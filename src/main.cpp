@@ -174,6 +174,9 @@ int main(int argc, char **argv)
                 nMps++;
         }
 
+        ORB_SLAM3::IMU::Point point = vImu.size() > 0 ? vImu[0] : ORB_SLAM3::IMU::Point(0, 0, 0, 0, 0, 0, 0);
+        std::cout << "[IMU] t=" << vImu[0].t << " acc=(" << point.a.x() << "," << point.a.y() << "," << point.a.z()
+                  << ") gyro=(" << point.w.x() << "," << point.w.y() << "," << point.w.z() << ")\n";
         std::cout << "[TRACK] t=" << t << " state=" << st << " kp=" << kps.size() << " mp=" << nMps
                   << " imu=" << vImu.size() << "\n";
 
