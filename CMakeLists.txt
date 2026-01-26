@@ -39,9 +39,13 @@ set(ORB_LIB_DIR    "${ORB_SLAM3_ROOT}/lib")
 set(G2O_LIB_DIR    "${ORB_SLAM3_ROOT}/Thirdparty/g2o/lib")
 set(DBOW2_LIB_DIR  "${ORB_SLAM3_ROOT}/Thirdparty/DBoW2/lib")
 
-file(GLOB_RECURSE SRC CONFIGURE_DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+set(SRC
+  src/FrameSyncQueue.cpp
+  src/LibcameraStereo.cpp
+  src/Icm20948Poller.cpp
+  src/stereo_vslam_main.cpp
 )
+
 add_executable(stereo_vslam ${SRC})
 
 target_include_directories(stereo_vslam PRIVATE
