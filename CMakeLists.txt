@@ -51,6 +51,7 @@ add_executable(stereo_vslam ${SRC})
 
 target_include_directories(stereo_vslam PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/c_library_v2"
 )
 
 target_compile_options(stereo_vslam PRIVATE -O3 -w)

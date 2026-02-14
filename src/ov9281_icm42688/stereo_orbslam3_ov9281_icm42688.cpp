@@ -32,7 +32,7 @@
 
 #include <pthread.h>
 #include <sched.h>
-
+#include "mavlink_pose_sender.hpp"
 // ORB-SLAM3
 #include "System.h"
 #include "ImuTypes.h"
@@ -819,18 +819,6 @@ private:
       if ((int64_t)Bq[i].ts_ns > (int64_t)ats && adt > best_dt) break;
     }
 
-    static int64_t last_dbg = 0;
-    int64_t now = NowNs();
-    if (now - last_dbg > 1'000'000'000LL) {
-      last_dbg = now;
-      std::cerr << "[pairdbg] best_dt_ms=" << (best_dt/1e6)
-                << " thresh_ms=" << (pair_thresh_ns_/1e6)
-                << " qL=" << qL_.size() << " qR=" << qR_.size()
-                << " front_dt_ms=" << (((int64_t)qR_.front().ts_ns - (int64_t)qL_.front().ts_ns)/1e6)
-                << " cam1_off_ms=" << (cam1_ts_offset_ns_.load()/1e6)
-                << "\n";
-    }
-
     if (best_dt > pair_thresh_ns_) {
       int64_t dt_lr = (int64_t)qR_.front().ts_ns - (int64_t)qL_.front().ts_ns;
       if (dt_lr > 0) qL_.pop_front();
@@ -1278,8 +1266,8 @@ std::cerr << "udp_enable=" << (udp_enable ? "Y":"N")
           << "\n";
 
   // ORB-SLAM3 init
-  ORB_SLAM3::System SLAM(vocab, settings, ORB_SLAM3::System::IMU_STEREO, false);
-
+  ORB_SLAM3::System SLAM(vocab, settings, ORB_SLAM3::System::STEREO, false);
+  MavlinkSerial mav("/dev/ttyAMA0", 921600);
   // UDP sender (optional)
   UdpImageSender udp;
   if (udp_enable) {
@@ -1348,18 +1336,17 @@ std::cerr << "udp_enable=" << (udp_enable ? "Y":"N")
       sc2.gyro_lsb_per_dps = gyro_lsb_per_dps.load();
       ConvertRaw12_AccelGyro_ToSI(raw12, sc2, s);
 
-      static int64_t last_print_ns = 0;
-      const int64_t period_ns = 1000000000;
-      if (period_ns == 0 || (s.t_ns - last_print_ns) >= period_ns) {
-        last_print_ns = s.t_ns;
+      // static uint64_t imuCnt = 0;
+      // if (imuCnt % 200 == 0) {
 
-        std::cerr.setf(std::ios::fixed);
-        std::cerr << std::setprecision(6);
+      //   std::cerr.setf(std::ios::fixed);
+      //   std::cerr << std::setprecision(6);
 
-        std::cerr << " a(m/s^2)=[" << s.ax << "," << s.ay << "," << s.az << "]"
-                  << " g(rad/s)=[" << s.gx << "," << s.gy << "," << s.gz << "]"
-                  << "\n";
-      }
+      //   std::cerr << "[IMU] a(m/s^2)=[" << s.ax << "," << s.ay << "," << s.az << "]"
+      //             << " g(rad/s)=[" << s.gx << "," << s.gy << "," << s.gz << "]"
+      //             << "\n";
+      // }
+      // imuCnt++;
 
       imu_buf.Push(s);
       imu_cnt.fetch_add(1, std::memory_order_relaxed);
@@ -1504,14 +1491,14 @@ std::cerr << "udp_enable=" << (udp_enable ? "Y":"N")
       last_stat_ns = now;
       const uint64_t ic = imu_cnt.load();
       const uint64_t id = imu_drop.load();
-      std::cerr << "[stat] fps~=" << frame_cnt_1s
-                << " dt_ms=" << cam.LastDtMs()
-                << " imu_hz~=" << (ic - last_imu_cnt)
-                << " imu_drop~=" << (id - last_imu_drop)
-                << " imu_buf=" << imu_buf.Size()
-                << " last_vImu=" << vImu.size()
-                << " off_ns=" << ts_offset_ns
-                << "\n";
+      // std::cerr << "[STAT] fps~=" << frame_cnt_1s
+      //           << " dt_ms=" << cam.LastDtMs()
+      //           << " imu_hz~=" << (ic - last_imu_cnt)
+      //           << " imu_drop~=" << (id - last_imu_drop)
+      //           << " imu_buf=" << imu_buf.Size()
+      //           << " last_vImu=" << vImu.size()
+      //           << " off_ns=" << ts_offset_ns
+      //           << "\n";
       frame_cnt_1s = 0;
       last_imu_cnt = ic;
       last_imu_drop = id;
@@ -1540,15 +1527,38 @@ std::cerr << "udp_enable=" << (udp_enable ? "Y":"N")
     }
 
     Sophus::SE3f Tcw = SLAM.TrackStereo(L.gray, R.gray, frame_t, vImu);
+    int state = SLAM.GetTrackingState();   // ORB-SLAM3 有这个接口
+    if (state != ORB_SLAM3::Tracking::OK) {
+        std::cout << "[TRACK] state=" << state
+                  << " (not OK), skip pose\n";
+    }
     Sophus::SE3f Twc = Tcw.inverse();
 
     const Eigen::Vector3f t = Twc.translation();
     const Eigen::Quaternionf q(Twc.so3().unit_quaternion());
+    MavlinkSerial::Pose p_enu;
+    p_enu.x = t.x();
+    p_enu.y = t.y();
+    p_enu.z = t.z();
+    p_enu.qw = q.w();
+    p_enu.qx = q.x();
+    p_enu.qy = q.y();
+    p_enu.qz = q.z();
+    MavlinkSerial::normalizeQuat(p_enu.qw,p_enu.qx,p_enu.qy,p_enu.qz);
 
-    std::cout << frame_t << ","
-              << t.x() << "," << t.y() << "," << t.z() << ","
-              << q.w() << "," << q.x() << "," << q.y() << "," << q.z()
-              << "\n";
+    auto p_ned = MavlinkSerial::enuToNed(p_enu);
+
+    uint64_t t_us = mono_time_us();
+    mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD);
+
+    static uint64_t posCnt = 0;
+    if (posCnt % 30 == 0) {
+      std::cout << "[POSE]" << frame_t << ","
+                << t.x() << "," << t.y() << "," << t.z() << ","
+                << q.w() << "," << q.x() << "," << q.y() << "," << q.z()
+                << std::endl;
+    }
+    posCnt++;
   }
 
   cam.Close();
