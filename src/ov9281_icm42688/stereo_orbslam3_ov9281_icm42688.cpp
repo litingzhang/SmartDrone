@@ -1536,26 +1536,26 @@ std::cerr << "udp_enable=" << (udp_enable ? "Y":"N")
 
     const Eigen::Vector3f t = Twc.translation();
     const Eigen::Quaternionf q(Twc.so3().unit_quaternion());
-    MavlinkSerial::Pose p_enu;
-    p_enu.x = t.x();
-    p_enu.y = t.y();
-    p_enu.z = t.z();
-    p_enu.qw = q.w();
-    p_enu.qx = q.x();
-    p_enu.qy = q.y();
-    p_enu.qz = q.z();
-    MavlinkSerial::normalizeQuat(p_enu.qw,p_enu.qx,p_enu.qy,p_enu.qz);
+    MavlinkSerial::Pose p_ned;
+    p_ned.x = t.x();
+    p_ned.y = t.y();
+    p_ned.z = t.z();
+    p_ned.qw = q.w();
+    p_ned.qx = q.x();
+    p_ned.qy = q.y();
+    p_ned.qz = q.z();
+    MavlinkSerial::normalizeQuat(p_ned.qw,p_ned.qx,p_ned.qy,p_ned.qz);
 
-    auto p_ned = MavlinkSerial::enuToNed(p_enu);
+    // auto p_ned = MavlinkSerial::enuToNed(p_enu);
 
     uint64_t t_us = mono_time_us();
     mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD);
 
     static uint64_t posCnt = 0;
     if (posCnt % 30 == 0) {
-      std::cout << "[POSE]" << frame_t << ","
-                << t.x() << "," << t.y() << "," << t.z() << ","
-                << q.w() << "," << q.x() << "," << q.y() << "," << q.z()
+      std::cout << "[POSE]" << frame_t << ",\033[32m"
+                << p_ned.x << "," << p_ned.y << "," << p_ned.z << "\033[0m,"
+                << p_ned.qw << "," << p_ned.qx << "," << p_ned.qy << "," << p_ned.qz
                 << std::endl;
     }
     posCnt++;
