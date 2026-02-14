@@ -40,10 +40,11 @@ set(G2O_LIB_DIR    "${ORB_SLAM3_ROOT}/Thirdparty/g2o/lib")
 set(DBOW2_LIB_DIR  "${ORB_SLAM3_ROOT}/Thirdparty/DBoW2/lib")
 
 set(SRC
-  src/FrameSyncQueue.cpp
-  src/LibcameraStereo.cpp
-  src/Icm20948Poller.cpp
-  src/stereo_vslam_main.cpp
+  # src/FrameSyncQueue.cpp
+  # src/LibcameraStereo.cpp
+  # src/Icm20948Poller.cpp
+  # src/stereo_vslam_main.cpp
+  /home/ltz/workspace/stereo_vslam/src/ov9281_icm42688/stereo_orbslam3_ov9281_icm42688.cpp
 )
 
 add_executable(stereo_vslam ${SRC})
@@ -91,4 +92,5 @@ target_link_libraries(stereo_vslam PRIVATE
   DBoW2
   g2o
   pthread
+  gpiod
 )
