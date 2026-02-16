@@ -11,6 +11,10 @@
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <chrono>
+#include <cmath>
+#include <thread>
+#include <mutex>
+#include <atomic>
 
 #include "common/mavlink.h"
 
@@ -30,9 +34,182 @@ public:
         openSerial(dev, baud);
     }
 
+    // custom_mode = (main_mode << 16) | (sub_mode << 24)
+    static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6;
+
+    void sendCommandLong(uint16_t command,
+                         float p1=0,float p2=0,float p3=0,float p4=0,float p5=0,float p6=0,float p7=0,
+                         uint8_t target_system=1, uint8_t target_component=1,
+                         uint8_t confirmation=0)
+    {
+        mavlink_message_t msg{};
+        mavlink_msg_command_long_pack(
+            sysid_, compid_, &msg,
+            target_system, target_component,
+            command, confirmation,
+            p1,p2,p3,p4,p5,p6,p7
+        );
+        writeMessage(msg);
+    }
+
+    // base_mode: MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
+    // custom_mode: (OFFBOARD << 16)
+    void setModeOffboard(uint8_t target_system=1, uint8_t target_component=1)
+    {
+        const float base_mode = (float)MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
+        const uint32_t custom_mode = (uint32_t)PX4_CUSTOM_MAIN_MODE_OFFBOARD << 16;
+        sendCommandLong(MAV_CMD_DO_SET_MODE,
+                        base_mode,
+                        (float)custom_mode,
+                        0,0,0,0,0,
+                        target_system, target_component);
+    }
+
+    // ARM / DISARM
+    void arm(bool do_arm, uint8_t target_system=1, uint8_t target_component=1)
+    {
+        // MAV_CMD_COMPONENT_ARM_DISARM: param1=1 arm, 0 disarm
+        sendCommandLong(MAV_CMD_COMPONENT_ARM_DISARM,
+                        do_arm ? 1.0f : 0.0f,
+                        0,0,0,0,0,0,
+                        target_system, target_component);
+    }
+
+    void startOffboardAndArm(double setpoint_hz = 20.0,
+                             double heartbeat_hz = 1.0,
+                             int warmup_ms = 800,      // 先发 setpoint 的预热时间（PX4 常需要）
+                             uint8_t target_system=1, uint8_t target_component=1)
+    {
+        startSetpointStreamHz(setpoint_hz);
+        usleep((useconds_t)warmup_ms * 1000);
+        setModeOffboard(target_system, target_component);
+        usleep(200000);
+        arm(true, target_system, target_component);
+    }
+
     ~MavlinkSerial() {
+        stopSetpointStream();
         if (fd_ >= 0) close(fd_);
     }
+    struct SetpointLocalNED {
+        float x = NAN, y = NAN, z = NAN;      // position (m) NED
+        float vx = NAN, vy = NAN, vz = NAN;   // velocity (m/s) NED
+        float ax = NAN, ay = NAN, az = NAN;   // accel (m/s^2) NED  (通常可以不用)
+        float yaw = NAN;                      // rad
+        float yawspeed = NAN;                 // rad/s
+    };
+
+    void sendSetPositionTargetLocalNED(uint32_t time_boot_ms,
+                                       const SetpointLocalNED& sp,
+                                       uint8_t coordinate_frame = MAV_FRAME_LOCAL_NED)
+    {
+        // type_mask: 1 表示“忽略该字段”
+        // bits:
+        // 0..2: x,y,z
+        // 3..5: vx,vy,vz
+        // 6..8: ax,ay,az
+        // 9:  force_set (不用)
+        // 10: yaw
+        // 11: yaw_rate
+        uint16_t type_mask = 0;
+
+        auto ign = [&](int bit){ type_mask |= (1u << bit); };
+
+        if (!std::isfinite(sp.x)) ign(0);
+        if (!std::isfinite(sp.y)) ign(1);
+        if (!std::isfinite(sp.z)) ign(2);
+
+        if (!std::isfinite(sp.vx)) ign(3);
+        if (!std::isfinite(sp.vy)) ign(4);
+        if (!std::isfinite(sp.vz)) ign(5);
+
+        if (!std::isfinite(sp.ax)) ign(6);
+        if (!std::isfinite(sp.ay)) ign(7);
+        if (!std::isfinite(sp.az)) ign(8);
+
+        // force_set 不用就忽略（bit9 = 1）
+        ign(9);
+
+        if (!std::isfinite(sp.yaw)) ign(10);
+        if (!std::isfinite(sp.yawspeed)) ign(11);
+
+        mavlink_message_t msg{};
+        // target_system / target_component: 指向飞控(通常 1 / 1)
+        const uint8_t target_system = 1;
+        const uint8_t target_component = 1;
+
+        mavlink_msg_set_position_target_local_ned_pack(
+            sysid_, compid_, &msg,
+            time_boot_ms,
+            target_system,
+            target_component,
+            coordinate_frame,
+            type_mask,
+            std::isfinite(sp.x) ? sp.x : 0.0f,
+            std::isfinite(sp.y) ? sp.y : 0.0f,
+            std::isfinite(sp.z) ? sp.z : 0.0f,
+            std::isfinite(sp.vx) ? sp.vx : 0.0f,
+            std::isfinite(sp.vy) ? sp.vy : 0.0f,
+            std::isfinite(sp.vz) ? sp.vz : 0.0f,
+            std::isfinite(sp.ax) ? sp.ax : 0.0f,
+            std::isfinite(sp.ay) ? sp.ay : 0.0f,
+            std::isfinite(sp.az) ? sp.az : 0.0f,
+            std::isfinite(sp.yaw) ? sp.yaw : 0.0f,
+            std::isfinite(sp.yawspeed) ? sp.yawspeed : 0.0f
+        );
+
+        writeMessage(msg);
+    }
+    void startSetpointStreamHz(double hz = 20.0)
+    {
+        if (hz <= 0.0) hz = 20.0;
+        stream_period_us_ = static_cast<uint64_t>(1e6 / hz);
+
+        streaming_.store(true);
+        if (stream_thread_.joinable()) stream_thread_.join();
+
+        stream_thread_ = std::thread([this]() {
+            while (this->streaming_.load()) {
+                const uint32_t t_ms = time_boot_ms();
+
+                SetpointLocalNED sp;
+                {
+                    std::lock_guard<std::mutex> lk(this->sp_mtx_);
+                    sp = this->sp_current_;
+                }
+
+                this->sendSetPositionTargetLocalNED(t_ms, sp, MAV_FRAME_LOCAL_NED);
+                usleep(static_cast<useconds_t>(this->stream_period_us_));
+            }
+        });
+    }
+
+    void stopSetpointStream()
+    {
+        streaming_.store(false);
+        if (stream_thread_.joinable()) stream_thread_.join();
+    }
+
+    void updateStreamSetpoint(const SetpointLocalNED& sp_ned)
+    {
+        std::lock_guard<std::mutex> lk(sp_mtx_);
+        sp_current_ = sp_ned;
+    }
+
+    void updateStreamPosition(float x_n, float y_e, float z_d, float yaw_rad = NAN)
+    {
+        SetpointLocalNED sp{};
+        sp.x = x_n; sp.y = y_e; sp.z = z_d;
+        sp.yaw = yaw_rad;
+        updateStreamSetpoint(sp);
+    }
+
+void sendLand(uint8_t target_system=1, uint8_t target_component=1)
+{
+    sendCommandLong(MAV_CMD_NAV_LAND,
+                    0,0,0,0,0,0,0,
+                    target_system, target_component);
+}
 
     // Optional: send heartbeat periodically (1Hz is fine)
     void sendHeartbeat() {
@@ -152,6 +329,18 @@ public:
     }
 
 private:
+    std::atomic<bool> streaming_{false};
+    std::thread stream_thread_;
+    std::mutex sp_mtx_;
+    SetpointLocalNED sp_current_{};
+    uint64_t stream_period_us_{50000}; // 20Hz
+
+    static inline uint32_t time_boot_ms()
+    {
+        using namespace std::chrono;
+        return (uint32_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+    }
+
     int fd_;
     uint8_t sysid_;
     uint8_t compid_;

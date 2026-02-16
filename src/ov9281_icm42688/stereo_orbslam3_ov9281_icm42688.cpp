@@ -32,11 +32,12 @@
 
 #include <pthread.h>
 #include <sched.h>
-#include "mavlink_pose_sender.hpp"
 // ORB-SLAM3
 #include "System.h"
 #include "ImuTypes.h"
 #include <sophus/se3.hpp>
+#include "px4_console.hpp"
+#include "mavlink_pose_sender.hpp"
 
 using namespace libcamera;
 
@@ -1268,6 +1269,9 @@ std::cerr << "udp_enable=" << (udp_enable ? "Y":"N")
   // ORB-SLAM3 init
   ORB_SLAM3::System SLAM(vocab, settings, ORB_SLAM3::System::STEREO, false);
   MavlinkSerial mav("/dev/ttyAMA0", 921600);
+  Px4Console console(mav);
+  console.start();
+
   // UDP sender (optional)
   UdpImageSender udp;
   if (udp_enable) {
@@ -1419,7 +1423,6 @@ std::cerr << "udp_enable=" << (udp_enable ? "Y":"N")
     ts_offset_ns = 0;
   }
 
-  // Main loop
   int64_t last_frame_ns = 0;
   uint64_t frame_cnt_1s = 0;
   uint64_t last_imu_cnt = imu_cnt.load();
@@ -1436,6 +1439,9 @@ std::cerr << "udp_enable=" << (udp_enable ? "Y":"N")
   std::cout.tie(nullptr);
   std::cout.setf(std::ios::fixed);
   std::cout << std::setprecision(6);
+
+  mav.updateStreamPosition(0.0f, 0.0f, -0.8f, NAN); // NED: z=-0.3 表示向上 0.8m
+  mav.startSetpointStreamHz(20.0);
 
   while (g_running.load()) {
     FrameItem L, R;
@@ -1487,6 +1493,7 @@ std::cerr << "udp_enable=" << (udp_enable ? "Y":"N")
     const double frame_t = (double)frame_ns * 1e-9;
 
     const int64_t now = NowNs();
+    last_stat_ns = 0;
     if (now - last_stat_ns > 1'000'000'000LL) {
       last_stat_ns = now;
       const uint64_t ic = imu_cnt.load();
@@ -1531,6 +1538,7 @@ std::cerr << "udp_enable=" << (udp_enable ? "Y":"N")
     if (state != ORB_SLAM3::Tracking::OK) {
         std::cout << "[TRACK] state=" << state
                   << " (not OK), skip pose\n";
+        continue;
     }
     Sophus::SE3f Twc = Tcw.inverse();
 
