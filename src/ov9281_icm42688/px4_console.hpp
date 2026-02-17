@@ -1,8 +1,8 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -12,41 +12,46 @@
 #include "mavlink_pose_sender.hpp"
 
 class Px4Console {
-public:
-    explicit Px4Console(MavlinkSerial& mav)
-        : mav_(mav)
-    {}
+  public:
+    explicit Px4Console(MavlinkSerial &mav) : mav_(mav) {}
 
     ~Px4Console() { stop(); }
 
-    void start() {
+    void start()
+    {
         running_.store(true);
-        if (thread_.joinable()) thread_.join();
+        if (thread_.joinable())
+            thread_.join();
         thread_ = std::thread([this]() { this->loop(); });
+        std::cerr << "[px4console] started!" << std::endl;
     }
 
-    void stop() {
+    void stop()
+    {
         running_.store(false);
-        if (thread_.joinable()) thread_.join();
+        if (thread_.joinable())
+            thread_.join();
     }
 
-    bool handleLine(const std::string& line) {
+    bool handleLine(const std::string &line)
+    {
         auto tokens = tokenize(line);
-        if (tokens.empty()) return true;
+        if (tokens.empty())
+            return true;
 
-        const std::string& cmd = tokens[0];
+        const std::string &cmd = tokens[0];
 
-        if (cmd == "help" || cmd == "?") {
+        if (cmd.rfind("help", 0) || cmd.rfind("?", 0)) {
             printHelp();
             return true;
         }
 
-        if (cmd == "exit" || cmd == "quit") {
+        if (cmd.rfind("exit", 0) || cmd.rfind("quit", 0)) {
             running_.store(false);
             return true;
         }
 
-        if (cmd == "sp") {
+        if (cmd.rfind("sp", 0)) {
             // sp <x> <y> <z> [yaw]
             if (tokens.size() < 4) {
                 std::cout << "usage: sp <x> <y> <z> [yaw]\n";
@@ -56,7 +61,8 @@ public:
             float y = (float)toDouble(tokens[2], 0);
             float z = (float)toDouble(tokens[3], -0.8);
             float yaw = NAN;
-            if (tokens.size() >= 5) yaw = (float)toDouble(tokens[4], NAN);
+            if (tokens.size() >= 5)
+                yaw = (float)toDouble(tokens[4], NAN);
 
             mav_.updateStreamPosition(x, y, z, yaw);
             std::cout << "[px4] setpoint NED x=" << x << " y=" << y << " z=" << z
@@ -64,7 +70,7 @@ public:
             return true;
         }
 
-        if (cmd == "spenu") {
+        if (cmd.rfind("spenu", 0)) {
             if (tokens.size() < 4) {
                 std::cout << "usage: spenu <e> <n> <u> [yaw]\n";
                 return true;
@@ -73,7 +79,8 @@ public:
             float n = (float)toDouble(tokens[2], 0);
             float u = (float)toDouble(tokens[3], 0);
             float yaw = NAN;
-            if (tokens.size() >= 5) yaw = (float)toDouble(tokens[4], NAN);
+            if (tokens.size() >= 5)
+                yaw = (float)toDouble(tokens[4], NAN);
 
             float x_n = n;
             float y_e = e;
@@ -84,7 +91,7 @@ public:
             return true;
         }
 
-        if (cmd == "stream") {
+        if (cmd.rfind("stream", 0)) {
             // stream <hz>
             if (tokens.size() < 2) {
                 std::cout << "usage: stream <hz>\n";
@@ -101,29 +108,30 @@ public:
             return true;
         }
 
-        if (cmd == "offboard") {
+        if (cmd.rfind("offboard", 0)) {
             // offboard [setpoint_hz] [warmup_ms]
             double setpoint_hz = (tokens.size() >= 2) ? toDouble(tokens[1], 20.0) : 20.0;
             int warmup_ms = (tokens.size() >= 3) ? (int)toDouble(tokens[2], 800) : 800;
 
             mav_.setModeOffboard();
-            std::cout << "[px4] sent DO_SET_MODE OFFBOARD (NOTE: PX4 still requires streaming setpoints)\n";
+            std::cout << "[px4] sent DO_SET_MODE OFFBOARD (NOTE: PX4 still requires streaming "
+                         "setpoints)\n";
             return true;
         }
 
-        if (cmd == "arm") {
+        if (cmd.rfind("arm", 0)) {
             mav_.arm(true);
             std::cout << "[px4] arm sent\n";
             return true;
         }
 
-        if (cmd == "disarm") {
+        if (cmd.rfind("disarm", 0)) {
             mav_.arm(false);
             std::cout << "[px4] disarm sent\n";
             return true;
         }
 
-        if (cmd == "go") {
+        if (cmd.rfind("go", 0)) {
             // go [setpoint_hz] [hb_hz] [warmup_ms]
             double sp_hz = (tokens.size() >= 2) ? toDouble(tokens[1], 20.0) : 20.0;
             double hb_hz = (tokens.size() >= 3) ? toDouble(tokens[2], 1.0) : 1.0;
@@ -135,13 +143,13 @@ public:
             return true;
         }
 
-        if (cmd == "stop") {
+        if (cmd.rfind("stop", 0)) {
             mav_.stopSetpointStream();
             std::cout << "[px4] stopped setpoint stream\n";
             return true;
         }
 
-        if (cmd == "land") {
+        if (cmd.rfind("land", 0)) {
             mav_.stopSetpointStream();
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             mav_.sendLand();
@@ -149,7 +157,7 @@ public:
             return true;
         }
 
-        if (cmd == "cmd") {
+        if (cmd.rfind("cmd", 0)) {
             // cmd <command> [p1..p7]
             if (tokens.size() < 2) {
                 std::cout << "usage: cmd <command> [p1 p2 p3 p4 p5 p6 p7]\n";
@@ -157,11 +165,12 @@ public:
             }
             uint16_t command = (uint16_t)toDouble(tokens[1], 0);
 
-            float p[7] = {0,0,0,0,0,0,0};
+            float p[7] = {0, 0, 0, 0, 0, 0, 0};
             for (int i = 0; i < 7; ++i) {
-                if ((size_t)(i + 2) < tokens.size()) p[i] = (float)toDouble(tokens[i + 2], 0.0);
+                if ((size_t)(i + 2) < tokens.size())
+                    p[i] = (float)toDouble(tokens[i + 2], 0.0);
             }
-            mav_.sendCommandLong(command, p[0],p[1],p[2],p[3],p[4],p[5],p[6]);
+            mav_.sendCommandLong(command, p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
             std::cout << "[px4] cmd_long sent cmd=" << command << "\n";
             return true;
         }
@@ -170,12 +179,13 @@ public:
         return true;
     }
 
-private:
-    MavlinkSerial& mav_;
+  private:
+    MavlinkSerial &mav_;
     std::atomic<bool> running_{false};
     std::thread thread_;
 
-    void loop() {
+    void loop()
+    {
         printHelp();
         std::string line;
         while (running_.load() && std::getline(std::cin, line)) {
@@ -183,9 +193,10 @@ private:
         }
     }
 
-    static void printHelp() {
+    static void printHelp()
+    {
         std::cout <<
-R"HELP(
+            R"HELP(
 PX4 Console commands:
   help | ?                         Show this help
   exit | quit                      Exit console thread
@@ -207,28 +218,32 @@ PX4 Console commands:
 Notes:
   - Offboard requires continuous setpoints (recommend 20Hz or higher).
   - For NED: z is Down. So hover at 0.8m above origin -> z = -0.8
-)HELP";
+)HELP" << std::flush;
     }
 
-    static std::vector<std::string> tokenize(const std::string& s) {
+    static std::vector<std::string> tokenize(const std::string &s)
+    {
         std::istringstream iss(s);
         std::vector<std::string> out;
         std::string tok;
         while (iss >> tok) {
             // lower-case command token only; keep params as-is
             if (out.empty()) {
-                for (auto& c : tok) c = (char)std::tolower((unsigned char)c);
+                for (auto &c : tok)
+                    c = (char)std::tolower((unsigned char)c);
             }
             out.push_back(tok);
         }
         return out;
     }
 
-    static double toDouble(const std::string& s, double def) {
+    static double toDouble(const std::string &s, double def)
+    {
         try {
             size_t idx = 0;
             double v = std::stod(s, &idx);
-            if (idx != s.size()) return def;
+            if (idx != s.size())
+                return def;
             return v;
         } catch (...) {
             return def;
