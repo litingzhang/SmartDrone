@@ -494,7 +494,7 @@ int main(int argc, char **argv)
     std::cout << std::setprecision(6);
 
     mav.updateStreamPosition(0.0f, 0.0f, -0.3f, NAN); // NED: z=-0.3 表示向上 0.3m
-    mav.startSetpointStreamHz(20.0);
+    mav.startSetpointStreamHz(30.0);
 
     while (g_running.load()) {
         FrameItem L, R;
