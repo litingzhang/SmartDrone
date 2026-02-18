@@ -44,7 +44,7 @@ set(SRC
   # src/LibcameraStereo.cpp
   # src/Icm20948Poller.cpp
   # src/stereo_vslam_main.cpp
-  /home/ltz/workspace/stereo_vslam/src/ov9281_icm42688/stereo_orbslam3_ov9281_icm42688.cpp
+  src/ov9281_icm42688/main.cpp
 )
 
 add_executable(stereo_vslam ${SRC})

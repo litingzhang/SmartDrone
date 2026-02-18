@@ -15,7 +15,10 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
-
+#include <condition_variable>
+#include <unordered_map>
+#include <sstream>
+#include <poll.h>
 #include "common/mavlink.h"
 
 class MavlinkSerial {
@@ -32,6 +35,42 @@ public:
         : fd_(-1), sysid_(sysid), compid_(compid), seq_(0)
     {
         openSerial(dev, baud);
+    }
+
+    // ====== RX: start/stop ======
+    void startRx()
+    {
+        rx_running_.store(true);
+        if (rx_thread_.joinable()) rx_thread_.join();
+        rx_thread_ = std::thread([this]() { this->rxLoop(); });
+    }
+
+    void stopRx()
+    {
+        rx_running_.store(false);
+        if (rx_thread_.joinable()) rx_thread_.join();
+    }
+
+    // 自动学习到的 PX4 target（从 HEARTBEAT 得到）
+    uint8_t targetSystem() const { return px4_sysid_.load(); }
+    uint8_t targetComponent() const { return px4_compid_.load(); }
+
+    // 等待某个 COMMAND 的 ACK（返回 true 表示等到了）
+    // out_result: MAV_RESULT_*
+    bool waitCommandAck(uint16_t command, int timeout_ms, uint8_t& out_result)
+    {
+        std::unique_lock<std::mutex> lk(ack_mtx_);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+
+        auto pred = [&]() {
+            auto it = ack_map_.find(command);
+            return it != ack_map_.end();
+        };
+
+        if (!ack_cv_.wait_until(lk, deadline, pred)) return false;
+
+        out_result = ack_map_[command].result;
+        return true;
     }
 
     // custom_mode = (main_mode << 16) | (sub_mode << 24)
@@ -52,42 +91,87 @@ public:
         writeMessage(msg);
     }
 
+    bool sendCommandLongAndWaitAck(uint16_t command,
+                                float p1=0,float p2=0,float p3=0,float p4=0,float p5=0,float p6=0,float p7=0,
+                                int timeout_ms=800,
+                                uint8_t target_system=0, uint8_t target_component=0,
+                                uint8_t* out_result=nullptr)
+    {
+        if (target_system == 0) target_system = targetSystem();
+        if (target_component == 0) target_component = targetComponent();
+
+        {
+            std::lock_guard<std::mutex> lk(ack_mtx_);
+            ack_map_.erase(command);
+        }
+
+        sendCommandLong(command, p1,p2,p3,p4,p5,p6,p7, target_system, target_component);
+
+        uint8_t res = 255;
+        bool ok = waitCommandAck(command, timeout_ms, res);
+        if (out_result) *out_result = res;
+
+        if (!ok) {
+            printf("[ACK] TIMEOUT cmd=%u (target sys=%d comp=%d)\n", command, int(target_system), int(target_component));
+        } else {
+            printf("[ACK] cmd=%u result=%s\n", command, mavResultToStr(res));
+        }
+        return ok;
+    }
+
     // base_mode: MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
     // custom_mode: (OFFBOARD << 16)
-    void setModeOffboard(uint8_t target_system=1, uint8_t target_component=1)
+    bool setModeOffboard(int ack_timeout_ms = 800,
+                        uint8_t target_system = 0, uint8_t target_component = 0)
     {
         const float base_mode = (float)MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
         const uint32_t custom_mode = (uint32_t)PX4_CUSTOM_MAIN_MODE_OFFBOARD << 16;
-        sendCommandLong(MAV_CMD_DO_SET_MODE,
-                        base_mode,
-                        (float)custom_mode,
-                        0,0,0,0,0,
-                        target_system, target_component);
+
+        uint8_t res = 255;
+        bool got = sendCommandLongAndWaitAck(MAV_CMD_DO_SET_MODE,
+                                            base_mode,
+                                            (float)custom_mode,
+                                            0,0,0,0,0,
+                                            ack_timeout_ms,
+                                            target_system, target_component,
+                                            &res);
+
+        return got && (res == MAV_RESULT_ACCEPTED);
     }
 
     // ARM / DISARM
-    void arm(bool do_arm, uint8_t target_system=1, uint8_t target_component=1)
+    bool arm(bool do_arm, int ack_timeout_ms = 800, uint8_t target_system = 0, uint8_t target_component = 0)
     {
-        // MAV_CMD_COMPONENT_ARM_DISARM: param1=1 arm, 0 disarm
-        sendCommandLong(MAV_CMD_COMPONENT_ARM_DISARM,
-                        do_arm ? 1.0f : 0.0f,
-                        0,0,0,0,0,0,
-                        target_system, target_component);
+        uint8_t res = 255;
+        bool got = sendCommandLongAndWaitAck(MAV_CMD_COMPONENT_ARM_DISARM, do_arm ? 1.0f : 0.0f,
+            0,0,0,0,0,0, ack_timeout_ms, target_system, target_component, &res);
+        return got && (res == MAV_RESULT_ACCEPTED);
     }
 
-    void startOffboardAndArm(double setpoint_hz = 20.0,
-                             double heartbeat_hz = 1.0,
-                             int warmup_ms = 800,      // 先发 setpoint 的预热时间（PX4 常需要）
-                             uint8_t target_system=1, uint8_t target_component=1)
+    bool startOffboardAndArm(double setpoint_hz = 20.0,
+                            double heartbeat_hz = 1.0,
+                            int warmup_ms = 800,
+                            int ack_timeout_ms = 1000,
+                            uint8_t target_system = 0, uint8_t target_component = 0)
     {
-        startSetpointStreamHz(setpoint_hz);
+        // startSetpointStreamHz(setpoint_hz);
         usleep((useconds_t)warmup_ms * 1000);
-        setModeOffboard(target_system, target_component);
+        if (!setModeOffboard(ack_timeout_ms, target_system, target_component)) {
+            printf("[px4] OFFBOARD failed. Common causes: setpoints not streaming, estimator not ready, safety/RC checks.\n");
+            return false;
+        }
         usleep(200000);
-        arm(true, target_system, target_component);
+        if (!arm(true, ack_timeout_ms, target_system, target_component)) {
+            printf("[px4] ARM failed. Check STATUSTEXT for reason (EKF, safety switch, RC, arming checks).\n");
+            return false;
+        }
+
+        printf("[px4] OFFBOARD + ARM OK\n");
+        return true;
     }
 
     ~MavlinkSerial() {
+        stopRx();
         stopSetpointStream();
         if (fd_ >= 0) close(fd_);
     }
@@ -204,25 +288,16 @@ public:
         updateStreamSetpoint(sp);
     }
 
-void sendLand(uint8_t target_system=1, uint8_t target_component=1)
-{
-    sendCommandLong(MAV_CMD_NAV_LAND,
-                    0,0,0,0,0,0,0,
-                    target_system, target_component);
-}
+    bool sendLand(int ack_timeout_ms = 800, uint8_t target_system=1, uint8_t target_component=1)
+    {
+        uint8_t res = 255;
+        bool got = sendCommandLongAndWaitAck(MAV_CMD_NAV_LAND,
+                                        0,0,0,0,0,0,0,
+                                        ack_timeout_ms,
+                                        target_system, target_component,
+                                        &res);
 
-    // Optional: send heartbeat periodically (1Hz is fine)
-    void sendHeartbeat() {
-        mavlink_message_t msg;
-        mavlink_msg_heartbeat_pack(
-            sysid_, compid_, &msg,
-            MAV_TYPE_ONBOARD_CONTROLLER,          // or MAV_TYPE_VISION_SYSTEM
-            MAV_AUTOPILOT_INVALID,                // not an autopilot
-            0,                                    // base_mode
-            0,                                    // custom_mode
-            MAV_STATE_ACTIVE
-        );
-        writeMessage(msg);
+        return got && (res == MAV_RESULT_ACCEPTED);
     }
 
     // Send ODOMETRY to PX4
@@ -408,7 +483,116 @@ private:
         const uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
         ssize_t n = ::write(fd_, buf, len);
         if (n < 0) {
-            std::cerr << "[mav] write failed: " << std::strerror(errno) << "\n";
+            printf("[mav] write failed: %d\n", std::strerror(errno));
+        }
+    }
+
+    struct AckInfo {
+        uint8_t result = 255; // MAV_RESULT (0..), 255=unknown
+        uint8_t progress = 0; // MAVLink2 才有，common v2 支持
+        int32_t result_param2 = 0;
+        std::chrono::steady_clock::time_point t;
+    };
+
+    std::atomic<bool> rx_running_{false};
+    std::thread rx_thread_;
+
+    std::mutex ack_mtx_;
+    std::condition_variable ack_cv_;
+    std::unordered_map<uint16_t, AckInfo> ack_map_;
+
+    std::atomic<uint8_t> px4_sysid_{1};
+    std::atomic<uint8_t> px4_compid_{1};
+
+    static const char* mavResultToStr(uint8_t r)
+    {
+        switch (r) {
+            case MAV_RESULT_ACCEPTED: return "ACCEPTED";
+            case MAV_RESULT_TEMPORARILY_REJECTED: return "TEMP_REJECTED";
+            case MAV_RESULT_DENIED: return "DENIED";
+            case MAV_RESULT_UNSUPPORTED: return "UNSUPPORTED";
+            case MAV_RESULT_FAILED: return "FAILED";
+            case MAV_RESULT_IN_PROGRESS: return "IN_PROGRESS";
+            default: return "UNKNOWN";
+        }
+    }
+
+    void rxLoop()
+    {
+        mavlink_message_t msg{};
+        mavlink_status_t status{};
+
+        // 确保 fd_ 可读：用 poll，避免 busy loop
+        pollfd pfd{};
+        pfd.fd = fd_;
+        pfd.events = POLLIN;
+
+        while (rx_running_.load()) {
+            int pr = ::poll(&pfd, 1, 200); // 200ms
+            if (pr <= 0) continue;
+            if (!(pfd.revents & POLLIN)) continue;
+
+            uint8_t buf[512];
+            ssize_t n = ::read(fd_, buf, sizeof(buf));
+            if (n <= 0) continue;
+
+            for (ssize_t i = 0; i < n; i++) {
+                if (mavlink_parse_char(MAVLINK_COMM_0, buf[i], &msg, &status)) {
+                    handleMavlinkMessage(msg);
+                }
+            }
+        }
+    }
+
+    void handleMavlinkMessage(const mavlink_message_t& msg)
+    {
+        // 1) HEARTBEAT：学习 sysid/compid（PX4 autopilot）
+        if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
+            mavlink_heartbeat_t hb{};
+            mavlink_msg_heartbeat_decode(&msg, &hb);
+
+            // 只要是 autopilot，就认为是我们要控制的对象（PX4 / ArduPilot 都行）
+            if (hb.autopilot != MAV_AUTOPILOT_INVALID) {
+                px4_sysid_.store(msg.sysid);
+                px4_compid_.store(msg.compid);
+            }
+            return;
+        }
+
+        // 2) COMMAND_ACK：你要的核心
+        if (msg.msgid == MAVLINK_MSG_ID_COMMAND_ACK) {
+            mavlink_command_ack_t ack{};
+            mavlink_msg_command_ack_decode(&msg, &ack);
+
+            AckInfo info;
+            info.result = ack.result;
+            info.progress = ack.progress;          // mavlink2 才有效
+            info.result_param2 = ack.result_param2;
+            info.t = std::chrono::steady_clock::now();
+
+            {
+                std::lock_guard<std::mutex> lk(ack_mtx_);
+                ack_map_[ack.command] = info;
+            }
+            ack_cv_.notify_all();
+
+            printf("[ACK] sys=%d, comp=%d cmd=%u result= %d(%s) progress=%d param2=%d\n",
+                int(msg.sysid), int(msg.compid), ack.command, int(ack.result), mavResultToStr(ack.result),
+                int(ack.progress), ack.result_param2);
+            return;
+        }
+
+        if (msg.msgid == MAVLINK_MSG_ID_STATUSTEXT) {
+            mavlink_statustext_t st{};
+            mavlink_msg_statustext_decode(&msg, &st);
+
+            // st.text 不是必然以 '\0' 结尾，安全处理一下
+            char text[sizeof(st.text) + 1];
+            std::memcpy(text, st.text, sizeof(st.text));
+            text[sizeof(st.text)] = '\0';
+            
+            printf("[STATUSTEXT] sev=%d %s\n", int(st.severity), text);
+            return;
         }
     }
 };
