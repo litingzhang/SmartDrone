@@ -488,11 +488,6 @@ int main(int argc, char **argv)
     const int64_t slack_before_ns = std::max<int64_t>(2 * imu_dt_ns, 5'000'000);
     const int64_t slack_after_ns = std::max<int64_t>(2 * imu_dt_ns, 5'000'000);
 
-    std::ios::sync_with_stdio(false);
-    std::cout.tie(nullptr);
-    std::cout.setf(std::ios::fixed);
-    std::cout << std::setprecision(6);
-
     mav.updateStreamPosition(0.0f, 0.0f, -0.3f, NAN); // NED: z=-0.3 表示向上 0.3m
     mav.startSetpointStreamHz(30.0);
 
@@ -584,9 +579,6 @@ int main(int argc, char **argv)
 
         Sophus::SE3f Tcw = SLAM.TrackStereo(L.gray, R.gray, frame_t, vImu);
         int state = SLAM.GetTrackingState();
-        if (state != ORB_SLAM3::Tracking::OK) {
-            continue;
-        }
         Sophus::SE3f Twc = Tcw.inverse();
 
         const Eigen::Vector3f t = Twc.translation();
@@ -600,17 +592,14 @@ int main(int argc, char **argv)
         p_ned.qy = q.y();
         p_ned.qz = q.z();
         MavlinkSerial::normalizeQuat(p_ned.qw, p_ned.qx, p_ned.qy, p_ned.qz);
-
-        // auto p_ned = MavlinkSerial::enuToNed(p_enu);
-
         uint64_t t_us = mono_time_us();
-        mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD);
+        mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD,
+            state == ORB_SLAM3::Tracking::OK ? OdomQualityMode::GOOD : OdomQualityMode::LOST);
 
         static uint64_t posCnt = 0;
-        if (posCnt % 30 == 0) {
-            std::cout << "[POSE]" << frame_t << ",\033[32m" << p_ned.x << "," << p_ned.y << ","
-                      << p_ned.z << "\033[0m," << p_ned.qw << "," << p_ned.qx << "," << p_ned.qy
-                      << "," << p_ned.qz << std::endl;
+        if (posCnt % 100 == 0) {
+            printf("[POSE]%f,(x:%f,y:%f,z:%f),(qw:%f,qx:%f,qy:%f,qz:%f)\n",
+                frame_t, p_ned.x, p_ned.y, p_ned.z, p_ned.qw, p_ned.qx, p_ned.qy, p_ned.qz);
         }
         posCnt++;
     }

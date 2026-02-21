@@ -21,6 +21,31 @@
 #include <poll.h>
 #include "common/mavlink.h"
 
+enum class OdomQualityMode
+{
+    GOOD,
+    WEAK,
+    LOST
+};
+
+static inline void fill_cov_diag21(float cov[21],
+                                   float var_x, float var_y, float var_z,
+                                   float var_roll, float var_pitch, float var_yaw,
+                                   bool fill_offdiag_zero = true)
+{
+    if (fill_offdiag_zero) {
+        for (int i = 0; i < 21; i++) cov[i] = 0.0f;
+    }
+
+    // diag indices in MAVLink 21-array (upper-triangular of 6x6):
+    cov[0]  = var_x;     // xx
+    cov[6]  = var_y;     // yy
+    cov[11] = var_z;     // zz
+    cov[15] = var_roll;  // rollroll
+    cov[18] = var_pitch; // pitchpitch
+    cov[20] = var_yaw;   // yawyaw
+}
+
 class MavlinkSerial {
 public:
     struct Pose {
@@ -300,28 +325,45 @@ public:
         return got && (res == MAV_RESULT_ACCEPTED);
     }
 
-    // Send ODOMETRY to PX4
-    // timestamp_us: monotonic or sensor time in microseconds
-    // pose_ned: pose expressed in NED (meters) and quaternion in NED frame
-    // child_frame_id: MAV_FRAME_BODY_FRD if you are sending body frame; for world pose use MAV_FRAME_LOCAL_NED
-    void sendOdometry(uint64_t timestamp_us, const Pose& pose_ned,
-                      uint8_t frame_id = MAV_FRAME_LOCAL_NED,
-                      uint8_t child_frame_id = MAV_FRAME_BODY_FRD)
+    void sendOdometry(uint64_t timestamp_us,
+                    const Pose& pose_ned,
+                    uint8_t frame_id = MAV_FRAME_LOCAL_NED,
+                    uint8_t child_frame_id = MAV_FRAME_BODY_FRD,
+                    OdomQualityMode mode = OdomQualityMode::GOOD)
     {
         mavlink_message_t msg;
 
-        // Minimal: we send pose; leave velocities as NaN (PX4 will accept pose-only visual odom).
-        float vx = NAN, vy = NAN, vz = NAN;
-        float rollspeed = NAN, pitchspeed = NAN, yawspeed = NAN;
+        const float vx = NAN, vy = NAN, vz = NAN;
+        const float rollspeed = NAN, pitchspeed = NAN, yawspeed = NAN;
 
-        // Covariances: set -1 for "unknown" in MAVLink ODOMETRY? Actually ODOMETRY uses float[21].
-        // We'll set to NAN to indicate unknown (common practice). PX4 handles it.
         float pose_cov[21];
         float vel_cov[21];
-        for (int i = 0; i < 21; i++) { pose_cov[i] = NAN; vel_cov[i] = NAN; }
 
-        // q order in MAVLink: [w, x, y, z]
+        int8_t quality = 100;
+        uint8_t estimator_type = 0;
+
         float q[4] = {pose_ned.qw, pose_ned.qx, pose_ned.qy, pose_ned.qz};
+
+        if (mode == OdomQualityMode::GOOD) {
+            for (int i = 0; i < 21; i++) { pose_cov[i] = NAN; vel_cov[i] = NAN; }
+            quality = 100;
+        } else if (mode == OdomQualityMode::WEAK) {
+            fill_cov_diag21(pose_cov,
+                            2.25f, 2.25f, 2.25f,
+                            0.12f, 0.12f, 0.12f);
+            fill_cov_diag21(vel_cov,
+                            4.0f, 4.0f, 4.0f,
+                            1.0f, 1.0f, 1.0f);
+            quality = 20;
+        } else {
+            fill_cov_diag21(pose_cov,
+                            1e4f, 1e4f, 1e4f,
+                            10.0f, 10.0f, 10.0f);
+            fill_cov_diag21(vel_cov,
+                            1e2f, 1e2f, 1e2f,
+                            1e2f, 1e2f, 1e2f);
+            quality = 0;
+        }
 
         mavlink_msg_odometry_pack(
             sysid_, compid_, &msg,
@@ -334,40 +376,20 @@ public:
             rollspeed, pitchspeed, yawspeed,
             pose_cov,
             vel_cov,
-            0,      // reset_counter
-            0,      // estimator_type (0=unknown)
-            (int8_t)100 // quality: 0..100, 或 -1 表示未知（看你版本定义）
+            0,
+            estimator_type,
+            quality
         );
 
         writeMessage(msg);
     }
 
-    // Helpers: if your SLAM outputs ENU (x=E,y=N,z=Up), convert to NED (x=N,y=E,z=Down)
-    // Also quaternion transform for ENU->NED.
-    // IMPORTANT: quaternion frame transform is subtle; this is a standard ENU->NED rotation:
-    // R_ned = R_enu2ned * R_enu * R_enu2ned^T
-    // We implement via quaternion multiplication.
     static Pose enuToNed(const Pose& p_enu) {
         Pose out{};
-        // position: ENU -> NED
-        // ENU: (E, N, U)
-        // NED: (N, E, D)
         out.x = p_enu.y;
         out.y = p_enu.x;
         out.z = -p_enu.z;
 
-        // quaternion transform
-        // Rotation from ENU to NED can be represented by quaternion q_r.
-        // One common mapping is a +90deg about Z then 180deg about X (depends on conventions).
-        // We use a standard fixed transform:
-        // ENU basis to NED basis: [x_n y_n z_n] = [ y_e, x_e, -z_e ]
-        // Equivalent rotation: q_r = (0, 1/sqrt(2), 1/sqrt(2), 0) ??? (varies)
-        //
-        // To avoid “looks right but wrong”, we provide a conservative option:
-        // If you are unsure, initially send position-only and keep attitude as identity.
-        //
-        // Here is a widely used ENU->NED quaternion:
-        // q_r = [0, 1/sqrt(2), 1/sqrt(2), 0]  (w,x,y,z)
         const float s = 0.7071067811865476f;
         const float qr_w = 0.0f, qr_x = s, qr_y = s, qr_z = 0.0f;
 
@@ -546,12 +568,10 @@ private:
 
     void handleMavlinkMessage(const mavlink_message_t& msg)
     {
-        // 1) HEARTBEAT：学习 sysid/compid（PX4 autopilot）
         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
             mavlink_heartbeat_t hb{};
             mavlink_msg_heartbeat_decode(&msg, &hb);
 
-            // 只要是 autopilot，就认为是我们要控制的对象（PX4 / ArduPilot 都行）
             if (hb.autopilot != MAV_AUTOPILOT_INVALID) {
                 px4_sysid_.store(msg.sysid);
                 px4_compid_.store(msg.compid);
@@ -559,7 +579,6 @@ private:
             return;
         }
 
-        // 2) COMMAND_ACK：你要的核心
         if (msg.msgid == MAVLINK_MSG_ID_COMMAND_ACK) {
             mavlink_command_ack_t ack{};
             mavlink_msg_command_ack_decode(&msg, &ack);
