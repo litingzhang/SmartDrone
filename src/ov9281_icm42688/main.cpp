@@ -32,6 +32,7 @@
 #include "imu_buffer.hpp"
 #include "stereo_ov9281.hpp"
 #include "udp_image_sender.hpp"
+#include "logger.hpp"
 
 // ---------------- IMU (ICM42688) ----------------
 static inline int16_t Be16ToI16(uint8_t hi, uint8_t lo)
@@ -324,7 +325,7 @@ int main(int argc, char **argv)
     std::cerr << "udp_enable=" << (udp_enable ? "Y" : "N") << " udp_ip=" << udp_ip
               << " udp_port=" << udp_port << " jpeg_q=" << udp_jpeg_q << " payload=" << udp_payload
               << " queue=" << udp_q << "\n";
-
+    Logger::init("./stereo_vslam.log", 32 * 1024 * 1024, Logger::INFO, true);
     // ORB-SLAM3 init
     ORB_SLAM3::System SLAM(vocab, settings, ORB_SLAM3::System::STEREO, false);
     MavlinkSerial mav("/dev/ttyAMA0", 921600);
@@ -489,7 +490,6 @@ int main(int argc, char **argv)
     const int64_t slack_after_ns = std::max<int64_t>(2 * imu_dt_ns, 5'000'000);
 
     mav.updateStreamPosition(0.0f, 0.0f, -0.3f, NAN); // NED: z=-0.3 表示向上 0.3m
-    mav.startSetpointStreamHz(30.0);
 
     while (g_running.load()) {
         FrameItem L, R;
@@ -598,7 +598,7 @@ int main(int argc, char **argv)
 
         static uint64_t posCnt = 0;
         if (posCnt % 100 == 0) {
-            printf("[POSE]%f,(x:%f,y:%f,z:%f),(qw:%f,qx:%f,qy:%f,qz:%f)\n",
+            LOGI("[POSE]%f,(x:%f,y:%f,z:%f),(qw:%f,qx:%f,qy:%f,qz:%f)",
                 frame_t, p_ned.x, p_ned.y, p_ned.z, p_ned.qw, p_ned.qx, p_ned.qy, p_ned.qz);
         }
         posCnt++;
