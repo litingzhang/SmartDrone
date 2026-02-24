@@ -593,15 +593,13 @@ int main(int argc, char **argv)
         p_ned.qz = q.z();
         MavlinkSerial::normalizeQuat(p_ned.qw, p_ned.qx, p_ned.qy, p_ned.qz);
         uint64_t t_us = mono_time_us();
-        mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD,
-            state == ORB_SLAM3::Tracking::OK ? OdomQualityMode::GOOD : OdomQualityMode::LOST);
-
-        static uint64_t posCnt = 0;
-        if (posCnt % 100 == 0) {
+        if (state == ORB_SLAM3::Tracking::OK) {
+            mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, OdomQualityMode::GOOD);
             LOGI("[POSE]%f,(x:%f,y:%f,z:%f),(qw:%f,qx:%f,qy:%f,qz:%f)",
                 frame_t, p_ned.x, p_ned.y, p_ned.z, p_ned.qw, p_ned.qx, p_ned.qy, p_ned.qz);
+        } else {
+            mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, OdomQualityMode::LOST);
         }
-        posCnt++;
     }
 
     cam.Close();

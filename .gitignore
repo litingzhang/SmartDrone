@@ -2,3 +2,5 @@
 upload.sh
 build
 temp
+*gradle*
+.cxx

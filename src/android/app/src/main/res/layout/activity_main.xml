@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+  <LinearLayout
+      android:orientation="vertical"
+      android:padding="16dp"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content">
+
+    <TextView
+        android:id="@+id/tvStatus"
+        android:text="cm5udp ready"
+        android:textSize="18sp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
+    <!-- Quick commands -->
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp">
+
+      <Button
+          android:id="@+id/btnArm"
+          android:text="ARM"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"/>
+
+      <Button
+          android:id="@+id/btnDisarm"
+          android:text="DISARM"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"
+          android:layout_marginStart="8dp"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp">
+
+      <Button
+          android:id="@+id/btnOffboard"
+          android:text="OFFBOARD"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"/>
+
+      <Button
+          android:id="@+id/btnHold"
+          android:text="HOLD"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"
+          android:layout_marginStart="8dp"/>
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/btnLand"
+        android:text="LAND"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"/>
+
+    <Button
+        android:id="@+id/btnPing"
+        android:text="Send PING"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"/>
+
+    <!-- MOVE -->
+    <TextView
+        android:text="MOVE"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"/>
+
+    <EditText
+        android:id="@+id/etX"
+        android:hint="x (float)"
+        android:inputType="numberDecimal|numberSigned"
+        android:text="0"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
+    <EditText
+        android:id="@+id/etY"
+        android:hint="y (float)"
+        android:inputType="numberDecimal|numberSigned"
+        android:text="0"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
+    <EditText
+        android:id="@+id/etZ"
+        android:hint="z (float)"
+        android:inputType="numberDecimal|numberSigned"
+        android:text="1.2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
+    <EditText
+        android:id="@+id/etYaw"
+        android:hint="yaw (rad)"
+        android:inputType="numberDecimal|numberSigned"
+        android:text="0"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
+    <EditText
+        android:id="@+id/etMaxV"
+        android:hint="maxV (m/s)"
+        android:inputType="numberDecimal|numberSigned"
+        android:text="0.6"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
+    <Button
+        android:id="@+id/btnMove"
+        android:text="Send MOVE"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"/>
+
+    <Button
+        android:id="@+id/btnPoll"
+        android:text="Poll ACK"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"/>
+
+  </LinearLayout>
+</ScrollView>
