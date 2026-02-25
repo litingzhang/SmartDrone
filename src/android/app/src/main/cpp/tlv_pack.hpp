@@ -61,19 +61,19 @@ inline std::vector<uint8_t> MakeFrame(
 
 inline std::vector<uint8_t> MakeMovePayload(
     uint8_t frame,
-    float x,
-    float y,
-    float z,
-    float yaw,
+    float valueA,
+    float valueB,
+    float valueC,
+    float valueD,
     float maxV)
 {
     std::vector<uint8_t> payload;
     payload.reserve(21);
     payload.push_back(frame);
-    WriteF32Le(payload, x);
-    WriteF32Le(payload, y);
-    WriteF32Le(payload, z);
-    WriteF32Le(payload, yaw);
+    WriteF32Le(payload, valueA);
+    WriteF32Le(payload, valueB);
+    WriteF32Le(payload, valueC);
+    WriteF32Le(payload, valueD);
     WriteF32Le(payload, maxV);
     return payload;
 }

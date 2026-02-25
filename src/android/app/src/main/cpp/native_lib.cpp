@@ -13,6 +13,8 @@
 static UdpClient g_udpClient;
 static std::mutex g_mutex;
 static std::atomic<uint32_t> g_seqCounter{1};
+static constexpr uint8_t CMD_MOVE = 0x20;
+static constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
 
 static uint32_t NowMs32()
 {
@@ -68,8 +70,37 @@ Java_com_example_ZControl_NativeUdp_sendMove(
         MakeMovePayload(static_cast<uint8_t>(frameType), x, y, z, yaw, maxV);
     const std::vector<uint8_t> frame = MakeFrame(
         1,
-        0x20,
+        CMD_MOVE,
         0,
+        seq,
+        NowMs32(),
+        payload.data(),
+        static_cast<uint16_t>(payload.size()));
+
+    const bool ok = g_udpClient.Send(frame.data(), frame.size());
+    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_example_ZControl_NativeUdp_sendMoveVelocity(
+    JNIEnv*,
+    jclass,
+    jint frameType,
+    jfloat vx,
+    jfloat vy,
+    jfloat vz,
+    jfloat yawRate,
+    jfloat maxV)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const uint32_t seq = g_seqCounter.fetch_add(1);
+
+    const std::vector<uint8_t> payload =
+        MakeMovePayload(static_cast<uint8_t>(frameType), vx, vy, vz, yawRate, maxV);
+    const std::vector<uint8_t> frame = MakeFrame(
+        1,
+        CMD_MOVE,
+        MOVE_FLAG_VELOCITY,
         seq,
         NowMs32(),
         payload.data(),

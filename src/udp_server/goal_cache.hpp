@@ -5,10 +5,15 @@
 
 struct MoveGoal {
     uint8_t frame{0};
+    bool isVelocity{false};
     float x{0};
     float y{0};
     float z{1.2f};
     float yaw{0};
+    float vx{0};
+    float vy{0};
+    float vz{0};
+    float yawRate{0};
     float maxV{0.6f};
     uint32_t seq{0};
 };

@@ -501,6 +501,7 @@ private:
     }
 
     void WriteMessage(const mavlink_message_t& msg) {
+        std::lock_guard<std::mutex> txLock(m_txMtx);
         uint8_t buf[MAVLINK_MAX_PACKET_LEN];
         const uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
         ssize_t n = ::write(m_fd, buf, len);
@@ -522,6 +523,7 @@ private:
     std::mutex m_ackMtx;
     std::condition_variable m_ackCv;
     std::unordered_map<uint16_t, AckInfo> m_ackMap;
+    std::mutex m_txMtx;
 
     std::atomic<uint8_t> m_px4Sysid{1};
     std::atomic<uint8_t> m_px4Compid{1};

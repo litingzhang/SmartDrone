@@ -1,140 +1,329 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-  <LinearLayout
-      android:orientation="vertical"
-      android:padding="16dp"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content">
-
-    <TextView
-        android:id="@+id/tvStatus"
-        android:text="cm5udp ready"
-        android:textSize="18sp"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"/>
-
-    <!-- Quick commands -->
     <LinearLayout
-        android:orientation="horizontal"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp">
+        android:layout_height="match_parent"
+        android:orientation="horizontal">
 
-      <Button
-          android:id="@+id/btnArm"
-          android:text="ARM"
-          android:layout_width="0dp"
-          android:layout_height="wrap_content"
-          android:layout_weight="1"/>
+        <ImageView
+            android:id="@+id/ivVideoLeft"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:contentDescription="video_left"
+            android:scaleType="centerCrop" />
 
-      <Button
-          android:id="@+id/btnDisarm"
-          android:text="DISARM"
-          android:layout_width="0dp"
-          android:layout_height="wrap_content"
-          android:layout_weight="1"
-          android:layout_marginStart="8dp"/>
+        <ImageView
+            android:id="@+id/ivVideoRight"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:contentDescription="video_right"
+            android:scaleType="centerCrop" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#22000000" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <LinearLayout
+            android:id="@+id/layoutModeSwitch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnModeToggle"
+                android:layout_width="104dp"
+                android:layout_height="wrap_content"
+                android:minHeight="34dp"
+                android:text="切到命令" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/pageContainer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="8dp"
+            android:layout_weight="1">
+
+            <FrameLayout
+                android:id="@+id/pageManual"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
+
+                <com.example.ZControl.JoystickView
+                    android:id="@+id/joystickLeft"
+                    android:layout_width="170dp"
+                    android:layout_height="170dp"
+                    android:layout_gravity="bottom|start"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginBottom="8dp"
+                    android:alpha="0.65" />
+
+                <com.example.ZControl.JoystickView
+                    android:id="@+id/joystickRight"
+                    android:layout_width="170dp"
+                    android:layout_height="170dp"
+                    android:layout_gravity="bottom|end"
+                    android:layout_marginEnd="8dp"
+                    android:layout_marginBottom="8dp"
+                    android:alpha="0.65" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:id="@+id/pageCommand"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <GridLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:alignmentMode="alignMargins"
+                        android:columnCount="3"
+                        android:gravity="center_horizontal"
+                        android:useDefaultMargins="true">
+
+                        <Button
+                            android:id="@+id/btnArm"
+                            android:layout_width="74dp"
+                            android:layout_height="74dp"
+                            android:background="@drawable/bg_circle_button"
+                            android:text="ARM"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp" />
+
+                        <Button
+                            android:id="@+id/btnDisarm"
+                            android:layout_width="74dp"
+                            android:layout_height="74dp"
+                            android:background="@drawable/bg_circle_button"
+                            android:text="DISARM"
+                            android:textColor="#FFFFFF"
+                            android:textSize="10sp" />
+
+                        <Button
+                            android:id="@+id/btnOffboard"
+                            android:layout_width="74dp"
+                            android:layout_height="74dp"
+                            android:background="@drawable/bg_circle_button"
+                            android:text="OFFBOARD"
+                            android:textColor="#FFFFFF"
+                            android:textSize="9sp" />
+
+                        <Button
+                            android:id="@+id/btnHold"
+                            android:layout_width="74dp"
+                            android:layout_height="74dp"
+                            android:background="@drawable/bg_circle_button"
+                            android:text="HOLD"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp" />
+
+                        <Button
+                            android:id="@+id/btnLand"
+                            android:layout_width="74dp"
+                            android:layout_height="74dp"
+                            android:background="@drawable/bg_circle_button"
+                            android:text="LAND"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp" />
+
+                        <Button
+                            android:id="@+id/btnPing"
+                            android:layout_width="74dp"
+                            android:layout_height="74dp"
+                            android:background="@drawable/bg_circle_button"
+                            android:text="PING"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp" />
+                    </GridLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnMove"
+                            android:layout_width="74dp"
+                            android:layout_height="74dp"
+                            android:background="@drawable/bg_circle_button"
+                            android:text="MOVE"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp" />
+
+                        <Button
+                            android:id="@+id/btnPoll"
+                            android:layout_width="74dp"
+                            android:layout_height="74dp"
+                            android:layout_marginStart="10dp"
+                            android:background="@drawable/bg_circle_button"
+                            android:text="ACK"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:background="#66FFFFFF"
+                    android:orientation="vertical"
+                    android:padding="8dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="42dp"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center_vertical"
+                            android:text="X"
+                            android:textSize="13sp" />
+
+                        <EditText
+                            android:id="@+id/etX"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:hint="x"
+                            android:inputType="numberDecimal|numberSigned"
+                            android:text="0" />
+
+                        <TextView
+                            android:layout_width="42dp"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center_vertical"
+                            android:layout_marginStart="8dp"
+                            android:text="Y"
+                            android:textSize="13sp" />
+
+                        <EditText
+                            android:id="@+id/etY"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:hint="y"
+                            android:inputType="numberDecimal|numberSigned"
+                            android:text="0" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="42dp"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center_vertical"
+                            android:text="Z"
+                            android:textSize="13sp" />
+
+                        <EditText
+                            android:id="@+id/etZ"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:hint="z"
+                            android:inputType="numberDecimal|numberSigned"
+                            android:text="1.2" />
+
+                        <TextView
+                            android:layout_width="42dp"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center_vertical"
+                            android:layout_marginStart="8dp"
+                            android:text="Yaw"
+                            android:textSize="13sp" />
+
+                        <EditText
+                            android:id="@+id/etYaw"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:hint="yaw"
+                            android:inputType="numberDecimal|numberSigned"
+                            android:text="0" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="42dp"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center_vertical"
+                            android:text="MaxV"
+                            android:textSize="13sp" />
+
+                        <EditText
+                            android:id="@+id/etMaxV"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:hint="default speed"
+                            android:inputType="numberDecimal|numberSigned"
+                            android:text="0.6" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </FrameLayout>
     </LinearLayout>
 
     <LinearLayout
-        android:orientation="horizontal"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp">
+        android:layout_gravity="bottom|start"
+        android:layout_margin="6dp"
+        android:orientation="vertical">
 
-      <Button
-          android:id="@+id/btnOffboard"
-          android:text="OFFBOARD"
-          android:layout_width="0dp"
-          android:layout_height="wrap_content"
-          android:layout_weight="1"/>
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxWidth="300dp"
+            android:text="cm5udp ready"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
 
-      <Button
-          android:id="@+id/btnHold"
-          android:text="HOLD"
-          android:layout_width="0dp"
-          android:layout_height="wrap_content"
-          android:layout_weight="1"
-          android:layout_marginStart="8dp"/>
+        <TextView
+            android:id="@+id/tvJoystickState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:maxWidth="300dp"
+            android:text="Joystick idle"
+            android:textColor="#DDFFFFFF"
+            android:textSize="10sp" />
     </LinearLayout>
-
-    <Button
-        android:id="@+id/btnLand"
-        android:text="LAND"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"/>
-
-    <Button
-        android:id="@+id/btnPing"
-        android:text="Send PING"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"/>
-
-    <!-- MOVE -->
-    <TextView
-        android:text="MOVE"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="18dp"/>
-
-    <EditText
-        android:id="@+id/etX"
-        android:hint="x (float)"
-        android:inputType="numberDecimal|numberSigned"
-        android:text="0"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"/>
-
-    <EditText
-        android:id="@+id/etY"
-        android:hint="y (float)"
-        android:inputType="numberDecimal|numberSigned"
-        android:text="0"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"/>
-
-    <EditText
-        android:id="@+id/etZ"
-        android:hint="z (float)"
-        android:inputType="numberDecimal|numberSigned"
-        android:text="1.2"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"/>
-
-    <EditText
-        android:id="@+id/etYaw"
-        android:hint="yaw (rad)"
-        android:inputType="numberDecimal|numberSigned"
-        android:text="0"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"/>
-
-    <EditText
-        android:id="@+id/etMaxV"
-        android:hint="maxV (m/s)"
-        android:inputType="numberDecimal|numberSigned"
-        android:text="0.6"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"/>
-
-    <Button
-        android:id="@+id/btnMove"
-        android:text="Send MOVE"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"/>
-
-    <Button
-        android:id="@+id/btnPoll"
-        android:text="Poll ACK"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"/>
-
-  </LinearLayout>
-</ScrollView>
+</FrameLayout>

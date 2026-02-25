@@ -35,8 +35,12 @@ public:
         sockaddr_in localAddr{};
         localAddr.sin_family = AF_INET;
         localAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-        localAddr.sin_port = htons(0);
-        ::bind(m_fd, reinterpret_cast<sockaddr*>(&localAddr), sizeof(localAddr));
+        // Prefer binding to the same port so server-side video sender can target a fixed port.
+        localAddr.sin_port = htons(port);
+        if (::bind(m_fd, reinterpret_cast<sockaddr*>(&localAddr), sizeof(localAddr)) != 0) {
+            localAddr.sin_port = htons(0);
+            ::bind(m_fd, reinterpret_cast<sockaddr*>(&localAddr), sizeof(localAddr));
+        }
 
         const int flags = ::fcntl(m_fd, F_GETFL, 0);
         ::fcntl(m_fd, F_SETFL, flags | O_NONBLOCK);

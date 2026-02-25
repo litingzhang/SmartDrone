@@ -130,16 +130,50 @@ RouteResult TlvCmdRouter::HandleMove(const TlvFrame& frame)
     const uint8_t* payload = frame.payload.data();
     MoveGoal goal;
     goal.frame = payload[0];
-    goal.x = ReadF32Le(&payload[1]);
-    goal.y = ReadF32Le(&payload[5]);
-    goal.z = ReadF32Le(&payload[9]);
-    goal.yaw = ReadF32Le(&payload[13]);
+    const float valueA = ReadF32Le(&payload[1]);
+    const float valueB = ReadF32Le(&payload[5]);
+    const float valueC = ReadF32Le(&payload[9]);
+    const float valueD = ReadF32Le(&payload[13]);
     goal.maxV = ReadF32Le(&payload[17]);
     goal.seq = frame.seq;
+    goal.isVelocity = (frame.flags & MOVE_FLAG_VELOCITY) != 0;
+
+    if (goal.isVelocity) {
+        goal.vx = valueA;
+        goal.vy = valueB;
+        goal.vz = valueC;
+        goal.yawRate = valueD;
+    } else {
+        goal.x = valueA;
+        goal.y = valueB;
+        goal.z = valueC;
+        goal.yaw = valueD;
+    }
+
+    if (!(goal.maxV > 0.0f)) {
+        return {ACK_E_BAD_ARGS, "bad maxV"};
+    }
+    // Clamp speed parameter from mobile joystick to a sane range.
+    if (goal.maxV > 5.0f) {
+        goal.maxV = 5.0f;
+    }
 
     std::string err;
     if (!m_hooks.SetMoveGoal(goal, &err)) {
         return {ACK_E_INTERNAL, err.empty() ? "move failed" : err};
     }
-    return {ACK_OK, ""};
+    if (goal.isVelocity) {
+        return {ACK_OK,
+                "move(vel) accepted vx=" + std::to_string(goal.vx) +
+                    " vy=" + std::to_string(goal.vy) +
+                    " vz=" + std::to_string(goal.vz) +
+                    " yawRate=" + std::to_string(goal.yawRate) +
+                    " maxV=" + std::to_string(goal.maxV)};
+    }
+    return {ACK_OK,
+            "move(pos) accepted x=" + std::to_string(goal.x) +
+                " y=" + std::to_string(goal.y) +
+                " z=" + std::to_string(goal.z) +
+                " yaw=" + std::to_string(goal.yaw) +
+                " maxV=" + std::to_string(goal.maxV)};
 }

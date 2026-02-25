@@ -22,8 +22,11 @@ enum TlvCmd : uint8_t {
 };
 
 // MOVE payload layout (len=21):
-// frame(u8) x(f32le) y(f32le) z(f32le) yaw(f32le) maxV(f32le)
+// frame(u8) a(f32le) b(f32le) c(f32le) d(f32le) maxV(f32le)
+// flags bit0 == 0: a/b/c/d => x/y/z/yaw (position setpoint)
+// flags bit0 == 1: a/b/c/d => vx/vy/vz/yawRate (velocity setpoint)
 constexpr uint16_t MOVE_PAYLOAD_LEN = 21;
+constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
 
 enum FrameType : uint8_t {
     FRAME_MAP = 0,
