@@ -57,7 +57,7 @@ public:
 
     explicit MavlinkSerial(const std::string& dev, int baud,
                            uint8_t sysid = 42, uint8_t compid = MAV_COMP_ID_VISUAL_INERTIAL_ODOMETRY)
-        : fd_(-1), sysid_(sysid), compid_(compid), seq_(0)
+        : m_fd(-1), m_sysid(sysid), m_compid(compid), m_seq(0)
     {
         openSerial(dev, baud);
     }
@@ -65,36 +65,36 @@ public:
     // ====== RX: start/stop ======
     void startRx()
     {
-        rx_running_.store(true);
-        if (rx_thread_.joinable()) rx_thread_.join();
-        rx_thread_ = std::thread([this]() { this->rxLoop(); });
+        m_rxRunning.store(true);
+        if (m_rxThread.joinable()) m_rxThread.join();
+        m_rxThread = std::thread([this]() { this->rxLoop(); });
     }
 
     void stopRx()
     {
-        rx_running_.store(false);
-        if (rx_thread_.joinable()) rx_thread_.join();
+        m_rxRunning.store(false);
+        if (m_rxThread.joinable()) m_rxThread.join();
     }
 
     // 自动学习到的 PX4 target（从 HEARTBEAT 得到）
-    uint8_t targetSystem() const { return px4_sysid_.load(); }
-    uint8_t targetComponent() const { return px4_compid_.load(); }
+    uint8_t targetSystem() const { return m_px4Sysid.load(); }
+    uint8_t targetComponent() const { return m_px4Compid.load(); }
 
     // 等待某个 COMMAND 的 ACK（返回 true 表示等到了）
     // out_result: MAV_RESULT_*
     bool waitCommandAck(uint16_t command, int timeout_ms, uint8_t& out_result)
     {
-        std::unique_lock<std::mutex> lk(ack_mtx_);
+        std::unique_lock<std::mutex> lk(m_ackMtx);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
 
         auto pred = [&]() {
-            auto it = ack_map_.find(command);
-            return it != ack_map_.end();
+            auto it = m_ackMap.find(command);
+            return it != m_ackMap.end();
         };
 
-        if (!ack_cv_.wait_until(lk, deadline, pred)) return false;
+        if (!m_ackCv.wait_until(lk, deadline, pred)) return false;
 
-        out_result = ack_map_[command].result;
+        out_result = m_ackMap[command].result;
         return true;
     }
 
@@ -108,7 +108,7 @@ public:
     {
         mavlink_message_t msg{};
         mavlink_msg_command_long_pack(
-            sysid_, compid_, &msg,
+            m_sysid, m_compid, &msg,
             target_system, target_component,
             command, confirmation,
             p1,p2,p3,p4,p5,p6,p7
@@ -126,8 +126,8 @@ public:
         if (target_component == 0) target_component = targetComponent();
 
         {
-            std::lock_guard<std::mutex> lk(ack_mtx_);
-            ack_map_.erase(command);
+            std::lock_guard<std::mutex> lk(m_ackMtx);
+            m_ackMap.erase(command);
         }
 
         sendCommandLong(command, p1,p2,p3,p4,p5,p6,p7, target_system, target_component);
@@ -198,7 +198,7 @@ public:
     ~MavlinkSerial() {
         stopRx();
         stopSetpointStream();
-        if (fd_ >= 0) close(fd_);
+        if (m_fd >= 0) close(m_fd);
     }
     struct SetpointLocalNED {
         float x = NAN, y = NAN, z = NAN;      // position (m) NED
@@ -248,7 +248,7 @@ public:
         const uint8_t target_component = 1;
 
         mavlink_msg_set_position_target_local_ned_pack(
-            sysid_, compid_, &msg,
+            m_sysid, m_compid, &msg,
             time_boot_ms,
             target_system,
             target_component,
@@ -272,37 +272,37 @@ public:
     void startSetpointStreamHz(double hz = 20.0)
     {
         if (hz <= 0.0) hz = 20.0;
-        stream_period_us_ = static_cast<uint64_t>(1e6 / hz);
+        m_streamPeriodUs = static_cast<uint64_t>(1e6 / hz);
 
-        streaming_.store(true);
-        if (stream_thread_.joinable()) stream_thread_.join();
+        m_streaming.store(true);
+        if (m_streamThread.joinable()) m_streamThread.join();
 
-        stream_thread_ = std::thread([this]() {
-            while (this->streaming_.load()) {
+        m_streamThread = std::thread([this]() {
+            while (this->m_streaming.load()) {
                 const uint32_t t_ms = time_boot_ms();
 
                 SetpointLocalNED sp;
                 {
-                    std::lock_guard<std::mutex> lk(this->sp_mtx_);
-                    sp = this->sp_current_;
+                    std::lock_guard<std::mutex> lk(this->m_spMtx);
+                    sp = this->m_spCurrent;
                 }
 
                 this->sendSetPositionTargetLocalNED(t_ms, sp, MAV_FRAME_LOCAL_NED);
-                usleep(static_cast<useconds_t>(this->stream_period_us_));
+                usleep(static_cast<useconds_t>(this->m_streamPeriodUs));
             }
         });
     }
 
     void stopSetpointStream()
     {
-        streaming_.store(false);
-        if (stream_thread_.joinable()) stream_thread_.join();
+        m_streaming.store(false);
+        if (m_streamThread.joinable()) m_streamThread.join();
     }
 
     void updateStreamSetpoint(const SetpointLocalNED& sp_ned)
     {
-        std::lock_guard<std::mutex> lk(sp_mtx_);
-        sp_current_ = sp_ned;
+        std::lock_guard<std::mutex> lk(m_spMtx);
+        m_spCurrent = sp_ned;
     }
 
     void updateStreamPosition(float x_n, float y_e, float z_d, float yaw_rad = NAN)
@@ -366,7 +366,7 @@ public:
         }
 
         mavlink_msg_odometry_pack(
-            sysid_, compid_, &msg,
+            m_sysid, m_compid, &msg,
             timestamp_us,
             frame_id,
             child_frame_id,
@@ -426,11 +426,11 @@ public:
     }
 
 private:
-    std::atomic<bool> streaming_{false};
-    std::thread stream_thread_;
-    std::mutex sp_mtx_;
-    SetpointLocalNED sp_current_{};
-    uint64_t stream_period_us_{50000}; // 20Hz
+    std::atomic<bool> m_streaming{false};
+    std::thread m_streamThread;
+    std::mutex m_spMtx;
+    SetpointLocalNED m_spCurrent{};
+    uint64_t m_streamPeriodUs{50000}; // 20Hz
 
     static inline uint32_t time_boot_ms()
     {
@@ -438,10 +438,10 @@ private:
         return (uint32_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
     }
 
-    int fd_;
-    uint8_t sysid_;
-    uint8_t compid_;
-    uint8_t seq_;
+    int m_fd;
+    uint8_t m_sysid;
+    uint8_t m_compid;
+    uint8_t m_seq;
 
     static speed_t baudToTermios(int baud) {
         switch (baud) {
@@ -456,13 +456,13 @@ private:
     }
 
     void openSerial(const std::string& dev, int baud) {
-        fd_ = ::open(dev.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
-        if (fd_ < 0) {
+        m_fd = ::open(dev.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+        if (m_fd < 0) {
             throw std::runtime_error("open(" + dev + ") failed: " + std::string(std::strerror(errno)));
         }
 
         termios tio{};
-        if (tcgetattr(fd_, &tio) != 0) {
+        if (tcgetattr(m_fd, &tio) != 0) {
             throw std::runtime_error("tcgetattr failed: " + std::string(std::strerror(errno)));
         }
 
@@ -491,19 +491,19 @@ private:
         tio.c_cc[VMIN]  = 0;
         tio.c_cc[VTIME] = 0;
 
-        if (tcsetattr(fd_, TCSANOW, &tio) != 0) {
+        if (tcsetattr(m_fd, TCSANOW, &tio) != 0) {
             throw std::runtime_error("tcsetattr failed: " + std::string(std::strerror(errno)));
         }
 
         // set blocking for writes (optional)
-        int flags = fcntl(fd_, F_GETFL, 0);
-        if (flags >= 0) fcntl(fd_, F_SETFL, flags & ~O_NONBLOCK);
+        int flags = fcntl(m_fd, F_GETFL, 0);
+        if (flags >= 0) fcntl(m_fd, F_SETFL, flags & ~O_NONBLOCK);
     }
 
     void writeMessage(const mavlink_message_t& msg) {
         uint8_t buf[MAVLINK_MAX_PACKET_LEN];
         const uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-        ssize_t n = ::write(fd_, buf, len);
+        ssize_t n = ::write(m_fd, buf, len);
         if (n < 0) {
             printf("[mav] write failed: %d\n", std::strerror(errno));
         }
@@ -516,15 +516,15 @@ private:
         std::chrono::steady_clock::time_point t;
     };
 
-    std::atomic<bool> rx_running_{false};
-    std::thread rx_thread_;
+    std::atomic<bool> m_rxRunning{false};
+    std::thread m_rxThread;
 
-    std::mutex ack_mtx_;
-    std::condition_variable ack_cv_;
-    std::unordered_map<uint16_t, AckInfo> ack_map_;
+    std::mutex m_ackMtx;
+    std::condition_variable m_ackCv;
+    std::unordered_map<uint16_t, AckInfo> m_ackMap;
 
-    std::atomic<uint8_t> px4_sysid_{1};
-    std::atomic<uint8_t> px4_compid_{1};
+    std::atomic<uint8_t> m_px4Sysid{1};
+    std::atomic<uint8_t> m_px4Compid{1};
 
     static const char* mavResultToStr(uint8_t r)
     {
@@ -544,18 +544,18 @@ private:
         mavlink_message_t msg{};
         mavlink_status_t status{};
 
-        // 确保 fd_ 可读：用 poll，避免 busy loop
+        // 确保 m_fd 可读：用 poll，避免 busy loop
         pollfd pfd{};
-        pfd.fd = fd_;
+        pfd.fd = m_fd;
         pfd.events = POLLIN;
 
-        while (rx_running_.load()) {
+        while (m_rxRunning.load()) {
             int pr = ::poll(&pfd, 1, 200); // 200ms
             if (pr <= 0) continue;
             if (!(pfd.revents & POLLIN)) continue;
 
             uint8_t buf[512];
-            ssize_t n = ::read(fd_, buf, sizeof(buf));
+            ssize_t n = ::read(m_fd, buf, sizeof(buf));
             if (n <= 0) continue;
 
             for (ssize_t i = 0; i < n; i++) {
@@ -573,8 +573,8 @@ private:
             mavlink_msg_heartbeat_decode(&msg, &hb);
 
             if (hb.autopilot != MAV_AUTOPILOT_INVALID) {
-                px4_sysid_.store(msg.sysid);
-                px4_compid_.store(msg.compid);
+                m_px4Sysid.store(msg.sysid);
+                m_px4Compid.store(msg.compid);
             }
             return;
         }
@@ -590,10 +590,10 @@ private:
             info.t = std::chrono::steady_clock::now();
 
             {
-                std::lock_guard<std::mutex> lk(ack_mtx_);
-                ack_map_[ack.command] = info;
+                std::lock_guard<std::mutex> lk(m_ackMtx);
+                m_ackMap[ack.command] = info;
             }
-            ack_cv_.notify_all();
+            m_ackCv.notify_all();
 
             printf("[ACK] sys=%d, comp=%d cmd=%u result= %d(%s) progress=%d param2=%d\n",
                 int(msg.sysid), int(msg.compid), ack.command, int(ack.result), mavResultToStr(ack.result),
@@ -609,7 +609,7 @@ private:
             char text[sizeof(st.text) + 1];
             std::memcpy(text, st.text, sizeof(st.text));
             text[sizeof(st.text)] = '\0';
-            
+
             printf("[STATUSTEXT] sev=%d %s\n", int(st.severity), text);
             return;
         }

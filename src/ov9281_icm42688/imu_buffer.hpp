@@ -1,71 +1,87 @@
+#pragma once
 
+#include <opencv2/core/types.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <deque>
+#include <mutex>
+#include <vector>
+
+#include "ImuTypes.h"
 
 struct ImuSample {
-    int64_t t_ns{};
-    float ax{}, ay{}, az{}; // m/s^2
-    float gx{}, gy{}, gz{}; // rad/s
+    int64_t tNs{};
+    float ax{}, ay{}, az{};  // m/s^2
+    float gx{}, gy{}, gz{};  // rad/s
 };
 
 struct ImuScale {
-    float accel_lsb_per_g{2048.0f}; // default for 16g
-    float gyro_lsb_per_dps{16.4f};  // default for 2000 dps
+    float accelLsbPerG{2048.0f};     // default for 16g
+    float gyroLsbPerDps{16.4f};      // default for 2000 dps
 };
 
 class ImuBuffer {
-  public:
-    void Push(const ImuSample &s)
+public:
+    void Push(const ImuSample& sample)
     {
-        std::lock_guard<std::mutex> lk(mu_);
-        q_.push_back(s);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_queue.push_back(sample);
 
-        const int64_t keep_ns = keep_sec_ * 1000000000LL;
-        while (!q_.empty() && (q_.back().t_ns - q_.front().t_ns) > keep_ns) {
-            q_.pop_front();
-            if (last_used_idx_ > 0)
-                last_used_idx_--;
+        const int64_t keepNs = static_cast<int64_t>(m_keepSec) * 1000000000LL;
+        while (!m_queue.empty() && (m_queue.back().tNs - m_queue.front().tNs) > keepNs) {
+            m_queue.pop_front();
+            if (m_lastUsedIdx > 0) {
+                --m_lastUsedIdx;
+            }
         }
     }
 
-    std::vector<ORB_SLAM3::IMU::Point> PopBetweenNs(int64_t t0_ns, int64_t t1_ns,
-                                                    int64_t slack_before_ns, int64_t slack_after_ns)
+    std::vector<ORB_SLAM3::IMU::Point> PopBetweenNs(
+        int64_t t0Ns, int64_t t1Ns, int64_t slackBeforeNs, int64_t slackAfterNs)
     {
         std::vector<ORB_SLAM3::IMU::Point> out;
-        std::lock_guard<std::mutex> lk(mu_);
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-        if (q_.empty())
+        if (m_queue.empty() || t1Ns < t0Ns) {
             return out;
-        if (t1_ns < t0_ns)
-            return out;
+        }
 
-        const int64_t a0 = t0_ns - slack_before_ns;
-        const int64_t a1 = t1_ns + slack_after_ns;
+        const int64_t rangeStartNs = t0Ns - slackBeforeNs;
+        const int64_t rangeEndNs = t1Ns + slackAfterNs;
 
-        size_t i = std::min(last_used_idx_, q_.size());
-        while (i < q_.size() && q_[i].t_ns <= a0)
-            i++;
+        size_t i = std::min(m_lastUsedIdx, m_queue.size());
+        while (i < m_queue.size() && m_queue[i].tNs <= rangeStartNs) {
+            ++i;
+        }
 
         size_t j = i;
-        while (j < q_.size() && q_[j].t_ns <= a1) {
-            const auto &s = q_[j];
-            if (s.t_ns > t0_ns && s.t_ns <= t1_ns) {
-                const double ts = (double)s.t_ns * 1e-9;
-                out.emplace_back(cv::Point3f(s.ax, s.ay, s.az), cv::Point3f(s.gx, s.gy, s.gz), ts);
+        while (j < m_queue.size() && m_queue[j].tNs <= rangeEndNs) {
+            const auto& sample = m_queue[j];
+            if (sample.tNs > t0Ns && sample.tNs <= t1Ns) {
+                const double ts = static_cast<double>(sample.tNs) * 1e-9;
+                out.emplace_back(
+                    cv::Point3f(sample.ax, sample.ay, sample.az),
+                    cv::Point3f(sample.gx, sample.gy, sample.gz),
+                    ts);
             }
-            j++;
+            ++j;
         }
 
         if (!out.empty()) {
-            size_t k = i;
-            while (k < q_.size() && q_[k].t_ns <= t1_ns)
-                k++;
-            last_used_idx_ = k;
+            size_t nextUsedIdx = i;
+            while (nextUsedIdx < m_queue.size() && m_queue[nextUsedIdx].tNs <= t1Ns) {
+                ++nextUsedIdx;
+            }
+            m_lastUsedIdx = nextUsedIdx;
         }
 
-        const int64_t purge_before = t0_ns - purge_margin_ns_;
-        while (!q_.empty() && q_.front().t_ns < purge_before) {
-            q_.pop_front();
-            if (last_used_idx_ > 0)
-                last_used_idx_--;
+        const int64_t purgeBeforeNs = t0Ns - m_purgeMarginNs;
+        while (!m_queue.empty() && m_queue.front().tNs < purgeBeforeNs) {
+            m_queue.pop_front();
+            if (m_lastUsedIdx > 0) {
+                --m_lastUsedIdx;
+            }
         }
 
         return out;
@@ -73,25 +89,25 @@ class ImuBuffer {
 
     size_t Size() const
     {
-        std::lock_guard<std::mutex> lk(mu_);
-        return q_.size();
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_queue.size();
     }
 
-    bool PeekFirstLast(int64_t &t_first, int64_t &t_last) const
+    bool PeekFirstLast(int64_t& tFirst, int64_t& tLast) const
     {
-        std::lock_guard<std::mutex> lk(mu_);
-        if (q_.empty())
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_queue.empty()) {
             return false;
-        t_first = q_.front().t_ns;
-        t_last = q_.back().t_ns;
+        }
+        tFirst = m_queue.front().tNs;
+        tLast = m_queue.back().tNs;
         return true;
     }
 
-  private:
-    mutable std::mutex mu_;
-    std::deque<ImuSample> q_;
-    size_t last_used_idx_{0};
-
-    int keep_sec_{5};
-    int64_t purge_margin_ns_{20000000}; // 20ms
+private:
+    mutable std::mutex m_mutex;
+    std::deque<ImuSample> m_queue;
+    size_t m_lastUsedIdx{0};
+    int m_keepSec{5};
+    int64_t m_purgeMarginNs{20000000};  // 20ms
 };

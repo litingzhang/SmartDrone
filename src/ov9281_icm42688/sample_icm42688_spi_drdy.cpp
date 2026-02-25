@@ -20,9 +20,9 @@
 #include <thread>
 #include <vector>
 
-static std::atomic<bool> g_running{true};
+static std::atomic<bool> g_runningFlag{true};
 
-static void HandleSigint(int) { g_running.store(false); }
+static void HandleSigint(int) { g_runningFlag.store(false); }
 
 static int64_t NowNs() {
   timespec ts{};
@@ -67,41 +67,41 @@ struct ImuSample {
 
 class SpiDev {
 public:
-  explicit SpiDev(std::string dev) : dev_(std::move(dev)) {}
+  explicit SpiDev(std::string dev) : m_dev(std::move(dev)) {}
 
   bool Open(uint32_t speed_hz, uint8_t mode, uint8_t bits_per_word) {
-    fd_ = ::open(dev_.c_str(), O_RDWR);
-    if (fd_ < 0) {
-      std::cerr << "open " << dev_ << " failed: " << strerror(errno) << "\n";
+    m_fd = ::open(m_dev.c_str(), O_RDWR);
+    if (m_fd < 0) {
+      std::cerr << "open " << m_dev << " failed: " << strerror(errno) << "\n";
       return false;
     }
 
-    if (ioctl(fd_, SPI_IOC_WR_MODE, &mode) < 0 ||
-        ioctl(fd_, SPI_IOC_RD_MODE, &mode) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_MODE, &mode) < 0 ||
+        ioctl(m_fd, SPI_IOC_RD_MODE, &mode) < 0) {
       std::cerr << "SPI set mode failed: " << strerror(errno) << "\n";
       return false;
     }
 
-    if (ioctl(fd_, SPI_IOC_WR_BITS_PER_WORD, &bits_per_word) < 0 ||
-        ioctl(fd_, SPI_IOC_RD_BITS_PER_WORD, &bits_per_word) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_BITS_PER_WORD, &bits_per_word) < 0 ||
+        ioctl(m_fd, SPI_IOC_RD_BITS_PER_WORD, &bits_per_word) < 0) {
       std::cerr << "SPI set bits_per_word failed: " << strerror(errno) << "\n";
       return false;
     }
 
-    if (ioctl(fd_, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz) < 0 ||
-        ioctl(fd_, SPI_IOC_RD_MAX_SPEED_HZ, &speed_hz) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz) < 0 ||
+        ioctl(m_fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed_hz) < 0) {
       std::cerr << "SPI set speed failed: " << strerror(errno) << "\n";
       return false;
     }
 
-    speed_hz_ = speed_hz;
-    mode_ = mode;
-    bits_ = bits_per_word;
+    m_speedHz = speed_hz;
+    m_mode = mode;
+    m_bits = bits_per_word;
     return true;
   }
 
   ~SpiDev() {
-    if (fd_ >= 0) ::close(fd_);
+    if (m_fd >= 0) ::close(m_fd);
   }
 
   bool WriteReg(uint8_t reg, uint8_t val) {
@@ -134,28 +134,28 @@ private:
     tr.tx_buf = (unsigned long)tx;
     tr.rx_buf = (unsigned long)rx;
     tr.len = (uint32_t)len;
-    tr.speed_hz = speed_hz_;
-    tr.bits_per_word = bits_;
+    tr.speed_hz = m_speedHz;
+    tr.bits_per_word = m_bits;
     tr.delay_usecs = 0;
 
-    if (ioctl(fd_, SPI_IOC_MESSAGE(1), &tr) < 0) {
+    if (ioctl(m_fd, SPI_IOC_MESSAGE(1), &tr) < 0) {
       std::cerr << "SPI transfer failed: " << strerror(errno) << "\n";
       return false;
     }
     return true;
   }
 
-  std::string dev_;
-  int fd_{-1};
-  uint32_t speed_hz_{8000000};
-  uint8_t mode_{SPI_MODE_3};
-  uint8_t bits_{8};
+  std::string m_dev;
+  int m_fd{-1};
+  uint32_t m_speedHz{8000000};
+  uint8_t m_mode{SPI_MODE_3};
+  uint8_t m_bits{8};
 };
 class DrdyGpio {
 public:
   bool Open(const std::string &chip_path, unsigned line_offset) {
-    chip_ = gpiod_chip_open(chip_path.c_str());
-    if (!chip_) {
+    m_chip = gpiod_chip_open(chip_path.c_str());
+    if (!m_chip) {
       std::cerr << "gpiod_chip_open(" << chip_path << ") failed: "
                 << strerror(errno) << "\n";
       return false;
@@ -197,19 +197,19 @@ gpiod_line_settings_set_bias(settings, GPIOD_LINE_BIAS_PULL_UP);
     }
     gpiod_request_config_set_consumer(req_cfg, "icm42688_drdy");
 
-    request_ = gpiod_chip_request_lines(chip_, req_cfg, line_cfg);
+    m_request = gpiod_chip_request_lines(m_chip, req_cfg, line_cfg);
 
     gpiod_request_config_free(req_cfg);
     gpiod_line_config_free(line_cfg);
 
-    if (!request_) {
+    if (!m_request) {
       std::cerr << "gpiod_chip_request_lines failed: "
                 << strerror(errno) << "\n";
       return false;
     }
 
-    evbuf_ = gpiod_edge_event_buffer_new(256);
-    if (!evbuf_) {
+    m_evbuf = gpiod_edge_event_buffer_new(256);
+    if (!m_evbuf) {
       std::cerr << "gpiod_edge_event_buffer_new failed\n";
       return false;
     }
@@ -218,25 +218,25 @@ gpiod_line_settings_set_bias(settings, GPIOD_LINE_BIAS_PULL_UP);
   }
 
   ~DrdyGpio() {
-    if (evbuf_) gpiod_edge_event_buffer_free(evbuf_);
-    if (request_) gpiod_line_request_release(request_);
-    if (chip_) gpiod_chip_close(chip_);
+    if (m_evbuf) gpiod_edge_event_buffer_free(m_evbuf);
+    if (m_request) gpiod_line_request_release(m_request);
+    if (m_chip) gpiod_chip_close(m_chip);
   }
 
 bool Wait(int timeout_ms) {
   int64_t timeout_ns = (timeout_ms < 0) ? -1 : (int64_t)timeout_ms * 1000000LL;
-  int ret = gpiod_line_request_wait_edge_events(request_, timeout_ns);
+  int ret = gpiod_line_request_wait_edge_events(m_request, timeout_ns);
   if (ret <= 0) return false; // 0 timeout, <0 error
 
   // Drain all pending events (最多读 64 个)
-  int n = gpiod_line_request_read_edge_events(request_, evbuf_, 256);
+  int n = gpiod_line_request_read_edge_events(m_request, m_evbuf, 256);
   return n > 0;
 }
 
 private:
-  gpiod_chip *chip_{nullptr};
-  gpiod_line_request *request_{nullptr};
-  gpiod_edge_event_buffer *evbuf_{nullptr};
+  gpiod_chip *m_chip{nullptr};
+  gpiod_line_request *m_request{nullptr};
+  gpiod_edge_event_buffer *m_evbuf{nullptr};
 };
 
 struct Config {
@@ -433,7 +433,7 @@ Dump(REG_INT_STATUS,   "INT_STATUS");    // 0x2D
   int64_t last_t = 0;
   uint8_t st = 0;
   spi.ReadReg(REG_INT_STATUS, st);
-  while (g_running.load()) {
+  while (g_runningFlag.load()) {
     // Wait up to 1s; if timeout, continue so SIGINT can break.
     if (!drdy.Wait(1000)) continue;
   const int64_t t_ns = NowNs();

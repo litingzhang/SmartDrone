@@ -58,8 +58,8 @@
 using namespace libcamera;
 namespace fs = std::filesystem;
 
-static std::atomic<bool> g_running{true};
-static void SigIntHandler(int) { g_running.store(false); }
+static std::atomic<bool> g_runningFlag{true};
+static void SigIntHandler(int) { g_runningFlag.store(false); }
 
 // ---------------- time util ----------------
 static int64_t NowNs() {
@@ -127,32 +127,32 @@ struct ImuSample {
 
 class SpiDev {
 public:
-  explicit SpiDev(std::string dev) : dev_(std::move(dev)) {}
-  ~SpiDev() { if (fd_ >= 0) ::close(fd_); }
+  explicit SpiDev(std::string dev) : m_dev(std::move(dev)) {}
+  ~SpiDev() { if (m_fd >= 0) ::close(m_fd); }
 
   bool Open(uint32_t speed_hz, uint8_t mode, uint8_t bits_per_word) {
-    fd_ = ::open(dev_.c_str(), O_RDWR);
-    if (fd_ < 0) {
-      std::cerr << "open " << dev_ << " failed: " << strerror(errno) << "\n";
+    m_fd = ::open(m_dev.c_str(), O_RDWR);
+    if (m_fd < 0) {
+      std::cerr << "open " << m_dev << " failed: " << strerror(errno) << "\n";
       return false;
     }
-    if (ioctl(fd_, SPI_IOC_WR_MODE, &mode) < 0 || ioctl(fd_, SPI_IOC_RD_MODE, &mode) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_MODE, &mode) < 0 || ioctl(m_fd, SPI_IOC_RD_MODE, &mode) < 0) {
       std::cerr << "SPI set mode failed: " << strerror(errno) << "\n";
       return false;
     }
-    if (ioctl(fd_, SPI_IOC_WR_BITS_PER_WORD, &bits_per_word) < 0 ||
-        ioctl(fd_, SPI_IOC_RD_BITS_PER_WORD, &bits_per_word) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_BITS_PER_WORD, &bits_per_word) < 0 ||
+        ioctl(m_fd, SPI_IOC_RD_BITS_PER_WORD, &bits_per_word) < 0) {
       std::cerr << "SPI set bits failed: " << strerror(errno) << "\n";
       return false;
     }
-    if (ioctl(fd_, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz) < 0 ||
-        ioctl(fd_, SPI_IOC_RD_MAX_SPEED_HZ, &speed_hz) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz) < 0 ||
+        ioctl(m_fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed_hz) < 0) {
       std::cerr << "SPI set speed failed: " << strerror(errno) << "\n";
       return false;
     }
-    speed_hz_ = speed_hz;
-    mode_ = mode;
-    bits_ = bits_per_word;
+    m_speedHz = speed_hz;
+    m_mode = mode;
+    m_bits = bits_per_word;
     return true;
   }
 
@@ -185,28 +185,28 @@ private:
     tr.tx_buf = (unsigned long)tx;
     tr.rx_buf = (unsigned long)rx;
     tr.len = (uint32_t)len;
-    tr.speed_hz = speed_hz_;
-    tr.bits_per_word = bits_;
+    tr.speed_hz = m_speedHz;
+    tr.bits_per_word = m_bits;
     tr.delay_usecs = 0;
-    if (ioctl(fd_, SPI_IOC_MESSAGE(1), &tr) < 0) {
+    if (ioctl(m_fd, SPI_IOC_MESSAGE(1), &tr) < 0) {
       std::cerr << "SPI transfer failed: " << strerror(errno) << "\n";
       return false;
     }
     return true;
   }
 
-  std::string dev_;
-  int fd_{-1};
-  uint32_t speed_hz_{8000000};
-  uint8_t mode_{SPI_MODE_0};
-  uint8_t bits_{8};
+  std::string m_dev;
+  int m_fd{-1};
+  uint32_t m_speedHz{8000000};
+  uint8_t m_mode{SPI_MODE_0};
+  uint8_t m_bits{8};
 };
 
 class DrdyGpio {
 public:
   bool Open(const std::string &chip_path, unsigned line_offset, int max_burst = 256) {
-    chip_ = gpiod_chip_open(chip_path.c_str());
-    if (!chip_) {
+    m_chip = gpiod_chip_open(chip_path.c_str());
+    if (!m_chip) {
       std::cerr << "gpiod_chip_open(" << chip_path << ") failed: " << strerror(errno) << "\n";
       return false;
     }
@@ -229,37 +229,37 @@ public:
     if (!req_cfg) { gpiod_line_config_free(line_cfg); return false; }
     gpiod_request_config_set_consumer(req_cfg, "icm42688_drdy");
 
-    request_ = gpiod_chip_request_lines(chip_, req_cfg, line_cfg);
+    m_request = gpiod_chip_request_lines(m_chip, req_cfg, line_cfg);
     gpiod_request_config_free(req_cfg);
     gpiod_line_config_free(line_cfg);
 
-    if (!request_) {
+    if (!m_request) {
       std::cerr << "gpiod_chip_request_lines failed: " << strerror(errno) << "\n";
       return false;
     }
 
-    max_burst_ = std::max(1, max_burst);
-    evbuf_ = gpiod_edge_event_buffer_new((size_t)max_burst_);
-    return evbuf_ != nullptr;
+    m_maxBurst = std::max(1, max_burst);
+    m_evbuf = gpiod_edge_event_buffer_new((size_t)m_maxBurst);
+    return m_evbuf != nullptr;
   }
 
   ~DrdyGpio() {
-    if (evbuf_) gpiod_edge_event_buffer_free(evbuf_);
-    if (request_) gpiod_line_request_release(request_);
-    if (chip_) gpiod_chip_close(chip_);
+    if (m_evbuf) gpiod_edge_event_buffer_free(m_evbuf);
+    if (m_request) gpiod_line_request_release(m_request);
+    if (m_chip) gpiod_chip_close(m_chip);
   }
 
   // 关键：一次尽量读多条，返回“最后一条事件”的时间戳，避免堆积
   bool WaitLastTs(int timeout_ms, int64_t &ts_ns_out) {
     int64_t timeout_ns = (timeout_ms < 0) ? -1 : (int64_t)timeout_ms * 1000000LL;
-    int ret = gpiod_line_request_wait_edge_events(request_, timeout_ns);
+    int ret = gpiod_line_request_wait_edge_events(m_request, timeout_ns);
     if (ret <= 0) return false;
 
-    int n = gpiod_line_request_read_edge_events(request_, evbuf_, (size_t)max_burst_);
+    int n = gpiod_line_request_read_edge_events(m_request, m_evbuf, (size_t)m_maxBurst);
     if (n <= 0) return false;
 
     // 取最后一个 event 的时间戳
-    struct gpiod_edge_event *ev_last = gpiod_edge_event_buffer_get_event(evbuf_, (size_t)(n - 1));
+    struct gpiod_edge_event *ev_last = gpiod_edge_event_buffer_get_event(m_evbuf, (size_t)(n - 1));
     if (!ev_last) return false;
 
     ts_ns_out = (int64_t)gpiod_edge_event_get_timestamp_ns(ev_last);
@@ -267,10 +267,10 @@ public:
   }
 
 private:
-  gpiod_chip *chip_{nullptr};
-  gpiod_line_request *request_{nullptr};
-  gpiod_edge_event_buffer *evbuf_{nullptr};
-  int max_burst_{256};
+  gpiod_chip *m_chip{nullptr};
+  gpiod_line_request *m_request{nullptr};
+  gpiod_edge_event_buffer *m_evbuf{nullptr};
+  int m_maxBurst{256};
 };
 
 static bool IcmResetAndConfig(SpiDev &spi, int imu_hz) {
@@ -336,32 +336,32 @@ static void ConvertRawToSI(const uint8_t raw[14], ImuSample &s) {
 
 // ---------------- Stereo camera (libcamera) ----------------
 struct FrameItem {
-  int cam_index{-1};
-  uint64_t ts_ns{0};
-  int64_t  arrive_ns{0};
+  int camIndex{-1};
+  uint64_t tsNs{0};
+  int64_t  arriveNs{0};
   cv::Mat gray; // CV_8UC1
 };
 
 class LibcameraMonoCam {
 public:
-  bool Open(std::shared_ptr<Camera> cam, int cam_index, int w, int h, int fps,
+  bool Open(std::shared_ptr<Camera> cam, int camIndex, int w, int h, int fps,
             bool ae_disable, int exposure_us, float gain) {
-    cam_ = std::move(cam);
-    cam_index_ = cam_index;
+    m_cam = std::move(cam);
+    m_camIndex = camIndex;
 
-    if (!cam_) return false;
-    if (cam_->acquire()) {
-      std::cerr << "Failed to acquire camera " << cam_->id() << "\n";
+    if (!m_cam) return false;
+    if (m_cam->acquire()) {
+      std::cerr << "Failed to acquire camera " << m_cam->id() << "\n";
       return false;
     }
 
-    config_ = cam_->generateConfiguration({StreamRole::Viewfinder});
-    if (!config_ || config_->size() < 1) {
+    m_config = m_cam->generateConfiguration({StreamRole::Viewfinder});
+    if (!m_config || m_config->size() < 1) {
       std::cerr << "Failed to generate config\n";
       return false;
     }
 
-    StreamConfiguration &sc = config_->at(0);
+    StreamConfiguration &sc = m_config->at(0);
     sc.size.width = w;
     sc.size.height = h;
 
@@ -370,52 +370,52 @@ public:
 
     const int64_t maxFrameUs = 1000000LL / std::max(1, fps);
     const int64_t minFrameUs = 1000000LL / 120;
-    controls_.set(controls::FrameDurationLimits,
+    m_controls.set(controls::FrameDurationLimits,
                   Span<const int64_t, 2>({minFrameUs, maxFrameUs}));
 
     // if (ae_disable) {
-      controls_.set(controls::AeEnable, false);
-      controls_.set(controls::ExposureTime, exposure_us);
-      controls_.set(controls::AnalogueGain, gain);
+      m_controls.set(controls::AeEnable, false);
+      m_controls.set(controls::ExposureTime, exposure_us);
+      m_controls.set(controls::AnalogueGain, gain);
     // }
 
-    CameraConfiguration::Status status = config_->validate();
+    CameraConfiguration::Status status = m_config->validate();
     if (status == CameraConfiguration::Invalid) {
       std::cerr << "Invalid camera configuration\n";
       return false;
     }
 
-    if (config_->at(0).pixelFormat != formats::YUV420) {
+    if (m_config->at(0).pixelFormat != formats::YUV420) {
       std::cerr << "ERROR: validate() changed pixelFormat to "
-                << config_->at(0).pixelFormat.toString()
+                << m_config->at(0).pixelFormat.toString()
                 << " (expected YUV420). Refuse to run.\n";
       return false;
     }
 
-    if (cam_->configure(config_.get())) {
+    if (m_cam->configure(m_config.get())) {
       std::cerr << "Failed to configure camera\n";
       return false;
     }
 
-    stream_ = sc.stream();
-    if (!stream_) {
+    m_stream = sc.stream();
+    if (!m_stream) {
       std::cerr << "No stream after configure\n";
       return false;
     }
 
-    allocator_ = std::make_unique<FrameBufferAllocator>(cam_);
-    if (allocator_->allocate(stream_) < 0) {
+    m_allocator = std::make_unique<FrameBufferAllocator>(m_cam);
+    if (m_allocator->allocate(m_stream) < 0) {
       std::cerr << "Failed to allocate buffers\n";
       return false;
     }
 
-    const auto &buffers = allocator_->buffers(stream_);
+    const auto &buffers = m_allocator->buffers(m_stream);
     if (buffers.empty()) {
       std::cerr << "No buffers allocated\n";
       return false;
     }
 
-    bufferMaps_.clear();
+    m_bufferMaps.clear();
     for (auto &buf : buffers) {
       std::vector<PlaneMap> planes;
       planes.reserve(buf->planes().size());
@@ -429,87 +429,87 @@ public:
         }
         planes.push_back({addr, len});
       }
-      bufferMaps_[buf.get()] = std::move(planes);
+      m_bufferMaps[buf.get()] = std::move(planes);
     }
 
-    requests_.clear();
+    m_requests.clear();
     for (auto &buf : buffers) {
-      std::unique_ptr<Request> req = cam_->createRequest();
+      std::unique_ptr<Request> req = m_cam->createRequest();
       if (!req) return false;
-      if (req->addBuffer(stream_, buf.get()) < 0) return false;
-      requests_.push_back(std::move(req));
+      if (req->addBuffer(m_stream, buf.get()) < 0) return false;
+      m_requests.push_back(std::move(req));
     }
 
-    cam_->requestCompleted.connect(this, &LibcameraMonoCam::OnRequestComplete);
+    m_cam->requestCompleted.connect(this, &LibcameraMonoCam::OnRequestComplete);
     return true;
   }
 
   bool Start() {
-    if (cam_->start(&controls_)) {
+    if (m_cam->start(&m_controls)) {
       std::cerr << "camera start failed\n";
       return false;
     }
-    for (auto &r : requests_) {
-      if (cam_->queueRequest(r.get()) < 0) return false;
+    for (auto &r : m_requests) {
+      if (m_cam->queueRequest(r.get()) < 0) return false;
     }
     return true;
   }
 
-  void Stop() { if (cam_) cam_->stop(); }
+  void Stop() { if (m_cam) m_cam->stop(); }
 
   void Close() {
-    for (auto &kv : bufferMaps_) for (auto &pm : kv.second) MUnmap(pm.addr, pm.len);
-    bufferMaps_.clear();
+    for (auto &kv : m_bufferMaps) for (auto &pm : kv.second) MUnmap(pm.addr, pm.len);
+    m_bufferMaps.clear();
 
-    if (cam_) {
-      cam_->requestCompleted.disconnect(this, &LibcameraMonoCam::OnRequestComplete);
-      cam_->release();
-      cam_.reset();
+    if (m_cam) {
+      m_cam->requestCompleted.disconnect(this, &LibcameraMonoCam::OnRequestComplete);
+      m_cam->release();
+      m_cam.reset();
     }
   }
 
-  void SetSink(std::function<void(FrameItem &&)> sink) { sink_ = std::move(sink); }
+  void SetSink(std::function<void(FrameItem &&)> sink) { m_sink = std::move(sink); }
 
-  PixelFormat PixelFmt() const { return config_->at(0).pixelFormat; }
-  Size SizeWH() const { return config_->at(0).size; }
-  int Stride() const { return config_->at(0).stride; }
+  PixelFormat PixelFmt() const { return m_config->at(0).pixelFormat; }
+  Size SizeWH() const { return m_config->at(0).size; }
+  int Stride() const { return m_config->at(0).stride; }
 
 private:
   void OnRequestComplete(Request *req) {
     if (!req || req->status() == Request::RequestCancelled) return;
 
-    auto it = req->buffers().find(stream_);
+    auto it = req->buffers().find(m_stream);
     if (it == req->buffers().end()) {
       req->reuse(Request::ReuseBuffers);
-      cam_->queueRequest(req);
+      m_cam->queueRequest(req);
       return;
     }
     FrameBuffer *buf = it->second;
 
-    auto *buffer = req->findBuffer(stream_);
+    auto *buffer = req->findBuffer(m_stream);
     const FrameMetadata &fbmd = buffer->metadata();
 
     FrameItem item;
-    item.cam_index = cam_index_;
-    item.arrive_ns = NowNs();
-    item.ts_ns = fbmd.timestamp;
+    item.camIndex = m_camIndex;
+    item.arriveNs = NowNs();
+    item.tsNs = fbmd.timestamp;
 
-    const StreamConfiguration &sc = config_->at(0);
+    const StreamConfiguration &sc = m_config->at(0);
     const int w = sc.size.width;
     const int h = sc.size.height;
     const int strideY = sc.stride;
 
-    auto mit = bufferMaps_.find(buf);
-    if (mit == bufferMaps_.end() || mit->second.empty() || !mit->second[0].addr) {
+    auto mit = m_bufferMaps.find(buf);
+    if (mit == m_bufferMaps.end() || mit->second.empty() || !mit->second[0].addr) {
       req->reuse(Request::ReuseBuffers);
-      cam_->queueRequest(req);
+      m_cam->queueRequest(req);
       return;
     }
 
     if (sc.pixelFormat != formats::YUV420) {
       std::cerr << "Unexpected fmt in callback: " << sc.pixelFormat.toString() << "\n";
       req->reuse(Request::ReuseBuffers);
-      cam_->queueRequest(req);
+      m_cam->queueRequest(req);
       return;
     }
 
@@ -517,24 +517,24 @@ private:
     cv::Mat yview(h, w, CV_8UC1, (void*)pY, (size_t)strideY);
     item.gray = yview.clone(); // buffer复用，必须clone
 
-    if (sink_) sink_(std::move(item));
+    if (m_sink) m_sink(std::move(item));
 
     req->reuse(Request::ReuseBuffers);
-    cam_->queueRequest(req);
+    m_cam->queueRequest(req);
   }
 
-  std::shared_ptr<Camera> cam_;
-  int cam_index_{-1};
+  std::shared_ptr<Camera> m_cam;
+  int m_camIndex{-1};
 
-  std::unique_ptr<CameraConfiguration> config_;
-  Stream *stream_{nullptr};
+  std::unique_ptr<CameraConfiguration> m_config;
+  Stream *m_stream{nullptr};
 
-  ControlList controls_{controls::controls};
+  ControlList m_controls{controls::controls};
 
-  std::unique_ptr<FrameBufferAllocator> allocator_;
-  std::vector<std::unique_ptr<Request>> requests_;
-  std::map<FrameBuffer *, std::vector<PlaneMap>> bufferMaps_;
-  std::function<void(FrameItem &&)> sink_;
+  std::unique_ptr<FrameBufferAllocator> m_allocator;
+  std::vector<std::unique_ptr<Request>> m_requests;
+  std::map<FrameBuffer *, std::vector<PlaneMap>> m_bufferMaps;
+  std::function<void(FrameItem &&)> m_sink;
 };
 
 class LibcameraStereoOV9281 {
@@ -542,106 +542,106 @@ public:
   bool Open(int w, int h, int fps,
             bool ae_disable, int exposure_us, float gain,
             int max_pair_queue = 8, uint64_t pair_tol_ns = 15000000) {
-    w_ = w; h_ = h; fps_ = fps;
-    max_pair_queue_ = max_pair_queue;
-    pair_tol_ns_ = pair_tol_ns;
+    m_w = w; m_h = h; m_fps = fps;
+    m_maxPairQueue = max_pair_queue;
+    m_pairTolNs = pair_tol_ns;
 
-    cm_ = std::make_unique<CameraManager>();
-    if (cm_->start()) {
+    m_cm = std::make_unique<CameraManager>();
+    if (m_cm->start()) {
       std::cerr << "CameraManager start failed\n";
       return false;
     }
 
-    const auto &cams = cm_->cameras();
+    const auto &cams = m_cm->cameras();
     if (cams.size() < 2) {
       std::cerr << "Need 2 cameras, but found " << cams.size() << "\n";
       return false;
     }
 
-    camL_ = cams[0];
-    camR_ = cams[1];
+    m_camL = cams[0];
+    m_camR = cams[1];
 
     auto sink = [&](FrameItem &&fi) {
-      std::lock_guard<std::mutex> lk(mu_);
-      if (fi.cam_index == 0) qL_.push_back(std::move(fi));
-      else qR_.push_back(std::move(fi));
+      std::lock_guard<std::mutex> lk(m_mu);
+      if (fi.camIndex == 0) m_qL.push_back(std::move(fi));
+      else m_qR.push_back(std::move(fi));
       TryPairLocked();
     };
 
-    if (!left_.Open(camL_, 0, w, h, fps, ae_disable, exposure_us, gain)) return false;
-    if (!right_.Open(camR_, 1, w, h, fps, ae_disable, exposure_us, gain)) return false;
-    left_.SetSink(sink);
-    right_.SetSink(sink);
+    if (!m_left.Open(m_camL, 0, w, h, fps, ae_disable, exposure_us, gain)) return false;
+    if (!m_right.Open(m_camR, 1, w, h, fps, ae_disable, exposure_us, gain)) return false;
+    m_left.SetSink(sink);
+    m_right.SetSink(sink);
 
-    if (!left_.Start()) return false;
-    if (!right_.Start()) return false;
+    if (!m_left.Start()) return false;
+    if (!m_right.Start()) return false;
 
-    std::cerr << "Left  fmt=" << left_.PixelFmt().toString()
-              << " size=" << left_.SizeWH().toString()
-              << " stride=" << left_.Stride() << "\n";
-    std::cerr << "Right fmt=" << right_.PixelFmt().toString()
-              << " size=" << right_.SizeWH().toString()
-              << " stride=" << right_.Stride() << "\n";
+    std::cerr << "Left  fmt=" << m_left.PixelFmt().toString()
+              << " size=" << m_left.SizeWH().toString()
+              << " stride=" << m_left.Stride() << "\n";
+    std::cerr << "Right fmt=" << m_right.PixelFmt().toString()
+              << " size=" << m_right.SizeWH().toString()
+              << " stride=" << m_right.Stride() << "\n";
     return true;
   }
 
   void Close() {
-    left_.Stop(); right_.Stop();
-    left_.Close(); right_.Close();
-    if (cm_) cm_->stop();
-    cm_.reset();
+    m_left.Stop(); m_right.Stop();
+    m_left.Close(); m_right.Close();
+    if (m_cm) m_cm->stop();
+    m_cm.reset();
   }
 
   bool GrabPair(FrameItem &L, FrameItem &R, int timeout_ms = 1000) {
-    std::unique_lock<std::mutex> lk(mu_);
-    if (!cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms),
-                      [&]{ return !paired_raw_.empty() || !g_running.load(); })) {
+    std::unique_lock<std::mutex> lk(m_mu);
+    if (!m_cv.wait_for(lk, std::chrono::milliseconds(timeout_ms),
+                      [&]{ return !m_pairedRaw.empty() || !g_runningFlag.load(); })) {
       return false;
     }
-    if (paired_raw_.empty()) return false;
-    auto &p = paired_raw_.front();
+    if (m_pairedRaw.empty()) return false;
+    auto &p = m_pairedRaw.front();
     L = std::move(p.first);
     R = std::move(p.second);
-    paired_raw_.pop_front();
+    m_pairedRaw.pop_front();
     return true;
   }
 
-  uint64_t PairTolNs() const { return pair_tol_ns_; }
+  uint64_t PairTolNs() const { return m_pairTolNs; }
 
 private:
   void TryPairLocked() {
-    while (!qL_.empty() && !qR_.empty()) {
-      uint64_t tL = qL_.front().ts_ns;
-      uint64_t tR = qR_.front().ts_ns;
+    while (!m_qL.empty() && !m_qR.empty()) {
+      uint64_t tL = m_qL.front().tsNs;
+      uint64_t tR = m_qR.front().tsNs;
 
       int64_t dt = (int64_t)tL - (int64_t)tR;
       uint64_t adt = (dt < 0) ? (uint64_t)(-dt) : (uint64_t)dt;
 
-      if (adt <= pair_tol_ns_) {
-        auto L = std::move(qL_.front()); qL_.pop_front();
-        auto R = std::move(qR_.front()); qR_.pop_front();
-        paired_raw_.push_back({std::move(L), std::move(R)});
-        while ((int)paired_raw_.size() > max_pair_queue_) paired_raw_.pop_front();
-        cv_.notify_one();
+      if (adt <= m_pairTolNs) {
+        auto L = std::move(m_qL.front()); m_qL.pop_front();
+        auto R = std::move(m_qR.front()); m_qR.pop_front();
+        m_pairedRaw.push_back({std::move(L), std::move(R)});
+        while ((int)m_pairedRaw.size() > m_maxPairQueue) m_pairedRaw.pop_front();
+        m_cv.notify_one();
       } else {
-        if (tL < tR) qL_.pop_front();
-        else qR_.pop_front();
+        if (tL < tR) m_qL.pop_front();
+        else m_qR.pop_front();
       }
     }
   }
 
-  int w_{1280}, h_{800}, fps_{60};
-  int max_pair_queue_{8};
-  uint64_t pair_tol_ns_{1000000};
+  int m_w{1280}, m_h{800}, m_fps{60};
+  int m_maxPairQueue{8};
+  uint64_t m_pairTolNs{1000000};
 
-  std::unique_ptr<CameraManager> cm_;
-  std::shared_ptr<Camera> camL_, camR_;
-  LibcameraMonoCam left_, right_;
+  std::unique_ptr<CameraManager> m_cm;
+  std::shared_ptr<Camera> m_camL, m_camR;
+  LibcameraMonoCam m_left, m_right;
 
-  std::mutex mu_;
-  std::condition_variable cv_;
-  std::deque<FrameItem> qL_, qR_;
-  std::deque<std::pair<FrameItem, FrameItem>> paired_raw_;
+  std::mutex m_mu;
+  std::condition_variable m_cv;
+  std::deque<FrameItem> m_qL, m_qR;
+  std::deque<std::pair<FrameItem, FrameItem>> m_pairedRaw;
 };
 
 // ---------------- recorder helpers ----------------
@@ -759,7 +759,7 @@ int main(int argc, char **argv) {
 
     int imu_lines = 0;
 
-    while (g_running.load()) {
+    while (g_runningFlag.load()) {
       int64_t t_irq_ns = 0;
       if (!drdy.WaitLastTs(1000, t_irq_ns)) continue;
 
@@ -789,7 +789,7 @@ int main(int argc, char **argv) {
   // Camera
   LibcameraStereoOV9281 cam;
   if (!cam.Open(w, h, fps, ae_disable, exposure_us, gain)) {
-    g_running.store(false);
+    g_runningFlag.store(false);
     if (imu_th.joinable()) imu_th.join();
     return 1;
   }
@@ -799,12 +799,12 @@ int main(int argc, char **argv) {
   offs.reserve(std::max(10, warmup_pairs));
 
   std::cerr << "Warmup for ts_offset... pairs=" << warmup_pairs << "\n";
-  for (int i = 0; i < warmup_pairs && g_running.load(); ) {
+  for (int i = 0; i < warmup_pairs && g_runningFlag.load(); ) {
     FrameItem L, R;
     if (!cam.GrabPair(L, R, 1000)) continue;
 
-    int64_t cam_ts = (int64_t)((L.ts_ns + R.ts_ns)/2);
-    int64_t arrive = (L.arrive_ns && R.arrive_ns) ? (L.arrive_ns + R.arrive_ns)/2 : NowNs();
+    int64_t cam_ts = (int64_t)((L.tsNs + R.tsNs)/2);
+    int64_t arrive = (L.arriveNs && R.arriveNs) ? (L.arriveNs + R.arriveNs)/2 : NowNs();
     offs.push_back(arrive - cam_ts);
     ++i;
   }
@@ -824,20 +824,20 @@ int main(int argc, char **argv) {
   int64_t last_pair_ns = 0;
 
   std::cerr << "Recording... press Ctrl+C to stop\n";
-  while (g_running.load()) {
+  while (g_runningFlag.load()) {
     if (max_frames > 0 && saved >= max_frames) break;
 
     FrameItem L, R;
     if (!cam.GrabPair(L, R, 1000)) continue;
 
-    int64_t dt_lr = (int64_t)L.ts_ns - (int64_t)R.ts_ns;
+    int64_t dt_lr = (int64_t)L.tsNs - (int64_t)R.tsNs;
     if ((saved % 30) == 0) {
       std::cerr << "[pair] dt_lr_us=" << (std::llabs(dt_lr) / 1000.0)
                 << " tol_us=" << (cam.PairTolNs()/1000.0) << "\n";
       std::cerr << "[imu] ok=" << (imu_ok.load() ? "true" : "false") << "\n";
     }
 
-    int64_t cam_ts = (int64_t)((L.ts_ns + R.ts_ns)/2);
+    int64_t cam_ts = (int64_t)((L.tsNs + R.tsNs)/2);
     int64_t pair_ns = cam_ts + ts_offset_ns;
 
     if (last_pair_ns != 0 && pair_ns <= last_pair_ns) pair_ns = last_pair_ns + 1;
@@ -868,7 +868,7 @@ int main(int argc, char **argv) {
 
   std::cerr << "Stopping...\n";
   cam.Close();
-  g_running.store(false);
+  g_runningFlag.store(false);
   if (imu_th.joinable()) imu_th.join();
 
   std::fflush(f_cam0); std::fflush(f_cam1); std::fflush(f_imu);

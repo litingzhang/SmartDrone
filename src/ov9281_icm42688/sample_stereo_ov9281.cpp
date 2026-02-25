@@ -1,6 +1,6 @@
 // libcamera_stereo_ov9281.cpp
 #include <libcamera/libcamera.h>
-#include <libcamera/framebuffer.h> 
+#include <libcamera/framebuffer.h>
 #include <opencv2/opencv.hpp>
 #include <csignal>
 #include <atomic>
@@ -22,7 +22,7 @@
 
 using namespace libcamera;
 
-static std::atomic<bool> g_running{true};
+static std::atomic<bool> g_runningFlag{true};
 
 struct StereoFrame {
   double t;       // seconds
@@ -30,7 +30,7 @@ struct StereoFrame {
   cv::Mat right;  // CV_8UC1
 };
 
-static void SigIntHandler(int) { g_running.store(false); }
+static void SigIntHandler(int) { g_runningFlag.store(false); }
 
 static void *MMapFD(int fd, size_t len, off_t off = 0) {
   void *p = mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, off);
@@ -48,31 +48,31 @@ struct PlaneMap {
 };
 
 struct FrameItem {
-  int cam_index{-1};      // 0 left, 1 right
-  uint64_t ts_ns{0};      // libcamera timestamp (ns)
+  int camIndex{-1};      // 0 left, 1 right
+  uint64_t tsNs{0};      // libcamera timestamp (ns)
   cv::Mat gray;           // CV_8UC1
 };
 
 class LibcameraMonoCam {
 public:
-  bool Open(std::shared_ptr<Camera> cam, int cam_index, int w, int h, int fps) {
-    cam_ = std::move(cam);
-    cam_index_ = cam_index;
+  bool Open(std::shared_ptr<Camera> cam, int camIndex, int w, int h, int fps) {
+    m_cam = std::move(cam);
+    m_camIndex = camIndex;
 
-    if (!cam_) return false;
-    if (cam_->acquire()) {
-      std::cerr << "Failed to acquire camera " << cam_->id() << "\n";
+    if (!m_cam) return false;
+    if (m_cam->acquire()) {
+      std::cerr << "Failed to acquire camera " << m_cam->id() << "\n";
       return false;
     }
 
     // Generate configuration: one stream (viewfinder is fine)
-    config_ = cam_->generateConfiguration({StreamRole::Viewfinder});
-    if (!config_ || config_->size() < 1) {
+    m_config = m_cam->generateConfiguration({StreamRole::Viewfinder});
+    if (!m_config || m_config->size() < 1) {
       std::cerr << "Failed to generate config\n";
       return false;
     }
 
-    StreamConfiguration &sc = config_->at(0);
+    StreamConfiguration &sc = m_config->at(0);
     sc.size.width = w;
     sc.size.height = h;
 
@@ -80,43 +80,43 @@ public:
     sc.pixelFormat = formats::R8;
 
     // Ask for higher fps via controls (pipeline may clamp)
-    controls_.set(controls::FrameDurationLimits,
+    m_controls.set(controls::FrameDurationLimits,
                   Span<const int64_t, 2>({1000000LL / fps, 1000000LL / fps}));
-    controls_.set(controls::AeEnable, false);
+    m_controls.set(controls::AeEnable, false);
 
-    controls_.set(controls::ExposureTime, 3000);     // 3ms 例子
-    controls_.set(controls::AnalogueGain, 4.0f);     // 4x 例子
-    CameraConfiguration::Status status = config_->validate();
+    m_controls.set(controls::ExposureTime, 3000);     // 3ms 例子
+    m_controls.set(controls::AnalogueGain, 4.0f);     // 4x 例子
+    CameraConfiguration::Status status = m_config->validate();
     if (status == CameraConfiguration::Invalid) {
       std::cerr << "Invalid camera configuration\n";
       return false;
     }
 
-    if (cam_->configure(config_.get())) {
+    if (m_cam->configure(m_config.get())) {
       std::cerr << "Failed to configure camera\n";
       return false;
     }
 
-    stream_ = sc.stream();
-    if (!stream_) {
+    m_stream = sc.stream();
+    if (!m_stream) {
       std::cerr << "No stream after configure\n";
       return false;
     }
 
-    allocator_ = std::make_unique<FrameBufferAllocator>(cam_);
-    if (allocator_->allocate(stream_) < 0) {
+    m_allocator = std::make_unique<FrameBufferAllocator>(m_cam);
+    if (m_allocator->allocate(m_stream) < 0) {
       std::cerr << "Failed to allocate buffers\n";
       return false;
     }
 
-    const auto &buffers = allocator_->buffers(stream_);
+    const auto &buffers = m_allocator->buffers(m_stream);
     if (buffers.empty()) {
       std::cerr << "No buffers allocated\n";
       return false;
     }
 
     // mmap each buffer plane once
-    bufferMaps_.clear();
+    m_bufferMaps.clear();
     for (auto &buf : buffers) {
       std::vector<PlaneMap> planes;
       planes.reserve(buf->planes().size());
@@ -130,37 +130,37 @@ public:
         }
         planes.push_back({addr, len});
       }
-      bufferMaps_[buf.get()] = std::move(planes);
+      m_bufferMaps[buf.get()] = std::move(planes);
     }
 
     // Create requests and attach buffers
-    requests_.clear();
+    m_requests.clear();
     for (auto &buf : buffers) {
-      std::unique_ptr<Request> req = cam_->createRequest();
+      std::unique_ptr<Request> req = m_cam->createRequest();
       if (!req) {
         std::cerr << "createRequest failed\n";
         return false;
       }
-      if (req->addBuffer(stream_, buf.get()) < 0) {
+      if (req->addBuffer(m_stream, buf.get()) < 0) {
         std::cerr << "addBuffer failed\n";
         return false;
       }
-      requests_.push_back(std::move(req));
+      m_requests.push_back(std::move(req));
     }
 
-    cam_->requestCompleted.connect(this, &LibcameraMonoCam::OnRequestComplete);
+    m_cam->requestCompleted.connect(this, &LibcameraMonoCam::OnRequestComplete);
 
     return true;
   }
 
   bool Start() {
-    if (cam_->start(&controls_)) {
+    if (m_cam->start(&m_controls)) {
       std::cerr << "camera start failed\n";
       return false;
     }
     // queue all requests
-    for (auto &r : requests_) {
-      if (cam_->queueRequest(r.get()) < 0) {
+    for (auto &r : m_requests) {
+      if (m_cam->queueRequest(r.get()) < 0) {
         std::cerr << "queueRequest failed\n";
         return false;
       }
@@ -169,65 +169,65 @@ public:
   }
 
   void Stop() {
-    if (cam_) cam_->stop();
+    if (m_cam) m_cam->stop();
   }
 
   void Close() {
     // unmap
-    for (auto &kv : bufferMaps_) {
+    for (auto &kv : m_bufferMaps) {
       for (auto &pm : kv.second) MUnmap(pm.addr, pm.len);
     }
-    bufferMaps_.clear();
+    m_bufferMaps.clear();
 
-    if (cam_) {
-      cam_->requestCompleted.disconnect(this, &LibcameraMonoCam::OnRequestComplete);
-      cam_->release();
-      cam_.reset();
+    if (m_cam) {
+      m_cam->requestCompleted.disconnect(this, &LibcameraMonoCam::OnRequestComplete);
+      m_cam->release();
+      m_cam.reset();
     }
   }
 
   // 提供一个线程安全的“取帧回调”
   void SetSink(std::function<void(FrameItem &&)> sink) {
-    sink_ = std::move(sink);
+    m_sink = std::move(sink);
   }
 
   // Debug info
-  PixelFormat PixelFmt() const { return config_->at(0).pixelFormat; }
-  Size SizeWH() const { return config_->at(0).size; }
-  int Stride() const { return config_->at(0).stride; }
+  PixelFormat PixelFmt() const { return m_config->at(0).pixelFormat; }
+  Size SizeWH() const { return m_config->at(0).size; }
+  int Stride() const { return m_config->at(0).stride; }
 
 private:
   void OnRequestComplete(Request *req) {
     if (!req || req->status() == Request::RequestCancelled) return;
 
     // timestamp (ns): libcamera::FrameMetadata::timestamp
-    auto *buffer = req->findBuffer(stream_);
+    auto *buffer = req->findBuffer(m_stream);
     const libcamera::FrameMetadata &fbmd = buffer->metadata();
     uint64_t ts = fbmd.timestamp;      // ns (libcamera 里通常是 ns)
     unsigned seq = fbmd.sequence;
 
     // Find buffer
-    auto it = req->buffers().find(stream_);
+    auto it = req->buffers().find(m_stream);
     if (it == req->buffers().end()) {
-      cam_->queueRequest(req);
+      m_cam->queueRequest(req);
       return;
     }
     FrameBuffer *buf = it->second;
 
     // Convert to grayscale cv::Mat
     FrameItem item;
-    item.cam_index = cam_index_;
-    item.ts_ns = ts;
+    item.camIndex = m_camIndex;
+    item.tsNs = ts;
 
-    const StreamConfiguration &sc = config_->at(0);
+    const StreamConfiguration &sc = m_config->at(0);
     const int w = sc.size.width;
     const int h = sc.size.height;
     const int stride = sc.stride; // bytes per row (for plane 0)
 
     // Plane 0 address
-    auto mit = bufferMaps_.find(buf);
-    if (mit == bufferMaps_.end() || mit->second.empty() || !mit->second[0].addr) {
-      cam_->queueRequest(req);
+    auto mit = m_bufferMaps.find(buf);
+    if (mit == m_bufferMaps.end() || mit->second.empty() || !mit->second[0].addr) {
+      m_cam->queueRequest(req);
       return;
     }
     uint8_t *p0 = reinterpret_cast<uint8_t *>(mit->second[0].addr);
@@ -260,149 +260,149 @@ if (fmt == formats::R16) {
 }
 
 
-    if (sink_) sink_(std::move(item));
+    if (m_sink) m_sink(std::move(item));
 
     // Requeue
     req->reuse(Request::ReuseBuffers);
-    cam_->queueRequest(req);
+    m_cam->queueRequest(req);
   }
 
-  std::shared_ptr<libcamera::Camera> cam_;
-  int cam_index_{-1};
+  std::shared_ptr<libcamera::Camera> m_cam;
+  int m_camIndex{-1};
 
-  std::unique_ptr<CameraConfiguration> config_;
-  Stream *stream_{nullptr};
+  std::unique_ptr<CameraConfiguration> m_config;
+  Stream *m_stream{nullptr};
 
-  ControlList controls_{controls::controls};
+  ControlList m_controls{controls::controls};
 
-  std::unique_ptr<FrameBufferAllocator> allocator_;
-  std::vector<std::unique_ptr<Request>> requests_;
+  std::unique_ptr<FrameBufferAllocator> m_allocator;
+  std::vector<std::unique_ptr<Request>> m_requests;
 
-  std::map<FrameBuffer *, std::vector<PlaneMap>> bufferMaps_;
+  std::map<FrameBuffer *, std::vector<PlaneMap>> m_bufferMaps;
 
-  std::function<void(FrameItem &&)> sink_;
+  std::function<void(FrameItem &&)> m_sink;
 };
 
 class LibcameraStereoOV9281 {
 public:
   bool Open(int w, int h, int fps, int max_pair_queue = 8, uint64_t pair_tol_ns = 1500000ULL) {
-    w_ = w; h_ = h; fps_ = fps;
-    max_pair_queue_ = max_pair_queue;
-    pair_tol_ns_ = pair_tol_ns;
+    m_w = w; m_h = h; m_fps = fps;
+    m_maxPairQueue = max_pair_queue;
+    m_pairTolNs = pair_tol_ns;
 
-    cm_ = std::make_unique<CameraManager>();
-    if (cm_->start()) {
+    m_cm = std::make_unique<CameraManager>();
+    if (m_cm->start()) {
       std::cerr << "CameraManager start failed\n";
       return false;
     }
 
-    const std::vector<std::shared_ptr<Camera>> &cams = cm_->cameras();
+    const std::vector<std::shared_ptr<Camera>> &cams = m_cm->cameras();
     if (cams.size() < 2) {
       std::cerr << "Need 2 cameras, but found " << cams.size() << "\n";
       return false;
     }
 
     // Pick first two cameras as left/right
-    camL_ = cams[0];
-    camR_ = cams[1];
+    m_camL = cams[0];
+    m_camR = cams[1];
 
     // sink callback: push into per-cam queue, then try pair
     auto sink = [&](FrameItem &&fi) {
-      std::lock_guard<std::mutex> lk(mu_);
-      if (fi.cam_index == 0) qL_.push_back(std::move(fi));
-      else qR_.push_back(std::move(fi));
+      std::lock_guard<std::mutex> lk(m_mu);
+      if (fi.camIndex == 0) m_qL.push_back(std::move(fi));
+      else m_qR.push_back(std::move(fi));
       TryPairLocked();
     };
 
-    if (!left_.Open(camL_, 0, w, h, fps)) return false;
-    if (!right_.Open(camR_, 1, w, h, fps)) return false;
-    left_.SetSink(sink);
-    right_.SetSink(sink);
+    if (!m_left.Open(m_camL, 0, w, h, fps)) return false;
+    if (!m_right.Open(m_camR, 1, w, h, fps)) return false;
+    m_left.SetSink(sink);
+    m_right.SetSink(sink);
 
     // Start both
-    if (!left_.Start()) return false;
-    if (!right_.Start()) return false;
+    if (!m_left.Start()) return false;
+    if (!m_right.Start()) return false;
 
     // Print actual config
-    std::cerr << "Left fmt=" << left_.PixelFmt().toString()
-              << " size=" << left_.SizeWH().toString()
-              << " stride=" << left_.Stride() << "\n";
-    std::cerr << "Right fmt=" << right_.PixelFmt().toString()
-              << " size=" << right_.SizeWH().toString()
-              << " stride=" << right_.Stride() << "\n";
+    std::cerr << "Left fmt=" << m_left.PixelFmt().toString()
+              << " size=" << m_left.SizeWH().toString()
+              << " stride=" << m_left.Stride() << "\n";
+    std::cerr << "Right fmt=" << m_right.PixelFmt().toString()
+              << " size=" << m_right.SizeWH().toString()
+              << " stride=" << m_right.Stride() << "\n";
 
     return true;
   }
 
   void Close() {
-    left_.Stop();
-    right_.Stop();
-    left_.Close();
-    right_.Close();
+    m_left.Stop();
+    m_right.Stop();
+    m_left.Close();
+    m_right.Close();
 
-    if (cm_) cm_->stop();
-    cm_.reset();
+    if (m_cm) m_cm->stop();
+    m_cm.reset();
   }
 
   // 阻塞等一对同步帧（按 timestamp 配对）
   bool Grab(StereoFrame &out, int timeout_ms = 1000) {
-    std::unique_lock<std::mutex> lk(mu_);
-    if (!cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms), [&]{ return !paired_.empty() || !g_running.load(); })) {
+    std::unique_lock<std::mutex> lk(m_mu);
+    if (!m_cv.wait_for(lk, std::chrono::milliseconds(timeout_ms), [&]{ return !m_paired.empty() || !g_runningFlag.load(); })) {
       return false;
     }
-    if (paired_.empty()) return false;
+    if (m_paired.empty()) return false;
 
-    out = std::move(paired_.front());
-    paired_.pop_front();
+    out = std::move(m_paired.front());
+    m_paired.pop_front();
     return true;
   }
 
 private:
   void TryPairLocked() {
     // 简单策略：取队头，按 ts 最接近配对；超出容忍则丢旧的
-    while (!qL_.empty() && !qR_.empty()) {
-      uint64_t tL = qL_.front().ts_ns;
-      uint64_t tR = qR_.front().ts_ns;
+    while (!m_qL.empty() && !m_qR.empty()) {
+      uint64_t tL = m_qL.front().tsNs;
+      uint64_t tR = m_qR.front().tsNs;
 
       int64_t dt = (int64_t)tL - (int64_t)tR;
       uint64_t adt = (dt < 0) ? (uint64_t)(-dt) : (uint64_t)dt;
 
-      if (adt <= pair_tol_ns_) {
+      if (adt <= m_pairTolNs) {
         StereoFrame sf;
         uint64_t t = (tL + tR) / 2;
         sf.t = double(t) * 1e-9;  // seconds
-        sf.left = std::move(qL_.front().gray);
-        sf.right = std::move(qR_.front().gray);
-        qL_.pop_front();
-        qR_.pop_front();
+        sf.left = std::move(m_qL.front().gray);
+        sf.right = std::move(m_qR.front().gray);
+        m_qL.pop_front();
+        m_qR.pop_front();
 
-        paired_.push_back(std::move(sf));
-        while ((int)paired_.size() > max_pair_queue_) paired_.pop_front();
-        cv_.notify_one();
+        m_paired.push_back(std::move(sf));
+        while ((int)m_paired.size() > m_maxPairQueue) m_paired.pop_front();
+        m_cv.notify_one();
       } else {
         // drop older one to catch up
-        if (tL < tR) qL_.pop_front();
-        else qR_.pop_front();
+        if (tL < tR) m_qL.pop_front();
+        else m_qR.pop_front();
       }
     }
   }
 
-  int w_{1280}, h_{800}, fps_{200};
-  int max_pair_queue_{8};
-  uint64_t pair_tol_ns_{1500000ULL}; // 1.5ms tolerance
+  int m_w{1280}, m_h{800}, m_fps{200};
+  int m_maxPairQueue{8};
+  uint64_t m_pairTolNs{1500000ULL}; // 1.5ms tolerance
 
-  std::unique_ptr<CameraManager> cm_;
-    std::shared_ptr<Camera> camL_;
-    std::shared_ptr<Camera> camR_;
+  std::unique_ptr<CameraManager> m_cm;
+    std::shared_ptr<Camera> m_camL;
+    std::shared_ptr<Camera> m_camR;
 
-  LibcameraMonoCam left_;
-  LibcameraMonoCam right_;
+  LibcameraMonoCam m_left;
+  LibcameraMonoCam m_right;
 
-  std::mutex mu_;
-  std::condition_variable cv_;
-  std::deque<FrameItem> qL_;
-  std::deque<FrameItem> qR_;
-  std::deque<StereoFrame> paired_;
+  std::mutex m_mu;
+  std::condition_variable m_cv;
+  std::deque<FrameItem> m_qL;
+  std::deque<FrameItem> m_qR;
+  std::deque<StereoFrame> m_paired;
 };
 
 static int GetArgI(int argc, char **argv, const char *name, int def) {
@@ -424,7 +424,7 @@ int main(int argc, char **argv) {
   if (!stereo.Open(w, h, fps)) return 1;
 
   std::cerr << "t_s,left_mean,right_mean\n";
-  while (g_running.load()) {
+  while (g_runningFlag.load()) {
     StereoFrame f;
     if (!stereo.Grab(f, 1000)) continue;
 

@@ -6,75 +6,75 @@
 class UdpImageSender {
   public:
     struct Job {
-        int cam_index;  // 0=L, 1=R
+        int camIndex;  // 0=L, 1=R
         uint32_t seq;   // sequence for debug
-        double frame_t; // seconds
+        double frameTime; // seconds
         cv::Mat gray;   // CV_8UC1
     };
 
-    bool Open(const std::string &ip, int port, int jpeg_quality = 80,
-              int max_payload = 1200, // safe under typical MTU (1500)
-              int max_queue = 4)
+    bool Open(const std::string &ip, int port, int jpegQuality = 80,
+              int maxPayload = 1200, // safe under typical MTU (1500)
+              int maxQueue = 4)
     {
-        jpeg_quality_ = std::max(10, std::min(95, jpeg_quality));
-        max_payload_ = std::max(400, max_payload);
-        max_queue_ = std::max(1, max_queue);
+        m_jpegQuality = std::max(10, std::min(95, jpegQuality));
+        m_maxPayload = std::max(400, maxPayload);
+        m_maxQueue = std::max(1, maxQueue);
 
-        sock_ = ::socket(AF_INET, SOCK_DGRAM, 0);
-        if (sock_ < 0) {
+        m_sock = ::socket(AF_INET, SOCK_DGRAM, 0);
+        if (m_sock < 0) {
             std::cerr << "[udp] socket() failed: " << strerror(errno) << "\n";
             return false;
         }
 
-        memset(&dst_, 0, sizeof(dst_));
-        dst_.sin_family = AF_INET;
-        dst_.sin_port = htons((uint16_t)port);
-        if (::inet_pton(AF_INET, ip.c_str(), &dst_.sin_addr) != 1) {
+        memset(&m_dst, 0, sizeof(m_dst));
+        m_dst.sin_family = AF_INET;
+        m_dst.sin_port = htons((uint16_t)port);
+        if (::inet_pton(AF_INET, ip.c_str(), &m_dst.sin_addr) != 1) {
             std::cerr << "[udp] inet_pton failed for " << ip << "\n";
-            ::close(sock_);
-            sock_ = -1;
+            ::close(m_sock);
+            m_sock = -1;
             return false;
         }
 
-        running_.store(true);
-        th_ = std::thread([&] { Loop(); });
+        m_running.store(true);
+        m_th = std::thread([&] { Loop(); });
         return true;
     }
 
     void Close()
     {
-        running_.store(false);
-        cv_.notify_all();
-        if (th_.joinable())
-            th_.join();
-        if (sock_ >= 0) {
-            ::close(sock_);
-            sock_ = -1;
+        m_running.store(false);
+        m_cv.notify_all();
+        if (m_th.joinable())
+            m_th.join();
+        if (m_sock >= 0) {
+            ::close(m_sock);
+            m_sock = -1;
         }
         {
-            std::lock_guard<std::mutex> lk(mu_);
-            q_.clear();
+            std::lock_guard<std::mutex> lk(m_mu);
+            m_q.clear();
         }
     }
 
     // called from SLAM thread (non-blocking-ish)
-    void Enqueue(int cam_index, uint32_t seq, double frame_t, const cv::Mat &gray)
+    void Enqueue(int camIndex, uint32_t seq, double frameTime, const cv::Mat &gray)
     {
-        if (sock_ < 0)
+        if (m_sock < 0)
             return;
         Job job;
-        job.cam_index = cam_index;
+        job.camIndex = camIndex;
         job.seq = seq;
-        job.frame_t = frame_t;
+        job.frameTime = frameTime;
         job.gray = gray.clone(); // IMPORTANT: own data (libcamera buffer will be reused)
 
         {
-            std::lock_guard<std::mutex> lk(mu_);
-            q_.push_back(std::move(job));
-            while ((int)q_.size() > max_queue_)
-                q_.pop_front(); // drop old to keep real-time
+            std::lock_guard<std::mutex> lk(m_mu);
+            m_q.push_back(std::move(job));
+            while ((int)m_q.size() > m_maxQueue)
+                m_q.pop_front(); // drop old to keep real-time
         }
-        cv_.notify_one();
+        m_cv.notify_one();
     }
 
   private:
@@ -82,32 +82,32 @@ class UdpImageSender {
     struct PacketHeader {
         uint32_t magic;      // 'VSIM' 0x5643494D (or any)
         uint16_t version;    // 1
-        uint8_t cam_index;   // 0/1
+        uint8_t camIndex;   // 0/1
         uint8_t flags;       // reserved
         uint32_t seq;        // camera sequence
-        double frame_t;      // seconds
-        uint32_t frame_id;   // incremental id for this sender
-        uint16_t chunk_idx;  // 0..chunk_cnt-1
-        uint16_t chunk_cnt;  // total chunks
-        uint32_t total_size; // jpeg bytes total
-        uint32_t chunk_size; // bytes in this packet payload
+        double frameTime;      // seconds
+        uint32_t frameId;   // incremental id for this sender
+        uint16_t chunkIdx;  // 0..chunkCnt-1
+        uint16_t chunkCnt;  // total chunks
+        uint32_t totalSize; // jpeg bytes total
+        uint32_t chunkSize; // bytes in this packet payload
     };
 #pragma pack(pop)
 
     void Loop()
     {
         std::vector<uchar> jpeg;
-        std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, jpeg_quality_};
+        std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, m_jpegQuality};
 
-        while (running_.load()) {
+        while (m_running.load()) {
             Job job;
             {
-                std::unique_lock<std::mutex> lk(mu_);
-                cv_.wait(lk, [&] { return !running_.load() || !q_.empty(); });
-                if (!running_.load())
+                std::unique_lock<std::mutex> lk(m_mu);
+                m_cv.wait(lk, [&] { return !m_running.load() || !m_q.empty(); });
+                if (!m_running.load())
                     break;
-                job = std::move(q_.front());
-                q_.pop_front();
+                job = std::move(m_q.front());
+                m_q.pop_front();
             }
 
             // encode
@@ -122,27 +122,27 @@ class UdpImageSender {
                 continue;
 
             const uint32_t total = (uint32_t)jpeg.size();
-            const uint16_t chunks = (uint16_t)((total + max_payload_ - 1) / max_payload_);
-            const uint32_t fid = frame_id_.fetch_add(1, std::memory_order_relaxed);
+            const uint16_t chunks = (uint16_t)((total + m_maxPayload - 1) / m_maxPayload);
+            const uint32_t fid = m_frameId.fetch_add(1, std::memory_order_relaxed);
 
             for (uint16_t ci = 0; ci < chunks; ++ci) {
-                const uint32_t off = (uint32_t)ci * (uint32_t)max_payload_;
+                const uint32_t off = (uint32_t)ci * (uint32_t)m_maxPayload;
                 const uint32_t left = total - off;
                 const uint32_t pay =
-                    (left > (uint32_t)max_payload_) ? (uint32_t)max_payload_ : left;
+                    (left > (uint32_t)m_maxPayload) ? (uint32_t)m_maxPayload : left;
 
                 PacketHeader h{};
                 h.magic = 0x5643494D; // 'VCIM' just a tag
                 h.version = 1;
-                h.cam_index = (uint8_t)job.cam_index;
+                h.camIndex = (uint8_t)job.camIndex;
                 h.flags = 0;
                 h.seq = job.seq;
-                h.frame_t = job.frame_t;
-                h.frame_id = fid;
-                h.chunk_idx = ci;
-                h.chunk_cnt = chunks;
-                h.total_size = total;
-                h.chunk_size = pay;
+                h.frameTime = job.frameTime;
+                h.frameId = fid;
+                h.chunkIdx = ci;
+                h.chunkCnt = chunks;
+                h.totalSize = total;
+                h.chunkSize = pay;
 
                 // build packet buffer: header + payload
                 std::vector<uint8_t> pkt(sizeof(PacketHeader) + pay);
@@ -150,24 +150,24 @@ class UdpImageSender {
                 memcpy(pkt.data() + sizeof(PacketHeader), jpeg.data() + off, pay);
 
                 ssize_t sent =
-                    ::sendto(sock_, pkt.data(), pkt.size(), 0, (sockaddr *)&dst_, sizeof(dst_));
+                    ::sendto(m_sock, pkt.data(), pkt.size(), 0, (sockaddr *)&m_dst, sizeof(m_dst));
                 (void)sent; // ignore drop; UDP is best-effort
             }
         }
     }
 
-    int sock_{-1};
-    sockaddr_in dst_{};
+    int m_sock{-1};
+    sockaddr_in m_dst{};
 
-    int jpeg_quality_{80};
-    int max_payload_{1200};
-    int max_queue_{4};
+    int m_jpegQuality{80};
+    int m_maxPayload{1200};
+    int m_maxQueue{4};
 
-    std::atomic<bool> running_{false};
-    std::thread th_;
-    std::mutex mu_;
-    std::condition_variable cv_;
-    std::deque<Job> q_;
+    std::atomic<bool> m_running{false};
+    std::thread m_th;
+    std::mutex m_mu;
+    std::condition_variable m_cv;
+    std::deque<Job> m_q;
 
-    std::atomic<uint32_t> frame_id_{1};
+    std::atomic<uint32_t> m_frameId{1};
 };

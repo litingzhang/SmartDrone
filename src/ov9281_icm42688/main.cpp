@@ -27,219 +27,13 @@
 #include "mavlink_pose_sender.hpp"
 #include "px4_console.hpp"
 #include <sophus/se3.hpp>
-#include "spi_dev.hpp"
+#include "app_args.hpp"
+#include "icm42688_imu.hpp"
 #include "drdy_gpio.hpp"
 #include "imu_buffer.hpp"
 #include "stereo_ov9281.hpp"
 #include "udp_image_sender.hpp"
 #include "logger.hpp"
-
-// ---------------- IMU (ICM42688) ----------------
-static inline int16_t Be16ToI16(uint8_t hi, uint8_t lo)
-{
-    return (int16_t)((uint16_t(hi) << 8) | uint16_t(lo));
-}
-
-// Bank0 registers (subset)
-static constexpr uint8_t REG_DEVICE_CONFIG = 0x11;
-static constexpr uint8_t REG_INT_CONFIG = 0x14;
-static constexpr uint8_t REG_INT_STATUS = 0x2D;
-static constexpr uint8_t REG_PWR_MGMT0 = 0x4E;
-static constexpr uint8_t REG_GYRO_CONFIG0 = 0x4F;
-static constexpr uint8_t REG_ACCEL_CONFIG0 = 0x50;
-static constexpr uint8_t REG_INT_CONFIG1 = 0x64;
-static constexpr uint8_t REG_INT_SOURCE0 = 0x65;
-
-static bool SetThreadRealtime(int prio)
-{
-    sched_param sp{};
-    sp.sched_priority = prio;
-    return pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0;
-}
-
-static uint8_t OdrCodeFromHz(int hz)
-{
-    switch (hz) {
-    case 8000:
-        return 0x03;
-    case 4000:
-        return 0x04;
-    case 2000:
-        return 0x05;
-    case 1000:
-        return 0x06;
-    case 200:
-        return 0x07;
-    case 100:
-        return 0x08;
-    case 50:
-        return 0x09;
-    case 25:
-        return 0x0A;
-    default:
-        return 0x0F;
-    }
-}
-
-static bool BuildFsBitsAndScale(int accel_fs_g, int gyro_fs_dps, uint8_t &accel_fs_bits,
-                                uint8_t &gyro_fs_bits, ImuScale &scale)
-{
-    switch (accel_fs_g) {
-    case 2:
-        scale.accel_lsb_per_g = 16384.0f;
-        accel_fs_bits = 0x03;
-        break;
-    case 4:
-        scale.accel_lsb_per_g = 8192.0f;
-        accel_fs_bits = 0x02;
-        break;
-    case 8:
-        scale.accel_lsb_per_g = 4096.0f;
-        accel_fs_bits = 0x01;
-        break;
-    case 16:
-        scale.accel_lsb_per_g = 2048.0f;
-        accel_fs_bits = 0x00;
-        break;
-    default:
-        std::cerr << "Unsupported accel-fs " << accel_fs_g << " (use 2/4/8/16)\n";
-        return false;
-    }
-
-    switch (gyro_fs_dps) {
-    case 125:
-        scale.gyro_lsb_per_dps = 262.4f;
-        gyro_fs_bits = 0x04;
-        break;
-    case 250:
-        scale.gyro_lsb_per_dps = 131.0f;
-        gyro_fs_bits = 0x03;
-        break;
-    case 500:
-        scale.gyro_lsb_per_dps = 65.5f;
-        gyro_fs_bits = 0x02;
-        break;
-    case 1000:
-        scale.gyro_lsb_per_dps = 32.8f;
-        gyro_fs_bits = 0x01;
-        break;
-    case 2000:
-        scale.gyro_lsb_per_dps = 16.4f;
-        gyro_fs_bits = 0x00;
-        break;
-    default:
-        std::cerr << "Unsupported gyro-fs " << gyro_fs_dps << " (use 125/250/500/1000/2000)\n";
-        return false;
-    }
-
-    return true;
-}
-
-static bool IcmResetAndConfig(SpiDev &spi, int imu_hz, int accel_fs_g, int gyro_fs_dps,
-                              ImuScale &scale_out)
-{
-    uint8_t accel_fs_bits = 0, gyro_fs_bits = 0;
-    ImuScale sc{};
-    if (!BuildFsBitsAndScale(accel_fs_g, gyro_fs_dps, accel_fs_bits, gyro_fs_bits, sc))
-        return false;
-
-    if (!spi.WriteReg(REG_DEVICE_CONFIG, 0x01))
-        return false;
-    usleep(100000);
-
-    spi.WriteReg(REG_INT_CONFIG, 0x30);
-    spi.WriteReg(REG_INT_SOURCE0, 0x08); // DRDY
-    spi.WriteReg(REG_INT_CONFIG1, 0x00);
-
-    spi.WriteReg(REG_PWR_MGMT0, 0x0F);
-    usleep(20000);
-
-    uint8_t odr = OdrCodeFromHz(imu_hz);
-
-    uint8_t gyro_cfg0 = uint8_t((gyro_fs_bits << 5) | (odr & 0x0F));
-    uint8_t accel_cfg0 = uint8_t((accel_fs_bits << 5) | (odr & 0x0F));
-
-    if (!spi.WriteReg(REG_GYRO_CONFIG0, gyro_cfg0))
-        return false;
-    if (!spi.WriteReg(REG_ACCEL_CONFIG0, accel_cfg0))
-        return false;
-    usleep(20000);
-
-    scale_out = sc;
-    return true;
-}
-
-static void ConvertRaw12_AccelGyro_ToSI(const uint8_t raw12[12], const ImuScale &sc, ImuSample &s)
-{
-    int16_t ax = Be16ToI16(raw12[0], raw12[1]);
-    int16_t ay = Be16ToI16(raw12[2], raw12[3]);
-    int16_t az = Be16ToI16(raw12[4], raw12[5]);
-    int16_t gx = Be16ToI16(raw12[6], raw12[7]);
-    int16_t gy = Be16ToI16(raw12[8], raw12[9]);
-    int16_t gz = Be16ToI16(raw12[10], raw12[11]);
-
-    constexpr float kG = 9.80665f;
-    s.ax = (float(ax) / sc.accel_lsb_per_g) * kG;
-    s.ay = (float(ay) / sc.accel_lsb_per_g) * kG;
-    s.az = (float(az) / sc.accel_lsb_per_g) * kG;
-
-    constexpr float kDeg2Rad = 3.14159265358979323846f / 180.0f;
-    s.gx = (float(gx) / sc.gyro_lsb_per_dps) * kDeg2Rad;
-    s.gy = (float(gy) / sc.gyro_lsb_per_dps) * kDeg2Rad;
-    s.gz = (float(gz) / sc.gyro_lsb_per_dps) * kDeg2Rad;
-}
-
-// ---------------- args ----------------
-static std::string GetArgS(int argc, char **argv, const char *name, const char *def)
-{
-    for (int i = 1; i + 1 < argc; i++)
-        if (std::string(argv[i]) == name)
-            return argv[i + 1];
-    return def;
-}
-static int GetArgI(int argc, char **argv, const char *name, int def)
-{
-    for (int i = 1; i + 1 < argc; i++)
-        if (std::string(argv[i]) == name)
-            return std::stoi(argv[i + 1]);
-    return def;
-}
-static int64_t GetArgI64(int argc, char **argv, const char *name, int64_t def)
-{
-    for (int i = 1; i + 1 < argc; i++)
-        if (std::string(argv[i]) == name)
-            return std::stoll(argv[i + 1]);
-    return def;
-}
-static float GetArgF(int argc, char **argv, const char *name, float def)
-{
-    for (int i = 1; i + 1 < argc; i++)
-        if (std::string(argv[i]) == name)
-            return std::stof(argv[i + 1]);
-    return def;
-}
-static bool HasArg(int argc, char **argv, const char *name)
-{
-    for (int i = 1; i < argc; i++)
-        if (std::string(argv[i]) == name)
-            return true;
-    return false;
-}
-static uint8_t ParseU8HexOrDec(const std::string &s, uint8_t def)
-{
-    try {
-        int base = 10;
-        std::string t = s;
-        if (t.size() > 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X'))
-            base = 16;
-        int v = std::stoi(t, nullptr, base);
-        if (v < 0 || v > 255)
-            return def;
-        return (uint8_t)v;
-    } catch (...) {
-        return def;
-    }
-}
 
 int main(int argc, char **argv)
 {
@@ -247,98 +41,86 @@ int main(int argc, char **argv)
     signal(SIGTERM, SigIntHandler);
     signal(SIGKILL, SigIntHandler);
 
-    const std::string vocab = GetArgS(argc, argv, "--vocab", "ORBvoc.txt");
-    const std::string settings = GetArgS(argc, argv, "--settings", "stereo_inertial.yaml");
+    const AppConfig appConfig = ParseAppConfig(argc, argv);
+    const CameraConfig& cameraConfig = appConfig.camera;
+    const UdpConfig& udpConfig = appConfig.udp;
+    const ImuRuntimeConfig& imuConfig = appConfig.imu;
+    const RuntimeConfig& runtimeConfig = appConfig.runtime;
 
-    // camera
-    const int w = GetArgI(argc, argv, "--w", 1280);
-    const int h = GetArgI(argc, argv, "--h", 800);
-    const int fps = GetArgI(argc, argv, "--fps", 30);
-    const bool ae_disable = !HasArg(argc, argv, "--ae");
-    const int exposure_us = GetArgI(argc, argv, "--exp-us", 5000);
-    const float gain = GetArgF(argc, argv, "--gain", 8.0f);
+    const std::string& vocab = appConfig.vocab;
+    const std::string& settings = appConfig.settings;
 
-    const bool request_y8 = !HasArg(argc, argv, "--no-y8");
-    const bool r16_norm = HasArg(argc, argv, "--r16-norm");
+    // Temporary aliases kept to minimize changes in the main processing loop.
+    const int w = cameraConfig.width;
+    const int h = cameraConfig.height;
+    const int fps = cameraConfig.fps;
+    const bool aeDisable = cameraConfig.aeDisable;
+    const int exposureUs = cameraConfig.exposureUs;
+    const float gain = cameraConfig.gain;
+    const bool requestY8 = cameraConfig.requestY8;
+    const bool r16Norm = cameraConfig.r16Norm;
+    const int pairMs = cameraConfig.pairMs;
+    const int keepMs = cameraConfig.keepMs;
+    const int cam1TsOffsetMs = cameraConfig.cam1TsOffsetMs;
+    const bool autoCamOffset = cameraConfig.autoCamOffset;
+    const int autoOffsetSamples = cameraConfig.autoOffsetSamples;
+    const int autoOffsetTimeoutMs = cameraConfig.autoOffsetTimeoutMs;
 
-    // stereo pairing
-    const int pair_ms = GetArgI(argc, argv, "--pair-ms", 2);
-    const int keep_ms = GetArgI(argc, argv, "--keep-ms", 120);
-    // udp
-    const bool udp_enable = HasArg(argc, argv, "--udp");
-    const std::string udp_ip = GetArgS(argc, argv, "--udp-ip", "192.168.1.10");
-    const int udp_port = GetArgI(argc, argv, "--udp-port", 5000);
-    const int udp_jpeg_q = GetArgI(argc, argv, "--udp-jpeg-q", 80);
-    const int udp_payload = GetArgI(argc, argv, "--udp-payload", 1200);
-    const int udp_q = GetArgI(argc, argv, "--udp-queue", 4);
+    const bool udpEnable = udpConfig.enable;
+    const std::string& udpIp = udpConfig.ip;
+    const int udpPort = udpConfig.port;
+    const int udpJpegQ = udpConfig.jpegQ;
+    const int udpPayload = udpConfig.payload;
+    const int udpQueue = udpConfig.queue;
 
-    // --- NEW: camera timestamp compensation ---
-    const int cam1_ts_offset_ms = GetArgI(argc, argv, "--cam1-ts-offset-ms", 0);
-    const bool auto_cam_offset =
-        HasArg(argc, argv, "--auto-cam-offset") || (cam1_ts_offset_ms == 0);
-    const int auto_offset_samples = GetArgI(argc, argv, "--auto-offset-samples", 120);
-    const int auto_offset_timeout_ms = GetArgI(argc, argv, "--auto-offset-timeout-ms", 3000);
-
-    // imu
-    const std::string spi_dev = GetArgS(argc, argv, "--spi", "/dev/spidev0.0");
-    const uint32_t spi_speed = (uint32_t)GetArgI(argc, argv, "--speed", 8000000);
-    const uint8_t spi_mode = (uint8_t)GetArgI(argc, argv, "--mode", 0);
-    const uint8_t spi_bits = (uint8_t)GetArgI(argc, argv, "--bits", 8);
-
-    const std::string gpiochip = GetArgS(argc, argv, "--gpiochip", "/dev/gpiochip0");
-    const unsigned drdy_line = (unsigned)GetArgI(argc, argv, "--drdy", 24);
-    const int imu_hz = GetArgI(argc, argv, "--imu-hz", 200);
-
-    const int accel_fs_g = GetArgI(argc, argv, "--accel-fs", 16);
-    const int gyro_fs_dps = GetArgI(argc, argv, "--gyro-fs", 2000);
-
-    uint8_t imu_start_reg = 0x1F;
-    {
-        std::string s = GetArgS(argc, argv, "--imu-start-reg", "0x1F");
-        imu_start_reg = ParseU8HexOrDec(s, 0x1F);
-    }
-
-    // timing / robust
-    const int64_t off_reject_ns = GetArgI64(argc, argv, "--off-reject-ns", 10'000'000); // 10ms
-    const bool allow_empty_imu = HasArg(argc, argv, "--allow-empty-imu");
-
-    // realtime (optional)
-    const bool rt_imu = HasArg(argc, argv, "--rt-imu");
-    const int rt_prio = GetArgI(argc, argv, "--rt-prio", 60);
+    const std::string& spiDev = imuConfig.spiDev;
+    const uint32_t spiSpeed = imuConfig.spiSpeed;
+    const uint8_t spiMode = imuConfig.spiMode;
+    const uint8_t spiBits = imuConfig.spiBits;
+    const std::string& gpiochip = imuConfig.gpiochip;
+    const unsigned drdyLine = imuConfig.drdyLine;
+    const int imuHz = imuConfig.imuHz;
+    const int accelFsG = imuConfig.accelFsG;
+    const int gyroFsDps = imuConfig.gyroFsDps;
+    const uint8_t imuStartReg = imuConfig.imuStartReg;
+    const int64_t offRejectNs = runtimeConfig.offRejectNs;
+    const bool allowEmptyImu = runtimeConfig.allowEmptyImu;
+    const bool rtImu = imuConfig.rtImu;
+    const int rtPrio = imuConfig.rtPrio;
 
     std::cerr << "ORB vocab=" << vocab << "\nsettings=" << settings << "\n";
     std::cerr << "cam " << w << "x" << h << " @" << fps
-              << " ae_disable=" << (ae_disable ? "true" : "false") << " exp_us=" << exposure_us
-              << " gain=" << gain << " request_y8=" << (request_y8 ? "Y" : "N")
-              << " r16_norm=" << (r16_norm ? "Y" : "N") << "\n";
-    std::cerr << "pair_thresh=" << pair_ms << "ms keep_window=" << keep_ms << "ms\n";
-    std::cerr << "cam1_ts_offset_ms=" << cam1_ts_offset_ms
-              << " auto_cam_offset=" << (auto_cam_offset ? "Y" : "N")
-              << " auto_samples=" << auto_offset_samples
-              << " auto_timeout_ms=" << auto_offset_timeout_ms << "\n";
+              << " aeDisable=" << (aeDisable ? "true" : "false") << " exp_us=" << exposureUs
+              << " gain=" << gain << " requestY8=" << (requestY8 ? "Y" : "N")
+              << " r16Norm=" << (r16Norm ? "Y" : "N") << "\n";
+    std::cerr << "pair_thresh=" << pairMs << "ms keep_window=" << keepMs << "ms\n";
+    std::cerr << "cam1TsOffsetMs=" << cam1TsOffsetMs
+              << " autoCamOffset=" << (autoCamOffset ? "Y" : "N")
+              << " auto_samples=" << autoOffsetSamples
+              << " auto_timeout_ms=" << autoOffsetTimeoutMs << "\n";
 
-    std::cerr << "imu spi=" << spi_dev << " speed=" << spi_speed << " mode=" << int(spi_mode)
-              << " bits=" << int(spi_bits) << " drdy=" << gpiochip << ":" << drdy_line
-              << " imu_hz=" << imu_hz << " imu_start_reg=0x" << std::hex << int(imu_start_reg)
-              << std::dec << " accel_fs=" << accel_fs_g << "g" << " gyro_fs=" << gyro_fs_dps
+    std::cerr << "imu spi=" << spiDev << " speed=" << spiSpeed << " mode=" << int(spiMode)
+              << " bits=" << int(spiBits) << " drdy=" << gpiochip << ":" << drdyLine
+              << " imuHz=" << imuHz << " imuStartReg=0x" << std::hex << int(imuStartReg)
+              << std::dec << " accel_fs=" << accelFsG << "g" << " gyro_fs=" << gyroFsDps
               << "dps" << "\n";
-    std::cerr << "udp_enable=" << (udp_enable ? "Y" : "N") << " udp_ip=" << udp_ip
-              << " udp_port=" << udp_port << " jpeg_q=" << udp_jpeg_q << " payload=" << udp_payload
-              << " queue=" << udp_q << "\n";
-    Logger::init("./stereo_vslam.log", 32 * 1024 * 1024, Logger::INFO, true);
+    std::cerr << "udpEnable=" << (udpEnable ? "Y" : "N") << " udpIp=" << udpIp
+              << " udpPort=" << udpPort << " jpeg_q=" << udpJpegQ << " payload=" << udpPayload
+              << " queue=" << udpQueue << "\n";
+    Logger::Init("./stereo_vslam.log", 32 * 1024 * 1024, Logger::INFO, true);
     // ORB-SLAM3 init
     ORB_SLAM3::System SLAM(vocab, settings, ORB_SLAM3::System::STEREO, false);
     MavlinkSerial mav("/dev/ttyAMA0", 921600);
     mav.startRx();
     Px4Console console(mav);
-    console.start();
+    console.Start();
     // UDP sender (optional)
     UdpImageSender udp;
-    if (udp_enable) {
-        if (!udp.Open(udp_ip, udp_port, udp_jpeg_q, udp_payload, udp_q)) {
+    if (udpEnable) {
+        if (!udp.Open(udpIp, udpPort, udpJpegQ, udpPayload, udpQueue)) {
             std::cerr << "[udp] open failed, continue without udp.\n";
         } else {
-            std::cerr << "[udp] sending to " << udp_ip << ":" << udp_port << "\n";
+            std::cerr << "[udp] sending to " << udpIp << ":" << udpPort << "\n";
         }
     }
 
@@ -349,33 +131,33 @@ int main(int argc, char **argv)
     std::atomic<uint64_t> imu_drop{0};
 
     ImuScale imu_scale{};
-    std::atomic<float> accel_lsb_per_g{imu_scale.accel_lsb_per_g};
-    std::atomic<float> gyro_lsb_per_dps{imu_scale.gyro_lsb_per_dps};
+    std::atomic<float> accelLsbPerG{imu_scale.accelLsbPerG};
+    std::atomic<float> gyroLsbPerDps{imu_scale.gyroLsbPerDps};
 
     std::thread imu_th([&]() {
-        if (rt_imu) {
-            if (!SetThreadRealtime(rt_prio)) {
+        if (rtImu) {
+            if (!SetThreadRealtime(rtPrio)) {
                 std::cerr << "[imu] SetThreadRealtime failed (need CAP_SYS_NICE/root). continue.\n";
             } else {
-                std::cerr << "[imu] realtime SCHED_FIFO prio=" << rt_prio << "\n";
+                std::cerr << "[imu] realtime SCHED_FIFO prio=" << rtPrio << "\n";
             }
         }
 
-        SpiDev spi(spi_dev);
-        if (!spi.Open(spi_speed, spi_mode, spi_bits))
+        SpiDev spi(spiDev);
+        if (!spi.Open(spiSpeed, spiMode, spiBits))
             return;
 
         ImuScale sc{};
-        if (!IcmResetAndConfig(spi, imu_hz, accel_fs_g, gyro_fs_dps, sc))
+        if (!IcmResetAndConfig(spi, imuHz, accelFsG, gyroFsDps, sc))
             return;
 
-        accel_lsb_per_g.store(sc.accel_lsb_per_g);
-        gyro_lsb_per_dps.store(sc.gyro_lsb_per_dps);
-        std::cerr << "[imu] scale accel_lsb/g=" << sc.accel_lsb_per_g
-                  << " gyro_lsb/dps=" << sc.gyro_lsb_per_dps << "\n";
+        accelLsbPerG.store(sc.accelLsbPerG);
+        gyroLsbPerDps.store(sc.gyroLsbPerDps);
+        std::cerr << "[imu] scale accel_lsb/g=" << sc.accelLsbPerG
+                  << " gyro_lsb/dps=" << sc.gyroLsbPerDps << "\n";
 
         DrdyGpio drdy;
-        if (!drdy.Open(gpiochip, drdy_line))
+        if (!drdy.Open(gpiochip, drdyLine))
             return;
 
         imu_ok.store(true);
@@ -384,25 +166,25 @@ int main(int argc, char **argv)
         uint8_t st = 0;
         spi.ReadReg(REG_INT_STATUS, st);
 
-        while (g_running.load()) {
+        while (g_runningFlag.load()) {
             int64_t t_irq_ns = 0;
             if (!drdy.WaitTs(1000, t_irq_ns))
                 continue;
 
             ImuSample s{};
-            s.t_ns = t_irq_ns;
+            s.tNs = t_irq_ns;
 
             spi.ReadReg(REG_INT_STATUS, st);
 
-            if (!spi.ReadRegs(imu_start_reg, raw12, sizeof(raw12))) {
+            if (!spi.ReadRegs(imuStartReg, raw12, sizeof(raw12))) {
                 imu_drop.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
 
             ImuScale sc2{};
-            sc2.accel_lsb_per_g = accel_lsb_per_g.load();
-            sc2.gyro_lsb_per_dps = gyro_lsb_per_dps.load();
-            ConvertRaw12_AccelGyro_ToSI(raw12, sc2, s);
+            sc2.accelLsbPerG = accelLsbPerG.load();
+            sc2.gyroLsbPerDps = gyroLsbPerDps.load();
+            ConvertRaw12AccelGyroToSi(raw12, sc2, s);
 
             // static uint64_t imuCnt = 0;
             // if (imuCnt % 200 == 0) {
@@ -423,22 +205,22 @@ int main(int argc, char **argv)
 
     // Stereo camera
     LibcameraStereoOV9281_TsPair cam;
-    if (!cam.Open(w, h, fps, ae_disable, exposure_us, gain, request_y8,
-                  (int64_t)pair_ms * 1'000'000LL, (int64_t)keep_ms * 1'000'000LL, 8, r16_norm)) {
-        g_running.store(false);
+    if (!cam.Open(w, h, fps, aeDisable, exposureUs, gain, requestY8,
+                  (int64_t)pairMs * 1'000'000LL, (int64_t)keepMs * 1'000'000LL, 8, r16Norm)) {
+        g_runningFlag.store(false);
         if (imu_th.joinable())
             imu_th.join();
         return 1;
     }
 
     // Apply manual or auto cam1 offset
-    if (cam1_ts_offset_ms != 0) {
-        cam.SetCam1OffsetNs((int64_t)cam1_ts_offset_ms * 1'000'000LL);
-        std::cerr << "[camoff] manual cam1_ts_offset_ms=" << cam1_ts_offset_ms << "\n";
-    } else if (auto_cam_offset) {
-        std::cerr << "[camoff] auto estimating cam1 offset... samples=" << auto_offset_samples
-                  << " timeout_ms=" << auto_offset_timeout_ms << "\n";
-        cam.AutoEstimateAndSetOffset(auto_offset_samples, auto_offset_timeout_ms);
+    if (cam1TsOffsetMs != 0) {
+        cam.SetCam1OffsetNs((int64_t)cam1TsOffsetMs * 1'000'000LL);
+        std::cerr << "[camoff] manual cam1TsOffsetMs=" << cam1TsOffsetMs << "\n";
+    } else if (autoCamOffset) {
+        std::cerr << "[camoff] auto estimating cam1 offset... samples=" << autoOffsetSamples
+                  << " timeout_ms=" << autoOffsetTimeoutMs << "\n";
+        cam.AutoEstimateAndSetOffset(autoOffsetSamples, autoOffsetTimeoutMs);
     }
 
     // Warmup: estimate ts_offset_ns (libcamera timestamp domain -> NowNs domain)
@@ -448,7 +230,7 @@ int main(int argc, char **argv)
 
     int warm_pairs = 0;
     int64_t last_print = NowNs();
-    while (g_running.load() && warm_pairs < 60) {
+    while (g_runningFlag.load() && warm_pairs < 60) {
         FrameItem L, R;
         if (!cam.GrabPair(L, R, 1000)) {
             const int64_t now = NowNs();
@@ -461,8 +243,8 @@ int main(int argc, char **argv)
             }
             continue;
         }
-        int64_t cam_ts = (int64_t)((L.ts_ns + R.ts_ns) / 2);
-        int64_t arrive = (L.arrive_ns && R.arrive_ns) ? (L.arrive_ns + R.arrive_ns) / 2 : NowNs();
+        int64_t cam_ts = (int64_t)((L.tsNs + R.tsNs) / 2);
+        int64_t arrive = (L.arriveNs && R.arriveNs) ? (L.arriveNs + R.arriveNs) / 2 : NowNs();
         offs.push_back(arrive - cam_ts);
         warm_pairs++;
     }
@@ -485,13 +267,13 @@ int main(int argc, char **argv)
     int64_t last_stat_ns = NowNs();
 
     const int64_t frame_step_ns = (int64_t)(1000000000LL / std::max(1, fps));
-    const int64_t imu_dt_ns = (int64_t)(1000000000LL / std::max(1, imu_hz));
+    const int64_t imu_dt_ns = (int64_t)(1000000000LL / std::max(1, imuHz));
     const int64_t slack_before_ns = std::max<int64_t>(2 * imu_dt_ns, 5'000'000);
     const int64_t slack_after_ns = std::max<int64_t>(2 * imu_dt_ns, 5'000'000);
 
     mav.updateStreamPosition(0.0f, 0.0f, -0.3f, NAN); // NED: z=-0.3 表示向上 0.3m
 
-    while (g_running.load()) {
+    while (g_runningFlag.load()) {
         FrameItem L, R;
         if (!cam.GrabPair(L, R, 1000)) {
             const int64_t now = NowNs();
@@ -501,7 +283,7 @@ int main(int argc, char **argv)
                 const uint64_t id = imu_drop.load();
                 std::cerr << "[wd] no pair 1s" << " last_seq=" << cam.LastSeq()
                           << " dt_ms=" << cam.LastDtMs() << " pendL=" << cam.PendL()
-                          << " pendR=" << cam.PendR() << " imu_hz~=" << (ic - last_imu_cnt)
+                          << " pendR=" << cam.PendR() << " imuHz~=" << (ic - last_imu_cnt)
                           << " imu_drop~=" << (id - last_imu_drop) << " imu_buf=" << imu_buf.Size()
                           << "\n";
                 last_imu_cnt = ic;
@@ -512,13 +294,13 @@ int main(int argc, char **argv)
 
         frame_cnt_1s++;
 
-        const int64_t cam_ts = (int64_t)((L.ts_ns + R.ts_ns) / 2);
+        const int64_t cam_ts = (int64_t)((L.tsNs + R.tsNs) / 2);
         const int64_t arrive =
-            (L.arrive_ns && R.arrive_ns) ? (L.arrive_ns + R.arrive_ns) / 2 : NowNs();
+            (L.arriveNs && R.arriveNs) ? (L.arriveNs + R.arriveNs) / 2 : NowNs();
         const int64_t off_meas = arrive - cam_ts;
 
         const int64_t err = off_meas - ts_offset_ns;
-        if (Abs64(err) < off_reject_ns) {
+        if (Abs64(err) < offRejectNs) {
             ts_offset_ns = ts_offset_ns + (err >> 6); // alpha=1/64
         }
 
@@ -535,7 +317,7 @@ int main(int argc, char **argv)
         const int64_t prev_frame_ns = last_frame_ns;
         last_frame_ns = frame_ns;
 
-        const double frame_t = (double)frame_ns * 1e-9;
+        const double frameTime = (double)frame_ns * 1e-9;
 
         const int64_t now = NowNs();
         last_stat_ns = 0;
@@ -545,7 +327,7 @@ int main(int argc, char **argv)
             const uint64_t id = imu_drop.load();
             // std::cerr << "[STAT] fps~=" << frame_cnt_1s
             //           << " dt_ms=" << cam.LastDtMs()
-            //           << " imu_hz~=" << (ic - last_imu_cnt)
+            //           << " imuHz~=" << (ic - last_imu_cnt)
             //           << " imu_drop~=" << (id - last_imu_drop)
             //           << " imu_buf=" << imu_buf.Size()
             //           << " last_vImu=" << vImu.size()
@@ -568,16 +350,16 @@ int main(int argc, char **argv)
             }
             std::cerr << "\n";
 
-            if (!allow_empty_imu)
+            if (!allowEmptyImu)
                 continue;
         }
 
-        if (udp_enable) {
-            udp.Enqueue(0, L.seq, frame_t, L.gray);
-            udp.Enqueue(1, R.seq, frame_t, R.gray);
+        if (udpEnable) {
+            udp.Enqueue(0, L.seq, frameTime, L.gray);
+            udp.Enqueue(1, R.seq, frameTime, R.gray);
         }
 
-        Sophus::SE3f Tcw = SLAM.TrackStereo(L.gray, R.gray, frame_t, vImu);
+        Sophus::SE3f Tcw = SLAM.TrackStereo(L.gray, R.gray, frameTime, vImu);
         int state = SLAM.GetTrackingState();
         Sophus::SE3f Twc = Tcw.inverse();
 
@@ -596,14 +378,14 @@ int main(int argc, char **argv)
         if (state == ORB_SLAM3::Tracking::OK) {
             mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, OdomQualityMode::GOOD);
             LOGI("[POSE]%f,(x:%f,y:%f,z:%f),(qw:%f,qx:%f,qy:%f,qz:%f)",
-                frame_t, p_ned.x, p_ned.y, p_ned.z, p_ned.qw, p_ned.qx, p_ned.qy, p_ned.qz);
+                frameTime, p_ned.x, p_ned.y, p_ned.z, p_ned.qw, p_ned.qx, p_ned.qy, p_ned.qz);
         } else {
             mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, OdomQualityMode::LOST);
         }
     }
 
     cam.Close();
-    g_running.store(false);
+    g_runningFlag.store(false);
     if (imu_th.joinable())
         imu_th.join();
     SLAM.Shutdown();

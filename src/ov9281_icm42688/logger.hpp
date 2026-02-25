@@ -1,6 +1,6 @@
 // Usage:
 //   #include "logger.hpp"
-//   Logger::init("/tmp/app.log", 8*1024*1024); // 8MB ring
+//   Logger::Init("/tmp/app.log", 8*1024*1024); // 8MB ring
 //   LOGI("hello %d", 123);
 //   LOGE("err: %s", msg);
 // Optional: #define LOGGER_OVERRIDE_PRINTF before including to redirect printf -> LOGF.
@@ -29,11 +29,11 @@ public:
     // Initialize ring log file.
     // max_bytes: fixed file size (depth). Must be > 4KB recommended.
     // flush_each: flush every log line (safer) vs buffered (faster).
-    static bool init(const char* path, size_t max_bytes,
+    static bool Init(const char* path, size_t max_bytes,
                      Level level = INFO, bool flush_each = true)
     {
         std::lock_guard<std::mutex> lk(s_mtx());
-        close_locked();
+        CloseLocked();
 
         if (!path || !*path || max_bytes < 4096) return false;
 
@@ -50,13 +50,13 @@ public:
         s_fp() = fp;
 
         // ensure file size == max_bytes (pre-allocate by seeking and writing one byte)
-        if (!ensure_size_locked(max_bytes)) {
-            close_locked();
+        if (!EnsureSizeLocked(max_bytes)) {
+            CloseLocked();
             return false;
         }
 
         // restore write position from sidecar (best-effort)
-        s_writePos() = load_pos_locked();
+        s_writePos() = LoadPosLocked();
         if (s_writePos() >= s_maxBytes()) s_writePos() = 0;
 
         // seek to current write position
@@ -65,42 +65,42 @@ public:
         return true;
     }
 
-    static void shutdown()
+    static void Shutdown()
     {
         std::lock_guard<std::mutex> lk(s_mtx());
-        close_locked();
+        CloseLocked();
     }
 
-    static void setLevel(Level level) { s_level().store(level, std::memory_order_relaxed); }
+    static void SetLevel(Level level) { s_level().store(level, std::memory_order_relaxed); }
 
     // Get current write position in ring file (0..max_bytes-1)
-    static size_t tell()
+    static size_t Tell()
     {
         return s_writePosAtomic().load(std::memory_order_relaxed);
     }
 
-    static void logf(Level lvl, const char* fmt, ...)
+    static void Logf(Level lvl, const char* fmt, ...)
     {
         if (!fmt) return;
-        if (!enabled(lvl)) return;
+        if (!Enabled(lvl)) return;
 
         va_list ap;
         va_start(ap, fmt);
-        vlogf(lvl, fmt, ap);
+        VLogf(lvl, fmt, ap);
         va_end(ap);
     }
 
-    static void vlogf(Level lvl, const char* fmt, va_list ap)
+    static void VLogf(Level lvl, const char* fmt, va_list ap)
     {
         if (!fmt) return;
-        if (!enabled(lvl)) return;
+        if (!Enabled(lvl)) return;
 
         // Build one line into a stack buffer (truncates if too long)
         char line[1024];
         size_t off = 0;
 
         // prefix: time + level
-        off += format_prefix(line + off, sizeof(line) - off, lvl);
+        off += FormatPrefix(line + off, sizeof(line) - off, lvl);
         if (off >= sizeof(line)) off = sizeof(line) - 1;
 
         // message body
@@ -123,17 +123,17 @@ public:
             off = sizeof(line) - 1;
         }
 
-        write_locked(line, off);
+        WriteLocked(line, off);
     }
 
 private:
-    static bool enabled(Level lvl)
+    static bool Enabled(Level lvl)
     {
         Level cur = (Level)s_level().load(std::memory_order_relaxed);
         return (cur != OFF) && (lvl >= cur);
     }
 
-    static const char* lvl_str(Level lvl)
+    static const char* LvlStr(Level lvl)
     {
         switch (lvl) {
         case DEBUG: return "D";
@@ -144,7 +144,7 @@ private:
         }
     }
 
-    static size_t format_prefix(char* out, size_t cap, Level lvl)
+    static size_t FormatPrefix(char* out, size_t cap, Level lvl)
     {
         if (!out || cap == 0) return 0;
 
@@ -156,14 +156,14 @@ private:
 
         // "[12345678][I] "
         int n = std::snprintf(out, cap, "[%llu][%s] ",
-                              (unsigned long long)ms, lvl_str(lvl));
+                              (unsigned long long)ms, LvlStr(lvl));
         if (n < 0) return 0;
         size_t nn = (size_t)n;
         if (nn >= cap) nn = cap - 1;
         return nn;
     }
 
-    static void write_locked(const char* data, size_t len)
+    static void WriteLocked(const char* data, size_t len)
     {
         std::lock_guard<std::mutex> lk(s_mtx());
 
@@ -203,11 +203,11 @@ private:
 
         // persist write position occasionally (every ~64 writes)
         if ((++s_posSaveCounter() & 63u) == 0u) {
-            save_pos_locked(pos);
+            SavePosLocked(pos);
         }
     }
 
-    static bool ensure_size_locked(size_t max_bytes)
+    static bool EnsureSizeLocked(size_t max_bytes)
     {
         // Ensure file length = max_bytes
         std::fseek(s_fp(), 0L, SEEK_END);
@@ -234,14 +234,14 @@ private:
         return true;
     }
 
-    static std::string pos_path_locked()
+    static std::string PosPathLocked()
     {
         return s_path() + ".pos";
     }
 
-    static size_t load_pos_locked()
+    static size_t LoadPosLocked()
     {
-        const std::string p = pos_path_locked();
+        const std::string p = PosPathLocked();
         FILE* f = std::fopen(p.c_str(), "rb");
         if (!f) return 0;
         unsigned long long v = 0;
@@ -251,9 +251,9 @@ private:
         return (size_t)v;
     }
 
-    static void save_pos_locked(size_t pos)
+    static void SavePosLocked(size_t pos)
     {
-        const std::string p = pos_path_locked();
+        const std::string p = PosPathLocked();
         FILE* f = std::fopen(p.c_str(), "wb");
         if (!f) return;
         unsigned long long v = (unsigned long long)pos;
@@ -261,10 +261,10 @@ private:
         std::fclose(f);
     }
 
-    static void close_locked()
+    static void CloseLocked()
     {
         if (s_fp()) {
-            save_pos_locked(s_writePos());
+            SavePosLocked(s_writePos());
             std::fclose(s_fp());
             s_fp() = nullptr;
         }
@@ -288,21 +288,21 @@ private:
 };
 
 // Convenience macros
-#define LOGD(...) Logger::logf(Logger::DEBUG, __VA_ARGS__)
-#define LOGI(...) Logger::logf(Logger::INFO,  __VA_ARGS__)
-#define LOGW(...) Logger::logf(Logger::WARN,  __VA_ARGS__)
-#define LOGE(...) Logger::logf(Logger::ERROR, __VA_ARGS__)
+#define LOGD(...) Logger::Logf(Logger::DEBUG, __VA_ARGS__)
+#define LOGI(...) Logger::Logf(Logger::INFO,  __VA_ARGS__)
+#define LOGW(...) Logger::Logf(Logger::WARN,  __VA_ARGS__)
+#define LOGE(...) Logger::Logf(Logger::ERROR, __VA_ARGS__)
 
 // If you want to replace printf usage in your codebase (only in files including this header)
 // define LOGGER_OVERRIDE_PRINTF before including logger.hpp
 #ifdef LOGGER_OVERRIDE_PRINTF
-static inline int log_printf_compat(const char* fmt, ...)
+static inline int LogPrintfCompat(const char* fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-    Logger::vlogf(Logger::INFO, fmt, ap);
+    Logger::VLogf(Logger::INFO, fmt, ap);
     va_end(ap);
     return 0; // printf returns chars; we ignore for simplicity
 }
-#define printf(...) log_printf_compat(__VA_ARGS__)
+#define printf(...) LogPrintfCompat(__VA_ARGS__)
 #endif
