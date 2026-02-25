@@ -59,7 +59,7 @@ static constexpr uint8_t SPI_READ_MASK  = 0x80;
 static constexpr uint8_t SPI_WRITE_MASK = 0x00;
 
 struct ImuSample {
-  int64_t t_ns{};
+  int64_t tNs{};
   float ax{}, ay{}, az{}; // m/s^2
   float gx{}, gy{}, gz{}; // rad/s
   float temp_c{};         // Celsius (approx)
@@ -69,7 +69,7 @@ class SpiDev {
 public:
   explicit SpiDev(std::string dev) : m_dev(std::move(dev)) {}
 
-  bool Open(uint32_t speed_hz, uint8_t mode, uint8_t bits_per_word) {
+  bool Open(uint32_t speedHz, uint8_t mode, uint8_t bitsPerWord) {
     m_fd = ::open(m_dev.c_str(), O_RDWR);
     if (m_fd < 0) {
       std::cerr << "open " << m_dev << " failed: " << strerror(errno) << "\n";
@@ -82,21 +82,21 @@ public:
       return false;
     }
 
-    if (ioctl(m_fd, SPI_IOC_WR_BITS_PER_WORD, &bits_per_word) < 0 ||
-        ioctl(m_fd, SPI_IOC_RD_BITS_PER_WORD, &bits_per_word) < 0) {
-      std::cerr << "SPI set bits_per_word failed: " << strerror(errno) << "\n";
+    if (ioctl(m_fd, SPI_IOC_WR_BITS_PER_WORD, &bitsPerWord) < 0 ||
+        ioctl(m_fd, SPI_IOC_RD_BITS_PER_WORD, &bitsPerWord) < 0) {
+      std::cerr << "SPI set bitsPerWord failed: " << strerror(errno) << "\n";
       return false;
     }
 
-    if (ioctl(m_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz) < 0 ||
-        ioctl(m_fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed_hz) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speedHz) < 0 ||
+        ioctl(m_fd, SPI_IOC_RD_MAX_SPEED_HZ, &speedHz) < 0) {
       std::cerr << "SPI set speed failed: " << strerror(errno) << "\n";
       return false;
     }
 
-    m_speedHz = speed_hz;
+    m_speedHz = speedHz;
     m_mode = mode;
-    m_bits = bits_per_word;
+    m_bits = bitsPerWord;
     return true;
   }
 
@@ -118,11 +118,11 @@ public:
     return true;
   }
 
-  bool ReadRegs(uint8_t start_reg, uint8_t *out, size_t len) {
+  bool ReadRegs(uint8_t startReg, uint8_t *out, size_t len) {
     // We need to send 1 addr byte + dummy bytes, read back same count
     std::vector<uint8_t> tx(len + 1, 0x00);
     std::vector<uint8_t> rx(len + 1, 0x00);
-    tx[0] = uint8_t(SPI_READ_MASK | (start_reg & 0x7F));
+    tx[0] = uint8_t(SPI_READ_MASK | (startReg & 0x7F));
     if (!Transfer(tx.data(), rx.data(), rx.size())) return false;
     memcpy(out, rx.data() + 1, len);
     return true;
@@ -134,8 +134,8 @@ private:
     tr.tx_buf = (unsigned long)tx;
     tr.rx_buf = (unsigned long)rx;
     tr.len = (uint32_t)len;
-    tr.speed_hz = m_speedHz;
-    tr.bits_per_word = m_bits;
+    tr.speedHz = m_speedHz;
+    tr.bitsPerWord = m_bits;
     tr.delay_usecs = 0;
 
     if (ioctl(m_fd, SPI_IOC_MESSAGE(1), &tr) < 0) {
@@ -153,10 +153,10 @@ private:
 };
 class DrdyGpio {
 public:
-  bool Open(const std::string &chip_path, unsigned line_offset) {
-    m_chip = gpiod_chip_open(chip_path.c_str());
+  bool Open(const std::string &chipPath, unsigned lineOffset) {
+    m_chip = gpiod_chip_open(chipPath.c_str());
     if (!m_chip) {
-      std::cerr << "gpiod_chip_open(" << chip_path << ") failed: "
+      std::cerr << "gpiod_chip_open(" << chipPath << ") failed: "
                 << strerror(errno) << "\n";
       return false;
     }
@@ -172,35 +172,35 @@ gpiod_line_settings_set_edge_detection(settings, GPIOD_LINE_EDGE_RISING);
 gpiod_line_settings_set_bias(settings, GPIOD_LINE_BIAS_PULL_UP);
 
     // line config: apply settings to the given offset
-    gpiod_line_config *line_cfg = gpiod_line_config_new();
-    if (!line_cfg) {
+    gpiod_line_config *lineConfig = gpiod_line_config_new();
+    if (!lineConfig) {
       std::cerr << "gpiod_line_config_new failed\n";
       gpiod_line_settings_free(settings);
       return false;
     }
-    unsigned offsets[1] = { line_offset };
-    int rc = gpiod_line_config_add_line_settings(line_cfg, offsets, 1, settings);
+    unsigned offsets[1] = { lineOffset };
+    int rc = gpiod_line_config_add_line_settings(lineConfig, offsets, 1, settings);
     gpiod_line_settings_free(settings);
     if (rc < 0) {
       std::cerr << "gpiod_line_config_add_line_settings failed: "
                 << strerror(errno) << "\n";
-      gpiod_line_config_free(line_cfg);
+      gpiod_line_config_free(lineConfig);
       return false;
     }
 
     // request config
-    gpiod_request_config *req_cfg = gpiod_request_config_new();
-    if (!req_cfg) {
+    gpiod_request_config *requestConfig = gpiod_request_config_new();
+    if (!requestConfig) {
       std::cerr << "gpiod_request_config_new failed\n";
-      gpiod_line_config_free(line_cfg);
+      gpiod_line_config_free(lineConfig);
       return false;
     }
-    gpiod_request_config_set_consumer(req_cfg, "icm42688_drdy");
+    gpiod_request_config_set_consumer(requestConfig, "icm42688_drdy");
 
-    m_request = gpiod_chip_request_lines(m_chip, req_cfg, line_cfg);
+    m_request = gpiod_chip_request_lines(m_chip, requestConfig, lineConfig);
 
-    gpiod_request_config_free(req_cfg);
-    gpiod_line_config_free(line_cfg);
+    gpiod_request_config_free(requestConfig);
+    gpiod_line_config_free(lineConfig);
 
     if (!m_request) {
       std::cerr << "gpiod_chip_request_lines failed: "
@@ -223,9 +223,9 @@ gpiod_line_settings_set_bias(settings, GPIOD_LINE_BIAS_PULL_UP);
     if (m_chip) gpiod_chip_close(m_chip);
   }
 
-bool Wait(int timeout_ms) {
-  int64_t timeout_ns = (timeout_ms < 0) ? -1 : (int64_t)timeout_ms * 1000000LL;
-  int ret = gpiod_line_request_wait_edge_events(m_request, timeout_ns);
+bool Wait(int timeoutMs) {
+  int64_t timeoutNs = (timeoutMs < 0) ? -1 : (int64_t)timeoutMs * 1000000LL;
+  int ret = gpiod_line_request_wait_edge_events(m_request, timeoutNs);
   if (ret <= 0) return false; // 0 timeout, <0 error
 
   // Drain all pending events (最多读 64 个)
@@ -240,22 +240,22 @@ private:
 };
 
 struct Config {
-  std::string spi_dev = "/dev/spidev0.0";
+  std::string spiDev = "/dev/spidev0.0";
   uint32_t spi_speed_hz = 8000000;
-  uint8_t spi_mode = SPI_MODE_0;
-  uint8_t spi_bits = 8;
+  uint8_t spiMode = SPI_MODE_0;
+  uint8_t spiBits = 8;
 
   std::string gpiochip = "/dev/gpiochip0";
-  unsigned drdy_line = 24;
+  unsigned drdyLine = 24;
 
-  int imu_hz = 200;
+  int imuHz = 200;
   bool print_csv = true;
 };
 
 static void PrintUsage() {
   std::cerr <<
     "Usage: icm42688 [--spi /dev/spidevX.Y] [--speed hz] [--mode 0..3] [--bits 8]\n"
-    "               [--gpiochip /dev/gpiochipN] [--drdy line] [--hz imu_hz] [--no-csv]\n";
+    "               [--gpiochip /dev/gpiochipN] [--drdy line] [--hz imuHz] [--no-csv]\n";
 }
 
 static std::optional<Config> ParseArgs(int argc, char **argv) {
@@ -272,25 +272,25 @@ static std::optional<Config> ParseArgs(int argc, char **argv) {
 
     if (a == "--spi") {
       const char *v = need("--spi"); if (!v) return std::nullopt;
-      c.spi_dev = v;
+      c.spiDev = v;
     } else if (a == "--speed") {
       const char *v = need("--speed"); if (!v) return std::nullopt;
       c.spi_speed_hz = (uint32_t)strtoul(v, nullptr, 10);
     } else if (a == "--mode") {
       const char *v = need("--mode"); if (!v) return std::nullopt;
-      c.spi_mode = (uint8_t)strtoul(v, nullptr, 10);
+      c.spiMode = (uint8_t)strtoul(v, nullptr, 10);
     } else if (a == "--bits") {
       const char *v = need("--bits"); if (!v) return std::nullopt;
-      c.spi_bits = (uint8_t)strtoul(v, nullptr, 10);
+      c.spiBits = (uint8_t)strtoul(v, nullptr, 10);
     } else if (a == "--gpiochip") {
       const char *v = need("--gpiochip"); if (!v) return std::nullopt;
       c.gpiochip = v;
     } else if (a == "--drdy") {
       const char *v = need("--drdy"); if (!v) return std::nullopt;
-      c.drdy_line = (unsigned)strtoul(v, nullptr, 10);
+      c.drdyLine = (unsigned)strtoul(v, nullptr, 10);
     } else if (a == "--hz") {
       const char *v = need("--hz"); if (!v) return std::nullopt;
-      c.imu_hz = (int)strtol(v, nullptr, 10);
+      c.imuHz = (int)strtol(v, nullptr, 10);
     } else if (a == "--no-csv") {
       c.print_csv = false;
     } else if (a == "-h" || a == "--help") {
@@ -305,8 +305,8 @@ static std::optional<Config> ParseArgs(int argc, char **argv) {
   return c;
 }
 
-static bool IcmResetAndConfig(SpiDev &spi, int imu_hz) {
-  auto odr_code = [&](int hz) -> uint8_t {
+static bool IcmResetAndConfig(SpiDev &spi, int imuHz) {
+  auto odrCode = [&](int hz) -> uint8_t {
     switch (hz) {
       case 8000: return 0x03;
       case 4000: return 0x04;
@@ -327,14 +327,14 @@ usleep(100000);
 spi.WriteReg(REG_INT_CONFIG, 0x30);
 spi.WriteReg(REG_INT_SOURCE0, 0x08);
 spi.WriteReg(REG_INT_CONFIG1, 0x00);
-  uint8_t gyro_fs = 0x00;   // assume 2000 dps
-  uint8_t accel_fs = 0x00;  // assume 16 g
+  uint8_t gyroFs = 0x00;   // assume 2000 dps
+  uint8_t accelFs = 0x00;  // assume 16 g
 
-  uint8_t gyro_odr = odr_code(imu_hz);
-  uint8_t accel_odr = odr_code(imu_hz);
+  uint8_t gyroOdr = odrCode(imuHz);
+  uint8_t accelOdr = odrCode(imuHz);
 
-  uint8_t gyro_cfg0  = uint8_t((gyro_fs << 5)  | (gyro_odr & 0x0F));
-  uint8_t accel_cfg0 = uint8_t((accel_fs << 5) | (accel_odr & 0x0F));
+  uint8_t gyro_cfg0  = uint8_t((gyroFs << 5)  | (gyroOdr & 0x0F));
+  uint8_t accel_cfg0 = uint8_t((accelFs << 5) | (accelOdr & 0x0F));
   spi.WriteReg(REG_PWR_MGMT0, 0x0F);
   usleep(20000);
   if (!spi.WriteReg(REG_GYRO_CONFIG0, gyro_cfg0)) return false;
@@ -367,16 +367,16 @@ static void ConvertRawToSI(const uint8_t raw[14], ImuSample &s) {
   constexpr float kG = 9.80665f;
 
   // Conservative starting point (often close):
-  constexpr float accel_lsb_per_g = 2048.0f;      // adjust if needed
-  constexpr float gyro_lsb_per_dps = 16.4f;       // adjust if needed
+  constexpr float accelLsbPerG = 2048.0f;      // adjust if needed
+  constexpr float gyroLsbPerDps = 16.4f;       // adjust if needed
 
-  float ax_g = float(ax) / accel_lsb_per_g;
-  float ay_g = float(ay) / accel_lsb_per_g;
-  float az_g = float(az) / accel_lsb_per_g;
+  float ax_g = float(ax) / accelLsbPerG;
+  float ay_g = float(ay) / accelLsbPerG;
+  float az_g = float(az) / accelLsbPerG;
 
-  float gx_dps = float(gx) / gyro_lsb_per_dps;
-  float gy_dps = float(gy) / gyro_lsb_per_dps;
-  float gz_dps = float(gz) / gyro_lsb_per_dps;
+  float gx_dps = float(gx) / gyroLsbPerDps;
+  float gy_dps = float(gy) / gyroLsbPerDps;
+  float gz_dps = float(gz) / gyroLsbPerDps;
 
   s.ax = ax_g * kG;
   s.ay = ay_g * kG;
@@ -400,10 +400,10 @@ int main(int argc, char **argv) {
   if (!cfg_opt) return 1;
   const Config cfg = *cfg_opt;
 
-  SpiDev spi(cfg.spi_dev);
-  if (!spi.Open(cfg.spi_speed_hz, cfg.spi_mode, cfg.spi_bits)) return 1;
+  SpiDev spi(cfg.spiDev);
+  if (!spi.Open(cfg.spi_speed_hz, cfg.spiMode, cfg.spiBits)) return 1;
 
-  if (!IcmResetAndConfig(spi, cfg.imu_hz)) {
+  if (!IcmResetAndConfig(spi, cfg.imuHz)) {
     std::cerr << "ICM config failed.\n";
     return 1;
   }
@@ -422,10 +422,10 @@ Dump(REG_INT_SOURCE0,  "INT_SOURCE0");   // 0x65
 Dump(REG_INT_STATUS,   "INT_STATUS");    // 0x2D
 
   DrdyGpio drdy;
-  if (!drdy.Open(cfg.gpiochip, cfg.drdy_line)) return 1;
+  if (!drdy.Open(cfg.gpiochip, cfg.drdyLine)) return 1;
 
   if (cfg.print_csv) {
-    std::cout << "t_ns,ax,ay,az,gx,gy,gz,temp_c\n";
+    std::cout << "tNs,ax,ay,az,gx,gy,gz,temp_c\n";
   }
 
   // Main loop: wait DRDY -> timestamp -> read burst -> convert -> print
@@ -436,16 +436,16 @@ Dump(REG_INT_STATUS,   "INT_STATUS");    // 0x2D
   while (g_runningFlag.load()) {
     // Wait up to 1s; if timeout, continue so SIGINT can break.
     if (!drdy.Wait(1000)) continue;
-  const int64_t t_ns = NowNs();
+  const int64_t tNs = NowNs();
 
   spi.ReadReg(REG_INT_STATUS, st);       // ack/clear latch
   if (!spi.ReadRegs(REG_TEMP_DATA1, raw, sizeof(raw))) continue;
 
   ImuSample s{};
-  s.t_ns = t_ns;
+  s.tNs = tNs;
   ConvertRawToSI(raw, s);
 
-  std::cout << s.t_ns << "," << s.ax << "," << s.ay << "," << s.az << ","
+  std::cout << s.tNs << "," << s.ax << "," << s.ay << "," << s.az << ","
             << s.gx << "," << s.gy << "," << s.gz << "," << s.temp_c << "\n";
   }
 

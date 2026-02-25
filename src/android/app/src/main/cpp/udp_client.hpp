@@ -1,73 +1,89 @@
 #pragma once
+
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <string>
-#include <vector>
 
-class UdpClient
-{
+class UdpClient {
 public:
-    bool open(const std::string& ip, uint16_t port)
+    ~UdpClient() { Close(); }
+
+    bool Open(const std::string& ip, uint16_t port)
     {
-        close();
+        Close();
 
         m_fd = ::socket(AF_INET, SOCK_DGRAM, 0);
-        if (m_fd < 0) return false;
-
-        std::memset(&m_dst, 0, sizeof(m_dst));
-        m_dst.sin_family = AF_INET;
-        m_dst.sin_port = htons(port);
-        if (::inet_pton(AF_INET, ip.c_str(), &m_dst.sin_addr) != 1)
-        {
-            close();
+        if (m_fd < 0) {
             return false;
         }
 
-        // optional: bind local port for receiving
-        sockaddr_in local{};
-        local.sin_family = AF_INET;
-        local.sin_addr.s_addr = htonl(INADDR_ANY);
-        local.sin_port = htons(0); // auto
-        ::bind(m_fd, (sockaddr*)&local, sizeof(local));
+        std::memset(&m_dstAddr, 0, sizeof(m_dstAddr));
+        m_dstAddr.sin_family = AF_INET;
+        m_dstAddr.sin_port = htons(port);
+        if (::inet_pton(AF_INET, ip.c_str(), &m_dstAddr.sin_addr) != 1) {
+            Close();
+            return false;
+        }
 
-        // non-blocking recv
-        int flags = ::fcntl(m_fd, F_GETFL, 0);
+        sockaddr_in localAddr{};
+        localAddr.sin_family = AF_INET;
+        localAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        localAddr.sin_port = htons(0);
+        ::bind(m_fd, reinterpret_cast<sockaddr*>(&localAddr), sizeof(localAddr));
+
+        const int flags = ::fcntl(m_fd, F_GETFL, 0);
         ::fcntl(m_fd, F_SETFL, flags | O_NONBLOCK);
-
         return true;
     }
 
-    void close()
+    void Close()
     {
-        if (m_fd >= 0) ::close(m_fd);
-        m_fd = -1;
-        std::memset(&m_dst, 0, sizeof(m_dst));
+        if (m_fd >= 0) {
+            ::close(m_fd);
+            m_fd = -1;
+        }
+        std::memset(&m_dstAddr, 0, sizeof(m_dstAddr));
     }
 
-    bool send(const uint8_t* data, size_t len)
+    bool Send(const uint8_t* data, size_t len)
     {
-        if (m_fd < 0) return false;
-        const ssize_t n = ::sendto(m_fd, data, len, 0, (sockaddr*)&m_dst, sizeof(m_dst));
-        return (n == (ssize_t)len);
+        if (m_fd < 0) {
+            return false;
+        }
+        const ssize_t sentLen = ::sendto(
+            m_fd,
+            data,
+            len,
+            0,
+            reinterpret_cast<sockaddr*>(&m_dstAddr),
+            sizeof(m_dstAddr));
+        return sentLen == static_cast<ssize_t>(len);
     }
 
-    // returns bytes received (0 if none)
-    int recv(uint8_t* out, size_t cap)
+    // Returns bytes received (0 if none)
+    int Recv(uint8_t* out, size_t cap)
     {
-        if (m_fd < 0) return -1;
-        sockaddr_in src{};
-        socklen_t slen = sizeof(src);
-        const ssize_t n = ::recvfrom(m_fd, out, cap, 0, (sockaddr*)&src, &slen);
-        if (n < 0) return 0; // non-blocking: no data
-        return (int)n;
+        if (m_fd < 0) {
+            return -1;
+        }
+        sockaddr_in srcAddr{};
+        socklen_t srcLen = sizeof(srcAddr);
+        const ssize_t recvLen =
+            ::recvfrom(m_fd, out, cap, 0, reinterpret_cast<sockaddr*>(&srcAddr), &srcLen);
+        if (recvLen < 0) {
+            return 0;
+        }
+        return static_cast<int>(recvLen);
     }
 
 private:
     int m_fd{-1};
-    sockaddr_in m_dst{};
+    sockaddr_in m_dstAddr{};
 };

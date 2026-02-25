@@ -285,10 +285,10 @@ if (fmt == formats::R16) {
 
 class LibcameraStereoOV9281 {
 public:
-  bool Open(int w, int h, int fps, int max_pair_queue = 8, uint64_t pair_tol_ns = 1500000ULL) {
+  bool Open(int w, int h, int fps, int maxPairQueue = 8, uint64_t pairTolNs = 1500000ULL) {
     m_w = w; m_h = h; m_fps = fps;
-    m_maxPairQueue = max_pair_queue;
-    m_pairTolNs = pair_tol_ns;
+    m_maxPairQueue = maxPairQueue;
+    m_pairTolNs = pairTolNs;
 
     m_cm = std::make_unique<CameraManager>();
     if (m_cm->start()) {
@@ -345,9 +345,9 @@ public:
   }
 
   // 阻塞等一对同步帧（按 timestamp 配对）
-  bool Grab(StereoFrame &out, int timeout_ms = 1000) {
+  bool Grab(StereoFrame &out, int timeoutMs = 1000) {
     std::unique_lock<std::mutex> lk(m_mu);
-    if (!m_cv.wait_for(lk, std::chrono::milliseconds(timeout_ms), [&]{ return !m_paired.empty() || !g_runningFlag.load(); })) {
+    if (!m_cv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&]{ return !m_paired.empty() || !g_runningFlag.load(); })) {
       return false;
     }
     if (m_paired.empty()) return false;

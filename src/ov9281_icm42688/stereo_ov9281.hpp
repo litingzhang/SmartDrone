@@ -57,8 +57,8 @@ static int64_t NowNs()
 
 class LibcameraMonoCam {
   public:
-    bool Open(std::shared_ptr<Camera> cam, int camIndex, int w, int h, int fps, bool ae_disable,
-              int exposure_us, float gain, bool request_y8)
+    bool Open(std::shared_ptr<Camera> cam, int camIndex, int w, int h, int fps, bool aeDisable,
+              int exposureUs, float gain, bool requestY8)
     {
         m_cam = std::move(cam);
         m_camIndex = camIndex;
@@ -80,16 +80,16 @@ class LibcameraMonoCam {
         sc.size.width = w;
         sc.size.height = h;
 
-        if (request_y8) {
+        if (requestY8) {
             sc.pixelFormat = formats::R8; // mono 8-bit
         }
 
         const int64_t us = std::max<int64_t>(1, 1000000LL / std::max(1, fps));
         m_controls.set(controls::FrameDurationLimits, Span<const int64_t, 2>({us, us}));
 
-        if (ae_disable) {
+        if (aeDisable) {
             m_controls.set(controls::AeEnable, false);
-            m_controls.set(controls::ExposureTime, exposure_us);
+            m_controls.set(controls::ExposureTime, exposureUs);
             m_controls.set(controls::AnalogueGain, gain);
         }
 
@@ -288,16 +288,16 @@ class LibcameraMonoCam {
 // ---------------- Stereo pairing with SOFTWARE CAM OFFSET ----------------
 class LibcameraStereoOV9281_TsPair {
   public:
-    bool Open(int w, int h, int fps, bool ae_disable, int exposure_us, float gain, bool request_y8,
-              int64_t pair_thresh_ns, int64_t keep_window_ns, int max_pair_queue = 8,
+    bool Open(int w, int h, int fps, bool aeDisable, int exposureUs, float gain, bool requestY8,
+              int64_t pair_thresh_ns, int64_t keepWindowNs, int maxPairQueue = 8,
               bool r16_normalize = false)
     {
         m_w = w;
         m_h = h;
         m_fps = fps;
-        m_maxPairQueue = max_pair_queue;
+        m_maxPairQueue = maxPairQueue;
         m_pairThreshNs = pair_thresh_ns;
-        m_keepWindowNs = keep_window_ns;
+        m_keepWindowNs = keepWindowNs;
 
         m_cm = std::make_unique<CameraManager>();
         if (m_cm->start()) {
@@ -317,9 +317,9 @@ class LibcameraStereoOV9281_TsPair {
         auto sinkL = [&](FrameItem &&fi) { PushInbox(0, std::move(fi)); };
         auto sinkR = [&](FrameItem &&fi) { PushInbox(1, std::move(fi)); };
 
-        if (!m_left.Open(m_camL, 0, w, h, fps, ae_disable, exposure_us, gain, request_y8))
+        if (!m_left.Open(m_camL, 0, w, h, fps, aeDisable, exposureUs, gain, requestY8))
             return false;
-        if (!m_right.Open(m_camR, 1, w, h, fps, ae_disable, exposure_us, gain, request_y8))
+        if (!m_right.Open(m_camR, 1, w, h, fps, aeDisable, exposureUs, gain, requestY8))
             return false;
 
         m_left.SetR16Normalize(r16_normalize);
@@ -377,7 +377,7 @@ class LibcameraStereoOV9281_TsPair {
 
     // Auto estimate cam1 offset without requiring paired frames.
     // Returns true if estimated, false if timeout/insufficient samples.
-    bool AutoEstimateAndSetOffset(int samples, int timeout_ms)
+    bool AutoEstimateAndSetOffset(int samples, int timeoutMs)
     {
         if (samples <= 10)
             samples = 10;
@@ -393,7 +393,7 @@ class LibcameraStereoOV9281_TsPair {
         }
         m_cvEst.notify_all();
 
-        const int64_t t_deadline = NowNs() + (int64_t)timeout_ms * 1'000'000LL;
+        const int64_t t_deadline = NowNs() + (int64_t)timeoutMs * 1'000'000LL;
 
         while (g_runningFlag.load()) {
             if (m_estReady.load())
@@ -408,19 +408,19 @@ class LibcameraStereoOV9281_TsPair {
 
         if (ok) {
             const int64_t off = m_cam1TsOffsetNs.load();
-            std::cerr << "[camoff] estimated cam1_ts_offset_ns=" << off << " (" << (off / 1e6)
+            std::cerr << "[camoff] estimated cam1TsOffsetNs=" << off << " (" << (off / 1e6)
                       << " ms)\n";
         } else {
-            std::cerr << "[camoff] estimate failed/timeout. cam1_ts_offset_ns stays "
+            std::cerr << "[camoff] estimate failed/timeout. cam1TsOffsetNs stays "
                       << m_cam1TsOffsetNs.load() << "\n";
         }
         return ok;
     }
 
-    bool GrabPair(FrameItem &L, FrameItem &R, int timeout_ms = 1000)
+    bool GrabPair(FrameItem &L, FrameItem &R, int timeoutMs = 1000)
     {
         std::unique_lock<std::mutex> lk(m_muPair);
-        if (!m_cvPair.wait_for(lk, std::chrono::milliseconds(timeout_ms),
+        if (!m_cvPair.wait_for(lk, std::chrono::milliseconds(timeoutMs),
                                [&] { return !m_paired.empty() || !g_runningFlag.load(); })) {
             return false;
         }
@@ -448,36 +448,36 @@ class LibcameraStereoOV9281_TsPair {
     }
 
   private:
-    void PushInbox(int cam_idx, FrameItem &&fi)
+    void PushInbox(int camIdx, FrameItem &&fi)
     {
         {
             std::lock_guard<std::mutex> lk(m_muIn);
-            if (cam_idx == 0)
+            if (camIdx == 0)
                 m_inboxL.push_back(std::move(fi));
             else
                 m_inboxR.push_back(std::move(fi));
 
             const size_t kMaxInbox = 12;
-            auto &inb = (cam_idx == 0) ? m_inboxL : m_inboxR;
+            auto &inb = (camIdx == 0) ? m_inboxL : m_inboxR;
             while (inb.size() > kMaxInbox)
                 inb.pop_front();
         }
         m_cvIn.notify_all();
     }
 
-    bool PopInbox(int cam_idx, FrameItem &out)
+    bool PopInbox(int camIdx, FrameItem &out)
     {
         std::unique_lock<std::mutex> lk(m_muIn);
         m_cvIn.wait(lk, [&] {
             if (!m_running.load() || !g_runningFlag.load())
                 return true;
-            return cam_idx == 0 ? !m_inboxL.empty() : !m_inboxR.empty();
+            return camIdx == 0 ? !m_inboxL.empty() : !m_inboxR.empty();
         });
 
         if (!m_running.load() || !g_runningFlag.load())
             return false;
 
-        auto &inb = (cam_idx == 0) ? m_inboxL : m_inboxR;
+        auto &inb = (camIdx == 0) ? m_inboxL : m_inboxR;
         if (inb.empty())
             return false;
 
@@ -486,10 +486,10 @@ class LibcameraStereoOV9281_TsPair {
         return true;
     }
 
-    void RecordForEstimateLocked(int cam_idx, uint64_t ts)
+    void RecordForEstimateLocked(int camIdx, uint64_t ts)
     {
         // store monotonic timestamps
-        if (cam_idx == 0)
+        if (camIdx == 0)
             m_tsL.push_back((int64_t)ts);
         else
             m_tsR.push_back((int64_t)ts);
@@ -526,24 +526,24 @@ class LibcameraStereoOV9281_TsPair {
         }
     }
 
-    void ConsumeLoop(int cam_idx)
+    void ConsumeLoop(int camIdx)
     {
         while (m_running.load() && g_runningFlag.load()) {
             FrameItem fi;
-            if (!PopInbox(cam_idx, fi))
+            if (!PopInbox(camIdx, fi))
                 continue;
 
             // estimation mode: just record raw timestamps and drop frames (no pairing yet)
             if (m_estimating.load(std::memory_order_relaxed)) {
                 std::lock_guard<std::mutex> lk(m_muEst);
                 if (!m_estReady.load()) {
-                    RecordForEstimateLocked(cam_idx, fi.tsNs);
+                    RecordForEstimateLocked(camIdx, fi.tsNs);
                 }
                 continue;
             }
 
             // apply software offset to RIGHT camera timestamp
-            if (cam_idx == 1) {
+            if (camIdx == 1) {
                 int64_t off = m_cam1TsOffsetNs.load(std::memory_order_relaxed);
                 fi.tsNs = (uint64_t)((int64_t)fi.tsNs + off);
             }
@@ -568,21 +568,21 @@ class LibcameraStereoOV9281_TsPair {
         const uint64_t ats = Aq.front().tsNs;
 
         size_t best = 0;
-        int64_t best_dt = INT64_MAX;
+        int64_t bestDt = INT64_MAX;
         for (size_t i = 0; i < Bq.size(); ++i) {
             int64_t dt = (int64_t)Bq[i].tsNs - (int64_t)ats;
             int64_t adt = Abs64(dt);
-            if (adt < best_dt) {
-                best_dt = adt;
+            if (adt < bestDt) {
+                bestDt = adt;
                 best = i;
             }
-            if ((int64_t)Bq[i].tsNs > (int64_t)ats && adt > best_dt)
+            if ((int64_t)Bq[i].tsNs > (int64_t)ats && adt > bestDt)
                 break;
         }
 
-        if (best_dt > m_pairThreshNs) {
-            int64_t dt_lr = (int64_t)m_qR.front().tsNs - (int64_t)m_qL.front().tsNs;
-            if (dt_lr > 0)
+        if (bestDt > m_pairThreshNs) {
+            int64_t dtLr = (int64_t)m_qR.front().tsNs - (int64_t)m_qL.front().tsNs;
+            if (dtLr > 0)
                 m_qL.pop_front();
             else
                 m_qR.pop_front();

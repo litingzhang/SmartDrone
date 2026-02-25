@@ -1,117 +1,145 @@
 #include "tlv_cmd_router.hpp"
+
 #include <cstring>
-#include <iostream>
 
-TlvCmdRouter::TlvCmdRouter(MavlinkHooks& hooks) : m_hooks(hooks) {}
+namespace {
 
-static inline bool monotonic(uint32_t x, uint32_t& last)
+bool IsMonotonicSeq(uint32_t value, uint32_t& lastValue)
 {
-    if (x == 0) return false;
-    if (x <= last) return false;
-    last = x;
+    if (value == 0 || value <= lastValue) {
+        return false;
+    }
+    lastValue = value;
     return true;
 }
 
-float TlvCmdRouter::rdF32LE(const uint8_t* p)
+}  // namespace
+
+TlvCmdRouter::TlvCmdRouter(MavlinkHooks& hooks) : m_hooks(hooks) {}
+
+float TlvCmdRouter::ReadF32Le(const uint8_t* p)
 {
-    uint32_t u = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-    float f;
-    std::memcpy(&f, &u, sizeof(float));
-    return f;
+    const uint32_t raw = static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+                         (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+    float out = 0.0f;
+    std::memcpy(&out, &raw, sizeof(out));
+    return out;
 }
 
-uint32_t TlvCmdRouter::rdU32LE(const uint8_t* p)
+uint32_t TlvCmdRouter::ReadU32Le(const uint8_t* p)
 {
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+           (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
 }
 
-void TlvCmdRouter::registerDefaults()
+void TlvCmdRouter::RegisterDefaults()
 {
-    m_map[CMD_PING] = [this](const TlvFrame&) -> RouteResult {
-        return {ACK_OK, "pong"};
-    };
+    m_handlers[CMD_PING] = [](const TlvFrame&) -> RouteResult { return {ACK_OK, "pong"}; };
 
-    m_map[CMD_ARM] = [this](const TlvFrame&) { return handleSimple(CMD_ARM); };
-    m_map[CMD_DISARM] = [this](const TlvFrame&) { return handleSimple(CMD_DISARM); };
-    m_map[CMD_OFFBOARD] = [this](const TlvFrame&) { return handleSimple(CMD_OFFBOARD); };
-    m_map[CMD_HOLD] = [this](const TlvFrame&) { return handleSimple(CMD_HOLD); };
-    m_map[CMD_LAND] = [this](const TlvFrame&) { return handleSimple(CMD_LAND); };
-
-    m_map[CMD_MOVE] = [this](const TlvFrame& f) { return handleMove(f); };
+    m_handlers[CMD_ARM] = [this](const TlvFrame&) { return HandleSimple(CMD_ARM); };
+    m_handlers[CMD_DISARM] = [this](const TlvFrame&) { return HandleSimple(CMD_DISARM); };
+    m_handlers[CMD_OFFBOARD] = [this](const TlvFrame&) { return HandleSimple(CMD_OFFBOARD); };
+    m_handlers[CMD_HOLD] = [this](const TlvFrame&) { return HandleSimple(CMD_HOLD); };
+    m_handlers[CMD_LAND] = [this](const TlvFrame&) { return HandleSimple(CMD_LAND); };
+    m_handlers[CMD_MOVE] = [this](const TlvFrame& frame) { return HandleMove(frame); };
 }
 
-RouteResult TlvCmdRouter::handle(const TlvFrame& f)
+RouteResult TlvCmdRouter::Handle(const TlvFrame& frame)
 {
-    // basic version check
-    if (f.ver != TLV_VER) return {ACK_E_BAD_ARGS, "bad version"};
+    if (frame.ver != TLV_VER) {
+        return {ACK_E_BAD_ARGS, "bad version"};
+    }
+    if (!IsMonotonicSeq(frame.seq, m_lastSeq)) {
+        return {ACK_E_BAD_STATE, "seq not monotonic"};
+    }
 
-    // seq monotonic for all cmds (optional but recommended)
-    if (!monotonic(f.seq, m_lastSeq)) return {ACK_E_BAD_STATE, "seq not monotonic"};
-
-    auto it = m_map.find(f.cmd);
-    if (it == m_map.end()) return {ACK_E_UNKNOWN, "unknown cmd"};
-    return it->second(f);
+    const auto it = m_handlers.find(frame.cmd);
+    if (it == m_handlers.end()) {
+        return {ACK_E_UNKNOWN, "unknown cmd"};
+    }
+    return it->second(frame);
 }
 
-RouteResult TlvCmdRouter::handleSimple(uint8_t cmd)
+RouteResult TlvCmdRouter::HandleSimple(uint8_t cmd)
 {
-    const auto gate = m_hooks.gate();
+    const VehicleGate gate = m_hooks.GetGate();
     std::string err;
 
-    switch (cmd)
-    {
-    case CMD_ARM:
-        if (!gate.vioOk) return {ACK_E_BAD_STATE, "vio not ok"};
-        if (!m_hooks.arm(&err)) return {ACK_E_INTERNAL, err.empty() ? "arm failed" : err};
-        return {ACK_OK, ""};
+    switch (cmd) {
+        case CMD_ARM:
+            if (!gate.vioOk) {
+                return {ACK_E_BAD_STATE, "vio not ok"};
+            }
+            if (!m_hooks.Arm(&err)) {
+                return {ACK_E_INTERNAL, err.empty() ? "arm failed" : err};
+            }
+            return {ACK_OK, ""};
 
-    case CMD_DISARM:
-        if (!m_hooks.disarm(&err)) return {ACK_E_INTERNAL, err.empty() ? "disarm failed" : err};
-        return {ACK_OK, ""};
+        case CMD_DISARM:
+            if (!m_hooks.Disarm(&err)) {
+                return {ACK_E_INTERNAL, err.empty() ? "disarm failed" : err};
+            }
+            return {ACK_OK, ""};
 
-    case CMD_OFFBOARD:
-        if (!gate.vioOk) return {ACK_E_BAD_STATE, "vio not ok"};
-        if (!gate.offboardReady) return {ACK_E_BAD_STATE, "offboard not ready"};
-        if (!m_hooks.setOffboard(&err)) return {ACK_E_INTERNAL, err.empty() ? "offboard failed" : err};
-        return {ACK_OK, ""};
+        case CMD_OFFBOARD:
+            if (!gate.vioOk) {
+                return {ACK_E_BAD_STATE, "vio not ok"};
+            }
+            if (!gate.offboardReady) {
+                return {ACK_E_BAD_STATE, "offboard not ready"};
+            }
+            if (!m_hooks.SetOffboard(&err)) {
+                return {ACK_E_INTERNAL, err.empty() ? "offboard failed" : err};
+            }
+            return {ACK_OK, ""};
 
-    case CMD_HOLD:
-        if (!m_hooks.hold(&err)) return {ACK_E_INTERNAL, err.empty() ? "hold failed" : err};
-        return {ACK_OK, ""};
+        case CMD_HOLD:
+            if (!m_hooks.Hold(&err)) {
+                return {ACK_E_INTERNAL, err.empty() ? "hold failed" : err};
+            }
+            return {ACK_OK, ""};
 
-    case CMD_LAND:
-        if (!m_hooks.land(&err)) return {ACK_E_INTERNAL, err.empty() ? "land failed" : err};
-        return {ACK_OK, ""};
+        case CMD_LAND:
+            if (!m_hooks.Land(&err)) {
+                return {ACK_E_INTERNAL, err.empty() ? "land failed" : err};
+            }
+            return {ACK_OK, ""};
 
-    default:
-        return {ACK_E_UNKNOWN, "unknown simple cmd"};
+        default:
+            return {ACK_E_UNKNOWN, "unknown simple cmd"};
     }
 }
 
-RouteResult TlvCmdRouter::handleMove(const TlvFrame& f)
+RouteResult TlvCmdRouter::HandleMove(const TlvFrame& frame)
 {
-    if (f.len != MOVE_PAYLOAD_LEN) return {ACK_E_BAD_LEN, "bad move len"};
+    if (frame.len != MOVE_PAYLOAD_LEN) {
+        return {ACK_E_BAD_LEN, "bad move len"};
+    }
 
-    const auto gate = m_hooks.gate();
-    if (!gate.vioOk) return {ACK_E_BAD_STATE, "vio not ok"};
-    if (!gate.offboardReady) return {ACK_E_BAD_STATE, "offboard not ready"};
+    const VehicleGate gate = m_hooks.GetGate();
+    if (!gate.vioOk) {
+        return {ACK_E_BAD_STATE, "vio not ok"};
+    }
+    if (!gate.offboardReady) {
+        return {ACK_E_BAD_STATE, "offboard not ready"};
+    }
+    if (!IsMonotonicSeq(frame.seq, m_lastMoveSeq)) {
+        return {ACK_E_BAD_STATE, "old move dropped"};
+    }
 
-    // accept only latest move seq (avoid out-of-order jitter)
-    if (!monotonic(f.seq, m_lastMoveSeq)) return {ACK_E_BAD_STATE, "old move dropped"};
-
-    const uint8_t* p = f.payload.data();
-    MoveGoal g;
-    g.frame = p[0];
-    g.x = rdF32LE(&p[1]);
-    g.y = rdF32LE(&p[5]);
-    g.z = rdF32LE(&p[9]);
-    g.yaw = rdF32LE(&p[13]);
-    g.maxV = rdF32LE(&p[17]);
-    g.seq = f.seq;
-
-    // you can clamp bounds here if needed
+    const uint8_t* payload = frame.payload.data();
+    MoveGoal goal;
+    goal.frame = payload[0];
+    goal.x = ReadF32Le(&payload[1]);
+    goal.y = ReadF32Le(&payload[5]);
+    goal.z = ReadF32Le(&payload[9]);
+    goal.yaw = ReadF32Le(&payload[13]);
+    goal.maxV = ReadF32Le(&payload[17]);
+    goal.seq = frame.seq;
 
     std::string err;
-    if (!m_hooks.setMoveGoal(g, &err)) return {ACK_E_INTERNAL, err.empty() ? "move failed" : err};
+    if (!m_hooks.SetMoveGoal(goal, &err)) {
+        return {ACK_E_INTERNAL, err.empty() ? "move failed" : err};
+    }
     return {ACK_OK, ""};
 }

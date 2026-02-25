@@ -27,20 +27,20 @@ public:
     enum Level : int { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3, OFF = 99 };
 
     // Initialize ring log file.
-    // max_bytes: fixed file size (depth). Must be > 4KB recommended.
-    // flush_each: flush every log line (safer) vs buffered (faster).
-    static bool Init(const char* path, size_t max_bytes,
-                     Level level = INFO, bool flush_each = true)
+    // maxBytes: fixed file size (depth). Must be > 4KB recommended.
+    // flushEach: flush every log line (safer) vs buffered (faster).
+    static bool Init(const char* path, size_t maxBytes,
+                     Level level = INFO, bool flushEach = true)
     {
         std::lock_guard<std::mutex> lk(s_mtx());
         CloseLocked();
 
-        if (!path || !*path || max_bytes < 4096) return false;
+        if (!path || !*path || maxBytes < 4096) return false;
 
         s_path() = path;
-        s_maxBytes() = max_bytes;
+        s_maxBytes() = maxBytes;
         s_level().store(level, std::memory_order_relaxed);
-        s_flushEach() = flush_each;
+        s_flushEach() = flushEach;
 
         // open file r+b else create w+b
         FILE* fp = std::fopen(path, "r+b");
@@ -49,8 +49,8 @@ public:
 
         s_fp() = fp;
 
-        // ensure file size == max_bytes (pre-allocate by seeking and writing one byte)
-        if (!EnsureSizeLocked(max_bytes)) {
+        // ensure file size == maxBytes (pre-allocate by seeking and writing one byte)
+        if (!EnsureSizeLocked(maxBytes)) {
             CloseLocked();
             return false;
         }
@@ -73,7 +73,7 @@ public:
 
     static void SetLevel(Level level) { s_level().store(level, std::memory_order_relaxed); }
 
-    // Get current write position in ring file (0..max_bytes-1)
+    // Get current write position in ring file (0..maxBytes-1)
     static size_t Tell()
     {
         return s_writePosAtomic().load(std::memory_order_relaxed);
@@ -207,27 +207,27 @@ private:
         }
     }
 
-    static bool EnsureSizeLocked(size_t max_bytes)
+    static bool EnsureSizeLocked(size_t maxBytes)
     {
-        // Ensure file length = max_bytes
+        // Ensure file length = maxBytes
         std::fseek(s_fp(), 0L, SEEK_END);
         long cur = std::ftell(s_fp());
         if (cur < 0) return false;
 
-        if ((size_t)cur == max_bytes) return true;
+        if ((size_t)cur == maxBytes) return true;
 
-        if ((size_t)cur > max_bytes) {
+        if ((size_t)cur > maxBytes) {
             // shrink: reopen by truncation
             // portable approach: rewrite file to exact size
             // (simple: create new file and swap)
             // Here we do a minimal approach: overwrite by extending logic:
-            // If larger, we keep it; but ring logic assumes max_bytes.
+            // If larger, we keep it; but ring logic assumes maxBytes.
             // Safer: return false.
             return false;
         }
 
         // extend
-        std::fseek(s_fp(), (long)(max_bytes - 1), SEEK_SET);
+        std::fseek(s_fp(), (long)(maxBytes - 1), SEEK_SET);
         unsigned char zero = 0;
         if (std::fwrite(&zero, 1, 1, s_fp()) != 1) return false;
         std::fflush(s_fp());

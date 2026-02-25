@@ -1,49 +1,46 @@
 #pragma once
+
 #include <cstdint>
 
-static constexpr uint8_t TLV_SYNC0 = 0xAA;
-static constexpr uint8_t TLV_SYNC1 = 0x55;
-static constexpr uint8_t TLV_VER   = 1;
+constexpr uint8_t TLV_SYNC0 = 0xAA;
+constexpr uint8_t TLV_SYNC1 = 0x55;
+constexpr uint8_t TLV_VER = 1;
 
-enum TlvCmd : uint8_t
-{
-    CMD_PING     = 0x01,
+enum TlvCmd : uint8_t {
+    CMD_PING = 0x01,
 
-    CMD_ARM      = 0x10,
-    CMD_DISARM   = 0x11,
+    CMD_ARM = 0x10,
+    CMD_DISARM = 0x11,
     CMD_OFFBOARD = 0x12,
-    CMD_HOLD     = 0x13,
-    CMD_LAND     = 0x14,
+    CMD_HOLD = 0x13,
+    CMD_LAND = 0x14,
 
-    CMD_MOVE     = 0x20,
+    CMD_MOVE = 0x20,
 
-    CMD_ACK      = 0xF0,
-    CMD_STATE    = 0xF1, // optional, not used here
+    CMD_ACK = 0xF0,
+    CMD_STATE = 0xF1,
 };
 
 // MOVE payload layout (len=21):
-// frame(u8) x(f32le) y(f32le) z(f32le) yaw(f32le) max_v(f32le)
-static constexpr uint16_t MOVE_PAYLOAD_LEN = 21;
+// frame(u8) x(f32le) y(f32le) z(f32le) yaw(f32le) maxV(f32le)
+constexpr uint16_t MOVE_PAYLOAD_LEN = 21;
 
-enum FrameType : uint8_t
-{
+enum FrameType : uint8_t {
     FRAME_MAP = 0,
     FRAME_ENU = 1,
     FRAME_NED = 2,
 };
 
 // ACK payload (len=9):
-// ack_cmd(u8) ack_seq(u32) status(i16) reserved(u16)
-static constexpr uint16_t ACK_PAYLOAD_LEN = 9;
+// ackCmd(u8) ackSeq(u32) status(i16) reserved(u16)
+constexpr uint16_t ACK_PAYLOAD_LEN = 9;
 
-// status codes (negative = error)
-enum AckStatus : int16_t
-{
-    ACK_OK          = 0,
-    ACK_E_BAD_CRC   = -1,
-    ACK_E_BAD_LEN   = -2,
-    ACK_E_BAD_ARGS  = -3,
+enum AckStatus : int16_t {
+    ACK_OK = 0,
+    ACK_E_BAD_CRC = -1,
+    ACK_E_BAD_LEN = -2,
+    ACK_E_BAD_ARGS = -3,
     ACK_E_BAD_STATE = -4,
-    ACK_E_UNKNOWN   = -5,
-    ACK_E_INTERNAL  = -6,
+    ACK_E_UNKNOWN = -5,
+    ACK_E_INTERNAL = -6,
 };

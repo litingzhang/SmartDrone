@@ -102,7 +102,7 @@ int main(int argc, char **argv)
     std::cerr << "imu spi=" << spiDev << " speed=" << spiSpeed << " mode=" << int(spiMode)
               << " bits=" << int(spiBits) << " drdy=" << gpiochip << ":" << drdyLine
               << " imuHz=" << imuHz << " imuStartReg=0x" << std::hex << int(imuStartReg)
-              << std::dec << " accel_fs=" << accelFsG << "g" << " gyro_fs=" << gyroFsDps
+              << std::dec << " accelFs=" << accelFsG << "g" << " gyroFs=" << gyroFsDps
               << "dps" << "\n";
     std::cerr << "udpEnable=" << (udpEnable ? "Y" : "N") << " udpIp=" << udpIp
               << " udpPort=" << udpPort << " jpeg_q=" << udpJpegQ << " payload=" << udpPayload
@@ -111,7 +111,7 @@ int main(int argc, char **argv)
     // ORB-SLAM3 init
     ORB_SLAM3::System SLAM(vocab, settings, ORB_SLAM3::System::STEREO, false);
     MavlinkSerial mav("/dev/ttyAMA0", 921600);
-    mav.startRx();
+    mav.StartRx();
     Px4Console console(mav);
     console.Start();
     // UDP sender (optional)
@@ -125,16 +125,16 @@ int main(int argc, char **argv)
     }
 
     // IMU thread
-    ImuBuffer imu_buf;
-    std::atomic<bool> imu_ok{false};
-    std::atomic<uint64_t> imu_cnt{0};
-    std::atomic<uint64_t> imu_drop{0};
+    ImuBuffer imuBuffer;
+    std::atomic<bool> imuOk{false};
+    std::atomic<uint64_t> imuCnt{0};
+    std::atomic<uint64_t> imuDrop{0};
 
     ImuScale imu_scale{};
     std::atomic<float> accelLsbPerG{imu_scale.accelLsbPerG};
     std::atomic<float> gyroLsbPerDps{imu_scale.gyroLsbPerDps};
 
-    std::thread imu_th([&]() {
+    std::thread imuThread([&]() {
         if (rtImu) {
             if (!SetThreadRealtime(rtPrio)) {
                 std::cerr << "[imu] SetThreadRealtime failed (need CAP_SYS_NICE/root). continue.\n";
@@ -160,24 +160,24 @@ int main(int argc, char **argv)
         if (!drdy.Open(gpiochip, drdyLine))
             return;
 
-        imu_ok.store(true);
+        imuOk.store(true);
 
         uint8_t raw12[12]{};
         uint8_t st = 0;
         spi.ReadReg(REG_INT_STATUS, st);
 
         while (g_runningFlag.load()) {
-            int64_t t_irq_ns = 0;
-            if (!drdy.WaitTs(1000, t_irq_ns))
+            int64_t tIrqNs = 0;
+            if (!drdy.WaitTs(1000, tIrqNs))
                 continue;
 
             ImuSample s{};
-            s.tNs = t_irq_ns;
+            s.tNs = tIrqNs;
 
             spi.ReadReg(REG_INT_STATUS, st);
 
             if (!spi.ReadRegs(imuStartReg, raw12, sizeof(raw12))) {
-                imu_drop.fetch_add(1, std::memory_order_relaxed);
+                imuDrop.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
 
@@ -198,8 +198,8 @@ int main(int argc, char **argv)
             // }
             // imuCnt++;
 
-            imu_buf.Push(s);
-            imu_cnt.fetch_add(1, std::memory_order_relaxed);
+            imuBuffer.Push(s);
+            imuCnt.fetch_add(1, std::memory_order_relaxed);
         }
     });
 
@@ -208,8 +208,8 @@ int main(int argc, char **argv)
     if (!cam.Open(w, h, fps, aeDisable, exposureUs, gain, requestY8,
                   (int64_t)pairMs * 1'000'000LL, (int64_t)keepMs * 1'000'000LL, 8, r16Norm)) {
         g_runningFlag.store(false);
-        if (imu_th.joinable())
-            imu_th.join();
+        if (imuThread.joinable())
+            imuThread.join();
         return 1;
     }
 
@@ -219,134 +219,134 @@ int main(int argc, char **argv)
         std::cerr << "[camoff] manual cam1TsOffsetMs=" << cam1TsOffsetMs << "\n";
     } else if (autoCamOffset) {
         std::cerr << "[camoff] auto estimating cam1 offset... samples=" << autoOffsetSamples
-                  << " timeout_ms=" << autoOffsetTimeoutMs << "\n";
+                  << " timeoutMs=" << autoOffsetTimeoutMs << "\n";
         cam.AutoEstimateAndSetOffset(autoOffsetSamples, autoOffsetTimeoutMs);
     }
 
-    // Warmup: estimate ts_offset_ns (libcamera timestamp domain -> NowNs domain)
+    // Warmup: estimate tsOffsetNs (libcamera timestamp domain -> NowNs domain)
     // Now that we can pair, this should work.
     std::vector<int64_t> offs;
     offs.reserve(120);
 
-    int warm_pairs = 0;
-    int64_t last_print = NowNs();
-    while (g_runningFlag.load() && warm_pairs < 60) {
+    int warmPairs = 0;
+    int64_t lastPrint = NowNs();
+    while (g_runningFlag.load() && warmPairs < 60) {
         FrameItem L, R;
         if (!cam.GrabPair(L, R, 1000)) {
             const int64_t now = NowNs();
-            if (now - last_print > 1'000'000'000LL) {
-                last_print = now;
+            if (now - lastPrint > 1'000'000'000LL) {
+                lastPrint = now;
                 std::cerr << "[warmup] waiting pairs..." << " last_seq=" << cam.LastSeq()
-                          << " dt_ms=" << cam.LastDtMs() << " pendL=" << cam.PendL()
-                          << " pendR=" << cam.PendR() << " imu_ok=" << (imu_ok.load() ? "Y" : "N")
-                          << " imu_buf=" << imu_buf.Size() << "\n";
+                          << " dtMs=" << cam.LastDtMs() << " pendL=" << cam.PendL()
+                          << " pendR=" << cam.PendR() << " imuOk=" << (imuOk.load() ? "Y" : "N")
+                          << " imuBuffer=" << imuBuffer.Size() << "\n";
             }
             continue;
         }
-        int64_t cam_ts = (int64_t)((L.tsNs + R.tsNs) / 2);
+        int64_t camTs = (int64_t)((L.tsNs + R.tsNs) / 2);
         int64_t arrive = (L.arriveNs && R.arriveNs) ? (L.arriveNs + R.arriveNs) / 2 : NowNs();
-        offs.push_back(arrive - cam_ts);
-        warm_pairs++;
+        offs.push_back(arrive - camTs);
+        warmPairs++;
     }
 
-    int64_t ts_offset_ns = Median(offs);
+    int64_t tsOffsetNs = Median(offs);
     if (!offs.empty()) {
         int64_t mino = *std::min_element(offs.begin(), offs.end());
         int64_t maxo = *std::max_element(offs.begin(), offs.end());
-        std::cerr << "Init ts_offset_ns(median)=" << ts_offset_ns << " range=[" << mino << ","
+        std::cerr << "Init tsOffsetNs(median)=" << tsOffsetNs << " range=[" << mino << ","
                   << maxo << "] ns\n";
     } else {
-        std::cerr << "Init ts_offset_ns failed (no warmup pairs). Using 0.\n";
-        ts_offset_ns = 0;
+        std::cerr << "Init tsOffsetNs failed (no warmup pairs). Using 0.\n";
+        tsOffsetNs = 0;
     }
 
-    int64_t last_frame_ns = 0;
-    uint64_t frame_cnt_1s = 0;
-    uint64_t last_imu_cnt = imu_cnt.load();
-    uint64_t last_imu_drop = imu_drop.load();
-    int64_t last_stat_ns = NowNs();
+    int64_t lastFrameNs = 0;
+    uint64_t frameCnt1s = 0;
+    uint64_t lastImuCnt = imuCnt.load();
+    uint64_t lastImuDrop = imuDrop.load();
+    int64_t lastStatNs = NowNs();
 
     const int64_t frame_step_ns = (int64_t)(1000000000LL / std::max(1, fps));
-    const int64_t imu_dt_ns = (int64_t)(1000000000LL / std::max(1, imuHz));
-    const int64_t slack_before_ns = std::max<int64_t>(2 * imu_dt_ns, 5'000'000);
-    const int64_t slack_after_ns = std::max<int64_t>(2 * imu_dt_ns, 5'000'000);
+    const int64_t imuDtNs = (int64_t)(1000000000LL / std::max(1, imuHz));
+    const int64_t slackBeforeNs = std::max<int64_t>(2 * imuDtNs, 5'000'000);
+    const int64_t slackAfterNs = std::max<int64_t>(2 * imuDtNs, 5'000'000);
 
-    mav.updateStreamPosition(0.0f, 0.0f, -0.3f, NAN); // NED: z=-0.3 表示向上 0.3m
+    mav.UpdateStreamPosition(0.0f, 0.0f, -0.3f, NAN); // NED: z=-0.3 表示向上 0.3m
 
     while (g_runningFlag.load()) {
         FrameItem L, R;
         if (!cam.GrabPair(L, R, 1000)) {
             const int64_t now = NowNs();
-            if (now - last_stat_ns > 1'000'000'000LL) {
-                last_stat_ns = now;
-                const uint64_t ic = imu_cnt.load();
-                const uint64_t id = imu_drop.load();
+            if (now - lastStatNs > 1'000'000'000LL) {
+                lastStatNs = now;
+                const uint64_t ic = imuCnt.load();
+                const uint64_t id = imuDrop.load();
                 std::cerr << "[wd] no pair 1s" << " last_seq=" << cam.LastSeq()
-                          << " dt_ms=" << cam.LastDtMs() << " pendL=" << cam.PendL()
-                          << " pendR=" << cam.PendR() << " imuHz~=" << (ic - last_imu_cnt)
-                          << " imu_drop~=" << (id - last_imu_drop) << " imu_buf=" << imu_buf.Size()
+                          << " dtMs=" << cam.LastDtMs() << " pendL=" << cam.PendL()
+                          << " pendR=" << cam.PendR() << " imuHz~=" << (ic - lastImuCnt)
+                          << " imuDrop~=" << (id - lastImuDrop) << " imuBuffer=" << imuBuffer.Size()
                           << "\n";
-                last_imu_cnt = ic;
-                last_imu_drop = id;
+                lastImuCnt = ic;
+                lastImuDrop = id;
             }
             continue;
         }
 
-        frame_cnt_1s++;
+        frameCnt1s++;
 
-        const int64_t cam_ts = (int64_t)((L.tsNs + R.tsNs) / 2);
+        const int64_t camTs = (int64_t)((L.tsNs + R.tsNs) / 2);
         const int64_t arrive =
             (L.arriveNs && R.arriveNs) ? (L.arriveNs + R.arriveNs) / 2 : NowNs();
-        const int64_t off_meas = arrive - cam_ts;
+        const int64_t off_meas = arrive - camTs;
 
-        const int64_t err = off_meas - ts_offset_ns;
+        const int64_t err = off_meas - tsOffsetNs;
         if (Abs64(err) < offRejectNs) {
-            ts_offset_ns = ts_offset_ns + (err >> 6); // alpha=1/64
+            tsOffsetNs = tsOffsetNs + (err >> 6); // alpha=1/64
         }
 
-        int64_t frame_ns = cam_ts + ts_offset_ns;
+        int64_t frameNs = camTs + tsOffsetNs;
 
-        if (last_frame_ns != 0 && frame_ns <= last_frame_ns) {
-            frame_ns = last_frame_ns + frame_step_ns;
+        if (lastFrameNs != 0 && frameNs <= lastFrameNs) {
+            frameNs = lastFrameNs + frame_step_ns;
         }
 
         std::vector<ORB_SLAM3::IMU::Point> vImu;
-        if (last_frame_ns != 0) {
-            vImu = imu_buf.PopBetweenNs(last_frame_ns, frame_ns, slack_before_ns, slack_after_ns);
+        if (lastFrameNs != 0) {
+            vImu = imuBuffer.PopBetweenNs(lastFrameNs, frameNs, slackBeforeNs, slackAfterNs);
         }
-        const int64_t prev_frame_ns = last_frame_ns;
-        last_frame_ns = frame_ns;
+        const int64_t prevFrameNs = lastFrameNs;
+        lastFrameNs = frameNs;
 
-        const double frameTime = (double)frame_ns * 1e-9;
+        const double frameTime = (double)frameNs * 1e-9;
 
         const int64_t now = NowNs();
-        last_stat_ns = 0;
-        if (now - last_stat_ns > 1'000'000'000LL) {
-            last_stat_ns = now;
-            const uint64_t ic = imu_cnt.load();
-            const uint64_t id = imu_drop.load();
-            // std::cerr << "[STAT] fps~=" << frame_cnt_1s
-            //           << " dt_ms=" << cam.LastDtMs()
-            //           << " imuHz~=" << (ic - last_imu_cnt)
-            //           << " imu_drop~=" << (id - last_imu_drop)
-            //           << " imu_buf=" << imu_buf.Size()
+        lastStatNs = 0;
+        if (now - lastStatNs > 1'000'000'000LL) {
+            lastStatNs = now;
+            const uint64_t ic = imuCnt.load();
+            const uint64_t id = imuDrop.load();
+            // std::cerr << "[STAT] fps~=" << frameCnt1s
+            //           << " dtMs=" << cam.LastDtMs()
+            //           << " imuHz~=" << (ic - lastImuCnt)
+            //           << " imuDrop~=" << (id - lastImuDrop)
+            //           << " imuBuffer=" << imuBuffer.Size()
             //           << " last_vImu=" << vImu.size()
-            //           << " off_ns=" << ts_offset_ns
+            //           << " off_ns=" << tsOffsetNs
             //           << "\n";
-            frame_cnt_1s = 0;
-            last_imu_cnt = ic;
-            last_imu_drop = id;
+            frameCnt1s = 0;
+            lastImuCnt = ic;
+            lastImuDrop = id;
         }
 
-        if (prev_frame_ns != 0 && vImu.empty()) {
-            int64_t t_first = 0, t_last = 0;
-            bool ok = imu_buf.PeekFirstLast(t_first, t_last);
-            std::cerr << "[imu] EMPTY vImu" << " t0=" << (double)prev_frame_ns * 1e-9
-                      << " t1=" << (double)frame_ns * 1e-9
-                      << " dt_ms=" << (frame_ns - prev_frame_ns) / 1e6 << " buf=" << imu_buf.Size();
+        if (prevFrameNs != 0 && vImu.empty()) {
+            int64_t tFirst = 0, tLast = 0;
+            bool ok = imuBuffer.PeekFirstLast(tFirst, tLast);
+            std::cerr << "[imu] EMPTY vImu" << " t0=" << (double)prevFrameNs * 1e-9
+                      << " t1=" << (double)frameNs * 1e-9
+                      << " dtMs=" << (frameNs - prevFrameNs) / 1e6 << " buf=" << imuBuffer.Size();
             if (ok) {
-                std::cerr << " imu_first=" << (double)t_first * 1e-9
-                          << " imu_last=" << (double)t_last * 1e-9;
+                std::cerr << " imu_first=" << (double)tFirst * 1e-9
+                          << " imu_last=" << (double)tLast * 1e-9;
             }
             std::cerr << "\n";
 
@@ -365,29 +365,29 @@ int main(int argc, char **argv)
 
         const Eigen::Vector3f t = Twc.translation();
         const Eigen::Quaternionf q(Twc.so3().unit_quaternion());
-        MavlinkSerial::Pose p_ned;
-        p_ned.x = t.x();
-        p_ned.y = t.y();
-        p_ned.z = t.z();
-        p_ned.qw = q.w();
-        p_ned.qx = q.x();
-        p_ned.qy = q.y();
-        p_ned.qz = q.z();
-        MavlinkSerial::normalizeQuat(p_ned.qw, p_ned.qx, p_ned.qy, p_ned.qz);
-        uint64_t t_us = mono_time_us();
+        MavlinkSerial::Pose pNed;
+        pNed.x = t.x();
+        pNed.y = t.y();
+        pNed.z = t.z();
+        pNed.qw = q.w();
+        pNed.qx = q.x();
+        pNed.qy = q.y();
+        pNed.qz = q.z();
+        MavlinkSerial::NormalizeQuat(pNed.qw, pNed.qx, pNed.qy, pNed.qz);
+        uint64_t tUs = MonoTimeUs();
         if (state == ORB_SLAM3::Tracking::OK) {
-            mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, OdomQualityMode::GOOD);
+            mav.SendOdometry(tUs, pNed, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, OdomQualityMode::GOOD);
             LOGI("[POSE]%f,(x:%f,y:%f,z:%f),(qw:%f,qx:%f,qy:%f,qz:%f)",
-                frameTime, p_ned.x, p_ned.y, p_ned.z, p_ned.qw, p_ned.qx, p_ned.qy, p_ned.qz);
+                frameTime, pNed.x, pNed.y, pNed.z, pNed.qw, pNed.qx, pNed.qy, pNed.qz);
         } else {
-            mav.sendOdometry(t_us, p_ned, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, OdomQualityMode::LOST);
+            mav.SendOdometry(tUs, pNed, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, OdomQualityMode::LOST);
         }
     }
 
     cam.Close();
     g_runningFlag.store(false);
-    if (imu_th.joinable())
-        imu_th.join();
+    if (imuThread.joinable())
+        imuThread.join();
     SLAM.Shutdown();
     return 0;
 }

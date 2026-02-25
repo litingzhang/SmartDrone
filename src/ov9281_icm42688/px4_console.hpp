@@ -69,7 +69,7 @@ class Px4Console {
             if (tokens.size() >= 5)
                 yaw = (float)ToDouble(tokens[4], NAN);
 
-            m_mavlink.updateStreamPosition(x, y, z, yaw);
+            m_mavlink.UpdateStreamPosition(x, y, z, yaw);
             printf("[px4] setpoint NED x=%f, y=%f, z=%f, yaw=%s\n", x, y, z,
                 (std::isfinite(yaw) ? std::to_string(yaw).c_str() : "NAN"));
             return true;
@@ -87,11 +87,11 @@ class Px4Console {
             if (tokens.size() >= 5)
                 yaw = (float)ToDouble(tokens[4], NAN);
 
-            float x_n = n;
-            float y_e = e;
-            float z_d = -u;
-            m_mavlink.updateStreamPosition(x_n, y_e, z_d, yaw);
-            printf("[px4] setpoint ENU->NED x=%f, y=%f, z=%f, yaw=%s\n", x_n, y_e, z_d,
+            float xN = n;
+            float yE = e;
+            float zD = -u;
+            m_mavlink.UpdateStreamPosition(xN, yE, zD, yaw);
+            printf("[px4] setpoint ENU->NED x=%f, y=%f, z=%f, yaw=%s\n", xN, yE, zD,
                 (std::isfinite(yaw) ? std::to_string(yaw) : "NAN"));
             return true;
         }
@@ -104,59 +104,59 @@ class Px4Console {
             }
             double hz = ToDouble(tokens[1], 20.0);
             if (hz <= 0) {
-                m_mavlink.stopSetpointStream();
+                m_mavlink.StopSetpointStream();
                 printf("[px4] setpoint stream stopped\n");
             } else {
-                m_mavlink.startSetpointStreamHz(hz);
+                m_mavlink.StartSetpointStreamHz(hz);
                 printf("[px4] setpoint stream started hz=%f\n", hz);
             }
             return true;
         }
 
         if (cmd.find("offboard", 0) == 0) {
-            // offboard [setpoint_hz] [warmup_ms]
-            double setpoint_hz = (tokens.size() >= 2) ? ToDouble(tokens[1], 20.0) : 20.0;
-            int warmup_ms = (tokens.size() >= 3) ? (int)ToDouble(tokens[2], 800) : 800;
+            // offboard [setpointHz] [warmupMs]
+            double setpointHz = (tokens.size() >= 2) ? ToDouble(tokens[1], 20.0) : 20.0;
+            int warmupMs = (tokens.size() >= 3) ? (int)ToDouble(tokens[2], 800) : 800;
 
-            m_mavlink.setModeOffboard();
+            m_mavlink.SetModeOffboard();
             printf("[px4] sent DO_SET_MODE OFFBOARD (NOTE: PX4 still requires streaming setpoints)\n");
             return true;
         }
 
         if (cmd.find("arm", 0) == 0) {
-            m_mavlink.arm(true);
+            m_mavlink.Arm(true);
             printf("[px4] arm sent\n");
             return true;
         }
 
         if (cmd.find("disarm", 0) == 0) {
-            m_mavlink.arm(false);
+            m_mavlink.Arm(false);
             printf("[px4] disarm sent\n");
             return true;
         }
 
         if (cmd.find("go", 0) == 0) {
-            // go [setpoint_hz] [hb_hz] [warmup_ms]
-            double sp_hz = (tokens.size() >= 2) ? ToDouble(tokens[1], 20.0) : 20.0;
-            double hb_hz = (tokens.size() >= 3) ? ToDouble(tokens[2], 1.0) : 1.0;
-            int warmup_ms = (tokens.size() >= 4) ? (int)ToDouble(tokens[3], 800) : 800;
+            // go [setpointHz] [hbHz] [warmupMs]
+            double spHz = (tokens.size() >= 2) ? ToDouble(tokens[1], 20.0) : 20.0;
+            double hbHz = (tokens.size() >= 3) ? ToDouble(tokens[2], 1.0) : 1.0;
+            int warmupMs = (tokens.size() >= 4) ? (int)ToDouble(tokens[3], 800) : 800;
 
-            m_mavlink.startOffboardAndArm(sp_hz, hb_hz, warmup_ms);
-            printf("[px4] go: heartbeat+stream+offboard+arm started (sp_hz=%f, hb_hz=%f, warmup_ms=%d",
-                sp_hz, hb_hz, warmup_ms);
+            m_mavlink.StartOffboardAndArm(spHz, hbHz, warmupMs);
+            printf("[px4] go: heartbeat+stream+offboard+arm started (spHz=%f, hbHz=%f, warmupMs=%d",
+                spHz, hbHz, warmupMs);
             return true;
         }
 
         if (cmd.find("stop", 0) == 0) {
-            m_mavlink.stopSetpointStream();
+            m_mavlink.StopSetpointStream();
             printf("[px4] stopped setpoint stream\n");
             return true;
         }
 
         if (cmd.find("land", 0) == 0) {
-            m_mavlink.stopSetpointStream();
+            m_mavlink.StopSetpointStream();
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            m_mavlink.sendLand();
+            m_mavlink.SendLand();
             printf("[px4] land sent\n");
             return true;
         }
@@ -174,8 +174,8 @@ class Px4Console {
                 if ((size_t)(i + 2) < tokens.size())
                     p[i] = (float)ToDouble(tokens[i + 2], 0.0);
             }
-            m_mavlink.sendCommandLong(command, p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
-            printf("[px4] cmd_long sent cmd=%u\n", command);
+            m_mavlink.SendCommandLong(command, p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
+            printf("[px4] cmdLong sent cmd=%u\n", command);
             return true;
         }
 
@@ -206,7 +206,7 @@ class Px4Console {
             "  sp <x> <y> <z> [yaw]             Update NED position setpoint (meters, yaw rad). e.g. sp 0 0 -0.8\n"
             "  spenu <e> <n> <u> [yaw]          Update ENU setpoint (converted to NED). e.g. spenu 0 0 0.8\n"
             "  stream <hz>                      Start/stop setpoint stream (<=0 stops). e.g. stream 20\n"
-            "  go [sp_hz] [hb_hz] [warmup_ms]   One-shot: heartbeat+stream+offboard+arm. e.g. go 20 1 800\n"
+            "  go [spHz] [hbHz] [warmupMs]   One-shot: heartbeat+stream+offboard+arm. e.g. go 20 1 800\n"
             "  offboard                          Send OFFBOARD mode command only (PX4 still needs stream)\n"
             "  arm | disarm                      Arm/disarm\n"
             "  land                              Stop stream then send LAND\n"

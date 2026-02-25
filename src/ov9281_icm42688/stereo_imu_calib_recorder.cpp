@@ -120,7 +120,7 @@ static constexpr uint8_t REG_INT_SOURCE0     = 0x65;
 static constexpr uint8_t SPI_READ_MASK  = 0x80;
 
 struct ImuSample {
-  int64_t t_ns{};          // DRDY timestamp (CLOCK_MONOTONIC domain)
+  int64_t tNs{};          // DRDY timestamp (CLOCK_MONOTONIC domain)
   float ax{}, ay{}, az{};  // m/s^2
   float gx{}, gy{}, gz{};  // rad/s
 };
@@ -130,7 +130,7 @@ public:
   explicit SpiDev(std::string dev) : m_dev(std::move(dev)) {}
   ~SpiDev() { if (m_fd >= 0) ::close(m_fd); }
 
-  bool Open(uint32_t speed_hz, uint8_t mode, uint8_t bits_per_word) {
+  bool Open(uint32_t speedHz, uint8_t mode, uint8_t bitsPerWord) {
     m_fd = ::open(m_dev.c_str(), O_RDWR);
     if (m_fd < 0) {
       std::cerr << "open " << m_dev << " failed: " << strerror(errno) << "\n";
@@ -140,19 +140,19 @@ public:
       std::cerr << "SPI set mode failed: " << strerror(errno) << "\n";
       return false;
     }
-    if (ioctl(m_fd, SPI_IOC_WR_BITS_PER_WORD, &bits_per_word) < 0 ||
-        ioctl(m_fd, SPI_IOC_RD_BITS_PER_WORD, &bits_per_word) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_BITS_PER_WORD, &bitsPerWord) < 0 ||
+        ioctl(m_fd, SPI_IOC_RD_BITS_PER_WORD, &bitsPerWord) < 0) {
       std::cerr << "SPI set bits failed: " << strerror(errno) << "\n";
       return false;
     }
-    if (ioctl(m_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz) < 0 ||
-        ioctl(m_fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed_hz) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speedHz) < 0 ||
+        ioctl(m_fd, SPI_IOC_RD_MAX_SPEED_HZ, &speedHz) < 0) {
       std::cerr << "SPI set speed failed: " << strerror(errno) << "\n";
       return false;
     }
-    m_speedHz = speed_hz;
+    m_speedHz = speedHz;
     m_mode = mode;
-    m_bits = bits_per_word;
+    m_bits = bitsPerWord;
     return true;
   }
 
@@ -170,10 +170,10 @@ public:
     return true;
   }
 
-  bool ReadRegs(uint8_t start_reg, uint8_t *out, size_t len) {
+  bool ReadRegs(uint8_t startReg, uint8_t *out, size_t len) {
     std::vector<uint8_t> tx(len + 1, 0x00);
     std::vector<uint8_t> rx(len + 1, 0x00);
-    tx[0] = uint8_t(SPI_READ_MASK | (start_reg & 0x7F));
+    tx[0] = uint8_t(SPI_READ_MASK | (startReg & 0x7F));
     if (!Transfer(tx.data(), rx.data(), rx.size())) return false;
     memcpy(out, rx.data() + 1, len);
     return true;
@@ -185,8 +185,8 @@ private:
     tr.tx_buf = (unsigned long)tx;
     tr.rx_buf = (unsigned long)rx;
     tr.len = (uint32_t)len;
-    tr.speed_hz = m_speedHz;
-    tr.bits_per_word = m_bits;
+    tr.speedHz = m_speedHz;
+    tr.bitsPerWord = m_bits;
     tr.delay_usecs = 0;
     if (ioctl(m_fd, SPI_IOC_MESSAGE(1), &tr) < 0) {
       std::cerr << "SPI transfer failed: " << strerror(errno) << "\n";
@@ -204,10 +204,10 @@ private:
 
 class DrdyGpio {
 public:
-  bool Open(const std::string &chip_path, unsigned line_offset, int max_burst = 256) {
-    m_chip = gpiod_chip_open(chip_path.c_str());
+  bool Open(const std::string &chipPath, unsigned lineOffset, int maxBurst = 256) {
+    m_chip = gpiod_chip_open(chipPath.c_str());
     if (!m_chip) {
-      std::cerr << "gpiod_chip_open(" << chip_path << ") failed: " << strerror(errno) << "\n";
+      std::cerr << "gpiod_chip_open(" << chipPath << ") failed: " << strerror(errno) << "\n";
       return false;
     }
 
@@ -217,28 +217,28 @@ public:
     gpiod_line_settings_set_edge_detection(settings, GPIOD_LINE_EDGE_RISING);
     gpiod_line_settings_set_bias(settings, GPIOD_LINE_BIAS_PULL_UP);
 
-    gpiod_line_config *line_cfg = gpiod_line_config_new();
-    if (!line_cfg) { gpiod_line_settings_free(settings); return false; }
+    gpiod_line_config *lineConfig = gpiod_line_config_new();
+    if (!lineConfig) { gpiod_line_settings_free(settings); return false; }
 
-    unsigned offsets[1] = { line_offset };
-    int rc = gpiod_line_config_add_line_settings(line_cfg, offsets, 1, settings);
+    unsigned offsets[1] = { lineOffset };
+    int rc = gpiod_line_config_add_line_settings(lineConfig, offsets, 1, settings);
     gpiod_line_settings_free(settings);
-    if (rc < 0) { gpiod_line_config_free(line_cfg); return false; }
+    if (rc < 0) { gpiod_line_config_free(lineConfig); return false; }
 
-    gpiod_request_config *req_cfg = gpiod_request_config_new();
-    if (!req_cfg) { gpiod_line_config_free(line_cfg); return false; }
-    gpiod_request_config_set_consumer(req_cfg, "icm42688_drdy");
+    gpiod_request_config *requestConfig = gpiod_request_config_new();
+    if (!requestConfig) { gpiod_line_config_free(lineConfig); return false; }
+    gpiod_request_config_set_consumer(requestConfig, "icm42688_drdy");
 
-    m_request = gpiod_chip_request_lines(m_chip, req_cfg, line_cfg);
-    gpiod_request_config_free(req_cfg);
-    gpiod_line_config_free(line_cfg);
+    m_request = gpiod_chip_request_lines(m_chip, requestConfig, lineConfig);
+    gpiod_request_config_free(requestConfig);
+    gpiod_line_config_free(lineConfig);
 
     if (!m_request) {
       std::cerr << "gpiod_chip_request_lines failed: " << strerror(errno) << "\n";
       return false;
     }
 
-    m_maxBurst = std::max(1, max_burst);
+    m_maxBurst = std::max(1, maxBurst);
     m_evbuf = gpiod_edge_event_buffer_new((size_t)m_maxBurst);
     return m_evbuf != nullptr;
   }
@@ -250,19 +250,19 @@ public:
   }
 
   // 关键：一次尽量读多条，返回“最后一条事件”的时间戳，避免堆积
-  bool WaitLastTs(int timeout_ms, int64_t &ts_ns_out) {
-    int64_t timeout_ns = (timeout_ms < 0) ? -1 : (int64_t)timeout_ms * 1000000LL;
-    int ret = gpiod_line_request_wait_edge_events(m_request, timeout_ns);
+  bool WaitLastTs(int timeoutMs, int64_t &tsNsOut) {
+    int64_t timeoutNs = (timeoutMs < 0) ? -1 : (int64_t)timeoutMs * 1000000LL;
+    int ret = gpiod_line_request_wait_edge_events(m_request, timeoutNs);
     if (ret <= 0) return false;
 
     int n = gpiod_line_request_read_edge_events(m_request, m_evbuf, (size_t)m_maxBurst);
     if (n <= 0) return false;
 
     // 取最后一个 event 的时间戳
-    struct gpiod_edge_event *ev_last = gpiod_edge_event_buffer_get_event(m_evbuf, (size_t)(n - 1));
-    if (!ev_last) return false;
+    struct gpiod_edge_event *evLast = gpiod_edge_event_buffer_get_event(m_evbuf, (size_t)(n - 1));
+    if (!evLast) return false;
 
-    ts_ns_out = (int64_t)gpiod_edge_event_get_timestamp_ns(ev_last);
+    tsNsOut = (int64_t)gpiod_edge_event_get_timestamp_ns(evLast);
     return true;
   }
 
@@ -273,8 +273,8 @@ private:
   int m_maxBurst{256};
 };
 
-static bool IcmResetAndConfig(SpiDev &spi, int imu_hz) {
-  auto odr_code = [&](int hz) -> uint8_t {
+static bool IcmResetAndConfig(SpiDev &spi, int imuHz) {
+  auto odrCode = [&](int hz) -> uint8_t {
     switch (hz) {
       case 8000: return 0x03;
       case 4000: return 0x04;
@@ -298,12 +298,12 @@ static bool IcmResetAndConfig(SpiDev &spi, int imu_hz) {
   spi.WriteReg(REG_PWR_MGMT0, 0x0F);
   usleep(20000);
 
-  uint8_t gyro_fs = 0x00;   // 示例：2000 dps
-  uint8_t accel_fs = 0x00;  // 示例：16 g
+  uint8_t gyroFs = 0x00;   // 示例：2000 dps
+  uint8_t accelFs = 0x00;  // 示例：16 g
 
-  uint8_t odr = odr_code(imu_hz);
-  uint8_t gyro_cfg0  = uint8_t((gyro_fs << 5)  | (odr & 0x0F));
-  uint8_t accel_cfg0 = uint8_t((accel_fs << 5) | (odr & 0x0F));
+  uint8_t odr = odrCode(imuHz);
+  uint8_t gyro_cfg0  = uint8_t((gyroFs << 5)  | (odr & 0x0F));
+  uint8_t accel_cfg0 = uint8_t((accelFs << 5) | (odr & 0x0F));
 
   if (!spi.WriteReg(REG_GYRO_CONFIG0, gyro_cfg0)) return false;
   if (!spi.WriteReg(REG_ACCEL_CONFIG0, accel_cfg0)) return false;
@@ -321,17 +321,17 @@ static void ConvertRawToSI(const uint8_t raw[14], ImuSample &s) {
   int16_t gz   = Be16ToI16(raw[12], raw[13]);
 
   constexpr float kG = 9.80665f;
-  constexpr float accel_lsb_per_g  = 2048.0f; // TODO: 按你的量程修
-  constexpr float gyro_lsb_per_dps = 16.4f;   // TODO: 按你的量程修
+  constexpr float accelLsbPerG  = 2048.0f; // TODO: 按你的量程修
+  constexpr float gyroLsbPerDps = 16.4f;   // TODO: 按你的量程修
 
-  s.ax = (float(ax) / accel_lsb_per_g) * kG;
-  s.ay = (float(ay) / accel_lsb_per_g) * kG;
-  s.az = (float(az) / accel_lsb_per_g) * kG;
+  s.ax = (float(ax) / accelLsbPerG) * kG;
+  s.ay = (float(ay) / accelLsbPerG) * kG;
+  s.az = (float(az) / accelLsbPerG) * kG;
 
   constexpr float kDeg2Rad = 3.14159265358979323846f / 180.0f;
-  s.gx = (float(gx) / gyro_lsb_per_dps) * kDeg2Rad;
-  s.gy = (float(gy) / gyro_lsb_per_dps) * kDeg2Rad;
-  s.gz = (float(gz) / gyro_lsb_per_dps) * kDeg2Rad;
+  s.gx = (float(gx) / gyroLsbPerDps) * kDeg2Rad;
+  s.gy = (float(gy) / gyroLsbPerDps) * kDeg2Rad;
+  s.gz = (float(gz) / gyroLsbPerDps) * kDeg2Rad;
 }
 
 // ---------------- Stereo camera (libcamera) ----------------
@@ -345,7 +345,7 @@ struct FrameItem {
 class LibcameraMonoCam {
 public:
   bool Open(std::shared_ptr<Camera> cam, int camIndex, int w, int h, int fps,
-            bool ae_disable, int exposure_us, float gain) {
+            bool aeDisable, int exposureUs, float gain) {
     m_cam = std::move(cam);
     m_camIndex = camIndex;
 
@@ -373,9 +373,9 @@ public:
     m_controls.set(controls::FrameDurationLimits,
                   Span<const int64_t, 2>({minFrameUs, maxFrameUs}));
 
-    // if (ae_disable) {
+    // if (aeDisable) {
       m_controls.set(controls::AeEnable, false);
-      m_controls.set(controls::ExposureTime, exposure_us);
+      m_controls.set(controls::ExposureTime, exposureUs);
       m_controls.set(controls::AnalogueGain, gain);
     // }
 
@@ -540,11 +540,11 @@ private:
 class LibcameraStereoOV9281 {
 public:
   bool Open(int w, int h, int fps,
-            bool ae_disable, int exposure_us, float gain,
-            int max_pair_queue = 8, uint64_t pair_tol_ns = 15000000) {
+            bool aeDisable, int exposureUs, float gain,
+            int maxPairQueue = 8, uint64_t pairTolNs = 15000000) {
     m_w = w; m_h = h; m_fps = fps;
-    m_maxPairQueue = max_pair_queue;
-    m_pairTolNs = pair_tol_ns;
+    m_maxPairQueue = maxPairQueue;
+    m_pairTolNs = pairTolNs;
 
     m_cm = std::make_unique<CameraManager>();
     if (m_cm->start()) {
@@ -568,8 +568,8 @@ public:
       TryPairLocked();
     };
 
-    if (!m_left.Open(m_camL, 0, w, h, fps, ae_disable, exposure_us, gain)) return false;
-    if (!m_right.Open(m_camR, 1, w, h, fps, ae_disable, exposure_us, gain)) return false;
+    if (!m_left.Open(m_camL, 0, w, h, fps, aeDisable, exposureUs, gain)) return false;
+    if (!m_right.Open(m_camR, 1, w, h, fps, aeDisable, exposureUs, gain)) return false;
     m_left.SetSink(sink);
     m_right.SetSink(sink);
 
@@ -592,9 +592,9 @@ public:
     m_cm.reset();
   }
 
-  bool GrabPair(FrameItem &L, FrameItem &R, int timeout_ms = 1000) {
+  bool GrabPair(FrameItem &L, FrameItem &R, int timeoutMs = 1000) {
     std::unique_lock<std::mutex> lk(m_mu);
-    if (!m_cv.wait_for(lk, std::chrono::milliseconds(timeout_ms),
+    if (!m_cv.wait_for(lk, std::chrono::milliseconds(timeoutMs),
                       [&]{ return !m_pairedRaw.empty() || !g_runningFlag.load(); })) {
       return false;
     }
@@ -653,9 +653,9 @@ static void EnsureDir(const fs::path &p) {
   }
 }
 
-static std::string TsToName(int64_t t_ns) {
+static std::string TsToName(int64_t tNs) {
   std::ostringstream oss;
-  oss << t_ns << ".png";
+  oss << tNs << ".png";
   return oss.str();
 }
 
@@ -678,80 +678,80 @@ int main(int argc, char **argv) {
   signal(SIGINT, SigIntHandler);
   signal(SIGTERM, SigIntHandler);
 
-  const std::string out_root = GetArgS(argc, argv, "--out", "./calib_out");
+  const std::string outRoot = GetArgS(argc, argv, "--out", "./calib_out");
 
   // camera
   const int w = GetArgI(argc, argv, "--w", 1280);
   const int h = GetArgI(argc, argv, "--h", 800);
   const int fps = GetArgI(argc, argv, "--fps", 30);
-  const bool ae_disable = HasArg(argc, argv, "--ae-disable");
-  const int exposure_us = GetArgI(argc, argv, "--exp-us", 3000);
+  const bool aeDisable = HasArg(argc, argv, "--ae-disable");
+  const int exposureUs = GetArgI(argc, argv, "--exp-us", 3000);
   const float gain = GetArgF(argc, argv, "--gain", 2.0f);
 
   // imu
-  const std::string spi_dev = GetArgS(argc, argv, "--spi", "/dev/spidev0.0");
+  const std::string spiDev = GetArgS(argc, argv, "--spi", "/dev/spidev0.0");
   const uint32_t spi_speed = (uint32_t)GetArgI(argc, argv, "--speed", 8000000);
-  const uint8_t spi_mode = (uint8_t)GetArgI(argc, argv, "--mode", 0);
-  const uint8_t spi_bits = (uint8_t)GetArgI(argc, argv, "--bits", 8);
+  const uint8_t spiMode = (uint8_t)GetArgI(argc, argv, "--mode", 0);
+  const uint8_t spiBits = (uint8_t)GetArgI(argc, argv, "--bits", 8);
 
   const std::string gpiochip = GetArgS(argc, argv, "--gpiochip", "/dev/gpiochip0");
-  const unsigned drdy_line = (unsigned)GetArgI(argc, argv, "--drdy", 24);
-  const int imu_hz = GetArgI(argc, argv, "--imu-hz", 400);
+  const unsigned drdyLine = (unsigned)GetArgI(argc, argv, "--drdy", 24);
+  const int imuHz = GetArgI(argc, argv, "--imu-hz", 400);
 
-  const int imu_flush_every = GetArgI(argc, argv, "--imu-flush-every", 800); // 400Hz: 2秒flush一次
-  const int drdy_burst = GetArgI(argc, argv, "--drdy-burst", 256);
+  const int imuFlushEvery = GetArgI(argc, argv, "--imu-flush-every", 800); // 400Hz: 2秒flush一次
+  const int drdyBurst = GetArgI(argc, argv, "--drdy-burst", 256);
 
   // optional
   const int max_frames = GetArgI(argc, argv, "--max-frames", -1);
-  const int warmup_pairs = GetArgI(argc, argv, "--warmup", 60);
+  const int warmupPairs = GetArgI(argc, argv, "--warmup", 60);
 
-  std::cerr << "out=" << out_root << "\n";
+  std::cerr << "out=" << outRoot << "\n";
   std::cerr << "cam " << w << "x" << h << " @" << fps
-            << " ae_disable=" << (ae_disable ? "true":"false")
-            << " exp_us=" << exposure_us << " gain=" << gain
+            << " aeDisable=" << (aeDisable ? "true":"false")
+            << " exp_us=" << exposureUs << " gain=" << gain
             << " (FORCE ISP YUV420->Y)\n";
-  std::cerr << "imu spi=" << spi_dev << " speed=" << spi_speed
-            << " mode=" << int(spi_mode) << " bits=" << int(spi_bits)
-            << " drdy=" << gpiochip << ":" << drdy_line
-            << " imu_hz=" << imu_hz
-            << " imu_flush_every=" << imu_flush_every
-            << " drdy_burst=" << drdy_burst << "\n";
+  std::cerr << "imu spi=" << spiDev << " speed=" << spi_speed
+            << " mode=" << int(spiMode) << " bits=" << int(spiBits)
+            << " drdy=" << gpiochip << ":" << drdyLine
+            << " imuHz=" << imuHz
+            << " imuFlushEvery=" << imuFlushEvery
+            << " drdyBurst=" << drdyBurst << "\n";
 
   // dirs
-  fs::path root(out_root);
+  fs::path root(outRoot);
   fs::path cam0_data = root / "cam0";
   fs::path cam1_data = root / "cam1";
   EnsureDir(cam0_data);
   EnsureDir(cam1_data);
 
-  FILE *f_cam0 = std::fopen((root / "cam0" / "data.csv").c_str(), "w");
-  FILE *f_cam1 = std::fopen((root / "cam1" / "data.csv").c_str(), "w");
-  FILE *f_imu  = std::fopen((root / "imu.csv").c_str(), "w");
-  if (!f_cam0 || !f_cam1 || !f_imu) {
+  FILE *fCam0 = std::fopen((root / "cam0" / "data.csv").c_str(), "w");
+  FILE *fCam1 = std::fopen((root / "cam1" / "data.csv").c_str(), "w");
+  FILE *fImu  = std::fopen((root / "imu.csv").c_str(), "w");
+  if (!fCam0 || !fCam1 || !fImu) {
     std::cerr << "Failed to open output csv files.\n";
     return 1;
   }
 
   // 给 csv 大缓冲：减少 400Hz 下的写盘抖动
-  SetupFileBuffer(f_cam0, 1 << 20);
-  SetupFileBuffer(f_cam1, 1 << 20);
-  SetupFileBuffer(f_imu,  4 << 20); // imu 行数更多，给大点
+  SetupFileBuffer(fCam0, 1 << 20);
+  SetupFileBuffer(fCam1, 1 << 20);
+  SetupFileBuffer(fImu,  4 << 20); // imu 行数更多，给大点
 
-  std::fprintf(f_cam0, "#timestamp [ns],filename\n");
-  std::fprintf(f_cam1, "#timestamp [ns],filename\n");
-  std::fprintf(f_imu,  "#timestamp [ns],w_x [rad/s],w_y [rad/s],w_z [rad/s],a_x [m/s^2],a_y [m/s^2],a_z [m/s^2]\n");
+  std::fprintf(fCam0, "#timestamp [ns],filename\n");
+  std::fprintf(fCam1, "#timestamp [ns],filename\n");
+  std::fprintf(fImu,  "#timestamp [ns],wX [rad/s],wY [rad/s],wZ [rad/s],aX [m/s^2],aY [m/s^2],aZ [m/s^2]\n");
 
   // IMU thread
-  std::atomic<bool> imu_ok{false};
-  std::thread imu_th([&](){
-    SpiDev spi(spi_dev);
-    if (!spi.Open(spi_speed, spi_mode, spi_bits)) return;
-    if (!IcmResetAndConfig(spi, imu_hz)) return;
+  std::atomic<bool> imuOk{false};
+  std::thread imuThread([&](){
+    SpiDev spi(spiDev);
+    if (!spi.Open(spi_speed, spiMode, spiBits)) return;
+    if (!IcmResetAndConfig(spi, imuHz)) return;
 
     DrdyGpio drdy;
-    if (!drdy.Open(gpiochip, drdy_line, drdy_burst)) return;
+    if (!drdy.Open(gpiochip, drdyLine, drdyBurst)) return;
 
-    imu_ok.store(true);
+    imuOk.store(true);
 
     uint8_t raw[14]{};
     uint8_t st = 0;
@@ -760,11 +760,11 @@ int main(int argc, char **argv) {
     int imu_lines = 0;
 
     while (g_runningFlag.load()) {
-      int64_t t_irq_ns = 0;
-      if (!drdy.WaitLastTs(1000, t_irq_ns)) continue;
+      int64_t tIrqNs = 0;
+      if (!drdy.WaitLastTs(1000, tIrqNs)) continue;
 
       ImuSample s{};
-      s.t_ns = t_irq_ns;
+      s.tNs = tIrqNs;
 
       // 读取一帧 IMU（注意：如果你想“每个 DRDY 事件都对应一帧”，需要循环读 n 次；
       // 这里策略是：取最后一个 DRDY 时间戳，读当前寄存器快照——防止 event 堆积时延迟扩大）
@@ -772,48 +772,48 @@ int main(int argc, char **argv) {
       if (!spi.ReadRegs(REG_TEMP_DATA1, raw, sizeof(raw))) continue;
       ConvertRawToSI(raw, s);
 
-      std::fprintf(f_imu, "%lld,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f\n",
-                   (long long)s.t_ns,
+      std::fprintf(fImu, "%lld,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f\n",
+                   (long long)s.tNs,
                    (double)s.gx, (double)s.gy, (double)s.gz,
                    (double)s.ax, (double)s.ay, (double)s.az);
 
       imu_lines++;
-      if (imu_flush_every > 0 && (imu_lines % imu_flush_every) == 0) {
-        std::fflush(f_imu);
+      if (imuFlushEvery > 0 && (imu_lines % imuFlushEvery) == 0) {
+        std::fflush(fImu);
       }
     }
 
-    std::fflush(f_imu);
+    std::fflush(fImu);
   });
 
   // Camera
   LibcameraStereoOV9281 cam;
-  if (!cam.Open(w, h, fps, ae_disable, exposure_us, gain)) {
+  if (!cam.Open(w, h, fps, aeDisable, exposureUs, gain)) {
     g_runningFlag.store(false);
-    if (imu_th.joinable()) imu_th.join();
+    if (imuThread.joinable()) imuThread.join();
     return 1;
   }
 
-  // warmup estimate ts_offset_ns (NowNs domain - camera ts domain)
+  // warmup estimate tsOffsetNs (NowNs domain - camera ts domain)
   std::vector<int64_t> offs;
-  offs.reserve(std::max(10, warmup_pairs));
+  offs.reserve(std::max(10, warmupPairs));
 
-  std::cerr << "Warmup for ts_offset... pairs=" << warmup_pairs << "\n";
-  for (int i = 0; i < warmup_pairs && g_runningFlag.load(); ) {
+  std::cerr << "Warmup for ts_offset... pairs=" << warmupPairs << "\n";
+  for (int i = 0; i < warmupPairs && g_runningFlag.load(); ) {
     FrameItem L, R;
     if (!cam.GrabPair(L, R, 1000)) continue;
 
-    int64_t cam_ts = (int64_t)((L.tsNs + R.tsNs)/2);
+    int64_t camTs = (int64_t)((L.tsNs + R.tsNs)/2);
     int64_t arrive = (L.arriveNs && R.arriveNs) ? (L.arriveNs + R.arriveNs)/2 : NowNs();
-    offs.push_back(arrive - cam_ts);
+    offs.push_back(arrive - camTs);
     ++i;
   }
 
-  int64_t ts_offset_ns = MedianEstimator::Median(offs);
+  int64_t tsOffsetNs = MedianEstimator::Median(offs);
   if (!offs.empty()) {
     int64_t mino = *std::min_element(offs.begin(), offs.end());
     int64_t maxo = *std::max_element(offs.begin(), offs.end());
-    std::cerr << "Init ts_offset_ns(median)=" << ts_offset_ns
+    std::cerr << "Init tsOffsetNs(median)=" << tsOffsetNs
               << " range=[" << mino << "," << maxo << "] ns\n";
   } else {
     std::cerr << "Warmup failed: no frames, ts_offset=0\n";
@@ -821,7 +821,7 @@ int main(int argc, char **argv) {
 
   // record loop
   int saved = 0;
-  int64_t last_pair_ns = 0;
+  int64_t lastPairNs = 0;
 
   std::cerr << "Recording... press Ctrl+C to stop\n";
   while (g_runningFlag.load()) {
@@ -830,20 +830,20 @@ int main(int argc, char **argv) {
     FrameItem L, R;
     if (!cam.GrabPair(L, R, 1000)) continue;
 
-    int64_t dt_lr = (int64_t)L.tsNs - (int64_t)R.tsNs;
+    int64_t dtLr = (int64_t)L.tsNs - (int64_t)R.tsNs;
     if ((saved % 30) == 0) {
-      std::cerr << "[pair] dt_lr_us=" << (std::llabs(dt_lr) / 1000.0)
+      std::cerr << "[pair] dt_lr_us=" << (std::llabs(dtLr) / 1000.0)
                 << " tol_us=" << (cam.PairTolNs()/1000.0) << "\n";
-      std::cerr << "[imu] ok=" << (imu_ok.load() ? "true" : "false") << "\n";
+      std::cerr << "[imu] ok=" << (imuOk.load() ? "true" : "false") << "\n";
     }
 
-    int64_t cam_ts = (int64_t)((L.tsNs + R.tsNs)/2);
-    int64_t pair_ns = cam_ts + ts_offset_ns;
+    int64_t camTs = (int64_t)((L.tsNs + R.tsNs)/2);
+    int64_t pairNs = camTs + tsOffsetNs;
 
-    if (last_pair_ns != 0 && pair_ns <= last_pair_ns) pair_ns = last_pair_ns + 1;
-    last_pair_ns = pair_ns;
+    if (lastPairNs != 0 && pairNs <= lastPairNs) pairNs = lastPairNs + 1;
+    lastPairNs = pairNs;
 
-    const std::string name = TsToName(pair_ns);
+    const std::string name = TsToName(pairNs);
     const fs::path fnL = cam0_data / name;
     const fs::path fnR = cam1_data / name;
 
@@ -856,11 +856,11 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    std::fprintf(f_cam0, "%lld,%s\n", (long long)pair_ns, name.c_str());
-    std::fprintf(f_cam1, "%lld,%s\n", (long long)pair_ns, name.c_str());
+    std::fprintf(fCam0, "%lld,%s\n", (long long)pairNs, name.c_str());
+    std::fprintf(fCam1, "%lld,%s\n", (long long)pairNs, name.c_str());
 
     if ((saved % 50) == 0) {
-      std::fflush(f_cam0); std::fflush(f_cam1);
+      std::fflush(fCam0); std::fflush(fCam1);
       std::cerr << "saved pairs=" << saved << "\n";
     }
     saved++;
@@ -869,10 +869,10 @@ int main(int argc, char **argv) {
   std::cerr << "Stopping...\n";
   cam.Close();
   g_runningFlag.store(false);
-  if (imu_th.joinable()) imu_th.join();
+  if (imuThread.joinable()) imuThread.join();
 
-  std::fflush(f_cam0); std::fflush(f_cam1); std::fflush(f_imu);
-  std::fclose(f_cam0); std::fclose(f_cam1); std::fclose(f_imu);
+  std::fflush(fCam0); std::fflush(fCam1); std::fflush(fImu);
+  std::fclose(fCam0); std::fclose(fCam1); std::fclose(fImu);
 
   std::cerr << "Done. Saved pairs=" << saved << "\n";
   return 0;

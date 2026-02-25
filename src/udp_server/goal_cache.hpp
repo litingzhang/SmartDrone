@@ -1,36 +1,39 @@
 #pragma once
-#include <mutex>
-#include <cstdint>
 
-struct MoveGoal
-{
+#include <cstdint>
+#include <mutex>
+
+struct MoveGoal {
     uint8_t frame{0};
-    float x{0}, y{0}, z{1.2f};
+    float x{0};
+    float y{0};
+    float z{1.2f};
     float yaw{0};
     float maxV{0.6f};
     uint32_t seq{0};
 };
 
-class GoalCache
-{
+class GoalCache {
 public:
-    void set(const MoveGoal& g)
+    void Set(const MoveGoal& goal)
     {
-        std::lock_guard<std::mutex> lk(m_mtx);
-        m_goal = g;
-        m_has = true;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_goal = goal;
+        m_hasGoal = true;
     }
 
-    bool get(MoveGoal* out) const
+    bool Get(MoveGoal* outGoal) const
     {
-        std::lock_guard<std::mutex> lk(m_mtx);
-        if (!m_has) return false;
-        *out = m_goal;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!m_hasGoal || outGoal == nullptr) {
+            return false;
+        }
+        *outGoal = m_goal;
         return true;
     }
 
 private:
-    mutable std::mutex m_mtx;
-    bool m_has{false};
+    mutable std::mutex m_mutex;
+    bool m_hasGoal{false};
     MoveGoal m_goal{};
 };

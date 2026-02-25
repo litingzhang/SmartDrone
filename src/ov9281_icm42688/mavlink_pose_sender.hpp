@@ -28,22 +28,22 @@ enum class OdomQualityMode
     LOST
 };
 
-static inline void fill_cov_diag21(float cov[21],
-                                   float var_x, float var_y, float var_z,
-                                   float var_roll, float var_pitch, float var_yaw,
-                                   bool fill_offdiag_zero = true)
+static inline void FillCovDiag21(float cov[21],
+                                   float varX, float varY, float varZ,
+                                   float varRoll, float varPitch, float varYaw,
+                                   bool fillOffdiagZero = true)
 {
-    if (fill_offdiag_zero) {
+    if (fillOffdiagZero) {
         for (int i = 0; i < 21; i++) cov[i] = 0.0f;
     }
 
     // diag indices in MAVLink 21-array (upper-triangular of 6x6):
-    cov[0]  = var_x;     // xx
-    cov[6]  = var_y;     // yy
-    cov[11] = var_z;     // zz
-    cov[15] = var_roll;  // rollroll
-    cov[18] = var_pitch; // pitchpitch
-    cov[20] = var_yaw;   // yawyaw
+    cov[0]  = varX;     // xx
+    cov[6]  = varY;     // yy
+    cov[11] = varZ;     // zz
+    cov[15] = varRoll;  // rollroll
+    cov[18] = varPitch; // pitchpitch
+    cov[20] = varYaw;   // yawyaw
 }
 
 class MavlinkSerial {
@@ -59,33 +59,33 @@ public:
                            uint8_t sysid = 42, uint8_t compid = MAV_COMP_ID_VISUAL_INERTIAL_ODOMETRY)
         : m_fd(-1), m_sysid(sysid), m_compid(compid), m_seq(0)
     {
-        openSerial(dev, baud);
+        OpenSerial(dev, baud);
     }
 
     // ====== RX: start/stop ======
-    void startRx()
+    void StartRx()
     {
         m_rxRunning.store(true);
         if (m_rxThread.joinable()) m_rxThread.join();
-        m_rxThread = std::thread([this]() { this->rxLoop(); });
+        m_rxThread = std::thread([this]() { this->RxLoop(); });
     }
 
-    void stopRx()
+    void StopRx()
     {
         m_rxRunning.store(false);
         if (m_rxThread.joinable()) m_rxThread.join();
     }
 
     // 自动学习到的 PX4 target（从 HEARTBEAT 得到）
-    uint8_t targetSystem() const { return m_px4Sysid.load(); }
-    uint8_t targetComponent() const { return m_px4Compid.load(); }
+    uint8_t GetTargetSystem() const { return m_px4Sysid.load(); }
+    uint8_t GetTargetComponent() const { return m_px4Compid.load(); }
 
     // 等待某个 COMMAND 的 ACK（返回 true 表示等到了）
-    // out_result: MAV_RESULT_*
-    bool waitCommandAck(uint16_t command, int timeout_ms, uint8_t& out_result)
+    // outResult: MAV_RESULT_*
+    bool WaitCommandAck(uint16_t command, int timeoutMs, uint8_t& outResult)
     {
         std::unique_lock<std::mutex> lk(m_ackMtx);
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
 
         auto pred = [&]() {
             auto it = m_ackMap.find(command);
@@ -94,99 +94,99 @@ public:
 
         if (!m_ackCv.wait_until(lk, deadline, pred)) return false;
 
-        out_result = m_ackMap[command].result;
+        outResult = m_ackMap[command].result;
         return true;
     }
 
-    // custom_mode = (main_mode << 16) | (sub_mode << 24)
+    // customMode = (mainMode << 16) | (subMode << 24)
     static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6;
 
-    void sendCommandLong(uint16_t command,
+    void SendCommandLong(uint16_t command,
                          float p1=0,float p2=0,float p3=0,float p4=0,float p5=0,float p6=0,float p7=0,
-                         uint8_t target_system=1, uint8_t target_component=1,
+                         uint8_t targetSystem = 1, uint8_t targetComponent = 1,
                          uint8_t confirmation=0)
     {
         mavlink_message_t msg{};
         mavlink_msg_command_long_pack(
             m_sysid, m_compid, &msg,
-            target_system, target_component,
+            targetSystem, targetComponent,
             command, confirmation,
             p1,p2,p3,p4,p5,p6,p7
         );
-        writeMessage(msg);
+        WriteMessage(msg);
     }
 
-    bool sendCommandLongAndWaitAck(uint16_t command,
+    bool SendCommandLongAndWaitAck(uint16_t command,
                                 float p1=0,float p2=0,float p3=0,float p4=0,float p5=0,float p6=0,float p7=0,
-                                int timeout_ms=800,
-                                uint8_t target_system=0, uint8_t target_component=0,
-                                uint8_t* out_result=nullptr)
+                                int timeoutMs=800,
+                                uint8_t targetSystem = 0, uint8_t targetComponent = 0,
+                                uint8_t* outResult=nullptr)
     {
-        if (target_system == 0) target_system = targetSystem();
-        if (target_component == 0) target_component = targetComponent();
+        if (targetSystem == 0) targetSystem = GetTargetSystem();
+        if (targetComponent == 0) targetComponent = GetTargetComponent();
 
         {
             std::lock_guard<std::mutex> lk(m_ackMtx);
             m_ackMap.erase(command);
         }
 
-        sendCommandLong(command, p1,p2,p3,p4,p5,p6,p7, target_system, target_component);
+        SendCommandLong(command, p1,p2,p3,p4,p5,p6,p7, targetSystem, targetComponent);
 
         uint8_t res = 255;
-        bool ok = waitCommandAck(command, timeout_ms, res);
-        if (out_result) *out_result = res;
+        bool ok = WaitCommandAck(command, timeoutMs, res);
+        if (outResult) *outResult = res;
 
         if (!ok) {
-            printf("[ACK] TIMEOUT cmd=%u (target sys=%d comp=%d)\n", command, int(target_system), int(target_component));
+            printf("[ACK] TIMEOUT cmd=%u (target sys=%d comp=%d)\n", command, int(targetSystem), int(targetComponent));
         } else {
-            printf("[ACK] cmd=%u result=%s\n", command, mavResultToStr(res));
+            printf("[ACK] cmd=%u result=%s\n", command, MavResultToStr(res));
         }
         return ok;
     }
 
-    // base_mode: MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
-    // custom_mode: (OFFBOARD << 16)
-    bool setModeOffboard(int ack_timeout_ms = 800,
-                        uint8_t target_system = 0, uint8_t target_component = 0)
+    // baseMode: MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
+    // customMode: (OFFBOARD << 16)
+    bool SetModeOffboard(int ackTimeoutMs = 800,
+                        uint8_t targetSystem = 0, uint8_t targetComponent = 0)
     {
-        const float base_mode = (float)MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
-        const uint32_t custom_mode = (uint32_t)PX4_CUSTOM_MAIN_MODE_OFFBOARD << 16;
+        const float baseMode = (float)MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
+        const uint32_t customMode = (uint32_t)PX4_CUSTOM_MAIN_MODE_OFFBOARD << 16;
 
         uint8_t res = 255;
-        bool got = sendCommandLongAndWaitAck(MAV_CMD_DO_SET_MODE,
-                                            base_mode,
-                                            (float)custom_mode,
+        bool got = SendCommandLongAndWaitAck(MAV_CMD_DO_SET_MODE,
+                                            baseMode,
+                                            (float)customMode,
                                             0,0,0,0,0,
-                                            ack_timeout_ms,
-                                            target_system, target_component,
+                                            ackTimeoutMs,
+                                            targetSystem, targetComponent,
                                             &res);
 
         return got && (res == MAV_RESULT_ACCEPTED);
     }
 
     // ARM / DISARM
-    bool arm(bool do_arm, int ack_timeout_ms = 800, uint8_t target_system = 0, uint8_t target_component = 0)
+    bool Arm(bool doArm, int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0)
     {
         uint8_t res = 255;
-        bool got = sendCommandLongAndWaitAck(MAV_CMD_COMPONENT_ARM_DISARM, do_arm ? 1.0f : 0.0f,
-            0,0,0,0,0,0, ack_timeout_ms, target_system, target_component, &res);
+        bool got = SendCommandLongAndWaitAck(MAV_CMD_COMPONENT_ARM_DISARM, doArm ? 1.0f : 0.0f,
+            0,0,0,0,0,0, ackTimeoutMs, targetSystem, targetComponent, &res);
         return got && (res == MAV_RESULT_ACCEPTED);
     }
 
-    bool startOffboardAndArm(double setpoint_hz = 20.0,
-                            double heartbeat_hz = 1.0,
-                            int warmup_ms = 800,
-                            int ack_timeout_ms = 1000,
-                            uint8_t target_system = 0, uint8_t target_component = 0)
+    bool StartOffboardAndArm(double setpointHz = 20.0,
+                            double heartbeatHz = 1.0,
+                            int warmupMs = 800,
+                            int ackTimeoutMs = 1000,
+                            uint8_t targetSystem = 0, uint8_t targetComponent = 0)
     {
-        // startSetpointStreamHz(setpoint_hz);
-        usleep((useconds_t)warmup_ms * 1000);
-        if (!setModeOffboard(ack_timeout_ms, target_system, target_component)) {
+        // StartSetpointStreamHz(setpointHz);
+        usleep((useconds_t)warmupMs * 1000);
+        if (!SetModeOffboard(ackTimeoutMs, targetSystem, targetComponent)) {
             printf("[px4] OFFBOARD failed. Common causes: setpoints not streaming, estimator not ready, safety/RC checks.\n");
             return false;
         }
         usleep(200000);
-        if (!arm(true, ack_timeout_ms, target_system, target_component)) {
+        if (!Arm(true, ackTimeoutMs, targetSystem, targetComponent)) {
             printf("[px4] ARM failed. Check STATUSTEXT for reason (EKF, safety switch, RC, arming checks).\n");
             return false;
         }
@@ -196,8 +196,8 @@ public:
     }
 
     ~MavlinkSerial() {
-        stopRx();
-        stopSetpointStream();
+        StopRx();
+        StopSetpointStream();
         if (m_fd >= 0) close(m_fd);
     }
     struct SetpointLocalNED {
@@ -208,11 +208,11 @@ public:
         float yawspeed = NAN;                 // rad/s
     };
 
-    void sendSetPositionTargetLocalNED(uint32_t time_boot_ms,
+    void SendSetPositionTargetLocalNed(uint32_t timeBootMs,
                                        const SetpointLocalNED& sp,
-                                       uint8_t coordinate_frame = MAV_FRAME_LOCAL_NED)
+                                       uint8_t coordinateFrame = MAV_FRAME_LOCAL_NED)
     {
-        // type_mask: 1 表示“忽略该字段”
+        // typeMask: 1 表示“忽略该字段”
         // bits:
         // 0..2: x,y,z
         // 3..5: vx,vy,vz
@@ -220,9 +220,9 @@ public:
         // 9:  force_set (不用)
         // 10: yaw
         // 11: yaw_rate
-        uint16_t type_mask = 0;
+        uint16_t typeMask = 0;
 
-        auto ign = [&](int bit){ type_mask |= (1u << bit); };
+        auto ign = [&](int bit){ typeMask |= (1u << bit); };
 
         if (!std::isfinite(sp.x)) ign(0);
         if (!std::isfinite(sp.y)) ign(1);
@@ -243,17 +243,17 @@ public:
         if (!std::isfinite(sp.yawspeed)) ign(11);
 
         mavlink_message_t msg{};
-        // target_system / target_component: 指向飞控(通常 1 / 1)
-        const uint8_t target_system = 1;
-        const uint8_t target_component = 1;
+        // GetTargetSystem / GetTargetComponent: 指向飞控(通常 1 / 1)
+        const uint8_t targetSystem = 1;
+        const uint8_t targetComponent = 1;
 
         mavlink_msg_set_position_target_local_ned_pack(
             m_sysid, m_compid, &msg,
-            time_boot_ms,
-            target_system,
-            target_component,
-            coordinate_frame,
-            type_mask,
+            timeBootMs,
+            targetSystem,
+            targetComponent,
+            coordinateFrame,
+            typeMask,
             std::isfinite(sp.x) ? sp.x : 0.0f,
             std::isfinite(sp.y) ? sp.y : 0.0f,
             std::isfinite(sp.z) ? sp.z : 0.0f,
@@ -267,9 +267,9 @@ public:
             std::isfinite(sp.yawspeed) ? sp.yawspeed : 0.0f
         );
 
-        writeMessage(msg);
+        WriteMessage(msg);
     }
-    void startSetpointStreamHz(double hz = 20.0)
+    void StartSetpointStreamHz(double hz = 20.0)
     {
         if (hz <= 0.0) hz = 20.0;
         m_streamPeriodUs = static_cast<uint64_t>(1e6 / hz);
@@ -279,7 +279,7 @@ public:
 
         m_streamThread = std::thread([this]() {
             while (this->m_streaming.load()) {
-                const uint32_t t_ms = time_boot_ms();
+                const uint32_t tMs = TimeBootMs();
 
                 SetpointLocalNED sp;
                 {
@@ -287,48 +287,48 @@ public:
                     sp = this->m_spCurrent;
                 }
 
-                this->sendSetPositionTargetLocalNED(t_ms, sp, MAV_FRAME_LOCAL_NED);
+                this->SendSetPositionTargetLocalNed(tMs, sp, MAV_FRAME_LOCAL_NED);
                 usleep(static_cast<useconds_t>(this->m_streamPeriodUs));
             }
         });
     }
 
-    void stopSetpointStream()
+    void StopSetpointStream()
     {
         m_streaming.store(false);
         if (m_streamThread.joinable()) m_streamThread.join();
     }
 
-    void updateStreamSetpoint(const SetpointLocalNED& sp_ned)
+    void UpdateStreamSetpoint(const SetpointLocalNED& spNed)
     {
         std::lock_guard<std::mutex> lk(m_spMtx);
-        m_spCurrent = sp_ned;
+        m_spCurrent = spNed;
     }
 
-    void updateStreamPosition(float x_n, float y_e, float z_d, float yaw_rad = NAN)
+    void UpdateStreamPosition(float xN, float yE, float zD, float yawRad = NAN)
     {
         SetpointLocalNED sp{};
-        sp.x = x_n; sp.y = y_e; sp.z = z_d;
-        sp.yaw = yaw_rad;
-        updateStreamSetpoint(sp);
+        sp.x = xN; sp.y = yE; sp.z = zD;
+        sp.yaw = yawRad;
+        UpdateStreamSetpoint(sp);
     }
 
-    bool sendLand(int ack_timeout_ms = 800, uint8_t target_system=1, uint8_t target_component=1)
+    bool SendLand(int ackTimeoutMs = 800, uint8_t targetSystem = 1, uint8_t targetComponent = 1)
     {
         uint8_t res = 255;
-        bool got = sendCommandLongAndWaitAck(MAV_CMD_NAV_LAND,
+        bool got = SendCommandLongAndWaitAck(MAV_CMD_NAV_LAND,
                                         0,0,0,0,0,0,0,
-                                        ack_timeout_ms,
-                                        target_system, target_component,
+                                        ackTimeoutMs,
+                                        targetSystem, targetComponent,
                                         &res);
 
         return got && (res == MAV_RESULT_ACCEPTED);
     }
 
-    void sendOdometry(uint64_t timestamp_us,
-                    const Pose& pose_ned,
-                    uint8_t frame_id = MAV_FRAME_LOCAL_NED,
-                    uint8_t child_frame_id = MAV_FRAME_BODY_FRD,
+    void SendOdometry(uint64_t timestampUs,
+                    const Pose& poseNed,
+                    uint8_t frameId = MAV_FRAME_LOCAL_NED,
+                    uint8_t childFrameId = MAV_FRAME_BODY_FRD,
                     OdomQualityMode mode = OdomQualityMode::GOOD)
     {
         mavlink_message_t msg;
@@ -336,30 +336,30 @@ public:
         const float vx = NAN, vy = NAN, vz = NAN;
         const float rollspeed = NAN, pitchspeed = NAN, yawspeed = NAN;
 
-        float pose_cov[21];
-        float vel_cov[21];
+        float poseCov[21];
+        float velCov[21];
 
         int8_t quality = 100;
-        uint8_t estimator_type = 0;
+        uint8_t estimatorType = 0;
 
-        float q[4] = {pose_ned.qw, pose_ned.qx, pose_ned.qy, pose_ned.qz};
+        float q[4] = {poseNed.qw, poseNed.qx, poseNed.qy, poseNed.qz};
 
         if (mode == OdomQualityMode::GOOD) {
-            for (int i = 0; i < 21; i++) { pose_cov[i] = NAN; vel_cov[i] = NAN; }
+            for (int i = 0; i < 21; i++) { poseCov[i] = NAN; velCov[i] = NAN; }
             quality = 100;
         } else if (mode == OdomQualityMode::WEAK) {
-            fill_cov_diag21(pose_cov,
+            FillCovDiag21(poseCov,
                             2.25f, 2.25f, 2.25f,
                             0.12f, 0.12f, 0.12f);
-            fill_cov_diag21(vel_cov,
+            FillCovDiag21(velCov,
                             4.0f, 4.0f, 4.0f,
                             1.0f, 1.0f, 1.0f);
             quality = 20;
         } else {
-            fill_cov_diag21(pose_cov,
+            FillCovDiag21(poseCov,
                             1e4f, 1e4f, 1e4f,
                             10.0f, 10.0f, 10.0f);
-            fill_cov_diag21(vel_cov,
+            FillCovDiag21(velCov,
                             1e2f, 1e2f, 1e2f,
                             1e2f, 1e2f, 1e2f);
             quality = 0;
@@ -367,31 +367,31 @@ public:
 
         mavlink_msg_odometry_pack(
             m_sysid, m_compid, &msg,
-            timestamp_us,
-            frame_id,
-            child_frame_id,
-            pose_ned.x, pose_ned.y, pose_ned.z,
+            timestampUs,
+            frameId,
+            childFrameId,
+            poseNed.x, poseNed.y, poseNed.z,
             q,
             vx, vy, vz,
             rollspeed, pitchspeed, yawspeed,
-            pose_cov,
-            vel_cov,
+            poseCov,
+            velCov,
             0,
-            estimator_type,
+            estimatorType,
             quality
         );
 
-        writeMessage(msg);
+        WriteMessage(msg);
     }
 
-    static Pose enuToNed(const Pose& p_enu) {
+    static Pose EnuToNed(const Pose& pEnu) {
         Pose out{};
-        out.x = p_enu.y;
-        out.y = p_enu.x;
-        out.z = -p_enu.z;
+        out.x = pEnu.y;
+        out.y = pEnu.x;
+        out.z = -pEnu.z;
 
         const float s = 0.7071067811865476f;
-        const float qr_w = 0.0f, qr_x = s, qr_y = s, qr_z = 0.0f;
+        const float qrW = 0.0f, qrX = s, qrY = s, qrZ = 0.0f;
 
         auto qmul = [](float aw, float ax, float ay, float az,
                        float bw, float bx, float by, float bz,
@@ -407,19 +407,19 @@ public:
         };
 
         // out_q = q_r * q_enu * q_r_conj
-        float t_w,t_x,t_y,t_z;
-        qmul(qr_w,qr_x,qr_y,qr_z, p_enu.qw,p_enu.qx,p_enu.qy,p_enu.qz, t_w,t_x,t_y,t_z);
+        float tW,tX,tY,tZ;
+        qmul(qrW,qrX,qrY,qrZ, pEnu.qw,pEnu.qx,pEnu.qy,pEnu.qz, tW,tX,tY,tZ);
 
-        float qrc_w,qrc_x,qrc_y,qrc_z;
-        qconj(qr_w,qr_x,qr_y,qr_z, qrc_w,qrc_x,qrc_y,qrc_z);
+        float qrcW,qrcX,qrcY,qrcZ;
+        qconj(qrW,qrX,qrY,qrZ, qrcW,qrcX,qrcY,qrcZ);
 
-        qmul(t_w,t_x,t_y,t_z, qrc_w,qrc_x,qrc_y,qrc_z, out.qw,out.qx,out.qy,out.qz);
+        qmul(tW,tX,tY,tZ, qrcW,qrcX,qrcY,qrcZ, out.qw,out.qx,out.qy,out.qz);
 
-        normalizeQuat(out.qw,out.qx,out.qy,out.qz);
+        NormalizeQuat(out.qw,out.qx,out.qy,out.qz);
         return out;
     }
 
-    static void normalizeQuat(float& w,float& x,float& y,float& z) {
+    static void NormalizeQuat(float& w,float& x,float& y,float& z) {
         const float n = std::sqrt(w*w+x*x+y*y+z*z);
         if (n > 1e-9f) { w/=n; x/=n; y/=n; z/=n; }
         else { w=1; x=y=z=0; }
@@ -432,7 +432,7 @@ private:
     SetpointLocalNED m_spCurrent{};
     uint64_t m_streamPeriodUs{50000}; // 20Hz
 
-    static inline uint32_t time_boot_ms()
+    static inline uint32_t TimeBootMs()
     {
         using namespace std::chrono;
         return (uint32_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
@@ -443,7 +443,7 @@ private:
     uint8_t m_compid;
     uint8_t m_seq;
 
-    static speed_t baudToTermios(int baud) {
+    static speed_t BaudToTermios(int baud) {
         switch (baud) {
             case 57600: return B57600;
             case 115200: return B115200;
@@ -455,7 +455,7 @@ private:
         }
     }
 
-    void openSerial(const std::string& dev, int baud) {
+    void OpenSerial(const std::string& dev, int baud) {
         m_fd = ::open(dev.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
         if (m_fd < 0) {
             throw std::runtime_error("open(" + dev + ") failed: " + std::string(std::strerror(errno)));
@@ -483,7 +483,7 @@ private:
         tio.c_iflag &= ~(IXON | IXOFF | IXANY);
 
         // set baud
-        speed_t spd = baudToTermios(baud);
+        speed_t spd = BaudToTermios(baud);
         cfsetispeed(&tio, spd);
         cfsetospeed(&tio, spd);
 
@@ -500,7 +500,7 @@ private:
         if (flags >= 0) fcntl(m_fd, F_SETFL, flags & ~O_NONBLOCK);
     }
 
-    void writeMessage(const mavlink_message_t& msg) {
+    void WriteMessage(const mavlink_message_t& msg) {
         uint8_t buf[MAVLINK_MAX_PACKET_LEN];
         const uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
         ssize_t n = ::write(m_fd, buf, len);
@@ -512,7 +512,7 @@ private:
     struct AckInfo {
         uint8_t result = 255; // MAV_RESULT (0..), 255=unknown
         uint8_t progress = 0; // MAVLink2 才有，common v2 支持
-        int32_t result_param2 = 0;
+        int32_t resultParam2 = 0;
         std::chrono::steady_clock::time_point t;
     };
 
@@ -526,7 +526,7 @@ private:
     std::atomic<uint8_t> m_px4Sysid{1};
     std::atomic<uint8_t> m_px4Compid{1};
 
-    static const char* mavResultToStr(uint8_t r)
+    static const char* MavResultToStr(uint8_t r)
     {
         switch (r) {
             case MAV_RESULT_ACCEPTED: return "ACCEPTED";
@@ -539,7 +539,7 @@ private:
         }
     }
 
-    void rxLoop()
+    void RxLoop()
     {
         mavlink_message_t msg{};
         mavlink_status_t status{};
@@ -560,13 +560,13 @@ private:
 
             for (ssize_t i = 0; i < n; i++) {
                 if (mavlink_parse_char(MAVLINK_COMM_0, buf[i], &msg, &status)) {
-                    handleMavlinkMessage(msg);
+                    HandleMavlinkMessage(msg);
                 }
             }
         }
     }
 
-    void handleMavlinkMessage(const mavlink_message_t& msg)
+    void HandleMavlinkMessage(const mavlink_message_t& msg)
     {
         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
             mavlink_heartbeat_t hb{};
@@ -586,7 +586,7 @@ private:
             AckInfo info;
             info.result = ack.result;
             info.progress = ack.progress;          // mavlink2 才有效
-            info.result_param2 = ack.result_param2;
+            info.resultParam2 = ack.result_param2;
             info.t = std::chrono::steady_clock::now();
 
             {
@@ -596,7 +596,7 @@ private:
             m_ackCv.notify_all();
 
             printf("[ACK] sys=%d, comp=%d cmd=%u result= %d(%s) progress=%d param2=%d\n",
-                int(msg.sysid), int(msg.compid), ack.command, int(ack.result), mavResultToStr(ack.result),
+                int(msg.sysid), int(msg.compid), ack.command, int(ack.result), MavResultToStr(ack.result),
                 int(ack.progress), ack.result_param2);
             return;
         }
@@ -617,7 +617,7 @@ private:
 };
 
 // Helper: monotonic microseconds
-static inline uint64_t mono_time_us() {
+static inline uint64_t MonoTimeUs() {
     using namespace std::chrono;
     return duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
 }
