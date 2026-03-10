@@ -19,6 +19,7 @@
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <limits>
 #include <optional>
 #include <string>
 #include <sys/ioctl.h>
@@ -510,10 +511,12 @@ class LibcameraStereoOV9281 {
 public:
   bool Open(int w, int h, int fps,
             bool aeDisable, int exposureUs, float gain,
-            int maxPairQueue = 8, uint64_t pairTolNs = 15000000) {
+            int maxPairQueue = 8, uint64_t pairTolNs = 15000000,
+            size_t pairSearchWindow = 6) {
     m_w = w; m_h = h; m_fps = fps;
     m_maxPairQueue = maxPairQueue;
     m_pairTolNs = pairTolNs;
+    m_pairSearchWindow = std::max<size_t>(1, pairSearchWindow);
 
     m_cm = std::make_unique<CameraManager>();
     if (m_cm->start()) {
@@ -576,25 +579,80 @@ public:
   }
 
   uint64_t PairTolNs() const { return m_pairTolNs; }
+  uint64_t PairAttempts() const { return m_pairAttempts.load(); }
+  uint64_t PairSuccesses() const { return m_pairSuccess.load(); }
+  uint64_t DropLeftCount() const { return m_dropLeft.load(); }
+  uint64_t DropRightCount() const { return m_dropRight.load(); }
+  uint64_t MaxMissDtNs() const { return m_maxMissDtNs.load(); }
 
 private:
+  static FrameItem PopAt(std::deque<FrameItem> &q, size_t idx) {
+    FrameItem item = std::move(q[idx]);
+    q.erase(q.begin() + static_cast<std::ptrdiff_t>(idx));
+    return item;
+  }
+
   void TryPairLocked() {
     while (!m_qL.empty() && !m_qR.empty()) {
-      uint64_t tL = m_qL.front().tsNs;
-      uint64_t tR = m_qR.front().tsNs;
+      const size_t nL = std::min(m_qL.size(), m_pairSearchWindow);
+      const size_t nR = std::min(m_qR.size(), m_pairSearchWindow);
 
-      int64_t dt = (int64_t)tL - (int64_t)tR;
-      uint64_t adt = (dt < 0) ? (uint64_t)(-dt) : (uint64_t)dt;
+      size_t bestL = 0;
+      size_t bestR = 0;
+      uint64_t bestDt = std::numeric_limits<uint64_t>::max();
+      bool found = false;
 
-      if (adt <= m_pairTolNs) {
-        auto L = std::move(m_qL.front()); m_qL.pop_front();
-        auto R = std::move(m_qR.front()); m_qR.pop_front();
+      for (size_t i = 0; i < nL; ++i) {
+        for (size_t j = 0; j < nR; ++j) {
+          int64_t dt = (int64_t)m_qL[i].tsNs - (int64_t)m_qR[j].tsNs;
+          uint64_t adt = (dt < 0) ? (uint64_t)(-dt) : (uint64_t)dt;
+          m_pairAttempts.fetch_add(1);
+          if (!found || adt < bestDt) {
+            bestDt = adt;
+            bestL = i;
+            bestR = j;
+            found = true;
+          }
+        }
+      }
+
+      if (!found) break;
+
+      if (bestDt <= m_pairTolNs) {
+        auto L = PopAt(m_qL, bestL);
+        auto R = PopAt(m_qR, bestR);
         m_pairedRaw.push_back({std::move(L), std::move(R)});
         while ((int)m_pairedRaw.size() > m_maxPairQueue) m_pairedRaw.pop_front();
+        m_pairSuccess.fetch_add(1);
         m_cv.notify_one();
       } else {
-        if (tL < tR) m_qL.pop_front();
-        else m_qR.pop_front();
+        uint64_t prevMax = m_maxMissDtNs.load();
+        while (bestDt > prevMax && !m_maxMissDtNs.compare_exchange_weak(prevMax, bestDt)) {}
+
+        const bool leftWindowFull = m_qL.size() >= m_pairSearchWindow;
+        const bool rightWindowFull = m_qR.size() >= m_pairSearchWindow;
+        if (!leftWindowFull && !rightWindowFull) break;
+
+        if (m_qL.front().tsNs < m_qR.front().tsNs) {
+          m_qL.pop_front();
+          m_dropLeft.fetch_add(1);
+        } else {
+          m_qR.pop_front();
+          m_dropRight.fetch_add(1);
+        }
+
+        int64_t nowNs = NowNs();
+        if (nowNs - m_lastDiagNs > 1000000000LL) {
+          m_lastDiagNs = nowNs;
+          std::cerr << "[pair-diag] attempts=" << m_pairAttempts.load()
+                    << " ok=" << m_pairSuccess.load()
+                    << " dropL=" << m_dropLeft.load()
+                    << " dropR=" << m_dropRight.load()
+                    << " miss_dt_us=" << (bestDt / 1000.0)
+                    << " max_miss_dt_us=" << (m_maxMissDtNs.load() / 1000.0)
+                    << " tol_us=" << (m_pairTolNs / 1000.0)
+                    << " search_window=" << m_pairSearchWindow << "\n";
+        }
       }
     }
   }
@@ -602,6 +660,7 @@ private:
   int m_w{1280}, m_h{800}, m_fps{60};
   int m_maxPairQueue{8};
   uint64_t m_pairTolNs{1000000};
+  size_t m_pairSearchWindow{6};
 
   std::unique_ptr<CameraManager> m_cm;
   std::shared_ptr<Camera> m_camL, m_camR;
@@ -611,6 +670,12 @@ private:
   std::condition_variable m_cv;
   std::deque<FrameItem> m_qL, m_qR;
   std::deque<std::pair<FrameItem, FrameItem>> m_pairedRaw;
+  std::atomic<uint64_t> m_pairAttempts{0};
+  std::atomic<uint64_t> m_pairSuccess{0};
+  std::atomic<uint64_t> m_dropLeft{0};
+  std::atomic<uint64_t> m_dropRight{0};
+  std::atomic<uint64_t> m_maxMissDtNs{0};
+  int64_t m_lastDiagNs{0};
 };
 
 static void EnsureDir(const fs::path &p) {
@@ -665,14 +730,16 @@ int main(int argc, char **argv) {
   const std::string gpiochip = GetArgS(argc, argv, "--gpiochip", "/dev/gpiochip0");
   const unsigned drdyLine = (unsigned)GetArgI(argc, argv, "--drdy", 24);
   const int imuHz = GetArgI(argc, argv, "--imu-hz", 400);
-  const int pairTolUs = GetArgI(argc, argv, "--pair-tol-us", 2000);
-  const int64_t offRejectNs = GetArgI64(argc, argv, "--off-reject-ns", 5'000'000);
+  const int pairTolUs = GetArgI(argc, argv, "--pair-tol-us", 15000);
+  const int pairSearchWindow = GetArgI(argc, argv, "--pair-search-window", 6);
+  const int64_t offRejectNs = GetArgI64(argc, argv, "--off-reject-ns", 20'000'000);
 
   const int imuFlushEvery = GetArgI(argc, argv, "--imu-flush-every", 800);
   const int drdyBurst = GetArgI(argc, argv, "--drdy-burst", 256);
 
   const int max_frames = GetArgI(argc, argv, "--max-frames", -1);
-  const int warmupPairs = GetArgI(argc, argv, "--warmup", 60);
+  const int warmupPairs = GetArgI(argc, argv, "--warmup", 20);
+  const int warmupTimeoutMs = GetArgI(argc, argv, "--warmup-timeout-ms", 15000);
 
   std::cerr << "out=" << outRoot << "\n";
   std::cerr << "cam " << w << "x" << h << " @" << fps
@@ -685,6 +752,7 @@ int main(int argc, char **argv) {
             << " imuFlushEvery=" << imuFlushEvery
             << " drdyBurst=" << drdyBurst << "\n";
   std::cerr << "pairTolUs=" << pairTolUs
+            << " pairSearchWindow=" << pairSearchWindow
             << " offRejectNs=" << offRejectNs << "\n";
 
   fs::path root(outRoot);
@@ -768,7 +836,8 @@ int main(int argc, char **argv) {
           exposureUs,
           gain,
           8,
-          static_cast<uint64_t>(std::max(1, pairTolUs)) * 1000ULL)) {
+          static_cast<uint64_t>(std::max(1, pairTolUs)) * 1000ULL,
+          static_cast<size_t>(std::max(1, pairSearchWindow)))) {
     g_runningFlag.store(false);
     if (imuThread.joinable()) imuThread.join();
     return 1;
@@ -777,10 +846,34 @@ int main(int argc, char **argv) {
   std::vector<int64_t> offs;
   offs.reserve(std::max(10, warmupPairs));
 
-  std::cerr << "Warmup for ts_offset... pairs=" << warmupPairs << "\n";
+  std::cerr << "Warmup for ts_offset... pairs=" << warmupPairs
+            << " timeoutMs=" << warmupTimeoutMs << "\n";
+  const int64_t warmupStartNs = NowNs();
+  int64_t lastWarmupDiagNs = warmupStartNs;
   for (int i = 0; i < warmupPairs && g_runningFlag.load(); ) {
+    if (warmupTimeoutMs > 0 &&
+        (NowNs() - warmupStartNs) > int64_t(warmupTimeoutMs) * 1000000LL) {
+      std::cerr << "Warmup timeout after " << warmupTimeoutMs
+                << " ms, collected " << offs.size() << "/" << warmupPairs
+                << " pairs. Proceeding with current estimate.\n";
+      break;
+    }
+
     FrameItem L, R;
-    if (!cam.GrabPair(L, R, 1000)) continue;
+    if (!cam.GrabPair(L, R, 1000)) {
+      int64_t nowNs = NowNs();
+      if (nowNs - lastWarmupDiagNs > 1000000000LL) {
+        lastWarmupDiagNs = nowNs;
+        std::cerr << "[warmup] pairs=" << offs.size() << "/" << warmupPairs
+                  << " pairAttempts=" << cam.PairAttempts()
+                  << " ok=" << cam.PairSuccesses()
+                  << " dropL=" << cam.DropLeftCount()
+                  << " dropR=" << cam.DropRightCount()
+                  << " maxMissDtUs=" << (cam.MaxMissDtNs() / 1000.0)
+                  << " imuOk=" << (imuOk.load() ? "true" : "false") << "\n";
+      }
+      continue;
+    }
 
     int64_t camTs = (int64_t)((L.tsNs + R.tsNs)/2);
     int64_t arrive = (L.arriveNs && R.arriveNs) ? (L.arriveNs + R.arriveNs)/2 : NowNs();
@@ -795,7 +888,13 @@ int main(int argc, char **argv) {
     std::cerr << "Init tsOffsetNs(median)=" << tsOffsetNs
               << " range=[" << mino << "," << maxo << "] ns\n";
   } else {
-    std::cerr << "Warmup failed: no frames, ts_offset=0\n";
+    std::cerr << "Warmup failed: no paired frames, ts_offset=0"
+              << " pairAttempts=" << cam.PairAttempts()
+              << " ok=" << cam.PairSuccesses()
+              << " dropL=" << cam.DropLeftCount()
+              << " dropR=" << cam.DropRightCount()
+              << " maxMissDtUs=" << (cam.MaxMissDtNs() / 1000.0)
+              << " imuOk=" << (imuOk.load() ? "true" : "false") << "\n";
   }
 
   int saved = 0;
@@ -849,8 +948,8 @@ int main(int argc, char **argv) {
     std::fprintf(fCam0, "%lld,%s\n", (long long)leftNs, nameL.c_str());
     std::fprintf(fCam1, "%lld,%s\n", (long long)rightNs, nameR.c_str());
 
-    udp.Enqueue(0, g_seq, leftNs, L.gray);
-    udp.Enqueue(1, g_seq++, rightNs, R.gray);
+    udp.Enqueue(0, g_seq, leftNs * 1e-9, L.gray);
+    udp.Enqueue(1, g_seq++, rightNs * 1e-9, R.gray);
     if ((saved % 50) == 0) {
       std::fflush(fCam0); std::fflush(fCam1);
       std::cerr << "saved pairs=" << saved << "\n";

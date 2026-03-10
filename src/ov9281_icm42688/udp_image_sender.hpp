@@ -37,30 +37,38 @@ class UdpImageSender {
         }
 
         m_running.store(true);
-        m_th = std::thread([&] { Loop(); });
+        for (int cam = 0; cam < 2; ++cam) {
+            m_th[cam] = std::thread([this, cam] { Loop(cam); });
+        }
         return true;
     }
 
     void Close()
     {
         m_running.store(false);
-        m_cv.notify_all();
-        if (m_th.joinable())
-            m_th.join();
+        for (int cam = 0; cam < 2; ++cam) {
+            m_cv[cam].notify_all();
+        }
+        for (int cam = 0; cam < 2; ++cam) {
+            if (m_th[cam].joinable())
+                m_th[cam].join();
+        }
         if (m_sock >= 0) {
             ::close(m_sock);
             m_sock = -1;
         }
         {
-            std::lock_guard<std::mutex> lk(m_mu);
-            m_q.clear();
+            for (int cam = 0; cam < 2; ++cam) {
+                std::lock_guard<std::mutex> lk(m_mu[cam]);
+                m_q[cam].clear();
+            }
         }
     }
 
     // called from SLAM thread (non-blocking-ish)
     void Enqueue(int camIndex, uint32_t seq, double frameTime, const cv::Mat &gray)
     {
-        if (m_sock < 0)
+        if (m_sock < 0 || camIndex < 0 || camIndex > 1)
             return;
         Job job;
         job.camIndex = camIndex;
@@ -69,12 +77,12 @@ class UdpImageSender {
         job.gray = gray.clone(); // IMPORTANT: own data (libcamera buffer will be reused)
 
         {
-            std::lock_guard<std::mutex> lk(m_mu);
-            m_q.push_back(std::move(job));
-            while ((int)m_q.size() > m_maxQueue)
-                m_q.pop_front(); // drop old to keep real-time
+            std::lock_guard<std::mutex> lk(m_mu[camIndex]);
+            m_q[camIndex].push_back(std::move(job));
+            while ((int)m_q[camIndex].size() > m_maxQueue)
+                m_q[camIndex].pop_front(); // drop old to keep real-time
         }
-        m_cv.notify_one();
+        m_cv[camIndex].notify_one();
     }
 
   private:
@@ -94,7 +102,7 @@ class UdpImageSender {
     };
 #pragma pack(pop)
 
-    void Loop()
+    void Loop(int camIndex)
     {
         std::vector<uchar> jpeg;
         std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, m_jpegQuality};
@@ -102,12 +110,12 @@ class UdpImageSender {
         while (m_running.load()) {
             Job job;
             {
-                std::unique_lock<std::mutex> lk(m_mu);
-                m_cv.wait(lk, [&] { return !m_running.load() || !m_q.empty(); });
+                std::unique_lock<std::mutex> lk(m_mu[camIndex]);
+                m_cv[camIndex].wait(lk, [&] { return !m_running.load() || !m_q[camIndex].empty(); });
                 if (!m_running.load())
                     break;
-                job = std::move(m_q.front());
-                m_q.pop_front();
+                job = std::move(m_q[camIndex].front());
+                m_q[camIndex].pop_front();
             }
 
             // encode
@@ -164,10 +172,10 @@ class UdpImageSender {
     int m_maxQueue{4};
 
     std::atomic<bool> m_running{false};
-    std::thread m_th;
-    std::mutex m_mu;
-    std::condition_variable m_cv;
-    std::deque<Job> m_q;
+    std::thread m_th[2];
+    std::mutex m_mu[2];
+    std::condition_variable m_cv[2];
+    std::deque<Job> m_q[2];
 
     std::atomic<uint32_t> m_frameId{1};
 };
