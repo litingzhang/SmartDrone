@@ -40,8 +40,6 @@
 #include "../udp_server/tlv_parser.hpp"
 #include "../udp_server/udp_server.hpp"
 
-// Build shortcut: embed the router implementation so this entry target can use udp_server
-// without requiring a separate link step update.
 #include "../udp_server/tlv_cmd_router.cpp"
 
 namespace {
@@ -537,8 +535,6 @@ int main(int argc, char **argv)
 
     const std::string& vocab = appConfig.vocab;
     const std::string& settings = appConfig.settings;
-
-    // Temporary aliases kept to minimize changes in the main processing loop.
     const int w = runtimeAliases.width;
     const int h = runtimeAliases.height;
     const int fps = runtimeAliases.fps;
@@ -561,7 +557,6 @@ int main(int argc, char **argv)
 
     PrintStartupConfig(appConfig, runtimeAliases);
     Logger::Init("./stereo_vslam.log", 32 * 1024 * 1024, Logger::INFO, true);
-    // ORB-SLAM3 init
     ORB_SLAM3::System SLAM(vocab, settings, ORB_SLAM3::System::STEREO, false);
     MavlinkSerial mav("/dev/ttyAMA0", 921600);
     mav.StartRx();
@@ -569,7 +564,6 @@ int main(int argc, char **argv)
     console.Start();
     Px4UdpHooks udpHooks(mav);
     std::thread udpCmdThread = StartUdpCommandThread(udpPort, udpHooks);
-    // UDP sender (optional)
     UdpImageSender udp;
     if (udpEnable) {
         if (!udp.Open(udpIp, udpPort, udpJpegQ, udpPayload, udpQueue)) {
@@ -578,12 +572,8 @@ int main(int argc, char **argv)
             std::cerr << "[udp] sending to " << udpIp << ":" << udpPort << "\n";
         }
     }
-
-    // IMU thread
     ImuThreadState imuState;
     std::thread imuThread = StartImuThread(runtimeAliases, imuState);
-
-    // Stereo camera
     LibcameraStereoOV9281_TsPair cam;
     if (!OpenAndConfigureCamera(cam, runtimeAliases, imuThread, udpCmdThread)) {
         return 1;
@@ -601,7 +591,7 @@ int main(int argc, char **argv)
     const int64_t slackBeforeNs = std::max<int64_t>(2 * imuDtNs, 5'000'000);
     const int64_t slackAfterNs = std::max<int64_t>(2 * imuDtNs, 5'000'000);
 
-    mav.UpdateStreamPosition(0.0f, 0.0f, -0.3f, NAN); // NED: z=-0.3 表示向上 0.3m
+    mav.UpdateStreamPosition(0.0f, 0.0f, -0.3f, NAN);
 
     while (g_runningFlag.load()) {
         FrameItem L, R;

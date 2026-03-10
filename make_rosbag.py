@@ -4,15 +4,15 @@
 Make ROS1 bag for Kalibr from your recorder outputs.
 
 Assumptions (matches your C++ recorder):
-- cam0_dir / cam1_dir contain images named "<timestamp_ns>.png" (or .jpg/.jpeg/.bmp/.tiff)
-  where timestamp_ns is an integer nanoseconds (monotonic-domain-ish).
+- cam0_dir / cam1_dir either contain `data.csv` with `timestamp_ns,filename`,
+  or images named "<timestamp_ns>.png" (or .jpg/.jpeg/.bmp/.tiff).
 - imu.csv columns (your C++ fprintf):
   #timestamp [ns],w_x [rad/s],w_y [rad/s],w_z [rad/s],a_x [m/s^2],a_y [m/s^2],a_z [m/s^2]
   i.e. gyro first, accel last.
 
 Key fixes vs your buggy script:
 1) IMU column order is corrected (gyro first, accel last).
-2) Do NOT "make_monotonic" for cameras (keeps stereo timestamps identical).
+2) Camera timestamps are preserved as recorded; no synthetic camera monotonic fixup.
 3) Only enforce strict monotonicity for IMU if needed.
 4) Use integer ns -> rospy.Time(secs,nsecs) to avoid float precision issues.
 """
@@ -56,6 +56,34 @@ def list_images_ns(dirpath: str):
             items.append((t_ns, os.path.join(dirpath, name)))
     items.sort(key=lambda x: x[0])
     return items
+
+
+def list_images_from_csv(dirpath: str):
+    csv_path = os.path.join(dirpath, "data.csv")
+    if not os.path.isfile(csv_path):
+        return None
+
+    items = []
+    with open(csv_path, "r", newline="") as f:
+        r = csv.reader(f)
+        for row in r:
+            if not row:
+                continue
+            if row[0].startswith("#") or row[0].startswith("timestamp") or len(row) < 2:
+                continue
+            t_ns = int(float(row[0]))
+            path = os.path.join(dirpath, row[1])
+            items.append((t_ns, path))
+
+    items.sort(key=lambda x: x[0])
+    return items
+
+
+def load_camera_items(dirpath: str):
+    items = list_images_from_csv(dirpath)
+    if items is not None:
+        return items
+    return list_images_ns(dirpath)
 
 
 def read_imu_csv_ns(path: str):
@@ -108,8 +136,8 @@ def main():
     if not os.path.isfile(imu_csv):
         raise RuntimeError(f"IMU csv not found: {imu_csv}")
 
-    cam0 = list_images_ns(cam0_dir)
-    cam1 = list_images_ns(cam1_dir)
+    cam0 = load_camera_items(cam0_dir)
+    cam1 = load_camera_items(cam1_dir)
     imu  = read_imu_csv_ns(imu_csv)
 
     if not cam0:
@@ -138,7 +166,7 @@ def main():
     print(f"[info] writing: {out_bag}")
 
     with rosbag.Bag(out_bag, "w") as bag:
-        # ---- write cameras (NO monotonic forcing, keep stereo stamps identical) ----
+        # ---- write cameras (preserve recorder timestamps as-is) ----
         for topic, items, frame_id in [
             ("/cam0/image_raw", cam0, "cam0"),
             ("/cam1/image_raw", cam1, "cam1"),

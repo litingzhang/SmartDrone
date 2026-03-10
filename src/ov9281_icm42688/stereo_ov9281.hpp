@@ -12,7 +12,7 @@ static void SigIntHandler(int) { g_runningFlag.store(false); }
 struct FrameItem {
     int camIndex{-1};    // 0 left, 1 right
     uint64_t tsNs{0};    // libcamera metadata timestamp
-    uint32_t seq{0};      // libcamera metadata sequence（diagnostic only）
+    uint32_t seq{0};
     int64_t arriveNs{0}; // NowNs() at callback
     cv::Mat gray;         // CV_8UC1
 };

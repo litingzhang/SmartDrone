@@ -1,1 +1,1 @@
-# SmartDrone
+# stereo_vslam

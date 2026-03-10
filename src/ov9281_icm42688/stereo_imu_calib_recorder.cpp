@@ -1,29 +1,3 @@
-// stereo_imu_calib_recorder.cpp
-//
-// 功能：双目(OV9281/libcamera PiSP, 强制 ISP 输出 YUV420 仅取Y平面) + ICM42688(SPI+DRDY) 标定数据录制
-// 输出：EuRoC 风格目录：
-//   <out>/mav0/cam0/data/*.png + <out>/mav0/cam0/data.csv
-//   <out>/mav0/cam1/data/*.png + <out>/mav0/cam1/data.csv
-//   <out>/mav0/imu0/data.csv
-//
-// 编译（示例）:
-// g++ stereo_imu_calib_recorder.cpp -O3 -std=c++17 \
-//   `pkg-config --cflags --libs libcamera opencv4 libgpiod` \
-//   -lpthread -o stereo_imu_calib_recorder
-//
-// 运行（示例）:
-// ./stereo_imu_calib_recorder \
-//   --out /home/ltz/calib_01 \
-//   --w 1280 --h 800 --fps 30 \
-//   --exp-us 3000 --gain 2 --ae-disable \
-//   --spi /dev/spidev0.0 --speed 8000000 --mode 0 --bits 8 \
-//   --gpiochip /dev/gpiochip0 --drdy 24 --imu-hz 400
-//
-// 改进点（400Hz稳定版）：
-// 1) setvbuf() 增大 csv 缓冲，降低写盘抖动
-// 2) DRDY 一次读多条 edge event，避免 event 堆积导致 IMU 时间戳落后
-// 3) 支持 --imu-flush-every N：每 N 行 flush 一次（默认 800）
-
 #include <libcamera/libcamera.h>
 #include <libcamera/framebuffer_allocator.h>
 
@@ -54,21 +28,20 @@
 #include <vector>
 #include <filesystem>
 #include <algorithm>
-
+#include "udp_image_sender.hpp"
 using namespace libcamera;
 namespace fs = std::filesystem;
 
 static std::atomic<bool> g_runningFlag{true};
 static void SigIntHandler(int) { g_runningFlag.store(false); }
+static uint32_t g_seq = 0;
 
-// ---------------- time util ----------------
 static int64_t NowNs() {
   timespec ts{};
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return int64_t(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
 }
 
-// ---------------- mmap helpers ----------------
 static void *MMapFD(int fd, size_t len, off_t off = 0) {
   void *p = mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, off);
   if (p == MAP_FAILED) return nullptr;
@@ -83,13 +56,16 @@ struct PlaneMap {
   size_t len{0};
 };
 
-// ---------------- args ----------------
 static std::string GetArgS(int argc, char **argv, const char *name, const char *def) {
   for (int i = 1; i + 1 < argc; i++) if (std::string(argv[i]) == name) return argv[i + 1];
   return def;
 }
 static int GetArgI(int argc, char **argv, const char *name, int def) {
   for (int i = 1; i + 1 < argc; i++) if (std::string(argv[i]) == name) return std::stoi(argv[i + 1]);
+  return def;
+}
+static int64_t GetArgI64(int argc, char **argv, const char *name, int64_t def) {
+  for (int i = 1; i + 1 < argc; i++) if (std::string(argv[i]) == name) return std::stoll(argv[i + 1]);
   return def;
 }
 static float GetArgF(int argc, char **argv, const char *name, float def) {
@@ -101,12 +77,10 @@ static bool HasArg(int argc, char **argv, const char *name) {
   return false;
 }
 
-// ---------------- IMU (ICM42688) ----------------
 static inline int16_t Be16ToI16(uint8_t hi, uint8_t lo) {
   return (int16_t)((uint16_t(hi) << 8) | uint16_t(lo));
 }
 
-// Bank0 registers (subset)
 static constexpr uint8_t REG_DEVICE_CONFIG   = 0x11;
 static constexpr uint8_t REG_INT_CONFIG      = 0x14;
 static constexpr uint8_t REG_TEMP_DATA1      = 0x1D;
@@ -130,7 +104,7 @@ public:
   explicit SpiDev(std::string dev) : m_dev(std::move(dev)) {}
   ~SpiDev() { if (m_fd >= 0) ::close(m_fd); }
 
-  bool Open(uint32_t speedHz, uint8_t mode, uint8_t bitsPerWord) {
+  bool Open(uint32_t speed_hz, uint8_t mode, uint8_t bitsPerWord) {
     m_fd = ::open(m_dev.c_str(), O_RDWR);
     if (m_fd < 0) {
       std::cerr << "open " << m_dev << " failed: " << strerror(errno) << "\n";
@@ -145,12 +119,12 @@ public:
       std::cerr << "SPI set bits failed: " << strerror(errno) << "\n";
       return false;
     }
-    if (ioctl(m_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speedHz) < 0 ||
-        ioctl(m_fd, SPI_IOC_RD_MAX_SPEED_HZ, &speedHz) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz) < 0 ||
+        ioctl(m_fd, SPI_IOC_RD_MAX_SPEED_HZ, &speed_hz) < 0) {
       std::cerr << "SPI set speed failed: " << strerror(errno) << "\n";
       return false;
     }
-    m_speedHz = speedHz;
+    m_speedHz = speed_hz;
     m_mode = mode;
     m_bits = bitsPerWord;
     return true;
@@ -185,8 +159,8 @@ private:
     tr.tx_buf = (unsigned long)tx;
     tr.rx_buf = (unsigned long)rx;
     tr.len = (uint32_t)len;
-    tr.speedHz = m_speedHz;
-    tr.bitsPerWord = m_bits;
+    tr.speed_hz = m_speedHz;
+    tr.bits_per_word = m_bits;
     tr.delay_usecs = 0;
     if (ioctl(m_fd, SPI_IOC_MESSAGE(1), &tr) < 0) {
       std::cerr << "SPI transfer failed: " << strerror(errno) << "\n";
@@ -249,7 +223,6 @@ public:
     if (m_chip) gpiod_chip_close(m_chip);
   }
 
-  // 关键：一次尽量读多条，返回“最后一条事件”的时间戳，避免堆积
   bool WaitLastTs(int timeoutMs, int64_t &tsNsOut) {
     int64_t timeoutNs = (timeoutMs < 0) ? -1 : (int64_t)timeoutMs * 1000000LL;
     int ret = gpiod_line_request_wait_edge_events(m_request, timeoutNs);
@@ -258,7 +231,6 @@ public:
     int n = gpiod_line_request_read_edge_events(m_request, m_evbuf, (size_t)m_maxBurst);
     if (n <= 0) return false;
 
-    // 取最后一个 event 的时间戳
     struct gpiod_edge_event *evLast = gpiod_edge_event_buffer_get_event(m_evbuf, (size_t)(n - 1));
     if (!evLast) return false;
 
@@ -298,8 +270,8 @@ static bool IcmResetAndConfig(SpiDev &spi, int imuHz) {
   spi.WriteReg(REG_PWR_MGMT0, 0x0F);
   usleep(20000);
 
-  uint8_t gyroFs = 0x00;   // 示例：2000 dps
-  uint8_t accelFs = 0x00;  // 示例：16 g
+  uint8_t gyroFs = 0x00;
+  uint8_t accelFs = 0x00;
 
   uint8_t odr = odrCode(imuHz);
   uint8_t gyro_cfg0  = uint8_t((gyroFs << 5)  | (odr & 0x0F));
@@ -321,8 +293,8 @@ static void ConvertRawToSI(const uint8_t raw[14], ImuSample &s) {
   int16_t gz   = Be16ToI16(raw[12], raw[13]);
 
   constexpr float kG = 9.80665f;
-  constexpr float accelLsbPerG  = 2048.0f; // TODO: 按你的量程修
-  constexpr float gyroLsbPerDps = 16.4f;   // TODO: 按你的量程修
+  constexpr float accelLsbPerG  = 2048.0f;
+  constexpr float gyroLsbPerDps = 16.4f;
 
   s.ax = (float(ax) / accelLsbPerG) * kG;
   s.ay = (float(ay) / accelLsbPerG) * kG;
@@ -334,7 +306,6 @@ static void ConvertRawToSI(const uint8_t raw[14], ImuSample &s) {
   s.gz = (float(gz) / gyroLsbPerDps) * kDeg2Rad;
 }
 
-// ---------------- Stereo camera (libcamera) ----------------
 struct FrameItem {
   int camIndex{-1};
   uint64_t tsNs{0};
@@ -365,7 +336,6 @@ public:
     sc.size.width = w;
     sc.size.height = h;
 
-    // 强制 ISP 输出
     sc.pixelFormat = formats::YUV420;
 
     const int64_t maxFrameUs = 1000000LL / std::max(1, fps);
@@ -373,11 +343,10 @@ public:
     m_controls.set(controls::FrameDurationLimits,
                   Span<const int64_t, 2>({minFrameUs, maxFrameUs}));
 
-    // if (aeDisable) {
       m_controls.set(controls::AeEnable, false);
       m_controls.set(controls::ExposureTime, exposureUs);
       m_controls.set(controls::AnalogueGain, gain);
-    // }
+
 
     CameraConfiguration::Status status = m_config->validate();
     if (status == CameraConfiguration::Invalid) {
@@ -515,7 +484,7 @@ private:
 
     uint8_t *pY = reinterpret_cast<uint8_t *>(mit->second[0].addr);
     cv::Mat yview(h, w, CV_8UC1, (void*)pY, (size_t)strideY);
-    item.gray = yview.clone(); // buffer复用，必须clone
+    item.gray = yview.clone();
 
     if (m_sink) m_sink(std::move(item));
 
@@ -644,7 +613,6 @@ private:
   std::deque<std::pair<FrameItem, FrameItem>> m_pairedRaw;
 };
 
-// ---------------- recorder helpers ----------------
 static void EnsureDir(const fs::path &p) {
   std::error_code ec;
   fs::create_directories(p, ec);
@@ -670,7 +638,7 @@ struct MedianEstimator {
 
 static void SetupFileBuffer(FILE *f, size_t bytes) {
   if (!f) return;
-  // _IOFBF: fully buffered
+
   setvbuf(f, nullptr, _IOFBF, bytes);
 }
 
@@ -679,8 +647,9 @@ int main(int argc, char **argv) {
   signal(SIGTERM, SigIntHandler);
 
   const std::string outRoot = GetArgS(argc, argv, "--out", "./calib_out");
+  const std::string udpIp = GetArgS(argc, argv, "--udp-ip", "10.42.0.109");
+  const int udpPort = GetArgI(argc, argv, "--udp-port", 14550);
 
-  // camera
   const int w = GetArgI(argc, argv, "--w", 1280);
   const int h = GetArgI(argc, argv, "--h", 800);
   const int fps = GetArgI(argc, argv, "--fps", 30);
@@ -688,7 +657,6 @@ int main(int argc, char **argv) {
   const int exposureUs = GetArgI(argc, argv, "--exp-us", 3000);
   const float gain = GetArgF(argc, argv, "--gain", 2.0f);
 
-  // imu
   const std::string spiDev = GetArgS(argc, argv, "--spi", "/dev/spidev0.0");
   const uint32_t spi_speed = (uint32_t)GetArgI(argc, argv, "--speed", 8000000);
   const uint8_t spiMode = (uint8_t)GetArgI(argc, argv, "--mode", 0);
@@ -697,32 +665,40 @@ int main(int argc, char **argv) {
   const std::string gpiochip = GetArgS(argc, argv, "--gpiochip", "/dev/gpiochip0");
   const unsigned drdyLine = (unsigned)GetArgI(argc, argv, "--drdy", 24);
   const int imuHz = GetArgI(argc, argv, "--imu-hz", 400);
+  const int pairTolUs = GetArgI(argc, argv, "--pair-tol-us", 2000);
+  const int64_t offRejectNs = GetArgI64(argc, argv, "--off-reject-ns", 5'000'000);
 
-  const int imuFlushEvery = GetArgI(argc, argv, "--imu-flush-every", 800); // 400Hz: 2秒flush一次
+  const int imuFlushEvery = GetArgI(argc, argv, "--imu-flush-every", 800);
   const int drdyBurst = GetArgI(argc, argv, "--drdy-burst", 256);
 
-  // optional
   const int max_frames = GetArgI(argc, argv, "--max-frames", -1);
   const int warmupPairs = GetArgI(argc, argv, "--warmup", 60);
 
   std::cerr << "out=" << outRoot << "\n";
   std::cerr << "cam " << w << "x" << h << " @" << fps
             << " aeDisable=" << (aeDisable ? "true":"false")
-            << " exp_us=" << exposureUs << " gain=" << gain
-            << " (FORCE ISP YUV420->Y)\n";
+            << " exp_us=" << exposureUs << " gain=" << gain << "\n";
   std::cerr << "imu spi=" << spiDev << " speed=" << spi_speed
             << " mode=" << int(spiMode) << " bits=" << int(spiBits)
             << " drdy=" << gpiochip << ":" << drdyLine
             << " imuHz=" << imuHz
             << " imuFlushEvery=" << imuFlushEvery
             << " drdyBurst=" << drdyBurst << "\n";
+  std::cerr << "pairTolUs=" << pairTolUs
+            << " offRejectNs=" << offRejectNs << "\n";
 
-  // dirs
   fs::path root(outRoot);
   fs::path cam0_data = root / "cam0";
   fs::path cam1_data = root / "cam1";
   EnsureDir(cam0_data);
   EnsureDir(cam1_data);
+
+  UdpImageSender udp;
+  if (!udp.Open(udpIp, udpPort, 45)) {
+      std::cerr << "[udp] open failed, continue without udp.\n";
+  } else {
+      std::cerr << "[udp] sending to " << udpIp << ":" << udpPort << "\n";
+  }
 
   FILE *fCam0 = std::fopen((root / "cam0" / "data.csv").c_str(), "w");
   FILE *fCam1 = std::fopen((root / "cam1" / "data.csv").c_str(), "w");
@@ -732,7 +708,6 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // 给 csv 大缓冲：减少 400Hz 下的写盘抖动
   SetupFileBuffer(fCam0, 1 << 20);
   SetupFileBuffer(fCam1, 1 << 20);
   SetupFileBuffer(fImu,  4 << 20); // imu 行数更多，给大点
@@ -741,7 +716,6 @@ int main(int argc, char **argv) {
   std::fprintf(fCam1, "#timestamp [ns],filename\n");
   std::fprintf(fImu,  "#timestamp [ns],wX [rad/s],wY [rad/s],wZ [rad/s],aX [m/s^2],aY [m/s^2],aZ [m/s^2]\n");
 
-  // IMU thread
   std::atomic<bool> imuOk{false};
   std::thread imuThread([&](){
     SpiDev spi(spiDev);
@@ -766,8 +740,7 @@ int main(int argc, char **argv) {
       ImuSample s{};
       s.tNs = tIrqNs;
 
-      // 读取一帧 IMU（注意：如果你想“每个 DRDY 事件都对应一帧”，需要循环读 n 次；
-      // 这里策略是：取最后一个 DRDY 时间戳，读当前寄存器快照——防止 event 堆积时延迟扩大）
+
       spi.ReadReg(REG_INT_STATUS, st);
       if (!spi.ReadRegs(REG_TEMP_DATA1, raw, sizeof(raw))) continue;
       ConvertRawToSI(raw, s);
@@ -786,15 +759,21 @@ int main(int argc, char **argv) {
     std::fflush(fImu);
   });
 
-  // Camera
   LibcameraStereoOV9281 cam;
-  if (!cam.Open(w, h, fps, aeDisable, exposureUs, gain)) {
+  if (!cam.Open(
+          w,
+          h,
+          fps,
+          aeDisable,
+          exposureUs,
+          gain,
+          8,
+          static_cast<uint64_t>(std::max(1, pairTolUs)) * 1000ULL)) {
     g_runningFlag.store(false);
     if (imuThread.joinable()) imuThread.join();
     return 1;
   }
 
-  // warmup estimate tsOffsetNs (NowNs domain - camera ts domain)
   std::vector<int64_t> offs;
   offs.reserve(std::max(10, warmupPairs));
 
@@ -819,9 +798,9 @@ int main(int argc, char **argv) {
     std::cerr << "Warmup failed: no frames, ts_offset=0\n";
   }
 
-  // record loop
   int saved = 0;
-  int64_t lastPairNs = 0;
+  int64_t lastLeftNs = 0;
+  int64_t lastRightNs = 0;
 
   std::cerr << "Recording... press Ctrl+C to stop\n";
   while (g_runningFlag.load()) {
@@ -832,20 +811,31 @@ int main(int argc, char **argv) {
 
     int64_t dtLr = (int64_t)L.tsNs - (int64_t)R.tsNs;
     if ((saved % 30) == 0) {
-      std::cerr << "[pair] dt_lr_us=" << (std::llabs(dtLr) / 1000.0)
+      std::cerr << "[pair] dt_lr_us=" << ((dtLr < 0 ? -dtLr : dtLr) / 1000.0)
                 << " tol_us=" << (cam.PairTolNs()/1000.0) << "\n";
       std::cerr << "[imu] ok=" << (imuOk.load() ? "true" : "false") << "\n";
     }
 
     int64_t camTs = (int64_t)((L.tsNs + R.tsNs)/2);
-    int64_t pairNs = camTs + tsOffsetNs;
+    int64_t arrive = (L.arriveNs && R.arriveNs) ? (L.arriveNs + R.arriveNs)/2 : NowNs();
+    int64_t off_meas = arrive - camTs;
+    int64_t err = off_meas - tsOffsetNs;
+    if ((err < 0 ? -err : err) < offRejectNs) {
+      tsOffsetNs += (err >> 6);
+    }
 
-    if (lastPairNs != 0 && pairNs <= lastPairNs) pairNs = lastPairNs + 1;
-    lastPairNs = pairNs;
+    int64_t leftNs = (int64_t)L.tsNs + tsOffsetNs;
+    int64_t rightNs = (int64_t)R.tsNs + tsOffsetNs;
 
-    const std::string name = TsToName(pairNs);
-    const fs::path fnL = cam0_data / name;
-    const fs::path fnR = cam1_data / name;
+    if (lastLeftNs != 0 && leftNs <= lastLeftNs) leftNs = lastLeftNs + 1;
+    if (lastRightNs != 0 && rightNs <= lastRightNs) rightNs = lastRightNs + 1;
+    lastLeftNs = leftNs;
+    lastRightNs = rightNs;
+
+    const std::string nameL = TsToName(leftNs);
+    const std::string nameR = TsToName(rightNs);
+    const fs::path fnL = cam0_data / nameL;
+    const fs::path fnR = cam1_data / nameR;
 
     if (!cv::imwrite(fnL.string(), L.gray)) {
       std::cerr << "imwrite failed: " << fnL << "\n";
@@ -856,9 +846,11 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    std::fprintf(fCam0, "%lld,%s\n", (long long)pairNs, name.c_str());
-    std::fprintf(fCam1, "%lld,%s\n", (long long)pairNs, name.c_str());
+    std::fprintf(fCam0, "%lld,%s\n", (long long)leftNs, nameL.c_str());
+    std::fprintf(fCam1, "%lld,%s\n", (long long)rightNs, nameR.c_str());
 
+    udp.Enqueue(0, g_seq, leftNs, L.gray);
+    udp.Enqueue(1, g_seq++, rightNs, R.gray);
     if ((saved % 50) == 0) {
       std::fflush(fCam0); std::fflush(fCam1);
       std::cerr << "saved pairs=" << saved << "\n";
