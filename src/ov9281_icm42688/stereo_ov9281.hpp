@@ -84,6 +84,9 @@ class LibcameraMonoCam {
             sc.pixelFormat = formats::R8; // mono 8-bit
         }
 
+        std::cerr << "[cam" << m_camIndex << "] request fmt=" << sc.pixelFormat.toString()
+                  << " size=" << sc.size.toString() << "\n";
+
         const int64_t us = std::max<int64_t>(1, 1000000LL / std::max(1, fps));
         m_controls.set(controls::FrameDurationLimits, Span<const int64_t, 2>({us, us}));
 
@@ -99,10 +102,21 @@ class LibcameraMonoCam {
             return false;
         }
 
+        std::cerr << "[cam" << m_camIndex << "] validate status="
+                  << (status == CameraConfiguration::Adjusted ? "Adjusted" : "Valid")
+                  << " fmt=" << m_config->at(0).pixelFormat.toString()
+                  << " size=" << m_config->at(0).size.toString()
+                  << " stride=" << m_config->at(0).stride << "\n";
+
         if (m_cam->configure(m_config.get())) {
             std::cerr << "Failed to configure camera\n";
             return false;
         }
+
+        std::cerr << "[cam" << m_camIndex << "] configured fmt="
+                  << m_config->at(0).pixelFormat.toString()
+                  << " size=" << m_config->at(0).size.toString()
+                  << " stride=" << m_config->at(0).stride << "\n";
 
         m_stream = sc.stream();
         if (!m_stream) {
@@ -642,7 +656,7 @@ class LibcameraStereoOV9281_TsPair {
     }
 
   private:
-    int m_w{1280}, m_h{800}, m_fps{30};
+    int m_w{640}, m_h{400}, m_fps{30};
     int m_maxPairQueue{8};
 
     int64_t m_pairThreshNs{2'000'000};

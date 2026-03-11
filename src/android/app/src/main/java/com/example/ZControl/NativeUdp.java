@@ -3,7 +3,7 @@ package com.example.ZControl;
 public class NativeUdp {
     static { System.loadLibrary("cm5udp"); }
 
-    public static native boolean init(String ip, int port);
+    public static native boolean init(String ip, int cmdPort, int videoPort);
     public static native void close();
 
     public static native int sendCmd(int cmd);

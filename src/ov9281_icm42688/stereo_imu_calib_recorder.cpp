@@ -657,7 +657,7 @@ private:
     }
   }
 
-  int m_w{1280}, m_h{800}, m_fps{60};
+  int m_w{640}, m_h{480}, m_fps{30};
   int m_maxPairQueue{8};
   uint64_t m_pairTolNs{1000000};
   size_t m_pairSearchWindow{6};
@@ -715,8 +715,8 @@ int main(int argc, char **argv) {
   const std::string udpIp = GetArgS(argc, argv, "--udp-ip", "10.42.0.109");
   const int udpPort = GetArgI(argc, argv, "--udp-port", 14550);
 
-  const int w = GetArgI(argc, argv, "--w", 1280);
-  const int h = GetArgI(argc, argv, "--h", 800);
+  const int w = GetArgI(argc, argv, "--w", 640);
+  const int h = GetArgI(argc, argv, "--h", 400);
   const int fps = GetArgI(argc, argv, "--fps", 30);
   const bool aeDisable = HasArg(argc, argv, "--ae-disable");
   const int exposureUs = GetArgI(argc, argv, "--exp-us", 3000);
@@ -729,7 +729,7 @@ int main(int argc, char **argv) {
 
   const std::string gpiochip = GetArgS(argc, argv, "--gpiochip", "/dev/gpiochip0");
   const unsigned drdyLine = (unsigned)GetArgI(argc, argv, "--drdy", 24);
-  const int imuHz = GetArgI(argc, argv, "--imu-hz", 400);
+  const int imuHz = GetArgI(argc, argv, "--imu-hz", 500);
   const int pairTolUs = GetArgI(argc, argv, "--pair-tol-us", 15000);
   const int pairSearchWindow = GetArgI(argc, argv, "--pair-search-window", 6);
   const int64_t offRejectNs = GetArgI64(argc, argv, "--off-reject-ns", 20'000'000);

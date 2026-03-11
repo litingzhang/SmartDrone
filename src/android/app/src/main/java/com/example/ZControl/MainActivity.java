@@ -530,16 +530,19 @@ public class MainActivity extends Activity {
         m_btnModeToggle = findViewById(R.id.btnModeToggle);
 
         final String cm5Ip = "192.168.0.103";
-        final int cm5Port = 14550;
+        final int cm5CmdPort = 14550;
+        final int phoneVideoPort = 5000;
 
         boolean ok;
         try {
-            ok = NativeUdp.init(cm5Ip, cm5Port);
+            ok = NativeUdp.init(cm5Ip, cm5CmdPort, phoneVideoPort);
         } catch (Throwable t) {
             m_tvStatus.setText("Native init error: " + t.getMessage());
             ok = false;
         }
-        m_tvStatus.setText(ok ? ("UDP ready -> " + cm5Ip + ":" + cm5Port) : "UDP init failed");
+        m_tvStatus.setText(ok
+                ? ("UDP ready cmd-> " + cm5Ip + ":" + cm5CmdPort + " video<-" + phoneVideoPort)
+                : "UDP init failed");
 
         Button btnArm = findViewById(R.id.btnArm);
         Button btnDisarm = findViewById(R.id.btnDisarm);

@@ -1,11 +1,30 @@
 #pragma once
 
+#include <cctype>
 #include <cstdint>
+#include <algorithm>
 #include <string>
 
+enum class SensorMode {
+    Stereo,
+    StereoImu,
+};
+
+inline SensorMode ParseSensorModeText(const std::string& text)
+{
+    std::string normalized = text;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (normalized == "stereo-imu" || normalized == "imu-stereo" || normalized == "stereo_inertial") {
+        return SensorMode::StereoImu;
+    }
+    return SensorMode::Stereo;
+}
+
 struct CameraConfig {
-    int width{1280};
-    int height{800};
+    int width{640};
+    int height{400};
     int fps{30};
     bool aeDisable{true};
     int exposureUs{5000};
@@ -24,6 +43,7 @@ struct UdpConfig {
     bool enable{false};
     std::string ip{"192.168.1.10"};
     int port{5000};
+    int cmdPort{14550};
     int jpegQ{80};
     int payload{1200};
     int queue{4};
@@ -52,6 +72,7 @@ struct RuntimeConfig {
 struct AppConfig {
     std::string vocab{"ORBvoc.txt"};
     std::string settings{"stereo_inertial.yaml"};
+    SensorMode sensorMode{SensorMode::Stereo};
     CameraConfig camera;
     UdpConfig udp;
     ImuRuntimeConfig imu;
@@ -146,9 +167,10 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
 
     config.vocab = argReader.GetString("--vocab", "ORBvoc.txt");
     config.settings = argReader.GetString("--settings", "stereo_inertial.yaml");
+    config.sensorMode = ParseSensorModeText(argReader.GetString("--sensor-mode", "stereo"));
 
-    config.camera.width = argReader.GetInt("--w", 1280);
-    config.camera.height = argReader.GetInt("--h", 800);
+    config.camera.width = argReader.GetInt("--w", 640);
+    config.camera.height = argReader.GetInt("--h", 400);
     config.camera.fps = argReader.GetInt("--fps", 30);
     config.camera.aeDisable = !argReader.HasFlag("--ae");
     config.camera.exposureUs = argReader.GetInt("--exp-us", 5000);
@@ -164,8 +186,9 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     config.camera.autoOffsetTimeoutMs = argReader.GetInt("--auto-offset-timeout-ms", 3000);
 
     config.udp.enable = argReader.HasFlag("--udp");
-    config.udp.ip = argReader.GetString("--udp-ip", "192.168.1.10");
+    config.udp.ip = argReader.GetString("--udp-ip", "10.42.0.109");
     config.udp.port = argReader.GetInt("--udp-port", 5000);
+    config.udp.cmdPort = argReader.GetInt("--cmd-port", 14550);
     config.udp.jpegQ = argReader.GetInt("--udp-jpeg-q", 80);
     config.udp.payload = argReader.GetInt("--udp-payload", 1200);
     config.udp.queue = argReader.GetInt("--udp-queue", 4);

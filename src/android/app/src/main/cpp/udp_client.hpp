@@ -15,7 +15,7 @@ class UdpClient {
 public:
     ~UdpClient() { Close(); }
 
-    bool Open(const std::string& ip, uint16_t port)
+    bool Open(const std::string& ip, uint16_t sendPort, uint16_t bindPort)
     {
         Close();
 
@@ -26,7 +26,7 @@ public:
 
         std::memset(&m_dstAddr, 0, sizeof(m_dstAddr));
         m_dstAddr.sin_family = AF_INET;
-        m_dstAddr.sin_port = htons(port);
+        m_dstAddr.sin_port = htons(sendPort);
         if (::inet_pton(AF_INET, ip.c_str(), &m_dstAddr.sin_addr) != 1) {
             Close();
             return false;
@@ -35,11 +35,10 @@ public:
         sockaddr_in localAddr{};
         localAddr.sin_family = AF_INET;
         localAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-        // Prefer binding to the same port so server-side video sender can target a fixed port.
-        localAddr.sin_port = htons(port);
+        localAddr.sin_port = htons(bindPort);
         if (::bind(m_fd, reinterpret_cast<sockaddr*>(&localAddr), sizeof(localAddr)) != 0) {
-            localAddr.sin_port = htons(0);
-            ::bind(m_fd, reinterpret_cast<sockaddr*>(&localAddr), sizeof(localAddr));
+            Close();
+            return false;
         }
 
         const int flags = ::fcntl(m_fd, F_GETFL, 0);

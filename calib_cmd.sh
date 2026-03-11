@@ -1,18 +1,3 @@
-docker run -it --rm \
-  -v ~/workspace/kalibr_data:/data \
-  osrf/ros:noetic-desktop-full
-
-
-source /opt/ros/noetic/setup.bash
-catkin_make -DCMAKE_BUILD_TYPE=Release
-source /opt/ws_kalibr/devel/setup.bash
-which kalibr_calibrate_cameras
-which kalibr_calibrate_imu_camera
-
-cd /data
-source /opt/ros/noetic/setup.bash
-source /data/kalibr_ws/devel/setup.bash
-
 sudo docker run -it --rm \
   -v /home/ltz/workspace/kalibr_data:/data \
   -w /data \
@@ -23,10 +8,16 @@ export MPLBACKEND=Agg
 source /opt/ros/noetic/setup.bash
 source /data/kalibr_ws/devel/setup.bash
 
-apt install -y python3-wxgtk4.0
-apt install -y python3-igraph
-apt install -y python3-scipy
+# Record both calib_A and calib_B with 640x400 / 30fps / 500Hz to match the
+# actual OV9281 RAW mode selected by libcamera on this platform.
+# Example recorder command:
+# ./calib_recorder --out /data/calib_A --w 640 --h 400 --fps 30 --imu-hz 500 --ae-disable --exp-us 6000 --gain 4 --pair-tol-us 5000
 
+apt-get install -y --no-install-recommends python3-wxgtk4.0
+apt-get install -y --no-install-recommends python3-igraph
+apt-get install -y --no-install-recommends python3-scipy
+
+export KALIBR_MANUAL_FOCAL_LENGTH_INIT=390
 rosrun kalibr kalibr_calibrate_cameras \
   --bag /data/calib_A.bag \
   --target /data/aprilgrid.yaml \
@@ -34,8 +25,9 @@ rosrun kalibr kalibr_calibrate_cameras \
   --topics /cam0/image_raw /cam1/image_raw \
   --approx-sync 0.005
 
+
 rosrun kalibr kalibr_calibrate_imu_camera \
-  --bag /data/calib_B_fixed.bag \
+  --bag /data/calib_B.bag \
   --cam /data/calib_A-camchain.yaml \
   --imu /data/imu.yaml \
   --target /data/aprilgrid.yaml

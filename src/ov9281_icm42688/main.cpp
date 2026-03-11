@@ -25,7 +25,6 @@
 #include "ImuTypes.h"
 #include "System.h"
 #include "mavlink_pose_sender.hpp"
-#include "px4_console.hpp"
 #include <sophus/se3.hpp>
 #include "app_args.hpp"
 #include "icm42688_imu.hpp"
@@ -179,6 +178,7 @@ private:
 };
 
 struct MainRuntimeAliases {
+    SensorMode sensorMode{SensorMode::Stereo};
     int width{};
     int height{};
     int fps{};
@@ -197,6 +197,7 @@ struct MainRuntimeAliases {
     bool udpEnable{};
     std::string udpIp;
     int udpPort{};
+    int cmdPort{};
     int udpJpegQ{};
     int udpPayload{};
     int udpQueue{};
@@ -234,6 +235,7 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig& appConfig)
     const ImuRuntimeConfig& imuConfig = appConfig.imu;
     const RuntimeConfig& runtimeConfig = appConfig.runtime;
 
+    aliases.sensorMode = appConfig.sensorMode;
     aliases.width = cameraConfig.width;
     aliases.height = cameraConfig.height;
     aliases.fps = cameraConfig.fps;
@@ -252,6 +254,7 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig& appConfig)
     aliases.udpEnable = udpConfig.enable;
     aliases.udpIp = udpConfig.ip;
     aliases.udpPort = udpConfig.port;
+    aliases.cmdPort = udpConfig.cmdPort;
     aliases.udpJpegQ = udpConfig.jpegQ;
     aliases.udpPayload = udpConfig.payload;
     aliases.udpQueue = udpConfig.queue;
@@ -285,6 +288,9 @@ void PrintStartupConfig(
     const MainRuntimeAliases& aliases)
 {
     std::cerr << "ORB vocab=" << appConfig.vocab << "\nsettings=" << appConfig.settings << "\n";
+    std::cerr << "sensorMode="
+              << (aliases.sensorMode == SensorMode::StereoImu ? "stereo-imu" : "stereo")
+              << "\n";
     std::cerr << "cam " << aliases.width << "x" << aliases.height << " @" << aliases.fps
               << " aeDisable=" << (aliases.aeDisable ? "true" : "false")
               << " exp_us=" << aliases.exposureUs << " gain=" << aliases.gain
@@ -306,6 +312,7 @@ void PrintStartupConfig(
               << " gyroFs=" << aliases.gyroFsDps << "dps" << "\n";
     std::cerr << "udpEnable=" << (aliases.udpEnable ? "Y" : "N")
               << " udpIp=" << aliases.udpIp << " udpPort=" << aliases.udpPort
+              << " cmdPort=" << aliases.cmdPort
               << " jpeg_q=" << aliases.udpJpegQ << " payload=" << aliases.udpPayload
               << " queue=" << aliases.udpQueue << "\n";
 }
@@ -420,6 +427,7 @@ std::thread StartImuThread(const MainRuntimeAliases& aliases, ImuThreadState& im
 bool OpenAndConfigureCamera(
     LibcameraStereoOV9281_TsPair& cam,
     const MainRuntimeAliases& aliases,
+    bool useImuThread,
     std::thread& imuThread,
     std::thread& udpCmdThread)
 {
@@ -439,7 +447,7 @@ bool OpenAndConfigureCamera(
         if (udpCmdThread.joinable()) {
             udpCmdThread.join();
         }
-        if (imuThread.joinable()) {
+        if (useImuThread && imuThread.joinable()) {
             imuThread.join();
         }
         return false;
@@ -506,26 +514,25 @@ int64_t EstimateTimestampOffsetNs(
 
 void ShutdownRuntime(
     LibcameraStereoOV9281_TsPair& cam,
-    Px4Console& console,
     MavlinkSerial& mav,
     std::thread& udpCmdThread,
+    bool useImuThread,
     std::thread& imuThread)
 {
     cam.Close();
     g_runningFlag.store(false);
-    console.Stop();
     mav.StopSetpointStream();
     mav.StopRx();
     if (udpCmdThread.joinable()) {
         udpCmdThread.join();
     }
-    if (imuThread.joinable()) {
+    if (useImuThread && imuThread.joinable()) {
         imuThread.join();
     }
 }
 
 }  // namespace
-
+static uint64_t g_cnt = 0;
 int main(int argc, char **argv)
 {
     InstallSignalHandlers();
@@ -535,6 +542,7 @@ int main(int argc, char **argv)
 
     const std::string& vocab = appConfig.vocab;
     const std::string& settings = appConfig.settings;
+    const SensorMode sensorMode = runtimeAliases.sensorMode;
     const int w = runtimeAliases.width;
     const int h = runtimeAliases.height;
     const int fps = runtimeAliases.fps;
@@ -548,22 +556,25 @@ int main(int argc, char **argv)
     const bool udpEnable = runtimeAliases.udpEnable;
     const std::string& udpIp = runtimeAliases.udpIp;
     const int udpPort = runtimeAliases.udpPort;
+    const int cmdPort = runtimeAliases.cmdPort;
     const int udpJpegQ = runtimeAliases.udpJpegQ;
     const int udpPayload = runtimeAliases.udpPayload;
     const int udpQueue = runtimeAliases.udpQueue;
     const int imuHz = runtimeAliases.imuHz;
     const int64_t offRejectNs = runtimeAliases.offRejectNs;
     const bool allowEmptyImu = runtimeAliases.allowEmptyImu;
+    const bool useImuInSlam = (sensorMode == SensorMode::StereoImu);
 
     PrintStartupConfig(appConfig, runtimeAliases);
     Logger::Init("./stereo_vslam.log", 32 * 1024 * 1024, Logger::INFO, true);
-    ORB_SLAM3::System SLAM(vocab, settings, ORB_SLAM3::System::STEREO, false);
+    const auto orbSensorMode = (sensorMode == SensorMode::StereoImu)
+        ? ORB_SLAM3::System::IMU_STEREO
+        : ORB_SLAM3::System::STEREO;
+    ORB_SLAM3::System SLAM(vocab, settings, orbSensorMode, false);
     MavlinkSerial mav("/dev/ttyAMA0", 921600);
     mav.StartRx();
-    Px4Console console(mav);
-    console.Start();
     Px4UdpHooks udpHooks(mav);
-    std::thread udpCmdThread = StartUdpCommandThread(udpPort, udpHooks);
+    std::thread udpCmdThread = StartUdpCommandThread(cmdPort, udpHooks);
     UdpImageSender udp;
     if (udpEnable) {
         if (!udp.Open(udpIp, udpPort, udpJpegQ, udpPayload, udpQueue)) {
@@ -573,9 +584,12 @@ int main(int argc, char **argv)
         }
     }
     ImuThreadState imuState;
-    std::thread imuThread = StartImuThread(runtimeAliases, imuState);
+    std::thread imuThread;
+    if (useImuInSlam) {
+        imuThread = StartImuThread(runtimeAliases, imuState);
+    }
     LibcameraStereoOV9281_TsPair cam;
-    if (!OpenAndConfigureCamera(cam, runtimeAliases, imuThread, udpCmdThread)) {
+    if (!OpenAndConfigureCamera(cam, runtimeAliases, useImuInSlam, imuThread, udpCmdThread)) {
         return 1;
     }
     int64_t tsOffsetNs = EstimateTimestampOffsetNs(cam, imuState);
@@ -632,7 +646,7 @@ int main(int argc, char **argv)
         }
 
         std::vector<ORB_SLAM3::IMU::Point> vImu;
-        if (lastFrameNs != 0) {
+        if (useImuInSlam && lastFrameNs != 0) {
             vImu = imuState.imuBuffer.PopBetweenNs(
                 lastFrameNs, frameNs, slackBeforeNs, slackAfterNs);
         }
@@ -659,7 +673,7 @@ int main(int argc, char **argv)
             lastImuDrop = id;
         }
 
-        if (prevFrameNs != 0 && vImu.empty()) {
+        if (useImuInSlam && prevFrameNs != 0 && vImu.empty()) {
             int64_t tFirst = 0, tLast = 0;
             bool ok = imuState.imuBuffer.PeekFirstLast(tFirst, tLast);
             std::cerr << "[imu] EMPTY vImu" << " t0=" << (double)prevFrameNs * 1e-9
@@ -681,7 +695,9 @@ int main(int argc, char **argv)
             udp.Enqueue(1, R.seq, frameTime, R.gray);
         }
 
-        Sophus::SE3f Tcw = SLAM.TrackStereo(L.gray, R.gray, frameTime, vImu);
+        Sophus::SE3f Tcw = useImuInSlam
+            ? SLAM.TrackStereo(L.gray, R.gray, frameTime, vImu)
+            : SLAM.TrackStereo(L.gray, R.gray, frameTime);
         int state = SLAM.GetTrackingState();
         Sophus::SE3f Twc = Tcw.inverse();
 
@@ -699,14 +715,17 @@ int main(int argc, char **argv)
         uint64_t tUs = MonoTimeUs();
         if (state == ORB_SLAM3::Tracking::OK) {
             mav.SendOdometry(tUs, pNed, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, OdomQualityMode::GOOD);
-            LOGI("[POSE]%f,(x:%f,y:%f,z:%f),(qw:%f,qx:%f,qy:%f,qz:%f)",
-                frameTime, pNed.x, pNed.y, pNed.z, pNed.qw, pNed.qx, pNed.qy, pNed.qz);
+            if (g_cnt % 15 == 0) {
+                printf("[POSE]%f,(x:%f,y:%f,z:%f),(qw:%f,qx:%f,qy:%f,qz:%f)\n",
+                    frameTime, pNed.x, pNed.y, pNed.z, pNed.qw, pNed.qx, pNed.qy, pNed.qz);
+            }
+            g_cnt++;
         } else {
             mav.SendOdometry(tUs, pNed, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, OdomQualityMode::LOST);
         }
     }
 
-    ShutdownRuntime(cam, console, mav, udpCmdThread, imuThread);
+    ShutdownRuntime(cam, mav, udpCmdThread, useImuInSlam, imuThread);
     SLAM.Shutdown();
     return 0;
 }

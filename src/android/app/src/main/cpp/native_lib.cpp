@@ -24,14 +24,19 @@ static uint32_t NowMs32()
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_example_ZControl_NativeUdp_init(JNIEnv* env, jclass, jstring ip, jint port)
+Java_com_example_ZControl_NativeUdp_init(JNIEnv* env, jclass, jstring ip, jint cmdPort, jint videoPort)
 {
     const char* cStr = env->GetStringUTFChars(ip, nullptr);
     const std::string ipString = (cStr != nullptr) ? cStr : "";
     env->ReleaseStringUTFChars(ip, cStr);
 
     std::lock_guard<std::mutex> lock(g_mutex);
-    return g_udpClient.Open(ipString, static_cast<uint16_t>(port)) ? JNI_TRUE : JNI_FALSE;
+    return g_udpClient.Open(
+               ipString,
+               static_cast<uint16_t>(cmdPort),
+               static_cast<uint16_t>(videoPort))
+        ? JNI_TRUE
+        : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL
