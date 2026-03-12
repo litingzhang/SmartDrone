@@ -77,7 +77,7 @@ public:
     sc.size.height = h;
 
     // Prefer GREY/Y8; if pipeline changes it, we'll handle Y plane later.
-    sc.pixelFormat = formats::R8;
+    sc.pixelFormat = formats::R16;
 
     // Ask for higher fps via controls (pipeline may clamp)
     m_controls.set(controls::FrameDurationLimits,

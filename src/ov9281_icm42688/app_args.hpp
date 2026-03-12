@@ -33,10 +33,6 @@ struct CameraConfig {
     bool r16Norm{false};
     int pairMs{2};
     int keepMs{120};
-    int cam1TsOffsetMs{0};
-    bool autoCamOffset{true};
-    int autoOffsetSamples{120};
-    int autoOffsetTimeoutMs{3000};
 };
 
 struct UdpConfig {
@@ -56,7 +52,7 @@ struct ImuRuntimeConfig {
     uint8_t spiBits{8};
     std::string gpiochip{"/dev/gpiochip0"};
     unsigned drdyLine{24};
-    int imuHz{200};
+    int imuHz{500};
     int accelFsG{16};
     int gyroFsDps{2000};
     uint8_t imuStartReg{0x1F};
@@ -171,7 +167,7 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
 
     config.camera.width = argReader.GetInt("--w", 640);
     config.camera.height = argReader.GetInt("--h", 400);
-    config.camera.fps = argReader.GetInt("--fps", 30);
+    config.camera.fps = argReader.GetInt("--fps", 60);
     config.camera.aeDisable = !argReader.HasFlag("--ae");
     config.camera.exposureUs = argReader.GetInt("--exp-us", 5000);
     config.camera.gain = argReader.GetFloat("--gain", 8.0f);
@@ -179,11 +175,6 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     config.camera.r16Norm = argReader.HasFlag("--r16-norm");
     config.camera.pairMs = argReader.GetInt("--pair-ms", 2);
     config.camera.keepMs = argReader.GetInt("--keep-ms", 120);
-    config.camera.cam1TsOffsetMs = argReader.GetInt("--cam1-ts-offset-ms", 0);
-    config.camera.autoCamOffset =
-        argReader.HasFlag("--auto-cam-offset") || (config.camera.cam1TsOffsetMs == 0);
-    config.camera.autoOffsetSamples = argReader.GetInt("--auto-offset-samples", 120);
-    config.camera.autoOffsetTimeoutMs = argReader.GetInt("--auto-offset-timeout-ms", 3000);
 
     config.udp.enable = argReader.HasFlag("--udp");
     config.udp.ip = argReader.GetString("--udp-ip", "10.42.0.109");
@@ -199,7 +190,7 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     config.imu.spiBits = static_cast<uint8_t>(argReader.GetInt("--bits", 8));
     config.imu.gpiochip = argReader.GetString("--gpiochip", "/dev/gpiochip0");
     config.imu.drdyLine = static_cast<unsigned>(argReader.GetInt("--drdy", 24));
-    config.imu.imuHz = argReader.GetInt("--imu-hz", 200);
+    config.imu.imuHz = argReader.GetInt("--imu-hz", 500);
     config.imu.accelFsG = argReader.GetInt("--accel-fs", 16);
     config.imu.gyroFsDps = argReader.GetInt("--gyro-fs", 2000);
     config.imu.imuStartReg = argReader.GetUint8HexOrDec("--imu-start-reg", 0x1F, "0x1F");

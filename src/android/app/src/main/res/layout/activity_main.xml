@@ -36,32 +36,103 @@
         android:orientation="vertical"
         android:padding="12dp">
 
-        <LinearLayout
-            android:id="@+id/layoutModeSwitch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/btnModeToggle"
-                android:layout_width="104dp"
-                android:layout_height="wrap_content"
-                android:minHeight="34dp"
-                android:text="切到命令" />
-        </LinearLayout>
-
         <FrameLayout
             android:id="@+id/pageContainer"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_marginTop="8dp"
             android:layout_weight="1">
 
             <FrameLayout
                 android:id="@+id/pageManual"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent">
+
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fillViewport="false"
+                    android:scrollbars="none">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnModeToggle"
+                            android:layout_width="104dp"
+                            android:layout_height="wrap_content"
+                            android:minHeight="34dp"
+                            android:text="COMMAND" />
+
+                        <Button
+                            android:id="@+id/btnArm"
+                            android:layout_width="86dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:background="@drawable/bg_oval_button"
+                            android:minHeight="34dp"
+                            android:text="ARM"
+                            android:textColor="#FFFFFF"
+                            android:textSize="10sp" />
+
+                        <Button
+                            android:id="@+id/btnAltitude"
+                            android:layout_width="92dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_oval_button"
+                            android:minHeight="34dp"
+                            android:text="ALTITUDE"
+                            android:textColor="#FFFFFF"
+                            android:textSize="9sp" />
+
+                        <Button
+                            android:id="@+id/btnPosition"
+                            android:layout_width="92dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_oval_button"
+                            android:minHeight="34dp"
+                            android:text="POSITION"
+                            android:textColor="#FFFFFF"
+                            android:textSize="9sp" />
+
+                        <Button
+                            android:id="@+id/btnOffboard"
+                            android:layout_width="94dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_oval_button"
+                            android:minHeight="34dp"
+                            android:text="OFFBOARD"
+                            android:textColor="#FFFFFF"
+                            android:textSize="10sp" />
+
+                        <Button
+                            android:id="@+id/btnHold"
+                            android:layout_width="80dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_oval_button"
+                            android:minHeight="34dp"
+                            android:text="HOLD"
+                            android:textColor="#FFFFFF"
+                            android:textSize="10sp" />
+
+                        <Button
+                            android:id="@+id/btnLand"
+                            android:layout_width="80dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_oval_button"
+                            android:minHeight="34dp"
+                            android:text="LAND"
+                            android:textColor="#FFFFFF"
+                            android:textSize="10sp" />
+                    </LinearLayout>
+                </HorizontalScrollView>
 
                 <com.example.ZControl.JoystickView
                     android:id="@+id/joystickLeft"
@@ -95,206 +166,106 @@
                     android:layout_weight="1"
                     android:orientation="vertical">
 
-                    <GridLayout
-                        android:layout_width="match_parent"
+                    <Button
+                        android:id="@+id/btnModeToggleCommand"
+                        android:layout_width="104dp"
                         android:layout_height="wrap_content"
-                        android:alignmentMode="alignMargins"
-                        android:columnCount="3"
-                        android:gravity="center_horizontal"
-                        android:useDefaultMargins="true">
-
-                        <Button
-                            android:id="@+id/btnArm"
-                            android:layout_width="74dp"
-                            android:layout_height="74dp"
-                            android:background="@drawable/bg_circle_button"
-                            android:text="ARM"
-                            android:textColor="#FFFFFF"
-                            android:textSize="11sp" />
-
-                        <Button
-                            android:id="@+id/btnDisarm"
-                            android:layout_width="74dp"
-                            android:layout_height="74dp"
-                            android:background="@drawable/bg_circle_button"
-                            android:text="DISARM"
-                            android:textColor="#FFFFFF"
-                            android:textSize="10sp" />
-
-                        <Button
-                            android:id="@+id/btnOffboard"
-                            android:layout_width="74dp"
-                            android:layout_height="74dp"
-                            android:background="@drawable/bg_circle_button"
-                            android:text="OFFBOARD"
-                            android:textColor="#FFFFFF"
-                            android:textSize="9sp" />
-
-                        <Button
-                            android:id="@+id/btnHold"
-                            android:layout_width="74dp"
-                            android:layout_height="74dp"
-                            android:background="@drawable/bg_circle_button"
-                            android:text="HOLD"
-                            android:textColor="#FFFFFF"
-                            android:textSize="11sp" />
-
-                        <Button
-                            android:id="@+id/btnLand"
-                            android:layout_width="74dp"
-                            android:layout_height="74dp"
-                            android:background="@drawable/bg_circle_button"
-                            android:text="LAND"
-                            android:textColor="#FFFFFF"
-                            android:textSize="11sp" />
-
-                        <Button
-                            android:id="@+id/btnPing"
-                            android:layout_width="74dp"
-                            android:layout_height="74dp"
-                            android:background="@drawable/bg_circle_button"
-                            android:text="PING"
-                            android:textColor="#FFFFFF"
-                            android:textSize="11sp" />
-                    </GridLayout>
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:gravity="center"
-                        android:orientation="horizontal">
-
-                        <Button
-                            android:id="@+id/btnMove"
-                            android:layout_width="74dp"
-                            android:layout_height="74dp"
-                            android:background="@drawable/bg_circle_button"
-                            android:text="MOVE"
-                            android:textColor="#FFFFFF"
-                            android:textSize="11sp" />
-
-                        <Button
-                            android:id="@+id/btnPoll"
-                            android:layout_width="74dp"
-                            android:layout_height="74dp"
-                            android:layout_marginStart="10dp"
-                            android:background="@drawable/bg_circle_button"
-                            android:text="ACK"
-                            android:textColor="#FFFFFF"
-                            android:textSize="11sp" />
-                    </LinearLayout>
+                        android:minHeight="34dp"
+                        android:text="MANUAL" />
                 </LinearLayout>
 
                 <LinearLayout
-                    android:layout_width="0dp"
+                    android:layout_width="260dp"
                     android:layout_height="match_parent"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
+                    android:layout_gravity="end"
                     android:background="#66FFFFFF"
                     android:orientation="vertical"
-                    android:padding="8dp">
+                    android:padding="4dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal">
 
-                        <TextView
-                            android:layout_width="42dp"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="center_vertical"
-                            android:text="X"
-                            android:textSize="13sp" />
-
-                        <EditText
-                            android:id="@+id/etX"
+                        <Button
+                            android:id="@+id/btnToggleSlam"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:hint="x"
-                            android:inputType="numberDecimal|numberSigned"
-                            android:text="0" />
+                            android:minHeight="32dp"
+                            android:text="VIO"
+                            android:textSize="10sp" />
 
-                        <TextView
-                            android:layout_width="42dp"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="center_vertical"
-                            android:layout_marginStart="8dp"
-                            android:text="Y"
-                            android:textSize="13sp" />
-
-                        <EditText
-                            android:id="@+id/etY"
+                        <Button
+                            android:id="@+id/btnToggleCalib"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
                             android:layout_weight="1"
-                            android:hint="y"
-                            android:inputType="numberDecimal|numberSigned"
-                            android:text="0" />
+                            android:minHeight="32dp"
+                            android:text="Calib"
+                            android:textSize="10sp" />
                     </LinearLayout>
 
-                    <LinearLayout
+                    <Button
+                        android:id="@+id/btnCleanCalib"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:layout_width="42dp"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="center_vertical"
-                            android:text="Z"
-                            android:textSize="13sp" />
-
-                        <EditText
-                            android:id="@+id/etZ"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:hint="z"
-                            android:inputType="numberDecimal|numberSigned"
-                            android:text="1.2" />
-
-                        <TextView
-                            android:layout_width="42dp"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="center_vertical"
-                            android:layout_marginStart="8dp"
-                            android:text="Yaw"
-                            android:textSize="13sp" />
-
-                        <EditText
-                            android:id="@+id/etYaw"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:hint="yaw"
-                            android:inputType="numberDecimal|numberSigned"
-                            android:text="0" />
-                    </LinearLayout>
+                        android:layout_marginTop="4dp"
+                        android:minHeight="32dp"
+                        android:text="Clean Calib"
+                        android:textSize="10sp" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
+                        android:layout_marginTop="4dp"
                         android:orientation="horizontal">
 
-                        <TextView
-                            android:layout_width="42dp"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="center_vertical"
-                            android:text="MaxV"
-                            android:textSize="13sp" />
-
                         <EditText
-                            android:id="@+id/etMaxV"
+                            android:id="@+id/etVehicleIp"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:hint="default speed"
-                            android:inputType="numberDecimal|numberSigned"
-                            android:text="0.6" />
+                            android:hint="Vehicle IP"
+                            android:inputType="textUri"
+                            android:minHeight="32dp"
+                            android:padding="4dp"
+                            android:text="192.168.0.103"
+                            android:textSize="10sp" />
                     </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:orientation="horizontal">
+
+                        <EditText
+                            android:id="@+id/etCfgExposure"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:hint="Exposure us"
+                            android:inputType="number"
+                            android:minHeight="32dp"
+                            android:padding="4dp"
+                            android:text="6000"
+                            android:textSize="10sp" />
+
+                        <EditText
+                            android:id="@+id/etCfgGain"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:layout_weight="1"
+                            android:hint="Gain"
+                            android:inputType="numberDecimal|numberSigned"
+                            android:minHeight="32dp"
+                            android:padding="4dp"
+                            android:text="4"
+                            android:textSize="10sp" />
+                    </LinearLayout>
+
                 </LinearLayout>
             </LinearLayout>
         </FrameLayout>
@@ -315,6 +286,26 @@
             android:text="cm5udp ready"
             android:textColor="#FFFFFF"
             android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/tvPose"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:maxWidth="360dp"
+            android:text="Pose idle"
+            android:textColor="#CCFFFFFF"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/tvVideoStats"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:maxWidth="360dp"
+            android:text="Video idle"
+            android:textColor="#B3FFFFFF"
+            android:textSize="10sp" />
 
         <TextView
             android:id="@+id/tvJoystickState"

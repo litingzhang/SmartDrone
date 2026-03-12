@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -14,7 +15,12 @@ static UdpClient g_udpClient;
 static std::mutex g_mutex;
 static std::atomic<uint32_t> g_seqCounter{1};
 static constexpr uint8_t CMD_MOVE = 0x20;
+static constexpr uint8_t CMD_RUNTIME_MODE = 0x30;
+static constexpr uint8_t CMD_RUNTIME_CONFIG = 0x31;
 static constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
+static constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
+static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 40;
+static constexpr size_t RUNTIME_IP_BYTES = 32;
 
 static uint32_t NowMs32()
 {
@@ -131,4 +137,43 @@ Java_com_example_ZControl_NativeUdp_pollRecv(JNIEnv* env, jclass)
     jbyteArray outArray = env->NewByteArray(recvLen);
     env->SetByteArrayRegion(outArray, 0, recvLen, reinterpret_cast<jbyte*>(buffer));
     return outArray;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_example_ZControl_NativeUdp_sendRuntimeMode(JNIEnv*, jclass, jint mode)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const uint32_t seq = g_seqCounter.fetch_add(1);
+    const uint8_t payload[RUNTIME_MODE_PAYLOAD_LEN] = {static_cast<uint8_t>(mode)};
+    const std::vector<uint8_t> frame = MakeFrame(
+        1, CMD_RUNTIME_MODE, 0, seq, NowMs32(), payload, RUNTIME_MODE_PAYLOAD_LEN);
+    const bool ok = g_udpClient.Send(frame.data(), frame.size());
+    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_example_ZControl_NativeUdp_sendRuntimeConfig(
+    JNIEnv*,
+    jclass,
+    jint exposureUs,
+    jfloat gain)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const uint32_t seq = g_seqCounter.fetch_add(1);
+    std::vector<uint8_t> payload;
+    payload.reserve(RUNTIME_CONFIG_PAYLOAD_LEN);
+    WriteU32Le(payload, static_cast<uint32_t>(exposureUs));
+    WriteF32Le(payload, static_cast<float>(gain));
+    payload.resize(RUNTIME_CONFIG_PAYLOAD_LEN, 0);
+
+    const std::vector<uint8_t> frame = MakeFrame(
+        1,
+        CMD_RUNTIME_CONFIG,
+        0,
+        seq,
+        NowMs32(),
+        payload.data(),
+        static_cast<uint16_t>(payload.size()));
+    const bool ok = g_udpClient.Send(frame.data(), frame.size());
+    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
 }

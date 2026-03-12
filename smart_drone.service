@@ -1,0 +1,16 @@
+[Unit]
+Description=SmartDrone Unified Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ltz
+WorkingDirectory=/home/ltz
+ExecStart=/home/ltz/smart_drone --auto-mode idle
+Restart=always
+RestartSec=2
+Environment=LD_LIBRARY_PATH=/home/ltz
+
+[Install]
+WantedBy=multi-user.target

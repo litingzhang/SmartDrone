@@ -16,6 +16,9 @@ enum TlvCmd : uint8_t {
     CMD_LAND = 0x14,
 
     CMD_MOVE = 0x20,
+    CMD_RUNTIME_MODE = 0x30,
+    CMD_RUNTIME_CONFIG = 0x31,
+    CMD_CALIB_CLEAN = 0x32,
 
     CMD_ACK = 0xF0,
     CMD_STATE = 0xF1,
@@ -27,6 +30,15 @@ enum TlvCmd : uint8_t {
 // flags bit0 == 1: a/b/c/d => vx/vy/vz/yawRate (velocity setpoint)
 constexpr uint16_t MOVE_PAYLOAD_LEN = 21;
 constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
+constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 40;
+constexpr uint16_t STATE_POSE_PAYLOAD_LEN = 32;
+
+enum RuntimeMode : uint8_t {
+    RUNTIME_MODE_IDLE = 0,
+    RUNTIME_MODE_SLAM = 1,
+    RUNTIME_MODE_CALIB = 2,
+};
 
 enum FrameType : uint8_t {
     FRAME_MAP = 0,

@@ -11,5 +11,9 @@ public class NativeUdp {
     public static native int sendMove(int frameType, float x, float y, float z, float yaw, float maxV);
     // MOVE velocity mode payload semantics (FRAME_NED): vx, vy, vz, yawRate, maxV
     public static native int sendMoveVelocity(int frameType, float vx, float vy, float vz, float yawRate, float maxV);
+    public static native int sendRuntimeMode(int mode);
+    public static native int sendRuntimeConfig(
+            int exposureUs,
+            float gain);
     public static native byte[] pollRecv();
 }

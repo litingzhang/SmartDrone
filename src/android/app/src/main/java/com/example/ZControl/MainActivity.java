@@ -1,14 +1,15 @@
 package com.example.ZControl;
 
 import android.app.Activity;
+import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.content.pm.ActivityInfo;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.WindowManager;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -19,41 +20,54 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
 
-    private static final int CMD_PING = 0x01;
     private static final int CMD_ARM = 0x10;
     private static final int CMD_DISARM = 0x11;
     private static final int CMD_OFFBOARD = 0x12;
     private static final int CMD_HOLD = 0x13;
     private static final int CMD_LAND = 0x14;
+    private static final int CMD_CALIB_CLEAN = 0x32;
     private static final int CMD_ACK = 0xF0;
+    private static final int CMD_STATE = 0xF1;
+
+    private static final int MODE_IDLE = 0;
+    private static final int MODE_SLAM = 1;
+    private static final int MODE_CALIB = 2;
 
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
+    private static final long RX_POLL_PERIOD_MS = 5L;
+    private static final int VIDEO_MAGIC = 0x5643494D;
+    private static final int VIDEO_HEADER_LEN = 36;
+    private static final int MAX_RX_PACKETS_PER_TICK = 96;
+    private static final int MAX_VIDEO_JPEG_BYTES = 2 * 1024 * 1024;
     private static final float DEADZONE = 0.08f;
     private static final float XY_SPEED_SCALE_MPS = 1.0f;
     private static final float Z_SPEED_SCALE_MPS = 0.8f;
     private static final float YAW_RATE_SCALE_RADPS = 1.0f;
     private static final String KEY_MANUAL_MODE = "manualMode";
-    private static final long RX_POLL_PERIOD_MS = 20L;
-    private static final int VIDEO_MAGIC = 0x5643494D;
-    private static final int VIDEO_HEADER_LEN = 36;
-    private static final int MAX_RX_PACKETS_PER_TICK = 16;
-    private static final int MAX_VIDEO_JPEG_BYTES = 2 * 1024 * 1024;
 
     private ImageView m_ivVideoLeft;
     private ImageView m_ivVideoRight;
     private TextView m_tvStatus;
+    private TextView m_tvPose;
+    private TextView m_tvVideoStats;
     private TextView m_tvJoystickState;
-
     private View m_pageManual;
     private View m_pageCommand;
     private Button m_btnModeToggle;
+    private Button m_btnModeToggleCommand;
+    private Button m_btnArmToggle;
+    private Button m_btnAltitude;
+    private Button m_btnPosition;
+    private Button m_btnOffboard;
+    private Button m_btnHold;
+    private Button m_btnLand;
+    private Button m_btnToggleSlam;
+    private Button m_btnToggleCalib;
 
-    private EditText m_etX;
-    private EditText m_etY;
-    private EditText m_etZ;
-    private EditText m_etYaw;
-    private EditText m_etMaxV;
+    private EditText m_etVehicleIp;
+    private EditText m_etCfgExposure;
+    private EditText m_etCfgGain;
 
     private JoystickView m_joystickLeft;
     private JoystickView m_joystickRight;
@@ -67,17 +81,23 @@ public class MainActivity extends Activity {
     private volatile boolean m_leftActive;
     private volatile boolean m_rightActive;
 
-    private float m_lastCmdX;
-    private float m_lastCmdY;
-    private float m_lastCmdZ;
-    private float m_lastCmdYaw;
     private long m_lastJoystickTickMs;
-
     private boolean m_joystickLoopRunning;
     private boolean m_lastJoystickActive;
-    private boolean m_isManualMode = true;
+    private boolean m_isManualMode = false;
     private boolean m_rxLoopRunning;
-    private byte[] m_lastAckPacket;
+    private int m_runtimeMode = MODE_IDLE;
+    private String m_vehicleIp = "192.168.0.103";
+    private boolean m_armLatched = false;
+    private String m_flightAction = "";
+    private int m_videoPktCount = 0;
+    private int m_videoFrameOk = 0;
+    private int m_videoDecodeFail = 0;
+    private int m_videoInvalidPkt = 0;
+    private int m_videoCamFrameOk0 = 0;
+    private int m_videoCamFrameOk1 = 0;
+    private long m_lastVideoStatsMs = 0L;
+    private long m_lastVideoPacketMs = 0L;
 
     private static final class VideoAssembly {
         int frameId = -1;
@@ -88,7 +108,7 @@ public class MainActivity extends Activity {
         int chunkReceived;
         int byteReceived;
 
-        void Reset() {
+        void reset() {
             frameId = -1;
             chunkCount = 0;
             totalSize = 0;
@@ -108,7 +128,7 @@ public class MainActivity extends Activity {
             if (!m_joystickLoopRunning) {
                 return;
             }
-            TickJoystickControl();
+            tickJoystickControl();
             m_handler.postDelayed(this, JOYSTICK_PERIOD_MS);
         }
     };
@@ -119,12 +139,12 @@ public class MainActivity extends Activity {
             if (!m_rxLoopRunning) {
                 return;
             }
-            TickRxLoop();
+            tickRxLoop();
             m_handler.postDelayed(this, RX_POLL_PERIOD_MS);
         }
     };
 
-    private static float ParseF(EditText et, float defVal) {
+    private static float parseF(EditText et, float defVal) {
         try {
             String s = et.getText().toString().trim();
             if (s.isEmpty()) {
@@ -136,32 +156,27 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static String Hex(byte[] bytes) {
-        if (bytes == null) {
-            return "null";
+    private static int parseI(EditText et, int defVal) {
+        try {
+            String s = et.getText().toString().trim();
+            if (s.isEmpty()) {
+                return defVal;
+            }
+            return Integer.parseInt(s);
+        } catch (Throwable t) {
+            return defVal;
         }
-        StringBuilder sb = new StringBuilder(bytes.length * 2);
-        for (byte v : bytes) {
-            sb.append(String.format(Locale.US, "%02X", v));
-        }
-        return sb.toString();
     }
 
-    private static float ApplyDeadzone(float v) {
+    private static float applyDeadzone(float v) {
         return (Math.abs(v) < DEADZONE) ? 0f : v;
     }
 
-    private static float Clamp01(float v) {
+    private static float clamp01(float v) {
         return Math.max(0f, Math.min(1f, v));
     }
 
-    private void SendHoldBurst(int count, String reason) {
-        for (int i = 0; i < count; ++i) {
-            SendSimpleCmd(reason + "[" + (i + 1) + "/" + count + "]", CMD_HOLD);
-        }
-    }
-
-    private void SendSimpleCmd(String name, int cmd) {
+    private void sendSimpleCmd(String name, int cmd) {
         try {
             int seq = NativeUdp.sendCmd(cmd);
             m_tvStatus.setText(name + " sent seq=" + seq + " cmd=0x" + Integer.toHexString(cmd));
@@ -170,18 +185,13 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void SendMoveCommand(float x, float y, float z, float yaw, float maxV, String reason) {
-        try {
-            int seq = NativeUdp.sendMove(FRAME_NED, x, y, z, yaw, maxV);
-            m_tvStatus.setText(String.format(Locale.US,
-                    "%s seq=%d x=%.2f y=%.2f z=%.2f yaw=%.2f maxV=%.2f",
-                    reason, seq, x, y, z, yaw, maxV));
-        } catch (Throwable t) {
-            m_tvStatus.setText(reason + " error: " + t.getMessage());
+    private void sendHoldBurst(int count, String reason) {
+        for (int i = 0; i < count; ++i) {
+            sendSimpleCmd(reason + "[" + (i + 1) + "/" + count + "]", CMD_HOLD);
         }
     }
 
-    private void SendMoveVelocityCommand(float vx, float vy, float vz, float yawRate, float maxV, String reason) {
+    private void sendMoveVelocityCommand(float vx, float vy, float vz, float yawRate, float maxV, String reason) {
         try {
             int seq = NativeUdp.sendMoveVelocity(FRAME_NED, vx, vy, vz, yawRate, maxV);
             m_tvStatus.setText(String.format(Locale.US,
@@ -192,37 +202,147 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void SyncPositionInputsToCache() {
-        m_lastCmdX = ParseF(m_etX, 0f);
-        m_lastCmdY = ParseF(m_etY, 0f);
-        m_lastCmdZ = ParseF(m_etZ, 1.2f);
-        m_lastCmdYaw = ParseF(m_etYaw, 0f);
+    private int sendRuntimeConfig() {
+        int exposureUs = parseI(m_etCfgExposure, 6000);
+        float gain = parseF(m_etCfgGain, 4.0f);
+        try {
+            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain);
+            m_tvStatus.setText(String.format(Locale.US,
+                    "CFG seq=%d exp=%d gain=%.1f",
+                    seq, exposureUs, gain));
+            return seq;
+        } catch (Throwable t) {
+            m_tvStatus.setText("CFG error: " + t.getMessage());
+            return -1;
+        }
     }
 
-    private static int ReadU16Le(byte[] data, int offset) {
+    private boolean ensureVehicleConnection() {
+        String vehicleIp = m_etVehicleIp.getText().toString().trim();
+        if (vehicleIp.isEmpty()) {
+            m_tvStatus.setText("Vehicle IP is empty");
+            return false;
+        }
+        if (vehicleIp.equals(m_vehicleIp)) {
+            return true;
+        }
+        try {
+            NativeUdp.close();
+            boolean ok = NativeUdp.init(vehicleIp, 14550, 5000);
+            if (!ok) {
+                m_tvStatus.setText("Reconnect failed: " + vehicleIp);
+                return false;
+            }
+            m_vehicleIp = vehicleIp;
+            return true;
+        } catch (Throwable t) {
+            m_tvStatus.setText("Reconnect error: " + t.getMessage());
+            return false;
+        }
+    }
+
+    private void setButtonState(Button button, boolean active, String color) {
+        if (button == null) {
+            return;
+        }
+        button.setBackgroundColor(Color.parseColor(color));
+        button.setAlpha(active ? 1.0f : 0.35f);
+        button.setTextColor(Color.WHITE);
+    }
+
+    private void updateRuntimeButtons() {
+        if (m_btnToggleSlam != null) {
+            m_btnToggleSlam.setText(m_runtimeMode == MODE_SLAM ? "Stop VIO" : "Start VIO");
+            setButtonState(m_btnToggleSlam, m_runtimeMode == MODE_SLAM, "#2E7D32");
+        }
+        if (m_btnToggleCalib != null) {
+            m_btnToggleCalib.setText(m_runtimeMode == MODE_CALIB ? "Stop Calib" : "Start Calib");
+            setButtonState(m_btnToggleCalib, m_runtimeMode == MODE_CALIB, "#1565C0");
+        }
+    }
+
+    private void updateFlightButtons() {
+        if (m_btnArmToggle != null) {
+            m_btnArmToggle.setText(m_armLatched ? "DISARM" : "ARM");
+            setButtonState(m_btnArmToggle, m_armLatched, "#C62828");
+        }
+        if (m_btnAltitude != null) {
+            setButtonState(m_btnAltitude, "ALTITUDE".equals(m_flightAction), "#3949AB");
+        }
+        if (m_btnPosition != null) {
+            setButtonState(m_btnPosition, "POSITION".equals(m_flightAction), "#283593");
+        }
+        if (m_btnOffboard != null) {
+            setButtonState(m_btnOffboard, "OFFBOARD".equals(m_flightAction), "#6A1B9A");
+        }
+        if (m_btnHold != null) {
+            setButtonState(m_btnHold, "HOLD".equals(m_flightAction), "#00897B");
+        }
+        if (m_btnLand != null) {
+            setButtonState(m_btnLand, "LAND".equals(m_flightAction), "#EF6C00");
+        }
+    }
+
+    private void sendRuntimeMode(int mode, String label) {
+        if (!ensureVehicleConnection()) {
+            return;
+        }
+        int cfgSeq = sendRuntimeConfig();
+        if (cfgSeq < 0) {
+            return;
+        }
+        try {
+            int seq = NativeUdp.sendRuntimeMode(mode);
+            m_runtimeMode = mode;
+            updateRuntimeButtons();
+            m_tvStatus.setText(label + " seq=" + seq + " after cfg=" + cfgSeq);
+        } catch (Throwable t) {
+            m_tvStatus.setText(label + " error: " + t.getMessage());
+        }
+    }
+
+    private void stopRuntime(String label) {
+        if (!ensureVehicleConnection()) {
+            return;
+        }
+        try {
+            int seq = NativeUdp.sendRuntimeMode(MODE_IDLE);
+            m_runtimeMode = MODE_IDLE;
+            updateRuntimeButtons();
+            m_tvStatus.setText(label + " seq=" + seq);
+        } catch (Throwable t) {
+            m_tvStatus.setText(label + " error: " + t.getMessage());
+        }
+    }
+
+    private static int readU16Le(byte[] data, int offset) {
         return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
     }
 
-    private static long ReadU32Le(byte[] data, int offset) {
+    private static long readU32Le(byte[] data, int offset) {
         return ((long) data[offset] & 0xFFL)
                 | (((long) data[offset + 1] & 0xFFL) << 8)
                 | (((long) data[offset + 2] & 0xFFL) << 16)
                 | (((long) data[offset + 3] & 0xFFL) << 24);
     }
 
-    private static int ReadI16Le(byte[] data, int offset) {
-        int v = ReadU16Le(data, offset);
+    private static int readI16Le(byte[] data, int offset) {
+        int v = readU16Le(data, offset);
         return (v >= 0x8000) ? (v - 0x10000) : v;
     }
 
-    private static int ReadI32Le(byte[] data, int offset) {
+    private static int readI32Le(byte[] data, int offset) {
         return (data[offset] & 0xFF)
                 | ((data[offset + 1] & 0xFF) << 8)
                 | ((data[offset + 2] & 0xFF) << 16)
                 | ((data[offset + 3] & 0xFF) << 24);
     }
 
-    private static String AckStatusToText(int status) {
+    private static float readF32Le(byte[] data, int offset) {
+        return Float.intBitsToFloat(readI32Le(data, offset));
+    }
+
+    private static String ackStatusToText(int status) {
         switch (status) {
             case 0:
                 return "ACK_OK";
@@ -243,84 +363,125 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String DecodeTlvAck(byte[] rx) {
+    private String decodeTlvAck(byte[] rx) {
         if (rx == null) {
             return "RX: null";
         }
         if (rx.length < 17) {
-            return "RX short: " + Hex(rx);
+            return "RX short: " + rx.length;
         }
         if ((rx[0] & 0xFF) != 0xAA || (rx[1] & 0xFF) != 0x55) {
-            return "RX(no sync): " + Hex(rx);
+            return "RX(no sync): " + rx.length;
         }
-
         int ver = rx[2] & 0xFF;
         int cmd = rx[3] & 0xFF;
         int flags = rx[4] & 0xFF;
-        int len = ReadU16Le(rx, 5);
-        long seq = ReadU32Le(rx, 7);
-        long tMs = ReadU32Le(rx, 11);
+        int len = readU16Le(rx, 5);
+        long seq = readU32Le(rx, 7);
+        long tMs = readU32Le(rx, 11);
         int total = 2 + (1 + 1 + 1 + 2 + 4 + 4) + len + 2;
         if (rx.length < total) {
             return String.format(Locale.US,
                     "RX partial ver=%d cmd=0x%02X len=%d bytes=%d need=%d",
                     ver, cmd, len, rx.length, total);
         }
-
         if (cmd != CMD_ACK || len < 9) {
             return String.format(Locale.US,
                     "RX TLV ver=%d cmd=0x%02X flags=%d len=%d seq=%d tMs=%d",
                     ver, cmd, flags, len, seq, tMs);
         }
-
         int payloadOffset = 15;
         int ackCmd = rx[payloadOffset] & 0xFF;
-        long ackSeq = ReadU32Le(rx, payloadOffset + 1);
-        int status = ReadI16Le(rx, payloadOffset + 5);
-        int reserved = ReadU16Le(rx, payloadOffset + 7);
-
+        long ackSeq = readU32Le(rx, payloadOffset + 1);
+        int status = readI16Le(rx, payloadOffset + 5);
+        int reserved = readU16Le(rx, payloadOffset + 7);
         return String.format(Locale.US,
                 "ACK ver=%d reqSeq=%d tMs=%d ackCmd=0x%02X ackSeq=%d status=%s reserved=%d",
-                ver, seq, tMs, ackCmd, ackSeq, AckStatusToText(status), reserved);
+                ver, seq, tMs, ackCmd, ackSeq, ackStatusToText(status), reserved);
     }
 
-    private boolean TryHandleVideoPacket(byte[] rx) {
+    private String runtimeModeToText(int mode) {
+        switch (mode) {
+            case MODE_SLAM:
+                return "SLAM";
+            case MODE_CALIB:
+                return "CALIB";
+            default:
+                return "IDLE";
+        }
+    }
+
+    private boolean tryHandleStatePacket(byte[] rx) {
+        if (!isTlvPacket(rx) || rx.length < 15) {
+            return false;
+        }
+        int cmd = rx[3] & 0xFF;
+        int len = readU16Le(rx, 5);
+        if (cmd != CMD_STATE || len != 32 || rx.length < 15 + len + 2) {
+            return false;
+        }
+        int payloadOffset = 15;
+        int runtimeMode = rx[payloadOffset] & 0xFF;
+        int trackingState = rx[payloadOffset + 1] & 0xFF;
+        float x = readF32Le(rx, payloadOffset + 4);
+        float y = readF32Le(rx, payloadOffset + 8);
+        float z = readF32Le(rx, payloadOffset + 12);
+        float qw = readF32Le(rx, payloadOffset + 16);
+        float qx = readF32Le(rx, payloadOffset + 20);
+        float qy = readF32Le(rx, payloadOffset + 24);
+        float qz = readF32Le(rx, payloadOffset + 28);
+        if (m_tvPose != null) {
+            if (runtimeMode == MODE_SLAM) {
+                m_tvPose.setText(String.format(Locale.US,
+                        "Pose %s trk=%d\np[%.2f %.2f %.2f]\nq[%.2f %.2f %.2f %.2f]",
+                        runtimeModeToText(runtimeMode), trackingState, x, y, z, qw, qx, qy, qz));
+            } else if (runtimeMode == MODE_CALIB) {
+                m_tvPose.setText("Pose hidden in CALIB");
+            } else {
+                m_tvPose.setText("Pose idle");
+            }
+        }
+        return true;
+    }
+
+    private boolean tryHandleVideoPacket(byte[] rx) {
         if (rx == null || rx.length < VIDEO_HEADER_LEN) {
             return false;
         }
-        if (ReadI32Le(rx, 0) != VIDEO_MAGIC) {
+        if (readI32Le(rx, 0) != VIDEO_MAGIC) {
             return false;
         }
-        int version = ReadU16Le(rx, 4);
-        if (version != 1) {
+        m_videoPktCount++;
+        m_lastVideoPacketMs = System.currentTimeMillis();
+        if (readU16Le(rx, 4) != 1) {
+            m_videoInvalidPkt++;
             return false;
         }
         int camIndex = rx[6] & 0xFF;
         if (camIndex < 0 || camIndex >= m_videoAssemblies.length) {
+            m_videoInvalidPkt++;
             return true;
         }
-        int frameId = ReadI32Le(rx, 20);
-        int chunkIdx = ReadU16Le(rx, 24);
-        int chunkCnt = ReadU16Le(rx, 26);
-        int totalSize = ReadI32Le(rx, 28);
-        int chunkSize = ReadI32Le(rx, 32);
+        int frameId = readI32Le(rx, 20);
+        int chunkIdx = readU16Le(rx, 24);
+        int chunkCnt = readU16Le(rx, 26);
+        int totalSize = readI32Le(rx, 28);
+        int chunkSize = readI32Le(rx, 32);
         int payloadLen = rx.length - VIDEO_HEADER_LEN;
-
         if (chunkCnt <= 0 || chunkCnt > 256 || chunkIdx < 0 || chunkIdx >= chunkCnt) {
+            m_videoInvalidPkt++;
             return true;
         }
-        if (totalSize <= 0 || totalSize > MAX_VIDEO_JPEG_BYTES) {
-            return true;
-        }
-        if (chunkSize < 0 || chunkSize != payloadLen) {
+        if (totalSize <= 0 || totalSize > MAX_VIDEO_JPEG_BYTES || chunkSize != payloadLen) {
+            m_videoInvalidPkt++;
             return true;
         }
 
         VideoAssembly assembly = m_videoAssemblies[camIndex];
-        boolean needReset = (frameId != assembly.frameId)
-                || (assembly.chunks == null)
-                || (assembly.chunkCount != chunkCnt)
-                || (assembly.totalSize != totalSize);
+        boolean needReset = frameId != assembly.frameId
+                || assembly.chunks == null
+                || assembly.chunkCount != chunkCnt
+                || assembly.totalSize != totalSize;
         if (needReset) {
             assembly.frameId = frameId;
             assembly.chunkCount = chunkCnt;
@@ -338,7 +499,6 @@ public class MainActivity extends Activity {
             assembly.chunkReceived += 1;
             assembly.byteReceived += payload.length;
         }
-
         if (assembly.chunkReceived != assembly.chunkCount || assembly.byteReceived <= 0) {
             return true;
         }
@@ -353,44 +513,76 @@ public class MainActivity extends Activity {
             System.arraycopy(chunk, 0, jpeg, offset, chunk.length);
             offset += chunk.length;
         }
+
         Bitmap bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
-        ImageView targetView = (camIndex == 0) ? m_ivVideoLeft : m_ivVideoRight;
-        if (bitmap != null && targetView != null) {
-            targetView.setImageBitmap(bitmap);
+        ImageView target = (camIndex == 0) ? m_ivVideoLeft : m_ivVideoRight;
+        if (bitmap != null && target != null) {
+            target.setImageBitmap(bitmap);
+            m_videoFrameOk++;
+            if (camIndex == 0) {
+                m_videoCamFrameOk0++;
+            } else {
+                m_videoCamFrameOk1++;
+            }
+        } else {
+            m_videoDecodeFail++;
         }
-        assembly.Reset();
+        assembly.reset();
         return true;
     }
 
-    private boolean IsTlvPacket(byte[] rx) {
-        return rx != null
-                && rx.length >= 4
+    private boolean isTlvPacket(byte[] rx) {
+        return rx != null && rx.length >= 4
                 && (rx[0] & 0xFF) == 0xAA
                 && (rx[1] & 0xFF) == 0x55;
     }
 
-    private void TickRxLoop() {
+    private void tickRxLoop() {
         for (int i = 0; i < MAX_RX_PACKETS_PER_TICK; ++i) {
             byte[] rx;
             try {
                 rx = NativeUdp.pollRecv();
             } catch (Throwable t) {
                 m_tvStatus.setText("rx error: " + t.getMessage());
+                updateVideoStatsView();
                 return;
             }
             if (rx == null) {
+                updateVideoStatsView();
                 return;
             }
-            if (TryHandleVideoPacket(rx)) {
+            if (tryHandleVideoPacket(rx)) {
                 continue;
             }
-            if (IsTlvPacket(rx)) {
-                m_lastAckPacket = rx;
+            if (tryHandleStatePacket(rx)) {
+                continue;
+            }
+            if (isTlvPacket(rx)) {
+                m_tvStatus.setText(decodeTlvAck(rx));
             }
         }
+        updateVideoStatsView();
     }
 
-    private void TickJoystickControl() {
+    private void updateVideoStatsView() {
+        if (m_tvVideoStats == null) {
+            return;
+        }
+        long nowMs = System.currentTimeMillis();
+        if (nowMs - m_lastVideoStatsMs < 250L) {
+            return;
+        }
+        m_lastVideoStatsMs = nowMs;
+        final String lastSeen = (m_lastVideoPacketMs == 0L)
+                ? "never"
+                : String.format(Locale.US, "%dms", (nowMs - m_lastVideoPacketMs));
+        m_tvVideoStats.setText(String.format(Locale.US,
+                "Video pkt=%d ok=%d fail=%d bad=%d L=%d R=%d last=%s",
+                m_videoPktCount, m_videoFrameOk, m_videoDecodeFail,
+                m_videoInvalidPkt, m_videoCamFrameOk0, m_videoCamFrameOk1, lastSeen));
+    }
+
+    private void tickJoystickControl() {
         long nowMs = System.currentTimeMillis();
         if (m_lastJoystickTickMs == 0L) {
             m_lastJoystickTickMs = nowMs;
@@ -402,15 +594,14 @@ public class MainActivity extends Activity {
             dtSec = JOYSTICK_PERIOD_MS / 1000.0f;
         }
 
-        float leftX = ApplyDeadzone(m_leftX);
-        float leftY = ApplyDeadzone(m_leftY);
-        float rightX = ApplyDeadzone(m_rightX);
-        float rightY = ApplyDeadzone(m_rightY);
+        float leftX = applyDeadzone(m_leftX);
+        float leftY = applyDeadzone(m_leftY);
+        float rightX = applyDeadzone(m_rightX);
+        float rightY = applyDeadzone(m_rightY);
 
-        float leftMag = Clamp01((float) Math.hypot(leftX, leftY));
-        float rightMag = Clamp01((float) Math.hypot(rightX, rightY));
-        float rightVerticalMag = Clamp01(Math.abs(rightY));
-
+        float leftMag = clamp01((float) Math.hypot(leftX, leftY));
+        float rightMag = clamp01((float) Math.hypot(rightX, rightY));
+        float rightVerticalMag = clamp01(Math.abs(rightY));
         boolean active = m_leftActive || m_rightActive
                 || leftX != 0f || leftY != 0f || rightX != 0f || rightY != 0f;
 
@@ -421,28 +612,26 @@ public class MainActivity extends Activity {
         if (!active) {
             if (m_lastJoystickActive) {
                 m_lastJoystickActive = false;
-                SendHoldBurst(3, "HOLD(center)");
+                sendHoldBurst(3, "HOLD(center)");
             }
             return;
         }
         m_lastJoystickActive = true;
 
-        float baseMaxV = Math.max(0.1f, ParseF(m_etMaxV, 0.6f));
-        float dynamicMaxV = baseMaxV * Clamp01(Math.max(leftMag, Math.max(rightVerticalMag, Math.abs(rightX))));
+        float baseMaxV = 0.6f;
+        float dynamicMaxV = baseMaxV * clamp01(Math.max(leftMag, Math.max(rightVerticalMag, Math.abs(rightX))));
         if (dynamicMaxV < 0.05f) {
             dynamicMaxV = 0.05f;
         }
 
-        // PX4-style local NED velocity setpoint semantics.
         float vx = leftY * XY_SPEED_SCALE_MPS * baseMaxV;
         float vy = leftX * XY_SPEED_SCALE_MPS * baseMaxV;
         float vz = (-rightY) * Z_SPEED_SCALE_MPS * baseMaxV;
         float yawRate = rightX * YAW_RATE_SCALE_RADPS;
-
-        SendMoveVelocityCommand(vx, vy, vz, yawRate, dynamicMaxV, "JOY VEL");
+        sendMoveVelocityCommand(vx, vy, vz, yawRate, dynamicMaxV, "JOY VEL");
     }
 
-    private void StartJoystickLoop() {
+    private void startJoystickLoop() {
         if (m_joystickLoopRunning) {
             return;
         }
@@ -451,12 +640,12 @@ public class MainActivity extends Activity {
         m_handler.post(m_joystickLoop);
     }
 
-    private void StopJoystickLoop() {
+    private void stopJoystickLoop() {
         m_joystickLoopRunning = false;
         m_handler.removeCallbacks(m_joystickLoop);
     }
 
-    private void StartRxLoop() {
+    private void startRxLoop() {
         if (m_rxLoopRunning) {
             return;
         }
@@ -464,19 +653,18 @@ public class MainActivity extends Activity {
         m_handler.post(m_rxLoop);
     }
 
-    private void StopRxLoop() {
+    private void stopRxLoop() {
         m_rxLoopRunning = false;
         m_handler.removeCallbacks(m_rxLoop);
     }
 
-    private void ResetJoysticksAndHold() {
+    private void resetJoysticksAndHold() {
         if (m_joystickLeft != null) {
             m_joystickLeft.Reset();
         }
         if (m_joystickRight != null) {
             m_joystickRight.Reset();
         }
-
         m_leftX = 0f;
         m_leftY = 0f;
         m_rightX = 0f;
@@ -484,27 +672,26 @@ public class MainActivity extends Activity {
         m_leftActive = false;
         m_rightActive = false;
         m_lastJoystickActive = false;
-
-        SendHoldBurst(3, "HOLD(page)");
+        sendHoldBurst(3, "HOLD(page)");
     }
 
-    private void SetManualPage(boolean manualMode) {
+    private void setManualPage(boolean manualMode) {
         if (m_pageManual == null || m_pageCommand == null) {
             return;
         }
         m_isManualMode = manualMode;
         if (!manualMode) {
-            ResetJoysticksAndHold();
+            resetJoysticksAndHold();
         }
         m_pageManual.setVisibility(manualMode ? View.VISIBLE : View.GONE);
         m_pageCommand.setVisibility(manualMode ? View.GONE : View.VISIBLE);
         if (m_btnModeToggle != null) {
-            m_btnModeToggle.setText(manualMode ? "MANUAL" : "COMMAND");
+            m_btnModeToggle.setText("COMMAND");
         }
-        int targetOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
-        if (getRequestedOrientation() != targetOrientation) {
-            setRequestedOrientation(targetOrientation);
+        if (m_btnModeToggleCommand != null) {
+            m_btnModeToggleCommand.setText("MANUAL");
         }
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
     }
 
     @Override
@@ -524,45 +711,45 @@ public class MainActivity extends Activity {
         m_ivVideoLeft = findViewById(R.id.ivVideoLeft);
         m_ivVideoRight = findViewById(R.id.ivVideoRight);
         m_tvStatus = findViewById(R.id.tvStatus);
+        m_tvPose = findViewById(R.id.tvPose);
+        m_tvVideoStats = findViewById(R.id.tvVideoStats);
         m_tvJoystickState = findViewById(R.id.tvJoystickState);
         m_pageManual = findViewById(R.id.pageManual);
         m_pageCommand = findViewById(R.id.pageCommand);
         m_btnModeToggle = findViewById(R.id.btnModeToggle);
+        m_btnModeToggleCommand = findViewById(R.id.btnModeToggleCommand);
+        m_btnArmToggle = findViewById(R.id.btnArm);
+        m_btnAltitude = findViewById(R.id.btnAltitude);
+        m_btnPosition = findViewById(R.id.btnPosition);
+        m_btnOffboard = findViewById(R.id.btnOffboard);
+        m_btnHold = findViewById(R.id.btnHold);
+        m_btnLand = findViewById(R.id.btnLand);
+        m_btnToggleSlam = findViewById(R.id.btnToggleSlam);
+        m_btnToggleCalib = findViewById(R.id.btnToggleCalib);
 
-        final String cm5Ip = "192.168.0.103";
-        final int cm5CmdPort = 14550;
-        final int phoneVideoPort = 5000;
+        Button btnCleanCalib = findViewById(R.id.btnCleanCalib);
 
-        boolean ok;
-        try {
-            ok = NativeUdp.init(cm5Ip, cm5CmdPort, phoneVideoPort);
-        } catch (Throwable t) {
-            m_tvStatus.setText("Native init error: " + t.getMessage());
-            ok = false;
-        }
-        m_tvStatus.setText(ok
-                ? ("UDP ready cmd-> " + cm5Ip + ":" + cm5CmdPort + " video<-" + phoneVideoPort)
-                : "UDP init failed");
-
-        Button btnArm = findViewById(R.id.btnArm);
-        Button btnDisarm = findViewById(R.id.btnDisarm);
-        Button btnOffboard = findViewById(R.id.btnOffboard);
-        Button btnHold = findViewById(R.id.btnHold);
-        Button btnLand = findViewById(R.id.btnLand);
-        Button btnPing = findViewById(R.id.btnPing);
-        Button btnMove = findViewById(R.id.btnMove);
-        Button btnPoll = findViewById(R.id.btnPoll);
-
-        m_etX = findViewById(R.id.etX);
-        m_etY = findViewById(R.id.etY);
-        m_etZ = findViewById(R.id.etZ);
-        m_etYaw = findViewById(R.id.etYaw);
-        m_etMaxV = findViewById(R.id.etMaxV);
+        m_etVehicleIp = findViewById(R.id.etVehicleIp);
+        m_etCfgExposure = findViewById(R.id.etCfgExposure);
+        m_etCfgGain = findViewById(R.id.etCfgGain);
 
         m_joystickLeft = findViewById(R.id.joystickLeft);
         m_joystickRight = findViewById(R.id.joystickRight);
 
-        SyncPositionInputsToCache();
+        final String cm5Ip = "192.168.0.103";
+        final int cm5CmdPort = 14550;
+        final int phoneVideoPort = 5000;
+        m_vehicleIp = cm5Ip;
+        boolean ok;
+        try {
+            ok = NativeUdp.init(cm5Ip, cm5CmdPort, phoneVideoPort);
+        } catch (Throwable t) {
+            ok = false;
+            m_tvStatus.setText("Native init error: " + t.getMessage());
+        }
+        if (ok) {
+            m_tvStatus.setText("UDP ready cmd-> " + cm5Ip + ":" + cm5CmdPort + " video<-" + phoneVideoPort);
+        }
 
         m_joystickLeft.SetOnStickChangedListener((xNorm, yNorm, active) -> {
             m_leftX = xNorm;
@@ -575,36 +762,84 @@ public class MainActivity extends Activity {
             m_rightActive = active;
         });
 
-        m_btnModeToggle.setOnClickListener(v -> SetManualPage(!m_isManualMode));
-        if (savedInstanceState != null) {
-            m_isManualMode = savedInstanceState.getBoolean(KEY_MANUAL_MODE, true);
+        m_btnModeToggle.setOnClickListener(v -> setManualPage(!m_isManualMode));
+        if (m_btnModeToggleCommand != null) {
+            m_btnModeToggleCommand.setOnClickListener(v -> setManualPage(!m_isManualMode));
         }
-        SetManualPage(m_isManualMode);
+        if (savedInstanceState != null) {
+            m_isManualMode = savedInstanceState.getBoolean(KEY_MANUAL_MODE, false);
+        }
+        setManualPage(m_isManualMode);
 
-        btnArm.setOnClickListener(v -> SendSimpleCmd("ARM", CMD_ARM));
-        btnDisarm.setOnClickListener(v -> SendSimpleCmd("DISARM", CMD_DISARM));
-        btnOffboard.setOnClickListener(v -> SendSimpleCmd("OFFBOARD", CMD_OFFBOARD));
-        btnHold.setOnClickListener(v -> SendSimpleCmd("HOLD", CMD_HOLD));
-        btnLand.setOnClickListener(v -> SendSimpleCmd("LAND", CMD_LAND));
-        btnPing.setOnClickListener(v -> SendSimpleCmd("PING", CMD_PING));
-
-        btnMove.setOnClickListener(v -> {
-            SyncPositionInputsToCache();
-            float maxV = ParseF(m_etMaxV, 0.6f);
-            SendMoveCommand(m_lastCmdX, m_lastCmdY, m_lastCmdZ, m_lastCmdYaw, maxV, "MOVE(pos) sent");
+        if (m_btnArmToggle != null) {
+            m_btnArmToggle.setOnClickListener(v -> {
+                final boolean nextArm = !m_armLatched;
+                sendSimpleCmd(nextArm ? "ARM" : "DISARM", nextArm ? CMD_ARM : CMD_DISARM);
+                m_armLatched = nextArm;
+                updateFlightButtons();
+            });
+        }
+        if (m_btnOffboard != null) {
+            m_btnOffboard.setOnClickListener(v -> {
+                sendSimpleCmd("OFFBOARD", CMD_OFFBOARD);
+                m_flightAction = "OFFBOARD";
+                updateFlightButtons();
+            });
+        }
+        if (m_btnAltitude != null) {
+            m_btnAltitude.setOnClickListener(v -> {
+                m_flightAction = "ALTITUDE";
+                updateFlightButtons();
+                m_tvStatus.setText("ALTITUDE mode selected");
+            });
+        }
+        if (m_btnPosition != null) {
+            m_btnPosition.setOnClickListener(v -> {
+                m_flightAction = "POSITION";
+                updateFlightButtons();
+                m_tvStatus.setText("POSITION mode selected");
+            });
+        }
+        if (m_btnHold != null) {
+            m_btnHold.setOnClickListener(v -> {
+                sendSimpleCmd("HOLD", CMD_HOLD);
+                m_flightAction = "HOLD";
+                updateFlightButtons();
+            });
+        }
+        if (m_btnLand != null) {
+            m_btnLand.setOnClickListener(v -> {
+                sendSimpleCmd("LAND", CMD_LAND);
+                m_flightAction = "LAND";
+                updateFlightButtons();
+            });
+        }
+        btnCleanCalib.setOnClickListener(v -> {
+            if (!ensureVehicleConnection()) {
+                return;
+            }
+            sendSimpleCmd("CLEAN_CALIB", CMD_CALIB_CLEAN);
         });
 
-        btnPoll.setOnClickListener(v -> {
-            byte[] cached = m_lastAckPacket;
-            if (cached == null) {
-                m_tvStatus.setText("no cached ACK/TLV");
+        m_btnToggleSlam.setOnClickListener(v -> {
+            if (m_runtimeMode == MODE_SLAM) {
+                stopRuntime("Stop VIO");
             } else {
-                m_tvStatus.setText(DecodeTlvAck(cached));
+                sendRuntimeMode(MODE_SLAM, "Start VIO");
             }
         });
+        m_btnToggleCalib.setOnClickListener(v -> {
+            if (m_runtimeMode == MODE_CALIB) {
+                stopRuntime("Stop Calib");
+            } else {
+                sendRuntimeMode(MODE_CALIB, "Start Calib");
+            }
+        });
+        updateRuntimeButtons();
+        updateFlightButtons();
 
-        StartJoystickLoop();
-        StartRxLoop();
+        startJoystickLoop();
+        startRxLoop();
     }
 
     @Override
@@ -620,8 +855,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        StopRxLoop();
-        StopJoystickLoop();
+        stopRxLoop();
+        stopJoystickLoop();
         super.onDestroy();
         try {
             NativeUdp.close();
@@ -635,4 +870,3 @@ public class MainActivity extends Activity {
         super.onSaveInstanceState(outState);
     }
 }
-

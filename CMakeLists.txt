@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
 option(CROSS_AARCH64 "Enable aarch64 cross compile" ON)
-option(BUILD_CALIB_RECORDER "Build stereo calibration recorder" ON)
-option(BUILD_SMART_DRONE "Build stereo VIO application" ON)
+option(BUILD_CALIB_RECORDER "Compatibility switch; recorder is merged into smart_drone" ON)
+option(BUILD_SMART_DRONE "Build unified stereo runtime application" ON)
 
 if(NOT BUILD_CALIB_RECORDER AND NOT BUILD_SMART_DRONE)
   message(FATAL_ERROR "At least one of BUILD_CALIB_RECORDER or BUILD_SMART_DRONE must be ON")
@@ -99,14 +99,7 @@ function(configure_orb_target target_name)
   )
 endfunction()
 
-if(BUILD_CALIB_RECORDER)
-  add_executable(calib_recorder
-    src/ov9281_icm42688/stereo_imu_calib_recorder.cpp
-  )
-  configure_common_target(calib_recorder)
-endif()
-
-if(BUILD_SMART_DRONE)
+if(BUILD_SMART_DRONE OR BUILD_CALIB_RECORDER)
   add_executable(smart_drone
     src/ov9281_icm42688/main.cpp
   )

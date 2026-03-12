@@ -41,6 +41,9 @@ public:
             return false;
         }
 
+        int rcvBuf = 4 * 1024 * 1024;
+        ::setsockopt(m_fd, SOL_SOCKET, SO_RCVBUF, &rcvBuf, sizeof(rcvBuf));
+
         const int flags = ::fcntl(m_fd, F_GETFL, 0);
         ::fcntl(m_fd, F_SETFL, flags | O_NONBLOCK);
         return true;

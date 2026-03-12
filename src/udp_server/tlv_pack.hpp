@@ -21,6 +21,14 @@ inline void WriteU32Le(std::vector<uint8_t>& buffer, uint32_t value)
     buffer.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
 }
 
+inline void WriteF32Le(std::vector<uint8_t>& buffer, float value)
+{
+    uint32_t raw = 0;
+    static_assert(sizeof(raw) == sizeof(value), "float size mismatch");
+    std::memcpy(&raw, &value, sizeof(raw));
+    WriteU32Le(buffer, raw);
+}
+
 inline std::vector<uint8_t> MakeFrame(
     uint8_t ver,
     uint8_t cmd,

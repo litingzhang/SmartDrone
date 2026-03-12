@@ -1,7 +1,10 @@
 #include <arpa/inet.h>
 
+#include <condition_variable>
 #include <netinet/in.h>
 #include <sys/socket.h>
+
+#include <chrono>
 // ---------------- UDP image sender ----------------
 class UdpImageSender {
   public:
@@ -9,7 +12,7 @@ class UdpImageSender {
         int camIndex;  // 0=L, 1=R
         uint32_t seq;   // sequence for debug
         double frameTime; // seconds
-        cv::Mat gray;   // CV_8UC1
+        cv::Mat gray;   // preview source, may be CV_8UC1 or CV_16UC1
     };
 
     bool Open(const std::string &ip, int port, int jpegQuality = 80,
@@ -35,6 +38,7 @@ class UdpImageSender {
             m_sock = -1;
             return false;
         }
+        std::cerr << "[udp] sending to " << ip << ":" << port << "\n";
 
         m_running.store(true);
         for (int cam = 0; cam < 2; ++cam) {
@@ -106,6 +110,10 @@ class UdpImageSender {
     {
         std::vector<uchar> jpeg;
         std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, m_jpegQuality};
+        cv::Mat preview8;
+        auto lastLog = std::chrono::steady_clock::now();
+        int encodedFrames = 0;
+        int sentPackets = 0;
 
         while (m_running.load()) {
             Job job;
@@ -120,18 +128,41 @@ class UdpImageSender {
 
             // encode
             jpeg.clear();
+            preview8.release();
+            if (job.gray.empty()) {
+                continue;
+            }
+            if (job.gray.type() == CV_8UC1) {
+                preview8 = job.gray;
+            } else if (job.gray.type() == CV_16UC1) {
+                double minVal = 0.0;
+                double maxVal = 0.0;
+                cv::minMaxLoc(job.gray, &minVal, &maxVal);
+                const double scale = (maxVal > minVal) ? (255.0 / (maxVal - minVal)) : (1.0 / 256.0);
+                const double shift = (maxVal > minVal) ? (-minVal * scale) : 0.0;
+                job.gray.convertTo(preview8, CV_8U, scale, shift);
+            } else {
+                job.gray.convertTo(preview8, CV_8U);
+            }
             try {
-                cv::imencode(".jpg", job.gray, jpeg, params);
+                cv::imencode(".jpg", preview8, jpeg, params);
             } catch (const std::exception &e) {
                 std::cerr << "[udp] imencode exception: " << e.what() << "\n";
                 continue;
             }
-            if (jpeg.empty())
+            if (jpeg.empty()) {
+                std::cerr << "[udp] empty jpeg cam=" << camIndex
+                          << " type=" << job.gray.type()
+                          << " rows=" << job.gray.rows
+                          << " cols=" << job.gray.cols
+                          << "\n";
                 continue;
+            }
 
             const uint32_t total = (uint32_t)jpeg.size();
             const uint16_t chunks = (uint16_t)((total + m_maxPayload - 1) / m_maxPayload);
             const uint32_t fid = m_frameId.fetch_add(1, std::memory_order_relaxed);
+            encodedFrames++;
 
             for (uint16_t ci = 0; ci < chunks; ++ci) {
                 const uint32_t off = (uint32_t)ci * (uint32_t)m_maxPayload;
@@ -160,6 +191,21 @@ class UdpImageSender {
                 ssize_t sent =
                     ::sendto(m_sock, pkt.data(), pkt.size(), 0, (sockaddr *)&m_dst, sizeof(m_dst));
                 (void)sent; // ignore drop; UDP is best-effort
+                sentPackets++;
+            }
+
+            const auto now = std::chrono::steady_clock::now();
+            if (now - lastLog >= std::chrono::seconds(1)) {
+                std::cerr << "[udp] cam=" << camIndex
+                          << " encoded=" << encodedFrames
+                          << " packets=" << sentPackets
+                          << " last_jpeg=" << total
+                          << " srcType=" << job.gray.type()
+                          << " previewType=" << preview8.type()
+                          << "\n";
+                encodedFrames = 0;
+                sentPackets = 0;
+                lastLog = now;
             }
         }
     }

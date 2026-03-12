@@ -154,6 +154,7 @@ def main():
 
     # Only enforce monotonicity for IMU if needed
     last_ts = defaultdict(lambda: -1)
+    skipped_cam_dups = defaultdict(int)
 
     def imu_make_strictly_increasing(dt_ns: int) -> int:
         if dt_ns <= last_ts["/imu0"]:
@@ -176,6 +177,14 @@ def main():
                 if dt_ns < 0:
                     continue
 
+                if dt_ns <= last_ts[topic]:
+                    skipped_cam_dups[topic] += 1
+                    print(
+                        f"[warn] skip non-increasing {topic} stamp={dt_ns} "
+                        f"last={last_ts[topic]} path={path}"
+                    )
+                    continue
+
                 ts = ns_to_rospy_time(dt_ns)
 
                 img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
@@ -186,6 +195,7 @@ def main():
                 msg.header = Header(stamp=ts, frame_id=frame_id)
 
                 bag.write(topic, msg, ts)
+                last_ts[topic] = dt_ns
 
         # ---- write IMU ----
         for t_ns, wx, wy, wz, ax, ay, az in imu:
@@ -206,6 +216,10 @@ def main():
             m.linear_acceleration.z = az
 
             bag.write("/imu0", m, ts)
+
+    for topic in ["/cam0/image_raw", "/cam1/image_raw"]:
+        if skipped_cam_dups[topic]:
+            print(f"[warn] skipped {skipped_cam_dups[topic]} duplicate frames on {topic}")
 
     print("[done] wrote:", out_bag)
 

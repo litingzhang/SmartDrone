@@ -7,10 +7,10 @@ Usage:
   ./build.sh [calib_recorder|smart_drone|both|all]
 
 Modes:
-  calib_recorder  Build only the calibration recorder target
-  smart_drone     Build only the VIO target
-  both            Build calib_recorder and smart_drone targets
-  all             Build ORB-SLAM3 first, then build calib_recorder and smart_drone
+  calib_recorder  Compatibility alias, builds unified smart_drone target
+  smart_drone     Build the unified runtime target
+  both            Compatibility alias, builds unified smart_drone target
+  all             Build ORB-SLAM3 first, then build unified smart_drone target
 EOF
 }
 
@@ -71,7 +71,7 @@ cmake -S . -B "$BUILD_DIR" \
     -DBUILD_SMART_DRONE="$BUILD_SMART_DRONE"
 
 if [ "$MODE" = "calib_recorder" ]; then
-    cmake --build "$BUILD_DIR" --target calib_recorder -j16
+    cmake --build "$BUILD_DIR" --target smart_drone -j16
 elif [ "$MODE" = "smart_drone" ]; then
     cmake --build "$BUILD_DIR" --target smart_drone -j16
 else
