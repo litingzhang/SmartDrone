@@ -306,6 +306,32 @@ std::vector<cv::Point2f> ExtractTrackedLeftFeatures(const std::vector<ORB_SLAM3:
     return out;
 }
 
+std::vector<cv::Point2f> ExtractTrackedRightFeatures(const std::vector<ORB_SLAM3::MapPoint*>& mapPoints,
+                                                     const std::vector<int>& leftToRightMatches,
+                                                     const std::vector<cv::KeyPoint>& rightKeyPoints,
+                                                     int imageWidth,
+                                                     int imageHeight)
+{
+    std::vector<cv::Point2f> out;
+    const size_t leftCount = std::min(mapPoints.size(), leftToRightMatches.size());
+    out.reserve(leftCount);
+    for (size_t i = 0; i < leftCount; ++i) {
+        if (!mapPoints[i]) {
+            continue;
+        }
+        const int rightIndex = leftToRightMatches[i];
+        if (rightIndex < 0 || static_cast<size_t>(rightIndex) >= rightKeyPoints.size()) {
+            continue;
+        }
+        const cv::Point2f& pt = rightKeyPoints[static_cast<size_t>(rightIndex)].pt;
+        if (pt.x < 0.0f || pt.y < 0.0f || pt.x >= static_cast<float>(imageWidth) || pt.y >= static_cast<float>(imageHeight)) {
+            continue;
+        }
+        out.push_back(pt);
+    }
+    return out;
+}
+
 std::string PeerToIpString(const UdpPeer& peer)
 {
     if (!peer.valid) {
@@ -521,14 +547,22 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         Sophus::SE3f Tcw = useImu ? SLAM.TrackStereo(L.gray, R.gray, frameTime, vImu)
                                   : SLAM.TrackStereo(L.gray, R.gray, frameTime);
         std::vector<cv::Point2f> trackedLeftFeatures;
+        std::vector<cv::Point2f> trackedRightFeatures;
         if (a.udpEnable) {
+            const auto trackedMapPoints = SLAM.GetTrackedMapPoints();
             trackedLeftFeatures = ExtractTrackedLeftFeatures(
-                SLAM.GetTrackedMapPoints(),
+                trackedMapPoints,
                 SLAM.GetTrackedKeyPointsUn(),
                 L.gray.cols,
                 L.gray.rows);
+            trackedRightFeatures = ExtractTrackedRightFeatures(
+                trackedMapPoints,
+                SLAM.GetTrackedLeftToRightMatches(),
+                SLAM.GetTrackedKeyPointsRight(),
+                R.gray.cols,
+                R.gray.rows);
             udp.Enqueue(0, L.seq, frameTime, L.gray, trackedLeftFeatures);
-            udp.Enqueue(1, R.seq, frameTime, R.gray);
+            udp.Enqueue(1, R.seq, frameTime, R.gray, trackedRightFeatures);
         }
         const Sophus::SE3f Twc = Tcw.inverse();
         const Eigen::Vector3f t = Twc.translation();
