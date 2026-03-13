@@ -20,10 +20,8 @@ rosrun kalibr kalibr_calibrate_cameras \
   --topics /cam0/image_raw /cam1/image_raw \
   --approx-sync 0.002
 
-
 rosrun kalibr kalibr_calibrate_imu_camera \
   --bag /data/calib_B.bag \
   --cam /data/calib_A-camchain.yaml \
   --imu /data/imu.yaml \
-  --target /data/aprilgrid.yaml \
-  --approx-sync 0.002
+  --target /data/aprilgrid.yaml

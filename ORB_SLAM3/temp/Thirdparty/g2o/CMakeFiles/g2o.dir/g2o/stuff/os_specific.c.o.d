@@ -1,0 +1,27 @@
+Thirdparty/g2o/CMakeFiles/g2o.dir/g2o/stuff/os_specific.c.o: \
+ /home/ltz/workspace/ORB_SLAM3-master/Thirdparty/g2o/g2o/stuff/os_specific.c \
+ /usr/aarch64-linux-gnu/include/stdc-predef.h \
+ /home/ltz/workspace/ORB_SLAM3-master/Thirdparty/g2o/g2o/stuff/os_specific.h \
+ /usr/aarch64-linux-gnu/include/sys/time.h \
+ /usr/aarch64-linux-gnu/include/features.h \
+ /usr/aarch64-linux-gnu/include/features-time64.h \
+ /usr/aarch64-linux-gnu/include/bits/wordsize.h \
+ /usr/aarch64-linux-gnu/include/bits/timesize.h \
+ /usr/aarch64-linux-gnu/include/sys/cdefs.h \
+ /usr/aarch64-linux-gnu/include/bits/long-double.h \
+ /usr/aarch64-linux-gnu/include/gnu/stubs.h \
+ /usr/aarch64-linux-gnu/include/gnu/stubs-lp64.h \
+ /usr/aarch64-linux-gnu/include/bits/types.h \
+ /usr/aarch64-linux-gnu/include/bits/typesizes.h \
+ /usr/aarch64-linux-gnu/include/bits/time64.h \
+ /usr/aarch64-linux-gnu/include/bits/types/time_t.h \
+ /usr/aarch64-linux-gnu/include/bits/types/struct_timeval.h \
+ /usr/aarch64-linux-gnu/include/sys/select.h \
+ /usr/aarch64-linux-gnu/include/bits/select.h \
+ /usr/aarch64-linux-gnu/include/bits/types/sigset_t.h \
+ /usr/aarch64-linux-gnu/include/bits/types/__sigset_t.h \
+ /usr/aarch64-linux-gnu/include/bits/types/struct_timespec.h \
+ /usr/aarch64-linux-gnu/include/bits/endian.h \
+ /usr/aarch64-linux-gnu/include/bits/endianness.h \
+ /usr/aarch64-linux-gnu/include/bits/select2.h \
+ /usr/aarch64-linux-gnu/include/bits/select-decl.h

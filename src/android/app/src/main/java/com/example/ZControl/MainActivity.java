@@ -4,7 +4,9 @@ import android.app.Activity;
 import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -40,6 +42,8 @@ public class MainActivity extends Activity {
     private static final int VIDEO_HEADER_LEN = 36;
     private static final int MAX_RX_PACKETS_PER_TICK = 96;
     private static final int MAX_VIDEO_JPEG_BYTES = 2 * 1024 * 1024;
+    private static final int VIDEO_FLAG_FEATURE_POINTS = 0x01;
+    private static final double FRAME_MATCH_TOLERANCE_SEC = 0.002;
     private static final float DEADZONE = 0.08f;
     private static final float XY_SPEED_SCALE_MPS = 1.0f;
     private static final float Z_SPEED_SCALE_MPS = 0.8f;
@@ -98,9 +102,14 @@ public class MainActivity extends Activity {
     private int m_videoCamFrameOk1 = 0;
     private long m_lastVideoStatsMs = 0L;
     private long m_lastVideoPacketMs = 0L;
+    private int m_featurePktCount = 0;
+    private int m_featureMatchCount = 0;
+
+    private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private static final class VideoAssembly {
         int frameId = -1;
+        double frameTimeSec = Double.NaN;
         int chunkCount;
         int totalSize;
         byte[][] chunks;
@@ -110,6 +119,7 @@ public class MainActivity extends Activity {
 
         void reset() {
             frameId = -1;
+            frameTimeSec = Double.NaN;
             chunkCount = 0;
             totalSize = 0;
             chunks = null;
@@ -119,8 +129,39 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final class DisplayFrame {
+        int frameId = -1;
+        double frameTimeSec = Double.NaN;
+        Bitmap bitmap;
+        int overlayFrameId = -1;
+    }
+
+    private static final class FeatureFrame {
+        int frameId = -1;
+        double frameTimeSec = Double.NaN;
+        int width;
+        int height;
+        int[] xs;
+        int[] ys;
+        int count;
+
+        void reset() {
+            frameId = -1;
+            frameTimeSec = Double.NaN;
+            width = 0;
+            height = 0;
+            xs = null;
+            ys = null;
+            count = 0;
+        }
+    }
+
     private final VideoAssembly[] m_videoAssemblies =
             new VideoAssembly[]{new VideoAssembly(), new VideoAssembly()};
+    private final DisplayFrame[] m_displayFrames =
+            new DisplayFrame[]{new DisplayFrame(), new DisplayFrame()};
+    private final FeatureFrame[] m_featureFrames =
+            new FeatureFrame[]{new FeatureFrame(), new FeatureFrame()};
 
     private final Runnable m_joystickLoop = new Runnable() {
         @Override
@@ -338,8 +379,23 @@ public class MainActivity extends Activity {
                 | ((data[offset + 3] & 0xFF) << 24);
     }
 
+    private static long readI64Le(byte[] data, int offset) {
+        return ((long) data[offset] & 0xFFL)
+                | (((long) data[offset + 1] & 0xFFL) << 8)
+                | (((long) data[offset + 2] & 0xFFL) << 16)
+                | (((long) data[offset + 3] & 0xFFL) << 24)
+                | (((long) data[offset + 4] & 0xFFL) << 32)
+                | (((long) data[offset + 5] & 0xFFL) << 40)
+                | (((long) data[offset + 6] & 0xFFL) << 48)
+                | (((long) data[offset + 7] & 0xFFL) << 56);
+    }
+
     private static float readF32Le(byte[] data, int offset) {
         return Float.intBitsToFloat(readI32Le(data, offset));
+    }
+
+    private static double readF64Le(byte[] data, int offset) {
+        return Double.longBitsToDouble(readI64Le(data, offset));
     }
 
     private static String ackStatusToText(int status) {
@@ -451,17 +507,22 @@ public class MainActivity extends Activity {
         if (readI32Le(rx, 0) != VIDEO_MAGIC) {
             return false;
         }
-        m_videoPktCount++;
         m_lastVideoPacketMs = System.currentTimeMillis();
         if (readU16Le(rx, 4) != 1) {
             m_videoInvalidPkt++;
             return false;
         }
         int camIndex = rx[6] & 0xFF;
+        int flags = rx[7] & 0xFF;
         if (camIndex < 0 || camIndex >= m_videoAssemblies.length) {
             m_videoInvalidPkt++;
             return true;
         }
+        if ((flags & VIDEO_FLAG_FEATURE_POINTS) != 0) {
+            return tryHandleFeaturePacket(rx, camIndex);
+        }
+        m_videoPktCount++;
+        double frameTimeSec = readF64Le(rx, 12);
         int frameId = readI32Le(rx, 20);
         int chunkIdx = readU16Le(rx, 24);
         int chunkCnt = readU16Le(rx, 26);
@@ -484,6 +545,7 @@ public class MainActivity extends Activity {
                 || assembly.totalSize != totalSize;
         if (needReset) {
             assembly.frameId = frameId;
+            assembly.frameTimeSec = frameTimeSec;
             assembly.chunkCount = chunkCnt;
             assembly.totalSize = totalSize;
             assembly.chunks = new byte[chunkCnt][];
@@ -517,7 +579,12 @@ public class MainActivity extends Activity {
         Bitmap bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
         ImageView target = (camIndex == 0) ? m_ivVideoLeft : m_ivVideoRight;
         if (bitmap != null && target != null) {
-            target.setImageBitmap(bitmap);
+            DisplayFrame displayFrame = m_displayFrames[camIndex];
+            displayFrame.frameId = frameId;
+            displayFrame.frameTimeSec = frameTimeSec;
+            displayFrame.bitmap = bitmap;
+            displayFrame.overlayFrameId = -1;
+            renderVideoFrame(camIndex);
             m_videoFrameOk++;
             if (camIndex == 0) {
                 m_videoCamFrameOk0++;
@@ -529,6 +596,77 @@ public class MainActivity extends Activity {
         }
         assembly.reset();
         return true;
+    }
+
+    private boolean tryHandleFeaturePacket(byte[] rx, int camIndex) {
+        int frameId = readI32Le(rx, 20);
+        int chunkIdx = readU16Le(rx, 24);
+        int chunkCnt = readU16Le(rx, 26);
+        int totalSize = readI32Le(rx, 28);
+        int payloadLen = rx.length - VIDEO_HEADER_LEN;
+        if (chunkIdx != 0 || chunkCnt != 1 || totalSize != payloadLen || payloadLen < 6) {
+            m_videoInvalidPkt++;
+            return true;
+        }
+        int width = readU16Le(rx, VIDEO_HEADER_LEN);
+        int height = readU16Le(rx, VIDEO_HEADER_LEN + 2);
+        int count = readU16Le(rx, VIDEO_HEADER_LEN + 4);
+        if (width <= 0 || height <= 0 || count < 0 || payloadLen != 6 + count * 4) {
+            m_videoInvalidPkt++;
+            return true;
+        }
+        FeatureFrame featureFrame = m_featureFrames[camIndex];
+        featureFrame.frameId = frameId;
+        featureFrame.frameTimeSec = readF64Le(rx, 12);
+        featureFrame.width = width;
+        featureFrame.height = height;
+        featureFrame.count = count;
+        featureFrame.xs = new int[count];
+        featureFrame.ys = new int[count];
+        int cursor = VIDEO_HEADER_LEN + 6;
+        for (int i = 0; i < count; ++i) {
+            featureFrame.xs[i] = readU16Le(rx, cursor);
+            featureFrame.ys[i] = readU16Le(rx, cursor + 2);
+            cursor += 4;
+        }
+        m_featurePktCount++;
+        renderVideoFrame(camIndex);
+        return true;
+    }
+
+    private void renderVideoFrame(int camIndex) {
+        DisplayFrame displayFrame = m_displayFrames[camIndex];
+        ImageView target = (camIndex == 0) ? m_ivVideoLeft : m_ivVideoRight;
+        if (displayFrame.bitmap == null || target == null) {
+            return;
+        }
+        Bitmap output = displayFrame.bitmap;
+        FeatureFrame featureFrame = m_featureFrames[camIndex];
+        if (featureFrame.xs != null
+                && Math.abs(featureFrame.frameTimeSec - displayFrame.frameTimeSec) <= FRAME_MATCH_TOLERANCE_SEC) {
+            output = overlayFeaturePoints(displayFrame.bitmap, featureFrame);
+            if (displayFrame.overlayFrameId != featureFrame.frameId) {
+                displayFrame.overlayFrameId = featureFrame.frameId;
+                m_featureMatchCount++;
+            }
+        }
+        target.setImageBitmap(output);
+    }
+
+    private Bitmap overlayFeaturePoints(Bitmap source, FeatureFrame featureFrame) {
+        Bitmap mutable = source.copy(Bitmap.Config.ARGB_8888, true);
+        if (mutable == null) {
+            return source;
+        }
+        Canvas canvas = new Canvas(mutable);
+        float scaleX = (featureFrame.width > 0) ? ((float) mutable.getWidth() / (float) featureFrame.width) : 1.0f;
+        float scaleY = (featureFrame.height > 0) ? ((float) mutable.getHeight() / (float) featureFrame.height) : 1.0f;
+        for (int i = 0; i < featureFrame.count; ++i) {
+            float x = featureFrame.xs[i] * scaleX;
+            float y = featureFrame.ys[i] * scaleY;
+            canvas.drawCircle(x, y, 5.0f, m_featurePaint);
+        }
+        return mutable;
     }
 
     private boolean isTlvPacket(byte[] rx) {
@@ -577,8 +715,9 @@ public class MainActivity extends Activity {
                 ? "never"
                 : String.format(Locale.US, "%dms", (nowMs - m_lastVideoPacketMs));
         m_tvVideoStats.setText(String.format(Locale.US,
-                "Video pkt=%d ok=%d fail=%d bad=%d L=%d R=%d last=%s",
-                m_videoPktCount, m_videoFrameOk, m_videoDecodeFail,
+                "Video pkt=%d feat=%d fuse=%d ok=%d fail=%d bad=%d L=%d R=%d last=%s",
+                m_videoPktCount, m_featurePktCount, m_featureMatchCount,
+                m_videoFrameOk, m_videoDecodeFail,
                 m_videoInvalidPkt, m_videoCamFrameOk0, m_videoCamFrameOk1, lastSeen));
     }
 
@@ -726,6 +865,9 @@ public class MainActivity extends Activity {
         m_btnLand = findViewById(R.id.btnLand);
         m_btnToggleSlam = findViewById(R.id.btnToggleSlam);
         m_btnToggleCalib = findViewById(R.id.btnToggleCalib);
+        m_featurePaint.setColor(Color.GREEN);
+        m_featurePaint.setStyle(Paint.Style.STROKE);
+        m_featurePaint.setStrokeWidth(2.0f);
 
         Button btnCleanCalib = findViewById(R.id.btnCleanCalib);
 

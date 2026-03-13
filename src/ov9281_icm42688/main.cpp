@@ -285,6 +285,27 @@ uint32_t MonoTimeMs32()
     return static_cast<uint32_t>((MonoTimeUs() / 1000ULL) & 0xFFFFFFFFu);
 }
 
+std::vector<cv::Point2f> ExtractTrackedLeftFeatures(const std::vector<ORB_SLAM3::MapPoint*>& mapPoints,
+                                                    const std::vector<cv::KeyPoint>& keyPoints,
+                                                    int imageWidth,
+                                                    int imageHeight)
+{
+    std::vector<cv::Point2f> out;
+    const size_t count = std::min(mapPoints.size(), keyPoints.size());
+    out.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        if (!mapPoints[i]) {
+            continue;
+        }
+        const cv::Point2f& pt = keyPoints[i].pt;
+        if (pt.x < 0.0f || pt.y < 0.0f || pt.x >= static_cast<float>(imageWidth) || pt.y >= static_cast<float>(imageHeight)) {
+            continue;
+        }
+        out.push_back(pt);
+    }
+    return out;
+}
+
 std::string PeerToIpString(const UdpPeer& peer)
 {
     if (!peer.valid) {
@@ -497,12 +518,18 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         }
         lastFrameNs = frameNs;
         const double frameTime = (double)frameNs * 1e-9;
-        if (a.udpEnable) {
-            udp.Enqueue(0, L.seq, frameTime, L.gray);
-            udp.Enqueue(1, R.seq, frameTime, R.gray);
-        }
         Sophus::SE3f Tcw = useImu ? SLAM.TrackStereo(L.gray, R.gray, frameTime, vImu)
                                   : SLAM.TrackStereo(L.gray, R.gray, frameTime);
+        std::vector<cv::Point2f> trackedLeftFeatures;
+        if (a.udpEnable) {
+            trackedLeftFeatures = ExtractTrackedLeftFeatures(
+                SLAM.GetTrackedMapPoints(),
+                SLAM.GetTrackedKeyPointsUn(),
+                L.gray.cols,
+                L.gray.rows);
+            udp.Enqueue(0, L.seq, frameTime, L.gray, trackedLeftFeatures);
+            udp.Enqueue(1, R.seq, frameTime, R.gray);
+        }
         const Sophus::SE3f Twc = Tcw.inverse();
         const Eigen::Vector3f t = Twc.translation();
         const Eigen::Quaternionf q(Twc.so3().unit_quaternion());

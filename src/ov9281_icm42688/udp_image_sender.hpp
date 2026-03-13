@@ -1,18 +1,37 @@
+#pragma once
+
 #include <arpa/inet.h>
 
-#include <condition_variable>
-#include <netinet/in.h>
-#include <sys/socket.h>
-
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cmath>
+#include <condition_variable>
+#include <cerrno>
+#include <cstring>
+#include <deque>
+#include <iostream>
+#include <mutex>
+#include <netinet/in.h>
+#include <string>
+#include <sys/socket.h>
+#include <thread>
+#include <unistd.h>
+#include <vector>
+
+#include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
 // ---------------- UDP image sender ----------------
 class UdpImageSender {
   public:
+    static constexpr uint8_t FLAG_FEATURE_POINTS = 0x01;
+
     struct Job {
         int camIndex;  // 0=L, 1=R
         uint32_t seq;   // sequence for debug
         double frameTime; // seconds
         cv::Mat gray;   // preview source, may be CV_8UC1 or CV_16UC1
+        std::vector<cv::Point2f> trackedPoints;
     };
 
     bool Open(const std::string &ip, int port, int jpegQuality = 80,
@@ -70,7 +89,11 @@ class UdpImageSender {
     }
 
     // called from SLAM thread (non-blocking-ish)
-    void Enqueue(int camIndex, uint32_t seq, double frameTime, const cv::Mat &gray)
+    void Enqueue(int camIndex,
+                 uint32_t seq,
+                 double frameTime,
+                 const cv::Mat &gray,
+                 const std::vector<cv::Point2f> &trackedPoints = {})
     {
         if (m_sock < 0 || camIndex < 0 || camIndex > 1)
             return;
@@ -79,6 +102,7 @@ class UdpImageSender {
         job.seq = seq;
         job.frameTime = frameTime;
         job.gray = gray.clone(); // IMPORTANT: own data (libcamera buffer will be reused)
+        job.trackedPoints = trackedPoints;
 
         {
             std::lock_guard<std::mutex> lk(m_mu[camIndex]);
@@ -114,6 +138,7 @@ class UdpImageSender {
         auto lastLog = std::chrono::steady_clock::now();
         int encodedFrames = 0;
         int sentPackets = 0;
+        int featurePackets = 0;
 
         while (m_running.load()) {
             Job job;
@@ -194,20 +219,76 @@ class UdpImageSender {
                 sentPackets++;
             }
 
+            if (!job.trackedPoints.empty()) {
+                SendFeaturePacket(job, fid, preview8.cols, preview8.rows, job.trackedPoints);
+                featurePackets++;
+            }
+
             const auto now = std::chrono::steady_clock::now();
             if (now - lastLog >= std::chrono::seconds(1)) {
                 std::cerr << "[udp] cam=" << camIndex
                           << " encoded=" << encodedFrames
                           << " packets=" << sentPackets
+                          << " featurePkt=" << featurePackets
                           << " last_jpeg=" << total
                           << " srcType=" << job.gray.type()
                           << " previewType=" << preview8.type()
                           << "\n";
                 encodedFrames = 0;
                 sentPackets = 0;
+                featurePackets = 0;
                 lastLog = now;
             }
         }
+    }
+
+    void SendFeaturePacket(const Job &job,
+                           uint32_t frameId,
+                           int width,
+                           int height,
+                           const std::vector<cv::Point2f> &trackedPoints)
+    {
+        if (m_sock < 0 || width <= 0 || height <= 0 || trackedPoints.empty()) {
+            return;
+        }
+
+        const size_t sendCount = std::min<size_t>(trackedPoints.size(), 160);
+        std::vector<uint8_t> payload;
+        payload.reserve(6 + sendCount * 4);
+        WriteU16Le(payload, static_cast<uint16_t>(std::min(width, 0xFFFF)));
+        WriteU16Le(payload, static_cast<uint16_t>(std::min(height, 0xFFFF)));
+        WriteU16Le(payload, static_cast<uint16_t>(sendCount));
+        for (size_t i = 0; i < sendCount; ++i) {
+            const cv::Point2f &pt = trackedPoints[i];
+            const int xi = std::clamp<int>(static_cast<int>(std::lround(pt.x)), 0, width - 1);
+            const int yi = std::clamp<int>(static_cast<int>(std::lround(pt.y)), 0, height - 1);
+            WriteU16Le(payload, static_cast<uint16_t>(xi));
+            WriteU16Le(payload, static_cast<uint16_t>(yi));
+        }
+
+        PacketHeader h{};
+        h.magic = 0x5643494D;
+        h.version = 1;
+        h.camIndex = static_cast<uint8_t>(job.camIndex);
+        h.flags = FLAG_FEATURE_POINTS;
+        h.seq = job.seq;
+        h.frameTime = job.frameTime;
+        h.frameId = frameId;
+        h.chunkIdx = 0;
+        h.chunkCnt = 1;
+        h.totalSize = static_cast<uint32_t>(payload.size());
+        h.chunkSize = static_cast<uint32_t>(payload.size());
+
+        std::vector<uint8_t> pkt(sizeof(PacketHeader) + payload.size());
+        std::memcpy(pkt.data(), &h, sizeof(PacketHeader));
+        std::memcpy(pkt.data() + sizeof(PacketHeader), payload.data(), payload.size());
+        ::sendto(m_sock, pkt.data(), pkt.size(), 0, reinterpret_cast<sockaddr *>(&m_dst), sizeof(m_dst));
+    }
+
+    static void WriteU16Le(std::vector<uint8_t> &out, uint16_t value)
+    {
+        out.push_back(static_cast<uint8_t>(value & 0xFF));
+        out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
     }
 
     int m_sock{-1};

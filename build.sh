@@ -54,7 +54,7 @@ echo "MODE:$MODE"
 
 if [ "$BUILD_ORB" -eq 1 ]; then
     echo "build ORB-SLAM3"
-    cd ../ORB_SLAM3-master
+    cd "$SCRIPT_DIR/ORB_SLAM3"
     rm -rf temp
     cmake -S . -B temp \
         -DSYSROOT="$SYSROOT" \
