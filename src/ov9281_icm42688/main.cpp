@@ -58,6 +58,7 @@ struct RemoteRuntimeConfig {
     int exposureUs{6000};
     float gain{4.0f};
     std::string udpIp;
+    SensorMode sensorMode{SensorMode::Stereo};
 };
 
 struct MainRuntimeAliases {
@@ -71,6 +72,11 @@ struct MainRuntimeAliases {
     uint32_t spiSpeed{};
     uint8_t spiMode{}, spiBits{}, imuStartReg{};
     unsigned drdyLine{};
+};
+
+struct StereoBodyExtrinsics {
+    Sophus::SE3f Tbc{Sophus::SE3f()};
+    bool loaded{false};
 };
 
 struct ImuThreadState {
@@ -151,6 +157,56 @@ struct LivePoseState {
     uint32_t txSeq{1};
     bool dirty{false};
 };
+
+std::optional<Sophus::SE3f> ReadSe3Node(const cv::FileNode& node)
+{
+    if (node.empty()) return std::nullopt;
+
+    cv::Mat mat;
+    node >> mat;
+    if (mat.empty() || mat.rows != 4 || mat.cols != 4) return std::nullopt;
+
+    cv::Mat mat32f;
+    mat.convertTo(mat32f, CV_32F);
+    Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            T(r, c) = mat32f.at<float>(r, c);
+        }
+    }
+    return Sophus::SE3f(T);
+}
+
+StereoBodyExtrinsics LoadStereoBodyExtrinsics(const std::string& settingsPath)
+{
+    StereoBodyExtrinsics extrinsics;
+
+    cv::FileStorage fs(settingsPath, cv::FileStorage::READ);
+    if (!fs.isOpened()) {
+        std::cerr << "[pose] warning: failed to open settings for stereo body extrinsics: " << settingsPath << "\n";
+        return extrinsics;
+    }
+
+    const auto maybeTbc = ReadSe3Node(fs["T_b_c1"]);
+    const auto maybeImuTbc = ReadSe3Node(fs["IMU.T_b_c1"]);
+    if (maybeTbc.has_value()) {
+        extrinsics.Tbc = *maybeTbc;
+        extrinsics.loaded = true;
+    } else if (maybeImuTbc.has_value()) {
+        extrinsics.Tbc = *maybeImuTbc;
+        extrinsics.loaded = true;
+    } else {
+        std::cerr << "[pose] info: no T_b_c1/IMU.T_b_c1 in settings, pure stereo pose stays in camera frame\n";
+    }
+
+    if (extrinsics.loaded) {
+        const Eigen::Vector3f t = extrinsics.Tbc.translation();
+        std::cerr << "[pose] pure stereo will publish body pose using T_b_c1"
+                  << " tx=" << t.x() << " ty=" << t.y() << " tz=" << t.z() << "\n";
+    }
+
+    return extrinsics;
+}
 
 class Px4UdpHooks final : public MavlinkHooks {
 public:
@@ -514,6 +570,8 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
                            a.sensorMode == SensorMode::StereoImu ? ORB_SLAM3::System::IMU_STEREO
                                                                  : ORB_SLAM3::System::STEREO,
                            false);
+    const StereoBodyExtrinsics stereoBodyExtrinsics =
+        (a.sensorMode == SensorMode::Stereo) ? LoadStereoBodyExtrinsics(cfg.app.settings) : StereoBodyExtrinsics{};
     UdpImageSender udp;
     if (a.udpEnable) udp.Open(a.udpIp, a.udpPort, a.udpJpegQ, a.udpPayload, a.udpQueue);
     ImuThreadState imuState;
@@ -532,6 +590,11 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     const int64_t imuDtNs = 1000000000LL / std::max(1, a.imuHz);
     const int64_t slackBeforeNs = std::max<int64_t>(2 * imuDtNs, 5000000);
     const int64_t slackAfterNs = std::max<int64_t>(2 * imuDtNs, 5000000);
+    auto lastFeatureLog = std::chrono::steady_clock::now();
+    int leftFeatureFrames = 0;
+    int rightFeatureFrames = 0;
+    size_t leftFeatureCount = 0;
+    size_t rightFeatureCount = 0;
     while (g_runningFlag.load() && !stop.load()) {
         FrameItem L, R;
         if (!cam.GrabPair(L, R, 1000)) continue;
@@ -563,14 +626,37 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
                 R.gray.rows);
             udp.Enqueue(0, L.seq, frameTime, L.gray, trackedLeftFeatures);
             udp.Enqueue(1, R.seq, frameTime, R.gray, trackedRightFeatures);
+            leftFeatureFrames += trackedLeftFeatures.empty() ? 0 : 1;
+            rightFeatureFrames += trackedRightFeatures.empty() ? 0 : 1;
+            leftFeatureCount += trackedLeftFeatures.size();
+            rightFeatureCount += trackedRightFeatures.size();
+            const auto now = std::chrono::steady_clock::now();
+            if (now - lastFeatureLog >= std::chrono::seconds(1)) {
+                std::cerr << "[feat] left_frames=" << leftFeatureFrames
+                          << " left_points=" << leftFeatureCount
+                          << " right_frames=" << rightFeatureFrames
+                          << " right_points=" << rightFeatureCount
+                          << " last_left=" << trackedLeftFeatures.size()
+                          << " last_right=" << trackedRightFeatures.size()
+                          << "\n";
+                lastFeatureLog = now;
+                leftFeatureFrames = 0;
+                rightFeatureFrames = 0;
+                leftFeatureCount = 0;
+                rightFeatureCount = 0;
+            }
         }
-        const Sophus::SE3f Twc = Tcw.inverse();
+        Sophus::SE3f Twc = Tcw.inverse();
+        if (!useImu && stereoBodyExtrinsics.loaded) {
+            Twc = Twc * stereoBodyExtrinsics.Tbc.inverse();
+        }
         const Eigen::Vector3f t = Twc.translation();
         const Eigen::Quaternionf q(Twc.so3().unit_quaternion());
-        MavlinkSerial::Pose p{};
-        p.x = t.x(); p.y = t.y(); p.z = t.z();
-        p.qw = q.w(); p.qx = q.x(); p.qy = q.y(); p.qz = q.z();
-        MavlinkSerial::NormalizeQuat(p.qw, p.qx, p.qy, p.qz);
+        MavlinkSerial::Pose pSlam{};
+        pSlam.x = t.x(); pSlam.y = t.y(); pSlam.z = t.z();
+        pSlam.qw = q.w(); pSlam.qx = q.x(); pSlam.qy = q.y(); pSlam.qz = q.z();
+        MavlinkSerial::NormalizeQuat(pSlam.qw, pSlam.qx, pSlam.qy, pSlam.qz);
+        const MavlinkSerial::Pose p = MavlinkSerial::EnuToNed(pSlam);
         const int state = SLAM.GetTrackingState();
         livePose.UpdatePose(RUNTIME_MODE_SLAM, static_cast<uint8_t>(state), p);
         mav.SendOdometry(MonoTimeUs(), p, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD,
@@ -751,6 +837,7 @@ public:
         CameraConfig& cam = m_config.app.camera;
         cam.exposureUs = r.exposureUs;
         cam.gain = r.gain;
+        m_config.app.sensorMode = r.sensorMode;
         m_config.app.udp.ip = r.udpIp;
         m_config.app.udp.enable = !r.udpIp.empty();
         if (m_desiredMode != UnifiedMode::Idle) {
@@ -855,9 +942,10 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
     RemoteRuntimeConfig r{};
     r.exposureUs = (int)ReadU32Le(&p[0]);
     r.gain = ReadF32Le(&p[4]);
-    const char* ipChars = reinterpret_cast<const char*>(&p[8]);
+    r.sensorMode = (p[8] == RUNTIME_SENSOR_STEREO_IMU) ? SensorMode::StereoImu : SensorMode::Stereo;
+    const char* ipChars = reinterpret_cast<const char*>(&p[9]);
     size_t ipLen = 0;
-    while (ipLen < 32 && ipChars[ipLen] != '\0') {
+    while (ipLen < 31 && ipChars[ipLen] != '\0') {
         ++ipLen;
     }
     r.udpIp.assign(ipChars, ipLen);
@@ -867,7 +955,8 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
     }
     std::string err;
     if (!c.UpdateRemoteConfig(r, &err)) return {ACK_E_BAD_ARGS, err.empty() ? "runtime cfg failed" : err};
-    return {ACK_OK, "runtime cfg updated udp=" + r.udpIp};
+    return {ACK_OK, "runtime cfg updated udp=" + r.udpIp +
+                    " sensor=" + std::string(r.sensorMode == SensorMode::StereoImu ? "stereo-imu" : "stereo")};
 }
 
 RouteResult HandleCalibCleanFrame(const TlvFrame& frame, UnifiedRuntimeController& c)

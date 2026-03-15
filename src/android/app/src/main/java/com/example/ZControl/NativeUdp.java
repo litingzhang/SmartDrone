@@ -14,6 +14,7 @@ public class NativeUdp {
     public static native int sendRuntimeMode(int mode);
     public static native int sendRuntimeConfig(
             int exposureUs,
-            float gain);
+            float gain,
+            int sensorMode);
     public static native byte[] pollRecv();
 }

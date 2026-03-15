@@ -31,6 +31,8 @@ enum TlvCmd : uint8_t {
 constexpr uint16_t MOVE_PAYLOAD_LEN = 21;
 constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
 constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
+// RUNTIME_CONFIG payload:
+// exposureUs(u32le) gain(f32le) sensorMode(u8) reserved[31]
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 40;
 constexpr uint16_t STATE_POSE_PAYLOAD_LEN = 32;
 
@@ -38,6 +40,11 @@ enum RuntimeMode : uint8_t {
     RUNTIME_MODE_IDLE = 0,
     RUNTIME_MODE_SLAM = 1,
     RUNTIME_MODE_CALIB = 2,
+};
+
+enum RuntimeSensorMode : uint8_t {
+    RUNTIME_SENSOR_STEREO = 0,
+    RUNTIME_SENSOR_STEREO_IMU = 1,
 };
 
 enum FrameType : uint8_t {

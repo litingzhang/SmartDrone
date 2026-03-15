@@ -34,6 +34,8 @@ public class MainActivity extends Activity {
     private static final int MODE_IDLE = 0;
     private static final int MODE_SLAM = 1;
     private static final int MODE_CALIB = 2;
+    private static final int SENSOR_STEREO = 0;
+    private static final int SENSOR_STEREO_IMU = 1;
 
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
@@ -68,6 +70,7 @@ public class MainActivity extends Activity {
     private Button m_btnLand;
     private Button m_btnToggleSlam;
     private Button m_btnToggleCalib;
+    private Button m_btnSensorMode;
 
     private EditText m_etVehicleIp;
     private EditText m_etCfgExposure;
@@ -94,6 +97,7 @@ public class MainActivity extends Activity {
     private String m_vehicleIp = "192.168.0.103";
     private boolean m_armLatched = false;
     private String m_flightAction = "";
+    private int m_sensorMode = SENSOR_STEREO;
     private int m_videoPktCount = 0;
     private int m_videoFrameOk = 0;
     private int m_videoDecodeFail = 0;
@@ -104,6 +108,10 @@ public class MainActivity extends Activity {
     private long m_lastVideoPacketMs = 0L;
     private int m_featurePktCount = 0;
     private int m_featureMatchCount = 0;
+    private int m_featurePktCount0 = 0;
+    private int m_featurePktCount1 = 0;
+    private int m_featureMatchCount0 = 0;
+    private int m_featureMatchCount1 = 0;
 
     private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
@@ -247,10 +255,10 @@ public class MainActivity extends Activity {
         int exposureUs = parseI(m_etCfgExposure, 6000);
         float gain = parseF(m_etCfgGain, 4.0f);
         try {
-            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain);
+            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, m_sensorMode);
             m_tvStatus.setText(String.format(Locale.US,
-                    "CFG seq=%d exp=%d gain=%.1f",
-                    seq, exposureUs, gain));
+                    "CFG seq=%d exp=%d gain=%.1f sensor=%s",
+                    seq, exposureUs, gain, sensorModeToText(m_sensorMode)));
             return seq;
         } catch (Throwable t) {
             m_tvStatus.setText("CFG error: " + t.getMessage());
@@ -292,6 +300,10 @@ public class MainActivity extends Activity {
     }
 
     private void updateRuntimeButtons() {
+        if (m_btnSensorMode != null) {
+            m_btnSensorMode.setText(sensorModeToText(m_sensorMode));
+            setButtonState(m_btnSensorMode, m_sensorMode == SENSOR_STEREO_IMU, "#455A64");
+        }
         if (m_btnToggleSlam != null) {
             m_btnToggleSlam.setText(m_runtimeMode == MODE_SLAM ? "Stop VIO" : "Start VIO");
             setButtonState(m_btnToggleSlam, m_runtimeMode == MODE_SLAM, "#2E7D32");
@@ -467,6 +479,31 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String sensorModeToText(int sensorMode) {
+        return sensorMode == SENSOR_STEREO_IMU ? "Stereo-IMU" : "Stereo";
+    }
+
+    private String trackingStateToText(int trackingState) {
+        switch (trackingState) {
+            case 0:
+                return "NO_IMAGES_YET";
+            case 1:
+                return "NOT_INITIALIZED";
+            case 2:
+                return "OK";
+            case 3:
+                return "RECENTLY_LOST";
+            case 4:
+                return "LOST";
+            case 5:
+                return "OK_KLT";
+            case 0xFF:
+                return "INVALID";
+            default:
+                return "STATE(" + trackingState + ")";
+        }
+    }
+
     private boolean tryHandleStatePacket(byte[] rx) {
         if (!isTlvPacket(rx) || rx.length < 15) {
             return false;
@@ -488,9 +525,19 @@ public class MainActivity extends Activity {
         float qz = readF32Le(rx, payloadOffset + 28);
         if (m_tvPose != null) {
             if (runtimeMode == MODE_SLAM) {
+                boolean hasValidPose = trackingState == 2 || trackingState == 5;
+                if (!hasValidPose) {
+                    x = Float.NaN;
+                    y = Float.NaN;
+                    z = Float.NaN;
+                    qw = Float.NaN;
+                    qx = Float.NaN;
+                    qy = Float.NaN;
+                    qz = Float.NaN;
+                }
                 m_tvPose.setText(String.format(Locale.US,
-                        "Pose %s trk=%d\np[%.2f %.2f %.2f]\nq[%.2f %.2f %.2f %.2f]",
-                        runtimeModeToText(runtimeMode), trackingState, x, y, z, qw, qx, qy, qz));
+                        "Pose %s trk=%s\np[%.2f %.2f %.2f]\nq[%.2f %.2f %.2f %.2f]",
+                        runtimeModeToText(runtimeMode), trackingStateToText(trackingState), x, y, z, qw, qx, qy, qz));
             } else if (runtimeMode == MODE_CALIB) {
                 m_tvPose.setText("Pose hidden in CALIB");
             } else {
@@ -630,6 +677,11 @@ public class MainActivity extends Activity {
             cursor += 4;
         }
         m_featurePktCount++;
+        if (camIndex == 0) {
+            m_featurePktCount0++;
+        } else {
+            m_featurePktCount1++;
+        }
         renderVideoFrame(camIndex);
         return true;
     }
@@ -648,6 +700,11 @@ public class MainActivity extends Activity {
             if (displayFrame.overlayFrameId != featureFrame.frameId) {
                 displayFrame.overlayFrameId = featureFrame.frameId;
                 m_featureMatchCount++;
+                if (camIndex == 0) {
+                    m_featureMatchCount0++;
+                } else {
+                    m_featureMatchCount1++;
+                }
             }
         }
         target.setImageBitmap(output);
@@ -715,8 +772,9 @@ public class MainActivity extends Activity {
                 ? "never"
                 : String.format(Locale.US, "%dms", (nowMs - m_lastVideoPacketMs));
         m_tvVideoStats.setText(String.format(Locale.US,
-                "Video pkt=%d feat=%d fuse=%d ok=%d fail=%d bad=%d L=%d R=%d last=%s",
-                m_videoPktCount, m_featurePktCount, m_featureMatchCount,
+                "Video pkt=%d feat=%d(L%d/R%d) fuse=%d(L%d/R%d) ok=%d fail=%d bad=%d L=%d R=%d last=%s",
+                m_videoPktCount, m_featurePktCount, m_featurePktCount0, m_featurePktCount1,
+                m_featureMatchCount, m_featureMatchCount0, m_featureMatchCount1,
                 m_videoFrameOk, m_videoDecodeFail,
                 m_videoInvalidPkt, m_videoCamFrameOk0, m_videoCamFrameOk1, lastSeen));
     }
@@ -865,6 +923,7 @@ public class MainActivity extends Activity {
         m_btnLand = findViewById(R.id.btnLand);
         m_btnToggleSlam = findViewById(R.id.btnToggleSlam);
         m_btnToggleCalib = findViewById(R.id.btnToggleCalib);
+        m_btnSensorMode = findViewById(R.id.btnSensorMode);
         m_featurePaint.setColor(Color.GREEN);
         m_featurePaint.setStyle(Paint.Style.STROKE);
         m_featurePaint.setStrokeWidth(2.0f);
@@ -962,6 +1021,19 @@ public class MainActivity extends Activity {
             }
             sendSimpleCmd("CLEAN_CALIB", CMD_CALIB_CLEAN);
         });
+        if (m_btnSensorMode != null) {
+            m_btnSensorMode.setOnClickListener(v -> {
+                m_sensorMode = (m_sensorMode == SENSOR_STEREO_IMU) ? SENSOR_STEREO : SENSOR_STEREO_IMU;
+                updateRuntimeButtons();
+                if (!ensureVehicleConnection()) {
+                    return;
+                }
+                int seq = sendRuntimeConfig();
+                if (seq >= 0) {
+                    m_tvStatus.setText("Sensor mode -> " + sensorModeToText(m_sensorMode) + " cfgSeq=" + seq);
+                }
+            });
+        }
 
         m_btnToggleSlam.setOnClickListener(v -> {
             if (m_runtimeMode == MODE_SLAM) {

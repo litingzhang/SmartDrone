@@ -156,7 +156,8 @@ Java_com_example_ZControl_NativeUdp_sendRuntimeConfig(
     JNIEnv*,
     jclass,
     jint exposureUs,
-    jfloat gain)
+    jfloat gain,
+    jint sensorMode)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     const uint32_t seq = g_seqCounter.fetch_add(1);
@@ -164,6 +165,7 @@ Java_com_example_ZControl_NativeUdp_sendRuntimeConfig(
     payload.reserve(RUNTIME_CONFIG_PAYLOAD_LEN);
     WriteU32Le(payload, static_cast<uint32_t>(exposureUs));
     WriteF32Le(payload, static_cast<float>(gain));
+    payload.push_back(static_cast<uint8_t>(sensorMode));
     payload.resize(RUNTIME_CONFIG_PAYLOAD_LEN, 0);
 
     const std::vector<uint8_t> frame = MakeFrame(
