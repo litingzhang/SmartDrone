@@ -94,7 +94,7 @@ public class MainActivity extends Activity {
     private boolean m_isManualMode = false;
     private boolean m_rxLoopRunning;
     private int m_runtimeMode = MODE_IDLE;
-    private String m_vehicleIp = "192.168.0.103";
+    private String m_vehicleIp = "10.42.0.1";
     private boolean m_armLatched = false;
     private String m_flightAction = "";
     private int m_sensorMode = SENSOR_STEREO;
@@ -937,7 +937,7 @@ public class MainActivity extends Activity {
         m_joystickLeft = findViewById(R.id.joystickLeft);
         m_joystickRight = findViewById(R.id.joystickRight);
 
-        final String cm5Ip = "192.168.0.103";
+        final String cm5Ip = "10.42.0.1";
         final int cm5CmdPort = 14550;
         final int phoneVideoPort = 5000;
         m_vehicleIp = cm5Ip;
