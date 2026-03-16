@@ -8,7 +8,6 @@
 │  ├─ smart_drone/    # CM5 flight runtime entry and device-facing modules
 │  ├─ common/tlv/     # shared UDP/TLV control protocol and server helpers
 │  └─ android/        # Android app project
-├─ include/           # shared camera / utility headers
 ├─ third_party/       # MAVLink and other external code
 ├─ ORB_SLAM3/         # SLAM dependency
 └─ build/             # generated build outputs
