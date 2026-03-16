@@ -321,6 +321,7 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, 
     mTrackingState = mpTracker->mState;
     mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;
     mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
+    mTrackedRightCoordinates = mpTracker->mCurrentFrame.mvuRight;
 
     return Tcw;
 }
@@ -393,6 +394,7 @@ Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const
     mTrackingState = mpTracker->mState;
     mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;
     mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
+    mTrackedRightCoordinates = mpTracker->mCurrentFrame.mvuRight;
     return Tcw;
 }
 
@@ -469,6 +471,7 @@ Sophus::SE3f System::TrackMonocular(const cv::Mat &im, const double &timestamp, 
     mTrackingState = mpTracker->mState;
     mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;
     mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
+    mTrackedRightCoordinates = mpTracker->mCurrentFrame.mvuRight;
 
     return Tcw;
 }
@@ -1334,6 +1337,12 @@ vector<cv::KeyPoint> System::GetTrackedKeyPointsUn()
 {
     unique_lock<mutex> lock(mMutexState);
     return mTrackedKeyPointsUn;
+}
+
+vector<float> System::GetTrackedRightCoordinates()
+{
+    unique_lock<mutex> lock(mMutexState);
+    return mTrackedRightCoordinates;
 }
 
 double System::GetTimeFromIMUInit()

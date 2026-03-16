@@ -425,6 +425,32 @@ std::vector<cv::Point2f> ExtractTrackedLeftFeatures(const std::vector<ORB_SLAM3:
     return out;
 }
 
+std::vector<cv::Point2f> ExtractTrackedRightFeatures(const std::vector<ORB_SLAM3::MapPoint*>& mapPoints,
+                                                     const std::vector<cv::KeyPoint>& leftKeyPoints,
+                                                     const std::vector<float>& rightCoordinates,
+                                                     int imageWidth,
+                                                     int imageHeight)
+{
+    std::vector<cv::Point2f> out;
+    const size_t count = std::min({mapPoints.size(), leftKeyPoints.size(), rightCoordinates.size()});
+    out.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        if (!mapPoints[i]) {
+            continue;
+        }
+        const float rightX = rightCoordinates[i];
+        if (rightX < 0.0f) {
+            continue;
+        }
+        const cv::Point2f pt(rightX, leftKeyPoints[i].pt.y);
+        if (pt.x < 0.0f || pt.y < 0.0f || pt.x >= static_cast<float>(imageWidth) || pt.y >= static_cast<float>(imageHeight)) {
+            continue;
+        }
+        out.push_back(pt);
+    }
+    return out;
+}
+
 std::string PeerToIpString(const UdpPeer& peer)
 {
     if (!peer.valid) {
@@ -627,12 +653,34 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     const int64_t imuDtNs = 1000000000LL / std::max(1, a.imuHz);
     const int64_t slackBeforeNs = std::max<int64_t>(2 * imuDtNs, 5000000);
     const int64_t slackAfterNs = std::max<int64_t>(2 * imuDtNs, 5000000);
+    const uint64_t imuWarmupSamples = static_cast<uint64_t>(std::max(20, a.imuHz / 2));
     auto lastFeatureLog = std::chrono::steady_clock::now();
+    auto lastImuWindowLog = std::chrono::steady_clock::now();
+    auto lastImuWarmupLog = std::chrono::steady_clock::now();
     int leftFeatureFrames = 0;
+    int rightFeatureFrames = 0;
     size_t leftFeatureCount = 0;
+    size_t rightFeatureCount = 0;
     Sophus::SE3f stereoReferencePose{Sophus::SE3f()};
     bool stereoReferencePoseSet = false;
     while (g_runningFlag.load() && !stop.load()) {
+        if (useImu) {
+            const uint64_t imuCnt = imuState.imuCnt.load(std::memory_order_relaxed);
+            const bool imuReady = imuState.imuOk.load(std::memory_order_relaxed) && imuCnt >= imuWarmupSamples;
+            if (!imuReady) {
+                const auto now = std::chrono::steady_clock::now();
+                if (now - lastImuWarmupLog >= std::chrono::seconds(1)) {
+                    std::cerr << "[imu-warmup] waiting imu_ok="
+                              << (imuState.imuOk.load(std::memory_order_relaxed) ? "true" : "false")
+                              << " imu_cnt=" << imuCnt
+                              << " need=" << imuWarmupSamples
+                              << "\n";
+                    lastImuWarmupLog = now;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+        }
         FrameItem L, R;
         if (!cam.GrabPair(L, R, 1000)) continue;
         int64_t frameNs = (int64_t)((L.tsNs + R.tsNs) / 2);
@@ -640,6 +688,18 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         std::vector<ORB_SLAM3::IMU::Point> vImu;
         if (useImu && lastFrameNs != 0) {
             vImu = imuState.imuBuffer.PopBetweenNs(lastFrameNs, frameNs, slackBeforeNs, slackAfterNs);
+            const auto now = std::chrono::steady_clock::now();
+            if (now - lastImuWindowLog >= std::chrono::seconds(1)) {
+                std::cerr << "[imu-win] frame_dt_ms=" << ((frameNs - lastFrameNs) / 1e6)
+                          << " slack_before_ms=" << (slackBeforeNs / 1e6)
+                          << " slack_after_ms=" << (slackAfterNs / 1e6)
+                          << " imu_samples=" << vImu.size()
+                          << " imu_cnt=" << imuState.imuCnt.load(std::memory_order_relaxed)
+                          << " imu_drop=" << imuState.imuDrop.load(std::memory_order_relaxed)
+                          << " empty=" << (vImu.empty() ? "true" : "false")
+                          << "\n";
+                lastImuWindowLog = now;
+            }
             if (vImu.empty() && !a.allowEmptyImu) continue;
         }
         lastFrameNs = frameNs;
@@ -647,27 +707,41 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         Sophus::SE3f Tcw = useImu ? SLAM.TrackStereo(L.gray, R.gray, frameTime, vImu)
                                   : SLAM.TrackStereo(L.gray, R.gray, frameTime);
         std::vector<cv::Point2f> trackedLeftFeatures;
+        std::vector<cv::Point2f> trackedRightFeatures;
         if (a.udpEnable) {
             const auto trackedMapPoints = SLAM.GetTrackedMapPoints();
+            const auto trackedKeyPoints = SLAM.GetTrackedKeyPointsUn();
             trackedLeftFeatures = ExtractTrackedLeftFeatures(
                 trackedMapPoints,
-                SLAM.GetTrackedKeyPointsUn(),
+                trackedKeyPoints,
                 L.gray.cols,
                 L.gray.rows);
+            trackedRightFeatures = ExtractTrackedRightFeatures(
+                trackedMapPoints,
+                trackedKeyPoints,
+                SLAM.GetTrackedRightCoordinates(),
+                R.gray.cols,
+                R.gray.rows);
             udp.Enqueue(0, L.seq, frameTime, L.gray, trackedLeftFeatures);
-            udp.Enqueue(1, R.seq, frameTime, R.gray);
+            udp.Enqueue(1, R.seq, frameTime, R.gray, trackedRightFeatures);
             leftFeatureFrames += trackedLeftFeatures.empty() ? 0 : 1;
+            rightFeatureFrames += trackedRightFeatures.empty() ? 0 : 1;
             leftFeatureCount += trackedLeftFeatures.size();
+            rightFeatureCount += trackedRightFeatures.size();
             const auto now = std::chrono::steady_clock::now();
             if (now - lastFeatureLog >= std::chrono::seconds(1)) {
                 std::cerr << "[feat] left_frames=" << leftFeatureFrames
                           << " left_points=" << leftFeatureCount
+                          << " right_frames=" << rightFeatureFrames
+                          << " right_points=" << rightFeatureCount
                           << " last_left=" << trackedLeftFeatures.size()
-                          << " last_right=disabled(legacy ORB ABI)"
+                          << " last_right=" << trackedRightFeatures.size()
                           << "\n";
                 lastFeatureLog = now;
                 leftFeatureFrames = 0;
+                rightFeatureFrames = 0;
                 leftFeatureCount = 0;
+                rightFeatureCount = 0;
             }
         }
         const int state = SLAM.GetTrackingState();
