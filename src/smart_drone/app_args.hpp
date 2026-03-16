@@ -162,7 +162,7 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     AppConfig config;
 
     config.vocab = argReader.GetString("--vocab", "ORBvoc.txt");
-    config.settings = argReader.GetString("--settings", "src/smart_drone/stereo_inertial.yaml");
+    config.settings = argReader.GetString("--settings", "stereo_inertial.yaml");
     config.sensorMode = ParseSensorModeText(argReader.GetString("--sensor-mode", "stereo"));
 
     config.camera.width = argReader.GetInt("--w", 640);

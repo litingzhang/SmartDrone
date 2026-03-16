@@ -315,7 +315,7 @@ public class MainActivity extends Activity {
     }
 
     private int sendRuntimeConfig() {
-        return sendRuntimeConfig(parseI(m_etCfgExposure, 6000), parseF(m_etCfgGain, 4.0f), m_sensorMode);
+        return sendRuntimeConfig(parseI(m_etCfgExposure, 3000), parseF(m_etCfgGain, 2.0f), m_sensorMode);
     }
 
     private void sendRuntimeConfigAwaitAck(
@@ -418,8 +418,8 @@ public class MainActivity extends Activity {
         if (isPending(PENDING_RUNTIME)) {
             return;
         }
-        final int exposureUs = parseI(m_etCfgExposure, 6000);
-        final float gain = parseF(m_etCfgGain, 4.0f);
+        final int exposureUs = parseI(m_etCfgExposure, 3000);
+        final float gain = parseF(m_etCfgGain, 2.0f);
         final int sensorMode = m_sensorMode;
         sendRuntimeConfigAwaitAck(exposureUs, gain, sensorMode, label + " CFG", PENDING_RUNTIME, () -> {
             try {
@@ -1241,8 +1241,8 @@ public class MainActivity extends Activity {
         if (m_btnSensorMode != null) {
             m_btnSensorMode.setOnClickListener(v -> {
                 final int nextSensorMode = (m_sensorMode == SENSOR_STEREO_IMU) ? SENSOR_STEREO : SENSOR_STEREO_IMU;
-                final int exposureUs = parseI(m_etCfgExposure, 6000);
-                final float gain = parseF(m_etCfgGain, 4.0f);
+                final int exposureUs = parseI(m_etCfgExposure, 3000);
+                final float gain = parseF(m_etCfgGain, 2.0f);
                 sendRuntimeConfigAwaitAck(exposureUs, gain, nextSensorMode, "Sensor mode", PENDING_SENSOR, () -> {
                     m_sensorMode = nextSensorMode;
                     updateRuntimeButtons();

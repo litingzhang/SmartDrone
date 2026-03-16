@@ -54,8 +54,8 @@ struct UnifiedConfig {
 };
 
 struct RemoteRuntimeConfig {
-    int exposureUs{6000};
-    float gain{4.0f};
+    int exposureUs{3000};
+    float gain{2.0f};
     std::string udpIp;
     SensorMode sensorMode{SensorMode::Stereo};
 };
@@ -425,32 +425,6 @@ std::vector<cv::Point2f> ExtractTrackedLeftFeatures(const std::vector<ORB_SLAM3:
     return out;
 }
 
-std::vector<cv::Point2f> ExtractTrackedRightFeatures(const std::vector<ORB_SLAM3::MapPoint*>& mapPoints,
-                                                     const std::vector<int>& leftToRightMatches,
-                                                     const std::vector<cv::KeyPoint>& rightKeyPoints,
-                                                     int imageWidth,
-                                                     int imageHeight)
-{
-    std::vector<cv::Point2f> out;
-    const size_t leftCount = std::min(mapPoints.size(), leftToRightMatches.size());
-    out.reserve(leftCount);
-    for (size_t i = 0; i < leftCount; ++i) {
-        if (!mapPoints[i]) {
-            continue;
-        }
-        const int rightIndex = leftToRightMatches[i];
-        if (rightIndex < 0 || static_cast<size_t>(rightIndex) >= rightKeyPoints.size()) {
-            continue;
-        }
-        const cv::Point2f& pt = rightKeyPoints[static_cast<size_t>(rightIndex)].pt;
-        if (pt.x < 0.0f || pt.y < 0.0f || pt.x >= static_cast<float>(imageWidth) || pt.y >= static_cast<float>(imageHeight)) {
-            continue;
-        }
-        out.push_back(pt);
-    }
-    return out;
-}
-
 std::string PeerToIpString(const UdpPeer& peer)
 {
     if (!peer.valid) {
@@ -655,9 +629,9 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     const int64_t slackAfterNs = std::max<int64_t>(2 * imuDtNs, 5000000);
     auto lastFeatureLog = std::chrono::steady_clock::now();
     int leftFeatureFrames = 0;
-    int rightFeatureFrames = 0;
     size_t leftFeatureCount = 0;
-    size_t rightFeatureCount = 0;
+    Sophus::SE3f stereoReferencePose{Sophus::SE3f()};
+    bool stereoReferencePoseSet = false;
     while (g_runningFlag.load() && !stop.load()) {
         FrameItem L, R;
         if (!cam.GrabPair(L, R, 1000)) continue;
@@ -673,7 +647,6 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         Sophus::SE3f Tcw = useImu ? SLAM.TrackStereo(L.gray, R.gray, frameTime, vImu)
                                   : SLAM.TrackStereo(L.gray, R.gray, frameTime);
         std::vector<cv::Point2f> trackedLeftFeatures;
-        std::vector<cv::Point2f> trackedRightFeatures;
         if (a.udpEnable) {
             const auto trackedMapPoints = SLAM.GetTrackedMapPoints();
             trackedLeftFeatures = ExtractTrackedLeftFeatures(
@@ -681,37 +654,34 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
                 SLAM.GetTrackedKeyPointsUn(),
                 L.gray.cols,
                 L.gray.rows);
-            trackedRightFeatures = ExtractTrackedRightFeatures(
-                trackedMapPoints,
-                SLAM.GetTrackedLeftToRightMatches(),
-                SLAM.GetTrackedKeyPointsRight(),
-                R.gray.cols,
-                R.gray.rows);
             udp.Enqueue(0, L.seq, frameTime, L.gray, trackedLeftFeatures);
-            udp.Enqueue(1, R.seq, frameTime, R.gray, trackedRightFeatures);
+            udp.Enqueue(1, R.seq, frameTime, R.gray);
             leftFeatureFrames += trackedLeftFeatures.empty() ? 0 : 1;
-            rightFeatureFrames += trackedRightFeatures.empty() ? 0 : 1;
             leftFeatureCount += trackedLeftFeatures.size();
-            rightFeatureCount += trackedRightFeatures.size();
             const auto now = std::chrono::steady_clock::now();
             if (now - lastFeatureLog >= std::chrono::seconds(1)) {
                 std::cerr << "[feat] left_frames=" << leftFeatureFrames
                           << " left_points=" << leftFeatureCount
-                          << " right_frames=" << rightFeatureFrames
-                          << " right_points=" << rightFeatureCount
                           << " last_left=" << trackedLeftFeatures.size()
-                          << " last_right=" << trackedRightFeatures.size()
+                          << " last_right=disabled(legacy ORB ABI)"
                           << "\n";
                 lastFeatureLog = now;
                 leftFeatureFrames = 0;
-                rightFeatureFrames = 0;
                 leftFeatureCount = 0;
-                rightFeatureCount = 0;
             }
         }
+        const int state = SLAM.GetTrackingState();
         Sophus::SE3f Twc = Tcw.inverse();
         if (!useImu && stereoBodyExtrinsics.loaded) {
             Twc = Twc * stereoBodyExtrinsics.Tbc.inverse();
+        }
+        if (!useImu && state == ORB_SLAM3::Tracking::OK) {
+            if (!stereoReferencePoseSet) {
+                stereoReferencePose = Twc;
+                stereoReferencePoseSet = true;
+                std::cerr << "[pose] stereo reference aligned to first tracked body pose\n";
+            }
+            Twc = stereoReferencePose.inverse() * Twc;
         }
         const Eigen::Vector3f t = Twc.translation();
         const Eigen::Quaternionf q(Twc.so3().unit_quaternion());
@@ -719,8 +689,7 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         pSlam.x = t.x(); pSlam.y = t.y(); pSlam.z = t.z();
         pSlam.qw = q.w(); pSlam.qx = q.x(); pSlam.qy = q.y(); pSlam.qz = q.z();
         MavlinkSerial::NormalizeQuat(pSlam.qw, pSlam.qx, pSlam.qy, pSlam.qz);
-        const MavlinkSerial::Pose p = MavlinkSerial::EnuToNed(pSlam);
-        const int state = SLAM.GetTrackingState();
+        const MavlinkSerial::Pose p = useImu ? MavlinkSerial::EnuToNed(pSlam) : pSlam;
         livePose.UpdatePose(RUNTIME_MODE_SLAM, static_cast<uint8_t>(state), p);
         mav.SendOdometry(MonoTimeUs(), p, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD,
                          state == ORB_SLAM3::Tracking::OK ? OdomQualityMode::GOOD : OdomQualityMode::LOST);

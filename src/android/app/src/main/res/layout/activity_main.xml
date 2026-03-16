@@ -256,7 +256,7 @@
                             android:inputType="number"
                             android:minHeight="32dp"
                             android:padding="4dp"
-                            android:text="6000"
+                            android:text="3000"
                             android:textSize="10sp" />
 
                         <EditText
@@ -269,7 +269,7 @@
                             android:inputType="numberDecimal|numberSigned"
                             android:minHeight="32dp"
                             android:padding="4dp"
-                            android:text="4"
+                            android:text="2"
                             android:textSize="10sp" />
                     </LinearLayout>
 

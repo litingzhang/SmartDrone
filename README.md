@@ -27,6 +27,7 @@ cd ~/SmartDrone
 cd ~/SmartDrone/src/android
 rm -rf app/.cxx app/build
 ./gradlew :app:assembleDebug --no-daemon
+adb -d install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 `smart_drone` source entry is now at `src/smart_drone/main.cpp`.
