@@ -1,11 +1,25 @@
 # SmartDrone
 
+## Project Layout
+
+```
+.
+├─ src/
+│  ├─ smart_drone/    # CM5 flight runtime entry and device-facing modules
+│  ├─ common/tlv/     # shared UDP/TLV control protocol and server helpers
+│  └─ android/        # Android app project
+├─ include/           # shared camera / utility headers
+├─ third_party/       # MAVLink and other external code
+├─ ORB_SLAM3/         # SLAM dependency
+└─ build/             # generated build outputs
+```
+
 **Build CM5 main program**
 
 ```
 cd ~/SmartDrone
-./build.sh smart_drone; # increase compile, only main program.
-./build.sh all; # full compile, including ORB-SLAM3, etc..
+./build.sh smart_drone   # only build the runtime executable
+./build.sh all           # build ORB-SLAM3 first, then smart_drone
 ```
 
 **Build Android APP**
@@ -15,6 +29,9 @@ cd ~/SmartDrone/src/android
 rm -rf app/.cxx app/build
 ./gradlew :app:assembleDebug --no-daemon
 ```
+
+`smart_drone` source entry is now at `src/smart_drone/main.cpp`.
+Shared TLV control code now lives under `src/common/tlv/`.
 
 **Calibration**
 

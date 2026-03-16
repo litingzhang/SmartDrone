@@ -29,7 +29,7 @@ if(CROSS_AARCH64)
   set(ENV{PKG_CONFIG_PATH} "")
 endif()
 
-project(ov9281_apps CXX)
+project(SmartDrone CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -53,7 +53,6 @@ find_package(OpenCV REQUIRED)
 
 function(configure_common_target target_name)
   target_include_directories(${target_name} PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/c_library_v2"
     ${LIBCAMERA_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
@@ -99,10 +98,18 @@ function(configure_orb_target target_name)
   )
 endfunction()
 
+set(SMART_DRONE_SOURCES
+  src/smart_drone/main.cpp
+  src/common/tlv/tlv_cmd_router.cpp
+)
+
 if(BUILD_SMART_DRONE OR BUILD_CALIB_RECORDER)
-  add_executable(smart_drone
-    src/ov9281_icm42688/main.cpp
-  )
+  add_executable(smart_drone ${SMART_DRONE_SOURCES})
   configure_common_target(smart_drone)
   configure_orb_target(smart_drone)
+  target_include_directories(smart_drone PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/tlv"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/smart_drone"
+  )
 endif()

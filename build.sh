@@ -47,7 +47,7 @@ esac
 
 SYSROOT="$(cd ../sysroots/cm5 && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/temp"
+BUILD_DIR="$SCRIPT_DIR/build/cmake"
 
 echo "SYSROOT:$SYSROOT"
 echo "MODE:$MODE"
@@ -55,15 +55,16 @@ echo "MODE:$MODE"
 if [ "$BUILD_ORB" -eq 1 ]; then
     echo "build ORB-SLAM3"
     cd "$SCRIPT_DIR/ORB_SLAM3"
-    rm -rf temp
-    cmake -S . -B temp \
+    rm -rf build
+    cmake -S . -B build \
         -DSYSROOT="$SYSROOT" \
         -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/toolchain/toolchain-cm5-aarch64.cmake"
-    cmake --build temp -j16
+    cmake --build build -j16
     cd - >/dev/null
 fi
 
 rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
 cmake -S . -B "$BUILD_DIR" \
     -DSYSROOT="$SYSROOT" \
     -DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config \

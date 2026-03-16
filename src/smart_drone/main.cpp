@@ -29,14 +29,12 @@
 #include "stereo_ov9281.hpp"
 #include "udp_image_sender.hpp"
 
-#include "../udp_server/mavlink_hooks.hpp"
-#include "../udp_server/tlv_cmd_router.hpp"
-#include "../udp_server/tlv_pack.hpp"
-#include "../udp_server/tlv_parser.hpp"
-#include "../udp_server/tlv_protocol.hpp"
-#include "../udp_server/udp_server.hpp"
-
-#include "../udp_server/tlv_cmd_router.cpp"
+#include "common/tlv/mavlink_hooks.hpp"
+#include "common/tlv/tlv_cmd_router.hpp"
+#include "common/tlv/tlv_pack.hpp"
+#include "common/tlv/tlv_parser.hpp"
+#include "common/tlv/tlv_protocol.hpp"
+#include "common/tlv/udp_server.hpp"
 #include <sophus/se3.hpp>
 
 namespace fs = std::filesystem;
