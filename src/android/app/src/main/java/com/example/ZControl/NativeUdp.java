@@ -11,10 +11,9 @@ public class NativeUdp {
     public static native int sendMove(int frameType, float x, float y, float z, float yaw, float maxV);
     // MOVE velocity mode payload semantics (FRAME_NED): vx, vy, vz, yawRate, maxV
     public static native int sendMoveVelocity(int frameType, float vx, float vy, float vz, float yawRate, float maxV);
-    // MOVE rc joystick payload semantics (FRAME_NED): mode, throttle, yaw, pitch, roll, maxV
+    // MOVE rc joystick payload semantics (FRAME_NED): throttle, yaw, pitch, roll, maxV
     public static native int sendMoveRcJoystick(
             int frameType,
-            int controlMode,
             float throttle,
             float yaw,
             float pitch,

@@ -59,12 +59,16 @@
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
-                        <Button
+                        <ImageButton
                             android:id="@+id/btnModeToggle"
-                            android:layout_width="104dp"
-                            android:layout_height="wrap_content"
-                            android:minHeight="34dp"
-                            android:text="COMMAND" />
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:background="@drawable/bg_circle_button"
+                            android:contentDescription="toggle_page"
+                            android:padding="10dp"
+                            android:scaleType="centerInside"
+                            android:src="@android:drawable/ic_menu_rotate"
+                            android:tint="#FFFFFF" />
 
                         <Button
                             android:id="@+id/btnArm"
@@ -85,39 +89,6 @@
                             android:background="@drawable/bg_oval_button"
                             android:minHeight="34dp"
                             android:text="E-STOP"
-                            android:textColor="#FFFFFF"
-                            android:textSize="9sp" />
-
-                        <Button
-                            android:id="@+id/btnStabilize"
-                            android:layout_width="92dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="4dp"
-                            android:background="@drawable/bg_oval_button"
-                            android:minHeight="34dp"
-                            android:text="STABLIZE"
-                            android:textColor="#FFFFFF"
-                            android:textSize="9sp" />
-
-                        <Button
-                            android:id="@+id/btnAltitude"
-                            android:layout_width="92dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="4dp"
-                            android:background="@drawable/bg_oval_button"
-                            android:minHeight="34dp"
-                            android:text="ALTITUDE"
-                            android:textColor="#FFFFFF"
-                            android:textSize="9sp" />
-
-                        <Button
-                            android:id="@+id/btnPosition"
-                            android:layout_width="92dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="4dp"
-                            android:background="@drawable/bg_oval_button"
-                            android:minHeight="34dp"
-                            android:text="POSITION"
                             android:textColor="#FFFFFF"
                             android:textSize="9sp" />
 
@@ -188,12 +159,16 @@
                     android:layout_weight="1"
                     android:orientation="vertical">
 
-                    <Button
+                    <ImageButton
                         android:id="@+id/btnModeToggleCommand"
-                        android:layout_width="104dp"
-                        android:layout_height="wrap_content"
-                        android:minHeight="34dp"
-                        android:text="MANUAL" />
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:background="@drawable/bg_circle_button"
+                        android:contentDescription="toggle_page"
+                        android:padding="10dp"
+                        android:scaleType="centerInside"
+                        android:src="@android:drawable/ic_menu_rotate"
+                        android:tint="#FFFFFF" />
                 </LinearLayout>
 
                 <LinearLayout

@@ -9,7 +9,6 @@ struct MoveGoal {
     uint8_t frame{0};
     bool isVelocity{false};
     bool isRcJoystick{false};
-    uint8_t controlMode{RC_CONTROL_STABILIZE};
     float x{0};
     float y{0};
     float z{1.2f};

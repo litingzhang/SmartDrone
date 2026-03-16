@@ -316,30 +316,20 @@ public:
 
             const float xySpeed = std::max(0.2f, std::min(goal.maxV, 5.0f));
             setpoint.vz = -throttle * kVzSpeedMps;
-            setpoint.yaw = NAN;
-            setpoint.yawspeed = yaw * kYawRateRadps;
-
-            if (goal.controlMode == RC_CONTROL_POSITION) {
-                LivePoseState::Snapshot snapshot{};
-                if (!m_livePose.ReadSnapshot(snapshot) || !snapshot.poseValid) {
-                    if (err) *err = "position mode needs valid live pose";
-                    return false;
-                }
-
-                setpoint.x = snapshot.x + pitch * xySpeed * kPositionLookaheadSec;
-                setpoint.y = snapshot.y + roll * xySpeed * kPositionLookaheadSec;
-                setpoint.z = NAN;
-                setpoint.vx = NAN;
-                setpoint.vy = NAN;
-                const float currentYaw = YawFromQuat(snapshot.qw, snapshot.qx, snapshot.qy, snapshot.qz);
-                const float yawLookahead = yaw * kYawRateRadps * kPositionLookaheadSec;
-                setpoint.yaw = currentYaw + yawLookahead;
-                setpoint.yawspeed = NAN;
-            } else {
-                setpoint.x = NAN; setpoint.y = NAN; setpoint.z = NAN;
-                setpoint.vx = pitch * xySpeed;
-                setpoint.vy = roll * xySpeed;
+            LivePoseState::Snapshot snapshot{};
+            if (!m_livePose.ReadSnapshot(snapshot) || !snapshot.poseValid) {
+                if (err) *err = "offboard joystick needs valid live pose";
+                return false;
             }
+            setpoint.x = snapshot.x + pitch * xySpeed * kPositionLookaheadSec;
+            setpoint.y = snapshot.y + roll * xySpeed * kPositionLookaheadSec;
+            setpoint.z = NAN;
+            setpoint.vx = NAN;
+            setpoint.vy = NAN;
+            const float currentYaw = YawFromQuat(snapshot.qw, snapshot.qx, snapshot.qy, snapshot.qz);
+            const float yawLookahead = yaw * kYawRateRadps * kPositionLookaheadSec;
+            setpoint.yaw = currentYaw + yawLookahead;
+            setpoint.yawspeed = NAN;
         } else if (goal.isVelocity) {
             setpoint.x = NAN; setpoint.y = NAN; setpoint.z = NAN;
             setpoint.vx = goal.vx; setpoint.vy = goal.vy; setpoint.vz = goal.vz;

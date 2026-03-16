@@ -127,7 +127,6 @@ Java_com_example_ZControl_NativeUdp_sendMoveRcJoystick(
     JNIEnv*,
     jclass,
     jint frameType,
-    jint controlMode,
     jfloat throttle,
     jfloat yaw,
     jfloat pitch,
@@ -139,7 +138,6 @@ Java_com_example_ZControl_NativeUdp_sendMoveRcJoystick(
 
     const std::vector<uint8_t> payload = MakeMoveRcPayload(
         static_cast<uint8_t>(frameType),
-        static_cast<uint8_t>(controlMode),
         throttle,
         yaw,
         pitch,

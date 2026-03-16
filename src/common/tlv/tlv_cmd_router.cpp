@@ -145,12 +145,11 @@ RouteResult TlvCmdRouter::HandleMove(const TlvFrame& frame)
         if (frame.len != MOVE_RC_PAYLOAD_LEN) {
             return {ACK_E_BAD_LEN, "bad rc move len"};
         }
-        goal.controlMode = payload[1];
-        goal.throttleNorm = ReadF32Le(&payload[2]);
-        goal.yawNorm = ReadF32Le(&payload[6]);
-        goal.pitchNorm = ReadF32Le(&payload[10]);
-        goal.rollNorm = ReadF32Le(&payload[14]);
-        goal.maxV = ReadF32Le(&payload[18]);
+        goal.throttleNorm = ReadF32Le(&payload[1]);
+        goal.yawNorm = ReadF32Le(&payload[5]);
+        goal.pitchNorm = ReadF32Le(&payload[9]);
+        goal.rollNorm = ReadF32Le(&payload[13]);
+        goal.maxV = ReadF32Le(&payload[17]);
     } else {
         const float valueA = ReadF32Le(&payload[1]);
         const float valueB = ReadF32Le(&payload[5]);
@@ -174,9 +173,6 @@ RouteResult TlvCmdRouter::HandleMove(const TlvFrame& frame)
     if (!(goal.maxV > 0.0f)) {
         return {ACK_E_BAD_ARGS, "bad maxV"};
     }
-    if (goal.isRcJoystick && goal.controlMode > RC_CONTROL_POSITION) {
-        return {ACK_E_BAD_ARGS, "bad rc mode"};
-    }
     // Clamp speed parameter from mobile joystick to a sane range.
     if (goal.maxV > 5.0f) {
         goal.maxV = 5.0f;
@@ -188,8 +184,7 @@ RouteResult TlvCmdRouter::HandleMove(const TlvFrame& frame)
     }
     if (goal.isRcJoystick) {
         return {ACK_OK,
-                "move(rc) accepted mode=" + std::to_string(goal.controlMode) +
-                    " thr=" + std::to_string(goal.throttleNorm) +
+                "move(rc) accepted thr=" + std::to_string(goal.throttleNorm) +
                     " yaw=" + std::to_string(goal.yawNorm) +
                     " pitch=" + std::to_string(goal.pitchNorm) +
                     " roll=" + std::to_string(goal.rollNorm) +

@@ -15,6 +15,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -44,9 +45,6 @@ public class MainActivity extends Activity {
     private static final int MODE_CALIB = 2;
     private static final int SENSOR_STEREO = 0;
     private static final int SENSOR_STEREO_IMU = 1;
-    private static final int RC_MODE_STABILIZE = 0;
-    private static final int RC_MODE_ALTITUDE = 1;
-    private static final int RC_MODE_POSITION = 2;
     private static final long ACK_PENDING_TIMEOUT_MS = 3000L;
     private static final long EMERGENCY_STOP_HOLD_MS = 1000L;
     private static final String PENDING_ARM = "arm";
@@ -78,13 +76,10 @@ public class MainActivity extends Activity {
     private TextView m_tvJoystickState;
     private View m_pageManual;
     private View m_pageCommand;
-    private Button m_btnModeToggle;
-    private Button m_btnModeToggleCommand;
+    private ImageButton m_btnModeToggle;
+    private ImageButton m_btnModeToggleCommand;
     private Button m_btnArmToggle;
     private Button m_btnEmergencyStop;
-    private Button m_btnStabilize;
-    private Button m_btnAltitude;
-    private Button m_btnPosition;
     private Button m_btnOffboard;
     private Button m_btnHold;
     private Button m_btnLand;
@@ -118,7 +113,6 @@ public class MainActivity extends Activity {
     private String m_vehicleIp = "10.42.0.1";
     private boolean m_armLatched = false;
     private String m_lastFlightCommand = "";
-    private int m_rcControlMode = RC_MODE_STABILIZE;
     private int m_sensorMode = SENSOR_STEREO;
     private int m_videoPktCount = 0;
     private int m_videoFrameOk = 0;
@@ -291,7 +285,6 @@ public class MainActivity extends Activity {
     }
 
     private void sendMoveRcJoystickCommand(
-            int controlMode,
             float throttle,
             float yaw,
             float pitch,
@@ -299,10 +292,10 @@ public class MainActivity extends Activity {
             float maxV,
             String reason) {
         try {
-            int seq = NativeUdp.sendMoveRcJoystick(FRAME_NED, controlMode, throttle, yaw, pitch, roll, maxV);
+            int seq = NativeUdp.sendMoveRcJoystick(FRAME_NED, throttle, yaw, pitch, roll, maxV);
             m_tvStatus.setText(String.format(Locale.US,
-                    "%s seq=%d mode=%s thr=%.2f yaw=%.2f pitch=%.2f roll=%.2f maxV=%.2f",
-                    reason, seq, rcModeToText(controlMode), throttle, yaw, pitch, roll, maxV));
+                    "%s seq=%d OFFBOARD thr=%.2f yaw=%.2f pitch=%.2f roll=%.2f maxV=%.2f",
+                    reason, seq, throttle, yaw, pitch, roll, maxV));
         } catch (Throwable t) {
             m_tvStatus.setText(reason + " error: " + t.getMessage());
         }
@@ -402,19 +395,10 @@ public class MainActivity extends Activity {
     private void updateFlightButtons() {
         if (m_btnArmToggle != null) {
             m_btnArmToggle.setText(m_armLatched ? "DISARM" : "ARM");
-            setButtonState(m_btnArmToggle, m_armLatched, isPending(PENDING_ARM), "#C62828");
+            setButtonState(m_btnArmToggle, true, isPending(PENDING_ARM), "#C62828");
         }
         if (m_btnEmergencyStop != null) {
             setButtonState(m_btnEmergencyStop, "EMERGENCY_STOP".equals(m_lastFlightCommand), isPending(PENDING_EMERGENCY_STOP), "#B71C1C");
-        }
-        if (m_btnStabilize != null) {
-            setButtonState(m_btnStabilize, m_rcControlMode == RC_MODE_STABILIZE, false, "#5D4037");
-        }
-        if (m_btnAltitude != null) {
-            setButtonState(m_btnAltitude, m_rcControlMode == RC_MODE_ALTITUDE, false, "#3949AB");
-        }
-        if (m_btnPosition != null) {
-            setButtonState(m_btnPosition, m_rcControlMode == RC_MODE_POSITION, false, "#283593");
         }
         if (m_btnOffboard != null) {
             setButtonState(m_btnOffboard, "OFFBOARD".equals(m_lastFlightCommand), isPending(PENDING_OFFBOARD), "#6A1B9A");
@@ -700,17 +684,6 @@ public class MainActivity extends Activity {
         int ackCmd;
         long ackSeq;
         int status;
-    }
-
-    private String rcModeToText(int controlMode) {
-        switch (controlMode) {
-            case RC_MODE_ALTITUDE:
-                return "ALTITUDE";
-            case RC_MODE_POSITION:
-                return "POSITION";
-            default:
-                return "STABLIZE";
-        }
     }
 
     private String trackingStateToText(int trackingState) {
@@ -1036,8 +1009,7 @@ public class MainActivity extends Activity {
                 || leftX != 0f || leftY != 0f || rightX != 0f || rightY != 0f;
 
         m_tvJoystickState.setText(String.format(Locale.US,
-                "Mode=%s L[yaw=%.2f thr=%.2f mag=%.2f] R[roll=%.2f pitch=%.2f mag=%.2f] %s",
-                rcModeToText(m_rcControlMode),
+                "OFFBOARD L[yaw=%.2f thr=%.2f mag=%.2f] R[roll=%.2f pitch=%.2f mag=%.2f] %s",
                 leftX, leftY, leftMag, rightX, rightY, rightMag, active ? "ACTIVE" : "CENTER"));
 
         if (!active) {
@@ -1049,7 +1021,7 @@ public class MainActivity extends Activity {
         }
         m_lastJoystickActive = true;
 
-        float baseMaxV = (m_rcControlMode == RC_MODE_POSITION) ? 1.0f : 0.8f;
+        float baseMaxV = 1.0f;
         float dynamicMaxV = baseMaxV * clamp01(Math.max(leftMag, Math.max(rightVerticalMag, Math.abs(rightX))));
         if (dynamicMaxV < 0.05f) {
             dynamicMaxV = 0.05f;
@@ -1059,7 +1031,7 @@ public class MainActivity extends Activity {
         float yaw = leftX;
         float pitch = rightY;
         float roll = rightX;
-        sendMoveRcJoystickCommand(m_rcControlMode, throttle, yaw, pitch, roll, dynamicMaxV, "JOY RC");
+        sendMoveRcJoystickCommand(throttle, yaw, pitch, roll, dynamicMaxV, "JOY RC");
     }
 
     private void startJoystickLoop() {
@@ -1116,12 +1088,6 @@ public class MainActivity extends Activity {
         }
         m_pageManual.setVisibility(manualMode ? View.VISIBLE : View.GONE);
         m_pageCommand.setVisibility(manualMode ? View.GONE : View.VISIBLE);
-        if (m_btnModeToggle != null) {
-            m_btnModeToggle.setText("COMMAND");
-        }
-        if (m_btnModeToggleCommand != null) {
-            m_btnModeToggleCommand.setText("MANUAL");
-        }
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
     }
 
@@ -1151,9 +1117,6 @@ public class MainActivity extends Activity {
         m_btnModeToggleCommand = findViewById(R.id.btnModeToggleCommand);
         m_btnArmToggle = findViewById(R.id.btnArm);
         m_btnEmergencyStop = findViewById(R.id.btnEmergencyStop);
-        m_btnStabilize = findViewById(R.id.btnStabilize);
-        m_btnAltitude = findViewById(R.id.btnAltitude);
-        m_btnPosition = findViewById(R.id.btnPosition);
         m_btnOffboard = findViewById(R.id.btnOffboard);
         m_btnHold = findViewById(R.id.btnHold);
         m_btnLand = findViewById(R.id.btnLand);
@@ -1253,27 +1216,6 @@ public class MainActivity extends Activity {
                     m_lastFlightCommand = "OFFBOARD";
                     updateFlightButtons();
                 });
-            });
-        }
-        if (m_btnStabilize != null) {
-            m_btnStabilize.setOnClickListener(v -> {
-                m_rcControlMode = RC_MODE_STABILIZE;
-                updateFlightButtons();
-                m_tvStatus.setText("STABLIZE mode selected");
-            });
-        }
-        if (m_btnAltitude != null) {
-            m_btnAltitude.setOnClickListener(v -> {
-                m_rcControlMode = RC_MODE_ALTITUDE;
-                updateFlightButtons();
-                m_tvStatus.setText("ALTITUDE mode selected");
-            });
-        }
-        if (m_btnPosition != null) {
-            m_btnPosition.setOnClickListener(v -> {
-                m_rcControlMode = RC_MODE_POSITION;
-                updateFlightButtons();
-                m_tvStatus.setText("POSITION mode selected");
             });
         }
         if (m_btnHold != null) {
