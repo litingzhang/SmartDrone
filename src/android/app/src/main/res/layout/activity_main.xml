@@ -78,6 +78,28 @@
                             android:textSize="10sp" />
 
                         <Button
+                            android:id="@+id/btnEmergencyStop"
+                            android:layout_width="92dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_oval_button"
+                            android:minHeight="34dp"
+                            android:text="E-STOP"
+                            android:textColor="#FFFFFF"
+                            android:textSize="9sp" />
+
+                        <Button
+                            android:id="@+id/btnStabilize"
+                            android:layout_width="92dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_oval_button"
+                            android:minHeight="34dp"
+                            android:text="STABLIZE"
+                            android:textColor="#FFFFFF"
+                            android:textSize="9sp" />
+
+                        <Button
                             android:id="@+id/btnAltitude"
                             android:layout_width="92dp"
                             android:layout_height="wrap_content"

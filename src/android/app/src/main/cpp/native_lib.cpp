@@ -18,6 +18,7 @@ static constexpr uint8_t CMD_MOVE = 0x20;
 static constexpr uint8_t CMD_RUNTIME_MODE = 0x30;
 static constexpr uint8_t CMD_RUNTIME_CONFIG = 0x31;
 static constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
+static constexpr uint8_t MOVE_FLAG_RC_JOYSTICK = 0x02;
 static constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 40;
 static constexpr size_t RUNTIME_IP_BYTES = 32;
@@ -112,6 +113,42 @@ Java_com_example_ZControl_NativeUdp_sendMoveVelocity(
         1,
         CMD_MOVE,
         MOVE_FLAG_VELOCITY,
+        seq,
+        NowMs32(),
+        payload.data(),
+        static_cast<uint16_t>(payload.size()));
+
+    const bool ok = g_udpClient.Send(frame.data(), frame.size());
+    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_example_ZControl_NativeUdp_sendMoveRcJoystick(
+    JNIEnv*,
+    jclass,
+    jint frameType,
+    jint controlMode,
+    jfloat throttle,
+    jfloat yaw,
+    jfloat pitch,
+    jfloat roll,
+    jfloat maxV)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const uint32_t seq = g_seqCounter.fetch_add(1);
+
+    const std::vector<uint8_t> payload = MakeMoveRcPayload(
+        static_cast<uint8_t>(frameType),
+        static_cast<uint8_t>(controlMode),
+        throttle,
+        yaw,
+        pitch,
+        roll,
+        maxV);
+    const std::vector<uint8_t> frame = MakeFrame(
+        1,
+        CMD_MOVE,
+        MOVE_FLAG_RC_JOYSTICK,
         seq,
         NowMs32(),
         payload.data(),

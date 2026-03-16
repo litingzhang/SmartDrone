@@ -14,6 +14,7 @@ enum TlvCmd : uint8_t {
     CMD_OFFBOARD = 0x12,
     CMD_HOLD = 0x13,
     CMD_LAND = 0x14,
+    CMD_EMERGENCY_STOP = 0x15,
 
     CMD_MOVE = 0x20,
     CMD_RUNTIME_MODE = 0x30,
@@ -24,12 +25,16 @@ enum TlvCmd : uint8_t {
     CMD_STATE = 0xF1,
 };
 
-// MOVE payload layout (len=21):
+// MOVE payload layout legacy (len=21):
 // frame(u8) a(f32le) b(f32le) c(f32le) d(f32le) maxV(f32le)
 // flags bit0 == 0: a/b/c/d => x/y/z/yaw (position setpoint)
 // flags bit0 == 1: a/b/c/d => vx/vy/vz/yawRate (velocity setpoint)
 constexpr uint16_t MOVE_PAYLOAD_LEN = 21;
 constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
+// MOVE payload layout rc joystick (len=22):
+// frame(u8) controlMode(u8) throttle(f32le) yaw(f32le) pitch(f32le) roll(f32le) maxV(f32le)
+constexpr uint16_t MOVE_RC_PAYLOAD_LEN = 22;
+constexpr uint8_t MOVE_FLAG_RC_JOYSTICK = 0x02;
 constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // RUNTIME_CONFIG payload:
 // exposureUs(u32le) gain(f32le) sensorMode(u8) reserved[31]
@@ -51,6 +56,12 @@ enum FrameType : uint8_t {
     FRAME_MAP = 0,
     FRAME_ENU = 1,
     FRAME_NED = 2,
+};
+
+enum RcControlMode : uint8_t {
+    RC_CONTROL_STABILIZE = 0,
+    RC_CONTROL_ALTITUDE = 1,
+    RC_CONTROL_POSITION = 2,
 };
 
 // ACK payload (len=9):

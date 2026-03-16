@@ -10,6 +10,7 @@ import android.graphics.Paint;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -18,7 +19,11 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 public class MainActivity extends Activity {
 
@@ -27,6 +32,9 @@ public class MainActivity extends Activity {
     private static final int CMD_OFFBOARD = 0x12;
     private static final int CMD_HOLD = 0x13;
     private static final int CMD_LAND = 0x14;
+    private static final int CMD_EMERGENCY_STOP = 0x15;
+    private static final int CMD_RUNTIME_MODE = 0x30;
+    private static final int CMD_RUNTIME_CONFIG = 0x31;
     private static final int CMD_CALIB_CLEAN = 0x32;
     private static final int CMD_ACK = 0xF0;
     private static final int CMD_STATE = 0xF1;
@@ -36,6 +44,19 @@ public class MainActivity extends Activity {
     private static final int MODE_CALIB = 2;
     private static final int SENSOR_STEREO = 0;
     private static final int SENSOR_STEREO_IMU = 1;
+    private static final int RC_MODE_STABILIZE = 0;
+    private static final int RC_MODE_ALTITUDE = 1;
+    private static final int RC_MODE_POSITION = 2;
+    private static final long ACK_PENDING_TIMEOUT_MS = 3000L;
+    private static final long EMERGENCY_STOP_HOLD_MS = 1000L;
+    private static final String PENDING_ARM = "arm";
+    private static final String PENDING_EMERGENCY_STOP = "emergency_stop";
+    private static final String PENDING_OFFBOARD = "offboard";
+    private static final String PENDING_HOLD = "hold";
+    private static final String PENDING_LAND = "land";
+    private static final String PENDING_RUNTIME = "runtime";
+    private static final String PENDING_SENSOR = "sensor";
+    private static final String PENDING_CLEAN_CALIB = "clean_calib";
 
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
@@ -47,9 +68,6 @@ public class MainActivity extends Activity {
     private static final int VIDEO_FLAG_FEATURE_POINTS = 0x01;
     private static final double FRAME_MATCH_TOLERANCE_SEC = 0.002;
     private static final float DEADZONE = 0.08f;
-    private static final float XY_SPEED_SCALE_MPS = 1.0f;
-    private static final float Z_SPEED_SCALE_MPS = 0.8f;
-    private static final float YAW_RATE_SCALE_RADPS = 1.0f;
     private static final String KEY_MANUAL_MODE = "manualMode";
 
     private ImageView m_ivVideoLeft;
@@ -63,6 +81,8 @@ public class MainActivity extends Activity {
     private Button m_btnModeToggle;
     private Button m_btnModeToggleCommand;
     private Button m_btnArmToggle;
+    private Button m_btnEmergencyStop;
+    private Button m_btnStabilize;
     private Button m_btnAltitude;
     private Button m_btnPosition;
     private Button m_btnOffboard;
@@ -71,6 +91,7 @@ public class MainActivity extends Activity {
     private Button m_btnToggleSlam;
     private Button m_btnToggleCalib;
     private Button m_btnSensorMode;
+    private Button m_btnCleanCalib;
 
     private EditText m_etVehicleIp;
     private EditText m_etCfgExposure;
@@ -96,7 +117,8 @@ public class MainActivity extends Activity {
     private int m_runtimeMode = MODE_IDLE;
     private String m_vehicleIp = "10.42.0.1";
     private boolean m_armLatched = false;
-    private String m_flightAction = "";
+    private String m_lastFlightCommand = "";
+    private int m_rcControlMode = RC_MODE_STABILIZE;
     private int m_sensorMode = SENSOR_STEREO;
     private int m_videoPktCount = 0;
     private int m_videoFrameOk = 0;
@@ -114,6 +136,14 @@ public class MainActivity extends Activity {
     private int m_featureMatchCount1 = 0;
 
     private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Map<Long, PendingAckAction> m_pendingAckActions = new HashMap<>();
+    private final Set<String> m_pendingUiKeys = new HashSet<>();
+    private final Runnable m_emergencyStopHoldRunnable = () ->
+            sendSimpleCmdAwaitAck("EMERGENCY_STOP", CMD_EMERGENCY_STOP, PENDING_EMERGENCY_STOP, () -> {
+                m_armLatched = false;
+                m_lastFlightCommand = "EMERGENCY_STOP";
+                updateFlightButtons();
+            });
 
     private static final class VideoAssembly {
         int frameId = -1;
@@ -234,36 +264,85 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void sendSimpleCmdAwaitAck(String name, int cmd, String pendingKey, AckSuccess onSuccess) {
+        if (!ensureVehicleConnection()) {
+            return;
+        }
+        if (isPending(pendingKey)) {
+            return;
+        }
+        try {
+            int seq = NativeUdp.sendCmd(cmd);
+            if (seq < 0) {
+                m_tvStatus.setText(name + " send failed");
+                return;
+            }
+            registerPendingAck(seq, cmd, name, pendingKey, onSuccess);
+            m_tvStatus.setText(name + " sent seq=" + seq + " cmd=0x" + Integer.toHexString(cmd));
+        } catch (Throwable t) {
+            m_tvStatus.setText(name + " error: " + t.getMessage());
+        }
+    }
+
     private void sendHoldBurst(int count, String reason) {
         for (int i = 0; i < count; ++i) {
             sendSimpleCmd(reason + "[" + (i + 1) + "/" + count + "]", CMD_HOLD);
         }
     }
 
-    private void sendMoveVelocityCommand(float vx, float vy, float vz, float yawRate, float maxV, String reason) {
+    private void sendMoveRcJoystickCommand(
+            int controlMode,
+            float throttle,
+            float yaw,
+            float pitch,
+            float roll,
+            float maxV,
+            String reason) {
         try {
-            int seq = NativeUdp.sendMoveVelocity(FRAME_NED, vx, vy, vz, yawRate, maxV);
+            int seq = NativeUdp.sendMoveRcJoystick(FRAME_NED, controlMode, throttle, yaw, pitch, roll, maxV);
             m_tvStatus.setText(String.format(Locale.US,
-                    "%s seq=%d vx=%.2f vy=%.2f vz=%.2f yawRate=%.2f maxV=%.2f",
-                    reason, seq, vx, vy, vz, yawRate, maxV));
+                    "%s seq=%d mode=%s thr=%.2f yaw=%.2f pitch=%.2f roll=%.2f maxV=%.2f",
+                    reason, seq, rcModeToText(controlMode), throttle, yaw, pitch, roll, maxV));
         } catch (Throwable t) {
             m_tvStatus.setText(reason + " error: " + t.getMessage());
         }
     }
 
-    private int sendRuntimeConfig() {
-        int exposureUs = parseI(m_etCfgExposure, 6000);
-        float gain = parseF(m_etCfgGain, 4.0f);
+    private int sendRuntimeConfig(int exposureUs, float gain, int sensorMode) {
         try {
-            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, m_sensorMode);
+            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, sensorMode);
             m_tvStatus.setText(String.format(Locale.US,
                     "CFG seq=%d exp=%d gain=%.1f sensor=%s",
-                    seq, exposureUs, gain, sensorModeToText(m_sensorMode)));
+                    seq, exposureUs, gain, sensorModeToText(sensorMode)));
             return seq;
         } catch (Throwable t) {
             m_tvStatus.setText("CFG error: " + t.getMessage());
             return -1;
         }
+    }
+
+    private int sendRuntimeConfig() {
+        return sendRuntimeConfig(parseI(m_etCfgExposure, 6000), parseF(m_etCfgGain, 4.0f), m_sensorMode);
+    }
+
+    private void sendRuntimeConfigAwaitAck(
+            int exposureUs,
+            float gain,
+            int sensorMode,
+            String label,
+            String pendingKey,
+            AckSuccess onSuccess) {
+        if (!ensureVehicleConnection()) {
+            return;
+        }
+        if (isPending(pendingKey)) {
+            return;
+        }
+        int seq = sendRuntimeConfig(exposureUs, gain, sensorMode);
+        if (seq < 0) {
+            return;
+        }
+        registerPendingAck(seq, CMD_RUNTIME_CONFIG, label, pendingKey, onSuccess);
     }
 
     private boolean ensureVehicleConnection() {
@@ -290,49 +369,61 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void setButtonState(Button button, boolean active, String color) {
+    private void setButtonState(Button button, boolean active, boolean pending, String color) {
         if (button == null) {
             return;
         }
         button.setBackgroundColor(Color.parseColor(color));
-        button.setAlpha(active ? 1.0f : 0.35f);
+        button.setAlpha(pending ? 0.2f : (active ? 1.0f : 0.35f));
         button.setTextColor(Color.WHITE);
+        button.setEnabled(!pending);
     }
 
     private void updateRuntimeButtons() {
+        boolean sensorPending = isPending(PENDING_SENSOR) || isPending(PENDING_RUNTIME);
+        boolean runtimePending = isPending(PENDING_RUNTIME);
         if (m_btnSensorMode != null) {
             m_btnSensorMode.setText(sensorModeToText(m_sensorMode));
-            setButtonState(m_btnSensorMode, m_sensorMode == SENSOR_STEREO_IMU, "#455A64");
+            setButtonState(m_btnSensorMode, m_sensorMode == SENSOR_STEREO_IMU, sensorPending, "#455A64");
         }
         if (m_btnToggleSlam != null) {
             m_btnToggleSlam.setText(m_runtimeMode == MODE_SLAM ? "Stop VIO" : "Start VIO");
-            setButtonState(m_btnToggleSlam, m_runtimeMode == MODE_SLAM, "#2E7D32");
+            setButtonState(m_btnToggleSlam, m_runtimeMode == MODE_SLAM, runtimePending, "#2E7D32");
         }
         if (m_btnToggleCalib != null) {
             m_btnToggleCalib.setText(m_runtimeMode == MODE_CALIB ? "Stop Calib" : "Start Calib");
-            setButtonState(m_btnToggleCalib, m_runtimeMode == MODE_CALIB, "#1565C0");
+            setButtonState(m_btnToggleCalib, m_runtimeMode == MODE_CALIB, runtimePending, "#1565C0");
+        }
+        if (m_btnCleanCalib != null) {
+            setButtonState(m_btnCleanCalib, false, isPending(PENDING_CLEAN_CALIB), "#546E7A");
         }
     }
 
     private void updateFlightButtons() {
         if (m_btnArmToggle != null) {
             m_btnArmToggle.setText(m_armLatched ? "DISARM" : "ARM");
-            setButtonState(m_btnArmToggle, m_armLatched, "#C62828");
+            setButtonState(m_btnArmToggle, m_armLatched, isPending(PENDING_ARM), "#C62828");
+        }
+        if (m_btnEmergencyStop != null) {
+            setButtonState(m_btnEmergencyStop, "EMERGENCY_STOP".equals(m_lastFlightCommand), isPending(PENDING_EMERGENCY_STOP), "#B71C1C");
+        }
+        if (m_btnStabilize != null) {
+            setButtonState(m_btnStabilize, m_rcControlMode == RC_MODE_STABILIZE, false, "#5D4037");
         }
         if (m_btnAltitude != null) {
-            setButtonState(m_btnAltitude, "ALTITUDE".equals(m_flightAction), "#3949AB");
+            setButtonState(m_btnAltitude, m_rcControlMode == RC_MODE_ALTITUDE, false, "#3949AB");
         }
         if (m_btnPosition != null) {
-            setButtonState(m_btnPosition, "POSITION".equals(m_flightAction), "#283593");
+            setButtonState(m_btnPosition, m_rcControlMode == RC_MODE_POSITION, false, "#283593");
         }
         if (m_btnOffboard != null) {
-            setButtonState(m_btnOffboard, "OFFBOARD".equals(m_flightAction), "#6A1B9A");
+            setButtonState(m_btnOffboard, "OFFBOARD".equals(m_lastFlightCommand), isPending(PENDING_OFFBOARD), "#6A1B9A");
         }
         if (m_btnHold != null) {
-            setButtonState(m_btnHold, "HOLD".equals(m_flightAction), "#00897B");
+            setButtonState(m_btnHold, "HOLD".equals(m_lastFlightCommand), isPending(PENDING_HOLD), "#00897B");
         }
         if (m_btnLand != null) {
-            setButtonState(m_btnLand, "LAND".equals(m_flightAction), "#EF6C00");
+            setButtonState(m_btnLand, "LAND".equals(m_lastFlightCommand), isPending(PENDING_LAND), "#EF6C00");
         }
     }
 
@@ -340,32 +431,84 @@ public class MainActivity extends Activity {
         if (!ensureVehicleConnection()) {
             return;
         }
-        int cfgSeq = sendRuntimeConfig();
-        if (cfgSeq < 0) {
+        if (isPending(PENDING_RUNTIME)) {
             return;
         }
-        try {
-            int seq = NativeUdp.sendRuntimeMode(mode);
-            m_runtimeMode = mode;
-            updateRuntimeButtons();
-            m_tvStatus.setText(label + " seq=" + seq + " after cfg=" + cfgSeq);
-        } catch (Throwable t) {
-            m_tvStatus.setText(label + " error: " + t.getMessage());
-        }
+        final int exposureUs = parseI(m_etCfgExposure, 6000);
+        final float gain = parseF(m_etCfgGain, 4.0f);
+        final int sensorMode = m_sensorMode;
+        sendRuntimeConfigAwaitAck(exposureUs, gain, sensorMode, label + " CFG", PENDING_RUNTIME, () -> {
+            try {
+                int seq = NativeUdp.sendRuntimeMode(mode);
+                if (seq < 0) {
+                    clearPendingKey(PENDING_RUNTIME);
+                    m_tvStatus.setText(label + " send failed");
+                    return;
+                }
+                registerPendingAck(seq, CMD_RUNTIME_MODE, label, PENDING_RUNTIME, () -> {
+                    m_runtimeMode = mode;
+                    updateRuntimeButtons();
+                });
+                m_tvStatus.setText(label + " sent seq=" + seq);
+            } catch (Throwable t) {
+                clearPendingKey(PENDING_RUNTIME);
+                m_tvStatus.setText(label + " error: " + t.getMessage());
+            }
+        });
     }
 
     private void stopRuntime(String label) {
         if (!ensureVehicleConnection()) {
             return;
         }
+        if (isPending(PENDING_RUNTIME)) {
+            return;
+        }
         try {
             int seq = NativeUdp.sendRuntimeMode(MODE_IDLE);
-            m_runtimeMode = MODE_IDLE;
-            updateRuntimeButtons();
-            m_tvStatus.setText(label + " seq=" + seq);
+            if (seq < 0) {
+                m_tvStatus.setText(label + " send failed");
+                return;
+            }
+            registerPendingAck(seq, CMD_RUNTIME_MODE, label, PENDING_RUNTIME, () -> {
+                m_runtimeMode = MODE_IDLE;
+                updateRuntimeButtons();
+            });
+            m_tvStatus.setText(label + " sent seq=" + seq);
         } catch (Throwable t) {
             m_tvStatus.setText(label + " error: " + t.getMessage());
         }
+    }
+
+    private void registerPendingAck(long seq, int command, String label, String pendingKey, AckSuccess onSuccess) {
+        if (pendingKey != null && !pendingKey.isEmpty()) {
+            m_pendingUiKeys.add(pendingKey);
+            updateRuntimeButtons();
+            updateFlightButtons();
+        }
+        Runnable timeoutRunnable = () -> {
+            PendingAckAction removed = m_pendingAckActions.remove(seq);
+            if (removed == null) {
+                return;
+            }
+            clearPendingKey(removed.pendingKey);
+            m_tvStatus.setText(removed.label + " timeout");
+        };
+        m_pendingAckActions.put(seq, new PendingAckAction(command, label, pendingKey, onSuccess, timeoutRunnable));
+        m_handler.postDelayed(timeoutRunnable, ACK_PENDING_TIMEOUT_MS);
+    }
+
+    private boolean isPending(String pendingKey) {
+        return pendingKey != null && m_pendingUiKeys.contains(pendingKey);
+    }
+
+    private void clearPendingKey(String pendingKey) {
+        if (pendingKey == null || pendingKey.isEmpty()) {
+            return;
+        }
+        m_pendingUiKeys.remove(pendingKey);
+        updateRuntimeButtons();
+        updateFlightButtons();
     }
 
     private static int readU16Le(byte[] data, int offset) {
@@ -432,6 +575,12 @@ public class MainActivity extends Activity {
     }
 
     private String decodeTlvAck(byte[] rx) {
+        AckFrame ack = parseAckFrame(rx);
+        if (ack.valid) {
+            return String.format(Locale.US,
+                    "ACK reqSeq=%d ackCmd=0x%02X ackSeq=%d status=%s",
+                    ack.reqSeq, ack.ackCmd, ack.ackSeq, ackStatusToText(ack.status));
+        }
         if (rx == null) {
             return "RX: null";
         }
@@ -453,19 +602,61 @@ public class MainActivity extends Activity {
                     "RX partial ver=%d cmd=0x%02X len=%d bytes=%d need=%d",
                     ver, cmd, len, rx.length, total);
         }
+        return String.format(Locale.US,
+                "RX TLV ver=%d cmd=0x%02X flags=%d len=%d seq=%d tMs=%d",
+                ver, cmd, flags, len, seq, tMs);
+    }
+
+    private AckFrame parseAckFrame(byte[] rx) {
+        AckFrame out = new AckFrame();
+        if (rx == null) {
+            return out;
+        }
+        if (rx.length < 17) {
+            return out;
+        }
+        if ((rx[0] & 0xFF) != 0xAA || (rx[1] & 0xFF) != 0x55) {
+            return out;
+        }
+        int cmd = rx[3] & 0xFF;
+        int len = readU16Le(rx, 5);
+        int total = 2 + (1 + 1 + 1 + 2 + 4 + 4) + len + 2;
+        if (rx.length < total) {
+            return out;
+        }
         if (cmd != CMD_ACK || len < 9) {
-            return String.format(Locale.US,
-                    "RX TLV ver=%d cmd=0x%02X flags=%d len=%d seq=%d tMs=%d",
-                    ver, cmd, flags, len, seq, tMs);
+            return out;
         }
         int payloadOffset = 15;
-        int ackCmd = rx[payloadOffset] & 0xFF;
-        long ackSeq = readU32Le(rx, payloadOffset + 1);
-        int status = readI16Le(rx, payloadOffset + 5);
-        int reserved = readU16Le(rx, payloadOffset + 7);
-        return String.format(Locale.US,
-                "ACK ver=%d reqSeq=%d tMs=%d ackCmd=0x%02X ackSeq=%d status=%s reserved=%d",
-                ver, seq, tMs, ackCmd, ackSeq, ackStatusToText(status), reserved);
+        out.valid = true;
+        out.reqSeq = readU32Le(rx, 7);
+        out.ackCmd = rx[payloadOffset] & 0xFF;
+        out.ackSeq = readU32Le(rx, payloadOffset + 1);
+        out.status = readI16Le(rx, payloadOffset + 5);
+        return out;
+    }
+
+    private boolean tryHandleAckPacket(byte[] rx) {
+        AckFrame ack = parseAckFrame(rx);
+        if (!ack.valid) {
+            return false;
+        }
+        PendingAckAction pending = m_pendingAckActions.remove(ack.ackSeq);
+        if (pending != null) {
+            m_handler.removeCallbacks(pending.onTimeout);
+            clearPendingKey(pending.pendingKey);
+        }
+        if (pending != null && pending.command == ack.ackCmd && ack.status == 0) {
+            pending.onSuccess.run();
+        }
+        if (pending != null) {
+            m_tvStatus.setText(String.format(Locale.US,
+                    "%s ack=%s seq=%d",
+                    pending.label, ackStatusToText(ack.status), ack.ackSeq));
+        } else {
+            m_tvStatus.setText(decodeTlvAck(rx));
+        }
+        return true;
     }
 
     private String runtimeModeToText(int mode) {
@@ -481,6 +672,45 @@ public class MainActivity extends Activity {
 
     private String sensorModeToText(int sensorMode) {
         return sensorMode == SENSOR_STEREO_IMU ? "Stereo-IMU" : "Stereo";
+    }
+
+    private interface AckSuccess {
+        void run();
+    }
+
+    private static final class PendingAckAction {
+        final int command;
+        final String label;
+        final String pendingKey;
+        final AckSuccess onSuccess;
+        final Runnable onTimeout;
+
+        PendingAckAction(int command, String label, String pendingKey, AckSuccess onSuccess, Runnable onTimeout) {
+            this.command = command;
+            this.label = label;
+            this.pendingKey = pendingKey;
+            this.onSuccess = onSuccess;
+            this.onTimeout = onTimeout;
+        }
+    }
+
+    private static final class AckFrame {
+        boolean valid;
+        long reqSeq;
+        int ackCmd;
+        long ackSeq;
+        int status;
+    }
+
+    private String rcModeToText(int controlMode) {
+        switch (controlMode) {
+            case RC_MODE_ALTITUDE:
+                return "ALTITUDE";
+            case RC_MODE_POSITION:
+                return "POSITION";
+            default:
+                return "STABLIZE";
+        }
     }
 
     private String trackingStateToText(int trackingState) {
@@ -752,6 +982,9 @@ public class MainActivity extends Activity {
             if (tryHandleStatePacket(rx)) {
                 continue;
             }
+            if (tryHandleAckPacket(rx)) {
+                continue;
+            }
             if (isTlvPacket(rx)) {
                 m_tvStatus.setText(decodeTlvAck(rx));
             }
@@ -803,7 +1036,8 @@ public class MainActivity extends Activity {
                 || leftX != 0f || leftY != 0f || rightX != 0f || rightY != 0f;
 
         m_tvJoystickState.setText(String.format(Locale.US,
-                "L[x=%.2f y=%.2f mag=%.2f] R[x=%.2f y=%.2f mag=%.2f] %s",
+                "Mode=%s L[yaw=%.2f thr=%.2f mag=%.2f] R[roll=%.2f pitch=%.2f mag=%.2f] %s",
+                rcModeToText(m_rcControlMode),
                 leftX, leftY, leftMag, rightX, rightY, rightMag, active ? "ACTIVE" : "CENTER"));
 
         if (!active) {
@@ -815,17 +1049,17 @@ public class MainActivity extends Activity {
         }
         m_lastJoystickActive = true;
 
-        float baseMaxV = 0.6f;
+        float baseMaxV = (m_rcControlMode == RC_MODE_POSITION) ? 1.0f : 0.8f;
         float dynamicMaxV = baseMaxV * clamp01(Math.max(leftMag, Math.max(rightVerticalMag, Math.abs(rightX))));
         if (dynamicMaxV < 0.05f) {
             dynamicMaxV = 0.05f;
         }
 
-        float vx = leftY * XY_SPEED_SCALE_MPS * baseMaxV;
-        float vy = leftX * XY_SPEED_SCALE_MPS * baseMaxV;
-        float vz = (-rightY) * Z_SPEED_SCALE_MPS * baseMaxV;
-        float yawRate = rightX * YAW_RATE_SCALE_RADPS;
-        sendMoveVelocityCommand(vx, vy, vz, yawRate, dynamicMaxV, "JOY VEL");
+        float throttle = leftY;
+        float yaw = leftX;
+        float pitch = rightY;
+        float roll = rightX;
+        sendMoveRcJoystickCommand(m_rcControlMode, throttle, yaw, pitch, roll, dynamicMaxV, "JOY RC");
     }
 
     private void startJoystickLoop() {
@@ -916,6 +1150,8 @@ public class MainActivity extends Activity {
         m_btnModeToggle = findViewById(R.id.btnModeToggle);
         m_btnModeToggleCommand = findViewById(R.id.btnModeToggleCommand);
         m_btnArmToggle = findViewById(R.id.btnArm);
+        m_btnEmergencyStop = findViewById(R.id.btnEmergencyStop);
+        m_btnStabilize = findViewById(R.id.btnStabilize);
         m_btnAltitude = findViewById(R.id.btnAltitude);
         m_btnPosition = findViewById(R.id.btnPosition);
         m_btnOffboard = findViewById(R.id.btnOffboard);
@@ -928,7 +1164,7 @@ public class MainActivity extends Activity {
         m_featurePaint.setStyle(Paint.Style.STROKE);
         m_featurePaint.setStrokeWidth(2.0f);
 
-        Button btnCleanCalib = findViewById(R.id.btnCleanCalib);
+        m_btnCleanCalib = findViewById(R.id.btnCleanCalib);
 
         m_etVehicleIp = findViewById(R.id.etVehicleIp);
         m_etCfgExposure = findViewById(R.id.etCfgExposure);
@@ -975,63 +1211,100 @@ public class MainActivity extends Activity {
         if (m_btnArmToggle != null) {
             m_btnArmToggle.setOnClickListener(v -> {
                 final boolean nextArm = !m_armLatched;
-                sendSimpleCmd(nextArm ? "ARM" : "DISARM", nextArm ? CMD_ARM : CMD_DISARM);
-                m_armLatched = nextArm;
-                updateFlightButtons();
+                sendSimpleCmdAwaitAck(nextArm ? "ARM" : "DISARM", nextArm ? CMD_ARM : CMD_DISARM, PENDING_ARM, () -> {
+                    m_armLatched = nextArm;
+                    m_lastFlightCommand = nextArm ? "ARM" : "DISARM";
+                    updateFlightButtons();
+                });
+            });
+        }
+        if (m_btnEmergencyStop != null) {
+            m_btnEmergencyStop.setOnClickListener(v ->
+                    m_tvStatus.setText("Press and hold E-STOP for 1 second"));
+            m_btnEmergencyStop.setOnTouchListener((v, event) -> {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        if (!isPending(PENDING_EMERGENCY_STOP)) {
+                            m_handler.removeCallbacks(m_emergencyStopHoldRunnable);
+                            m_tvStatus.setText("Hold E-STOP for 1 second to trigger");
+                            m_handler.postDelayed(m_emergencyStopHoldRunnable, EMERGENCY_STOP_HOLD_MS);
+                        }
+                        return false;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                    case MotionEvent.ACTION_MOVE:
+                        if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                            float x = event.getX();
+                            float y = event.getY();
+                            if (x >= 0 && x <= v.getWidth() && y >= 0 && y <= v.getHeight()) {
+                                return false;
+                            }
+                        }
+                        m_handler.removeCallbacks(m_emergencyStopHoldRunnable);
+                        return false;
+                    default:
+                        return false;
+                }
             });
         }
         if (m_btnOffboard != null) {
             m_btnOffboard.setOnClickListener(v -> {
-                sendSimpleCmd("OFFBOARD", CMD_OFFBOARD);
-                m_flightAction = "OFFBOARD";
+                sendSimpleCmdAwaitAck("OFFBOARD", CMD_OFFBOARD, PENDING_OFFBOARD, () -> {
+                    m_lastFlightCommand = "OFFBOARD";
+                    updateFlightButtons();
+                });
+            });
+        }
+        if (m_btnStabilize != null) {
+            m_btnStabilize.setOnClickListener(v -> {
+                m_rcControlMode = RC_MODE_STABILIZE;
                 updateFlightButtons();
+                m_tvStatus.setText("STABLIZE mode selected");
             });
         }
         if (m_btnAltitude != null) {
             m_btnAltitude.setOnClickListener(v -> {
-                m_flightAction = "ALTITUDE";
+                m_rcControlMode = RC_MODE_ALTITUDE;
                 updateFlightButtons();
                 m_tvStatus.setText("ALTITUDE mode selected");
             });
         }
         if (m_btnPosition != null) {
             m_btnPosition.setOnClickListener(v -> {
-                m_flightAction = "POSITION";
+                m_rcControlMode = RC_MODE_POSITION;
                 updateFlightButtons();
                 m_tvStatus.setText("POSITION mode selected");
             });
         }
         if (m_btnHold != null) {
             m_btnHold.setOnClickListener(v -> {
-                sendSimpleCmd("HOLD", CMD_HOLD);
-                m_flightAction = "HOLD";
-                updateFlightButtons();
+                sendSimpleCmdAwaitAck("HOLD", CMD_HOLD, PENDING_HOLD, () -> {
+                    m_lastFlightCommand = "HOLD";
+                    updateFlightButtons();
+                });
             });
         }
         if (m_btnLand != null) {
             m_btnLand.setOnClickListener(v -> {
-                sendSimpleCmd("LAND", CMD_LAND);
-                m_flightAction = "LAND";
-                updateFlightButtons();
+                sendSimpleCmdAwaitAck("LAND", CMD_LAND, PENDING_LAND, () -> {
+                    m_lastFlightCommand = "LAND";
+                    updateFlightButtons();
+                });
             });
         }
-        btnCleanCalib.setOnClickListener(v -> {
-            if (!ensureVehicleConnection()) {
-                return;
-            }
-            sendSimpleCmd("CLEAN_CALIB", CMD_CALIB_CLEAN);
-        });
+        if (m_btnCleanCalib != null) {
+            m_btnCleanCalib.setOnClickListener(v ->
+                    sendSimpleCmdAwaitAck("CLEAN_CALIB", CMD_CALIB_CLEAN, PENDING_CLEAN_CALIB, () -> { }));
+        }
         if (m_btnSensorMode != null) {
             m_btnSensorMode.setOnClickListener(v -> {
-                m_sensorMode = (m_sensorMode == SENSOR_STEREO_IMU) ? SENSOR_STEREO : SENSOR_STEREO_IMU;
-                updateRuntimeButtons();
-                if (!ensureVehicleConnection()) {
-                    return;
-                }
-                int seq = sendRuntimeConfig();
-                if (seq >= 0) {
-                    m_tvStatus.setText("Sensor mode -> " + sensorModeToText(m_sensorMode) + " cfgSeq=" + seq);
-                }
+                final int nextSensorMode = (m_sensorMode == SENSOR_STEREO_IMU) ? SENSOR_STEREO : SENSOR_STEREO_IMU;
+                final int exposureUs = parseI(m_etCfgExposure, 6000);
+                final float gain = parseF(m_etCfgGain, 4.0f);
+                sendRuntimeConfigAwaitAck(exposureUs, gain, nextSensorMode, "Sensor mode", PENDING_SENSOR, () -> {
+                    m_sensorMode = nextSensorMode;
+                    updateRuntimeButtons();
+                });
             });
         }
 
@@ -1071,6 +1344,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         stopRxLoop();
         stopJoystickLoop();
+        m_handler.removeCallbacks(m_emergencyStopHoldRunnable);
         super.onDestroy();
         try {
             NativeUdp.close();

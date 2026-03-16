@@ -3,9 +3,13 @@
 #include <cstdint>
 #include <mutex>
 
+#include "tlv_protocol.hpp"
+
 struct MoveGoal {
     uint8_t frame{0};
     bool isVelocity{false};
+    bool isRcJoystick{false};
+    uint8_t controlMode{RC_CONTROL_STABILIZE};
     float x{0};
     float y{0};
     float z{1.2f};
@@ -14,6 +18,10 @@ struct MoveGoal {
     float vy{0};
     float vz{0};
     float yawRate{0};
+    float throttleNorm{0};
+    float yawNorm{0};
+    float pitchNorm{0};
+    float rollNorm{0};
     float maxV{0.6f};
     uint32_t seq{0};
 };

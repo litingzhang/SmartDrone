@@ -173,6 +173,17 @@ public:
         return got && (res == MAV_RESULT_ACCEPTED);
     }
 
+    bool EmergencyStop(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0)
+    {
+        uint8_t res = 255;
+        // PX4 immediate motor kill uses forced disarm magic in param2.
+        bool got = SendCommandLongAndWaitAck(MAV_CMD_COMPONENT_ARM_DISARM,
+            0.0f, 21196.0f,
+            0,0,0,0,0,
+            ackTimeoutMs, targetSystem, targetComponent, &res);
+        return got && (res == MAV_RESULT_ACCEPTED);
+    }
+
     bool StartOffboardAndArm(double setpointHz = 20.0,
                             double heartbeatHz = 1.0,
                             int warmupMs = 800,

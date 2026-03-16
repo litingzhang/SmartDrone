@@ -77,3 +77,24 @@ inline std::vector<uint8_t> MakeMovePayload(
     WriteF32Le(payload, maxV);
     return payload;
 }
+
+inline std::vector<uint8_t> MakeMoveRcPayload(
+    uint8_t frame,
+    uint8_t controlMode,
+    float throttle,
+    float yaw,
+    float pitch,
+    float roll,
+    float maxV)
+{
+    std::vector<uint8_t> payload;
+    payload.reserve(22);
+    payload.push_back(frame);
+    payload.push_back(controlMode);
+    WriteF32Le(payload, throttle);
+    WriteF32Le(payload, yaw);
+    WriteF32Le(payload, pitch);
+    WriteF32Le(payload, roll);
+    WriteF32Le(payload, maxV);
+    return payload;
+}

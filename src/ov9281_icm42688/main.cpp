@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdio>
 #include <ctime>
+#include <cmath>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -146,7 +147,22 @@ struct LivePoseState {
         return true;
     }
 
-    std::mutex mu;
+    bool ReadSnapshot(Snapshot& out) const
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        if (!hasPeer) return false;
+        out.hasPeer = hasPeer;
+        out.peer = latestPeer;
+        out.poseValid = poseValid;
+        out.runtimeMode = runtimeMode;
+        out.trackingState = trackingState;
+        out.x = x; out.y = y; out.z = z;
+        out.qw = qw; out.qx = qx; out.qy = qy; out.qz = qz;
+        out.seq = txSeq;
+        return true;
+    }
+
+    mutable std::mutex mu;
     UdpPeer latestPeer{};
     bool hasPeer{false};
     bool poseValid{false};
@@ -157,6 +173,18 @@ struct LivePoseState {
     uint32_t txSeq{1};
     bool dirty{false};
 };
+
+float ClampSignedUnit(float value)
+{
+    return std::max(-1.0f, std::min(1.0f, value));
+}
+
+float YawFromQuat(float qw, float qx, float qy, float qz)
+{
+    const float siny = 2.0f * (qw * qz + qx * qy);
+    const float cosy = 1.0f - 2.0f * (qy * qy + qz * qz);
+    return std::atan2(siny, cosy);
+}
 
 std::optional<Sophus::SE3f> ReadSe3Node(const cv::FileNode& node)
 {
@@ -210,7 +238,7 @@ StereoBodyExtrinsics LoadStereoBodyExtrinsics(const std::string& settingsPath)
 
 class Px4UdpHooks final : public MavlinkHooks {
 public:
-    explicit Px4UdpHooks(MavlinkSerial& mavlink) : m_mavlink(mavlink) {}
+    Px4UdpHooks(MavlinkSerial& mavlink, LivePoseState& livePose) : m_mavlink(mavlink), m_livePose(livePose) {}
     VehicleGate GetGate() const override { return VehicleGate{}; }
     bool Arm(std::string* err) override
     {
@@ -228,6 +256,16 @@ public:
     {
         if (!m_mavlink.Arm(false)) {
             if (err) *err = "px4 disarm rejected";
+            return false;
+        }
+        return true;
+    }
+    bool EmergencyStop(std::string* err) override
+    {
+        m_mavlink.StopSetpointStream();
+        m_streamStarted.store(false, std::memory_order_relaxed);
+        if (!m_mavlink.EmergencyStop()) {
+            if (err) *err = "px4 emergency stop rejected";
             return false;
         }
         return true;
@@ -264,11 +302,47 @@ public:
         }
         return true;
     }
-    bool SetMoveGoal(const MoveGoal& goal, std::string*) override
+    bool SetMoveGoal(const MoveGoal& goal, std::string* err) override
     {
         if (!EnsureSetpointStream()) return false;
         MavlinkSerial::SetpointLocalNED setpoint{};
-        if (goal.isVelocity) {
+        if (goal.isRcJoystick) {
+            constexpr float kYawRateRadps = 1.2f;
+            constexpr float kVzSpeedMps = 1.0f;
+            constexpr float kPositionLookaheadSec = 0.8f;
+
+            const float throttle = ClampSignedUnit(goal.throttleNorm);
+            const float yaw = ClampSignedUnit(goal.yawNorm);
+            const float pitch = ClampSignedUnit(goal.pitchNorm);
+            const float roll = ClampSignedUnit(goal.rollNorm);
+
+            const float xySpeed = std::max(0.2f, std::min(goal.maxV, 5.0f));
+            setpoint.vz = -throttle * kVzSpeedMps;
+            setpoint.yaw = NAN;
+            setpoint.yawspeed = yaw * kYawRateRadps;
+
+            if (goal.controlMode == RC_CONTROL_POSITION) {
+                LivePoseState::Snapshot snapshot{};
+                if (!m_livePose.ReadSnapshot(snapshot) || !snapshot.poseValid) {
+                    if (err) *err = "position mode needs valid live pose";
+                    return false;
+                }
+
+                setpoint.x = snapshot.x + pitch * xySpeed * kPositionLookaheadSec;
+                setpoint.y = snapshot.y + roll * xySpeed * kPositionLookaheadSec;
+                setpoint.z = NAN;
+                setpoint.vx = NAN;
+                setpoint.vy = NAN;
+                const float currentYaw = YawFromQuat(snapshot.qw, snapshot.qx, snapshot.qy, snapshot.qz);
+                const float yawLookahead = yaw * kYawRateRadps * kPositionLookaheadSec;
+                setpoint.yaw = currentYaw + yawLookahead;
+                setpoint.yawspeed = NAN;
+            } else {
+                setpoint.x = NAN; setpoint.y = NAN; setpoint.z = NAN;
+                setpoint.vx = pitch * xySpeed;
+                setpoint.vy = roll * xySpeed;
+            }
+        } else if (goal.isVelocity) {
             setpoint.x = NAN; setpoint.y = NAN; setpoint.z = NAN;
             setpoint.vx = goal.vx; setpoint.vy = goal.vy; setpoint.vz = goal.vz;
             setpoint.yaw = NAN; setpoint.yawspeed = goal.yawRate;
@@ -291,6 +365,7 @@ private:
         return true;
     }
     MavlinkSerial& m_mavlink;
+    LivePoseState& m_livePose;
     std::atomic<bool> m_streamStarted{false};
 };
 
@@ -1054,8 +1129,8 @@ int main(int argc, char** argv)
 
     MavlinkSerial mav("/dev/ttyAMA0", 921600);
     mav.StartRx();
-    Px4UdpHooks hooks(mav);
     LivePoseState livePose;
+    Px4UdpHooks hooks(mav, livePose);
     UnifiedRuntimeController controller(cfg, mav, livePose);
     controller.Start();
     if (autoMode != UnifiedMode::Idle) controller.SetMode(autoMode, nullptr);
