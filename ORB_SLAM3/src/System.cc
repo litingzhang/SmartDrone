@@ -20,6 +20,7 @@
 
 #include "System.h"
 #include "Converter.h"
+#include <limits>
 #include <thread>
 // #include <pangolin/pangolin.h>
 #include <iomanip>
@@ -501,6 +502,12 @@ bool System::MapChanged()
     }
     else
         return false;
+}
+
+unsigned long System::GetCurrentMapId()
+{
+    Map* pCurrentMap = mpAtlas ? mpAtlas->GetCurrentMap() : nullptr;
+    return pCurrentMap ? pCurrentMap->GetId() : std::numeric_limits<unsigned long>::max();
 }
 
 void System::Reset()

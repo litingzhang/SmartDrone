@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -94,6 +95,8 @@ struct LivePoseState {
         bool poseValid{false};
         uint8_t runtimeMode{RUNTIME_MODE_IDLE};
         uint8_t trackingState{0xFF};
+        uint16_t resetCounter{0};
+        uint16_t resetMapCount{0};
         float x{0.0f}, y{0.0f}, z{0.0f};
         float qw{1.0f}, qx{0.0f}, qy{0.0f}, qz{0.0f};
         uint32_t seq{0};
@@ -118,11 +121,14 @@ struct LivePoseState {
         dirty = true;
     }
 
-    void UpdatePose(uint8_t mode, uint8_t tracking, const MavlinkSerial::Pose& p)
+    void UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCounterIn, uint16_t resetMapCountIn,
+                    const MavlinkSerial::Pose& p)
     {
         std::lock_guard<std::mutex> lock(mu);
         runtimeMode = mode;
         trackingState = tracking;
+        resetCounter = resetCounterIn;
+        resetMapCount = resetMapCountIn;
         x = p.x; y = p.y; z = p.z;
         qw = p.qw; qx = p.qx; qy = p.qy; qz = p.qz;
         poseValid = true;
@@ -138,6 +144,8 @@ struct LivePoseState {
         out.poseValid = poseValid;
         out.runtimeMode = runtimeMode;
         out.trackingState = trackingState;
+        out.resetCounter = resetCounter;
+        out.resetMapCount = resetMapCount;
         out.x = x; out.y = y; out.z = z;
         out.qw = qw; out.qx = qx; out.qy = qy; out.qz = qz;
         out.seq = ++txSeq;
@@ -154,6 +162,8 @@ struct LivePoseState {
         out.poseValid = poseValid;
         out.runtimeMode = runtimeMode;
         out.trackingState = trackingState;
+        out.resetCounter = resetCounter;
+        out.resetMapCount = resetMapCount;
         out.x = x; out.y = y; out.z = z;
         out.qw = qw; out.qx = qx; out.qy = qy; out.qz = qz;
         out.seq = txSeq;
@@ -166,10 +176,69 @@ struct LivePoseState {
     bool poseValid{false};
     uint8_t runtimeMode{RUNTIME_MODE_IDLE};
     uint8_t trackingState{0xFF};
+    uint16_t resetCounter{0};
+    uint16_t resetMapCount{0};
     float x{0.0f}, y{0.0f}, z{0.0f};
     float qw{1.0f}, qx{0.0f}, qy{0.0f}, qz{0.0f};
     uint32_t txSeq{1};
     bool dirty{false};
+};
+
+bool IsTrackingPoseUsable(int trackingState)
+{
+    return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::OK_KLT;
+}
+
+struct PoseContinuityMapper {
+    Sophus::SE3f MapPose(unsigned long mapId, int trackingState, const Sophus::SE3f& rawPoseWc)
+    {
+        if (mapId != kInvalidMapId && (!haveMapId || mapId != lastMapId)) {
+            pendingReset = haveMapId;
+            haveMapId = true;
+            lastMapId = mapId;
+        }
+
+        if (!IsTrackingPoseUsable(trackingState)) {
+            return bridgeRawToContinuous * rawPoseWc;
+        }
+
+        if (!bridgeInitialized) {
+            bridgeRawToContinuous = Sophus::SE3f();
+            bridgeInitialized = true;
+        } else if (pendingReset) {
+            if (haveLastContinuousPose) {
+                bridgeRawToContinuous = lastContinuousPose * rawPoseWc.inverse();
+            } else {
+                bridgeRawToContinuous = Sophus::SE3f();
+            }
+            pendingReset = false;
+            ++resetCounter;
+            ++resetMapCount;
+            std::cerr << "[pose] map reset bridged map_id=" << mapId
+                      << " reset_counter=" << int(GetResetCounter())
+                      << " reset_map_count=" << resetMapCount << "\n";
+        }
+
+        const Sophus::SE3f continuousPose = bridgeRawToContinuous * rawPoseWc;
+        lastContinuousPose = continuousPose;
+        haveLastContinuousPose = true;
+        return continuousPose;
+    }
+
+    uint8_t GetResetCounter() const { return static_cast<uint8_t>(resetCounter & 0xFFu); }
+    uint16_t GetResetMapCount() const { return static_cast<uint16_t>(resetMapCount & 0xFFFFu); }
+
+    static constexpr unsigned long kInvalidMapId = std::numeric_limits<unsigned long>::max();
+
+    Sophus::SE3f bridgeRawToContinuous{Sophus::SE3f()};
+    Sophus::SE3f lastContinuousPose{Sophus::SE3f()};
+    bool bridgeInitialized{false};
+    bool haveLastContinuousPose{false};
+    bool haveMapId{false};
+    bool pendingReset{false};
+    unsigned long lastMapId{kInvalidMapId};
+    uint32_t resetCounter{0};
+    uint32_t resetMapCount{0};
 };
 
 float ClampSignedUnit(float value)
@@ -663,6 +732,8 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     size_t rightFeatureCount = 0;
     Sophus::SE3f stereoReferencePose{Sophus::SE3f()};
     bool stereoReferencePoseSet = false;
+    unsigned long lastRawMapId = PoseContinuityMapper::kInvalidMapId;
+    PoseContinuityMapper continuityMapper{};
     while (g_runningFlag.load() && !stop.load()) {
         if (useImu) {
             const uint64_t imuCnt = imuState.imuCnt.load(std::memory_order_relaxed);
@@ -745,11 +816,19 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
             }
         }
         const int state = SLAM.GetTrackingState();
+        const unsigned long mapId = SLAM.GetCurrentMapId();
+        const bool mapIdChanged = mapId != PoseContinuityMapper::kInvalidMapId && mapId != lastRawMapId;
+        if (mapIdChanged) {
+            lastRawMapId = mapId;
+            if (!useImu) {
+                stereoReferencePoseSet = false;
+            }
+        }
         Sophus::SE3f Twc = Tcw.inverse();
         if (!useImu && stereoBodyExtrinsics.loaded) {
             Twc = Twc * stereoBodyExtrinsics.Tbc.inverse();
         }
-        if (!useImu && state == ORB_SLAM3::Tracking::OK) {
+        if (!useImu && IsTrackingPoseUsable(state)) {
             if (!stereoReferencePoseSet) {
                 stereoReferencePose = Twc;
                 stereoReferencePoseSet = true;
@@ -757,16 +836,19 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
             }
             Twc = stereoReferencePose.inverse() * Twc;
         }
-        const Eigen::Vector3f t = Twc.translation();
-        const Eigen::Quaternionf q(Twc.so3().unit_quaternion());
+        const Sophus::SE3f TwcContinuous = continuityMapper.MapPose(mapId, state, Twc);
+        const Eigen::Vector3f t = TwcContinuous.translation();
+        const Eigen::Quaternionf q(TwcContinuous.so3().unit_quaternion());
         MavlinkSerial::Pose pSlam{};
         pSlam.x = t.x(); pSlam.y = t.y(); pSlam.z = t.z();
         pSlam.qw = q.w(); pSlam.qx = q.x(); pSlam.qy = q.y(); pSlam.qz = q.z();
         MavlinkSerial::NormalizeQuat(pSlam.qw, pSlam.qx, pSlam.qy, pSlam.qz);
         const MavlinkSerial::Pose p = useImu ? MavlinkSerial::EnuToNed(pSlam) : pSlam;
-        livePose.UpdatePose(RUNTIME_MODE_SLAM, static_cast<uint8_t>(state), p);
+        livePose.UpdatePose(RUNTIME_MODE_SLAM, static_cast<uint8_t>(state),
+                            continuityMapper.GetResetCounter(), continuityMapper.GetResetMapCount(), p);
         mav.SendOdometry(MonoTimeUs(), p, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD,
-                         state == ORB_SLAM3::Tracking::OK ? OdomQualityMode::GOOD : OdomQualityMode::LOST);
+                         continuityMapper.GetResetCounter(),
+                         IsTrackingPoseUsable(state) ? OdomQualityMode::GOOD : OdomQualityMode::LOST);
     }
     cam.Close();
     if (imuThread.joinable()) imuThread.join();
@@ -1119,7 +1201,8 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks& hooks, UnifiedRuntimeCo
                     payload.reserve(STATE_POSE_PAYLOAD_LEN);
                     payload.push_back(snap.runtimeMode);
                     payload.push_back(snap.trackingState);
-                    WriteU16Le(payload, 0);
+                    WriteU16Le(payload, snap.resetCounter);
+                    WriteU16Le(payload, snap.resetMapCount);
                     WriteF32Le(payload, snap.x);
                     WriteF32Le(payload, snap.y);
                     WriteF32Le(payload, snap.z);

@@ -713,19 +713,22 @@ public class MainActivity extends Activity {
         }
         int cmd = rx[3] & 0xFF;
         int len = readU16Le(rx, 5);
-        if (cmd != CMD_STATE || len != 32 || rx.length < 15 + len + 2) {
+        if (cmd != CMD_STATE || (len != 32 && len != 34) || rx.length < 15 + len + 2) {
             return false;
         }
         int payloadOffset = 15;
         int runtimeMode = rx[payloadOffset] & 0xFF;
         int trackingState = rx[payloadOffset + 1] & 0xFF;
-        float x = readF32Le(rx, payloadOffset + 4);
-        float y = readF32Le(rx, payloadOffset + 8);
-        float z = readF32Le(rx, payloadOffset + 12);
-        float qw = readF32Le(rx, payloadOffset + 16);
-        float qx = readF32Le(rx, payloadOffset + 20);
-        float qy = readF32Le(rx, payloadOffset + 24);
-        float qz = readF32Le(rx, payloadOffset + 28);
+        int resetCounter = len >= 34 ? readU16Le(rx, payloadOffset + 2) : 0;
+        int resetMapCount = len >= 34 ? readU16Le(rx, payloadOffset + 4) : 0;
+        int poseOffset = len >= 34 ? payloadOffset + 6 : payloadOffset + 4;
+        float x = readF32Le(rx, poseOffset);
+        float y = readF32Le(rx, poseOffset + 4);
+        float z = readF32Le(rx, poseOffset + 8);
+        float qw = readF32Le(rx, poseOffset + 12);
+        float qx = readF32Le(rx, poseOffset + 16);
+        float qy = readF32Le(rx, poseOffset + 20);
+        float qz = readF32Le(rx, poseOffset + 24);
         if (m_tvPose != null) {
             if (runtimeMode == MODE_SLAM) {
                 boolean hasValidPose = trackingState == 2 || trackingState == 5;
@@ -739,8 +742,9 @@ public class MainActivity extends Activity {
                     qz = Float.NaN;
                 }
                 m_tvPose.setText(String.format(Locale.US,
-                        "Pose %s trk=%s\np[%.2f %.2f %.2f]\nq[%.2f %.2f %.2f %.2f]",
-                        runtimeModeToText(runtimeMode), trackingStateToText(trackingState), x, y, z, qw, qx, qy, qz));
+                        "Pose %s trk=%s rst=%d map_rst=%d\np[%.2f %.2f %.2f]\nq[%.2f %.2f %.2f %.2f]",
+                        runtimeModeToText(runtimeMode), trackingStateToText(trackingState),
+                        resetCounter, resetMapCount, x, y, z, qw, qx, qy, qz));
             } else if (runtimeMode == MODE_CALIB) {
                 m_tvPose.setText("Pose hidden in CALIB");
             } else {

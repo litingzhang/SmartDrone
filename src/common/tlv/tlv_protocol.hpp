@@ -39,7 +39,10 @@ constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // RUNTIME_CONFIG payload:
 // exposureUs(u32le) gain(f32le) sensorMode(u8) reserved[31]
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 40;
-constexpr uint16_t STATE_POSE_PAYLOAD_LEN = 32;
+// STATE payload:
+// runtimeMode(u8) trackingState(u8) resetCounter(u16le) resetMapCount(u16le)
+// x/y/z/qw/qx/qy/qz (7 * f32le)
+constexpr uint16_t STATE_POSE_PAYLOAD_LEN = 34;
 
 enum RuntimeMode : uint8_t {
     RUNTIME_MODE_IDLE = 0,

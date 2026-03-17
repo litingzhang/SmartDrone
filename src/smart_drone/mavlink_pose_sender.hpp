@@ -340,6 +340,7 @@ public:
                     const Pose& poseNed,
                     uint8_t frameId = MAV_FRAME_LOCAL_NED,
                     uint8_t childFrameId = MAV_FRAME_BODY_FRD,
+                    uint8_t resetCounter = 0,
                     OdomQualityMode mode = OdomQualityMode::GOOD)
     {
         mavlink_message_t msg;
@@ -387,7 +388,7 @@ public:
             rollspeed, pitchspeed, yawspeed,
             poseCov,
             velCov,
-            0,
+            resetCounter,
             estimatorType,
             quality
         );
