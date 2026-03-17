@@ -100,6 +100,8 @@ struct LivePoseState {
         float x{0.0f}, y{0.0f}, z{0.0f};
         float qw{1.0f}, qx{0.0f}, qy{0.0f}, qz{0.0f};
         uint32_t seq{0};
+        std::vector<float> pointCloudXyz;
+        uint32_t pointCloudSeq{0};
     };
 
     void UpdatePeer(const UdpPeer& peer)
@@ -135,6 +137,14 @@ struct LivePoseState {
         dirty = true;
     }
 
+    void UpdatePointCloud(const std::vector<float>& xyz)
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        pointCloudXyz = xyz;
+        ++pointCloudSeq;
+        dirty = true;
+    }
+
     bool ConsumeSnapshot(Snapshot& out)
     {
         std::lock_guard<std::mutex> lock(mu);
@@ -149,6 +159,8 @@ struct LivePoseState {
         out.x = x; out.y = y; out.z = z;
         out.qw = qw; out.qx = qx; out.qy = qy; out.qz = qz;
         out.seq = ++txSeq;
+        out.pointCloudXyz = pointCloudXyz;
+        out.pointCloudSeq = pointCloudSeq;
         dirty = false;
         return true;
     }
@@ -167,6 +179,8 @@ struct LivePoseState {
         out.x = x; out.y = y; out.z = z;
         out.qw = qw; out.qx = qx; out.qy = qy; out.qz = qz;
         out.seq = txSeq;
+        out.pointCloudXyz = pointCloudXyz;
+        out.pointCloudSeq = pointCloudSeq;
         return true;
     }
 
@@ -180,9 +194,15 @@ struct LivePoseState {
     uint16_t resetMapCount{0};
     float x{0.0f}, y{0.0f}, z{0.0f};
     float qw{1.0f}, qx{0.0f}, qy{0.0f}, qz{0.0f};
+    std::vector<float> pointCloudXyz;
+    uint32_t pointCloudSeq{0};
     uint32_t txSeq{1};
     bool dirty{false};
 };
+
+constexpr uint8_t CMD_POINT_CLOUD = 0xF2;
+constexpr uint16_t POINT_CLOUD_HEADER_LEN = 4;
+constexpr size_t MAX_POINT_CLOUD_POINTS_TX = 120;
 
 bool IsTrackingPoseUsable(int trackingState)
 {
@@ -471,6 +491,30 @@ float ReadF32Le(const uint8_t* p)
 uint32_t MonoTimeMs32()
 {
     return static_cast<uint32_t>((MonoTimeUs() / 1000ULL) & 0xFFFFFFFFu);
+}
+
+std::vector<float> ExtractSparsePointCloud(const std::vector<ORB_SLAM3::MapPoint*>& mapPoints)
+{
+    std::vector<float> xyz;
+    xyz.reserve(std::min(mapPoints.size(), MAX_POINT_CLOUD_POINTS_TX) * 3);
+    size_t appended = 0;
+    for (ORB_SLAM3::MapPoint* point : mapPoints) {
+        if (!point || point->isBad()) {
+            continue;
+        }
+        const Eigen::Vector3f world = point->GetWorldPos();
+        if (!std::isfinite(world.x()) || !std::isfinite(world.y()) || !std::isfinite(world.z())) {
+            continue;
+        }
+        xyz.push_back(world.x());
+        xyz.push_back(world.y());
+        xyz.push_back(world.z());
+        ++appended;
+        if (appended >= MAX_POINT_CLOUD_POINTS_TX) {
+            break;
+        }
+    }
+    return xyz;
 }
 
 std::vector<cv::Point2f> ExtractTrackedLeftFeatures(const std::vector<ORB_SLAM3::MapPoint*>& mapPoints,
@@ -781,6 +825,7 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         std::vector<cv::Point2f> trackedRightFeatures;
         if (a.udpEnable) {
             const auto trackedMapPoints = SLAM.GetTrackedMapPoints();
+            livePose.UpdatePointCloud(ExtractSparsePointCloud(trackedMapPoints));
             const auto trackedKeyPoints = SLAM.GetTrackedKeyPointsUn();
             trackedLeftFeatures = ExtractTrackedLeftFeatures(
                 trackedMapPoints,
@@ -1214,6 +1259,21 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks& hooks, UnifiedRuntimeCo
                         MakeFrame(TLV_VER, CMD_STATE, 0, snap.seq, MonoTimeMs32(),
                                   payload.data(), static_cast<uint16_t>(payload.size()));
                     server.SendTo(snap.peer, stateFrame.data(), stateFrame.size());
+
+                    const size_t pointCount = snap.pointCloudXyz.size() / 3;
+                    if (pointCount > 0) {
+                        std::vector<uint8_t> cloudPayload;
+                        cloudPayload.reserve(POINT_CLOUD_HEADER_LEN + pointCount * 12);
+                        WriteU16Le(cloudPayload, static_cast<uint16_t>(std::min<size_t>(pointCount, 0xFFFF)));
+                        WriteU16Le(cloudPayload, static_cast<uint16_t>(snap.pointCloudSeq & 0xFFFFu));
+                        for (size_t i = 0; i < pointCount * 3; ++i) {
+                            WriteF32Le(cloudPayload, snap.pointCloudXyz[i]);
+                        }
+                        std::vector<uint8_t> cloudFrame =
+                            MakeFrame(TLV_VER, CMD_POINT_CLOUD, 0, snap.seq, MonoTimeMs32(),
+                                      cloudPayload.data(), static_cast<uint16_t>(cloudPayload.size()));
+                        server.SendTo(snap.peer, cloudFrame.data(), cloudFrame.size());
+                    }
                 }
             }
         }

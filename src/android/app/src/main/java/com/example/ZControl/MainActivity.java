@@ -13,10 +13,13 @@ import android.os.Looper;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.ArrayAdapter;
+import android.widget.AutoCompleteTextView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 
 import java.util.Arrays;
@@ -25,6 +28,8 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
 
@@ -39,6 +44,7 @@ public class MainActivity extends Activity {
     private static final int CMD_CALIB_CLEAN = 0x32;
     private static final int CMD_ACK = 0xF0;
     private static final int CMD_STATE = 0xF1;
+    private static final int CMD_POINT_CLOUD = 0xF2;
 
     private static final int MODE_IDLE = 0;
     private static final int MODE_SLAM = 1;
@@ -54,7 +60,13 @@ public class MainActivity extends Activity {
     private static final String PENDING_LAND = "land";
     private static final String PENDING_RUNTIME = "runtime";
     private static final String PENDING_SENSOR = "sensor";
+    private static final String PENDING_CONFIG = "config";
     private static final String PENDING_CLEAN_CALIB = "clean_calib";
+    private static final int EXPOSURE_MIN_US = 500;
+    private static final int EXPOSURE_MAX_US = 20000;
+    private static final int EXPOSURE_STEP_US = 500;
+    private static final int GAIN_MIN = 1;
+    private static final int GAIN_MAX = 32;
 
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
@@ -67,9 +79,13 @@ public class MainActivity extends Activity {
     private static final double FRAME_MATCH_TOLERANCE_SEC = 0.002;
     private static final float DEADZONE = 0.08f;
     private static final String KEY_MANUAL_MODE = "manualMode";
-
+    private static final String[] DEFAULT_VEHICLE_IPS = new String[]{
+            "10.42.0.1",
+            "192.168.0.105"
+    };
     private ImageView m_ivVideoLeft;
     private ImageView m_ivVideoRight;
+    private Map3DView m_map3dView;
     private TextView m_tvStatus;
     private TextView m_tvPose;
     private TextView m_tvVideoStats;
@@ -87,10 +103,14 @@ public class MainActivity extends Activity {
     private Button m_btnToggleCalib;
     private Button m_btnSensorMode;
     private Button m_btnCleanCalib;
+    private ImageButton m_btnMapClear;
+    private ImageButton m_btnMapZoom;
 
-    private EditText m_etVehicleIp;
-    private EditText m_etCfgExposure;
-    private EditText m_etCfgGain;
+    private AutoCompleteTextView m_etVehicleIp;
+    private TextView m_tvCfgExposureValue;
+    private TextView m_tvCfgGainValue;
+    private SeekBar m_sbCfgExposure;
+    private SeekBar m_sbCfgGain;
 
     private JoystickView m_joystickLeft;
     private JoystickView m_joystickRight;
@@ -114,6 +134,8 @@ public class MainActivity extends Activity {
     private boolean m_armLatched = false;
     private String m_lastFlightCommand = "";
     private int m_sensorMode = SENSOR_STEREO;
+    private int m_cfgExposureUs = 3000;
+    private int m_cfgGain = 2;
     private int m_videoPktCount = 0;
     private int m_videoFrameOk = 0;
     private int m_videoDecodeFail = 0;
@@ -241,6 +263,209 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static int clampInt(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static int quantizeExposureUs(int exposureUs) {
+        int clamped = clampInt(exposureUs, EXPOSURE_MIN_US, EXPOSURE_MAX_US);
+        int steps = Math.round((clamped - EXPOSURE_MIN_US) / (float) EXPOSURE_STEP_US);
+        return EXPOSURE_MIN_US + steps * EXPOSURE_STEP_US;
+    }
+
+    private static int quantizeGain(int gain) {
+        return clampInt(gain, GAIN_MIN, GAIN_MAX);
+    }
+
+    private static Float findPoseField(String text, String... keys) {
+        if (text == null) {
+            return null;
+        }
+        for (String key : keys) {
+            Pattern pattern = Pattern.compile("(?i)\\b" + Pattern.quote(key)
+                    + "\\s*[:=]\\s*(-?\\d+(?:\\.\\d+)?)");
+            Matcher matcher = pattern.matcher(text);
+            if (matcher.find()) {
+                try {
+                    return Float.parseFloat(matcher.group(1));
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return null;
+    }
+
+    private static int readLeU16(byte[] data, int offset) {
+        return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
+    }
+
+    private static int readFramePayloadLen(byte[] data) {
+        if (data == null || data.length < 17) {
+            return -1;
+        }
+        return readLeU16(data, 5);
+    }
+
+    private static float readLeF32(byte[] data, int offset) {
+        int bits = (data[offset] & 0xFF)
+                | ((data[offset + 1] & 0xFF) << 8)
+                | ((data[offset + 2] & 0xFF) << 16)
+                | ((data[offset + 3] & 0xFF) << 24);
+        return Float.intBitsToFloat(bits);
+    }
+
+    private static float clampUnit(float value) {
+        return Math.max(-1.0f, Math.min(1.0f, value));
+    }
+
+    private static float quatYawDeg(float qw, float qx, float qy, float qz) {
+        double siny = 2.0 * (qw * qz + qx * qy);
+        double cosy = 1.0 - 2.0 * (qy * qy + qz * qz);
+        return (float) Math.toDegrees(Math.atan2(siny, cosy));
+    }
+
+    private static float quatPitchDeg(float qw, float qx, float qy, float qz) {
+        double sinp = 2.0 * (qw * qy - qz * qx);
+        return (float) Math.toDegrees(Math.asin(clampUnit((float) sinp)));
+    }
+
+    private static float quatRollDeg(float qw, float qx, float qy, float qz) {
+        double sinr = 2.0 * (qw * qx + qy * qz);
+        double cosr = 1.0 - 2.0 * (qx * qx + qy * qy);
+        return (float) Math.toDegrees(Math.atan2(sinr, cosr));
+    }
+
+    private boolean tryHandleStatePoseForMap(byte[] rx) {
+        if (rx == null || rx.length < 43) {
+            return false;
+        }
+        if ((rx[0] & 0xFF) != 0xAA || (rx[1] & 0xFF) != 0x55 || (rx[3] & 0xFF) != CMD_STATE) {
+            return false;
+        }
+        final int payloadLen = readFramePayloadLen(rx);
+        if (payloadLen < 34 || rx.length < 17 + payloadLen) {
+            return false;
+        }
+        final int payloadOffset = 15;
+        final float x = readLeF32(rx, payloadOffset + 6);
+        final float y = readLeF32(rx, payloadOffset + 10);
+        final float z = readLeF32(rx, payloadOffset + 14);
+        final float qw = readLeF32(rx, payloadOffset + 18);
+        final float qx = readLeF32(rx, payloadOffset + 22);
+        final float qy = readLeF32(rx, payloadOffset + 26);
+        final float qz = readLeF32(rx, payloadOffset + 30);
+        float mapX = x;
+        float mapY = y;
+        float mapZ = z;
+        float rollDeg = quatRollDeg(qw, qx, qy, qz);
+        float pitchDeg = quatPitchDeg(qw, qx, qy, qz);
+        float yawDeg = quatYawDeg(qw, qx, qy, qz);
+        if (m_map3dView != null) {
+            m_map3dView.setPose(
+                    mapX,
+                    mapY,
+                    mapZ,
+                    rollDeg,
+                    pitchDeg,
+                    yawDeg,
+                    true);
+        }
+        return true;
+    }
+
+    private boolean tryHandlePointCloudPacket(byte[] rx) {
+        if (rx == null || rx.length < 21) {
+            return false;
+        }
+        if ((rx[0] & 0xFF) != 0xAA || (rx[1] & 0xFF) != 0x55 || (rx[3] & 0xFF) != CMD_POINT_CLOUD) {
+            return false;
+        }
+        final int payloadLen = readFramePayloadLen(rx);
+        if (payloadLen < 4 || rx.length < 17 + payloadLen) {
+            return false;
+        }
+        final int payloadOffset = 15;
+        final int pointCount = readLeU16(rx, payloadOffset);
+        final int actualPointCount = Math.min(pointCount, (payloadLen - 4) / 12);
+        if (actualPointCount <= 0) {
+            return true;
+        }
+        float[] xyz = new float[actualPointCount * 3];
+        int src = payloadOffset + 4;
+        for (int i = 0; i < actualPointCount; ++i) {
+            int dst = i * 3;
+            xyz[dst] = readLeF32(rx, src);
+            xyz[dst + 1] = readLeF32(rx, src + 4);
+            xyz[dst + 2] = readLeF32(rx, src + 8);
+            src += 12;
+        }
+        if (m_map3dView != null) {
+            m_map3dView.setPointCloud(xyz, actualPointCount);
+        }
+        return true;
+    }
+
+    private void updatePoseMapFromText() {
+        if (m_map3dView == null || m_tvPose == null) {
+            return;
+        }
+        String poseText = m_tvPose.getText() != null ? m_tvPose.getText().toString() : "";
+        Float x = findPoseField(poseText, "x", "px", "tx", "posx");
+        Float y = findPoseField(poseText, "y", "py", "ty", "posy");
+        Float z = findPoseField(poseText, "z", "pz", "tz", "posz");
+        Float roll = findPoseField(poseText, "roll", "r");
+        Float pitch = findPoseField(poseText, "pitch", "p");
+        Float yaw = findPoseField(poseText, "yaw");
+        if (yaw == null) {
+            yaw = findPoseField(poseText, "heading");
+        }
+        if (x == null || y == null || z == null) {
+            return;
+        }
+        m_map3dView.setPose(
+                x,
+                y,
+                z,
+                roll != null ? roll : 0f,
+                pitch != null ? pitch : 0f,
+                yaw != null ? yaw : 0f,
+                true);
+    }
+
+    private void updateConfigViews() {
+        if (m_tvCfgExposureValue != null) {
+            m_tvCfgExposureValue.setText(String.format(Locale.US, "Exposure: %d us", m_cfgExposureUs));
+        }
+        if (m_tvCfgGainValue != null) {
+            m_tvCfgGainValue.setText(String.format(Locale.US, "Gain: %d", m_cfgGain));
+        }
+        if (m_sbCfgExposure != null) {
+            int progress = (m_cfgExposureUs - EXPOSURE_MIN_US) / EXPOSURE_STEP_US;
+            if (m_sbCfgExposure.getProgress() != progress) {
+                m_sbCfgExposure.setProgress(progress);
+            }
+        }
+        if (m_sbCfgGain != null) {
+            int progress = m_cfgGain - GAIN_MIN;
+            if (m_sbCfgGain.getProgress() != progress) {
+                m_sbCfgGain.setProgress(progress);
+            }
+        }
+    }
+
+    private void updateMapButtons() {
+        if (m_btnMapZoom != null && m_map3dView != null) {
+            m_btnMapZoom.setImageResource(
+                    m_map3dView.isZoomedIn()
+                            ? android.R.drawable.ic_menu_zoom
+                            : android.R.drawable.ic_menu_search);
+        }
+    }
+
+    private void sendCurrentRuntimeConfig(String label, String pendingKey, AckSuccess onSuccess) {
+        sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float) m_cfgGain, m_sensorMode, label, pendingKey, onSuccess);
+    }
+
     private static float applyDeadzone(float v) {
         return (Math.abs(v) < DEADZONE) ? 0f : v;
     }
@@ -315,7 +540,7 @@ public class MainActivity extends Activity {
     }
 
     private int sendRuntimeConfig() {
-        return sendRuntimeConfig(parseI(m_etCfgExposure, 3000), parseF(m_etCfgGain, 2.0f), m_sensorMode);
+        return sendRuntimeConfig(m_cfgExposureUs, (float) m_cfgGain, m_sensorMode);
     }
 
     private void sendRuntimeConfigAwaitAck(
@@ -418,8 +643,8 @@ public class MainActivity extends Activity {
         if (isPending(PENDING_RUNTIME)) {
             return;
         }
-        final int exposureUs = parseI(m_etCfgExposure, 3000);
-        final float gain = parseF(m_etCfgGain, 2.0f);
+        final int exposureUs = m_cfgExposureUs;
+        final float gain = (float) m_cfgGain;
         final int sensorMode = m_sensorMode;
         sendRuntimeConfigAwaitAck(exposureUs, gain, sensorMode, label + " CFG", PENDING_RUNTIME, () -> {
             try {
@@ -956,6 +1181,10 @@ public class MainActivity extends Activity {
             if (tryHandleVideoPacket(rx)) {
                 continue;
             }
+            if (tryHandlePointCloudPacket(rx)) {
+                continue;
+            }
+            tryHandleStatePoseForMap(rx);
             if (tryHandleStatePacket(rx)) {
                 continue;
             }
@@ -1111,6 +1340,7 @@ public class MainActivity extends Activity {
 
         m_ivVideoLeft = findViewById(R.id.ivVideoLeft);
         m_ivVideoRight = findViewById(R.id.ivVideoRight);
+        m_map3dView = findViewById(R.id.map3dView);
         m_tvStatus = findViewById(R.id.tvStatus);
         m_tvPose = findViewById(R.id.tvPose);
         m_tvVideoStats = findViewById(R.id.tvVideoStats);
@@ -1127,6 +1357,8 @@ public class MainActivity extends Activity {
         m_btnToggleSlam = findViewById(R.id.btnToggleSlam);
         m_btnToggleCalib = findViewById(R.id.btnToggleCalib);
         m_btnSensorMode = findViewById(R.id.btnSensorMode);
+        m_btnMapClear = findViewById(R.id.btnMapClear);
+        m_btnMapZoom = findViewById(R.id.btnMapZoom);
         m_featurePaint.setColor(Color.GREEN);
         m_featurePaint.setStyle(Paint.Style.STROKE);
         m_featurePaint.setStrokeWidth(2.0f);
@@ -1134,8 +1366,23 @@ public class MainActivity extends Activity {
         m_btnCleanCalib = findViewById(R.id.btnCleanCalib);
 
         m_etVehicleIp = findViewById(R.id.etVehicleIp);
-        m_etCfgExposure = findViewById(R.id.etCfgExposure);
-        m_etCfgGain = findViewById(R.id.etCfgGain);
+        if (m_etVehicleIp != null) {
+            ArrayAdapter<String> vehicleIpAdapter = new ArrayAdapter<>(
+                    this,
+                    android.R.layout.simple_dropdown_item_1line,
+                    DEFAULT_VEHICLE_IPS);
+            m_etVehicleIp.setAdapter(vehicleIpAdapter);
+            m_etVehicleIp.setOnClickListener(v -> m_etVehicleIp.showDropDown());
+            m_etVehicleIp.setOnFocusChangeListener((v, hasFocus) -> {
+                if (hasFocus) {
+                    m_etVehicleIp.showDropDown();
+                }
+            });
+        }
+        m_tvCfgExposureValue = findViewById(R.id.tvCfgExposureValue);
+        m_tvCfgGainValue = findViewById(R.id.tvCfgGainValue);
+        m_sbCfgExposure = findViewById(R.id.sbCfgExposure);
+        m_sbCfgGain = findViewById(R.id.sbCfgGain);
 
         m_joystickLeft = findViewById(R.id.joystickLeft);
         m_joystickRight = findViewById(R.id.joystickRight);
@@ -1153,6 +1400,66 @@ public class MainActivity extends Activity {
         }
         if (ok) {
             m_tvStatus.setText("UDP ready cmd-> " + cm5Ip + ":" + cm5CmdPort + " video<-" + phoneVideoPort);
+        }
+
+        if (m_sbCfgExposure != null) {
+            m_sbCfgExposure.setMax((EXPOSURE_MAX_US - EXPOSURE_MIN_US) / EXPOSURE_STEP_US);
+            m_sbCfgExposure.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    m_cfgExposureUs = EXPOSURE_MIN_US + progress * EXPOSURE_STEP_US;
+                    updateConfigViews();
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {
+                }
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    sendCurrentRuntimeConfig("Exposure", PENDING_CONFIG, () -> { });
+                }
+            });
+        }
+        if (m_sbCfgGain != null) {
+            m_sbCfgGain.setMax(GAIN_MAX - GAIN_MIN);
+            m_sbCfgGain.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    m_cfgGain = GAIN_MIN + progress;
+                    updateConfigViews();
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {
+                }
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    sendCurrentRuntimeConfig("Gain", PENDING_CONFIG, () -> { });
+                }
+            });
+        }
+        m_cfgExposureUs = quantizeExposureUs(m_cfgExposureUs);
+        m_cfgGain = quantizeGain(m_cfgGain);
+        updateConfigViews();
+        updatePoseMapFromText();
+        updateMapButtons();
+
+        if (m_btnMapClear != null) {
+            m_btnMapClear.setOnClickListener(v -> {
+                if (m_map3dView != null) {
+                    m_map3dView.clearPointCloud();
+                }
+            });
+        }
+        if (m_btnMapZoom != null) {
+            m_btnMapZoom.setOnClickListener(v -> {
+                if (m_map3dView != null) {
+                    m_map3dView.toggleZoom();
+                    updateMapButtons();
+                }
+            });
         }
 
         m_joystickLeft.SetOnStickChangedListener((xNorm, yNorm, active) -> {
@@ -1245,8 +1552,8 @@ public class MainActivity extends Activity {
         if (m_btnSensorMode != null) {
             m_btnSensorMode.setOnClickListener(v -> {
                 final int nextSensorMode = (m_sensorMode == SENSOR_STEREO_IMU) ? SENSOR_STEREO : SENSOR_STEREO_IMU;
-                final int exposureUs = parseI(m_etCfgExposure, 3000);
-                final float gain = parseF(m_etCfgGain, 2.0f);
+                final int exposureUs = m_cfgExposureUs;
+                final float gain = (float) m_cfgGain;
                 sendRuntimeConfigAwaitAck(exposureUs, gain, nextSensorMode, "Sensor mode", PENDING_SENSOR, () -> {
                     m_sensorMode = nextSensorMode;
                     updateRuntimeButtons();
