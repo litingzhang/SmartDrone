@@ -1,5 +1,4 @@
 .clang-format
-upload.sh
 build
 temp
 *gradle*
