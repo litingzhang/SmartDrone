@@ -33,12 +33,33 @@
 
 #include <mutex>
 #include <chrono>
+#include <algorithm>
 
 
 using namespace std;
 
 namespace ORB_SLAM3
 {
+
+namespace
+{
+int CountTrackedMapPoints(const Frame& frame)
+{
+    int tracked = 0;
+    for(int i = 0; i < frame.N; ++i)
+    {
+        if(frame.mvpMapPoints[i] && !frame.mvbOutlier[i])
+            ++tracked;
+    }
+    return tracked;
+}
+
+struct RelocCandidateOrder
+{
+    int index;
+    int bowMatches;
+};
+}
 
 
 Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, Atlas *pAtlas, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor, Settings* settings, const string &_nameSeq):
@@ -1434,11 +1455,6 @@ void Tracking::SetLoopClosing(LoopClosing *pLoopClosing)
     mpLoopClosing=pLoopClosing;
 }
 
-// void Tracking::SetViewer(Viewer *pViewer)
-// {
-//     mpViewer=pViewer;
-// }
-
 void Tracking::SetStepByStep(bool bSet)
 {
     bStepByStep = bSet;
@@ -1453,15 +1469,12 @@ bool Tracking::GetStepByStep()
 
 Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat &imRectRight, const double &timestamp, string filename)
 {
-    //cout << "GrabImageStereo" << endl;
-
     mImGray = imRectLeft;
     cv::Mat imGrayRight = imRectRight;
     mImRight = imRectRight;
 
     if(mImGray.channels()==3)
     {
-        //cout << "Image with 3 channels" << endl;
         if(mbRGB)
         {
             cvtColor(mImGray,mImGray,cv::COLOR_RGB2GRAY);
@@ -1475,7 +1488,6 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
     }
     else if(mImGray.channels()==4)
     {
-        //cout << "Image with 4 channels" << endl;
         if(mbRGB)
         {
             cvtColor(mImGray,mImGray,cv::COLOR_RGBA2GRAY);
@@ -1488,8 +1500,6 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
         }
     }
 
-    //cout << "Incoming frame creation" << endl;
-
     if (mSensor == System::STEREO && !mpCamera2)
         mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera);
     else if(mSensor == System::STEREO && mpCamera2)
@@ -1499,8 +1509,6 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
     else if(mSensor == System::IMU_STEREO && mpCamera2)
         mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,mpCamera2,mTlr,&mLastFrame,*mpImuCalib);
 
-    //cout << "Incoming frame ended" << endl;
-
     mCurrentFrame.mNameFile = filename;
     mCurrentFrame.mnDataset = mnNumDataset;
 
@@ -1509,9 +1517,7 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
     vdStereoMatch_ms.push_back(mCurrentFrame.mTimeStereoMatch);
 #endif
 
-    //cout << "Tracking start" << endl;
     Track();
-    //cout << "Tracking end" << endl;
 
     return mCurrentFrame.GetPose();
 }
@@ -2157,10 +2163,7 @@ void Tracking::Track()
             else
                 mState=RECENTLY_LOST; // visual to lost
 
-            /*if(mCurrentFrame.mnId>mnLastRelocFrameId+mMaxFrames)
-            {*/
-                mTimeStampLost = mCurrentFrame.mTimeStamp;
-            //}
+            mTimeStampLost = mCurrentFrame.mTimeStamp;
         }
 
         // Save frame if recent relocalization, since they are used for IMU reset (as we are making copy, it shluld be once mCurrFrame is completely modified)
@@ -3179,7 +3182,7 @@ bool Tracking::NeedNewKeyFrame()
     }
 
     bool c4 = false;
-    if ((((mnMatchesInliers<75) && (mnMatchesInliers>15)) || mState==RECENTLY_LOST) && (mSensor == System::IMU_MONOCULAR)) // MODIFICATION_2, originally ((((mnMatchesInliers<75) && (mnMatchesInliers>15)) || mState==RECENTLY_LOST) && ((mSensor == System::IMU_MONOCULAR)))
+    if ((((mnMatchesInliers<75) && (mnMatchesInliers>15)) || mState==RECENTLY_LOST) && (mSensor == System::IMU_MONOCULAR))
         c4=true;
     else
         c4=false;
@@ -3363,7 +3366,6 @@ void Tracking::SearchLocalPoints()
     }
 
     int nToMatch=0;
-
     // Project points in frame and check its visibility
     for(vector<MapPoint*>::iterator vit=mvpLocalMapPoints.begin(), vend=mvpLocalMapPoints.end(); vit!=vend; vit++)
     {
@@ -3410,7 +3412,7 @@ void Tracking::SearchLocalPoints()
         if(mState==LOST || mState==RECENTLY_LOST) // Lost for less than 1 second
             th=15; // 15
 
-        int matches = matcher.SearchByProjection(mCurrentFrame, mvpLocalMapPoints, th, mpLocalMapper->mbFarPoints, mpLocalMapper->mThFarPoints);
+        matcher.SearchByProjection(mCurrentFrame, mvpLocalMapPoints, th, mpLocalMapper->mbFarPoints, mpLocalMapper->mThFarPoints);
     }
 }
 
@@ -3427,6 +3429,7 @@ void Tracking::UpdateLocalMap()
 void Tracking::UpdateLocalPoints()
 {
     mvpLocalMapPoints.clear();
+    mvpLocalMapPoints.reserve(mvpLocalKeyFrames.size() * 200);
 
     int count_pts = 0;
 
@@ -3496,7 +3499,6 @@ void Tracking::UpdateLocalKeyFrames()
                 }
                 else
                 {
-                    // MODIFICATION
                     mLastFrame.mvpMapPoints[i]=NULL;
                 }
             }
@@ -3627,14 +3629,20 @@ bool Tracking::Relocalization()
     // If enough matches are found we setup a PnP solver
     ORBmatcher matcher(0.75,true);
 
-    vector<MLPnPsolver*> vpMLPnPsolvers;
-    vpMLPnPsolvers.resize(nKFs);
+    thread_local vector<MLPnPsolver*> vpMLPnPsolvers;
+    thread_local vector<vector<MapPoint*> > vvpMapPointMatches;
+    thread_local vector<bool> vbDiscarded;
+    thread_local vector<RelocCandidateOrder> vCandidateOrder;
 
-    vector<vector<MapPoint*> > vvpMapPointMatches;
+    for(MLPnPsolver* pSolver : vpMLPnPsolvers)
+        delete pSolver;
+
+    vpMLPnPsolvers.assign(nKFs, static_cast<MLPnPsolver*>(NULL));
+    vvpMapPointMatches.clear();
     vvpMapPointMatches.resize(nKFs);
-
-    vector<bool> vbDiscarded;
-    vbDiscarded.resize(nKFs);
+    vbDiscarded.assign(nKFs, false);
+    vCandidateOrder.clear();
+    vCandidateOrder.reserve(nKFs);
 
     int nCandidates=0;
 
@@ -3656,10 +3664,17 @@ bool Tracking::Relocalization()
                 MLPnPsolver* pSolver = new MLPnPsolver(mCurrentFrame,vvpMapPointMatches[i]);
                 pSolver->SetRansacParameters(0.99,10,300,6,0.5,5.991);  //This solver needs at least 6 points
                 vpMLPnPsolvers[i] = pSolver;
+                vCandidateOrder.push_back({i, nmatches});
                 nCandidates++;
             }
         }
     }
+
+    sort(vCandidateOrder.begin(), vCandidateOrder.end(),
+         [](const RelocCandidateOrder& lhs, const RelocCandidateOrder& rhs)
+         {
+             return lhs.bowMatches > rhs.bowMatches;
+         });
 
     // Alternatively perform some iterations of P4P RANSAC
     // Until we found a camera pose supported by enough inliers
@@ -3668,8 +3683,9 @@ bool Tracking::Relocalization()
 
     while(nCandidates>0 && !bMatch)
     {
-        for(int i=0; i<nKFs; i++)
+        for(const RelocCandidateOrder& candidate : vCandidateOrder)
         {
+            const int i = candidate.index;
             if(vbDiscarded[i])
                 continue;
 
@@ -3694,7 +3710,6 @@ bool Tracking::Relocalization()
             {
                 Sophus::SE3f Tcw(eigTcw);
                 mCurrentFrame.SetPose(Tcw);
-                // Tcw.copyTo(mCurrentFrame.mTcw);
 
                 set<MapPoint*> sFound;
 
@@ -3765,12 +3780,18 @@ bool Tracking::Relocalization()
 
     if(!bMatch)
     {
+        for(MLPnPsolver* pSolver : vpMLPnPsolvers)
+            delete pSolver;
+        vpMLPnPsolvers.clear();
         return false;
     }
     else
     {
         mnLastRelocFrameId = mCurrentFrame.mnId;
         cout << "Relocalized!!" << endl;
+        for(MLPnPsolver* pSolver : vpMLPnPsolvers)
+            delete pSolver;
+        vpMLPnPsolvers.clear();
         return true;
     }
 
@@ -3779,13 +3800,6 @@ bool Tracking::Relocalization()
 void Tracking::Reset(bool bLocMap)
 {
     Verbose::PrintMess("System Reseting", Verbose::VERBOSITY_NORMAL);
-
-    // if(mpViewer)
-    // {
-    //     mpViewer->RequestStop();
-    //     while(!mpViewer->isStopped())
-    //         usleep(3000);
-    // }
 
     // Reset Local Mapping
     if (!bLocMap)
@@ -3831,21 +3845,12 @@ void Tracking::Reset(bool bLocMap)
     mpLastKeyFrame = static_cast<KeyFrame*>(NULL);
     mvIniMatches.clear();
 
-    // if(mpViewer)
-    //     mpViewer->Release();
-
     Verbose::PrintMess("   End reseting! ", Verbose::VERBOSITY_NORMAL);
 }
 
 void Tracking::ResetActiveMap(bool bLocMap)
 {
     Verbose::PrintMess("Active map Reseting", Verbose::VERBOSITY_NORMAL);
-    // if(mpViewer)
-    // {
-    //     mpViewer->RequestStop();
-    //     while(!mpViewer->isStopped())
-    //         usleep(3000);
-    // }
 
     Map* pMap = mpAtlas->GetCurrentMap();
 
@@ -3879,7 +3884,6 @@ void Tracking::ResetActiveMap(bool bLocMap)
     mbReadyToInitializate = false;
 
     list<bool> lbLost;
-    // lbLost.reserve(mlbLost.size());
     unsigned int index = mnFirstFrameId;
     cout << "mnFirstFrameId = " << mnFirstFrameId << endl;
     for(Map* pMap : mpAtlas->GetAllMaps())
@@ -3891,7 +3895,6 @@ void Tracking::ResetActiveMap(bool bLocMap)
         }
     }
 
-    //cout << "First Frame id: " << index << endl;
     int num_lost = 0;
     cout << "mnInitialFrameId = " << mnInitialFrameId << endl;
 
@@ -3921,9 +3924,6 @@ void Tracking::ResetActiveMap(bool bLocMap)
     mvIniMatches.clear();
 
     mbVelocity = false;
-
-    // if(mpViewer)
-    //     mpViewer->Release();
 
     Verbose::PrintMess("   End reseting! ", Verbose::VERBOSITY_NORMAL);
 }

@@ -26,11 +26,33 @@
 #include "Thirdparty/DBoW2/DBoW2/FeatureVector.h"
 
 #include<stdint-gcc.h>
+#include<array>
 
 using namespace std;
 
 namespace ORB_SLAM3
 {
+    namespace
+    {
+        constexpr size_t kRotationHistogramLength = 30;
+        constexpr float kProjectionNNRatio = 0.9f;
+        using RotationHistogram = std::array<std::vector<int>, kRotationHistogramLength>;
+
+        RotationHistogram& GetRotationHistogramBuffer()
+        {
+            thread_local RotationHistogram rotHist;
+            return rotHist;
+        }
+
+        void ResetRotationHistogram(RotationHistogram& rotHist, const size_t reserveCount = 500)
+        {
+            for(std::vector<int>& hist : rotHist)
+            {
+                hist.clear();
+                hist.reserve(reserveCount);
+            }
+        }
+    }
 
     const int ORBmatcher::TH_HIGH = 100;
     const int ORBmatcher::TH_LOW = 50;
@@ -58,6 +80,8 @@ namespace ORB_SLAM3
             if(pMP->isBad())
                 continue;
 
+            const cv::Mat MPdescriptor = pMP->GetDescriptor();
+
             if(pMP->mbTrackInView)
             {
                 const int &nPredictedLevel = pMP->mnTrackScaleLevel;
@@ -72,7 +96,6 @@ namespace ORB_SLAM3
                         F.GetFeaturesInArea(pMP->mTrackProjX,pMP->mTrackProjY,r*F.mvScaleFactors[nPredictedLevel],nPredictedLevel-1,nPredictedLevel);
 
                 if(!vIndices.empty()){
-                    const cv::Mat MPdescriptor = pMP->GetDescriptor();
 
                     int bestDist=256;
                     int bestLevel= -1;
@@ -152,8 +175,6 @@ namespace ORB_SLAM3
                     if(vIndices.empty())
                         continue;
 
-                    const cv::Mat MPdescriptor = pMP->GetDescriptor();
-
                     int bestDist=256;
                     int bestLevel= -1;
                     int bestDist2=256;
@@ -224,15 +245,14 @@ namespace ORB_SLAM3
     {
         const vector<MapPoint*> vpMapPointsKF = pKF->GetMapPointMatches();
 
-        vpMapPointMatches = vector<MapPoint*>(F.N,static_cast<MapPoint*>(NULL));
+        vpMapPointMatches.assign(F.N, static_cast<MapPoint*>(NULL));
 
         const DBoW2::FeatureVector &vFeatVecKF = pKF->mFeatVec;
 
         int nmatches=0;
 
-        vector<int> rotHist[HISTO_LENGTH];
-        for(int i=0;i<HISTO_LENGTH;i++)
-            rotHist[i].reserve(500);
+        RotationHistogram& rotHist = GetRotationHistogramBuffer();
+        ResetRotationHistogram(rotHist);
         const float factor = 1.0f/HISTO_LENGTH;
 
         // We perform the matching over ORB that belong to the same vocabulary node (at a certain level)
@@ -407,7 +427,7 @@ namespace ORB_SLAM3
             int ind2=-1;
             int ind3=-1;
 
-            ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
+            ComputeThreeMaxima(rotHist.data(),HISTO_LENGTH,ind1,ind2,ind3);
 
             for(int i=0; i<HISTO_LENGTH; i++)
             {
@@ -650,9 +670,8 @@ namespace ORB_SLAM3
         int nmatches=0;
         vnMatches12 = vector<int>(F1.mvKeysUn.size(),-1);
 
-        vector<int> rotHist[HISTO_LENGTH];
-        for(int i=0;i<HISTO_LENGTH;i++)
-            rotHist[i].reserve(500);
+        RotationHistogram& rotHist = GetRotationHistogramBuffer();
+        ResetRotationHistogram(rotHist);
         const float factor = 1.0f/HISTO_LENGTH;
 
         vector<int> vMatchedDistance(F2.mvKeysUn.size(),INT_MAX);
@@ -735,7 +754,7 @@ namespace ORB_SLAM3
             int ind2=-1;
             int ind3=-1;
 
-            ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
+            ComputeThreeMaxima(rotHist.data(),HISTO_LENGTH,ind1,ind2,ind3);
 
             for(int i=0; i<HISTO_LENGTH; i++)
             {
@@ -777,9 +796,8 @@ namespace ORB_SLAM3
         vpMatches12 = vector<MapPoint*>(vpMapPoints1.size(),static_cast<MapPoint*>(NULL));
         vector<bool> vbMatched2(vpMapPoints2.size(),false);
 
-        vector<int> rotHist[HISTO_LENGTH];
-        for(int i=0;i<HISTO_LENGTH;i++)
-            rotHist[i].reserve(500);
+        RotationHistogram& rotHist = GetRotationHistogramBuffer();
+        ResetRotationHistogram(rotHist);
 
         const float factor = 1.0f/HISTO_LENGTH;
 
@@ -887,7 +905,7 @@ namespace ORB_SLAM3
             int ind2=-1;
             int ind3=-1;
 
-            ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
+            ComputeThreeMaxima(rotHist.data(),HISTO_LENGTH,ind1,ind2,ind3);
 
             for(int i=0; i<HISTO_LENGTH; i++)
             {
@@ -949,9 +967,8 @@ namespace ORB_SLAM3
         vector<bool> vbMatched2(pKF2->N,false);
         vector<int> vMatches12(pKF1->N,-1);
 
-        vector<int> rotHist[HISTO_LENGTH];
-        for(int i=0;i<HISTO_LENGTH;i++)
-            rotHist[i].reserve(500);
+        RotationHistogram& rotHist = GetRotationHistogramBuffer();
+        ResetRotationHistogram(rotHist);
 
         const float factor = 1.0f/HISTO_LENGTH;
 
@@ -1069,7 +1086,7 @@ namespace ORB_SLAM3
 
                         }
 
-                        if(bCoarse || pCamera1->epipolarConstrain(pCamera2,kp1,kp2,R12,t12,pKF1->mvLevelSigma2[kp1.octave],pKF2->mvLevelSigma2[kp2.octave])) // MODIFICATION_2
+                        if(bCoarse || pCamera1->epipolarConstrain(pCamera2,kp1,kp2,R12,t12,pKF1->mvLevelSigma2[kp1.octave],pKF2->mvLevelSigma2[kp2.octave]))
                         {
                             bestIdx2 = idx2;
                             bestDist = dist;
@@ -1117,7 +1134,7 @@ namespace ORB_SLAM3
             int ind2=-1;
             int ind3=-1;
 
-            ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
+            ComputeThreeMaxima(rotHist.data(),HISTO_LENGTH,ind1,ind2,ind3);
 
             for(int i=0; i<HISTO_LENGTH; i++)
             {
@@ -1678,9 +1695,8 @@ namespace ORB_SLAM3
         int nmatches = 0;
 
         // Rotation Histogram (to check rotation consistency)
-        vector<int> rotHist[HISTO_LENGTH];
-        for(int i=0;i<HISTO_LENGTH;i++)
-            rotHist[i].reserve(500);
+        RotationHistogram& rotHist = GetRotationHistogramBuffer();
+        ResetRotationHistogram(rotHist);
         const float factor = 1.0f/HISTO_LENGTH;
 
         const Sophus::SE3f Tcw = CurrentFrame.GetPose();
@@ -1738,6 +1754,9 @@ namespace ORB_SLAM3
                     const cv::Mat dMP = pMP->GetDescriptor();
 
                     int bestDist = 256;
+                    int bestDist2 = 256;
+                    int bestLevel = -1;
+                    int bestLevel2 = -1;
                     int bestIdx2 = -1;
 
                     for(vector<size_t>::const_iterator vit=vIndices2.begin(), vend=vIndices2.end(); vit!=vend; vit++)
@@ -1759,16 +1778,30 @@ namespace ORB_SLAM3
                         const cv::Mat &d = CurrentFrame.mDescriptors.row(i2);
 
                         const int dist = DescriptorDistance(dMP,d);
+                        const int level = (CurrentFrame.Nleft == -1) ? CurrentFrame.mvKeysUn[i2].octave
+                                                                     : (i2 < CurrentFrame.Nleft) ? CurrentFrame.mvKeys[i2].octave
+                                                                                                 : CurrentFrame.mvKeysRight[i2 - CurrentFrame.Nleft].octave;
 
                         if(dist<bestDist)
                         {
+                            bestDist2=bestDist;
                             bestDist=dist;
+                            bestLevel2 = bestLevel;
+                            bestLevel = level;
                             bestIdx2=i2;
+                        }
+                        else if(dist<bestDist2)
+                        {
+                            bestDist2=dist;
+                            bestLevel2 = level;
                         }
                     }
 
                     if(bestDist<=TH_HIGH)
                     {
+                        if(bestLevel==bestLevel2 && bestDist>kProjectionNNRatio*bestDist2)
+                            continue;
+
                         CurrentFrame.mvpMapPoints[bestIdx2]=pMP;
                         nmatches++;
 
@@ -1813,6 +1846,9 @@ namespace ORB_SLAM3
                         const cv::Mat dMP = pMP->GetDescriptor();
 
                         int bestDist = 256;
+                        int bestDist2 = 256;
+                        int bestLevel = -1;
+                        int bestLevel2 = -1;
                         int bestIdx2 = -1;
 
                         for(vector<size_t>::const_iterator vit=vIndices2.begin(), vend=vIndices2.end(); vit!=vend; vit++)
@@ -1825,16 +1861,28 @@ namespace ORB_SLAM3
                             const cv::Mat &d = CurrentFrame.mDescriptors.row(i2 + CurrentFrame.Nleft);
 
                             const int dist = DescriptorDistance(dMP,d);
+                            const int level = CurrentFrame.mvKeysRight[i2].octave;
 
                             if(dist<bestDist)
                             {
+                                bestDist2=bestDist;
                                 bestDist=dist;
+                                bestLevel2 = bestLevel;
+                                bestLevel = level;
                                 bestIdx2=i2;
+                            }
+                            else if(dist<bestDist2)
+                            {
+                                bestDist2=dist;
+                                bestLevel2 = level;
                             }
                         }
 
                         if(bestDist<=TH_HIGH)
                         {
+                            if(bestLevel==bestLevel2 && bestDist>kProjectionNNRatio*bestDist2)
+                                continue;
+
                             CurrentFrame.mvpMapPoints[bestIdx2 + CurrentFrame.Nleft]=pMP;
                             nmatches++;
                             if(mbCheckOrientation)
@@ -1868,7 +1916,7 @@ namespace ORB_SLAM3
             int ind2=-1;
             int ind3=-1;
 
-            ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
+            ComputeThreeMaxima(rotHist.data(),HISTO_LENGTH,ind1,ind2,ind3);
 
             for(int i=0; i<HISTO_LENGTH; i++)
             {
@@ -1894,9 +1942,8 @@ namespace ORB_SLAM3
         Eigen::Vector3f Ow = Tcw.inverse().translation();
 
         // Rotation Histogram (to check rotation consistency)
-        vector<int> rotHist[HISTO_LENGTH];
-        for(int i=0;i<HISTO_LENGTH;i++)
-            rotHist[i].reserve(500);
+        RotationHistogram& rotHist = GetRotationHistogramBuffer();
+        ResetRotationHistogram(rotHist);
         const float factor = 1.0f/HISTO_LENGTH;
 
         const vector<MapPoint*> vpMPs = pKF->GetMapPointMatches();
@@ -1944,6 +1991,9 @@ namespace ORB_SLAM3
                     const cv::Mat dMP = pMP->GetDescriptor();
 
                     int bestDist = 256;
+                    int bestDist2 = 256;
+                    int bestLevel = -1;
+                    int bestLevel2 = -1;
                     int bestIdx2 = -1;
 
                     for(vector<size_t>::const_iterator vit=vIndices2.begin(); vit!=vIndices2.end(); vit++)
@@ -1955,16 +2005,28 @@ namespace ORB_SLAM3
                         const cv::Mat &d = CurrentFrame.mDescriptors.row(i2);
 
                         const int dist = DescriptorDistance(dMP,d);
+                        const int level = CurrentFrame.mvKeysUn[i2].octave;
 
                         if(dist<bestDist)
                         {
+                            bestDist2=bestDist;
                             bestDist=dist;
+                            bestLevel2 = bestLevel;
+                            bestLevel = level;
                             bestIdx2=i2;
+                        }
+                        else if(dist<bestDist2)
+                        {
+                            bestDist2=dist;
+                            bestLevel2 = level;
                         }
                     }
 
                     if(bestDist<=ORBdist)
                     {
+                        if(bestLevel==bestLevel2 && bestDist>kProjectionNNRatio*bestDist2)
+                            continue;
+
                         CurrentFrame.mvpMapPoints[bestIdx2]=pMP;
                         nmatches++;
 
@@ -1991,7 +2053,7 @@ namespace ORB_SLAM3
             int ind2=-1;
             int ind3=-1;
 
-            ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
+            ComputeThreeMaxima(rotHist.data(),HISTO_LENGTH,ind1,ind2,ind3);
 
             for(int i=0; i<HISTO_LENGTH; i++)
             {

@@ -658,7 +658,6 @@ Eigen::Vector3f Frame::inRefCoordinates(Eigen::Vector3f pCw)
 vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const float  &r, const int minLevel, const int maxLevel, const bool bRight) const
 {
     vector<size_t> vIndices;
-    vIndices.reserve(N);
 
     float factorX = r;
     float factorY = r;
@@ -688,12 +687,15 @@ vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const f
     }
 
     const bool bCheckLevels = (minLevel>0) || (maxLevel>=0);
+    const int nCellsX = nMaxCellX - nMinCellX + 1;
+    const int nCellsY = nMaxCellY - nMinCellY + 1;
+    vIndices.reserve(min(N, nCellsX * nCellsY * 8));
 
     for(int ix = nMinCellX; ix<=nMaxCellX; ix++)
     {
         for(int iy = nMinCellY; iy<=nMaxCellY; iy++)
         {
-            const vector<size_t> vCell = (!bRight) ? mGrid[ix][iy] : mGridRight[ix][iy];
+            const vector<size_t>& vCell = (!bRight) ? mGrid[ix][iy] : mGridRight[ix][iy];
             if(vCell.empty())
                 continue;
 
