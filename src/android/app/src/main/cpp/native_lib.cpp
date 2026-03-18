@@ -31,7 +31,7 @@ static uint32_t NowMs32()
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_example_ZControl_NativeUdp_init(JNIEnv* env, jclass, jstring ip, jint cmdPort, jint videoPort)
+Java_com_example_smartdrone_NativeUdp_init(JNIEnv* env, jclass, jstring ip, jint cmdPort, jint videoPort)
 {
     const char* cStr = env->GetStringUTFChars(ip, nullptr);
     const std::string ipString = (cStr != nullptr) ? cStr : "";
@@ -47,14 +47,14 @@ Java_com_example_ZControl_NativeUdp_init(JNIEnv* env, jclass, jstring ip, jint c
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_example_ZControl_NativeUdp_close(JNIEnv*, jclass)
+Java_com_example_smartdrone_NativeUdp_close(JNIEnv*, jclass)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_udpClient.Close();
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_example_ZControl_NativeUdp_sendCmd(JNIEnv*, jclass, jint cmd)
+Java_com_example_smartdrone_NativeUdp_sendCmd(JNIEnv*, jclass, jint cmd)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     const uint32_t seq = g_seqCounter.fetch_add(1);
@@ -65,7 +65,7 @@ Java_com_example_ZControl_NativeUdp_sendCmd(JNIEnv*, jclass, jint cmd)
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_example_ZControl_NativeUdp_sendMove(
+Java_com_example_smartdrone_NativeUdp_sendMove(
     JNIEnv*,
     jclass,
     jint frameType,
@@ -94,7 +94,7 @@ Java_com_example_ZControl_NativeUdp_sendMove(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_example_ZControl_NativeUdp_sendMoveVelocity(
+Java_com_example_smartdrone_NativeUdp_sendMoveVelocity(
     JNIEnv*,
     jclass,
     jint frameType,
@@ -123,7 +123,7 @@ Java_com_example_ZControl_NativeUdp_sendMoveVelocity(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_example_ZControl_NativeUdp_sendMoveRcJoystick(
+Java_com_example_smartdrone_NativeUdp_sendMoveRcJoystick(
     JNIEnv*,
     jclass,
     jint frameType,
@@ -157,7 +157,7 @@ Java_com_example_ZControl_NativeUdp_sendMoveRcJoystick(
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_example_ZControl_NativeUdp_pollRecv(JNIEnv* env, jclass)
+Java_com_example_smartdrone_NativeUdp_pollRecv(JNIEnv* env, jclass)
 {
     uint8_t buffer[2048]{};
     int recvLen = 0;
@@ -175,7 +175,7 @@ Java_com_example_ZControl_NativeUdp_pollRecv(JNIEnv* env, jclass)
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_example_ZControl_NativeUdp_sendRuntimeMode(JNIEnv*, jclass, jint mode)
+Java_com_example_smartdrone_NativeUdp_sendRuntimeMode(JNIEnv*, jclass, jint mode)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     const uint32_t seq = g_seqCounter.fetch_add(1);
@@ -187,7 +187,7 @@ Java_com_example_ZControl_NativeUdp_sendRuntimeMode(JNIEnv*, jclass, jint mode)
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_example_ZControl_NativeUdp_sendRuntimeConfig(
+Java_com_example_smartdrone_NativeUdp_sendRuntimeConfig(
     JNIEnv*,
     jclass,
     jint exposureUs,

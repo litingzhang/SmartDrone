@@ -107,6 +107,7 @@ public class MainActivity extends Activity {
     private Button m_btnCleanCalib;
     private ImageButton m_btnMapClear;
     private ImageButton m_btnMapZoom;
+    private Button m_btnFeatureToggle;
 
     private AutoCompleteTextView m_etVehicleIp;
     private TextView m_tvCfgExposureValue;
@@ -152,6 +153,7 @@ public class MainActivity extends Activity {
     private int m_featurePktCount1 = 0;
     private int m_featureMatchCount0 = 0;
     private int m_featureMatchCount1 = 0;
+    private boolean m_showFeaturePoints = true;
 
     private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Map<Long, PendingAckAction> m_pendingAckActions = new HashMap<>();
@@ -462,6 +464,19 @@ public class MainActivity extends Activity {
                             ? android.R.drawable.ic_menu_zoom
                             : android.R.drawable.ic_menu_search);
         }
+    }
+
+    private void updateFeatureToggleButton() {
+        if (m_btnFeatureToggle == null) {
+            return;
+        }
+        m_btnFeatureToggle.setText(m_showFeaturePoints ? "Feat ON" : "Feat OFF");
+        m_btnFeatureToggle.setAlpha(m_showFeaturePoints ? 1.0f : 0.65f);
+    }
+
+    private void refreshVideoFrames() {
+        renderVideoFrame(0);
+        renderVideoFrame(1);
     }
 
     private void sendCurrentRuntimeConfig(String label, String pendingKey, AckSuccess onSuccess) {
@@ -1128,7 +1143,8 @@ public class MainActivity extends Activity {
         }
         Bitmap output = displayFrame.bitmap;
         FeatureFrame featureFrame = m_featureFrames[camIndex];
-        if (featureFrame.xs != null
+        if (m_showFeaturePoints
+                && featureFrame.xs != null
                 && Math.abs(featureFrame.frameTimeSec - displayFrame.frameTimeSec) <= FRAME_MATCH_TOLERANCE_SEC) {
             output = overlayFeaturePoints(displayFrame.bitmap, featureFrame);
             if (displayFrame.overlayFrameId != featureFrame.frameId) {
@@ -1361,6 +1377,7 @@ public class MainActivity extends Activity {
         m_btnSensorMode = findViewById(R.id.btnSensorMode);
         m_btnMapClear = findViewById(R.id.btnMapClear);
         m_btnMapZoom = findViewById(R.id.btnMapZoom);
+        m_btnFeatureToggle = findViewById(R.id.btnFeatureToggle);
         m_featurePaint.setColor(Color.GREEN);
         m_featurePaint.setStyle(Paint.Style.STROKE);
         m_featurePaint.setStrokeWidth(2.0f);
@@ -1447,6 +1464,7 @@ public class MainActivity extends Activity {
         updateConfigViews();
         updatePoseMapFromText();
         updateMapButtons();
+        updateFeatureToggleButton();
 
         if (m_btnMapClear != null) {
             m_btnMapClear.setOnClickListener(v -> {
@@ -1461,6 +1479,13 @@ public class MainActivity extends Activity {
                     m_map3dView.toggleZoom();
                     updateMapButtons();
                 }
+            });
+        }
+        if (m_btnFeatureToggle != null) {
+            m_btnFeatureToggle.setOnClickListener(v -> {
+                m_showFeaturePoints = !m_showFeaturePoints;
+                updateFeatureToggleButton();
+                refreshVideoFrames();
             });
         }
 
