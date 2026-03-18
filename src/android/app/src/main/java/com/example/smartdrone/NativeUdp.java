@@ -1,4 +1,4 @@
-package com.example.ZControl;
+package com.example.smartdrone;
 
 public class NativeUdp {
     static { System.loadLibrary("cm5udp"); }

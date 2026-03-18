@@ -1,4 +1,6 @@
-package com.example.ZControl;
+package com.example.smartdrone;
+
+import com.example.smartdrone.R;
 
 import android.app.Activity;
 import android.content.pm.ActivityInfo;

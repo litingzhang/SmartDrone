@@ -1,4 +1,4 @@
-package com.example.ZControl;
+package com.example.smartdrone;
 
 import android.content.Context;
 import android.graphics.Canvas;

@@ -127,7 +127,7 @@
                     </LinearLayout>
                 </HorizontalScrollView>
 
-                <com.example.ZControl.JoystickView
+                <com.example.smartdrone.JoystickView
                     android:id="@+id/joystickLeft"
                     android:layout_width="170dp"
                     android:layout_height="170dp"
@@ -136,7 +136,7 @@
                     android:layout_marginBottom="8dp"
                     android:alpha="0.65" />
 
-                <com.example.ZControl.JoystickView
+                <com.example.smartdrone.JoystickView
                     android:id="@+id/joystickRight"
                     android:layout_width="170dp"
                     android:layout_height="170dp"
@@ -152,7 +152,7 @@
                     android:layout_marginTop="0dp"
                     android:layout_marginEnd="0dp">
 
-                    <com.example.ZControl.Map3DView
+                    <com.example.smartdrone.Map3DView
                         android:id="@+id/map3dView"
                         android:layout_width="260dp"
                         android:layout_height="180dp" />
