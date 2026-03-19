@@ -25,7 +25,7 @@ inline SensorMode ParseSensorModeText(const std::string& text)
 struct CameraConfig {
     int width{640};
     int height{400};
-    int fps{30};
+    int fps{60};
     bool aeDisable{true};
     int exposureUs{5000};
     float gain{8.0f};

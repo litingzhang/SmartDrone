@@ -502,7 +502,7 @@ class LibcameraStereoOV9281_TsPair {
         }
     }
 
-    int m_w{640}, m_h{400}, m_fps{30};
+    int m_w{640}, m_h{400}, m_fps{60};
     int m_maxPairQueue{8};
     int64_t m_pairThreshNs{2'000'000};
     int64_t m_keepWindowNs{120'000'000};
