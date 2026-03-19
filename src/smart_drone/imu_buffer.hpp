@@ -51,7 +51,7 @@ public:
         const int64_t rangeStartNs = t0Ns - slackBeforeNs;
         const int64_t rangeEndNs = t1Ns + slackAfterNs;
 
-        size_t i = std::min(m_lastUsedIdx, m_queue.size());
+        size_t i = std::min(m_lastUsedIdx > 0 ? (m_lastUsedIdx - 1) : 0, m_queue.size());
         while (i < m_queue.size() && m_queue[i].tNs < rangeStartNs) {
             ++i;
         }
@@ -64,29 +64,60 @@ public:
                 ts);
         };
 
+        auto appendInterpolatedSample = [&appendSample](const ImuSample& a,
+                                                        const ImuSample& b,
+                                                        int64_t targetNs) {
+            appendSample(InterpolateSample(a, b, targetNs));
+        };
+
         out.reserve(std::min(m_queue.size() - i, static_cast<size_t>(256)));
 
-        size_t j = i;
-        bool appendedLeading = false;
+        size_t startIdx = i;
+        while (startIdx < m_queue.size() && m_queue[startIdx].tNs < t0Ns) {
+            ++startIdx;
+        }
+
         int64_t lastAppendedTsNs = std::numeric_limits<int64_t>::min();
-        while (j < m_queue.size() && m_queue[j].tNs <= rangeEndNs) {
-            const ImuSample& sample = m_queue[j];
-            const bool inMainWindow = sample.tNs > t0Ns && sample.tNs <= t1Ns;
-            const bool isLeadingBoundary = !appendedLeading && sample.tNs <= t0Ns;
-            const bool isTrailingBoundary = sample.tNs > t1Ns;
-            if (inMainWindow || isLeadingBoundary || isTrailingBoundary) {
-                if (sample.tNs != lastAppendedTsNs) {
-                    appendSample(sample);
-                    lastAppendedTsNs = sample.tNs;
-                }
-                if (isLeadingBoundary) {
-                    appendedLeading = true;
-                }
-                if (isTrailingBoundary) {
-                    break;
-                }
+
+        auto appendUnique = [&](const ImuSample& sample) {
+            if (sample.tNs != lastAppendedTsNs) {
+                appendSample(sample);
+                lastAppendedTsNs = sample.tNs;
+            }
+        };
+
+        if (startIdx < m_queue.size() && m_queue[startIdx].tNs == t0Ns) {
+            appendUnique(m_queue[startIdx]);
+            ++startIdx;
+        } else if (startIdx > 0 && startIdx < m_queue.size() &&
+                   m_queue[startIdx - 1].tNs < t0Ns && m_queue[startIdx].tNs > t0Ns &&
+                   m_queue[startIdx].tNs <= rangeEndNs) {
+            appendInterpolatedSample(m_queue[startIdx - 1], m_queue[startIdx], t0Ns);
+            lastAppendedTsNs = t0Ns;
+        } else if (startIdx > 0 && m_queue[startIdx - 1].tNs >= rangeStartNs) {
+            appendUnique(m_queue[startIdx - 1]);
+        }
+
+        size_t j = startIdx;
+        while (j < m_queue.size() && m_queue[j].tNs <= t1Ns) {
+            if (m_queue[j].tNs > t0Ns) {
+                appendUnique(m_queue[j]);
             }
             ++j;
+        }
+
+        const bool haveExactTrailing = !out.empty() && lastAppendedTsNs == t1Ns;
+        if (!haveExactTrailing) {
+            if (j < m_queue.size() && m_queue[j].tNs == t1Ns) {
+                appendUnique(m_queue[j]);
+            } else if (j > 0 && j < m_queue.size() &&
+                       m_queue[j - 1].tNs < t1Ns && m_queue[j].tNs > t1Ns &&
+                       m_queue[j].tNs <= rangeEndNs) {
+                appendInterpolatedSample(m_queue[j - 1], m_queue[j], t1Ns);
+                lastAppendedTsNs = t1Ns;
+            } else if (j < m_queue.size() && m_queue[j].tNs <= rangeEndNs) {
+                appendUnique(m_queue[j]);
+            }
         }
 
         if (!out.empty()) {
@@ -131,4 +162,30 @@ private:
     size_t m_lastUsedIdx{0};
     int m_keepSec{5};
     int64_t m_purgeMarginNs{20000000};  // 20ms
+
+    static ImuSample InterpolateSample(const ImuSample& a, const ImuSample& b, int64_t targetNs)
+    {
+        if (b.tNs <= a.tNs || targetNs <= a.tNs) {
+            ImuSample out = a;
+            out.tNs = targetNs;
+            return out;
+        }
+        if (targetNs >= b.tNs) {
+            ImuSample out = b;
+            out.tNs = targetNs;
+            return out;
+        }
+
+        const float alpha = static_cast<float>(targetNs - a.tNs) /
+                            static_cast<float>(b.tNs - a.tNs);
+        ImuSample out{};
+        out.tNs = targetNs;
+        out.ax = a.ax + (b.ax - a.ax) * alpha;
+        out.ay = a.ay + (b.ay - a.ay) * alpha;
+        out.az = a.az + (b.az - a.az) * alpha;
+        out.gx = a.gx + (b.gx - a.gx) * alpha;
+        out.gy = a.gy + (b.gy - a.gy) * alpha;
+        out.gz = a.gz + (b.gz - a.gz) * alpha;
+        return out;
+    }
 };

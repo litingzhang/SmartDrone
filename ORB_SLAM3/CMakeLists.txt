@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 3.16)
 
 project(ORB_SLAM3)
 
+option(ENABLE_ARM_CPU_TUNING "Enable tuned ARM CPU flags for the deployment target" ON)
+set(ARM_CPU_TUNE "cortex-a76" CACHE STRING "ARM CPU passed to -mcpu/-mtune when tuning is enabled")
+
 # set(CMAKE_SYSROOT "/home/ltz/sysroots/cm5")
 # set(CMAKE_FIND_ROOT_PATH "/home/ltz/sysroots/cm5")
 # set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
@@ -22,6 +25,10 @@ set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+
+if(ENABLE_ARM_CPU_TUNING AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$" AND NOT ARM_CPU_TUNE STREQUAL "")
+  add_compile_options("-mcpu=${ARM_CPU_TUNE}" "-mtune=${ARM_CPU_TUNE}")
+endif()
 
 LIST(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_modules)
 

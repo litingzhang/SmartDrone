@@ -28,6 +28,7 @@ Camera2.p2: -0.0008298335755836476
 
 Camera.bf: 35.49506352441868
 Stereo.ThDepth: 35.0
+System.thFarPoints: 8.0
 
 Stereo.T_c1_c2:
   rows: 4
