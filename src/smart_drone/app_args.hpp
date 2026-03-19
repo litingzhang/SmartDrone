@@ -33,6 +33,7 @@ struct CameraConfig {
     bool r16Norm{false};
     int pairMs{2};
     int keepMs{120};
+    int pairQueue{3};
 };
 
 struct UdpConfig {
@@ -162,8 +163,10 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     AppConfig config;
 
     config.vocab = argReader.GetString("--vocab", "ORBvoc.txt");
-    config.settings = argReader.GetString("--settings", "stereo_inertial.yaml");
     config.sensorMode = ParseSensorModeText(argReader.GetString("--sensor-mode", "stereo"));
+    const char* defaultSettings =
+        (config.sensorMode == SensorMode::StereoImu) ? "stereo_inertial.yaml" : "stereo.yaml";
+    config.settings = argReader.GetString("--settings", defaultSettings);
 
     config.camera.width = argReader.GetInt("--w", 640);
     config.camera.height = argReader.GetInt("--h", 400);
@@ -175,6 +178,7 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     config.camera.r16Norm = argReader.HasFlag("--r16-norm");
     config.camera.pairMs = argReader.GetInt("--pair-ms", 2);
     config.camera.keepMs = argReader.GetInt("--keep-ms", 120);
+    config.camera.pairQueue = argReader.GetInt("--pair-queue", 3);
 
     config.udp.enable = argReader.HasFlag("--udp");
     config.udp.ip = argReader.GetString("--udp-ip", "10.42.0.109");

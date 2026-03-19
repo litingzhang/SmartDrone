@@ -26,9 +26,11 @@
 #include<stdlib.h>
 #include<string>
 #include<thread>
+#include<vector>
 #include<opencv2/core/core.hpp>
 
 #include "Tracking.h"
+#include "TrackedVisualData.h"
 // #include "FrameDrawer.h"
 // #include "MapDrawer.h"
 #include "Atlas.h"
@@ -175,9 +177,12 @@ public:
     // You can call this right after TrackMonocular (or stereo or RGBD)
     int GetTrackingState();
     unsigned long GetCurrentMapId();
-    std::vector<MapPoint*> GetTrackedMapPoints();
-    std::vector<cv::KeyPoint> GetTrackedKeyPointsUn();
-    std::vector<float> GetTrackedRightCoordinates();
+    TrackedVisualData ExtractTrackedVisualData(int leftImageWidth,
+                                               int leftImageHeight,
+                                               int rightImageWidth,
+                                               int rightImageHeight,
+                                               bool includePointCloud,
+                                               size_t maxPointCloudPoints);
 
     // For debugging
     double GetTimeFromIMUInit();
@@ -253,9 +258,6 @@ private:
 
     // Tracking state
     int mTrackingState;
-    std::vector<MapPoint*> mTrackedMapPoints;
-    std::vector<cv::KeyPoint> mTrackedKeyPointsUn;
-    std::vector<float> mTrackedRightCoordinates;
     std::mutex mMutexState;
 
     //

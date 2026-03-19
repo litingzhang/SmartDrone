@@ -34,6 +34,7 @@
 #include "ORBextractor.h"
 // #include "MapDrawer.h"
 #include "System.h"
+#include "TrackedVisualData.h"
 #include "ImuTypes.h"
 #include "Settings.h"
 
@@ -80,6 +81,12 @@ public:
     // void SetViewer(Viewer* pViewer);
     void SetStepByStep(bool bSet);
     bool GetStepByStep();
+    TrackedVisualData ExtractTrackedVisualData(int leftImageWidth,
+                                               int leftImageHeight,
+                                               int rightImageWidth,
+                                               int rightImageHeight,
+                                               bool includePointCloud,
+                                               size_t maxPointCloudPoints) const;
 
     // Load new settings
     // The focal lenght should be similar or scale prediction will fail when projecting points

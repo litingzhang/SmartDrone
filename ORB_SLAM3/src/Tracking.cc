@@ -18,6 +18,7 @@
 
 
 #include "Tracking.h"
+#include "System.h"
 
 #include "ORBmatcher.h"
 // #include "FrameDrawer.h"
@@ -40,6 +41,66 @@ using namespace std;
 
 namespace ORB_SLAM3
 {
+
+TrackedVisualData Tracking::ExtractTrackedVisualData(int leftImageWidth,
+                                                     int leftImageHeight,
+                                                     int rightImageWidth,
+                                                     int rightImageHeight,
+                                                     bool includePointCloud,
+                                                     size_t maxPointCloudPoints) const
+{
+    TrackedVisualData out;
+    const size_t leftCount = std::min(mCurrentFrame.mvpMapPoints.size(), mCurrentFrame.mvKeysUn.size());
+    const size_t rightCount = std::min(leftCount, mCurrentFrame.mvuRight.size());
+    out.leftFeatures.reserve(leftCount);
+    out.rightFeatures.reserve(rightCount);
+
+    const size_t cappedCloudPoints = std::max<size_t>(1, maxPointCloudPoints);
+    const size_t cloudStride = includePointCloud
+        ? std::max<size_t>(1, mCurrentFrame.mvpMapPoints.size() / cappedCloudPoints)
+        : std::numeric_limits<size_t>::max();
+    if (includePointCloud) {
+        out.pointCloudXyz.reserve(cappedCloudPoints * 3);
+    }
+
+    size_t cloudCount = 0;
+    for (size_t i = 0; i < leftCount; ++i) {
+        MapPoint* point = mCurrentFrame.mvpMapPoints[i];
+        if (!point || point->isBad()) {
+            continue;
+        }
+
+        const cv::Point2f& leftPt = mCurrentFrame.mvKeysUn[i].pt;
+        if (leftPt.x >= 0.0f && leftPt.y >= 0.0f &&
+            leftPt.x < static_cast<float>(leftImageWidth) &&
+            leftPt.y < static_cast<float>(leftImageHeight)) {
+            out.leftFeatures.push_back(leftPt);
+        }
+
+        if (i < rightCount) {
+            const float rightX = mCurrentFrame.mvuRight[i];
+            const float rightY = leftPt.y;
+            if (rightX >= 0.0f && rightY >= 0.0f &&
+                rightX < static_cast<float>(rightImageWidth) &&
+                rightY < static_cast<float>(rightImageHeight)) {
+                out.rightFeatures.emplace_back(rightX, rightY);
+            }
+        }
+
+        if (includePointCloud && cloudCount < cappedCloudPoints &&
+            (cloudStride == 1 || (i % cloudStride) == 0)) {
+            const Eigen::Vector3f world = point->GetWorldPos();
+            if (std::isfinite(world.x()) && std::isfinite(world.y()) && std::isfinite(world.z())) {
+                out.pointCloudXyz.push_back(world.x());
+                out.pointCloudXyz.push_back(world.y());
+                out.pointCloudXyz.push_back(world.z());
+                ++cloudCount;
+            }
+        }
+    }
+
+    return out;
+}
 
 namespace
 {

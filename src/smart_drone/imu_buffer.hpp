@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -51,26 +52,46 @@ public:
         const int64_t rangeEndNs = t1Ns + slackAfterNs;
 
         size_t i = std::min(m_lastUsedIdx, m_queue.size());
-        while (i < m_queue.size() && m_queue[i].tNs <= rangeStartNs) {
+        while (i < m_queue.size() && m_queue[i].tNs < rangeStartNs) {
             ++i;
         }
 
+        auto appendSample = [&out](const ImuSample& sample) {
+            const double ts = static_cast<double>(sample.tNs) * 1e-9;
+            out.emplace_back(
+                cv::Point3f(sample.ax, sample.ay, sample.az),
+                cv::Point3f(sample.gx, sample.gy, sample.gz),
+                ts);
+        };
+
+        out.reserve(std::min(m_queue.size() - i, static_cast<size_t>(256)));
+
         size_t j = i;
+        bool appendedLeading = false;
+        int64_t lastAppendedTsNs = std::numeric_limits<int64_t>::min();
         while (j < m_queue.size() && m_queue[j].tNs <= rangeEndNs) {
-            const auto& sample = m_queue[j];
-            if (sample.tNs > t0Ns && sample.tNs <= t1Ns) {
-                const double ts = static_cast<double>(sample.tNs) * 1e-9;
-                out.emplace_back(
-                    cv::Point3f(sample.ax, sample.ay, sample.az),
-                    cv::Point3f(sample.gx, sample.gy, sample.gz),
-                    ts);
+            const ImuSample& sample = m_queue[j];
+            const bool inMainWindow = sample.tNs > t0Ns && sample.tNs <= t1Ns;
+            const bool isLeadingBoundary = !appendedLeading && sample.tNs <= t0Ns;
+            const bool isTrailingBoundary = sample.tNs > t1Ns;
+            if (inMainWindow || isLeadingBoundary || isTrailingBoundary) {
+                if (sample.tNs != lastAppendedTsNs) {
+                    appendSample(sample);
+                    lastAppendedTsNs = sample.tNs;
+                }
+                if (isLeadingBoundary) {
+                    appendedLeading = true;
+                }
+                if (isTrailingBoundary) {
+                    break;
+                }
             }
             ++j;
         }
 
         if (!out.empty()) {
             size_t nextUsedIdx = i;
-            while (nextUsedIdx < m_queue.size() && m_queue[nextUsedIdx].tNs <= t1Ns) {
+            while (nextUsedIdx < m_queue.size() && m_queue[nextUsedIdx].tNs < t1Ns) {
                 ++nextUsedIdx;
             }
             m_lastUsedIdx = nextUsedIdx;

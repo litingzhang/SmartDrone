@@ -65,8 +65,8 @@ public:
     // ====== RX: start/stop ======
     void StartRx()
     {
+        StopRx();
         m_rxRunning.store(true);
-        if (m_rxThread.joinable()) m_rxThread.join();
         m_rxThread = std::thread([this]() { this->RxLoop(); });
     }
 
@@ -285,8 +285,8 @@ public:
         if (hz <= 0.0) hz = 20.0;
         m_streamPeriodUs = static_cast<uint64_t>(1e6 / hz);
 
+        StopSetpointStream();
         m_streaming.store(true);
-        if (m_streamThread.joinable()) m_streamThread.join();
 
         m_streamThread = std::thread([this]() {
             while (this->m_streaming.load()) {
@@ -507,18 +507,52 @@ private:
             throw std::runtime_error("tcsetattr failed: " + std::string(std::strerror(errno)));
         }
 
-        // set blocking for writes (optional)
         int flags = fcntl(m_fd, F_GETFL, 0);
-        if (flags >= 0) fcntl(m_fd, F_SETFL, flags & ~O_NONBLOCK);
+        if (flags >= 0) {
+            fcntl(m_fd, F_SETFL, flags | O_NONBLOCK);
+        }
     }
 
     void WriteMessage(const mavlink_message_t& msg) {
         std::lock_guard<std::mutex> txLock(m_txMtx);
         uint8_t buf[MAVLINK_MAX_PACKET_LEN];
         const uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-        ssize_t n = ::write(m_fd, buf, len);
-        if (n < 0) {
-            printf("[mav] write failed: %d\n", std::strerror(errno));
+        size_t written = 0;
+        while (written < len) {
+            pollfd pfd{};
+            pfd.fd = m_fd;
+            pfd.events = POLLOUT;
+
+            const int pr = ::poll(&pfd, 1, 200);
+            if (pr == 0) {
+                printf("[mav] write timeout after %zu/%u bytes\n", written, unsigned(len));
+                return;
+            }
+            if (pr < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                printf("[mav] poll failed: %s\n", std::strerror(errno));
+                return;
+            }
+            if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+                printf("[mav] write poll error revents=0x%x\n", pfd.revents);
+                return;
+            }
+            if ((pfd.revents & POLLOUT) == 0) {
+                continue;
+            }
+
+            const ssize_t n = ::write(m_fd, buf + written, len - written);
+            if (n > 0) {
+                written += static_cast<size_t>(n);
+                continue;
+            }
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+                continue;
+            }
+            printf("[mav] write failed: %s\n", std::strerror(errno));
+            return;
         }
     }
 

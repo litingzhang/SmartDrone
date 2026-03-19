@@ -31,6 +31,7 @@ struct FrameItem {
     uint32_t seq{0};
     int64_t arriveNs{0};
     cv::Mat gray;
+    std::shared_ptr<void> owner;
 };
 
 struct PlaneMap {
@@ -164,6 +165,18 @@ class LibcameraMonoCam {
             m_requests.push_back(std::move(req));
         }
 
+        {
+            std::lock_guard<std::mutex> lock(m_framePoolMu);
+            m_frameSlots.clear();
+            m_freeFrameSlots.clear();
+            const size_t slotCount = buffers.size() + 2;
+            m_frameSlots.reserve(slotCount);
+            for (size_t i = 0; i < slotCount; ++i) {
+                m_frameSlots.push_back(std::make_unique<FrameSlot>());
+                m_freeFrameSlots.push_back(m_frameSlots.back().get());
+            }
+        }
+
         m_cam->requestCompleted.connect(this, &LibcameraMonoCam::OnRequestComplete);
         return true;
     }
@@ -205,6 +218,11 @@ class LibcameraMonoCam {
         m_allocator.reset();
         m_stream = nullptr;
         m_config.reset();
+        {
+            std::lock_guard<std::mutex> lock(m_framePoolMu);
+            m_freeFrameSlots.clear();
+            m_frameSlots.clear();
+        }
 
         if (m_cam) {
             m_cam->release();
@@ -256,35 +274,47 @@ class LibcameraMonoCam {
         }
         uint8_t *p0 = reinterpret_cast<uint8_t *>(mit->second[0].addr);
 
-        cv::Mat gray8;
+        auto frameSlot = AcquireFrameSlot();
+        if (!frameSlot) {
+            if (m_active.load(std::memory_order_relaxed)) {
+                req->reuse(Request::ReuseBuffers);
+                m_cam->queueRequest(req);
+            }
+            return;
+        }
+        cv::Mat& gray8 = frameSlot->gray;
         if (sc.pixelFormat == formats::R8) {
             cv::Mat g(h, w, CV_8UC1, (void *)p0, (size_t)stride);
-            gray8 = g.clone();
+            gray8.create(h, w, CV_8UC1);
+            g.copyTo(gray8);
         } else if (sc.pixelFormat == formats::XRGB8888) {
             cv::Mat bgra(h, w, CV_8UC4, (void *)p0, (size_t)stride);
+            gray8.create(h, w, CV_8UC1);
             cv::cvtColor(bgra, gray8, cv::COLOR_BGRA2GRAY);
         } else if (sc.pixelFormat == formats::RGB888) {
             cv::Mat rgb(h, w, CV_8UC3, (void *)p0, (size_t)stride);
+            gray8.create(h, w, CV_8UC1);
             cv::cvtColor(rgb, gray8, cv::COLOR_RGB2GRAY);
         } else if (sc.pixelFormat == formats::R16) {
             cv::Mat m16(h, w, CV_16UC1, (void *)p0, (size_t)stride);
-            cv::Mat g8(h, w, CV_8UC1);
+            gray8.create(h, w, CV_8UC1);
             if (!m_r16Normalize) {
-                m16.convertTo(g8, CV_8U, 1.0 / 256.0);
+                m16.convertTo(gray8, CV_8U, 1.0 / 256.0);
             } else {
                 double minv = 0, maxv = 0;
                 cv::minMaxLoc(m16, &minv, &maxv);
                 const double scale = (maxv > minv) ? (255.0 / (maxv - minv)) : 1.0;
                 const double shift = -minv * scale;
-                m16.convertTo(g8, CV_8U, scale, shift);
+                m16.convertTo(gray8, CV_8U, scale, shift);
             }
-            gray8 = g8;
         } else {
             cv::Mat g(h, w, CV_8UC1, (void *)p0, (size_t)stride);
-            gray8 = g.clone();
+            gray8.create(h, w, CV_8UC1);
+            g.copyTo(gray8);
         }
 
-        item.gray = std::move(gray8);
+        item.gray = gray8;
+        item.owner = std::shared_ptr<void>(std::move(frameSlot));
         if (m_sink)
             m_sink(std::move(item));
 
@@ -292,6 +322,31 @@ class LibcameraMonoCam {
             req->reuse(Request::ReuseBuffers);
             m_cam->queueRequest(req);
         }
+    }
+
+    struct FrameSlot {
+        cv::Mat gray;
+    };
+
+    std::shared_ptr<FrameSlot> AcquireFrameSlot()
+    {
+        std::lock_guard<std::mutex> lock(m_framePoolMu);
+        if (m_freeFrameSlots.empty()) {
+            return {};
+        }
+        FrameSlot* slot = m_freeFrameSlots.front();
+        m_freeFrameSlots.pop_front();
+        return std::shared_ptr<FrameSlot>(slot, [this](FrameSlot* s) { ReturnFrameSlot(s); });
+    }
+
+    void ReturnFrameSlot(FrameSlot* slot)
+    {
+        if (!slot) return;
+        std::lock_guard<std::mutex> lock(m_framePoolMu);
+        if (!m_active.load(std::memory_order_relaxed)) {
+            return;
+        }
+        m_freeFrameSlots.push_back(slot);
     }
 
     std::shared_ptr<Camera> m_cam;
@@ -305,10 +360,15 @@ class LibcameraMonoCam {
     std::function<void(FrameItem &&)> m_sink;
     bool m_r16Normalize{false};
     std::atomic<bool> m_active{false};
+    std::mutex m_framePoolMu;
+    std::vector<std::unique_ptr<FrameSlot>> m_frameSlots;
+    std::deque<FrameSlot*> m_freeFrameSlots;
 };
 
 class LibcameraStereoOV9281_TsPair {
   public:
+    static constexpr size_t kPairLookahead = 3;
+
     bool Open(int w, int h, int fps, bool aeDisable, int exposureUs, float gain, bool requestY8,
               int64_t pair_thresh_ns, int64_t keepWindowNs, int maxPairQueue = 8,
               bool r16_normalize = false)
@@ -381,7 +441,7 @@ class LibcameraStereoOV9281_TsPair {
         m_cm.reset();
     }
 
-    bool GrabPair(FrameItem &L, FrameItem &R, int timeoutMs = 1000)
+    bool GrabPair(FrameItem &L, FrameItem &R, int timeoutMs = 1000, bool preferLatest = false)
     {
         std::unique_lock<std::mutex> lk(m_muPair);
         if (!m_cvPair.wait_for(lk, std::chrono::milliseconds(timeoutMs),
@@ -390,6 +450,13 @@ class LibcameraStereoOV9281_TsPair {
         }
         if (m_paired.empty())
             return false;
+        if (preferLatest && m_paired.size() > 1) {
+            const size_t staleCount = m_paired.size() - 1;
+            for (size_t i = 0; i < staleCount; ++i) {
+                m_paired.pop_front();
+            }
+            m_droppedPaired.fetch_add(staleCount, std::memory_order_relaxed);
+        }
         auto &p = m_paired.front();
         L = std::move(p.first);
         R = std::move(p.second);
@@ -410,6 +477,7 @@ class LibcameraStereoOV9281_TsPair {
         return m_qR.size();
     }
     int64_t PairTolNs() const { return m_pairThreshNs; }
+    uint64_t DroppedPaired() const { return m_droppedPaired.load(std::memory_order_relaxed); }
 
   private:
     void PushFrame(FrameItem &&fi)
@@ -423,55 +491,65 @@ class LibcameraStereoOV9281_TsPair {
         if (m_qL.empty() || m_qR.empty())
             return false;
 
-        const bool anchorLeft = (m_qL.front().tsNs <= m_qR.front().tsNs);
-        auto &aq = anchorLeft ? m_qL : m_qR;
-        auto &bq = anchorLeft ? m_qR : m_qL;
-        const uint64_t ats = aq.front().tsNs;
+        const size_t bestRightForLeft = FindBestMatchIndex(m_qR, m_qL.front().tsNs);
+        const int64_t bestLeftDt = (bestRightForLeft < m_qR.size())
+            ? Abs64(static_cast<int64_t>(m_qR[bestRightForLeft].tsNs) - static_cast<int64_t>(m_qL.front().tsNs))
+            : INT64_MAX;
+        const size_t bestLeftForRight = FindBestMatchIndex(m_qL, m_qR.front().tsNs);
+        const int64_t bestRightDt = (bestLeftForRight < m_qL.size())
+            ? Abs64(static_cast<int64_t>(m_qL[bestLeftForRight].tsNs) - static_cast<int64_t>(m_qR.front().tsNs))
+            : INT64_MAX;
 
-        size_t best = 0;
-        int64_t bestDt = INT64_MAX;
-        for (size_t i = 0; i < bq.size(); ++i) {
-            const int64_t dt = (int64_t)bq[i].tsNs - (int64_t)ats;
-            const int64_t adt = Abs64(dt);
-            if (adt < bestDt) {
-                bestDt = adt;
-                best = i;
-            }
-            if ((int64_t)bq[i].tsNs > (int64_t)ats && adt > bestDt)
-                break;
-        }
-
+        const bool pairFromLeft = bestLeftDt <= bestRightDt;
+        const int64_t bestDt = pairFromLeft ? bestLeftDt : bestRightDt;
         if (bestDt > m_pairThreshNs) {
-            const int64_t dtLr = (int64_t)m_qR.front().tsNs - (int64_t)m_qL.front().tsNs;
-            if (dtLr > 0)
+            if (m_qL.front().tsNs <= m_qR.front().tsNs) {
                 m_qL.pop_front();
-            else
+            } else {
                 m_qR.pop_front();
+            }
             return true;
         }
 
-        FrameItem a = std::move(aq.front());
-        FrameItem b = std::move(bq[best]);
-        aq.pop_front();
-        bq.erase(bq.begin() + static_cast<std::ptrdiff_t>(best));
-
-        FrameItem L, R;
-        if (anchorLeft) {
-            L = std::move(a);
-            R = std::move(b);
+        FrameItem L;
+        FrameItem R;
+        if (pairFromLeft) {
+            L = std::move(m_qL.front());
+            R = std::move(m_qR[bestRightForLeft]);
+            m_qL.pop_front();
+            m_qR.erase(m_qR.begin() + static_cast<std::ptrdiff_t>(bestRightForLeft));
         } else {
-            L = std::move(b);
-            R = std::move(a);
+            L = std::move(m_qL[bestLeftForRight]);
+            R = std::move(m_qR.front());
+            m_qL.erase(m_qL.begin() + static_cast<std::ptrdiff_t>(bestLeftForRight));
+            m_qR.pop_front();
         }
 
         m_lastDtMs.store(((int64_t)R.tsNs - (int64_t)L.tsNs) / 1'000'000);
         m_lastSeq.store(L.seq);
 
         m_paired.push_back({std::move(L), std::move(R)});
-        while ((int)m_paired.size() > m_maxPairQueue)
+        while ((int)m_paired.size() > m_maxPairQueue) {
             m_paired.pop_front();
+            m_droppedPaired.fetch_add(1, std::memory_order_relaxed);
+        }
         m_cvPair.notify_one();
         return true;
+    }
+
+    size_t FindBestMatchIndex(const std::deque<FrameItem>& q, uint64_t targetTs) const
+    {
+        const size_t limit = std::min(kPairLookahead, q.size());
+        size_t bestIdx = q.size();
+        int64_t bestDt = INT64_MAX;
+        for (size_t i = 0; i < limit; ++i) {
+            const int64_t dt = Abs64(static_cast<int64_t>(q[i].tsNs) - static_cast<int64_t>(targetTs));
+            if (dt < bestDt) {
+                bestDt = dt;
+                bestIdx = i;
+            }
+        }
+        return bestIdx;
     }
 
     void PurgeOldLocked()
@@ -518,4 +596,5 @@ class LibcameraStereoOV9281_TsPair {
 
     std::atomic<int64_t> m_lastDtMs{0};
     std::atomic<uint32_t> m_lastSeq{0};
+    std::atomic<uint64_t> m_droppedPaired{0};
 };

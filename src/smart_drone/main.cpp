@@ -63,7 +63,7 @@ struct RemoteRuntimeConfig {
 
 struct MainRuntimeAliases {
     SensorMode sensorMode{SensorMode::Stereo};
-    int width{}, height{}, fps{}, exposureUs{}, pairMs{}, keepMs{};
+    int width{}, height{}, fps{}, exposureUs{}, pairMs{}, keepMs{}, pairQueue{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{};
     float gain{};
     std::string udpIp, spiDev, gpiochip;
@@ -137,10 +137,10 @@ struct LivePoseState {
         dirty = true;
     }
 
-    void UpdatePointCloud(const std::vector<float>& xyz)
+    void UpdatePointCloud(std::vector<float> xyz)
     {
         std::lock_guard<std::mutex> lock(mu);
-        pointCloudXyz = xyz;
+        pointCloudXyz = std::move(xyz);
         ++pointCloudSeq;
         dirty = true;
     }
@@ -203,6 +203,7 @@ struct LivePoseState {
 constexpr uint8_t CMD_POINT_CLOUD = 0xF2;
 constexpr uint16_t POINT_CLOUD_HEADER_LEN = 4;
 constexpr size_t MAX_POINT_CLOUD_POINTS_TX = 120;
+constexpr int64_t POINT_CLOUD_UPDATE_INTERVAL_NS = 200000000LL;
 
 bool IsTrackingPoseUsable(int trackingState)
 {
@@ -326,7 +327,19 @@ StereoBodyExtrinsics LoadStereoBodyExtrinsics(const std::string& settingsPath)
 class Px4UdpHooks final : public MavlinkHooks {
 public:
     Px4UdpHooks(MavlinkSerial& mavlink, LivePoseState& livePose) : m_mavlink(mavlink), m_livePose(livePose) {}
-    VehicleGate GetGate() const override { return VehicleGate{}; }
+    VehicleGate GetGate() const override
+    {
+        LivePoseState::Snapshot snapshot{};
+        const bool hasSnapshot = m_livePose.ReadSnapshot(snapshot);
+        const bool vioOk = hasSnapshot &&
+                           snapshot.runtimeMode == RUNTIME_MODE_SLAM &&
+                           snapshot.poseValid &&
+                           IsTrackingPoseUsable(snapshot.trackingState);
+        VehicleGate gate{};
+        gate.vioOk = vioOk;
+        gate.offboardReady = vioOk;
+        return gate;
+    }
     bool Arm(std::string* err) override
     {
         if (!EnsureSetpointStream()) {
@@ -453,7 +466,8 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig& c)
     a.width = c.camera.width; a.height = c.camera.height; a.fps = c.camera.fps;
     a.aeDisable = c.camera.aeDisable; a.exposureUs = c.camera.exposureUs; a.gain = c.camera.gain;
     a.requestY8 = c.camera.requestY8; a.r16Norm = c.camera.r16Norm; a.pairMs = c.camera.pairMs;
-    a.keepMs = c.camera.keepMs; a.udpEnable = c.udp.enable; a.udpIp = c.udp.ip; a.udpPort = c.udp.port;
+    a.keepMs = c.camera.keepMs; a.pairQueue = c.camera.pairQueue;
+    a.udpEnable = c.udp.enable; a.udpIp = c.udp.ip; a.udpPort = c.udp.port;
     a.cmdPort = c.udp.cmdPort; a.udpJpegQ = c.udp.jpegQ; a.udpPayload = c.udp.payload;
     a.udpQueue = c.udp.queue; a.spiDev = c.imu.spiDev; a.spiSpeed = c.imu.spiSpeed;
     a.spiMode = c.imu.spiMode; a.spiBits = c.imu.spiBits; a.gpiochip = c.imu.gpiochip;
@@ -493,77 +507,6 @@ uint32_t MonoTimeMs32()
     return static_cast<uint32_t>((MonoTimeUs() / 1000ULL) & 0xFFFFFFFFu);
 }
 
-std::vector<float> ExtractSparsePointCloud(const std::vector<ORB_SLAM3::MapPoint*>& mapPoints)
-{
-    std::vector<float> xyz;
-    xyz.reserve(std::min(mapPoints.size(), MAX_POINT_CLOUD_POINTS_TX) * 3);
-    size_t appended = 0;
-    for (ORB_SLAM3::MapPoint* point : mapPoints) {
-        if (!point || point->isBad()) {
-            continue;
-        }
-        const Eigen::Vector3f world = point->GetWorldPos();
-        if (!std::isfinite(world.x()) || !std::isfinite(world.y()) || !std::isfinite(world.z())) {
-            continue;
-        }
-        xyz.push_back(world.x());
-        xyz.push_back(world.y());
-        xyz.push_back(world.z());
-        ++appended;
-        if (appended >= MAX_POINT_CLOUD_POINTS_TX) {
-            break;
-        }
-    }
-    return xyz;
-}
-
-std::vector<cv::Point2f> ExtractTrackedLeftFeatures(const std::vector<ORB_SLAM3::MapPoint*>& mapPoints,
-                                                    const std::vector<cv::KeyPoint>& keyPoints,
-                                                    int imageWidth,
-                                                    int imageHeight)
-{
-    std::vector<cv::Point2f> out;
-    const size_t count = std::min(mapPoints.size(), keyPoints.size());
-    out.reserve(count);
-    for (size_t i = 0; i < count; ++i) {
-        if (!mapPoints[i]) {
-            continue;
-        }
-        const cv::Point2f& pt = keyPoints[i].pt;
-        if (pt.x < 0.0f || pt.y < 0.0f || pt.x >= static_cast<float>(imageWidth) || pt.y >= static_cast<float>(imageHeight)) {
-            continue;
-        }
-        out.push_back(pt);
-    }
-    return out;
-}
-
-std::vector<cv::Point2f> ExtractTrackedRightFeatures(const std::vector<ORB_SLAM3::MapPoint*>& mapPoints,
-                                                     const std::vector<cv::KeyPoint>& leftKeyPoints,
-                                                     const std::vector<float>& rightCoordinates,
-                                                     int imageWidth,
-                                                     int imageHeight)
-{
-    std::vector<cv::Point2f> out;
-    const size_t count = std::min({mapPoints.size(), leftKeyPoints.size(), rightCoordinates.size()});
-    out.reserve(count);
-    for (size_t i = 0; i < count; ++i) {
-        if (!mapPoints[i]) {
-            continue;
-        }
-        const float rightX = rightCoordinates[i];
-        if (rightX < 0.0f) {
-            continue;
-        }
-        const cv::Point2f pt(rightX, leftKeyPoints[i].pt.y);
-        if (pt.x < 0.0f || pt.y < 0.0f || pt.x >= static_cast<float>(imageWidth) || pt.y >= static_cast<float>(imageHeight)) {
-            continue;
-        }
-        out.push_back(pt);
-    }
-    return out;
-}
-
 std::string PeerToIpString(const UdpPeer& peer)
 {
     if (!peer.valid) {
@@ -577,6 +520,42 @@ std::string PeerToIpString(const UdpPeer& peer)
     return std::string(ipText);
 }
 
+bool SamePeer(const UdpPeer& a, const UdpPeer& b)
+{
+    if (!a.valid || !b.valid) {
+        return false;
+    }
+    return a.addr.sin_family == b.addr.sin_family &&
+           a.addr.sin_port == b.addr.sin_port &&
+           a.addr.sin_addr.s_addr == b.addr.sin_addr.s_addr;
+}
+
+class CommandPeerGate {
+public:
+    static constexpr auto kPeerTimeout = std::chrono::seconds(5);
+
+    bool Accept(const UdpPeer& peer, const std::chrono::steady_clock::time_point& now)
+    {
+        if (!peer.valid) {
+            return false;
+        }
+        if (!m_lockedPeer.valid || (now - m_lastSeen) > kPeerTimeout) {
+            m_lockedPeer = peer;
+            m_lastSeen = now;
+            return true;
+        }
+        if (SamePeer(peer, m_lockedPeer)) {
+            m_lastSeen = now;
+            return true;
+        }
+        return false;
+    }
+
+private:
+    UdpPeer m_lockedPeer{};
+    std::chrono::steady_clock::time_point m_lastSeen{};
+};
+
 void PrintStartupConfig(const AppConfig& app, const MainRuntimeAliases& a, UnifiedMode mode)
 {
     std::cerr << "mode="
@@ -585,7 +564,8 @@ void PrintStartupConfig(const AppConfig& app, const MainRuntimeAliases& a, Unifi
     std::cerr << "cam " << a.width << "x" << a.height << " @" << a.fps
               << " aeDisable=" << (a.aeDisable ? "true" : "false")
               << " exp_us=" << a.exposureUs << " gain=" << a.gain << " pixelFormat=R16\n";
-    std::cerr << "pair_thresh=" << a.pairMs << "ms keep_window=" << a.keepMs << "ms\n";
+    std::cerr << "pair_thresh=" << a.pairMs << "ms keep_window=" << a.keepMs
+              << "ms pair_queue=" << a.pairQueue << "\n";
     std::cerr << "imuHz=" << a.imuHz << " udp=" << (a.udpEnable ? "Y" : "N")
               << " udpPort=" << a.udpPort << " cmdPort=" << a.cmdPort << "\n";
     std::cerr << "vocab=" << app.vocab << "\nsettings=" << app.settings << "\n";
@@ -733,7 +713,8 @@ std::thread StartCalibImuWriterThread(const MainRuntimeAliases& a, FILE* fImu, s
 bool OpenCamera(LibcameraStereoOV9281_TsPair& cam, const MainRuntimeAliases& a)
 {
     return cam.Open(a.width, a.height, a.fps, a.aeDisable, a.exposureUs, a.gain, a.requestY8,
-                    (int64_t)a.pairMs * 1000000LL, (int64_t)a.keepMs * 1000000LL, 8, a.r16Norm);
+                    (int64_t)a.pairMs * 1000000LL, (int64_t)a.keepMs * 1000000LL, a.pairQueue,
+                    a.r16Norm);
 }
 
 bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bool>& stop, LivePoseState& livePose)
@@ -774,6 +755,9 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     int rightFeatureFrames = 0;
     size_t leftFeatureCount = 0;
     size_t rightFeatureCount = 0;
+    int64_t lastPointCloudUpdateNs = 0;
+    uint64_t lastDroppedPaired = 0;
+    auto lastPairDropLog = std::chrono::steady_clock::now();
     Sophus::SE3f stereoReferencePose{Sophus::SE3f()};
     bool stereoReferencePoseSet = false;
     unsigned long lastRawMapId = PoseContinuityMapper::kInvalidMapId;
@@ -797,7 +781,20 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
             }
         }
         FrameItem L, R;
-        if (!cam.GrabPair(L, R, 1000)) continue;
+        if (!cam.GrabPair(L, R, 1000, true)) continue;
+        const auto pairDropNow = std::chrono::steady_clock::now();
+        if (pairDropNow - lastPairDropLog >= std::chrono::seconds(1)) {
+            const uint64_t droppedPaired = cam.DroppedPaired();
+            if (droppedPaired != lastDroppedPaired) {
+                std::cerr << "[pair] dropped_stale=" << (droppedPaired - lastDroppedPaired)
+                          << " total=" << droppedPaired
+                          << " pend_l=" << cam.PendL()
+                          << " pend_r=" << cam.PendR()
+                          << "\n";
+                lastDroppedPaired = droppedPaired;
+            }
+            lastPairDropLog = pairDropNow;
+        }
         int64_t frameNs = (int64_t)((L.tsNs + R.tsNs) / 2);
         if (lastFrameNs != 0 && frameNs <= lastFrameNs) frameNs = lastFrameNs + frameStepNs;
         std::vector<ORB_SLAM3::IMU::Point> vImu;
@@ -824,20 +821,21 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         std::vector<cv::Point2f> trackedLeftFeatures;
         std::vector<cv::Point2f> trackedRightFeatures;
         if (a.udpEnable) {
-            const auto trackedMapPoints = SLAM.GetTrackedMapPoints();
-            livePose.UpdatePointCloud(ExtractSparsePointCloud(trackedMapPoints));
-            const auto trackedKeyPoints = SLAM.GetTrackedKeyPointsUn();
-            trackedLeftFeatures = ExtractTrackedLeftFeatures(
-                trackedMapPoints,
-                trackedKeyPoints,
+            const bool updatePointCloud =
+                (frameNs - lastPointCloudUpdateNs) >= POINT_CLOUD_UPDATE_INTERVAL_NS;
+            ORB_SLAM3::TrackedVisualData visual = SLAM.ExtractTrackedVisualData(
                 L.gray.cols,
-                L.gray.rows);
-            trackedRightFeatures = ExtractTrackedRightFeatures(
-                trackedMapPoints,
-                trackedKeyPoints,
-                SLAM.GetTrackedRightCoordinates(),
+                L.gray.rows,
                 R.gray.cols,
-                R.gray.rows);
+                R.gray.rows,
+                updatePointCloud,
+                MAX_POINT_CLOUD_POINTS_TX);
+            trackedLeftFeatures = std::move(visual.leftFeatures);
+            trackedRightFeatures = std::move(visual.rightFeatures);
+            if (updatePointCloud) {
+                livePose.UpdatePointCloud(std::move(visual.pointCloudXyz));
+                lastPointCloudUpdateNs = frameNs;
+            }
             udp.Enqueue(0, L.seq, frameTime, L.gray, trackedLeftFeatures);
             udp.Enqueue(1, R.seq, frameTime, R.gray, trackedRightFeatures);
             leftFeatureFrames += trackedLeftFeatures.empty() ? 0 : 1;
@@ -1175,6 +1173,9 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
     RemoteRuntimeConfig r{};
     r.exposureUs = (int)ReadU32Le(&p[0]);
     r.gain = ReadF32Le(&p[4]);
+    if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
+        return {ACK_E_BAD_ARGS, "bad runtime cfg args"};
+    }
     r.sensorMode = (p[8] == RUNTIME_SENSOR_STEREO_IMU) ? SensorMode::StereoImu : SensorMode::Stereo;
     const char* ipChars = reinterpret_cast<const char*>(&p[9]);
     size_t ipLen = 0;
@@ -1215,20 +1216,31 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks& hooks, UnifiedRuntimeCo
         TlvCmdRouter router(hooks);
         router.RegisterDefaults();
         TlvParser parser;
+        CommandPeerGate peerGate;
         uint8_t rx[2048]{};
         auto lastStateTx = std::chrono::steady_clock::now();
+        auto lastRejectedPeerLog = std::chrono::steady_clock::time_point{};
         while (g_runningFlag.load()) {
             UdpPeer peer{};
             const int n = server.Recv(rx, sizeof(rx), &peer);
             if (n <= 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
             } else {
+                const auto now = std::chrono::steady_clock::now();
+                if (!peerGate.Accept(peer, now)) {
+                    if (now - lastRejectedPeerLog >= std::chrono::seconds(1)) {
+                        lastRejectedPeerLog = now;
+                        std::cerr << "[udp_cmd] rejected packet from non-active peer ip="
+                                  << PeerToIpString(peer) << " port=" << ntohs(peer.addr.sin_port) << "\n";
+                    }
+                    continue;
+                }
                 livePose.UpdatePeer(peer);
                 parser.Push(rx, (size_t)n);
                 while (auto frame = parser.TryPop()) {
                     RouteResult rr{};
                     if (frame->cmd == CMD_RUNTIME_MODE) rr = HandleRuntimeModeFrame(*frame, controller);
-                else if (frame->cmd == CMD_RUNTIME_CONFIG) rr = HandleRuntimeConfigFrame(*frame, peer, controller);
+                    else if (frame->cmd == CMD_RUNTIME_CONFIG) rr = HandleRuntimeConfigFrame(*frame, peer, controller);
                     else if (frame->cmd == CMD_CALIB_CLEAN) rr = HandleCalibCleanFrame(*frame, controller);
                     else rr = router.Handle(*frame);
                     std::vector<uint8_t> ack = MakeAckFrame(frame->seq, frame->tMs, frame->cmd, frame->seq, rr.status);

@@ -15,9 +15,11 @@
 #include <netinet/in.h>
 #include <string>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <array>
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -25,13 +27,16 @@
 class UdpImageSender {
   public:
     static constexpr uint8_t FLAG_FEATURE_POINTS = 0x01;
+    static constexpr double MAX_IMAGE_FPS = 12.0;
+    static constexpr double MIN_FRAME_INTERVAL_SEC = 1.0 / MAX_IMAGE_FPS;
 
-    struct Job {
+    struct Slot {
         int camIndex;  // 0=L, 1=R
         uint32_t seq;   // sequence for debug
         double frameTime; // seconds
-        cv::Mat gray;   // preview source, may be CV_8UC1 or CV_16UC1
+        cv::Mat preview; // reusable preview storage
         std::vector<cv::Point2f> trackedPoints;
+        std::vector<uint8_t> featureBuf;
     };
 
     bool Open(const std::string &ip, int port, int jpegQuality = 80,
@@ -59,6 +64,17 @@ class UdpImageSender {
         }
         std::cerr << "[udp] sending to " << ip << ":" << port << "\n";
 
+        for (int cam = 0; cam < 2; ++cam) {
+            std::lock_guard<std::mutex> lk(m_mu[cam]);
+            m_slots[cam].assign(static_cast<size_t>(m_maxQueue + 2), Slot{});
+            m_ready[cam].clear();
+            m_free[cam].clear();
+            for (size_t i = 0; i < m_slots[cam].size(); ++i) {
+                m_slots[cam][i].camIndex = cam;
+                m_free[cam].push_back(i);
+            }
+        }
+
         m_running.store(true);
         for (int cam = 0; cam < 2; ++cam) {
             m_th[cam] = std::thread([this, cam] { Loop(cam); });
@@ -83,7 +99,9 @@ class UdpImageSender {
         {
             for (int cam = 0; cam < 2; ++cam) {
                 std::lock_guard<std::mutex> lk(m_mu[cam]);
-                m_q[cam].clear();
+                m_ready[cam].clear();
+                m_free[cam].clear();
+                m_slots[cam].clear();
             }
         }
     }
@@ -97,18 +115,43 @@ class UdpImageSender {
     {
         if (m_sock < 0 || camIndex < 0 || camIndex > 1)
             return;
-        Job job;
-        job.camIndex = camIndex;
-        job.seq = seq;
-        job.frameTime = frameTime;
-        job.gray = gray.clone(); // IMPORTANT: own data (libcamera buffer will be reused)
-        job.trackedPoints = trackedPoints;
 
         {
             std::lock_guard<std::mutex> lk(m_mu[camIndex]);
-            m_q[camIndex].push_back(std::move(job));
-            while ((int)m_q[camIndex].size() > m_maxQueue)
-                m_q[camIndex].pop_front(); // drop old to keep real-time
+            const double lastFrameTime = m_lastAcceptedFrameTime[camIndex];
+            if (lastFrameTime >= 0.0) {
+                const double dt = frameTime - lastFrameTime;
+                if (dt >= 0.0 && dt < MIN_FRAME_INTERVAL_SEC) {
+                    return;
+                }
+            }
+            m_lastAcceptedFrameTime[camIndex] = frameTime;
+
+            if (m_free[camIndex].empty()) {
+                if (m_ready[camIndex].empty()) {
+                    return;
+                }
+                const size_t staleSlot = m_ready[camIndex].front();
+                m_ready[camIndex].pop_front();
+                m_free[camIndex].push_back(staleSlot);
+            }
+
+            const size_t slotIndex = m_free[camIndex].front();
+            m_free[camIndex].pop_front();
+            Slot& slot = m_slots[camIndex][slotIndex];
+            slot.seq = seq;
+            slot.frameTime = frameTime;
+            if (!FillPreview(gray, slot.preview)) {
+                m_free[camIndex].push_back(slotIndex);
+                return;
+            }
+            slot.trackedPoints = trackedPoints;
+            m_ready[camIndex].push_back(slotIndex);
+            while ((int)m_ready[camIndex].size() > m_maxQueue) {
+                const size_t staleSlot = m_ready[camIndex].front();
+                m_ready[camIndex].pop_front();
+                m_free[camIndex].push_back(staleSlot);
+            }
         }
         m_cv[camIndex].notify_one();
     }
@@ -134,53 +177,46 @@ class UdpImageSender {
     {
         std::vector<uchar> jpeg;
         std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, m_jpegQuality};
-        cv::Mat preview8;
         auto lastLog = std::chrono::steady_clock::now();
         int encodedFrames = 0;
         int sentPackets = 0;
         int featurePackets = 0;
 
         while (m_running.load()) {
-            Job job;
+            size_t slotIndex = 0;
             {
                 std::unique_lock<std::mutex> lk(m_mu[camIndex]);
-                m_cv[camIndex].wait(lk, [&] { return !m_running.load() || !m_q[camIndex].empty(); });
+                m_cv[camIndex].wait(lk, [&] { return !m_running.load() || !m_ready[camIndex].empty(); });
                 if (!m_running.load())
                     break;
-                job = std::move(m_q[camIndex].front());
-                m_q[camIndex].pop_front();
+                slotIndex = m_ready[camIndex].front();
+                m_ready[camIndex].pop_front();
             }
+            Slot& slot = m_slots[camIndex][slotIndex];
 
             // encode
             jpeg.clear();
-            preview8.release();
-            if (job.gray.empty()) {
+            if (slot.preview.empty()) {
+                std::lock_guard<std::mutex> lk(m_mu[camIndex]);
+                m_free[camIndex].push_back(slotIndex);
                 continue;
             }
-            if (job.gray.type() == CV_8UC1) {
-                preview8 = job.gray;
-            } else if (job.gray.type() == CV_16UC1) {
-                double minVal = 0.0;
-                double maxVal = 0.0;
-                cv::minMaxLoc(job.gray, &minVal, &maxVal);
-                const double scale = (maxVal > minVal) ? (255.0 / (maxVal - minVal)) : (1.0 / 256.0);
-                const double shift = (maxVal > minVal) ? (-minVal * scale) : 0.0;
-                job.gray.convertTo(preview8, CV_8U, scale, shift);
-            } else {
-                job.gray.convertTo(preview8, CV_8U);
-            }
             try {
-                cv::imencode(".jpg", preview8, jpeg, params);
+                cv::imencode(".jpg", slot.preview, jpeg, params);
             } catch (const std::exception &e) {
                 std::cerr << "[udp] imencode exception: " << e.what() << "\n";
+                std::lock_guard<std::mutex> lk(m_mu[camIndex]);
+                m_free[camIndex].push_back(slotIndex);
                 continue;
             }
             if (jpeg.empty()) {
                 std::cerr << "[udp] empty jpeg cam=" << camIndex
-                          << " type=" << job.gray.type()
-                          << " rows=" << job.gray.rows
-                          << " cols=" << job.gray.cols
+                          << " type=" << slot.preview.type()
+                          << " rows=" << slot.preview.rows
+                          << " cols=" << slot.preview.cols
                           << "\n";
+                std::lock_guard<std::mutex> lk(m_mu[camIndex]);
+                m_free[camIndex].push_back(slotIndex);
                 continue;
             }
 
@@ -198,29 +234,35 @@ class UdpImageSender {
                 PacketHeader h{};
                 h.magic = 0x5643494D; // 'VCIM' just a tag
                 h.version = 1;
-                h.camIndex = (uint8_t)job.camIndex;
+                h.camIndex = (uint8_t)slot.camIndex;
                 h.flags = 0;
-                h.seq = job.seq;
-                h.frameTime = job.frameTime;
+                h.seq = slot.seq;
+                h.frameTime = slot.frameTime;
                 h.frameId = fid;
                 h.chunkIdx = ci;
                 h.chunkCnt = chunks;
                 h.totalSize = total;
                 h.chunkSize = pay;
 
-                // build packet buffer: header + payload
-                std::vector<uint8_t> pkt(sizeof(PacketHeader) + pay);
-                memcpy(pkt.data(), &h, sizeof(PacketHeader));
-                memcpy(pkt.data() + sizeof(PacketHeader), jpeg.data() + off, pay);
+                iovec iov[2]{};
+                iov[0].iov_base = &h;
+                iov[0].iov_len = sizeof(h);
+                iov[1].iov_base = jpeg.data() + off;
+                iov[1].iov_len = pay;
 
-                ssize_t sent =
-                    ::sendto(m_sock, pkt.data(), pkt.size(), 0, (sockaddr *)&m_dst, sizeof(m_dst));
+                msghdr msg{};
+                msg.msg_name = &m_dst;
+                msg.msg_namelen = sizeof(m_dst);
+                msg.msg_iov = iov;
+                msg.msg_iovlen = 2;
+
+                ssize_t sent = ::sendmsg(m_sock, &msg, 0);
                 (void)sent; // ignore drop; UDP is best-effort
                 sentPackets++;
             }
 
-            if (!job.trackedPoints.empty()) {
-                SendFeaturePacket(job, fid, preview8.cols, preview8.rows, job.trackedPoints);
+            if (!slot.trackedPoints.empty()) {
+                SendFeaturePacket(slot, fid, slot.preview.cols, slot.preview.rows, slot.trackedPoints);
                 featurePackets++;
             }
 
@@ -231,18 +273,21 @@ class UdpImageSender {
                           << " packets=" << sentPackets
                           << " featurePkt=" << featurePackets
                           << " last_jpeg=" << total
-                          << " srcType=" << job.gray.type()
-                          << " previewType=" << preview8.type()
+                          << " preview=" << slot.preview.cols << "x" << slot.preview.rows
+                          << " previewType=" << slot.preview.type()
                           << "\n";
                 encodedFrames = 0;
                 sentPackets = 0;
                 featurePackets = 0;
                 lastLog = now;
             }
+
+            std::lock_guard<std::mutex> lk(m_mu[camIndex]);
+            m_free[camIndex].push_back(slotIndex);
         }
     }
 
-    void SendFeaturePacket(const Job &job,
+    void SendFeaturePacket(Slot &slot,
                            uint32_t frameId,
                            int width,
                            int height,
@@ -253,42 +298,73 @@ class UdpImageSender {
         }
 
         const size_t sendCount = std::min<size_t>(trackedPoints.size(), 160);
-        std::vector<uint8_t> payload;
-        payload.reserve(6 + sendCount * 4);
-        WriteU16Le(payload, static_cast<uint16_t>(std::min(width, 0xFFFF)));
-        WriteU16Le(payload, static_cast<uint16_t>(std::min(height, 0xFFFF)));
-        WriteU16Le(payload, static_cast<uint16_t>(sendCount));
+        const size_t payloadSize = 6 + sendCount * 4;
+        slot.featureBuf.resize(payloadSize);
+        uint8_t* payload = slot.featureBuf.data();
+
+        WriteU16Le(payload, 0, static_cast<uint16_t>(std::min(width, 0xFFFF)));
+        WriteU16Le(payload, 2, static_cast<uint16_t>(std::min(height, 0xFFFF)));
+        WriteU16Le(payload, 4, static_cast<uint16_t>(sendCount));
         for (size_t i = 0; i < sendCount; ++i) {
             const cv::Point2f &pt = trackedPoints[i];
             const int xi = std::clamp<int>(static_cast<int>(std::lround(pt.x)), 0, width - 1);
             const int yi = std::clamp<int>(static_cast<int>(std::lround(pt.y)), 0, height - 1);
-            WriteU16Le(payload, static_cast<uint16_t>(xi));
-            WriteU16Le(payload, static_cast<uint16_t>(yi));
+            const size_t pointOffset = 6 + i * 4;
+            WriteU16Le(payload, pointOffset, static_cast<uint16_t>(xi));
+            WriteU16Le(payload, pointOffset + 2, static_cast<uint16_t>(yi));
         }
 
         PacketHeader h{};
         h.magic = 0x5643494D;
         h.version = 1;
-        h.camIndex = static_cast<uint8_t>(job.camIndex);
+        h.camIndex = static_cast<uint8_t>(slot.camIndex);
         h.flags = FLAG_FEATURE_POINTS;
-        h.seq = job.seq;
-        h.frameTime = job.frameTime;
+        h.seq = slot.seq;
+        h.frameTime = slot.frameTime;
         h.frameId = frameId;
         h.chunkIdx = 0;
         h.chunkCnt = 1;
-        h.totalSize = static_cast<uint32_t>(payload.size());
-        h.chunkSize = static_cast<uint32_t>(payload.size());
+        h.totalSize = static_cast<uint32_t>(payloadSize);
+        h.chunkSize = static_cast<uint32_t>(payloadSize);
 
-        std::vector<uint8_t> pkt(sizeof(PacketHeader) + payload.size());
-        std::memcpy(pkt.data(), &h, sizeof(PacketHeader));
-        std::memcpy(pkt.data() + sizeof(PacketHeader), payload.data(), payload.size());
-        ::sendto(m_sock, pkt.data(), pkt.size(), 0, reinterpret_cast<sockaddr *>(&m_dst), sizeof(m_dst));
+        iovec iov[2]{};
+        iov[0].iov_base = &h;
+        iov[0].iov_len = sizeof(h);
+        iov[1].iov_base = slot.featureBuf.data();
+        iov[1].iov_len = slot.featureBuf.size();
+
+        msghdr msg{};
+        msg.msg_name = &m_dst;
+        msg.msg_namelen = sizeof(m_dst);
+        msg.msg_iov = iov;
+        msg.msg_iovlen = 2;
+        ::sendmsg(m_sock, &msg, 0);
     }
 
-    static void WriteU16Le(std::vector<uint8_t> &out, uint16_t value)
+    static bool FillPreview(const cv::Mat& gray, cv::Mat& preview)
     {
-        out.push_back(static_cast<uint8_t>(value & 0xFF));
-        out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+        if (gray.empty()) {
+            preview.release();
+            return false;
+        }
+
+        if (gray.type() == CV_8UC1) {
+            preview.create(gray.rows, gray.cols, CV_8UC1);
+            gray.copyTo(preview);
+        } else if (gray.type() == CV_16UC1) {
+            preview.create(gray.rows, gray.cols, CV_8UC1);
+            gray.convertTo(preview, CV_8U, 1.0 / 256.0);
+        } else {
+            preview.create(gray.rows, gray.cols, CV_8UC1);
+            gray.convertTo(preview, CV_8U);
+        }
+        return true;
+    }
+
+    static void WriteU16Le(uint8_t* out, size_t offset, uint16_t value)
+    {
+        out[offset] = static_cast<uint8_t>(value & 0xFF);
+        out[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);
     }
 
     int m_sock{-1};
@@ -302,7 +378,10 @@ class UdpImageSender {
     std::thread m_th[2];
     std::mutex m_mu[2];
     std::condition_variable m_cv[2];
-    std::deque<Job> m_q[2];
+    std::array<std::vector<Slot>, 2> m_slots;
+    std::deque<size_t> m_ready[2];
+    std::deque<size_t> m_free[2];
+    double m_lastAcceptedFrameTime[2]{-1.0, -1.0};
 
     std::atomic<uint32_t> m_frameId{1};
 };

@@ -20,7 +20,10 @@
 
 #include "System.h"
 #include "Converter.h"
+#include <algorithm>
+#include <cmath>
 #include <limits>
+#include <sys/stat.h>
 #include <thread>
 // #include <pangolin/pangolin.h>
 #include <iomanip>
@@ -36,6 +39,45 @@
 
 namespace ORB_SLAM3
 {
+
+namespace
+{
+bool GetFileMTime(const std::string& path, time_t& outTime)
+{
+    struct stat st {};
+    if(::stat(path.c_str(), &st) != 0)
+        return false;
+    outTime = st.st_mtime;
+    return true;
+}
+
+bool LoadVocabularyWithCache(const std::string& textPath, ORBVocabulary& vocabulary)
+{
+    const std::string binFile = textPath + ".bin";
+    time_t textTime = 0;
+    time_t binTime = 0;
+    const bool hasText = GetFileMTime(textPath, textTime);
+    const bool hasBin = GetFileMTime(binFile, binTime);
+    if (hasBin) {
+        const bool useBin = !hasText || binTime >= textTime;
+        if (useBin && vocabulary.loadFromBinaryFile(binFile)) {
+            cout << "Vocabulary loaded from binary cache: " << binFile << endl << endl;
+            return true;
+        }
+        cerr << "Binary vocabulary cache load failed, fallback to text: " << binFile << endl;
+    }
+
+    if (!hasText) {
+        return false;
+    }
+    if (!vocabulary.loadFromTextFile(textPath)) {
+        return false;
+    }
+    vocabulary.saveToBinaryFile(binFile);
+    cout << "Vocabulary cached to binary file: " << binFile << endl;
+    return true;
+}
+}
 
 Verbose::eLevel Verbose::th = Verbose::VERBOSITY_NORMAL;
 
@@ -116,7 +158,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
 
         mpVocabulary = new ORBVocabulary();
-        bool bVocLoad = mpVocabulary->loadFromTextFile(strVocFile);
+        bool bVocLoad = LoadVocabularyWithCache(strVocFile, *mpVocabulary);
         if(!bVocLoad)
         {
             cerr << "Wrong path to vocabulary. " << endl;
@@ -138,7 +180,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
 
         mpVocabulary = new ORBVocabulary();
-        bool bVocLoad = mpVocabulary->loadFromTextFile(strVocFile);
+        bool bVocLoad = LoadVocabularyWithCache(strVocFile, *mpVocabulary);
         if(!bVocLoad)
         {
             cerr << "Wrong path to vocabulary. " << endl;
@@ -320,9 +362,6 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, 
 
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = mpTracker->mState;
-    mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;
-    mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
-    mTrackedRightCoordinates = mpTracker->mCurrentFrame.mvuRight;
 
     return Tcw;
 }
@@ -393,9 +432,6 @@ Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const
 
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = mpTracker->mState;
-    mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;
-    mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
-    mTrackedRightCoordinates = mpTracker->mCurrentFrame.mvuRight;
     return Tcw;
 }
 
@@ -470,9 +506,6 @@ Sophus::SE3f System::TrackMonocular(const cv::Mat &im, const double &timestamp, 
 
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = mpTracker->mState;
-    mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;
-    mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
-    mTrackedRightCoordinates = mpTracker->mCurrentFrame.mvuRight;
 
     return Tcw;
 }
@@ -1161,22 +1194,16 @@ int System::GetTrackingState()
     return mTrackingState;
 }
 
-vector<MapPoint*> System::GetTrackedMapPoints()
+TrackedVisualData System::ExtractTrackedVisualData(int leftImageWidth,
+                                                   int leftImageHeight,
+                                                   int rightImageWidth,
+                                                   int rightImageHeight,
+                                                   bool includePointCloud,
+                                                   size_t maxPointCloudPoints)
 {
-    unique_lock<mutex> lock(mMutexState);
-    return mTrackedMapPoints;
-}
-
-vector<cv::KeyPoint> System::GetTrackedKeyPointsUn()
-{
-    unique_lock<mutex> lock(mMutexState);
-    return mTrackedKeyPointsUn;
-}
-
-vector<float> System::GetTrackedRightCoordinates()
-{
-    unique_lock<mutex> lock(mMutexState);
-    return mTrackedRightCoordinates;
+    return mpTracker->ExtractTrackedVisualData(leftImageWidth, leftImageHeight,
+                                               rightImageWidth, rightImageHeight,
+                                               includePointCloud, maxPointCloudPoints);
 }
 
 double System::GetTimeFromIMUInit()

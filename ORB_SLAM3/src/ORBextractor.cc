@@ -786,10 +786,11 @@ namespace ORB_SLAM3
 
         for (int level = 0; level < nlevels; ++level)
         {
+            const cv::Mat &levelImg = mvImagePyramid[level];
             const int minBorderX = EDGE_THRESHOLD-3;
             const int minBorderY = minBorderX;
-            const int maxBorderX = mvImagePyramid[level].cols-EDGE_THRESHOLD+3;
-            const int maxBorderY = mvImagePyramid[level].rows-EDGE_THRESHOLD+3;
+            const int maxBorderX = levelImg.cols-EDGE_THRESHOLD+3;
+            const int maxBorderY = levelImg.rows-EDGE_THRESHOLD+3;
 
             vector<cv::KeyPoint> vToDistributeKeys;
             vToDistributeKeys.reserve(nfeatures*10);
@@ -822,9 +823,10 @@ namespace ORB_SLAM3
                         maxX = maxBorderX;
 
                     vector<cv::KeyPoint> vKeysCell;
+                    vKeysCell.reserve(64);
+                    const cv::Mat cell = levelImg.rowRange(iniY,maxY).colRange(iniX,maxX);
 
-                    FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
-                         vKeysCell,iniThFAST,true);
+                    FAST(cell, vKeysCell, iniThFAST, true);
 
                     /*if(bRight && j <= 13){
                         FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
@@ -842,8 +844,7 @@ namespace ORB_SLAM3
 
                     if(vKeysCell.empty())
                     {
-                        FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
-                             vKeysCell,minThFAST,true);
+                        FAST(cell, vKeysCell, minThFAST, true);
                         /*if(bRight && j <= 13){
                             FAST(mvImagePyramid[level].rowRange(iniY,maxY).colRange(iniX,maxX),
                                  vKeysCell,5,true);

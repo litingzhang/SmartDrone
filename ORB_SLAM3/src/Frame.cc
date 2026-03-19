@@ -30,8 +30,74 @@
 #include <include/CameraModels/Pinhole.h>
 #include <include/CameraModels/KannalaBrandt8.h>
 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
+
 namespace ORB_SLAM3
 {
+
+namespace
+{
+
+inline int PatchL1Distance11x11(const cv::Mat& leftLevel, int leftCenterX, int leftCenterY,
+                                const cv::Mat& rightLevel, int rightCenterX, int rightCenterY)
+{
+    constexpr int kHalfWindow = 5;
+    constexpr int kWindowSize = 2 * kHalfWindow + 1;
+
+    int sad = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    auto accumulateRowSad = [&](const uchar* leftPtr, const uchar* rightPtr) {
+        const uint8x8_t left8 = vld1_u8(leftPtr);
+        const uint8x8_t right8 = vld1_u8(rightPtr);
+        uint16x8_t rowSad16 = vdupq_n_u16(0);
+        rowSad16 = vabal_u8(rowSad16, left8, right8);
+        int rowSad = vaddvq_u16(rowSad16);
+        rowSad += std::abs(static_cast<int>(leftPtr[8]) - static_cast<int>(rightPtr[8]));
+        rowSad += std::abs(static_cast<int>(leftPtr[9]) - static_cast<int>(rightPtr[9]));
+        rowSad += std::abs(static_cast<int>(leftPtr[10]) - static_cast<int>(rightPtr[10]));
+        return rowSad;
+    };
+
+    int dy = -kHalfWindow;
+    for(; dy + 3 <= kHalfWindow; dy += 4)
+    {
+        const uchar* leftPtr0 = leftLevel.ptr<uchar>(leftCenterY + dy) + (leftCenterX - kHalfWindow);
+        const uchar* rightPtr0 = rightLevel.ptr<uchar>(rightCenterY + dy) + (rightCenterX - kHalfWindow);
+        const uchar* leftPtr1 = leftLevel.ptr<uchar>(leftCenterY + dy + 1) + (leftCenterX - kHalfWindow);
+        const uchar* rightPtr1 = rightLevel.ptr<uchar>(rightCenterY + dy + 1) + (rightCenterX - kHalfWindow);
+        const uchar* leftPtr2 = leftLevel.ptr<uchar>(leftCenterY + dy + 2) + (leftCenterX - kHalfWindow);
+        const uchar* rightPtr2 = rightLevel.ptr<uchar>(rightCenterY + dy + 2) + (rightCenterX - kHalfWindow);
+        const uchar* leftPtr3 = leftLevel.ptr<uchar>(leftCenterY + dy + 3) + (leftCenterX - kHalfWindow);
+        const uchar* rightPtr3 = rightLevel.ptr<uchar>(rightCenterY + dy + 3) + (rightCenterX - kHalfWindow);
+        sad += accumulateRowSad(leftPtr0, rightPtr0);
+        sad += accumulateRowSad(leftPtr1, rightPtr1);
+        sad += accumulateRowSad(leftPtr2, rightPtr2);
+        sad += accumulateRowSad(leftPtr3, rightPtr3);
+    }
+
+    for(; dy <= kHalfWindow; ++dy)
+    {
+        const uchar* leftPtr = leftLevel.ptr<uchar>(leftCenterY + dy) + (leftCenterX - kHalfWindow);
+        const uchar* rightPtr = rightLevel.ptr<uchar>(rightCenterY + dy) + (rightCenterX - kHalfWindow);
+        sad += accumulateRowSad(leftPtr, rightPtr);
+    }
+#else
+    for(int dy = -kHalfWindow; dy <= kHalfWindow; ++dy)
+    {
+        const uchar* leftPtr = leftLevel.ptr<uchar>(leftCenterY + dy) + (leftCenterX - kHalfWindow);
+        const uchar* rightPtr = rightLevel.ptr<uchar>(rightCenterY + dy) + (rightCenterX - kHalfWindow);
+        for(int dx = 0; dx < kWindowSize; ++dx)
+        {
+            sad += std::abs(static_cast<int>(leftPtr[dx]) - static_cast<int>(rightPtr[dx]));
+        }
+    }
+#endif
+    return sad;
+}
+
+}
 
 long unsigned int Frame::nNextId=0;
 bool Frame::mbInitialComputations=true;
@@ -816,25 +882,34 @@ void Frame::ComputeStereoMatches()
     mvuRight = vector<float>(N,-1.0f);
     mvDepth = vector<float>(N,-1.0f);
 
+    struct StereoCandidate
+    {
+        int leftIdx;
+        int rightIdx;
+        int corrDist;
+        float bestuR;
+        float depth;
+    };
+
     const int thOrbDist = (ORBmatcher::TH_HIGH+ORBmatcher::TH_LOW)/2;
 
     const int nRows = mpORBextractorLeft->mvImagePyramid[0].rows;
+    const int Nr = mvKeysRight.size();
 
     //Assign keypoints to row table
     vector<vector<size_t> > vRowIndices(nRows,vector<size_t>());
+    const size_t rowReserve = std::max<size_t>(32, (static_cast<size_t>(Nr) * 3) / std::max(1, nRows));
 
     for(int i=0; i<nRows; i++)
-        vRowIndices[i].reserve(200);
-
-    const int Nr = mvKeysRight.size();
+        vRowIndices[i].reserve(rowReserve);
 
     for(int iR=0; iR<Nr; iR++)
     {
         const cv::KeyPoint &kp = mvKeysRight[iR];
         const float &kpY = kp.pt.y;
         const float r = 2.0f*mvScaleFactors[mvKeysRight[iR].octave];
-        const int maxr = ceil(kpY+r);
-        const int minr = floor(kpY-r);
+        const int maxr = std::min(nRows-1, static_cast<int>(ceil(kpY+r)));
+        const int minr = std::max(0, static_cast<int>(floor(kpY-r)));
 
         for(int yi=minr;yi<=maxr;yi++)
             vRowIndices[yi].push_back(iR);
@@ -846,17 +921,19 @@ void Frame::ComputeStereoMatches()
     const float maxD = mbf/minZ;
 
     // For each left keypoint search a match in the right image
-    vector<pair<int, int> > vDistIdx;
-    vDistIdx.reserve(N);
+    vector<StereoCandidate> vCandidatesAccepted;
+    vCandidatesAccepted.reserve(N);
+    vector<int> bestCandidateForRight(Nr, -1);
+    vector<int> bestRightCost(Nr, INT_MAX);
 
     for(int iL=0; iL<N; iL++)
     {
         const cv::KeyPoint &kpL = mvKeys[iL];
         const int &levelL = kpL.octave;
-        const float &vL = kpL.pt.y;
+        const int rowL = std::max(0, std::min(nRows-1, cvRound(kpL.pt.y)));
         const float &uL = kpL.pt.x;
 
-        const vector<size_t> &vCandidates = vRowIndices[vL];
+        const vector<size_t> &vCandidates = vRowIndices[rowL];
 
         if(vCandidates.empty())
             continue;
@@ -868,6 +945,7 @@ void Frame::ComputeStereoMatches()
             continue;
 
         int bestDist = ORBmatcher::TH_HIGH;
+        int bestDist2 = ORBmatcher::TH_HIGH;
         size_t bestIdxR = 0;
 
         const cv::Mat &dL = mDescriptors.row(iL);
@@ -890,11 +968,24 @@ void Frame::ComputeStereoMatches()
 
                 if(dist<bestDist)
                 {
+                    bestDist2 = bestDist;
                     bestDist = dist;
                     bestIdxR = iR;
                 }
+                else if(dist<bestDist2)
+                {
+                    bestDist2 = dist;
+                }
             }
         }
+
+        // Descriptor ambiguity is a common source of bad pure-stereo depths.
+        // A light ratio test removes unstable matches before sub-pixel refinement.
+        if(bestDist >= ORBmatcher::TH_HIGH)
+            continue;
+
+        if(bestDist2 < ORBmatcher::TH_HIGH && static_cast<float>(bestDist) > 0.9f*static_cast<float>(bestDist2))
+            continue;
 
         // Subpixel match by correlation
         if(bestDist<thOrbDist)
@@ -908,7 +999,11 @@ void Frame::ComputeStereoMatches()
 
             // sliding window search
             const int w = 5;
-            cv::Mat IL = mpORBextractorLeft->mvImagePyramid[kpL.octave].rowRange(scaledvL-w,scaledvL+w+1).colRange(scaleduL-w,scaleduL+w+1);
+            const cv::Mat &leftLevel = mpORBextractorLeft->mvImagePyramid[kpL.octave];
+            const cv::Mat &rightLevel = mpORBextractorRight->mvImagePyramid[kpL.octave];
+            if(scaledvL-w < 0 || scaledvL+w >= leftLevel.rows ||
+               scaleduL-w < 0 || scaleduL+w >= leftLevel.cols)
+                continue;
 
             int bestDist = INT_MAX;
             int bestincR = 0;
@@ -918,14 +1013,15 @@ void Frame::ComputeStereoMatches()
 
             const float iniu = scaleduR0+L-w;
             const float endu = scaleduR0+L+w+1;
-            if(iniu<0 || endu >= mpORBextractorRight->mvImagePyramid[kpL.octave].cols)
+            if(iniu<0 || endu >= rightLevel.cols || scaledvL-w < 0 || scaledvL+w >= rightLevel.rows)
                 continue;
 
             for(int incR=-L; incR<=+L; incR++)
             {
-                cv::Mat IR = mpORBextractorRight->mvImagePyramid[kpL.octave].rowRange(scaledvL-w,scaledvL+w+1).colRange(scaleduR0+incR-w,scaleduR0+incR+w+1);
-
-                float dist = cv::norm(IL,IR,cv::NORM_L1);
+                const int rightCenterX = static_cast<int>(scaleduR0) + incR;
+                const float dist = static_cast<float>(
+                    PatchL1Distance11x11(leftLevel, static_cast<int>(scaleduL), static_cast<int>(scaledvL),
+                                         rightLevel, rightCenterX, static_cast<int>(scaledvL)));
                 if(dist<bestDist)
                 {
                     bestDist =  dist;
@@ -960,12 +1056,36 @@ void Frame::ComputeStereoMatches()
                     disparity=0.01;
                     bestuR = uL-0.01;
                 }
-                mvDepth[iL]=mbf/disparity;
-                mvuRight[iL] = bestuR;
-                vDistIdx.push_back(pair<int,int>(bestDist,iL));
+                const float depth = mbf/disparity;
+                if(bestDist < bestRightCost[bestIdxR])
+                {
+                    bestRightCost[bestIdxR] = bestDist;
+                    bestCandidateForRight[bestIdxR] = static_cast<int>(vCandidatesAccepted.size());
+                    vCandidatesAccepted.push_back({iL, static_cast<int>(bestIdxR), bestDist, bestuR, depth});
+                }
             }
         }
     }
+
+    if(vCandidatesAccepted.empty())
+        return;
+
+    vector<pair<int, int> > vDistIdx;
+    vDistIdx.reserve(vCandidatesAccepted.size());
+    for(size_t i = 0; i < bestCandidateForRight.size(); ++i)
+    {
+        const int candidateIdx = bestCandidateForRight[i];
+        if(candidateIdx < 0)
+            continue;
+
+        const StereoCandidate &candidate = vCandidatesAccepted[candidateIdx];
+        mvDepth[candidate.leftIdx] = candidate.depth;
+        mvuRight[candidate.leftIdx] = candidate.bestuR;
+        vDistIdx.push_back(pair<int,int>(candidate.corrDist, candidate.leftIdx));
+    }
+
+    if(vDistIdx.empty())
+        return;
 
     sort(vDistIdx.begin(),vDistIdx.end());
     const float median = vDistIdx[vDistIdx.size()/2].first;

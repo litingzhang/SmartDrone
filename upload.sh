@@ -44,6 +44,7 @@ ORB_SO="$SCRIPT_DIR/ORB_SLAM3/lib/libORB_SLAM3.so"
 DBOW2_SO="$SCRIPT_DIR/ORB_SLAM3/Thirdparty/DBoW2/lib/libDBoW2.so"
 G2O_SO="$SCRIPT_DIR/ORB_SLAM3/Thirdparty/g2o/lib/libg2o.so"
 CALIB_YAML="$SCRIPT_DIR/src/smart_drone/stereo_inertial.yaml"
+STEREO_YAML="$SCRIPT_DIR/src/smart_drone/stereo.yaml"
 
 require_file() {
     if [ ! -f "$1" ]; then
@@ -68,12 +69,14 @@ require_file "$ORB_SO"
 require_file "$DBOW2_SO"
 require_file "$G2O_SO"
 require_file "$CALIB_YAML"
+require_file "$STEREO_YAML"
 
 upload_atomic "$SMART_DRONE_BIN" "smart_drone"
 upload_atomic "$ORB_SO" "libORB_SLAM3.so"
 upload_atomic "$DBOW2_SO" "libDBoW2.so"
 upload_atomic "$G2O_SO" "libg2o.so"
 upload_atomic "$CALIB_YAML" "stereo_inertial.yaml"
+upload_atomic "$STEREO_YAML" "stereo.yaml"
 
 if [ "$RESTART_SERVICE" = "1" ]; then
     echo "restart service $REMOTE_SERVICE"

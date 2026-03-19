@@ -1,5 +1,6 @@
 #include "tlv_cmd_router.hpp"
 
+#include <cmath>
 #include <cstring>
 
 namespace {
@@ -11,6 +12,11 @@ bool IsMonotonicSeq(uint32_t value, uint32_t& lastValue)
     }
     lastValue = value;
     return true;
+}
+
+bool IsFinite(float value)
+{
+    return std::isfinite(value);
 }
 
 }  // namespace
@@ -150,12 +156,21 @@ RouteResult TlvCmdRouter::HandleMove(const TlvFrame& frame)
         goal.pitchNorm = ReadF32Le(&payload[9]);
         goal.rollNorm = ReadF32Le(&payload[13]);
         goal.maxV = ReadF32Le(&payload[17]);
+        if (!IsFinite(goal.throttleNorm) || !IsFinite(goal.yawNorm) ||
+            !IsFinite(goal.pitchNorm) || !IsFinite(goal.rollNorm) ||
+            !IsFinite(goal.maxV)) {
+            return {ACK_E_BAD_ARGS, "non-finite rc move"};
+        }
     } else {
         const float valueA = ReadF32Le(&payload[1]);
         const float valueB = ReadF32Le(&payload[5]);
         const float valueC = ReadF32Le(&payload[9]);
         const float valueD = ReadF32Le(&payload[13]);
         goal.maxV = ReadF32Le(&payload[17]);
+        if (!IsFinite(valueA) || !IsFinite(valueB) || !IsFinite(valueC) ||
+            !IsFinite(valueD) || !IsFinite(goal.maxV)) {
+            return {ACK_E_BAD_ARGS, "non-finite move"};
+        }
 
         if (goal.isVelocity) {
             goal.vx = valueA;

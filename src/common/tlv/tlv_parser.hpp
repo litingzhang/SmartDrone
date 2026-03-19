@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <array>
 #include <vector>
 
 struct TlvFrame {
@@ -21,54 +22,76 @@ struct TlvFrame {
 
 class TlvParser {
 public:
+    static constexpr size_t kMaxPayloadSize = 512;
+    static constexpr size_t kMaxBufferSize = 4096;
+
     void Push(const uint8_t* data, size_t size)
     {
-        m_buffer.insert(m_buffer.end(), data, data + size);
+        if (data == nullptr || size == 0) {
+            return;
+        }
+        if (size >= kMaxBufferSize) {
+            data += (size - kMaxBufferSize);
+            size = kMaxBufferSize;
+            m_head = 0;
+            m_size = 0;
+        }
+        const size_t overflow = (m_size + size > kMaxBufferSize) ? (m_size + size - kMaxBufferSize) : 0;
+        if (overflow > 0) {
+            Advance(overflow);
+        }
+        for (size_t i = 0; i < size; ++i) {
+            m_buffer[(m_head + m_size + i) % kMaxBufferSize] = data[i];
+        }
+        m_size += size;
     }
 
     std::optional<TlvFrame> TryPop()
     {
         while (true) {
             const size_t kMinSize = 2 + (1 + 1 + 1 + 2 + 4 + 4) + 2;
-            if (m_buffer.size() < kMinSize) {
+            if (m_size < kMinSize) {
                 return std::nullopt;
             }
 
             size_t syncIndex = 0;
-            for (; syncIndex + 1 < m_buffer.size(); ++syncIndex) {
-                if (m_buffer[syncIndex] == TLV_SYNC0 && m_buffer[syncIndex + 1] == TLV_SYNC1) {
+            for (; syncIndex + 1 < m_size; ++syncIndex) {
+                if (ByteAt(syncIndex) == TLV_SYNC0 && ByteAt(syncIndex + 1) == TLV_SYNC1) {
                     break;
                 }
             }
             if (syncIndex > 0) {
-                m_buffer.erase(m_buffer.begin(), m_buffer.begin() + syncIndex);
+                Advance(syncIndex);
             }
-            if (m_buffer.size() < kMinSize) {
+            if (m_size < kMinSize) {
                 return std::nullopt;
             }
-            if (!(m_buffer[0] == TLV_SYNC0 && m_buffer[1] == TLV_SYNC1)) {
+            if (!(ByteAt(0) == TLV_SYNC0 && ByteAt(1) == TLV_SYNC1)) {
                 return std::nullopt;
             }
 
-            const uint8_t ver = m_buffer[2];
-            const uint8_t cmd = m_buffer[3];
-            const uint8_t flags = m_buffer[4];
-            const uint16_t len = ReadU16Le(&m_buffer[5]);
+            const uint8_t ver = ByteAt(2);
+            const uint8_t cmd = ByteAt(3);
+            const uint8_t flags = ByteAt(4);
+            const uint16_t len = ReadU16LeAt(5);
+            if (len > kMaxPayloadSize) {
+                Advance(1);
+                continue;
+            }
 
             const size_t totalSize = 2 + (1 + 1 + 1 + 2 + 4 + 4) + static_cast<size_t>(len) + 2;
-            if (m_buffer.size() < totalSize) {
+            if (m_size < totalSize) {
                 return std::nullopt;
             }
 
-            const uint32_t seq = ReadU32Le(&m_buffer[7]);
-            const uint32_t tMs = ReadU32Le(&m_buffer[11]);
+            const uint32_t seq = ReadU32LeAt(7);
+            const uint32_t tMs = ReadU32LeAt(11);
 
-            const uint8_t* crcBase = &m_buffer[2];
             const size_t crcLen = (totalSize - 2) - 2;
-            const uint16_t crcCalc = Crc16CcittFalse(crcBase, crcLen);
-            const uint16_t crcRecv = ReadU16Le(&m_buffer[totalSize - 2]);
+            const uint16_t crcCalc = CalcCrc(2, crcLen);
+            const uint16_t crcRecv = ReadU16LeAt(totalSize - 2);
             if (crcCalc != crcRecv) {
-                m_buffer.erase(m_buffer.begin());
+                Advance(1);
                 continue;
             }
 
@@ -81,25 +104,64 @@ public:
             frame.tMs = tMs;
             frame.payload.resize(len);
             if (len > 0) {
-                std::memcpy(frame.payload.data(), &m_buffer[15], len);
+                CopyOut(15, frame.payload.data(), len);
             }
 
-            m_buffer.erase(m_buffer.begin(), m_buffer.begin() + totalSize);
+            Advance(totalSize);
             return frame;
         }
     }
 
 private:
-    static uint16_t ReadU16Le(const uint8_t* p)
+    uint8_t ByteAt(size_t offset) const
     {
-        return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+        return m_buffer[(m_head + offset) % kMaxBufferSize];
     }
 
-    static uint32_t ReadU32Le(const uint8_t* p)
+    uint16_t CalcCrc(size_t offset, size_t len) const
     {
-        return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-               (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+        if (len == 0) {
+            return 0xFFFF;
+        }
+
+        const size_t start = (m_head + offset) % kMaxBufferSize;
+        const size_t firstLen = std::min(len, kMaxBufferSize - start);
+        uint16_t crc = Crc16CcittFalseUpdate(0xFFFF, m_buffer.data() + start, firstLen);
+        if (firstLen < len) {
+            crc = Crc16CcittFalseUpdate(crc, m_buffer.data(), len - firstLen);
+        }
+        return crc;
     }
 
-    std::vector<uint8_t> m_buffer;
+    void CopyOut(size_t offset, uint8_t* dst, size_t len) const
+    {
+        for (size_t i = 0; i < len; ++i) {
+            dst[i] = ByteAt(offset + i);
+        }
+    }
+
+    void Advance(size_t count)
+    {
+        const size_t delta = (count > m_size) ? m_size : count;
+        m_head = (m_head + delta) % kMaxBufferSize;
+        m_size -= delta;
+    }
+
+    uint16_t ReadU16LeAt(size_t offset) const
+    {
+        return static_cast<uint16_t>(ByteAt(offset)) |
+               (static_cast<uint16_t>(ByteAt(offset + 1)) << 8);
+    }
+
+    uint32_t ReadU32LeAt(size_t offset) const
+    {
+        return static_cast<uint32_t>(ByteAt(offset)) |
+               (static_cast<uint32_t>(ByteAt(offset + 1)) << 8) |
+               (static_cast<uint32_t>(ByteAt(offset + 2)) << 16) |
+               (static_cast<uint32_t>(ByteAt(offset + 3)) << 24);
+    }
+
+    std::array<uint8_t, kMaxBufferSize> m_buffer{};
+    size_t m_head{0};
+    size_t m_size{0};
 };
