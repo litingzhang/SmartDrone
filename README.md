@@ -1,84 +1,25 @@
 # SmartDrone
 
+SmartDrone is a stereo / stereo-inertial drone runtime built around `ORB_SLAM3`, IMU input, UDP preview streaming, MAVLink pose publishing, and a small Android control app.
+
 ## Project Layout
 
-```
+```text
 .
-├─ src/
-│  ├─ smart_drone/    # CM5 flight runtime entry and device-facing modules
-│  ├─ common/tlv/     # shared UDP/TLV control protocol and server helpers
-│  └─ android/        # Android app project
-├─ third_party/       # MAVLink and other external code
-├─ ORB_SLAM3/         # SLAM dependency
-└─ build/             # generated build outputs
+|- src/
+|  |- smart_drone/   # CM5 flight runtime entry and device-facing modules
+|  |- common/tlv/    # Shared UDP/TLV control protocol and helpers
+|  `- android/       # Android app project
+|- third_party/      # MAVLink and other external code
+|- ORB_SLAM3/        # SLAM dependency
+`- build/            # Generated build outputs
 ```
 
-**Build CM5 main program**
-
-```
-cd ~/SmartDrone
-./build.sh smart_drone   # only build the runtime executable
-./build.sh all           # build ORB-SLAM3 first, then smart_drone
-```
-
-**Build Android APP**
-
-```
-cd ~/SmartDrone/src/android
-rm -rf app/.cxx app/build
-./gradlew :app:assembleDebug --no-daemon
-adb -d install -r src/android/app/build/outputs/apk/debug/app-debug.apk
-```
-
-`smart_drone` source entry is now at `src/smart_drone/main.cpp`.
-Shared TLV control code now lives under `src/common/tlv/`.
-
-**Calibration**
-
-1. Start a docker env, eg.
-
-   ```
-   sudo docker run -it --rm \
-     -v ~/workspace/kalibr_data:/data \
-     -w /data \
-     swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/ulong2/ie_kalibr_image:latest \
-     bash
-   
-   export MPLBACKEND=Agg
-   source /opt/ros/noetic/setup.bash
-   source /data/kalibr_ws/devel/setup.bash
-   
-   apt-get install -y --no-install-recommends python3-wxgtk4.0
-   apt-get install -y --no-install-recommends python3-igraph
-   apt-get install -y --no-install-recommends python3-scipy
-   ```
-
-2. generate stereo calib param
-
-   ```
-   python3 make_rosbag.py;
-   rosrun kalibr kalibr_calibrate_cameras \
-     --bag /data/calib_A.bag \
-     --target /data/aprilgrid.yaml \
-     --models pinhole-radtan pinhole-radtan \
-     --topics /cam0/image_raw /cam1/image_raw \
-     --approx-sync 0.002
-   ```
-
-3. generate stereo-imu calib param for genarating stereo_imu.yaml
-
-   ```
-   python3 make_rosbag.py;
-   rosrun kalibr kalibr_calibrate_imu_camera \
-     --bag /data/calib_B.bag \
-     --cam /data/calib_A-camchain.yaml \
-     --imu /data/imu.yaml \
-     --target /data/aprilgrid.yaml
-   ```
+The runtime entry point is [`src/smart_drone/main.cpp`](/d:/SmartDrone/src/smart_drone/main.cpp).
 
 ## Build
 
-统一构建入口使用仓库根目录下的 `build.sh`：
+Use the repository root `build.sh` script as the unified build entry point:
 
 ```bash
 ./build.sh smart_drone
@@ -86,30 +27,96 @@ Shared TLV control code now lives under `src/common/tlv/`.
 ./build.sh all
 ```
 
-参数说明：
+Build targets:
 
-- `smart_drone`：编译主运行程序
-- `android`：编译 Android App，默认执行 `:app:assembleDebug`
-- `all`：先编译 `ORB_SLAM3`，再编译本地 C++ 目标和 Android App
+- `smart_drone`: build the main runtime executable only
+- `android`: build the Android app, defaulting to `:app:assembleDebug`
+- `all`: build `ORB_SLAM3` first, then the local C++ targets and Android app
 
-Android 构建规则：
+Android build behavior:
 
-- 优先使用 `src/android/gradlew`
-- 如果只有 `src/android/gradlew.bat`，脚本会通过 `cmd.exe` 调用
-- 如果仓库里没有 Gradle Wrapper，则回退到系统安装的 `gradle`
-- 构建前会自动清理 `src/android/app/.cxx`，避免仓库改名或移动后残留旧的 CMake 绝对路径缓存
+- Prefer `src/android/gradlew`
+- If only `src/android/gradlew.bat` exists, the script uses `cmd.exe`
+- If no Gradle wrapper exists in the repo, the script falls back to the system `gradle`
+- Before building, the script removes `src/android/app/.cxx` to avoid stale CMake cache paths after repo moves or renames
 
-可选环境变量：
+Optional environment variable:
 
 ```bash
 ANDROID_GRADLE_TASK=assembleRelease ./build.sh android
 ```
 
-这会把 Android 构建任务从默认的 `assembleDebug` 切换成你指定的 Gradle task。
+This overrides the default Android Gradle task from `assembleDebug` to the value you provide.
+
+## Build Manually
+
+### Build the CM5 Runtime
+
+```bash
+cd ~/SmartDrone
+./build.sh smart_drone
+./build.sh all
+```
+
+### Build the Android App
+
+```bash
+cd ~/SmartDrone/src/android
+rm -rf app/.cxx app/build
+./gradlew :app:assembleDebug --no-daemon
+adb -d install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+## Calibration
+
+### 1. Start a Kalibr Environment
+
+Example Docker command:
+
+```bash
+sudo docker run -it --rm \
+  -v ~/workspace/kalibr_data:/data \
+  -w /data \
+  swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/ulong2/ie_kalibr_image:latest \
+  bash
+
+export MPLBACKEND=Agg
+source /opt/ros/noetic/setup.bash
+source /data/kalibr_ws/devel/setup.bash
+
+apt-get install -y --no-install-recommends python3-wxgtk4.0
+apt-get install -y --no-install-recommends python3-igraph
+apt-get install -y --no-install-recommends python3-scipy
+```
+
+### 2. Generate Stereo Calibration Parameters
+
+```bash
+python3 make_rosbag.py
+rosrun kalibr kalibr_calibrate_cameras \
+  --bag /data/calib_A.bag \
+  --target /data/aprilgrid.yaml \
+  --models pinhole-radtan pinhole-radtan \
+  --topics /cam0/image_raw /cam1/image_raw \
+  --approx-sync 0.002
+```
+
+### 3. Generate Stereo-IMU Calibration Parameters
+
+Use this step to generate `stereo_imu.yaml`:
+
+```bash
+python3 make_rosbag.py
+rosrun kalibr kalibr_calibrate_imu_camera \
+  --bag /data/calib_B.bag \
+  --cam /data/calib_A-camchain.yaml \
+  --imu /data/imu.yaml \
+  --target /data/aprilgrid.yaml
+```
 
 ## Upload
 
-可以使用根目录下的 `upload.sh` 把可执行文件、ORB-SLAM3 相关动态库和标定文件上传到远端：
+Use the root `upload.sh` script to upload the runtime executable, `ORB_SLAM3` shared libraries, and calibration files to the target device:
 
 ```bash
 ./upload.sh
@@ -117,16 +124,16 @@ ANDROID_GRADLE_TASK=assembleRelease ./build.sh android
 TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./upload.sh --restart
 ```
 
-默认行为：
+Default behavior:
 
-- 上传 `build/cmake/smart_drone`
-- 上传 `libORB_SLAM3.so`、`libDBoW2.so`、`libg2o.so`
-- 上传 `src/ov9281_icm42688/stereo_inertial.yaml`
-- 先传到远端 `*.new`，再通过 `mv` 原子替换，避免直接覆盖正在使用的文件
+- Upload `build/cmake/smart_drone`
+- Upload `libORB_SLAM3.so`, `libDBoW2.so`, and `libg2o.so`
+- Upload the runtime calibration file used by the device
+- Upload to temporary `*.new` files first, then atomically replace the final files with `mv`
 
-可选环境变量：
+Optional environment variables:
 
-- `TARGET_HOST`：默认 `ltz@192.168.0.105`
-- `REMOTE_DIR`：默认 `/home/ltz`
-- `REMOTE_SERVICE`：默认 `smart_drone`
-- `RESTART_SERVICE`：设为 `1` 时，上传后执行 `sudo systemctl restart smart_drone`
+- `TARGET_HOST`: default `ltz@192.168.0.105`
+- `REMOTE_DIR`: default `/home/ltz`
+- `REMOTE_SERVICE`: default `smart_drone`
+- `RESTART_SERVICE`: if set to `1`, run `sudo systemctl restart smart_drone` after upload
