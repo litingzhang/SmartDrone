@@ -80,6 +80,11 @@ class LibcameraMonoCam {
         m_cam = std::move(cam);
         m_camIndex = camIndex;
         m_active.store(true, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(m_callbackMu);
+            m_closing = false;
+            m_callbacksInFlight = 0;
+        }
 
         if (!m_cam)
             return false;
@@ -167,13 +172,13 @@ class LibcameraMonoCam {
 
         {
             std::lock_guard<std::mutex> lock(m_framePoolMu);
-            m_frameSlots.clear();
-            m_freeFrameSlots.clear();
+            m_framePool = std::make_shared<FramePoolState>();
+            m_framePool->active.store(true, std::memory_order_relaxed);
             const size_t slotCount = buffers.size() + 2;
-            m_frameSlots.reserve(slotCount);
+            m_framePool->slots.reserve(slotCount);
             for (size_t i = 0; i < slotCount; ++i) {
-                m_frameSlots.push_back(std::make_unique<FrameSlot>());
-                m_freeFrameSlots.push_back(m_frameSlots.back().get());
+                m_framePool->slots.push_back(std::make_unique<FrameSlot>());
+                m_framePool->freeSlots.push_back(m_framePool->slots.back().get());
             }
         }
 
@@ -197,6 +202,11 @@ class LibcameraMonoCam {
     void Stop()
     {
         m_active.store(false, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(m_framePoolMu);
+            if (m_framePool)
+                m_framePool->active.store(false, std::memory_order_relaxed);
+        }
         if (m_cam)
             m_cam->stop();
     }
@@ -205,9 +215,18 @@ class LibcameraMonoCam {
     {
         m_active.store(false, std::memory_order_relaxed);
         m_sink = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_callbackMu);
+            m_closing = true;
+        }
 
         if (m_cam)
             m_cam->requestCompleted.disconnect(this, &LibcameraMonoCam::OnRequestComplete);
+
+        if (m_cam)
+            m_cam->stop();
+
+        WaitForCallbacks();
 
         for (auto &kv : m_bufferMaps)
             for (auto &pm : kv.second)
@@ -215,13 +234,18 @@ class LibcameraMonoCam {
         m_bufferMaps.clear();
 
         m_requests.clear();
+        if (m_allocator && m_stream)
+            m_allocator->free(m_stream);
         m_allocator.reset();
-        m_stream = nullptr;
         m_config.reset();
+        m_stream = nullptr;
         {
             std::lock_guard<std::mutex> lock(m_framePoolMu);
-            m_freeFrameSlots.clear();
-            m_frameSlots.clear();
+            if (m_framePool) {
+                m_framePool->active.store(false, std::memory_order_relaxed);
+                m_framePool->freeSlots.clear();
+            }
+            m_framePool.reset();
         }
 
         if (m_cam) {
@@ -237,8 +261,45 @@ class LibcameraMonoCam {
     void SetR16Normalize(bool on) { m_r16Normalize = on; }
 
   private:
+    struct CallbackScope {
+        LibcameraMonoCam* self{nullptr};
+        bool armed{false};
+
+        explicit CallbackScope(LibcameraMonoCam* owner) : self(owner)
+        {
+            if (!self)
+                return;
+            std::lock_guard<std::mutex> lock(self->m_callbackMu);
+            if (self->m_closing)
+                return;
+            ++self->m_callbacksInFlight;
+            armed = true;
+        }
+
+        ~CallbackScope()
+        {
+            if (!self || !armed)
+                return;
+            std::lock_guard<std::mutex> lock(self->m_callbackMu);
+            --self->m_callbacksInFlight;
+            if (self->m_callbacksInFlight == 0)
+                self->m_callbackCv.notify_all();
+        }
+
+        bool Active() const { return armed; }
+    };
+
+    void WaitForCallbacks()
+    {
+        std::unique_lock<std::mutex> lock(m_callbackMu);
+        m_callbackCv.wait(lock, [this] { return m_callbacksInFlight == 0; });
+    }
+
     void OnRequestComplete(Request *req)
     {
+        CallbackScope callbackScope(this);
+        if (!callbackScope.Active())
+            return;
         if (!m_active.load(std::memory_order_relaxed))
             return;
         if (!req || req->status() == Request::RequestCancelled)
@@ -328,25 +389,36 @@ class LibcameraMonoCam {
         cv::Mat gray;
     };
 
+    struct FramePoolState {
+        std::atomic<bool> active{false};
+        std::vector<std::unique_ptr<FrameSlot>> slots;
+        std::deque<FrameSlot*> freeSlots;
+        std::mutex mu;
+    };
+
     std::shared_ptr<FrameSlot> AcquireFrameSlot()
     {
         std::lock_guard<std::mutex> lock(m_framePoolMu);
-        if (m_freeFrameSlots.empty()) {
+        if (!m_framePool) {
             return {};
         }
-        FrameSlot* slot = m_freeFrameSlots.front();
-        m_freeFrameSlots.pop_front();
-        return std::shared_ptr<FrameSlot>(slot, [this](FrameSlot* s) { ReturnFrameSlot(s); });
-    }
-
-    void ReturnFrameSlot(FrameSlot* slot)
-    {
-        if (!slot) return;
-        std::lock_guard<std::mutex> lock(m_framePoolMu);
-        if (!m_active.load(std::memory_order_relaxed)) {
-            return;
+        std::lock_guard<std::mutex> poolLock(m_framePool->mu);
+        if (m_framePool->freeSlots.empty()) {
+            return {};
         }
-        m_freeFrameSlots.push_back(slot);
+        FrameSlot* slot = m_framePool->freeSlots.front();
+        m_framePool->freeSlots.pop_front();
+        std::shared_ptr<FramePoolState> framePool = m_framePool;
+        return std::shared_ptr<FrameSlot>(slot, [framePool](FrameSlot* s) {
+            if (!framePool || !s || !framePool->active.load(std::memory_order_relaxed)) {
+                return;
+            }
+            std::lock_guard<std::mutex> lock(framePool->mu);
+            if (!framePool->active.load(std::memory_order_relaxed)) {
+                return;
+            }
+            framePool->freeSlots.push_back(s);
+        });
     }
 
     std::shared_ptr<Camera> m_cam;
@@ -361,8 +433,11 @@ class LibcameraMonoCam {
     bool m_r16Normalize{false};
     std::atomic<bool> m_active{false};
     std::mutex m_framePoolMu;
-    std::vector<std::unique_ptr<FrameSlot>> m_frameSlots;
-    std::deque<FrameSlot*> m_freeFrameSlots;
+    std::shared_ptr<FramePoolState> m_framePool;
+    std::mutex m_callbackMu;
+    std::condition_variable m_callbackCv;
+    size_t m_callbacksInFlight{0};
+    bool m_closing{false};
 };
 
 class LibcameraStereoOV9281_TsPair {
@@ -433,9 +508,12 @@ class LibcameraStereoOV9281_TsPair {
             m_qR.clear();
             m_paired.clear();
         }
+        m_cvPair.notify_all();
 
         m_left.Close();
         m_right.Close();
+        m_camL.reset();
+        m_camR.reset();
         if (m_cm)
             m_cm->stop();
         m_cm.reset();

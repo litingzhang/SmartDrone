@@ -86,6 +86,15 @@ void LoopClosing::SetLocalMapper(LocalMapping *pLocalMapper)
     mpLocalMapper=pLocalMapper;
 }
 
+void LoopClosing::AbortGlobalBundleAdjustment()
+{
+    unique_lock<mutex> lock(mMutexGBA);
+    if(!mbRunningGBA)
+        return;
+    mbStopGBA = true;
+    mnFullBAIdx++;
+}
+
 
 void LoopClosing::Run()
 {

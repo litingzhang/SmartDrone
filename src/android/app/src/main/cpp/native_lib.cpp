@@ -19,9 +19,11 @@ static constexpr uint8_t CMD_RUNTIME_MODE = 0x30;
 static constexpr uint8_t CMD_RUNTIME_CONFIG = 0x31;
 static constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
 static constexpr uint8_t MOVE_FLAG_RC_JOYSTICK = 0x02;
+static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
+static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
+static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
 static constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 40;
-static constexpr size_t RUNTIME_IP_BYTES = 32;
 
 static uint32_t NowMs32()
 {
@@ -192,7 +194,10 @@ Java_com_example_smartdrone_NativeUdp_sendRuntimeConfig(
     jclass,
     jint exposureUs,
     jfloat gain,
-    jint sensorMode)
+    jint sensorMode,
+    jboolean sendImage,
+    jboolean sendFeature,
+    jboolean sendMap)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     const uint32_t seq = g_seqCounter.fetch_add(1);
@@ -201,6 +206,11 @@ Java_com_example_smartdrone_NativeUdp_sendRuntimeConfig(
     WriteU32Le(payload, static_cast<uint32_t>(exposureUs));
     WriteF32Le(payload, static_cast<float>(gain));
     payload.push_back(static_cast<uint8_t>(sensorMode));
+    uint8_t streamFlags = 0;
+    if (sendImage == JNI_TRUE) streamFlags |= RUNTIME_CFG_FLAG_SEND_IMAGE;
+    if (sendFeature == JNI_TRUE) streamFlags |= RUNTIME_CFG_FLAG_SEND_FEATURE;
+    if (sendMap == JNI_TRUE) streamFlags |= RUNTIME_CFG_FLAG_SEND_MAP;
+    payload.push_back(streamFlags);
     payload.resize(RUNTIME_CONFIG_PAYLOAD_LEN, 0);
 
     const std::vector<uint8_t> frame = MakeFrame(

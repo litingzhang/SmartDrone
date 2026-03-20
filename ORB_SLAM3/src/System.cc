@@ -559,6 +559,8 @@ void System::Shutdown()
 {
     {
         unique_lock<mutex> lock(mMutexReset);
+        if(mbShutDown)
+            return;
         mbShutDown = true;
     }
 
@@ -566,6 +568,7 @@ void System::Shutdown()
 
     mpLocalMapper->RequestFinish();
     mpLoopCloser->RequestFinish();
+    mpLoopCloser->AbortGlobalBundleAdjustment();
     /*if(mpViewer)
     {
         mpViewer->RequestFinish();
@@ -573,20 +576,34 @@ void System::Shutdown()
             usleep(5000);
     }*/
 
-    // Wait until all thread have effectively stopped
-    /*while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
+    while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
     {
-        if(!mpLocalMapper->isFinished())
-            cout << "mpLocalMapper is not finished" << endl;*/
-        /*if(!mpLoopCloser->isFinished())
-            cout << "mpLoopCloser is not finished" << endl;
-        if(mpLoopCloser->isRunningGBA()){
-            cout << "mpLoopCloser is running GBA" << endl;
-            cout << "break anyway..." << endl;
-            break;
-        }*/
-        /*usleep(5000);
-    }*/
+        usleep(5000);
+    }
+
+    if(mptLocalMapping)
+    {
+        if(mptLocalMapping->joinable())
+            mptLocalMapping->join();
+        delete mptLocalMapping;
+        mptLocalMapping = nullptr;
+    }
+
+    if(mptLoopClosing)
+    {
+        if(mptLoopClosing->joinable())
+            mptLoopClosing->join();
+        delete mptLoopClosing;
+        mptLoopClosing = nullptr;
+    }
+
+    if(mptViewer)
+    {
+        if(mptViewer->joinable())
+            mptViewer->join();
+        delete mptViewer;
+        mptViewer = nullptr;
+    }
 
     if(!mStrSaveAtlasToFile.empty())
     {

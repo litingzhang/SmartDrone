@@ -107,7 +107,12 @@ public class MainActivity extends Activity {
     private Button m_btnCleanCalib;
     private ImageButton m_btnMapClear;
     private ImageButton m_btnMapZoom;
+    private Button m_btnImageToggle;
+    private Button m_btnImageToggleCommand;
+    private Button m_btnMapToggle;
+    private Button m_btnMapToggleCommand;
     private Button m_btnFeatureToggle;
+    private Button m_btnFeatureToggleCommand;
 
     private AutoCompleteTextView m_etVehicleIp;
     private TextView m_tvCfgExposureValue;
@@ -153,6 +158,9 @@ public class MainActivity extends Activity {
     private int m_featurePktCount1 = 0;
     private int m_featureMatchCount0 = 0;
     private int m_featureMatchCount1 = 0;
+    private boolean m_sendImage = true;
+    private boolean m_sendFeature = true;
+    private boolean m_sendMap = true;
     private boolean m_showFeaturePoints = true;
 
     private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -340,6 +348,9 @@ public class MainActivity extends Activity {
     }
 
     private boolean tryHandleStatePoseForMap(byte[] rx) {
+        if (!m_sendMap) {
+            return false;
+        }
         if (rx == null || rx.length < 43) {
             return false;
         }
@@ -378,6 +389,9 @@ public class MainActivity extends Activity {
     }
 
     private boolean tryHandlePointCloudPacket(byte[] rx) {
+        if (!m_sendMap) {
+            return false;
+        }
         if (rx == null || rx.length < 21) {
             return false;
         }
@@ -466,12 +480,42 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void updateStreamToggleButtons() {
+        if (m_btnImageToggle != null) {
+            m_btnImageToggle.setText(m_sendImage ? "Img ON" : "Img OFF");
+            m_btnImageToggle.setAlpha(m_sendImage ? 1.0f : 0.65f);
+        }
+        if (m_btnImageToggleCommand != null) {
+            m_btnImageToggleCommand.setText(m_sendImage ? "Img ON" : "Img OFF");
+            m_btnImageToggleCommand.setAlpha(m_sendImage ? 1.0f : 0.65f);
+        }
+        if (m_btnMapToggle != null) {
+            m_btnMapToggle.setText(m_sendMap ? "Map ON" : "Map OFF");
+            m_btnMapToggle.setAlpha(m_sendMap ? 1.0f : 0.65f);
+        }
+        if (m_btnMapToggleCommand != null) {
+            m_btnMapToggleCommand.setText(m_sendMap ? "Map ON" : "Map OFF");
+            m_btnMapToggleCommand.setAlpha(m_sendMap ? 1.0f : 0.65f);
+        }
+        if (m_btnFeatureToggle != null) {
+            m_btnFeatureToggle.setText(m_sendFeature ? "Feat ON" : "Feat OFF");
+            m_btnFeatureToggle.setAlpha(m_sendFeature ? 1.0f : 0.65f);
+        }
+        if (m_btnFeatureToggleCommand != null) {
+            m_btnFeatureToggleCommand.setText(m_sendFeature ? "Feat ON" : "Feat OFF");
+            m_btnFeatureToggleCommand.setAlpha(m_sendFeature ? 1.0f : 0.65f);
+        }
+        if (m_map3dView != null) {
+            m_map3dView.setVisibility(m_sendMap ? View.VISIBLE : View.GONE);
+        }
+    }
+
     private void updateFeatureToggleButton() {
         if (m_btnFeatureToggle == null) {
             return;
         }
-        m_btnFeatureToggle.setText(m_showFeaturePoints ? "Feat ON" : "Feat OFF");
-        m_btnFeatureToggle.setAlpha(m_showFeaturePoints ? 1.0f : 0.65f);
+        m_showFeaturePoints = m_sendFeature;
+        updateStreamToggleButtons();
     }
 
     private void refreshVideoFrames() {
@@ -480,7 +524,16 @@ public class MainActivity extends Activity {
     }
 
     private void sendCurrentRuntimeConfig(String label, String pendingKey, AckSuccess onSuccess) {
-        sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float) m_cfgGain, m_sensorMode, label, pendingKey, onSuccess);
+        sendRuntimeConfigAwaitAck(
+                m_cfgExposureUs,
+                (float) m_cfgGain,
+                m_sensorMode,
+                m_sendImage,
+                m_sendFeature,
+                m_sendMap,
+                label,
+                pendingKey,
+                onSuccess);
     }
 
     private static float applyDeadzone(float v) {
@@ -543,12 +596,21 @@ public class MainActivity extends Activity {
         }
     }
 
-    private int sendRuntimeConfig(int exposureUs, float gain, int sensorMode) {
+    private int sendRuntimeConfig(
+            int exposureUs,
+            float gain,
+            int sensorMode,
+            boolean sendImage,
+            boolean sendFeature,
+            boolean sendMap) {
         try {
-            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, sensorMode);
+            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, sensorMode, sendImage, sendFeature, sendMap);
             m_tvStatus.setText(String.format(Locale.US,
-                    "CFG seq=%d exp=%d gain=%.1f sensor=%s",
-                    seq, exposureUs, gain, sensorModeToText(sensorMode)));
+                    "CFG seq=%d exp=%d gain=%.1f sensor=%s img=%s feat=%s map=%s",
+                    seq, exposureUs, gain, sensorModeToText(sensorMode),
+                    sendImage ? "on" : "off",
+                    sendFeature ? "on" : "off",
+                    sendMap ? "on" : "off"));
             return seq;
         } catch (Throwable t) {
             m_tvStatus.setText("CFG error: " + t.getMessage());
@@ -557,13 +619,22 @@ public class MainActivity extends Activity {
     }
 
     private int sendRuntimeConfig() {
-        return sendRuntimeConfig(m_cfgExposureUs, (float) m_cfgGain, m_sensorMode);
+        return sendRuntimeConfig(
+                m_cfgExposureUs,
+                (float) m_cfgGain,
+                m_sensorMode,
+                m_sendImage,
+                m_sendFeature,
+                m_sendMap);
     }
 
     private void sendRuntimeConfigAwaitAck(
             int exposureUs,
             float gain,
             int sensorMode,
+            boolean sendImage,
+            boolean sendFeature,
+            boolean sendMap,
             String label,
             String pendingKey,
             AckSuccess onSuccess) {
@@ -573,7 +644,7 @@ public class MainActivity extends Activity {
         if (isPending(pendingKey)) {
             return;
         }
-        int seq = sendRuntimeConfig(exposureUs, gain, sensorMode);
+        int seq = sendRuntimeConfig(exposureUs, gain, sensorMode, sendImage, sendFeature, sendMap);
         if (seq < 0) {
             return;
         }
@@ -663,7 +734,16 @@ public class MainActivity extends Activity {
         final int exposureUs = m_cfgExposureUs;
         final float gain = (float) m_cfgGain;
         final int sensorMode = m_sensorMode;
-        sendRuntimeConfigAwaitAck(exposureUs, gain, sensorMode, label + " CFG", PENDING_RUNTIME, () -> {
+        sendRuntimeConfigAwaitAck(
+                exposureUs,
+                gain,
+                sensorMode,
+                m_sendImage,
+                m_sendFeature,
+                m_sendMap,
+                label + " CFG",
+                PENDING_RUNTIME,
+                () -> {
             try {
                 int seq = NativeUdp.sendRuntimeMode(mode);
                 if (seq < 0) {
@@ -1015,7 +1095,13 @@ public class MainActivity extends Activity {
             return true;
         }
         if ((flags & VIDEO_FLAG_FEATURE_POINTS) != 0) {
+            if (!m_sendFeature) {
+                return true;
+            }
             return tryHandleFeaturePacket(rx, camIndex);
+        }
+        if (!m_sendImage) {
+            return true;
         }
         m_videoPktCount++;
         double frameTimeSec = readF64Le(rx, 12);
@@ -1143,7 +1229,7 @@ public class MainActivity extends Activity {
         }
         Bitmap output = displayFrame.bitmap;
         FeatureFrame featureFrame = m_featureFrames[camIndex];
-        if (m_showFeaturePoints
+        if (m_sendFeature && m_showFeaturePoints
                 && featureFrame.xs != null
                 && Math.abs(featureFrame.frameTimeSec - displayFrame.frameTimeSec) <= FRAME_MATCH_TOLERANCE_SEC) {
             output = overlayFeaturePoints(displayFrame.bitmap, featureFrame);
@@ -1377,7 +1463,12 @@ public class MainActivity extends Activity {
         m_btnSensorMode = findViewById(R.id.btnSensorMode);
         m_btnMapClear = findViewById(R.id.btnMapClear);
         m_btnMapZoom = findViewById(R.id.btnMapZoom);
+        m_btnImageToggle = findViewById(R.id.btnImageToggle);
+        m_btnImageToggleCommand = findViewById(R.id.btnImageToggleCommand);
+        m_btnMapToggle = findViewById(R.id.btnMapToggle);
+        m_btnMapToggleCommand = findViewById(R.id.btnMapToggleCommand);
         m_btnFeatureToggle = findViewById(R.id.btnFeatureToggle);
+        m_btnFeatureToggleCommand = findViewById(R.id.btnFeatureToggleCommand);
         m_featurePaint.setColor(Color.GREEN);
         m_featurePaint.setStyle(Paint.Style.STROKE);
         m_featurePaint.setStrokeWidth(2.0f);
@@ -1464,6 +1555,7 @@ public class MainActivity extends Activity {
         updateConfigViews();
         updatePoseMapFromText();
         updateMapButtons();
+        updateStreamToggleButtons();
         updateFeatureToggleButton();
 
         if (m_btnMapClear != null) {
@@ -1481,11 +1573,85 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        if (m_btnImageToggle != null) {
+            m_btnImageToggle.setOnClickListener(v -> {
+                final boolean nextValue = !m_sendImage;
+                sendRuntimeConfigAwaitAck(
+                        m_cfgExposureUs,
+                        (float) m_cfgGain,
+                        m_sensorMode,
+                        nextValue,
+                        m_sendFeature,
+                        m_sendMap,
+                        "Image stream",
+                        PENDING_CONFIG,
+                        () -> {
+                            m_sendImage = nextValue;
+                            if (!m_sendImage) {
+                                if (m_ivVideoLeft != null) m_ivVideoLeft.setImageDrawable(null);
+                                if (m_ivVideoRight != null) m_ivVideoRight.setImageDrawable(null);
+                            }
+                            updateStreamToggleButtons();
+                        });
+            });
+        }
+        if (m_btnImageToggleCommand != null) {
+            m_btnImageToggleCommand.setOnClickListener(v -> {
+                if (m_btnImageToggle != null) {
+                    m_btnImageToggle.performClick();
+                }
+            });
+        }
+        if (m_btnMapToggle != null) {
+            m_btnMapToggle.setOnClickListener(v -> {
+                final boolean nextValue = !m_sendMap;
+                sendRuntimeConfigAwaitAck(
+                        m_cfgExposureUs,
+                        (float) m_cfgGain,
+                        m_sensorMode,
+                        m_sendImage,
+                        m_sendFeature,
+                        nextValue,
+                        "Map stream",
+                        PENDING_CONFIG,
+                        () -> {
+                            m_sendMap = nextValue;
+                            updateStreamToggleButtons();
+                        });
+            });
+        }
+        if (m_btnMapToggleCommand != null) {
+            m_btnMapToggleCommand.setOnClickListener(v -> {
+                if (m_btnMapToggle != null) {
+                    m_btnMapToggle.performClick();
+                }
+            });
+        }
         if (m_btnFeatureToggle != null) {
             m_btnFeatureToggle.setOnClickListener(v -> {
-                m_showFeaturePoints = !m_showFeaturePoints;
-                updateFeatureToggleButton();
-                refreshVideoFrames();
+                final boolean nextValue = !m_sendFeature;
+                sendRuntimeConfigAwaitAck(
+                        m_cfgExposureUs,
+                        (float) m_cfgGain,
+                        m_sensorMode,
+                        m_sendImage,
+                        nextValue,
+                        m_sendMap,
+                        "Feature stream",
+                        PENDING_CONFIG,
+                        () -> {
+                            m_sendFeature = nextValue;
+                            m_showFeaturePoints = nextValue;
+                            refreshVideoFrames();
+                            updateStreamToggleButtons();
+                        });
+            });
+        }
+        if (m_btnFeatureToggleCommand != null) {
+            m_btnFeatureToggleCommand.setOnClickListener(v -> {
+                if (m_btnFeatureToggle != null) {
+                    m_btnFeatureToggle.performClick();
+                }
             });
         }
 
@@ -1581,7 +1747,16 @@ public class MainActivity extends Activity {
                 final int nextSensorMode = (m_sensorMode == SENSOR_STEREO_IMU) ? SENSOR_STEREO : SENSOR_STEREO_IMU;
                 final int exposureUs = m_cfgExposureUs;
                 final float gain = (float) m_cfgGain;
-                sendRuntimeConfigAwaitAck(exposureUs, gain, nextSensorMode, "Sensor mode", PENDING_SENSOR, () -> {
+                sendRuntimeConfigAwaitAck(
+                        exposureUs,
+                        gain,
+                        nextSensorMode,
+                        m_sendImage,
+                        m_sendFeature,
+                        m_sendMap,
+                        "Sensor mode",
+                        PENDING_SENSOR,
+                        () -> {
                     m_sensorMode = nextSensorMode;
                     updateRuntimeButtons();
                 });

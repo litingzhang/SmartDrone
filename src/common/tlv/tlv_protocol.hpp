@@ -37,8 +37,11 @@ constexpr uint16_t MOVE_RC_PAYLOAD_LEN = 21;
 constexpr uint8_t MOVE_FLAG_RC_JOYSTICK = 0x02;
 constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // RUNTIME_CONFIG payload:
-// exposureUs(u32le) gain(f32le) sensorMode(u8) reserved[31]
+// exposureUs(u32le) gain(f32le) sensorMode(u8) streamFlags(u8) reserved[30]
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 40;
+constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
+constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
+constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
 // STATE payload:
 // runtimeMode(u8) trackingState(u8) resetCounter(u16le) resetMapCount(u16le)
 // x/y/z/qw/qx/qy/qz (7 * f32le)

@@ -34,6 +34,10 @@ class UdpImageSender {
         int camIndex;  // 0=L, 1=R
         uint32_t seq;   // sequence for debug
         double frameTime; // seconds
+        int width{0};
+        int height{0};
+        bool sendImage{true};
+        bool sendFeature{false};
         cv::Mat preview; // reusable preview storage
         std::vector<cv::Point2f> trackedPoints;
         std::vector<uint8_t> featureBuf;
@@ -111,9 +115,13 @@ class UdpImageSender {
                  uint32_t seq,
                  double frameTime,
                  const cv::Mat &gray,
-                 const std::vector<cv::Point2f> &trackedPoints = {})
+                 const std::vector<cv::Point2f> &trackedPoints = {},
+                 bool sendImage = true,
+                 bool sendFeature = true)
     {
         if (m_sock < 0 || camIndex < 0 || camIndex > 1)
+            return;
+        if (!sendImage && !sendFeature)
             return;
 
         {
@@ -141,11 +149,18 @@ class UdpImageSender {
             Slot& slot = m_slots[camIndex][slotIndex];
             slot.seq = seq;
             slot.frameTime = frameTime;
-            if (!FillPreview(gray, slot.preview)) {
+            slot.width = gray.cols;
+            slot.height = gray.rows;
+            slot.sendImage = sendImage;
+            slot.sendFeature = sendFeature;
+            if (sendImage && !FillPreview(gray, slot.preview)) {
                 m_free[camIndex].push_back(slotIndex);
                 return;
             }
-            slot.trackedPoints = trackedPoints;
+            if (!sendImage) {
+                slot.preview.release();
+            }
+            slot.trackedPoints = sendFeature ? trackedPoints : std::vector<cv::Point2f>{};
             m_ready[camIndex].push_back(slotIndex);
             while ((int)m_ready[camIndex].size() > m_maxQueue) {
                 const size_t staleSlot = m_ready[camIndex].front();
@@ -194,75 +209,78 @@ class UdpImageSender {
             }
             Slot& slot = m_slots[camIndex][slotIndex];
 
-            // encode
             jpeg.clear();
-            if (slot.preview.empty()) {
-                std::lock_guard<std::mutex> lk(m_mu[camIndex]);
-                m_free[camIndex].push_back(slotIndex);
-                continue;
-            }
-            try {
-                cv::imencode(".jpg", slot.preview, jpeg, params);
-            } catch (const std::exception &e) {
-                std::cerr << "[udp] imencode exception: " << e.what() << "\n";
-                std::lock_guard<std::mutex> lk(m_mu[camIndex]);
-                m_free[camIndex].push_back(slotIndex);
-                continue;
-            }
-            if (jpeg.empty()) {
-                std::cerr << "[udp] empty jpeg cam=" << camIndex
-                          << " type=" << slot.preview.type()
-                          << " rows=" << slot.preview.rows
-                          << " cols=" << slot.preview.cols
-                          << "\n";
-                std::lock_guard<std::mutex> lk(m_mu[camIndex]);
-                m_free[camIndex].push_back(slotIndex);
-                continue;
-            }
-
-            const uint32_t total = (uint32_t)jpeg.size();
-            const uint16_t chunks = (uint16_t)((total + m_maxPayload - 1) / m_maxPayload);
+            uint32_t total = 0;
             const uint32_t fid = m_frameId.fetch_add(1, std::memory_order_relaxed);
-            encodedFrames++;
 
-            for (uint16_t ci = 0; ci < chunks; ++ci) {
-                const uint32_t off = (uint32_t)ci * (uint32_t)m_maxPayload;
-                const uint32_t left = total - off;
-                const uint32_t pay =
-                    (left > (uint32_t)m_maxPayload) ? (uint32_t)m_maxPayload : left;
+            if (slot.sendImage) {
+                if (slot.preview.empty()) {
+                    std::lock_guard<std::mutex> lk(m_mu[camIndex]);
+                    m_free[camIndex].push_back(slotIndex);
+                    continue;
+                }
+                try {
+                    cv::imencode(".jpg", slot.preview, jpeg, params);
+                } catch (const std::exception &e) {
+                    std::cerr << "[udp] imencode exception: " << e.what() << "\n";
+                    std::lock_guard<std::mutex> lk(m_mu[camIndex]);
+                    m_free[camIndex].push_back(slotIndex);
+                    continue;
+                }
+                if (jpeg.empty()) {
+                    std::cerr << "[udp] empty jpeg cam=" << camIndex
+                              << " type=" << slot.preview.type()
+                              << " rows=" << slot.preview.rows
+                              << " cols=" << slot.preview.cols
+                              << "\n";
+                    std::lock_guard<std::mutex> lk(m_mu[camIndex]);
+                    m_free[camIndex].push_back(slotIndex);
+                    continue;
+                }
 
-                PacketHeader h{};
-                h.magic = 0x5643494D; // 'VCIM' just a tag
-                h.version = 1;
-                h.camIndex = (uint8_t)slot.camIndex;
-                h.flags = 0;
-                h.seq = slot.seq;
-                h.frameTime = slot.frameTime;
-                h.frameId = fid;
-                h.chunkIdx = ci;
-                h.chunkCnt = chunks;
-                h.totalSize = total;
-                h.chunkSize = pay;
+                total = (uint32_t)jpeg.size();
+                const uint16_t chunks = (uint16_t)((total + m_maxPayload - 1) / m_maxPayload);
+                encodedFrames++;
 
-                iovec iov[2]{};
-                iov[0].iov_base = &h;
-                iov[0].iov_len = sizeof(h);
-                iov[1].iov_base = jpeg.data() + off;
-                iov[1].iov_len = pay;
+                for (uint16_t ci = 0; ci < chunks; ++ci) {
+                    const uint32_t off = (uint32_t)ci * (uint32_t)m_maxPayload;
+                    const uint32_t left = total - off;
+                    const uint32_t pay =
+                        (left > (uint32_t)m_maxPayload) ? (uint32_t)m_maxPayload : left;
 
-                msghdr msg{};
-                msg.msg_name = &m_dst;
-                msg.msg_namelen = sizeof(m_dst);
-                msg.msg_iov = iov;
-                msg.msg_iovlen = 2;
+                    PacketHeader h{};
+                    h.magic = 0x5643494D;
+                    h.version = 1;
+                    h.camIndex = (uint8_t)slot.camIndex;
+                    h.flags = 0;
+                    h.seq = slot.seq;
+                    h.frameTime = slot.frameTime;
+                    h.frameId = fid;
+                    h.chunkIdx = ci;
+                    h.chunkCnt = chunks;
+                    h.totalSize = total;
+                    h.chunkSize = pay;
 
-                ssize_t sent = ::sendmsg(m_sock, &msg, 0);
-                (void)sent; // ignore drop; UDP is best-effort
-                sentPackets++;
+                    iovec iov[2]{};
+                    iov[0].iov_base = &h;
+                    iov[0].iov_len = sizeof(h);
+                    iov[1].iov_base = jpeg.data() + off;
+                    iov[1].iov_len = pay;
+
+                    msghdr msg{};
+                    msg.msg_name = &m_dst;
+                    msg.msg_namelen = sizeof(m_dst);
+                    msg.msg_iov = iov;
+                    msg.msg_iovlen = 2;
+
+                    ssize_t sent = ::sendmsg(m_sock, &msg, 0);
+                    (void)sent;
+                    sentPackets++;
+                }
             }
 
-            if (!slot.trackedPoints.empty()) {
-                SendFeaturePacket(slot, fid, slot.preview.cols, slot.preview.rows, slot.trackedPoints);
+            if (slot.sendFeature && !slot.trackedPoints.empty()) {
+                SendFeaturePacket(slot, fid, slot.width, slot.height, slot.trackedPoints);
                 featurePackets++;
             }
 

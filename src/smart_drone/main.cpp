@@ -59,12 +59,16 @@ struct RemoteRuntimeConfig {
     float gain{2.0f};
     std::string udpIp;
     SensorMode sensorMode{SensorMode::Stereo};
+    bool sendImage{true};
+    bool sendFeature{true};
+    bool sendMap{true};
 };
 
 struct MainRuntimeAliases {
     SensorMode sensorMode{SensorMode::Stereo};
     int width{}, height{}, fps{}, exposureUs{}, pairMs{}, keepMs{}, pairQueue{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{};
+    bool sendImage{true}, sendFeature{true}, sendMap{true};
     float gain{};
     std::string udpIp, spiDev, gpiochip;
     int udpPort{}, cmdPort{}, udpJpegQ{}, udpPayload{}, udpQueue{}, imuHz{}, accelFsG{}, gyroFsDps{},
@@ -469,6 +473,7 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig& c)
     a.keepMs = c.camera.keepMs; a.pairQueue = c.camera.pairQueue;
     a.udpEnable = c.udp.enable; a.udpIp = c.udp.ip; a.udpPort = c.udp.port;
     a.cmdPort = c.udp.cmdPort; a.udpJpegQ = c.udp.jpegQ; a.udpPayload = c.udp.payload;
+    a.sendImage = c.udp.sendImage; a.sendFeature = c.udp.sendFeature; a.sendMap = c.udp.sendMap;
     a.udpQueue = c.udp.queue; a.spiDev = c.imu.spiDev; a.spiSpeed = c.imu.spiSpeed;
     a.spiMode = c.imu.spiMode; a.spiBits = c.imu.spiBits; a.gpiochip = c.imu.gpiochip;
     a.drdyLine = c.imu.drdyLine; a.imuHz = c.imu.imuHz; a.accelFsG = c.imu.accelFsG;
@@ -568,6 +573,9 @@ void PrintStartupConfig(const AppConfig& app, const MainRuntimeAliases& a, Unifi
               << "ms pair_queue=" << a.pairQueue << "\n";
     std::cerr << "imuHz=" << a.imuHz << " udp=" << (a.udpEnable ? "Y" : "N")
               << " udpPort=" << a.udpPort << " cmdPort=" << a.cmdPort << "\n";
+    std::cerr << "stream img=" << (a.sendImage ? "Y" : "N")
+              << " feat=" << (a.sendFeature ? "Y" : "N")
+              << " map=" << (a.sendMap ? "Y" : "N") << "\n";
     std::cerr << "vocab=" << app.vocab << "\nsettings=" << app.settings << "\n";
 }
 
@@ -730,7 +738,9 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     const StereoBodyExtrinsics stereoBodyExtrinsics =
         (a.sensorMode == SensorMode::Stereo) ? LoadStereoBodyExtrinsics(cfg.app.settings) : StereoBodyExtrinsics{};
     UdpImageSender udp;
-    if (a.udpEnable) udp.Open(a.udpIp, a.udpPort, a.udpJpegQ, a.udpPayload, a.udpQueue);
+    if (a.udpEnable && (a.sendImage || a.sendFeature)) {
+        udp.Open(a.udpIp, a.udpPort, a.udpJpegQ, a.udpPayload, a.udpQueue);
+    }
     ImuThreadState imuState;
     std::thread imuThread;
     const bool useImu = (a.sensorMode == SensorMode::StereoImu);
@@ -820,9 +830,9 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
                                   : SLAM.TrackStereo(L.gray, R.gray, frameTime);
         std::vector<cv::Point2f> trackedLeftFeatures;
         std::vector<cv::Point2f> trackedRightFeatures;
-        if (a.udpEnable) {
+        if (a.udpEnable && (a.sendImage || a.sendFeature || a.sendMap)) {
             const bool updatePointCloud =
-                (frameNs - lastPointCloudUpdateNs) >= POINT_CLOUD_UPDATE_INTERVAL_NS;
+                a.sendMap && (frameNs - lastPointCloudUpdateNs) >= POINT_CLOUD_UPDATE_INTERVAL_NS;
             ORB_SLAM3::TrackedVisualData visual = SLAM.ExtractTrackedVisualData(
                 L.gray.cols,
                 L.gray.rows,
@@ -836,14 +846,16 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
                 livePose.UpdatePointCloud(std::move(visual.pointCloudXyz));
                 lastPointCloudUpdateNs = frameNs;
             }
-            udp.Enqueue(0, L.seq, frameTime, L.gray, trackedLeftFeatures);
-            udp.Enqueue(1, R.seq, frameTime, R.gray, trackedRightFeatures);
-            leftFeatureFrames += trackedLeftFeatures.empty() ? 0 : 1;
-            rightFeatureFrames += trackedRightFeatures.empty() ? 0 : 1;
-            leftFeatureCount += trackedLeftFeatures.size();
-            rightFeatureCount += trackedRightFeatures.size();
+            udp.Enqueue(0, L.seq, frameTime, L.gray, trackedLeftFeatures, a.sendImage, a.sendFeature);
+            udp.Enqueue(1, R.seq, frameTime, R.gray, trackedRightFeatures, a.sendImage, a.sendFeature);
+            if (a.sendFeature) {
+                leftFeatureFrames += trackedLeftFeatures.empty() ? 0 : 1;
+                rightFeatureFrames += trackedRightFeatures.empty() ? 0 : 1;
+                leftFeatureCount += trackedLeftFeatures.size();
+                rightFeatureCount += trackedRightFeatures.size();
+            }
             const auto now = std::chrono::steady_clock::now();
-            if (now - lastFeatureLog >= std::chrono::seconds(1)) {
+            if (a.sendFeature && now - lastFeatureLog >= std::chrono::seconds(1)) {
                 std::cerr << "[feat] left_frames=" << leftFeatureFrames
                           << " left_points=" << leftFeatureCount
                           << " right_frames=" << rightFeatureFrames
@@ -894,10 +906,19 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
                          IsTrackingPoseUsable(state) ? OdomQualityMode::GOOD : OdomQualityMode::LOST);
     }
     cam.Close();
+    std::cerr << "[session] slam camera closed\n";
     if (imuThread.joinable()) imuThread.join();
+    std::cerr << "[session] slam imu joined\n";
+    if (a.udpEnable && (a.sendImage || a.sendFeature)) {
+        udp.Close();
+        std::cerr << "[session] slam udp closed\n";
+    }
     mav.StopSetpointStream();
+    std::cerr << "[session] slam setpoint stopped\n";
     SLAM.Shutdown();
+    std::cerr << "[session] slam shutdown complete\n";
     livePose.SetRuntimeMode(RUNTIME_MODE_IDLE);
+    std::cerr << "[session] slam exit\n";
     return true;
 }
 
@@ -919,7 +940,7 @@ bool RunCalibSession(const UnifiedConfig& cfg, std::atomic<bool>& stop, LivePose
     std::fprintf(fCam1, "#timestamp [ns],filename\n");
     std::fprintf(fImu, "#timestamp [ns],wX [rad/s],wY [rad/s],wZ [rad/s],aX [m/s^2],aY [m/s^2],aZ [m/s^2]\n");
     UdpImageSender udp;
-    if (a.udpEnable) udp.Open(a.udpIp, a.udpPort, a.udpJpegQ, a.udpPayload, a.udpQueue);
+    if (a.udpEnable && a.sendImage) udp.Open(a.udpIp, a.udpPort, a.udpJpegQ, a.udpPayload, a.udpQueue);
     std::atomic<bool> imuOk{false};
     std::thread imuThread = StartCalibImuWriterThread(a, fImu, imuOk, stop);
     LibcameraStereoOV9281_TsPair cam;
@@ -1004,9 +1025,9 @@ bool RunCalibSession(const UnifiedConfig& cfg, std::atomic<bool>& stop, LivePose
         }
         std::fprintf(fCam0, "%lld,%s\n", (long long)pairNs, name.c_str());
         std::fprintf(fCam1, "%lld,%s\n", (long long)pairNs, name.c_str());
-        if (a.udpEnable) {
-            udp.Enqueue(0, L.seq, pairNs * 1e-9, L.gray);
-            udp.Enqueue(1, R.seq, pairNs * 1e-9, R.gray);
+        if (a.udpEnable && a.sendImage) {
+            udp.Enqueue(0, L.seq, pairNs * 1e-9, L.gray, {}, true, false);
+            udp.Enqueue(1, R.seq, pairNs * 1e-9, R.gray, {}, true, false);
         }
         if ((saved % 30) == 0) {
             std::cerr << "[calib-save] saved=" << (saved + 1)
@@ -1071,6 +1092,9 @@ public:
         m_config.app.sensorMode = r.sensorMode;
         m_config.app.udp.ip = r.udpIp;
         m_config.app.udp.enable = !r.udpIp.empty();
+        m_config.app.udp.sendImage = r.sendImage;
+        m_config.app.udp.sendFeature = r.sendFeature;
+        m_config.app.udp.sendMap = r.sendMap;
         if (m_desiredMode != UnifiedMode::Idle) {
             m_restartRequested = true;
             m_sessionStop.store(true);
@@ -1088,6 +1112,11 @@ public:
         const int removed = CleanupCalibDataDirs(m_config.calib.root);
         if (msg) *msg = "calib clean removed=" + std::to_string(removed);
         return true;
+    }
+    UnifiedConfig CurrentConfig()
+    {
+        std::lock_guard<std::mutex> lock(m_mu);
+        return m_config;
     }
 
 private:
@@ -1108,11 +1137,20 @@ private:
                 }
                 if (m_stopping) m_sessionStop.store(true);
                 if ((m_restartRequested || m_desiredMode != m_activeMode) && m_activeMode != UnifiedMode::Idle) {
+                    std::cerr << "[runtime] request stop active="
+                              << (m_activeMode == UnifiedMode::Slam ? "slam" : m_activeMode == UnifiedMode::Calib ? "calib" : "idle")
+                              << " desired="
+                              << (m_desiredMode == UnifiedMode::Slam ? "slam" : m_desiredMode == UnifiedMode::Calib ? "calib" : "idle")
+                              << " restart=" << (m_restartRequested ? "true" : "false") << "\n";
                     m_sessionStop.store(true);
                     needJoin = true;
                 }
             }
-            if (needJoin) JoinSession();
+            if (needJoin) {
+                std::cerr << "[runtime] joining session\n";
+                JoinSession();
+                std::cerr << "[runtime] session joined\n";
+            }
             {
                 std::lock_guard<std::mutex> lock(m_mu);
                 if (needJoin) {
@@ -1132,11 +1170,21 @@ private:
                 m_restartRequested = false;
             }
             if (startSession) {
+                std::cerr << "[runtime] starting session mode="
+                          << (startMode == UnifiedMode::Slam ? "slam" : startMode == UnifiedMode::Calib ? "calib" : "idle")
+                          << "\n";
                 m_session = std::thread([this, cfg, startMode]() mutable {
-                    if (startMode == UnifiedMode::Slam) RunSlamSession(cfg, m_mav, m_sessionStop, m_livePose);
-                    else if (startMode == UnifiedMode::Calib) RunCalibSession(cfg, m_sessionStop, m_livePose);
+                    bool ok = false;
+                    if (startMode == UnifiedMode::Slam) ok = RunSlamSession(cfg, m_mav, m_sessionStop, m_livePose);
+                    else if (startMode == UnifiedMode::Calib) ok = RunCalibSession(cfg, m_sessionStop, m_livePose);
+                    std::cerr << "[runtime] session function returned mode="
+                              << (startMode == UnifiedMode::Slam ? "slam" : startMode == UnifiedMode::Calib ? "calib" : "idle")
+                              << " ok=" << (ok ? "true" : "false") << "\n";
                     std::lock_guard<std::mutex> lock(m_mu);
                     m_sessionDone = true;
+                    std::cerr << "[runtime] session done mode="
+                              << (startMode == UnifiedMode::Slam ? "slam" : startMode == UnifiedMode::Calib ? "calib" : "idle")
+                              << "\n";
                     m_cv.notify_all();
                 });
             }
@@ -1177,9 +1225,19 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
         return {ACK_E_BAD_ARGS, "bad runtime cfg args"};
     }
     r.sensorMode = (p[8] == RUNTIME_SENSOR_STEREO_IMU) ? SensorMode::StereoImu : SensorMode::Stereo;
-    const char* ipChars = reinterpret_cast<const char*>(&p[9]);
+    const uint8_t streamFlags = p[9];
+    if (streamFlags == 0) {
+        r.sendImage = true;
+        r.sendFeature = true;
+        r.sendMap = true;
+    } else {
+        r.sendImage = (streamFlags & RUNTIME_CFG_FLAG_SEND_IMAGE) != 0;
+        r.sendFeature = (streamFlags & RUNTIME_CFG_FLAG_SEND_FEATURE) != 0;
+        r.sendMap = (streamFlags & RUNTIME_CFG_FLAG_SEND_MAP) != 0;
+    }
+    const char* ipChars = reinterpret_cast<const char*>(&p[10]);
     size_t ipLen = 0;
-    while (ipLen < 31 && ipChars[ipLen] != '\0') {
+    while (ipLen < 30 && ipChars[ipLen] != '\0') {
         ++ipLen;
     }
     r.udpIp.assign(ipChars, ipLen);
@@ -1190,7 +1248,10 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
     std::string err;
     if (!c.UpdateRemoteConfig(r, &err)) return {ACK_E_BAD_ARGS, err.empty() ? "runtime cfg failed" : err};
     return {ACK_OK, "runtime cfg updated udp=" + r.udpIp +
-                    " sensor=" + std::string(r.sensorMode == SensorMode::StereoImu ? "stereo-imu" : "stereo")};
+                    " sensor=" + std::string(r.sensorMode == SensorMode::StereoImu ? "stereo-imu" : "stereo") +
+                    " img=" + (r.sendImage ? "on" : "off") +
+                    " feat=" + (r.sendFeature ? "on" : "off") +
+                    " map=" + (r.sendMap ? "on" : "off")};
 }
 
 RouteResult HandleCalibCleanFrame(const TlvFrame& frame, UnifiedRuntimeController& c)
@@ -1254,37 +1315,40 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks& hooks, UnifiedRuntimeCo
                 lastStateTx = now;
                 LivePoseState::Snapshot snap{};
                 if (livePose.ConsumeSnapshot(snap) && snap.hasPeer) {
-                    std::vector<uint8_t> payload;
-                    payload.reserve(STATE_POSE_PAYLOAD_LEN);
-                    payload.push_back(snap.runtimeMode);
-                    payload.push_back(snap.trackingState);
-                    WriteU16Le(payload, snap.resetCounter);
-                    WriteU16Le(payload, snap.resetMapCount);
-                    WriteF32Le(payload, snap.x);
-                    WriteF32Le(payload, snap.y);
-                    WriteF32Le(payload, snap.z);
-                    WriteF32Le(payload, snap.qw);
-                    WriteF32Le(payload, snap.qx);
-                    WriteF32Le(payload, snap.qy);
-                    WriteF32Le(payload, snap.qz);
-                    std::vector<uint8_t> stateFrame =
-                        MakeFrame(TLV_VER, CMD_STATE, 0, snap.seq, MonoTimeMs32(),
-                                  payload.data(), static_cast<uint16_t>(payload.size()));
-                    server.SendTo(snap.peer, stateFrame.data(), stateFrame.size());
+                    const UnifiedConfig currentCfg = controller.CurrentConfig();
+                    if (currentCfg.app.udp.sendMap) {
+                        std::vector<uint8_t> payload;
+                        payload.reserve(STATE_POSE_PAYLOAD_LEN);
+                        payload.push_back(snap.runtimeMode);
+                        payload.push_back(snap.trackingState);
+                        WriteU16Le(payload, snap.resetCounter);
+                        WriteU16Le(payload, snap.resetMapCount);
+                        WriteF32Le(payload, snap.x);
+                        WriteF32Le(payload, snap.y);
+                        WriteF32Le(payload, snap.z);
+                        WriteF32Le(payload, snap.qw);
+                        WriteF32Le(payload, snap.qx);
+                        WriteF32Le(payload, snap.qy);
+                        WriteF32Le(payload, snap.qz);
+                        std::vector<uint8_t> stateFrame =
+                            MakeFrame(TLV_VER, CMD_STATE, 0, snap.seq, MonoTimeMs32(),
+                                      payload.data(), static_cast<uint16_t>(payload.size()));
+                        server.SendTo(snap.peer, stateFrame.data(), stateFrame.size());
 
-                    const size_t pointCount = snap.pointCloudXyz.size() / 3;
-                    if (pointCount > 0) {
-                        std::vector<uint8_t> cloudPayload;
-                        cloudPayload.reserve(POINT_CLOUD_HEADER_LEN + pointCount * 12);
-                        WriteU16Le(cloudPayload, static_cast<uint16_t>(std::min<size_t>(pointCount, 0xFFFF)));
-                        WriteU16Le(cloudPayload, static_cast<uint16_t>(snap.pointCloudSeq & 0xFFFFu));
-                        for (size_t i = 0; i < pointCount * 3; ++i) {
-                            WriteF32Le(cloudPayload, snap.pointCloudXyz[i]);
+                        const size_t pointCount = snap.pointCloudXyz.size() / 3;
+                        if (pointCount > 0) {
+                            std::vector<uint8_t> cloudPayload;
+                            cloudPayload.reserve(POINT_CLOUD_HEADER_LEN + pointCount * 12);
+                            WriteU16Le(cloudPayload, static_cast<uint16_t>(std::min<size_t>(pointCount, 0xFFFF)));
+                            WriteU16Le(cloudPayload, static_cast<uint16_t>(snap.pointCloudSeq & 0xFFFFu));
+                            for (size_t i = 0; i < pointCount * 3; ++i) {
+                                WriteF32Le(cloudPayload, snap.pointCloudXyz[i]);
+                            }
+                            std::vector<uint8_t> cloudFrame =
+                                MakeFrame(TLV_VER, CMD_POINT_CLOUD, 0, snap.seq, MonoTimeMs32(),
+                                          cloudPayload.data(), static_cast<uint16_t>(cloudPayload.size()));
+                            server.SendTo(snap.peer, cloudFrame.data(), cloudFrame.size());
                         }
-                        std::vector<uint8_t> cloudFrame =
-                            MakeFrame(TLV_VER, CMD_POINT_CLOUD, 0, snap.seq, MonoTimeMs32(),
-                                      cloudPayload.data(), static_cast<uint16_t>(cloudPayload.size()));
-                        server.SendTo(snap.peer, cloudFrame.data(), cloudFrame.size());
                     }
                 }
             }

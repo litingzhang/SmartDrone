@@ -47,9 +47,22 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent">
 
+                <ImageButton
+                    android:id="@+id/btnModeToggle"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_gravity="top|start"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="toggle_settings"
+                    android:padding="10dp"
+                    android:scaleType="centerInside"
+                    android:src="@android:drawable/ic_menu_manage"
+                    android:tint="#FFFFFF" />
+
                 <HorizontalScrollView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="52dp"
                     android:fillViewport="false"
                     android:scrollbars="none">
 
@@ -58,17 +71,6 @@
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
-
-                        <ImageButton
-                            android:id="@+id/btnModeToggle"
-                            android:layout_width="44dp"
-                            android:layout_height="44dp"
-                            android:background="@drawable/bg_circle_button"
-                            android:contentDescription="toggle_page"
-                            android:padding="10dp"
-                            android:scaleType="centerInside"
-                            android:src="@android:drawable/ic_menu_rotate"
-                            android:tint="#FFFFFF" />
 
                         <Button
                             android:id="@+id/btnArm"
@@ -194,34 +196,57 @@
 
             <LinearLayout
                 android:id="@+id/pageCommand"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:orientation="horizontal"
+                android:layout_width="320dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:background="#66FFFFFF"
+                android:elevation="8dp"
+                android:orientation="vertical"
+                android:padding="8dp"
                 android:visibility="gone">
 
                 <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_horizontal"
+                    android:orientation="horizontal">
 
-                    <ImageButton
-                        android:id="@+id/btnModeToggleCommand"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:background="@drawable/bg_circle_button"
-                        android:contentDescription="toggle_page"
-                        android:padding="10dp"
-                        android:scaleType="centerInside"
-                        android:src="@android:drawable/ic_menu_rotate"
-                        android:tint="#FFFFFF" />
+                    <Button
+                        android:id="@+id/btnImageToggle"
+                        android:layout_width="72dp"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_oval_button"
+                        android:minHeight="32dp"
+                        android:text="Img ON"
+                        android:textColor="#FFFFFF"
+                        android:textSize="10sp" />
+
+                    <Button
+                        android:id="@+id/btnMapToggle"
+                        android:layout_width="72dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:background="@drawable/bg_oval_button"
+                        android:minHeight="32dp"
+                        android:text="Map ON"
+                        android:textColor="#FFFFFF"
+                        android:textSize="10sp" />
+
+                    <Button
+                        android:id="@+id/btnFeatureToggle"
+                        android:layout_width="72dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:background="@drawable/bg_oval_button"
+                        android:minHeight="32dp"
+                        android:text="Feat ON"
+                        android:textColor="#FFFFFF"
+                        android:textSize="10sp" />
                 </LinearLayout>
 
                 <LinearLayout
-                    android:layout_width="260dp"
-                    android:layout_height="match_parent"
-                    android:layout_gravity="end"
-                    android:background="#66FFFFFF"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:padding="4dp">
 
@@ -346,17 +371,6 @@
         android:layout_gravity="bottom|start"
         android:layout_margin="6dp"
         android:orientation="vertical">
-
-        <Button
-            android:id="@+id/btnFeatureToggle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="6dp"
-            android:background="@drawable/bg_oval_button"
-            android:minHeight="32dp"
-            android:text="Feat ON"
-            android:textColor="#FFFFFF"
-            android:textSize="10sp" />
 
         <TextView
             android:id="@+id/tvStatus"

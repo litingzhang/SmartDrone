@@ -44,6 +44,9 @@ struct UdpConfig {
     int jpegQ{80};
     int payload{1200};
     int queue{4};
+    bool sendImage{true};
+    bool sendFeature{true};
+    bool sendMap{true};
 };
 
 struct ImuRuntimeConfig {
