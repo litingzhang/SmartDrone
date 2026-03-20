@@ -49,20 +49,21 @@
 
                 <ImageButton
                     android:id="@+id/btnModeToggle"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
                     android:layout_gravity="top|start"
                     android:background="@drawable/bg_circle_button"
                     android:contentDescription="toggle_settings"
-                    android:padding="10dp"
+                    android:padding="7dp"
                     android:scaleType="centerInside"
-                    android:src="@android:drawable/ic_menu_manage"
+                    android:src="@drawable/ic_settings_gear"
                     android:tint="#FFFFFF" />
 
                 <HorizontalScrollView
+                    android:id="@+id/remoteControlsBar"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="52dp"
+                    android:layout_marginStart="44dp"
                     android:fillViewport="false"
                     android:scrollbars="none">
 
@@ -148,6 +149,7 @@
                     android:alpha="0.65" />
 
                 <FrameLayout
+                    android:id="@+id/mapPanel"
                     android:layout_width="260dp"
                     android:layout_height="180dp"
                     android:layout_gravity="top|end"
@@ -176,7 +178,7 @@
                             android:contentDescription="clear_point_cloud"
                             android:padding="7dp"
                             android:scaleType="centerInside"
-                            android:src="@android:drawable/ic_menu_close_clear_cancel"
+                            android:src="@drawable/ic_eraser"
                             android:tint="#FFFFFF" />
 
                         <ImageButton
@@ -196,217 +198,424 @@
 
             <LinearLayout
                 android:id="@+id/pageCommand"
-                android:layout_width="320dp"
-                android:layout_height="wrap_content"
+                android:layout_width="360dp"
+                android:layout_height="320dp"
                 android:layout_gravity="center"
-                android:background="#66FFFFFF"
-                android:elevation="8dp"
+                android:background="@drawable/bg_settings_panel"
+                android:elevation="12dp"
                 android:orientation="vertical"
-                android:padding="8dp"
+                android:padding="14dp"
                 android:visibility="gone">
 
-                <LinearLayout
+                <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:gravity="center_horizontal"
-                    android:orientation="horizontal">
+                    android:gravity="center"
+                    android:text="Runtime Settings"
+                    android:textColor="#183247"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
 
-                    <Button
-                        android:id="@+id/btnImageToggle"
-                        android:layout_width="72dp"
-                        android:layout_height="wrap_content"
-                        android:background="@drawable/bg_oval_button"
-                        android:minHeight="32dp"
-                        android:text="Img ON"
-                        android:textColor="#FFFFFF"
-                        android:textSize="10sp" />
-
-                    <Button
-                        android:id="@+id/btnMapToggle"
-                        android:layout_width="72dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
-                        android:background="@drawable/bg_oval_button"
-                        android:minHeight="32dp"
-                        android:text="Map ON"
-                        android:textColor="#FFFFFF"
-                        android:textSize="10sp" />
-
-                    <Button
-                        android:id="@+id/btnFeatureToggle"
-                        android:layout_width="72dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
-                        android:background="@drawable/bg_oval_button"
-                        android:minHeight="32dp"
-                        android:text="Feat ON"
-                        android:textColor="#FFFFFF"
-                        android:textSize="10sp" />
-                </LinearLayout>
-
-                <LinearLayout
+                <ScrollView
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="4dp">
+                    android:layout_height="0dp"
+                    android:layout_marginTop="12dp"
+                    android:layout_weight="1"
+                    android:fillViewport="true"
+                    android:scrollbars="vertical">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal">
+                        android:orientation="vertical">
 
-                        <Button
-                            android:id="@+id/btnSensorMode"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:minHeight="32dp"
-                            android:text="Stereo"
-                            android:textSize="10sp" />
-
-                        <Button
-                            android:id="@+id/btnToggleSlam"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="4dp"
-                            android:layout_weight="1"
-                            android:minHeight="32dp"
-                            android:text="VIO"
-                            android:textSize="10sp" />
-
-                        <Button
-                            android:id="@+id/btnToggleCalib"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="4dp"
-                            android:layout_weight="1"
-                            android:minHeight="32dp"
-                            android:text="Calib"
-                            android:textSize="10sp" />
-                    </LinearLayout>
-
-                    <Button
-                        android:id="@+id/btnCleanCalib"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:minHeight="32dp"
-                        android:text="Clean Calib"
-                        android:textSize="10sp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:orientation="horizontal">
-
-                        <AutoCompleteTextView
-                            android:id="@+id/etVehicleIp"
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:hint="Vehicle IP"
-                            android:inputType="textUri"
-                            android:minHeight="32dp"
-                            android:padding="4dp"
-                            android:singleLine="true"
-                            android:completionThreshold="1"
-                            android:text="10.42.0.1"
+                            android:layout_marginTop="2dp"
+                            android:orientation="horizontal">
+
+                            <AutoCompleteTextView
+                                android:id="@+id/etVehicleIp"
+                                android:layout_width="match_parent"
+                                android:layout_height="40dp"
+                                android:background="#F7FAFC"
+                                android:hint="Vehicle IP"
+                                android:inputType="textUri"
+                                android:minHeight="40dp"
+                                android:paddingLeft="12dp"
+                                android:paddingRight="12dp"
+                                android:singleLine="true"
+                                android:completionThreshold="1"
+                                android:text=""
+                                android:textColor="#183247"
+                                android:textColorHint="#6B7A8C"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tvCfgExposureValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:text="Exposure: 3000 us"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgExposure"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Exposure slider" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="500 us step, 500-20000 us"
+                            android:textColor="#667085"
                             android:textSize="10sp" />
+
+                        <TextView
+                            android:id="@+id/tvCfgGainValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Gain: 2"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgGain"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Gain slider" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingBottom="4dp"
+                            android:text="1 step, 1-32"
+                            android:textColor="#667085"
+                            android:textSize="10sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="12dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="ORB-SLAM3"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnToggleSlam"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:minWidth="46dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="46dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="STEREO IMU"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnSensorMode"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:minWidth="42dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="42dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Display Image"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnImageToggle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:checked="true"
+                                android:minWidth="42dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="42dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Display 3DMap"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnMapToggle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:checked="true"
+                                android:minWidth="42dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="42dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Display Features"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnFeatureToggle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:checked="true"
+                                android:minWidth="42dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="42dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Calib Collect"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnToggleCalib"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:minWidth="46dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="46dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
+                        <Button
+                            android:id="@+id/btnCleanCalib"
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="@drawable/bg_settings_button"
+                            android:minHeight="40dp"
+                            android:text="Calib Clean"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Remote Control"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnRemoteToggle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:checked="false"
+                                android:minWidth="42dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="42dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Debug Info"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnDebugToggle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:checked="true"
+                                android:minWidth="42dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="42dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
                     </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/tvCfgExposureValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="Exposure: 3000 us"
-                        android:textColor="#222222"
-                        android:textSize="10sp"
-                        android:textStyle="bold" />
-
-                    <SeekBar
-                        android:id="@+id/sbCfgExposure"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:contentDescription="Exposure slider" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="500 us step, 500-20000 us"
-                        android:textColor="#66222222"
-                        android:textSize="9sp" />
-
-                    <TextView
-                        android:id="@+id/tvCfgGainValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="Gain: 2"
-                        android:textColor="#222222"
-                        android:textSize="10sp"
-                        android:textStyle="bold" />
-
-                    <SeekBar
-                        android:id="@+id/sbCfgGain"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:contentDescription="Gain slider" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="1 step, 1-32"
-                        android:textColor="#66222222"
-                        android:textSize="9sp" />
-
-                </LinearLayout>
+                </ScrollView>
             </LinearLayout>
         </FrameLayout>
     </LinearLayout>
 
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:id="@+id/debugPanel"
+        android:layout_width="260dp"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|start"
-        android:layout_margin="6dp"
-        android:orientation="vertical">
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="18dp"
+        android:background="#4D0B1220"
+        android:elevation="6dp"
+        android:orientation="vertical"
+        android:paddingLeft="10dp"
+        android:paddingTop="6dp"
+        android:paddingRight="10dp"
+        android:paddingBottom="6dp">
 
         <TextView
             android:id="@+id/tvStatus"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:maxWidth="300dp"
             android:text="cm5udp ready"
             android:textColor="#FFFFFF"
             android:textSize="11sp" />
 
         <TextView
             android:id="@+id/tvPose"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:maxWidth="360dp"
             android:text="Pose idle"
             android:textColor="#CCFFFFFF"
             android:textSize="10sp" />
 
         <TextView
             android:id="@+id/tvVideoStats"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:maxWidth="360dp"
             android:text="Video idle"
             android:textColor="#B3FFFFFF"
             android:textSize="10sp" />
 
         <TextView
             android:id="@+id/tvJoystickState"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:maxWidth="300dp"
             android:text="Joystick idle"
             android:textColor="#DDFFFFFF"
             android:textSize="10sp" />

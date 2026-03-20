@@ -3,7 +3,6 @@ package com.example.smartdrone;
 import com.example.smartdrone.R;
 
 import android.app.Activity;
-import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -22,6 +21,7 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.Arrays;
@@ -54,7 +54,6 @@ public class MainActivity extends Activity {
     private static final int SENSOR_STEREO = 0;
     private static final int SENSOR_STEREO_IMU = 1;
     private static final long ACK_PENDING_TIMEOUT_MS = 3000L;
-    private static final long EMERGENCY_STOP_HOLD_MS = 1000L;
     private static final String PENDING_ARM = "arm";
     private static final String PENDING_EMERGENCY_STOP = "emergency_stop";
     private static final String PENDING_OFFBOARD = "offboard";
@@ -80,7 +79,9 @@ public class MainActivity extends Activity {
     private static final int VIDEO_FLAG_FEATURE_POINTS = 0x01;
     private static final double FRAME_MATCH_TOLERANCE_SEC = 0.002;
     private static final float DEADZONE = 0.08f;
-    private static final String KEY_MANUAL_MODE = "manualMode";
+    private static final String KEY_SETTINGS_VISIBLE = "settingsVisible";
+    private static final String KEY_DEBUG_VISIBLE = "debugVisible";
+    private static final String KEY_REMOTE_VISIBLE = "remoteVisible";
     private static final String[] DEFAULT_VEHICLE_IPS = new String[]{
             "10.42.0.1",
             "192.168.0.105"
@@ -92,27 +93,27 @@ public class MainActivity extends Activity {
     private TextView m_tvPose;
     private TextView m_tvVideoStats;
     private TextView m_tvJoystickState;
-    private View m_pageManual;
+    private View m_debugPanel;
+    private View m_remoteControlsBar;
     private View m_pageCommand;
+    private View m_mapPanel;
     private ImageButton m_btnModeToggle;
-    private ImageButton m_btnModeToggleCommand;
     private Button m_btnArmToggle;
     private Button m_btnEmergencyStop;
     private Button m_btnOffboard;
     private Button m_btnHold;
     private Button m_btnLand;
-    private Button m_btnToggleSlam;
-    private Button m_btnToggleCalib;
-    private Button m_btnSensorMode;
+    private Switch m_btnToggleSlam;
+    private Switch m_btnToggleCalib;
+    private Switch m_btnSensorMode;
     private Button m_btnCleanCalib;
+    private Switch m_btnRemoteToggle;
+    private Switch m_btnDebugToggle;
     private ImageButton m_btnMapClear;
     private ImageButton m_btnMapZoom;
-    private Button m_btnImageToggle;
-    private Button m_btnImageToggleCommand;
-    private Button m_btnMapToggle;
-    private Button m_btnMapToggleCommand;
-    private Button m_btnFeatureToggle;
-    private Button m_btnFeatureToggleCommand;
+    private Switch m_btnImageToggle;
+    private Switch m_btnMapToggle;
+    private Switch m_btnFeatureToggle;
 
     private AutoCompleteTextView m_etVehicleIp;
     private TextView m_tvCfgExposureValue;
@@ -135,7 +136,10 @@ public class MainActivity extends Activity {
     private long m_lastJoystickTickMs;
     private boolean m_joystickLoopRunning;
     private boolean m_lastJoystickActive;
-    private boolean m_isManualMode = false;
+    private boolean m_settingsVisible = false;
+    private boolean m_debugVisible = false;
+    private boolean m_remoteVisible = false;
+    private boolean m_updatingToggleUi = false;
     private boolean m_rxLoopRunning;
     private int m_runtimeMode = MODE_IDLE;
     private String m_vehicleIp = "10.42.0.1";
@@ -166,13 +170,6 @@ public class MainActivity extends Activity {
     private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Map<Long, PendingAckAction> m_pendingAckActions = new HashMap<>();
     private final Set<String> m_pendingUiKeys = new HashSet<>();
-    private final Runnable m_emergencyStopHoldRunnable = () ->
-            sendSimpleCmdAwaitAck("EMERGENCY_STOP", CMD_EMERGENCY_STOP, PENDING_EMERGENCY_STOP, () -> {
-                m_armLatched = false;
-                m_lastFlightCommand = "EMERGENCY_STOP";
-                updateFlightButtons();
-            });
-
     private static final class VideoAssembly {
         int frameId = -1;
         double frameTimeSec = Double.NaN;
@@ -481,41 +478,74 @@ public class MainActivity extends Activity {
     }
 
     private void updateStreamToggleButtons() {
+        m_updatingToggleUi = true;
         if (m_btnImageToggle != null) {
-            m_btnImageToggle.setText(m_sendImage ? "Img ON" : "Img OFF");
+            m_btnImageToggle.setChecked(m_sendImage);
             m_btnImageToggle.setAlpha(m_sendImage ? 1.0f : 0.65f);
         }
-        if (m_btnImageToggleCommand != null) {
-            m_btnImageToggleCommand.setText(m_sendImage ? "Img ON" : "Img OFF");
-            m_btnImageToggleCommand.setAlpha(m_sendImage ? 1.0f : 0.65f);
-        }
         if (m_btnMapToggle != null) {
-            m_btnMapToggle.setText(m_sendMap ? "Map ON" : "Map OFF");
+            m_btnMapToggle.setChecked(m_sendMap);
             m_btnMapToggle.setAlpha(m_sendMap ? 1.0f : 0.65f);
         }
-        if (m_btnMapToggleCommand != null) {
-            m_btnMapToggleCommand.setText(m_sendMap ? "Map ON" : "Map OFF");
-            m_btnMapToggleCommand.setAlpha(m_sendMap ? 1.0f : 0.65f);
-        }
         if (m_btnFeatureToggle != null) {
-            m_btnFeatureToggle.setText(m_sendFeature ? "Feat ON" : "Feat OFF");
+            m_btnFeatureToggle.setChecked(m_sendFeature);
             m_btnFeatureToggle.setAlpha(m_sendFeature ? 1.0f : 0.65f);
         }
-        if (m_btnFeatureToggleCommand != null) {
-            m_btnFeatureToggleCommand.setText(m_sendFeature ? "Feat ON" : "Feat OFF");
-            m_btnFeatureToggleCommand.setAlpha(m_sendFeature ? 1.0f : 0.65f);
+        if (m_mapPanel != null) {
+            m_mapPanel.setVisibility(m_sendMap ? View.VISIBLE : View.GONE);
         }
-        if (m_map3dView != null) {
-            m_map3dView.setVisibility(m_sendMap ? View.VISIBLE : View.GONE);
-        }
+        m_updatingToggleUi = false;
     }
 
     private void updateFeatureToggleButton() {
-        if (m_btnFeatureToggle == null) {
-            return;
-        }
         m_showFeaturePoints = m_sendFeature;
         updateStreamToggleButtons();
+    }
+
+    private void updateDebugPanelVisibility() {
+        if (m_debugPanel != null) {
+            m_debugPanel.setVisibility(m_debugVisible && !m_settingsVisible ? View.VISIBLE : View.GONE);
+        }
+        if (m_btnDebugToggle != null) {
+            m_updatingToggleUi = true;
+            m_btnDebugToggle.setChecked(m_debugVisible);
+            m_btnDebugToggle.setAlpha(m_debugVisible ? 1.0f : 0.65f);
+            m_updatingToggleUi = false;
+        }
+    }
+
+    private void updateRemoteControlsVisibility() {
+        if (m_remoteControlsBar != null) {
+            m_remoteControlsBar.setVisibility(m_remoteVisible ? View.VISIBLE : View.GONE);
+        }
+        if (m_joystickLeft != null) {
+            m_joystickLeft.setVisibility(m_remoteVisible ? View.VISIBLE : View.GONE);
+        }
+        if (m_joystickRight != null) {
+            m_joystickRight.setVisibility(m_remoteVisible ? View.VISIBLE : View.GONE);
+        }
+        if (m_btnRemoteToggle != null) {
+            m_updatingToggleUi = true;
+            m_btnRemoteToggle.setChecked(m_remoteVisible);
+            m_btnRemoteToggle.setAlpha(m_remoteVisible ? 1.0f : 0.65f);
+            m_updatingToggleUi = false;
+        }
+    }
+
+    private void resetRemoteInputs() {
+        if (m_joystickLeft != null) {
+            m_joystickLeft.Reset();
+        }
+        if (m_joystickRight != null) {
+            m_joystickRight.Reset();
+        }
+        m_leftX = 0f;
+        m_leftY = 0f;
+        m_rightX = 0f;
+        m_rightY = 0f;
+        m_leftActive = false;
+        m_rightActive = false;
+        m_lastJoystickActive = false;
     }
 
     private void refreshVideoFrames() {
@@ -688,20 +718,25 @@ public class MainActivity extends Activity {
     private void updateRuntimeButtons() {
         boolean sensorPending = isPending(PENDING_SENSOR) || isPending(PENDING_RUNTIME);
         boolean runtimePending = isPending(PENDING_RUNTIME);
+        m_updatingToggleUi = true;
         if (m_btnSensorMode != null) {
-            m_btnSensorMode.setText(sensorModeToText(m_sensorMode));
-            setButtonState(m_btnSensorMode, m_sensorMode == SENSOR_STEREO_IMU, sensorPending, "#455A64");
+            m_btnSensorMode.setChecked(m_sensorMode == SENSOR_STEREO_IMU);
+            m_btnSensorMode.setEnabled(!sensorPending);
+            m_btnSensorMode.setAlpha(sensorPending ? 0.35f : 1.0f);
         }
         if (m_btnToggleSlam != null) {
-            m_btnToggleSlam.setText(m_runtimeMode == MODE_SLAM ? "Stop VIO" : "Start VIO");
-            setButtonState(m_btnToggleSlam, m_runtimeMode == MODE_SLAM, runtimePending, "#2E7D32");
+            m_btnToggleSlam.setChecked(m_runtimeMode == MODE_SLAM);
+            m_btnToggleSlam.setEnabled(!runtimePending);
+            m_btnToggleSlam.setAlpha(runtimePending ? 0.35f : 1.0f);
         }
         if (m_btnToggleCalib != null) {
-            m_btnToggleCalib.setText(m_runtimeMode == MODE_CALIB ? "Stop Calib" : "Start Calib");
-            setButtonState(m_btnToggleCalib, m_runtimeMode == MODE_CALIB, runtimePending, "#1565C0");
+            m_btnToggleCalib.setChecked(m_runtimeMode == MODE_CALIB);
+            m_btnToggleCalib.setEnabled(!runtimePending);
+            m_btnToggleCalib.setAlpha(runtimePending ? 0.35f : 1.0f);
         }
+        m_updatingToggleUi = false;
         if (m_btnCleanCalib != null) {
-            setButtonState(m_btnCleanCalib, false, isPending(PENDING_CLEAN_CALIB), "#546E7A");
+            setButtonState(m_btnCleanCalib, true, isPending(PENDING_CLEAN_CALIB), "#546E7A");
         }
     }
 
@@ -1341,13 +1376,16 @@ public class MainActivity extends Activity {
 
         float leftMag = clamp01((float) Math.hypot(leftX, leftY));
         float rightMag = clamp01((float) Math.hypot(rightX, rightY));
-        float rightVerticalMag = clamp01(Math.abs(rightY));
         boolean active = m_leftActive || m_rightActive
                 || leftX != 0f || leftY != 0f || rightX != 0f || rightY != 0f;
 
+        float horizontalVx = rightY * 5.0f;
+        float horizontalVy = rightX * 5.0f;
+        float verticalVz = -leftY * 3.0f;
+
         m_tvJoystickState.setText(String.format(Locale.US,
-                "OFFBOARD L[yaw=%.2f thr=%.2f mag=%.2f] R[roll=%.2f pitch=%.2f mag=%.2f] %s",
-                leftX, leftY, leftMag, rightX, rightY, rightMag, active ? "ACTIVE" : "CENTER"));
+                "OFFBOARD L[yaw=%.2f vz=%.2f] R[vy=%.2f vx=%.2f] magL=%.2f magR=%.2f %s",
+                leftX, verticalVz, horizontalVy, horizontalVx, leftMag, rightMag, active ? "ACTIVE" : "CENTER"));
 
         if (!active) {
             if (m_lastJoystickActive) {
@@ -1358,17 +1396,11 @@ public class MainActivity extends Activity {
         }
         m_lastJoystickActive = true;
 
-        float baseMaxV = 1.0f;
-        float dynamicMaxV = baseMaxV * clamp01(Math.max(leftMag, Math.max(rightVerticalMag, Math.abs(rightX))));
-        if (dynamicMaxV < 0.05f) {
-            dynamicMaxV = 0.05f;
-        }
-
         float throttle = leftY;
         float yaw = leftX;
         float pitch = rightY;
         float roll = rightX;
-        sendMoveRcJoystickCommand(throttle, yaw, pitch, roll, dynamicMaxV, "JOY RC");
+        sendMoveRcJoystickCommand(throttle, yaw, pitch, roll, 5.0f, "JOY RC");
     }
 
     private void startJoystickLoop() {
@@ -1398,34 +1430,13 @@ public class MainActivity extends Activity {
         m_handler.removeCallbacks(m_rxLoop);
     }
 
-    private void resetJoysticksAndHold() {
-        if (m_joystickLeft != null) {
-            m_joystickLeft.Reset();
-        }
-        if (m_joystickRight != null) {
-            m_joystickRight.Reset();
-        }
-        m_leftX = 0f;
-        m_leftY = 0f;
-        m_rightX = 0f;
-        m_rightY = 0f;
-        m_leftActive = false;
-        m_rightActive = false;
-        m_lastJoystickActive = false;
-        sendHoldBurst(3, "HOLD(page)");
-    }
-
-    private void setManualPage(boolean manualMode) {
-        if (m_pageManual == null || m_pageCommand == null) {
+    private void setSettingsVisible(boolean visible) {
+        if (m_pageCommand == null) {
             return;
         }
-        m_isManualMode = manualMode;
-        if (!manualMode) {
-            resetJoysticksAndHold();
-        }
-        m_pageManual.setVisibility(manualMode ? View.VISIBLE : View.GONE);
-        m_pageCommand.setVisibility(manualMode ? View.GONE : View.VISIBLE);
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        m_settingsVisible = visible;
+        m_pageCommand.setVisibility(visible ? View.VISIBLE : View.GONE);
+        updateDebugPanelVisibility();
     }
 
     @Override
@@ -1449,10 +1460,11 @@ public class MainActivity extends Activity {
         m_tvPose = findViewById(R.id.tvPose);
         m_tvVideoStats = findViewById(R.id.tvVideoStats);
         m_tvJoystickState = findViewById(R.id.tvJoystickState);
-        m_pageManual = findViewById(R.id.pageManual);
+        m_debugPanel = findViewById(R.id.debugPanel);
+        m_remoteControlsBar = findViewById(R.id.remoteControlsBar);
         m_pageCommand = findViewById(R.id.pageCommand);
+        m_mapPanel = findViewById(R.id.mapPanel);
         m_btnModeToggle = findViewById(R.id.btnModeToggle);
-        m_btnModeToggleCommand = findViewById(R.id.btnModeToggleCommand);
         m_btnArmToggle = findViewById(R.id.btnArm);
         m_btnEmergencyStop = findViewById(R.id.btnEmergencyStop);
         m_btnOffboard = findViewById(R.id.btnOffboard);
@@ -1461,14 +1473,13 @@ public class MainActivity extends Activity {
         m_btnToggleSlam = findViewById(R.id.btnToggleSlam);
         m_btnToggleCalib = findViewById(R.id.btnToggleCalib);
         m_btnSensorMode = findViewById(R.id.btnSensorMode);
+        m_btnRemoteToggle = findViewById(R.id.btnRemoteToggle);
+        m_btnDebugToggle = findViewById(R.id.btnDebugToggle);
         m_btnMapClear = findViewById(R.id.btnMapClear);
         m_btnMapZoom = findViewById(R.id.btnMapZoom);
         m_btnImageToggle = findViewById(R.id.btnImageToggle);
-        m_btnImageToggleCommand = findViewById(R.id.btnImageToggleCommand);
         m_btnMapToggle = findViewById(R.id.btnMapToggle);
-        m_btnMapToggleCommand = findViewById(R.id.btnMapToggleCommand);
         m_btnFeatureToggle = findViewById(R.id.btnFeatureToggle);
-        m_btnFeatureToggleCommand = findViewById(R.id.btnFeatureToggleCommand);
         m_featurePaint.setColor(Color.GREEN);
         m_featurePaint.setStyle(Paint.Style.STROKE);
         m_featurePaint.setStrokeWidth(2.0f);
@@ -1479,7 +1490,7 @@ public class MainActivity extends Activity {
         if (m_etVehicleIp != null) {
             ArrayAdapter<String> vehicleIpAdapter = new ArrayAdapter<>(
                     this,
-                    android.R.layout.simple_dropdown_item_1line,
+                    R.layout.dropdown_vehicle_ip_item,
                     DEFAULT_VEHICLE_IPS);
             m_etVehicleIp.setAdapter(vehicleIpAdapter);
             m_etVehicleIp.setOnClickListener(v -> m_etVehicleIp.showDropDown());
@@ -1557,6 +1568,8 @@ public class MainActivity extends Activity {
         updateMapButtons();
         updateStreamToggleButtons();
         updateFeatureToggleButton();
+        updateDebugPanelVisibility();
+        updateRemoteControlsVisibility();
 
         if (m_btnMapClear != null) {
             m_btnMapClear.setOnClickListener(v -> {
@@ -1574,8 +1587,11 @@ public class MainActivity extends Activity {
             });
         }
         if (m_btnImageToggle != null) {
-            m_btnImageToggle.setOnClickListener(v -> {
-                final boolean nextValue = !m_sendImage;
+            m_btnImageToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (m_updatingToggleUi) {
+                    return;
+                }
+                final boolean nextValue = isChecked;
                 sendRuntimeConfigAwaitAck(
                         m_cfgExposureUs,
                         (float) m_cfgGain,
@@ -1595,16 +1611,12 @@ public class MainActivity extends Activity {
                         });
             });
         }
-        if (m_btnImageToggleCommand != null) {
-            m_btnImageToggleCommand.setOnClickListener(v -> {
-                if (m_btnImageToggle != null) {
-                    m_btnImageToggle.performClick();
-                }
-            });
-        }
         if (m_btnMapToggle != null) {
-            m_btnMapToggle.setOnClickListener(v -> {
-                final boolean nextValue = !m_sendMap;
+            m_btnMapToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (m_updatingToggleUi) {
+                    return;
+                }
+                final boolean nextValue = isChecked;
                 sendRuntimeConfigAwaitAck(
                         m_cfgExposureUs,
                         (float) m_cfgGain,
@@ -1620,16 +1632,12 @@ public class MainActivity extends Activity {
                         });
             });
         }
-        if (m_btnMapToggleCommand != null) {
-            m_btnMapToggleCommand.setOnClickListener(v -> {
-                if (m_btnMapToggle != null) {
-                    m_btnMapToggle.performClick();
-                }
-            });
-        }
         if (m_btnFeatureToggle != null) {
-            m_btnFeatureToggle.setOnClickListener(v -> {
-                final boolean nextValue = !m_sendFeature;
+            m_btnFeatureToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (m_updatingToggleUi) {
+                    return;
+                }
+                final boolean nextValue = isChecked;
                 sendRuntimeConfigAwaitAck(
                         m_cfgExposureUs,
                         (float) m_cfgGain,
@@ -1647,11 +1655,26 @@ public class MainActivity extends Activity {
                         });
             });
         }
-        if (m_btnFeatureToggleCommand != null) {
-            m_btnFeatureToggleCommand.setOnClickListener(v -> {
-                if (m_btnFeatureToggle != null) {
-                    m_btnFeatureToggle.performClick();
+        if (m_btnDebugToggle != null) {
+            m_btnDebugToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (m_updatingToggleUi) {
+                    return;
                 }
+                m_debugVisible = isChecked;
+                updateDebugPanelVisibility();
+            });
+        }
+        if (m_btnRemoteToggle != null) {
+            m_btnRemoteToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (m_updatingToggleUi) {
+                    return;
+                }
+                m_remoteVisible = isChecked;
+                if (!m_remoteVisible) {
+                    resetRemoteInputs();
+                    sendHoldBurst(3, "HOLD(remote off)");
+                }
+                updateRemoteControlsVisibility();
             });
         }
 
@@ -1666,14 +1689,15 @@ public class MainActivity extends Activity {
             m_rightActive = active;
         });
 
-        m_btnModeToggle.setOnClickListener(v -> setManualPage(!m_isManualMode));
-        if (m_btnModeToggleCommand != null) {
-            m_btnModeToggleCommand.setOnClickListener(v -> setManualPage(!m_isManualMode));
-        }
+        m_btnModeToggle.setOnClickListener(v -> setSettingsVisible(!m_settingsVisible));
         if (savedInstanceState != null) {
-            m_isManualMode = savedInstanceState.getBoolean(KEY_MANUAL_MODE, false);
+            m_settingsVisible = savedInstanceState.getBoolean(KEY_SETTINGS_VISIBLE, false);
+            m_debugVisible = savedInstanceState.getBoolean(KEY_DEBUG_VISIBLE, false);
+            m_remoteVisible = savedInstanceState.getBoolean(KEY_REMOTE_VISIBLE, false);
         }
-        setManualPage(m_isManualMode);
+        setSettingsVisible(m_settingsVisible);
+        updateDebugPanelVisibility();
+        updateRemoteControlsVisibility();
 
         if (m_btnArmToggle != null) {
             m_btnArmToggle.setOnClickListener(v -> {
@@ -1687,32 +1711,11 @@ public class MainActivity extends Activity {
         }
         if (m_btnEmergencyStop != null) {
             m_btnEmergencyStop.setOnClickListener(v ->
-                    m_tvStatus.setText("Press and hold E-STOP for 1 second"));
-            m_btnEmergencyStop.setOnTouchListener((v, event) -> {
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        if (!isPending(PENDING_EMERGENCY_STOP)) {
-                            m_handler.removeCallbacks(m_emergencyStopHoldRunnable);
-                            m_tvStatus.setText("Hold E-STOP for 1 second to trigger");
-                            m_handler.postDelayed(m_emergencyStopHoldRunnable, EMERGENCY_STOP_HOLD_MS);
-                        }
-                        return false;
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                    case MotionEvent.ACTION_MOVE:
-                        if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
-                            float x = event.getX();
-                            float y = event.getY();
-                            if (x >= 0 && x <= v.getWidth() && y >= 0 && y <= v.getHeight()) {
-                                return false;
-                            }
-                        }
-                        m_handler.removeCallbacks(m_emergencyStopHoldRunnable);
-                        return false;
-                    default:
-                        return false;
-                }
-            });
+                    sendSimpleCmdAwaitAck("EMERGENCY_STOP", CMD_EMERGENCY_STOP, PENDING_EMERGENCY_STOP, () -> {
+                        m_armLatched = false;
+                        m_lastFlightCommand = "EMERGENCY_STOP";
+                        updateFlightButtons();
+                    }));
         }
         if (m_btnOffboard != null) {
             m_btnOffboard.setOnClickListener(v -> {
@@ -1743,8 +1746,11 @@ public class MainActivity extends Activity {
                     sendSimpleCmdAwaitAck("CLEAN_CALIB", CMD_CALIB_CLEAN, PENDING_CLEAN_CALIB, () -> { }));
         }
         if (m_btnSensorMode != null) {
-            m_btnSensorMode.setOnClickListener(v -> {
-                final int nextSensorMode = (m_sensorMode == SENSOR_STEREO_IMU) ? SENSOR_STEREO : SENSOR_STEREO_IMU;
+            m_btnSensorMode.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (m_updatingToggleUi) {
+                    return;
+                }
+                final int nextSensorMode = isChecked ? SENSOR_STEREO_IMU : SENSOR_STEREO;
                 final int exposureUs = m_cfgExposureUs;
                 final float gain = (float) m_cfgGain;
                 sendRuntimeConfigAwaitAck(
@@ -1757,24 +1763,34 @@ public class MainActivity extends Activity {
                         "Sensor mode",
                         PENDING_SENSOR,
                         () -> {
-                    m_sensorMode = nextSensorMode;
-                    updateRuntimeButtons();
-                });
+                            m_sensorMode = nextSensorMode;
+                            updateRuntimeButtons();
+                        });
             });
         }
 
-        m_btnToggleSlam.setOnClickListener(v -> {
-            if (m_runtimeMode == MODE_SLAM) {
+        m_btnToggleSlam.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (m_updatingToggleUi) {
+                return;
+            }
+            if (isChecked) {
+                sendRuntimeMode(MODE_SLAM, "Start VIO");
+            } else if (m_runtimeMode == MODE_SLAM) {
                 stopRuntime("Stop VIO");
             } else {
-                sendRuntimeMode(MODE_SLAM, "Start VIO");
+                updateRuntimeButtons();
             }
         });
-        m_btnToggleCalib.setOnClickListener(v -> {
-            if (m_runtimeMode == MODE_CALIB) {
+        m_btnToggleCalib.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (m_updatingToggleUi) {
+                return;
+            }
+            if (isChecked) {
+                sendRuntimeMode(MODE_CALIB, "Start Calib");
+            } else if (m_runtimeMode == MODE_CALIB) {
                 stopRuntime("Stop Calib");
             } else {
-                sendRuntimeMode(MODE_CALIB, "Start Calib");
+                updateRuntimeButtons();
             }
         });
         updateRuntimeButtons();
@@ -1799,7 +1815,6 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         stopRxLoop();
         stopJoystickLoop();
-        m_handler.removeCallbacks(m_emergencyStopHoldRunnable);
         super.onDestroy();
         try {
             NativeUdp.close();
@@ -1809,7 +1824,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
-        outState.putBoolean(KEY_MANUAL_MODE, m_isManualMode);
+        outState.putBoolean(KEY_SETTINGS_VISIBLE, m_settingsVisible);
+        outState.putBoolean(KEY_DEBUG_VISIBLE, m_debugVisible);
+        outState.putBoolean(KEY_REMOTE_VISIBLE, m_remoteVisible);
         super.onSaveInstanceState(outState);
     }
 }

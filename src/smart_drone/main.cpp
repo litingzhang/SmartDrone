@@ -412,30 +412,20 @@ public:
         MavlinkSerial::SetpointLocalNED setpoint{};
         if (goal.isRcJoystick) {
             constexpr float kYawRateRadps = 1.2f;
-            constexpr float kVzSpeedMps = 1.0f;
-            constexpr float kPositionLookaheadSec = 0.8f;
+            constexpr float kMaxHorizontalSpeedMps = 5.0f;
+            constexpr float kMaxVerticalSpeedMps = 3.0f;
 
             const float throttle = ClampSignedUnit(goal.throttleNorm);
             const float yaw = ClampSignedUnit(goal.yawNorm);
             const float pitch = ClampSignedUnit(goal.pitchNorm);
             const float roll = ClampSignedUnit(goal.rollNorm);
 
-            const float xySpeed = std::max(0.2f, std::min(goal.maxV, 5.0f));
-            setpoint.vz = -throttle * kVzSpeedMps;
-            LivePoseState::Snapshot snapshot{};
-            if (!m_livePose.ReadSnapshot(snapshot) || !snapshot.poseValid) {
-                if (err) *err = "offboard joystick needs valid live pose";
-                return false;
-            }
-            setpoint.x = snapshot.x + pitch * xySpeed * kPositionLookaheadSec;
-            setpoint.y = snapshot.y + roll * xySpeed * kPositionLookaheadSec;
-            setpoint.z = NAN;
-            setpoint.vx = NAN;
-            setpoint.vy = NAN;
-            const float currentYaw = YawFromQuat(snapshot.qw, snapshot.qx, snapshot.qy, snapshot.qz);
-            const float yawLookahead = yaw * kYawRateRadps * kPositionLookaheadSec;
-            setpoint.yaw = currentYaw + yawLookahead;
-            setpoint.yawspeed = NAN;
+            setpoint.x = NAN; setpoint.y = NAN; setpoint.z = NAN;
+            setpoint.vx = pitch * kMaxHorizontalSpeedMps;
+            setpoint.vy = roll * kMaxHorizontalSpeedMps;
+            setpoint.vz = -throttle * kMaxVerticalSpeedMps;
+            setpoint.yaw = NAN;
+            setpoint.yawspeed = yaw * kYawRateRadps;
         } else if (goal.isVelocity) {
             setpoint.x = NAN; setpoint.y = NAN; setpoint.z = NAN;
             setpoint.vx = goal.vx; setpoint.vy = goal.vy; setpoint.vz = goal.vz;
@@ -1040,12 +1030,19 @@ bool RunCalibSession(const UnifiedConfig& cfg, std::atomic<bool>& stop, LivePose
         }
     }
     cam.Close();
+    std::cerr << "[session] calib camera closed\n";
     stop.store(true);
     if (imuThread.joinable()) imuThread.join();
+    std::cerr << "[session] calib imu joined\n";
+    if (a.udpEnable && a.sendImage) {
+        udp.Close();
+        std::cerr << "[session] calib udp closed\n";
+    }
     std::fflush(fCam0); std::fflush(fCam1); std::fflush(fImu);
     std::fclose(fCam0); std::fclose(fCam1); std::fclose(fImu);
     std::cerr << "[calib] out=" << outRoot << " saved=" << saved << " imuOk=" << (imuOk.load() ? "true" : "false") << "\n";
     livePose.SetRuntimeMode(RUNTIME_MODE_IDLE);
+    std::cerr << "[session] calib exit\n";
     return true;
 }
 
@@ -1104,10 +1101,36 @@ public:
     }
     bool CleanupCalibData(std::string* msg)
     {
-        std::lock_guard<std::mutex> lock(m_mu);
-        if (m_activeMode != UnifiedMode::Idle || m_desiredMode != UnifiedMode::Idle || m_session.joinable()) {
-            if (msg) *msg = "runtime busy";
-            return false;
+        {
+            std::unique_lock<std::mutex> lock(m_mu);
+            if (m_stopping) {
+                if (msg) *msg = "runtime stopping";
+                return false;
+            }
+
+            // Allow "StopCalib -> CleanCalib" back-to-back by forcing the runtime
+            // into idle and waiting for the session thread to fully join.
+            if (m_activeMode != UnifiedMode::Idle || m_desiredMode != UnifiedMode::Idle || m_session.joinable()) {
+                m_desiredMode = UnifiedMode::Idle;
+                m_restartRequested = true;
+                m_sessionStop.store(true);
+                m_cv.notify_all();
+                const bool idleReady = m_cv.wait_for(lock, std::chrono::seconds(5), [this]() {
+                    return m_stopping
+                        || (m_activeMode == UnifiedMode::Idle
+                            && m_desiredMode == UnifiedMode::Idle
+                            && !m_session.joinable()
+                            && !m_sessionDone);
+                });
+                if (!idleReady) {
+                    if (msg) *msg = "runtime busy";
+                    return false;
+                }
+                if (m_stopping) {
+                    if (msg) *msg = "runtime stopping";
+                    return false;
+                }
+            }
         }
         const int removed = CleanupCalibDataDirs(m_config.calib.root);
         if (msg) *msg = "calib clean removed=" + std::to_string(removed);
@@ -1156,6 +1179,7 @@ private:
                 if (needJoin) {
                     m_sessionDone = false;
                     m_activeMode = UnifiedMode::Idle;
+                    m_cv.notify_all();
                 }
                 if (m_stopping) break;
                 if (m_activeMode != UnifiedMode::Idle && m_desiredMode == m_activeMode && !m_restartRequested) continue;
