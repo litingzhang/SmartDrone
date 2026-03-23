@@ -5,13 +5,12 @@
 
 namespace {
 
-bool IsMonotonicSeq(uint32_t value, uint32_t& lastValue)
+constexpr uint32_t kSessionResetSeqThreshold = 32;
+constexpr auto kSessionResetIdleGap = std::chrono::milliseconds(750);
+
+bool IsTickAfter32(uint32_t value, uint32_t baseline)
 {
-    if (value == 0 || value <= lastValue) {
-        return false;
-    }
-    lastValue = value;
-    return true;
+    return static_cast<int32_t>(value - baseline) > 0;
 }
 
 bool IsFinite(float value)
@@ -22,6 +21,42 @@ bool IsFinite(float value)
 }  // namespace
 
 TlvCmdRouter::TlvCmdRouter(MavlinkHooks& hooks) : m_hooks(hooks) {}
+
+bool TlvCmdRouter::AcceptSeq(uint32_t seq, uint32_t senderMs, SeqTracker& tracker)
+{
+    const auto now = std::chrono::steady_clock::now();
+    if (seq == 0) {
+        return false;
+    }
+    if (!tracker.seen) {
+        tracker.lastSeq = seq;
+        tracker.lastSenderMs = senderMs;
+        tracker.lastRxTime = now;
+        tracker.seen = true;
+        return true;
+    }
+    if (seq > tracker.lastSeq) {
+        tracker.lastSeq = seq;
+        if (IsTickAfter32(senderMs, tracker.lastSenderMs) || senderMs == tracker.lastSenderMs) {
+            tracker.lastSenderMs = senderMs;
+        }
+        tracker.lastRxTime = now;
+        return true;
+    }
+
+    const bool senderClockAdvanced = IsTickAfter32(senderMs, tracker.lastSenderMs);
+    const bool idleGapExceeded = (now - tracker.lastRxTime) >= kSessionResetIdleGap;
+    const bool looksLikeClientRestart =
+        seq <= kSessionResetSeqThreshold && (senderClockAdvanced || idleGapExceeded);
+    if (!looksLikeClientRestart) {
+        return false;
+    }
+
+    tracker.lastSeq = seq;
+    tracker.lastSenderMs = senderMs;
+    tracker.lastRxTime = now;
+    return true;
+}
 
 float TlvCmdRouter::ReadF32Le(const uint8_t* p)
 {
@@ -56,7 +91,7 @@ RouteResult TlvCmdRouter::Handle(const TlvFrame& frame)
     if (frame.ver != TLV_VER) {
         return {ACK_E_BAD_ARGS, "bad version"};
     }
-    if (!IsMonotonicSeq(frame.seq, m_lastSeq)) {
+    if (!AcceptSeq(frame.seq, frame.tMs, m_cmdSeqTracker)) {
         return {ACK_E_BAD_STATE, "seq not monotonic"};
     }
 
@@ -69,14 +104,10 @@ RouteResult TlvCmdRouter::Handle(const TlvFrame& frame)
 
 RouteResult TlvCmdRouter::HandleSimple(uint8_t cmd)
 {
-    const VehicleGate gate = m_hooks.GetGate();
     std::string err;
 
     switch (cmd) {
         case CMD_ARM:
-            if (!gate.vioOk) {
-                return {ACK_E_BAD_STATE, "vio not ok"};
-            }
             if (!m_hooks.Arm(&err)) {
                 return {ACK_E_INTERNAL, err.empty() ? "arm failed" : err};
             }
@@ -95,14 +126,8 @@ RouteResult TlvCmdRouter::HandleSimple(uint8_t cmd)
             return {ACK_OK, ""};
 
         case CMD_OFFBOARD:
-            if (!gate.vioOk) {
-                return {ACK_E_BAD_STATE, "vio not ok"};
-            }
-            if (!gate.offboardReady) {
-                return {ACK_E_BAD_STATE, "offboard not ready"};
-            }
             if (!m_hooks.SetOffboard(&err)) {
-                return {ACK_E_INTERNAL, err.empty() ? "offboard failed" : err};
+                return {ACK_E_INTERNAL, err.empty() ? "remote mode failed" : err};
             }
             return {ACK_OK, ""};
 
@@ -129,14 +154,7 @@ RouteResult TlvCmdRouter::HandleMove(const TlvFrame& frame)
         return {ACK_E_BAD_LEN, "bad move len"};
     }
 
-    const VehicleGate gate = m_hooks.GetGate();
-    if (!gate.vioOk) {
-        return {ACK_E_BAD_STATE, "vio not ok"};
-    }
-    if (!gate.offboardReady) {
-        return {ACK_E_BAD_STATE, "offboard not ready"};
-    }
-    if (!IsMonotonicSeq(frame.seq, m_lastMoveSeq)) {
+    if (!AcceptSeq(frame.seq, frame.tMs, m_moveSeqTracker)) {
         return {ACK_E_BAD_STATE, "old move dropped"};
     }
 
@@ -182,6 +200,16 @@ RouteResult TlvCmdRouter::HandleMove(const TlvFrame& frame)
             goal.y = valueB;
             goal.z = valueC;
             goal.yaw = valueD;
+        }
+    }
+
+    if (!goal.isRcJoystick) {
+        const VehicleGate gate = m_hooks.GetGate();
+        if (!gate.vioOk) {
+            return {ACK_E_BAD_STATE, "vio not ok"};
+        }
+        if (!gate.offboardReady) {
+            return {ACK_E_BAD_STATE, "offboard not ready"};
         }
     }
 

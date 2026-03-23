@@ -10,6 +10,11 @@ enum class SensorMode {
     StereoImu,
 };
 
+inline const char* DefaultSettingsForSensorMode(SensorMode mode)
+{
+    return (mode == SensorMode::StereoImu) ? "stereo_inertial.yaml" : "stereo.yaml";
+}
+
 inline SensorMode ParseSensorModeText(const std::string& text)
 {
     std::string normalized = text;
@@ -71,7 +76,7 @@ struct RuntimeConfig {
 
 struct AppConfig {
     std::string vocab{"ORBvoc.txt"};
-    std::string settings{"stereo_inertial.yaml"};
+    std::string settings{"stereo.yaml"};
     SensorMode sensorMode{SensorMode::Stereo};
     CameraConfig camera;
     UdpConfig udp;
@@ -167,8 +172,7 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
 
     config.vocab = argReader.GetString("--vocab", "ORBvoc.txt");
     config.sensorMode = ParseSensorModeText(argReader.GetString("--sensor-mode", "stereo"));
-    const char* defaultSettings =
-        (config.sensorMode == SensorMode::StereoImu) ? "stereo_inertial.yaml" : "stereo.yaml";
+    const char* defaultSettings = DefaultSettingsForSensorMode(config.sensorMode);
     config.settings = argReader.GetString("--settings", defaultSettings);
 
     config.camera.width = argReader.GetInt("--w", 640);

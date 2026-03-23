@@ -96,28 +96,6 @@
                             android:textSize="9sp" />
 
                         <Button
-                            android:id="@+id/btnOffboard"
-                            android:layout_width="94dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="4dp"
-                            android:background="@drawable/bg_oval_button"
-                            android:minHeight="34dp"
-                            android:text="OFFBOARD"
-                            android:textColor="#FFFFFF"
-                            android:textSize="10sp" />
-
-                        <Button
-                            android:id="@+id/btnHold"
-                            android:layout_width="80dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="4dp"
-                            android:background="@drawable/bg_oval_button"
-                            android:minHeight="34dp"
-                            android:text="HOLD"
-                            android:textColor="#FFFFFF"
-                            android:textSize="10sp" />
-
-                        <Button
                             android:id="@+id/btnLand"
                             android:layout_width="80dp"
                             android:layout_height="wrap_content"
@@ -130,23 +108,113 @@
                     </LinearLayout>
                 </HorizontalScrollView>
 
-                <com.example.smartdrone.JoystickView
+                <FrameLayout
                     android:id="@+id/joystickLeft"
-                    android:layout_width="170dp"
-                    android:layout_height="170dp"
+                    android:layout_width="148dp"
+                    android:layout_height="148dp"
                     android:layout_gravity="bottom|start"
-                    android:layout_marginStart="8dp"
-                    android:layout_marginBottom="8dp"
-                    android:alpha="0.65" />
+                    android:layout_marginStart="6dp"
+                    android:layout_marginBottom="6dp"
+                    android:alpha="0.92">
 
-                <com.example.smartdrone.JoystickView
+                    <ImageButton
+                        android:id="@+id/btnLeftUp"
+                        android:layout_width="76dp"
+                        android:layout_height="76dp"
+                        android:layout_gravity="top|center_horizontal"
+                        android:background="@android:color/transparent"
+                        android:contentDescription="altitude_up"
+                        android:padding="0dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_control_move_ground_forward" />
+
+                    <ImageButton
+                        android:id="@+id/btnLeftDown"
+                        android:layout_width="76dp"
+                        android:layout_height="76dp"
+                        android:layout_gravity="bottom|center_horizontal"
+                        android:background="@android:color/transparent"
+                        android:contentDescription="altitude_down"
+                        android:padding="0dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_control_move_ground_back" />
+
+                    <ImageButton
+                        android:id="@+id/btnLeftYawLeft"
+                        android:layout_width="76dp"
+                        android:layout_height="76dp"
+                        android:layout_gravity="center_vertical|start"
+                        android:background="@android:color/transparent"
+                        android:contentDescription="yaw_left"
+                        android:padding="0dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_control_move_ground_left" />
+
+                    <ImageButton
+                        android:id="@+id/btnLeftYawRight"
+                        android:layout_width="76dp"
+                        android:layout_height="76dp"
+                        android:layout_gravity="center_vertical|end"
+                        android:background="@android:color/transparent"
+                        android:contentDescription="yaw_right"
+                        android:padding="0dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_control_move_ground_right" />
+                </FrameLayout>
+
+                <FrameLayout
                     android:id="@+id/joystickRight"
-                    android:layout_width="170dp"
-                    android:layout_height="170dp"
+                    android:layout_width="148dp"
+                    android:layout_height="148dp"
                     android:layout_gravity="bottom|end"
-                    android:layout_marginEnd="8dp"
-                    android:layout_marginBottom="8dp"
-                    android:alpha="0.65" />
+                    android:layout_marginEnd="6dp"
+                    android:layout_marginBottom="6dp"
+                    android:alpha="0.92">
+
+                    <ImageButton
+                        android:id="@+id/btnRightForward"
+                        android:layout_width="76dp"
+                        android:layout_height="76dp"
+                        android:layout_gravity="top|center_horizontal"
+                        android:background="@android:color/transparent"
+                        android:contentDescription="move_forward"
+                        android:padding="0dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_control_move_ground_forward" />
+
+                    <ImageButton
+                        android:id="@+id/btnRightBack"
+                        android:layout_width="76dp"
+                        android:layout_height="76dp"
+                        android:layout_gravity="bottom|center_horizontal"
+                        android:background="@android:color/transparent"
+                        android:contentDescription="move_back"
+                        android:padding="0dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_control_move_ground_back" />
+
+                    <ImageButton
+                        android:id="@+id/btnRightLeft"
+                        android:layout_width="76dp"
+                        android:layout_height="76dp"
+                        android:layout_gravity="center_vertical|start"
+                        android:background="@android:color/transparent"
+                        android:contentDescription="move_left"
+                        android:padding="0dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_control_move_ground_left" />
+
+                    <ImageButton
+                        android:id="@+id/btnRightRight"
+                        android:layout_width="76dp"
+                        android:layout_height="76dp"
+                        android:layout_gravity="center_vertical|end"
+                        android:background="@android:color/transparent"
+                        android:contentDescription="move_right"
+                        android:padding="0dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_control_move_ground_right" />
+                </FrameLayout>
 
                 <FrameLayout
                     android:id="@+id/mapPanel"
@@ -616,7 +684,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:text="Joystick idle"
+            android:text="Remote idle"
             android:textColor="#DDFFFFFF"
             android:textSize="10sp" />
     </LinearLayout>

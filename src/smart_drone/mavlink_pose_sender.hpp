@@ -55,6 +55,32 @@ public:
         float qw, qx, qy, qz;
     };
 
+    struct LinearVelocityNed {
+        LinearVelocityNed(float xIn = NAN, float yIn = NAN, float zIn = NAN)
+            : x(xIn), y(yIn), z(zIn)
+        {
+        }
+
+        float x;
+        float y;
+        float z;
+    };
+
+    struct LocalPositionNed {
+        float x{0.0f}, y{0.0f}, z{0.0f};
+        float vx{0.0f}, vy{0.0f}, vz{0.0f};
+        uint32_t timeBootMs{0};
+        uint64_t receivedUs{0};
+    };
+
+    struct DownwardDistanceSensor {
+        float currentDistance{NAN};
+        float minDistance{NAN};
+        float maxDistance{NAN};
+        uint8_t signalQuality{0};
+        uint64_t receivedUs{0};
+    };
+
     explicit MavlinkSerial(const std::string& dev, int baud,
                            uint8_t sysid = 42, uint8_t compid = MAV_COMP_ID_VISUAL_INERTIAL_ODOMETRY)
         : m_fd(-1), m_sysid(sysid), m_compid(compid), m_seq(0)
@@ -80,6 +106,36 @@ public:
     uint8_t GetTargetSystem() const { return m_px4Sysid.load(); }
     uint8_t GetTargetComponent() const { return m_px4Compid.load(); }
 
+    bool GetLocalPositionNed(LocalPositionNed& out, uint64_t maxAgeUs = 500000) const
+    {
+        std::lock_guard<std::mutex> lk(m_localPosMtx);
+        if (!m_haveLocalPosNed) {
+            return false;
+        }
+
+        if (maxAgeUs > 0 && (MonotonicTimeUs() - m_localPosNed.receivedUs) > maxAgeUs) {
+            return false;
+        }
+
+        out = m_localPosNed;
+        return true;
+    }
+
+    bool GetDownwardDistanceSensor(DownwardDistanceSensor& out, uint64_t maxAgeUs = 200000) const
+    {
+        std::lock_guard<std::mutex> lk(m_distanceSensorMtx);
+        if (!m_haveDownwardDistanceSensor) {
+            return false;
+        }
+
+        if (maxAgeUs > 0 && (MonotonicTimeUs() - m_downwardDistanceSensor.receivedUs) > maxAgeUs) {
+            return false;
+        }
+
+        out = m_downwardDistanceSensor;
+        return true;
+    }
+
     // 等待某个 COMMAND 的 ACK（返回 true 表示等到了）
     // outResult: MAV_RESULT_*
     bool WaitCommandAck(uint16_t command, int timeoutMs, uint8_t& outResult)
@@ -98,8 +154,42 @@ public:
         return true;
     }
 
+    struct ManualControlInput {
+        float throttleNorm{0.0f}; // -1 descend, 0 hold, +1 climb
+        float yawNorm{0.0f};      // clockwise positive
+        float pitchNorm{0.0f};    // forward positive
+        float rollNorm{0.0f};     // right positive
+    };
+
+    struct FlightModeInfo {
+        uint8_t baseMode{0};
+        uint32_t customMode{0};
+        uint8_t mainMode{0};
+        uint8_t subMode{0};
+        bool armed{false};
+        uint64_t receivedUs{0};
+    };
+
     // customMode = (mainMode << 16) | (subMode << 24)
+    static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_MANUAL = 1;
+    static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_ALTCTL = 2;
+    static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_POSCTL = 3;
     static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6;
+
+    bool GetFlightModeInfo(FlightModeInfo& out, uint64_t maxAgeUs = 1500000) const
+    {
+        std::lock_guard<std::mutex> lk(m_flightModeMtx);
+        if (!m_haveFlightModeInfo) {
+            return false;
+        }
+
+        if (maxAgeUs > 0 && (MonotonicTimeUs() - m_flightModeInfo.receivedUs) > maxAgeUs) {
+            return false;
+        }
+
+        out = m_flightModeInfo;
+        return true;
+    }
 
     void SendCommandLong(uint16_t command,
                          float p1=0,float p2=0,float p3=0,float p4=0,float p5=0,float p6=0,float p7=0,
@@ -144,13 +234,12 @@ public:
         return ok;
     }
 
-    // baseMode: MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
-    // customMode: (OFFBOARD << 16)
-    bool SetModeOffboard(int ackTimeoutMs = 800,
+    bool SetModePx4Main(uint8_t mainMode,
+                        int ackTimeoutMs = 800,
                         uint8_t targetSystem = 0, uint8_t targetComponent = 0)
     {
         const float baseMode = (float)MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
-        const uint32_t customMode = (uint32_t)PX4_CUSTOM_MAIN_MODE_OFFBOARD << 16;
+        const uint32_t customMode = (uint32_t)mainMode << 16;
 
         uint8_t res = 255;
         bool got = SendCommandLongAndWaitAck(MAV_CMD_DO_SET_MODE,
@@ -162,6 +251,24 @@ public:
                                             &res);
 
         return got && (res == MAV_RESULT_ACCEPTED);
+    }
+
+    bool SetModeOffboard(int ackTimeoutMs = 800,
+                        uint8_t targetSystem = 0, uint8_t targetComponent = 0)
+    {
+        return SetModePx4Main(PX4_CUSTOM_MAIN_MODE_OFFBOARD, ackTimeoutMs, targetSystem, targetComponent);
+    }
+
+    bool SetModePosition(int ackTimeoutMs = 800,
+                         uint8_t targetSystem = 0, uint8_t targetComponent = 0)
+    {
+        return SetModePx4Main(PX4_CUSTOM_MAIN_MODE_POSCTL, ackTimeoutMs, targetSystem, targetComponent);
+    }
+
+    bool SetModeAltitude(int ackTimeoutMs = 800,
+                         uint8_t targetSystem = 0, uint8_t targetComponent = 0)
+    {
+        return SetModePx4Main(PX4_CUSTOM_MAIN_MODE_ALTCTL, ackTimeoutMs, targetSystem, targetComponent);
     }
 
     // ARM / DISARM
@@ -324,6 +431,41 @@ public:
         UpdateStreamSetpoint(sp);
     }
 
+    void SendManualControl(const ManualControlInput& input,
+                           uint16_t buttons = 0,
+                           uint16_t buttons2 = 0,
+                           uint8_t targetSystem = 0)
+    {
+        if (targetSystem == 0) {
+            targetSystem = GetTargetSystem();
+        }
+
+        auto toAxis = [](float value) -> int16_t {
+            const float clamped = std::max(-1.0f, std::min(1.0f, value));
+            return static_cast<int16_t>(std::lround(clamped * 1000.0f));
+        };
+
+        auto toThrottleAxis = [](float value) -> int16_t {
+            const float clamped = std::max(-1.0f, std::min(1.0f, value));
+            return static_cast<int16_t>(std::lround((clamped + 1.0f) * 500.0f));
+        };
+
+        mavlink_message_t msg{};
+        mavlink_msg_manual_control_pack(
+            m_sysid, m_compid, &msg,
+            targetSystem,
+            toAxis(input.pitchNorm),
+            toAxis(input.rollNorm),
+            toThrottleAxis(input.throttleNorm),
+            toAxis(input.yawNorm),
+            buttons,
+            buttons2,
+            0,
+            0, 0, 0, 0, 0, 0, 0, 0
+        );
+        WriteMessage(msg);
+    }
+
     bool SendLand(int ackTimeoutMs = 800, uint8_t targetSystem = 1, uint8_t targetComponent = 1)
     {
         uint8_t res = 255;
@@ -338,6 +480,7 @@ public:
 
     void SendOdometry(uint64_t timestampUs,
                     const Pose& poseNed,
+                    const LinearVelocityNed& velNed = LinearVelocityNed{},
                     uint8_t frameId = MAV_FRAME_LOCAL_NED,
                     uint8_t childFrameId = MAV_FRAME_BODY_FRD,
                     uint8_t resetCounter = 0,
@@ -345,7 +488,7 @@ public:
     {
         mavlink_message_t msg;
 
-        const float vx = NAN, vy = NAN, vz = NAN;
+        const float vx = velNed.x, vy = velNed.y, vz = velNed.z;
         const float rollspeed = NAN, pitchspeed = NAN, yawspeed = NAN;
 
         float poseCov[21];
@@ -355,25 +498,50 @@ public:
         uint8_t estimatorType = 0;
 
         float q[4] = {poseNed.qw, poseNed.qx, poseNed.qy, poseNed.qz};
+        const bool haveVelocity = std::isfinite(vx) && std::isfinite(vy) && std::isfinite(vz);
+        auto fillNanCov = [](float cov[21]) {
+            for (int i = 0; i < 21; i++) {
+                cov[i] = NAN;
+            }
+        };
 
         if (mode == OdomQualityMode::GOOD) {
-            for (int i = 0; i < 21; i++) { poseCov[i] = NAN; velCov[i] = NAN; }
+            // Keep vertical vision more conservative than horizontal to reduce height chasing
+            // when EKF2_HGT_REF=Vision.
+            FillCovDiag21(poseCov,
+                          0.04f, 0.04f, 0.36f,
+                          0.03f, 0.03f, 0.03f);
+            if (haveVelocity) {
+                FillCovDiag21(velCov,
+                              0.16f, 0.16f, 0.64f,
+                              1.0f, 1.0f, 1.0f);
+            } else {
+                fillNanCov(velCov);
+            }
             quality = 100;
         } else if (mode == OdomQualityMode::WEAK) {
             FillCovDiag21(poseCov,
-                            2.25f, 2.25f, 2.25f,
-                            0.12f, 0.12f, 0.12f);
-            FillCovDiag21(velCov,
-                            4.0f, 4.0f, 4.0f,
-                            1.0f, 1.0f, 1.0f);
+                          2.25f, 2.25f, 9.0f,
+                          0.25f, 0.25f, 0.25f);
+            if (haveVelocity) {
+                FillCovDiag21(velCov,
+                              4.0f, 4.0f, 16.0f,
+                              1.0f, 1.0f, 1.0f);
+            } else {
+                fillNanCov(velCov);
+            }
             quality = 20;
         } else {
             FillCovDiag21(poseCov,
-                            1e4f, 1e4f, 1e4f,
-                            10.0f, 10.0f, 10.0f);
-            FillCovDiag21(velCov,
-                            1e2f, 1e2f, 1e2f,
-                            1e2f, 1e2f, 1e2f);
+                          1e4f, 1e4f, 1e6f,
+                          10.0f, 10.0f, 10.0f);
+            if (haveVelocity) {
+                FillCovDiag21(velCov,
+                              1e2f, 1e2f, 1e4f,
+                              1e2f, 1e2f, 1e2f);
+            } else {
+                fillNanCov(velCov);
+            }
             quality = 0;
         }
 
@@ -448,6 +616,12 @@ private:
     {
         using namespace std::chrono;
         return (uint32_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+    }
+
+    static inline uint64_t MonotonicTimeUs()
+    {
+        using namespace std::chrono;
+        return duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
     }
 
     int m_fd;
@@ -570,9 +744,20 @@ private:
     std::condition_variable m_ackCv;
     std::unordered_map<uint16_t, AckInfo> m_ackMap;
     std::mutex m_txMtx;
+    mutable std::mutex m_flightModeMtx;
+    mutable std::mutex m_localPosMtx;
+    mutable std::mutex m_distanceSensorMtx;
 
     std::atomic<uint8_t> m_px4Sysid{1};
     std::atomic<uint8_t> m_px4Compid{1};
+    std::atomic<bool> m_localPosStreamRequested{false};
+    std::atomic<bool> m_distanceSensorStreamRequested{false};
+    FlightModeInfo m_flightModeInfo{};
+    bool m_haveFlightModeInfo{false};
+    LocalPositionNed m_localPosNed{};
+    bool m_haveLocalPosNed{false};
+    DownwardDistanceSensor m_downwardDistanceSensor{};
+    bool m_haveDownwardDistanceSensor{false};
 
     static const char* MavResultToStr(uint8_t r)
     {
@@ -621,8 +806,67 @@ private:
             mavlink_msg_heartbeat_decode(&msg, &hb);
 
             if (hb.autopilot != MAV_AUTOPILOT_INVALID) {
+                FlightModeInfo modeInfo{};
+                modeInfo.baseMode = hb.base_mode;
+                modeInfo.customMode = hb.custom_mode;
+                modeInfo.mainMode = static_cast<uint8_t>((hb.custom_mode >> 16) & 0xFFu);
+                modeInfo.subMode = static_cast<uint8_t>((hb.custom_mode >> 24) & 0xFFu);
+                modeInfo.armed = (hb.base_mode & MAV_MODE_FLAG_SAFETY_ARMED) != 0;
+                modeInfo.receivedUs = MonotonicTimeUs();
+
+                {
+                    std::lock_guard<std::mutex> lk(m_flightModeMtx);
+                    m_flightModeInfo = modeInfo;
+                    m_haveFlightModeInfo = true;
+                }
+
                 m_px4Sysid.store(msg.sysid);
                 m_px4Compid.store(msg.compid);
+                MaybeRequestLocalPositionNedStream(msg.sysid, msg.compid);
+                MaybeRequestDistanceSensorStream(msg.sysid, msg.compid);
+            }
+            return;
+        }
+
+        if (msg.msgid == MAVLINK_MSG_ID_LOCAL_POSITION_NED) {
+            mavlink_local_position_ned_t lpos{};
+            mavlink_msg_local_position_ned_decode(&msg, &lpos);
+
+            LocalPositionNed sample{};
+            sample.x = lpos.x;
+            sample.y = lpos.y;
+            sample.z = lpos.z;
+            sample.vx = lpos.vx;
+            sample.vy = lpos.vy;
+            sample.vz = lpos.vz;
+            sample.timeBootMs = lpos.time_boot_ms;
+            sample.receivedUs = MonotonicTimeUs();
+
+            {
+                std::lock_guard<std::mutex> lk(m_localPosMtx);
+                m_localPosNed = sample;
+                m_haveLocalPosNed = true;
+            }
+            return;
+        }
+
+        if (msg.msgid == MAVLINK_MSG_ID_DISTANCE_SENSOR) {
+            mavlink_distance_sensor_t dist{};
+            mavlink_msg_distance_sensor_decode(&msg, &dist);
+
+            if (dist.orientation == MAV_SENSOR_ROTATION_PITCH_270) {
+                DownwardDistanceSensor sample{};
+                sample.currentDistance = 0.01f * static_cast<float>(dist.current_distance);
+                sample.minDistance = 0.01f * static_cast<float>(dist.min_distance);
+                sample.maxDistance = 0.01f * static_cast<float>(dist.max_distance);
+                sample.signalQuality = dist.signal_quality;
+                sample.receivedUs = MonotonicTimeUs();
+
+                {
+                    std::lock_guard<std::mutex> lk(m_distanceSensorMtx);
+                    m_downwardDistanceSensor = sample;
+                    m_haveDownwardDistanceSensor = true;
+                }
             }
             return;
         }
@@ -661,6 +905,42 @@ private:
             printf("[STATUSTEXT] sev=%d %s\n", int(st.severity), text);
             return;
         }
+    }
+
+    void MaybeRequestLocalPositionNedStream(uint8_t targetSystem, uint8_t targetComponent)
+    {
+        bool expected = false;
+        if (!m_localPosStreamRequested.compare_exchange_strong(expected, true)) {
+            return;
+        }
+
+        constexpr float kIntervalUs = 50000.0f; // 20 Hz
+        SendCommandLong(MAV_CMD_SET_MESSAGE_INTERVAL,
+                        static_cast<float>(MAVLINK_MSG_ID_LOCAL_POSITION_NED),
+                        kIntervalUs,
+                        0, 0, 0, 0, 0,
+                        targetSystem, targetComponent);
+
+        printf("[mav] requested LOCAL_POSITION_NED @20Hz from sys=%d comp=%d\n",
+               int(targetSystem), int(targetComponent));
+    }
+
+    void MaybeRequestDistanceSensorStream(uint8_t targetSystem, uint8_t targetComponent)
+    {
+        bool expected = false;
+        if (!m_distanceSensorStreamRequested.compare_exchange_strong(expected, true)) {
+            return;
+        }
+
+        constexpr float kIntervalUs = 50000.0f; // 20 Hz
+        SendCommandLong(MAV_CMD_SET_MESSAGE_INTERVAL,
+                        static_cast<float>(MAVLINK_MSG_ID_DISTANCE_SENSOR),
+                        kIntervalUs,
+                        0, 0, 0, 0, 0,
+                        targetSystem, targetComponent);
+
+        printf("[mav] requested DISTANCE_SENSOR @20Hz from sys=%d comp=%d\n",
+               int(targetSystem), int(targetComponent));
     }
 };
 

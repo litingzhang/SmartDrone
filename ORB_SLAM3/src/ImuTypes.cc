@@ -21,6 +21,7 @@
 
 #include "GeometricTools.h"
 
+#include <cmath>
 #include<iostream>
 
 namespace ORB_SLAM3
@@ -85,6 +86,13 @@ IntegratedRotation::IntegratedRotation(const Eigen::Vector3f &angVel, const Bias
     const float x = (angVel(0)-imuBias.bwx)*time;
     const float y = (angVel(1)-imuBias.bwy)*time;
     const float z = (angVel(2)-imuBias.bwz)*time;
+
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+        deltaT = time;
+        deltaR = Eigen::Matrix3f::Identity();
+        rightJ = Eigen::Matrix3f::Identity();
+        return;
+    }
 
     const float d2 = x*x+y*y+z*z;
     const float d = sqrt(d2);
@@ -176,6 +184,10 @@ void Preintegrated::Reintegrate()
 
 void Preintegrated::IntegrateNewMeasurement(const Eigen::Vector3f &acceleration, const Eigen::Vector3f &angVel, const float &dt)
 {
+    if (!(dt > 0.0f) || !std::isfinite(dt) || !acceleration.allFinite() || !angVel.allFinite()) {
+        return;
+    }
+
     mvMeasurements.push_back(integrable(acceleration,angVel,dt));
 
     // Position is updated firstly, as it depends on previously computed velocity and rotation.
@@ -263,6 +275,10 @@ void Preintegrated::MergePrevious(Preintegrated* pPrev)
 void Preintegrated::SetNewBias(const Bias &bu_)
 {
     std::unique_lock<std::mutex> lock(mMutex);
+    if (!std::isfinite(bu_.bax) || !std::isfinite(bu_.bay) || !std::isfinite(bu_.baz) ||
+        !std::isfinite(bu_.bwx) || !std::isfinite(bu_.bwy) || !std::isfinite(bu_.bwz)) {
+        return;
+    }
     bu = bu_;
 
     db(0) = bu_.bwx-b.bwx;
@@ -285,7 +301,11 @@ Eigen::Matrix3f Preintegrated::GetDeltaRotation(const Bias &b_)
     std::unique_lock<std::mutex> lock(mMutex);
     Eigen::Vector3f dbg;
     dbg << b_.bwx-b.bwx,b_.bwy-b.bwy,b_.bwz-b.bwz;
-    return NormalizeRotation(dR * Sophus::SO3f::exp(JRg * dbg).matrix());
+    const Eigen::Vector3f rot = JRg * dbg;
+    if (!rot.allFinite()) {
+        return NormalizeRotation(dR);
+    }
+    return NormalizeRotation(dR * Sophus::SO3f::exp(rot).matrix());
 }
 
 Eigen::Vector3f Preintegrated::GetDeltaVelocity(const Bias &b_)
@@ -294,7 +314,11 @@ Eigen::Vector3f Preintegrated::GetDeltaVelocity(const Bias &b_)
     Eigen::Vector3f dbg, dba;
     dbg << b_.bwx-b.bwx,b_.bwy-b.bwy,b_.bwz-b.bwz;
     dba << b_.bax-b.bax,b_.bay-b.bay,b_.baz-b.baz;
-    return dV + JVg * dbg + JVa * dba;
+    const Eigen::Vector3f delta = JVg * dbg + JVa * dba;
+    if (!delta.allFinite()) {
+        return dV;
+    }
+    return dV + delta;
 }
 
 Eigen::Vector3f Preintegrated::GetDeltaPosition(const Bias &b_)
@@ -303,25 +327,41 @@ Eigen::Vector3f Preintegrated::GetDeltaPosition(const Bias &b_)
     Eigen::Vector3f dbg, dba;
     dbg << b_.bwx-b.bwx,b_.bwy-b.bwy,b_.bwz-b.bwz;
     dba << b_.bax-b.bax,b_.bay-b.bay,b_.baz-b.baz;
-    return dP + JPg * dbg + JPa * dba;
+    const Eigen::Vector3f delta = JPg * dbg + JPa * dba;
+    if (!delta.allFinite()) {
+        return dP;
+    }
+    return dP + delta;
 }
 
 Eigen::Matrix3f Preintegrated::GetUpdatedDeltaRotation()
 {
     std::unique_lock<std::mutex> lock(mMutex);
-    return NormalizeRotation(dR * Sophus::SO3f::exp(JRg*db.head(3)).matrix());
+    const Eigen::Vector3f rot = JRg * db.head(3);
+    if (!rot.allFinite()) {
+        return NormalizeRotation(dR);
+    }
+    return NormalizeRotation(dR * Sophus::SO3f::exp(rot).matrix());
 }
 
 Eigen::Vector3f Preintegrated::GetUpdatedDeltaVelocity()
 {
     std::unique_lock<std::mutex> lock(mMutex);
-    return dV + JVg * db.head(3) + JVa * db.tail(3);
+    const Eigen::Vector3f delta = JVg * db.head(3) + JVa * db.tail(3);
+    if (!delta.allFinite()) {
+        return dV;
+    }
+    return dV + delta;
 }
 
 Eigen::Vector3f Preintegrated::GetUpdatedDeltaPosition()
 {
     std::unique_lock<std::mutex> lock(mMutex);
-    return dP + JPg*db.head(3) + JPa*db.tail(3);
+    const Eigen::Vector3f delta = JPg*db.head(3) + JPa*db.tail(3);
+    if (!delta.allFinite()) {
+        return dP;
+    }
+    return dP + delta;
 }
 
 Eigen::Matrix3f Preintegrated::GetOriginalDeltaRotation() {

@@ -57,7 +57,6 @@ public class MainActivity extends Activity {
     private static final String PENDING_ARM = "arm";
     private static final String PENDING_EMERGENCY_STOP = "emergency_stop";
     private static final String PENDING_OFFBOARD = "offboard";
-    private static final String PENDING_HOLD = "hold";
     private static final String PENDING_LAND = "land";
     private static final String PENDING_RUNTIME = "runtime";
     private static final String PENDING_SENSOR = "sensor";
@@ -72,13 +71,13 @@ public class MainActivity extends Activity {
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
     private static final long RX_POLL_PERIOD_MS = 5L;
+    private static final float BUTTON_AXIS_MAGNITUDE = 1.0f;
     private static final int VIDEO_MAGIC = 0x5643494D;
     private static final int VIDEO_HEADER_LEN = 36;
     private static final int MAX_RX_PACKETS_PER_TICK = 96;
     private static final int MAX_VIDEO_JPEG_BYTES = 2 * 1024 * 1024;
     private static final int VIDEO_FLAG_FEATURE_POINTS = 0x01;
     private static final double FRAME_MATCH_TOLERANCE_SEC = 0.002;
-    private static final float DEADZONE = 0.08f;
     private static final String KEY_SETTINGS_VISIBLE = "settingsVisible";
     private static final String KEY_DEBUG_VISIBLE = "debugVisible";
     private static final String KEY_REMOTE_VISIBLE = "remoteVisible";
@@ -100,8 +99,6 @@ public class MainActivity extends Activity {
     private ImageButton m_btnModeToggle;
     private Button m_btnArmToggle;
     private Button m_btnEmergencyStop;
-    private Button m_btnOffboard;
-    private Button m_btnHold;
     private Button m_btnLand;
     private Switch m_btnToggleSlam;
     private Switch m_btnToggleCalib;
@@ -121,17 +118,27 @@ public class MainActivity extends Activity {
     private SeekBar m_sbCfgExposure;
     private SeekBar m_sbCfgGain;
 
-    private JoystickView m_joystickLeft;
-    private JoystickView m_joystickRight;
+    private View m_joystickLeft;
+    private View m_joystickRight;
+    private ImageButton m_btnLeftUp;
+    private ImageButton m_btnLeftDown;
+    private ImageButton m_btnLeftYawLeft;
+    private ImageButton m_btnLeftYawRight;
+    private ImageButton m_btnRightForward;
+    private ImageButton m_btnRightBack;
+    private ImageButton m_btnRightLeft;
+    private ImageButton m_btnRightRight;
 
     private final Handler m_handler = new Handler(Looper.getMainLooper());
 
-    private volatile float m_leftX;
-    private volatile float m_leftY;
-    private volatile float m_rightX;
-    private volatile float m_rightY;
-    private volatile boolean m_leftActive;
-    private volatile boolean m_rightActive;
+    private volatile boolean m_leftUpPressed;
+    private volatile boolean m_leftDownPressed;
+    private volatile boolean m_leftYawLeftPressed;
+    private volatile boolean m_leftYawRightPressed;
+    private volatile boolean m_rightForwardPressed;
+    private volatile boolean m_rightBackPressed;
+    private volatile boolean m_rightLeftPressed;
+    private volatile boolean m_rightRightPressed;
 
     private long m_lastJoystickTickMs;
     private boolean m_joystickLoopRunning;
@@ -533,19 +540,93 @@ public class MainActivity extends Activity {
     }
 
     private void resetRemoteInputs() {
-        if (m_joystickLeft != null) {
-            m_joystickLeft.Reset();
-        }
-        if (m_joystickRight != null) {
-            m_joystickRight.Reset();
-        }
-        m_leftX = 0f;
-        m_leftY = 0f;
-        m_rightX = 0f;
-        m_rightY = 0f;
-        m_leftActive = false;
-        m_rightActive = false;
+        m_leftUpPressed = false;
+        m_leftDownPressed = false;
+        m_leftYawLeftPressed = false;
+        m_leftYawRightPressed = false;
+        m_rightForwardPressed = false;
+        m_rightBackPressed = false;
+        m_rightLeftPressed = false;
+        m_rightRightPressed = false;
+        releaseDirectionalButton(m_btnLeftUp);
+        releaseDirectionalButton(m_btnLeftDown);
+        releaseDirectionalButton(m_btnLeftYawLeft);
+        releaseDirectionalButton(m_btnLeftYawRight);
+        releaseDirectionalButton(m_btnRightForward);
+        releaseDirectionalButton(m_btnRightBack);
+        releaseDirectionalButton(m_btnRightLeft);
+        releaseDirectionalButton(m_btnRightRight);
         m_lastJoystickActive = false;
+    }
+
+    private interface DirectionButtonHandler {
+        void onStateChanged(boolean pressed);
+    }
+
+    private void bindDirectionalButton(View button, DirectionButtonHandler handler) {
+        if (button == null) {
+            return;
+        }
+        button.setAlpha(0.76f);
+        button.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_POINTER_DOWN:
+                case MotionEvent.ACTION_MOVE:
+                    v.setPressed(true);
+                    v.setAlpha(1.0f);
+                    v.setScaleX(1.24f);
+                    v.setScaleY(1.24f);
+                    if (v instanceof ImageButton) {
+                        ((ImageButton) v).setColorFilter(Color.parseColor("#FFF1A8"));
+                    }
+                    handler.onStateChanged(true);
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_POINTER_UP:
+                    v.setPressed(false);
+                    v.setAlpha(0.76f);
+                    v.setScaleX(1.0f);
+                    v.setScaleY(1.0f);
+                    if (v instanceof ImageButton) {
+                        ((ImageButton) v).clearColorFilter();
+                    }
+                    handler.onStateChanged(false);
+                    v.performClick();
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    v.setPressed(false);
+                    v.setAlpha(0.76f);
+                    v.setScaleX(1.0f);
+                    v.setScaleY(1.0f);
+                    if (v instanceof ImageButton) {
+                        ((ImageButton) v).clearColorFilter();
+                    }
+                    handler.onStateChanged(false);
+                    return true;
+                default:
+                    return false;
+            }
+        });
+    }
+
+    private void releaseDirectionalButton(View button) {
+        if (button != null) {
+            button.setPressed(false);
+            button.setAlpha(0.76f);
+            button.setScaleX(1.0f);
+            button.setScaleY(1.0f);
+            if (button instanceof ImageButton) {
+                ((ImageButton) button).clearColorFilter();
+            }
+        }
+    }
+
+    private static float axisFromButtons(boolean positivePressed, boolean negativePressed) {
+        if (positivePressed == negativePressed) {
+            return 0f;
+        }
+        return positivePressed ? BUTTON_AXIS_MAGNITUDE : -BUTTON_AXIS_MAGNITUDE;
     }
 
     private void refreshVideoFrames() {
@@ -564,10 +645,6 @@ public class MainActivity extends Activity {
                 label,
                 pendingKey,
                 onSuccess);
-    }
-
-    private static float applyDeadzone(float v) {
-        return (Math.abs(v) < DEADZONE) ? 0f : v;
     }
 
     private static float clamp01(float v) {
@@ -609,6 +686,16 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void requestRemoteControlModeIfNeeded() {
+        if ("REMOTE".equals(m_lastFlightCommand) || isPending(PENDING_OFFBOARD)) {
+            return;
+        }
+        sendSimpleCmdAwaitAck("REMOTE", CMD_OFFBOARD, PENDING_OFFBOARD, () -> {
+            m_lastFlightCommand = "REMOTE";
+            updateFlightButtons();
+        });
+    }
+
     private void sendMoveRcJoystickCommand(
             float throttle,
             float yaw,
@@ -619,7 +706,7 @@ public class MainActivity extends Activity {
         try {
             int seq = NativeUdp.sendMoveRcJoystick(FRAME_NED, throttle, yaw, pitch, roll, maxV);
             m_tvStatus.setText(String.format(Locale.US,
-                    "%s seq=%d OFFBOARD thr=%.2f yaw=%.2f pitch=%.2f roll=%.2f maxV=%.2f",
+                    "%s seq=%d REMOTE thr=%.2f yaw=%.2f pitch=%.2f roll=%.2f maxV=%.2f",
                     reason, seq, throttle, yaw, pitch, roll, maxV));
         } catch (Throwable t) {
             m_tvStatus.setText(reason + " error: " + t.getMessage());
@@ -747,12 +834,6 @@ public class MainActivity extends Activity {
         }
         if (m_btnEmergencyStop != null) {
             setButtonState(m_btnEmergencyStop, "EMERGENCY_STOP".equals(m_lastFlightCommand), isPending(PENDING_EMERGENCY_STOP), "#B71C1C");
-        }
-        if (m_btnOffboard != null) {
-            setButtonState(m_btnOffboard, "OFFBOARD".equals(m_lastFlightCommand), isPending(PENDING_OFFBOARD), "#6A1B9A");
-        }
-        if (m_btnHold != null) {
-            setButtonState(m_btnHold, "HOLD".equals(m_lastFlightCommand), isPending(PENDING_HOLD), "#00897B");
         }
         if (m_btnLand != null) {
             setButtonState(m_btnLand, "LAND".equals(m_lastFlightCommand), isPending(PENDING_LAND), "#EF6C00");
@@ -1369,23 +1450,20 @@ public class MainActivity extends Activity {
             dtSec = JOYSTICK_PERIOD_MS / 1000.0f;
         }
 
-        float leftX = applyDeadzone(m_leftX);
-        float leftY = applyDeadzone(m_leftY);
-        float rightX = applyDeadzone(m_rightX);
-        float rightY = applyDeadzone(m_rightY);
+        float leftY = axisFromButtons(m_leftUpPressed, m_leftDownPressed);
+        float leftX = (leftY == 0f)
+                ? axisFromButtons(m_leftYawRightPressed, m_leftYawLeftPressed)
+                : 0f;
+        float rightX = axisFromButtons(m_rightRightPressed, m_rightLeftPressed);
+        float rightY = axisFromButtons(m_rightForwardPressed, m_rightBackPressed);
 
         float leftMag = clamp01((float) Math.hypot(leftX, leftY));
         float rightMag = clamp01((float) Math.hypot(rightX, rightY));
-        boolean active = m_leftActive || m_rightActive
-                || leftX != 0f || leftY != 0f || rightX != 0f || rightY != 0f;
-
-        float horizontalVx = rightY * 5.0f;
-        float horizontalVy = rightX * 5.0f;
-        float verticalVz = -leftY * 3.0f;
+        boolean active = leftX != 0f || leftY != 0f || rightX != 0f || rightY != 0f;
 
         m_tvJoystickState.setText(String.format(Locale.US,
-                "OFFBOARD L[yaw=%.2f vz=%.2f] R[vy=%.2f vx=%.2f] magL=%.2f magR=%.2f %s",
-                leftX, verticalVz, horizontalVy, horizontalVx, leftMag, rightMag, active ? "ACTIVE" : "CENTER"));
+                "REMOTE L[up=%.2f yaw=%.2f] R[fwd=%.2f right=%.2f] magL=%.2f magR=%.2f %s",
+                leftY, leftX, rightY, rightX, leftMag, rightMag, active ? "ACTIVE" : "CENTER"));
 
         if (!active) {
             if (m_lastJoystickActive) {
@@ -1395,6 +1473,7 @@ public class MainActivity extends Activity {
             return;
         }
         m_lastJoystickActive = true;
+        requestRemoteControlModeIfNeeded();
 
         float throttle = leftY;
         float yaw = leftX;
@@ -1467,8 +1546,6 @@ public class MainActivity extends Activity {
         m_btnModeToggle = findViewById(R.id.btnModeToggle);
         m_btnArmToggle = findViewById(R.id.btnArm);
         m_btnEmergencyStop = findViewById(R.id.btnEmergencyStop);
-        m_btnOffboard = findViewById(R.id.btnOffboard);
-        m_btnHold = findViewById(R.id.btnHold);
         m_btnLand = findViewById(R.id.btnLand);
         m_btnToggleSlam = findViewById(R.id.btnToggleSlam);
         m_btnToggleCalib = findViewById(R.id.btnToggleCalib);
@@ -1507,6 +1584,14 @@ public class MainActivity extends Activity {
 
         m_joystickLeft = findViewById(R.id.joystickLeft);
         m_joystickRight = findViewById(R.id.joystickRight);
+        m_btnLeftUp = findViewById(R.id.btnLeftUp);
+        m_btnLeftDown = findViewById(R.id.btnLeftDown);
+        m_btnLeftYawLeft = findViewById(R.id.btnLeftYawLeft);
+        m_btnLeftYawRight = findViewById(R.id.btnLeftYawRight);
+        m_btnRightForward = findViewById(R.id.btnRightForward);
+        m_btnRightBack = findViewById(R.id.btnRightBack);
+        m_btnRightLeft = findViewById(R.id.btnRightLeft);
+        m_btnRightRight = findViewById(R.id.btnRightRight);
 
         final String cm5Ip = "10.42.0.1";
         final int cm5CmdPort = 14550;
@@ -1673,21 +1758,21 @@ public class MainActivity extends Activity {
                 if (!m_remoteVisible) {
                     resetRemoteInputs();
                     sendHoldBurst(3, "HOLD(remote off)");
+                } else {
+                    requestRemoteControlModeIfNeeded();
                 }
                 updateRemoteControlsVisibility();
             });
         }
 
-        m_joystickLeft.SetOnStickChangedListener((xNorm, yNorm, active) -> {
-            m_leftX = xNorm;
-            m_leftY = yNorm;
-            m_leftActive = active;
-        });
-        m_joystickRight.SetOnStickChangedListener((xNorm, yNorm, active) -> {
-            m_rightX = xNorm;
-            m_rightY = yNorm;
-            m_rightActive = active;
-        });
+        bindDirectionalButton(m_btnLeftUp, pressed -> m_leftUpPressed = pressed);
+        bindDirectionalButton(m_btnLeftDown, pressed -> m_leftDownPressed = pressed);
+        bindDirectionalButton(m_btnLeftYawLeft, pressed -> m_leftYawLeftPressed = pressed);
+        bindDirectionalButton(m_btnLeftYawRight, pressed -> m_leftYawRightPressed = pressed);
+        bindDirectionalButton(m_btnRightForward, pressed -> m_rightForwardPressed = pressed);
+        bindDirectionalButton(m_btnRightBack, pressed -> m_rightBackPressed = pressed);
+        bindDirectionalButton(m_btnRightLeft, pressed -> m_rightLeftPressed = pressed);
+        bindDirectionalButton(m_btnRightRight, pressed -> m_rightRightPressed = pressed);
 
         m_btnModeToggle.setOnClickListener(v -> setSettingsVisible(!m_settingsVisible));
         if (savedInstanceState != null) {
@@ -1716,22 +1801,6 @@ public class MainActivity extends Activity {
                         m_lastFlightCommand = "EMERGENCY_STOP";
                         updateFlightButtons();
                     }));
-        }
-        if (m_btnOffboard != null) {
-            m_btnOffboard.setOnClickListener(v -> {
-                sendSimpleCmdAwaitAck("OFFBOARD", CMD_OFFBOARD, PENDING_OFFBOARD, () -> {
-                    m_lastFlightCommand = "OFFBOARD";
-                    updateFlightButtons();
-                });
-            });
-        }
-        if (m_btnHold != null) {
-            m_btnHold.setOnClickListener(v -> {
-                sendSimpleCmdAwaitAck("HOLD", CMD_HOLD, PENDING_HOLD, () -> {
-                    m_lastFlightCommand = "HOLD";
-                    updateFlightButtons();
-                });
-            });
         }
         if (m_btnLand != null) {
             m_btnLand.setOnClickListener(v -> {

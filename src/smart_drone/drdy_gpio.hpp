@@ -82,17 +82,33 @@ public:
             return false;
         }
 
-        int eventCount = gpiod_line_request_read_edge_events(m_request, m_eventBuffer, 1);
-        if (eventCount <= 0) {
+        int64_t latestTsNs = 0;
+        while (true) {
+            const int eventCount = gpiod_line_request_read_edge_events(m_request, m_eventBuffer, 32);
+            if (eventCount <= 0) {
+                break;
+            }
+
+            for (int i = 0; i < eventCount; ++i) {
+                gpiod_edge_event* event = gpiod_edge_event_buffer_get_event(m_eventBuffer, i);
+                if (event) {
+                    latestTsNs = static_cast<int64_t>(gpiod_edge_event_get_timestamp_ns(event));
+                }
+            }
+
+            ret = gpiod_line_request_wait_edge_events(m_request, 0);
+            if (ret <= 0) {
+                break;
+            }
+        }
+
+        if (latestTsNs <= 0) {
             return false;
         }
 
-        gpiod_edge_event* event = gpiod_edge_event_buffer_get_event(m_eventBuffer, 0);
-        if (!event) {
-            return false;
-        }
-
-        tsNsOut = static_cast<int64_t>(gpiod_edge_event_get_timestamp_ns(event));
+        // If DRDY edges piled up, pair the SPI read with the newest observed edge
+        // instead of replaying stale timestamps.
+        tsNsOut = latestTsNs;
         return true;
     }
 

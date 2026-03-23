@@ -99,6 +99,7 @@ struct LivePoseState {
         bool poseValid{false};
         uint8_t runtimeMode{RUNTIME_MODE_IDLE};
         uint8_t trackingState{0xFF};
+        OdomQualityMode odomQuality{OdomQualityMode::LOST};
         uint16_t resetCounter{0};
         uint16_t resetMapCount{0};
         float x{0.0f}, y{0.0f}, z{0.0f};
@@ -123,16 +124,18 @@ struct LivePoseState {
         if (mode != RUNTIME_MODE_SLAM) {
             poseValid = false;
             trackingState = 0xFF;
+            odomQuality = OdomQualityMode::LOST;
         }
         dirty = true;
     }
 
     void UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCounterIn, uint16_t resetMapCountIn,
-                    const MavlinkSerial::Pose& p)
+                    const MavlinkSerial::Pose& p, OdomQualityMode quality)
     {
         std::lock_guard<std::mutex> lock(mu);
         runtimeMode = mode;
         trackingState = tracking;
+        odomQuality = quality;
         resetCounter = resetCounterIn;
         resetMapCount = resetMapCountIn;
         x = p.x; y = p.y; z = p.z;
@@ -158,6 +161,7 @@ struct LivePoseState {
         out.poseValid = poseValid;
         out.runtimeMode = runtimeMode;
         out.trackingState = trackingState;
+        out.odomQuality = odomQuality;
         out.resetCounter = resetCounter;
         out.resetMapCount = resetMapCount;
         out.x = x; out.y = y; out.z = z;
@@ -178,6 +182,7 @@ struct LivePoseState {
         out.poseValid = poseValid;
         out.runtimeMode = runtimeMode;
         out.trackingState = trackingState;
+        out.odomQuality = odomQuality;
         out.resetCounter = resetCounter;
         out.resetMapCount = resetMapCount;
         out.x = x; out.y = y; out.z = z;
@@ -194,6 +199,7 @@ struct LivePoseState {
     bool poseValid{false};
     uint8_t runtimeMode{RUNTIME_MODE_IDLE};
     uint8_t trackingState{0xFF};
+    OdomQualityMode odomQuality{OdomQualityMode::LOST};
     uint16_t resetCounter{0};
     uint16_t resetMapCount{0};
     float x{0.0f}, y{0.0f}, z{0.0f};
@@ -212,6 +218,105 @@ constexpr int64_t POINT_CLOUD_UPDATE_INTERVAL_NS = 200000000LL;
 bool IsTrackingPoseUsable(int trackingState)
 {
     return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::OK_KLT;
+}
+
+bool IsOdomQualityUsable(OdomQualityMode quality)
+{
+    return quality != OdomQualityMode::LOST;
+}
+
+struct ImuWindowValidation {
+    size_t inputCount{0};
+    size_t outputCount{0};
+    size_t droppedNonFinite{0};
+    size_t droppedNonMonotonic{0};
+    size_t droppedOutOfRange{0};
+    double largestGapSec{0.0};
+    double firstLeadSec{0.0};
+    double tailLagSec{0.0};
+    const char* failureReason{nullptr};
+};
+
+bool IsFiniteImuPoint(const ORB_SLAM3::IMU::Point& p)
+{
+    return std::isfinite(p.t) &&
+           std::isfinite(p.a.x()) && std::isfinite(p.a.y()) && std::isfinite(p.a.z()) &&
+           std::isfinite(p.w.x()) && std::isfinite(p.w.y()) && std::isfinite(p.w.z());
+}
+
+bool SanitizeImuWindow(std::vector<ORB_SLAM3::IMU::Point>& vImu,
+                       double prevFrameTime,
+                       double frameTime,
+                       double expectedImuDtSec,
+                       ImuWindowValidation& stats)
+{
+    constexpr float kMaxAccelNormMps2 = 200.0f;
+    constexpr float kMaxGyroNormRadps = 40.0f;
+    constexpr double kMinSampleDtSec = 1e-6;
+
+    stats = ImuWindowValidation{};
+    stats.inputCount = vImu.size();
+
+    std::vector<ORB_SLAM3::IMU::Point> filtered;
+    filtered.reserve(vImu.size());
+
+    double lastT = 0.0;
+    bool haveLastT = false;
+    for (const auto& sample : vImu) {
+        if (!IsFiniteImuPoint(sample)) {
+            ++stats.droppedNonFinite;
+            continue;
+        }
+
+        const float accelNorm = sample.a.norm();
+        const float gyroNorm = sample.w.norm();
+        if (!(accelNorm <= kMaxAccelNormMps2) || !(gyroNorm <= kMaxGyroNormRadps)) {
+            ++stats.droppedOutOfRange;
+            continue;
+        }
+
+        if (haveLastT) {
+            const double dt = sample.t - lastT;
+            if (!(dt > kMinSampleDtSec)) {
+                ++stats.droppedNonMonotonic;
+                continue;
+            }
+            stats.largestGapSec = std::max(stats.largestGapSec, dt);
+        }
+
+        filtered.push_back(sample);
+        lastT = sample.t;
+        haveLastT = true;
+    }
+
+    vImu.swap(filtered);
+    stats.outputCount = vImu.size();
+
+    if (vImu.size() < 2) {
+        stats.failureReason = "too_few_samples";
+        return false;
+    }
+
+    stats.firstLeadSec = vImu.front().t - prevFrameTime;
+    stats.tailLagSec = frameTime - vImu.back().t;
+
+    const double boundarySlackSec = std::max(6.0 * expectedImuDtSec, 0.010);
+    const double maxGapSec = std::max(12.0 * expectedImuDtSec, 0.030);
+
+    if (stats.firstLeadSec > boundarySlackSec) {
+        stats.failureReason = "missing_leading_coverage";
+        return false;
+    }
+    if (stats.tailLagSec > boundarySlackSec) {
+        stats.failureReason = "missing_trailing_coverage";
+        return false;
+    }
+    if (stats.largestGapSec > maxGapSec) {
+        stats.failureReason = "large_internal_gap";
+        return false;
+    }
+
+    return true;
 }
 
 struct PoseContinuityMapper {
@@ -264,6 +369,257 @@ struct PoseContinuityMapper {
     unsigned long lastMapId{kInvalidMapId};
     uint32_t resetCounter{0};
     uint32_t resetMapCount{0};
+};
+
+struct VioStartupAligner {
+    MavlinkSerial::Pose AlignPose(const MavlinkSerial::Pose& poseNed, bool trackingUsable,
+                                  MavlinkSerial& mavlink, OdomQualityMode& outQuality)
+    {
+        const uint64_t nowUs = MonoTimeUs();
+        RefreshPx4LocalZ(mavlink);
+        RefreshRangeSensor(mavlink);
+
+        if (!trackingUsable) {
+            MavlinkSerial::Pose out = ComputeLostPose(nowUs);
+            outQuality = havePublishedPose ? OdomQualityMode::WEAK : OdomQualityMode::LOST;
+            trackingUsablePrev = false;
+            return out;
+        }
+
+        const bool trackingRecovered = !trackingUsablePrev;
+        if (!TryAlignZ(poseNed, nowUs, trackingRecovered)) {
+            MavlinkSerial::Pose out = havePublishedPose ? ComputeLostPose(nowUs) : poseNed;
+            outQuality = havePublishedPose ? OdomQualityMode::WEAK : OdomQualityMode::LOST;
+            trackingUsablePrev = false;
+            return out;
+        }
+
+        MavlinkSerial::Pose out = poseNed;
+        out.z += zOffset;
+
+        trackingUsablePrev = true;
+        lossActive = false;
+        holdPose = out;
+        havePublishedPose = true;
+        outQuality = (nowUs < weakUntilUs) ? OdomQualityMode::WEAK : OdomQualityMode::GOOD;
+        return out;
+    }
+
+private:
+    void RefreshPx4LocalZ(MavlinkSerial& mavlink)
+    {
+        MavlinkSerial::LocalPositionNed px4Local{};
+        if (mavlink.GetLocalPositionNed(px4Local, kPx4LocalPositionMaxAgeUs)) {
+            latestPx4Z = px4Local.z;
+            latestPx4ZReceivedUs = px4Local.receivedUs;
+            haveLatestPx4Z = true;
+        }
+    }
+
+    void RefreshRangeSensor(MavlinkSerial& mavlink)
+    {
+        MavlinkSerial::DownwardDistanceSensor rng{};
+        if (mavlink.GetDownwardDistanceSensor(rng, kRangeSensorMaxAgeUs)) {
+            latestRange = rng;
+            haveLatestRange = true;
+        }
+    }
+
+    bool HasFreshPx4LocalZ(uint64_t nowUs) const
+    {
+        return haveLatestPx4Z && (nowUs - latestPx4ZReceivedUs) <= kPx4LocalPositionMaxAgeUs;
+    }
+
+    bool HasFreshRange() const
+    {
+        return haveLatestRange && std::isfinite(latestRange.currentDistance);
+    }
+
+    MavlinkSerial::Pose ComputeLostPose(uint64_t nowUs)
+    {
+        MavlinkSerial::Pose out = holdPose;
+
+        if (!lossActive) {
+            lossActive = true;
+            if (havePublishedPose) {
+                holdPose = out;
+            }
+            if ((lastLossLogUs == 0) || (nowUs - lastLossLogUs >= 1000000ULL)) {
+                std::cerr << "[pose] VIO tracking lost, freezing world pose and height\n";
+                lastLossLogUs = nowUs;
+            }
+        }
+
+        ApplyRangeProtection(out, nowUs);
+        holdPose = out;
+        return out;
+    }
+
+    void ApplyRangeProtection(MavlinkSerial::Pose& pose, uint64_t nowUs)
+    {
+        if (!HasFreshRange()) {
+            return;
+        }
+
+        // Reject terrain changes by default. Only let range sensor move the hold altitude
+        // if the vehicle is getting dangerously close to the ground/obstacle.
+        if (latestRange.signalQuality == 0 || !std::isfinite(latestRange.currentDistance)) {
+            return;
+        }
+
+        if (latestRange.currentDistance >= kRangeHardFloorM) {
+            return;
+        }
+
+        const float clearanceDeficit = std::min(kRangeProtectionMaxStepM, kRangeHardFloorM - latestRange.currentDistance);
+
+        if ((lastRangeProtectLogUs == 0) || (nowUs - lastRangeProtectLogUs >= 500000ULL)) {
+            std::cerr << "[pose] range protection alert"
+                      << " rng=" << latestRange.currentDistance
+                      << " hard_floor=" << kRangeHardFloorM
+                      << " clearance_deficit=" << clearanceDeficit
+                      << " z_override=disabled\n";
+            lastRangeProtectLogUs = nowUs;
+        }
+    }
+
+    bool TryAlignZ(const MavlinkSerial::Pose& poseNed, uint64_t nowUs, bool trackingRecovered)
+    {
+        if (haveZOffset) {
+            if ((trackingRecovered || lossActive) && havePublishedPose) {
+                zOffset = holdPose.z - poseNed.z;
+                weakUntilUs = nowUs + kWeakHoldUs;
+                std::cerr << "[pose] VIO z realigned to held world height"
+                          << " hold_z=" << holdPose.z
+                          << " vio_z=" << poseNed.z
+                          << " z_offset=" << zOffset << "\n";
+            }
+            return true;
+        }
+
+        if (HasFreshPx4LocalZ(nowUs)) {
+            zOffset = latestPx4Z - poseNed.z;
+            haveZOffset = true;
+            weakUntilUs = nowUs + kWeakHoldUs;
+            std::cerr << "[pose] VIO z aligned to PX4 local height at startup"
+                      << " px4_z=" << latestPx4Z
+                      << " vio_z=" << poseNed.z
+                      << " z_offset=" << zOffset << "\n";
+            return true;
+        }
+
+        if ((lastMissingLocalPosLogUs == 0) || (nowUs - lastMissingLocalPosLogUs >= 1000000ULL)) {
+            std::cerr << "[pose] waiting for fresh PX4 LOCAL_POSITION_NED before initial VIO z alignment\n";
+            lastMissingLocalPosLogUs = nowUs;
+        }
+
+        return false;
+    }
+
+    static constexpr uint64_t kPx4LocalPositionMaxAgeUs = 500000ULL;
+    static constexpr uint64_t kRangeSensorMaxAgeUs = 200000ULL;
+    static constexpr uint64_t kWeakHoldUs = 1500000ULL;
+    static constexpr float kRangeHardFloorM = 0.35f;
+    static constexpr float kRangeProtectionMaxStepM = 0.30f;
+
+    float zOffset{0.0f};
+    float latestPx4Z{0.0f};
+    uint64_t weakUntilUs{0};
+    uint64_t latestPx4ZReceivedUs{0};
+    uint64_t lastLossLogUs{0};
+    uint64_t lastMissingLocalPosLogUs{0};
+    uint64_t lastRangeProtectLogUs{0};
+    bool haveZOffset{false};
+    bool haveLatestPx4Z{false};
+    bool lossActive{false};
+    bool trackingUsablePrev{false};
+    bool havePublishedPose{false};
+    bool haveLatestRange{false};
+    MavlinkSerial::Pose holdPose{};
+    MavlinkSerial::DownwardDistanceSensor latestRange{};
+};
+
+struct OdomVelocityTracker {
+    MavlinkSerial::LinearVelocityNed Update(const MavlinkSerial::Pose& pose,
+                                           int64_t frameNs,
+                                           OdomQualityMode quality,
+                                           uint16_t resetMapCount)
+    {
+        MavlinkSerial::LinearVelocityNed out{};
+
+        if (quality != OdomQualityMode::GOOD || !haveLastPose || lastQuality != OdomQualityMode::GOOD ||
+            resetMapCount != lastResetMapCount || frameNs <= lastFrameNs) {
+            ResetState(pose, frameNs, quality, resetMapCount);
+            return out;
+        }
+
+        const float dt = static_cast<float>(frameNs - lastFrameNs) * 1e-9f;
+        if (!(dt >= 0.005f) || !(dt <= 0.2f)) {
+            ResetState(pose, frameNs, quality, resetMapCount);
+            return out;
+        }
+
+        const float rawVx = (pose.x - lastPose.x) / dt;
+        const float rawVy = (pose.y - lastPose.y) / dt;
+        const float rawVz = (pose.z - lastPose.z) / dt;
+
+        if (!std::isfinite(rawVx) || !std::isfinite(rawVy) || !std::isfinite(rawVz) ||
+            std::fabs(rawVx) > kMaxHorizontalSpeedMps || std::fabs(rawVy) > kMaxHorizontalSpeedMps ||
+            std::fabs(rawVz) > kMaxVerticalSpeedMps) {
+            ResetState(pose, frameNs, quality, resetMapCount);
+            return out;
+        }
+
+        const float alphaXY = dt / (kHorizontalTauSec + dt);
+        const float alphaZ = dt / (kVerticalTauSec + dt);
+
+        if (!haveFilteredVelocity) {
+            filteredVelocity.x = rawVx;
+            filteredVelocity.y = rawVy;
+            filteredVelocity.z = rawVz;
+            haveFilteredVelocity = true;
+        } else {
+            filteredVelocity.x += alphaXY * (rawVx - filteredVelocity.x);
+            filteredVelocity.y += alphaXY * (rawVy - filteredVelocity.y);
+            filteredVelocity.z += alphaZ * (rawVz - filteredVelocity.z);
+        }
+
+        out = filteredVelocity;
+        lastPose = pose;
+        lastFrameNs = frameNs;
+        lastQuality = quality;
+        lastResetMapCount = resetMapCount;
+        haveLastPose = true;
+        return out;
+    }
+
+private:
+    void ResetState(const MavlinkSerial::Pose& pose,
+                    int64_t frameNs,
+                    OdomQualityMode quality,
+                    uint16_t resetMapCount)
+    {
+        lastPose = pose;
+        lastFrameNs = frameNs;
+        lastQuality = quality;
+        lastResetMapCount = resetMapCount;
+        filteredVelocity = {};
+        haveFilteredVelocity = false;
+        haveLastPose = true;
+    }
+
+    static constexpr float kHorizontalTauSec = 0.18f;
+    static constexpr float kVerticalTauSec = 0.30f;
+    static constexpr float kMaxHorizontalSpeedMps = 8.0f;
+    static constexpr float kMaxVerticalSpeedMps = 4.0f;
+
+    MavlinkSerial::Pose lastPose{};
+    MavlinkSerial::LinearVelocityNed filteredVelocity{};
+    int64_t lastFrameNs{0};
+    OdomQualityMode lastQuality{OdomQualityMode::LOST};
+    uint16_t lastResetMapCount{0};
+    bool haveLastPose{false};
+    bool haveFilteredVelocity{false};
 };
 
 float ClampSignedUnit(float value)
@@ -330,7 +686,19 @@ StereoBodyExtrinsics LoadStereoBodyExtrinsics(const std::string& settingsPath)
 
 class Px4UdpHooks final : public MavlinkHooks {
 public:
-    Px4UdpHooks(MavlinkSerial& mavlink, LivePoseState& livePose) : m_mavlink(mavlink), m_livePose(livePose) {}
+    Px4UdpHooks(MavlinkSerial& mavlink, LivePoseState& livePose) : m_mavlink(mavlink), m_livePose(livePose)
+    {
+        m_manualLoop = std::thread([this]() { ManualControlLoop(); });
+    }
+
+    ~Px4UdpHooks() override
+    {
+        m_manualLoopStop.store(true, std::memory_order_relaxed);
+        if (m_manualLoop.joinable()) {
+            m_manualLoop.join();
+        }
+    }
+
     VehicleGate GetGate() const override
     {
         LivePoseState::Snapshot snapshot{};
@@ -338,7 +706,8 @@ public:
         const bool vioOk = hasSnapshot &&
                            snapshot.runtimeMode == RUNTIME_MODE_SLAM &&
                            snapshot.poseValid &&
-                           IsTrackingPoseUsable(snapshot.trackingState);
+                           IsTrackingPoseUsable(snapshot.trackingState) &&
+                           IsOdomQualityUsable(snapshot.odomQuality);
         VehicleGate gate{};
         gate.vioOk = vioOk;
         gate.offboardReady = vioOk;
@@ -346,10 +715,8 @@ public:
     }
     bool Arm(std::string* err) override
     {
-        if (!EnsureSetpointStream()) {
-            if (err) *err = "setpoint stream start failed";
-            return false;
-        }
+        EnsureManualControlStream();
+        SendManualControlSnapshot();
         if (!m_mavlink.Arm(true)) {
             if (err) *err = "px4 arm rejected";
             return false;
@@ -358,6 +725,9 @@ public:
     }
     bool Disarm(std::string* err) override
     {
+        SetManualControlNeutral();
+        SendManualControlSnapshot();
+        DisableRemoteControl(true);
         if (!m_mavlink.Arm(false)) {
             if (err) *err = "px4 disarm rejected";
             return false;
@@ -368,6 +738,7 @@ public:
     {
         m_mavlink.StopSetpointStream();
         m_streamStarted.store(false, std::memory_order_relaxed);
+        DisableRemoteControl(true);
         if (!m_mavlink.EmergencyStop()) {
             if (err) *err = "px4 emergency stop rejected";
             return false;
@@ -376,30 +747,35 @@ public:
     }
     bool SetOffboard(std::string* err) override
     {
-        if (!EnsureSetpointStream()) {
-            if (err) *err = "setpoint stream start failed";
-            return false;
-        }
-        if (!m_mavlink.SetModeOffboard()) {
-            if (err) *err = "px4 offboard rejected";
+        EnsureManualControlStream();
+        m_remoteModeRequested.store(true, std::memory_order_relaxed);
+        WarmupManualControlLink();
+        if (!MaybeSyncRemoteFlightMode(true, err)) {
+            m_remoteModeRequested.store(false, std::memory_order_relaxed);
+            if (err && err->empty()) *err = "px4 remote mode rejected";
             return false;
         }
         return true;
     }
-    bool Hold(std::string*) override
+    bool Hold(std::string* err) override
     {
-        if (!EnsureSetpointStream()) return false;
-        MavlinkSerial::SetpointLocalNED setpoint{};
-        setpoint.x = NAN; setpoint.y = NAN; setpoint.z = NAN;
-        setpoint.vx = 0.0f; setpoint.vy = 0.0f; setpoint.vz = 0.0f;
-        setpoint.yaw = NAN; setpoint.yawspeed = 0.0f;
-        m_mavlink.UpdateStreamSetpoint(setpoint);
+        EnsureManualControlStream();
+        SetManualControlNeutral();
+        SendManualControlSnapshot();
+        m_remoteModeRequested.store(true, std::memory_order_relaxed);
+        if (!MaybeSyncRemoteFlightMode(true, err)) {
+            m_remoteModeRequested.store(false, std::memory_order_relaxed);
+            if (err && err->empty()) *err = "px4 hold mode rejected";
+            return false;
+        }
         return true;
     }
     bool Land(std::string* err) override
     {
         m_mavlink.StopSetpointStream();
         m_streamStarted.store(false, std::memory_order_relaxed);
+        SetManualControlNeutral();
+        DisableRemoteControl(true);
         if (!m_mavlink.SendLand()) {
             if (err) *err = "px4 land rejected";
             return false;
@@ -408,25 +784,29 @@ public:
     }
     bool SetMoveGoal(const MoveGoal& goal, std::string* err) override
     {
-        if (!EnsureSetpointStream()) return false;
-        MavlinkSerial::SetpointLocalNED setpoint{};
         if (goal.isRcJoystick) {
-            constexpr float kYawRateRadps = 1.2f;
-            constexpr float kMaxHorizontalSpeedMps = 5.0f;
-            constexpr float kMaxVerticalSpeedMps = 3.0f;
+            MavlinkSerial::ManualControlInput input{};
+            input.throttleNorm = ClampSignedUnit(goal.throttleNorm);
+            input.yawNorm = ClampSignedUnit(goal.yawNorm);
+            input.pitchNorm = ClampSignedUnit(goal.pitchNorm);
+            input.rollNorm = ClampSignedUnit(goal.rollNorm);
 
-            const float throttle = ClampSignedUnit(goal.throttleNorm);
-            const float yaw = ClampSignedUnit(goal.yawNorm);
-            const float pitch = ClampSignedUnit(goal.pitchNorm);
-            const float roll = ClampSignedUnit(goal.rollNorm);
+            EnsureManualControlStream();
+            {
+                std::lock_guard<std::mutex> lock(m_manualControlMtx);
+                m_manualControlInput = input;
+            }
+            SendManualControlSnapshot();
+            return true;
+        }
 
-            setpoint.x = NAN; setpoint.y = NAN; setpoint.z = NAN;
-            setpoint.vx = pitch * kMaxHorizontalSpeedMps;
-            setpoint.vy = roll * kMaxHorizontalSpeedMps;
-            setpoint.vz = -throttle * kMaxVerticalSpeedMps;
-            setpoint.yaw = NAN;
-            setpoint.yawspeed = yaw * kYawRateRadps;
-        } else if (goal.isVelocity) {
+        if (!EnsureSetpointStream()) {
+            if (err) *err = "setpoint stream start failed";
+            return false;
+        }
+
+        MavlinkSerial::SetpointLocalNED setpoint{};
+        if (goal.isVelocity) {
             setpoint.x = NAN; setpoint.y = NAN; setpoint.z = NAN;
             setpoint.vx = goal.vx; setpoint.vy = goal.vy; setpoint.vz = goal.vz;
             setpoint.yaw = NAN; setpoint.yawspeed = goal.yawRate;
@@ -440,6 +820,31 @@ public:
     }
 
 private:
+    enum class RemoteFlightMode : uint8_t {
+        Altitude = MavlinkSerial::PX4_CUSTOM_MAIN_MODE_ALTCTL,
+        Position = MavlinkSerial::PX4_CUSTOM_MAIN_MODE_POSCTL,
+    };
+
+    bool IsVioControlUsable() const
+    {
+        LivePoseState::Snapshot snapshot{};
+        return m_livePose.ReadSnapshot(snapshot) &&
+               snapshot.runtimeMode == RUNTIME_MODE_SLAM &&
+               snapshot.poseValid &&
+               IsTrackingPoseUsable(snapshot.trackingState) &&
+               IsOdomQualityUsable(snapshot.odomQuality);
+    }
+
+    RemoteFlightMode DesiredRemoteFlightMode() const
+    {
+        return IsVioControlUsable() ? RemoteFlightMode::Position : RemoteFlightMode::Altitude;
+    }
+
+    static const char* RemoteFlightModeToString(RemoteFlightMode mode)
+    {
+        return mode == RemoteFlightMode::Position ? "POSCTL" : "ALTCTL";
+    }
+
     bool EnsureSetpointStream()
     {
         bool expected = false;
@@ -448,9 +853,111 @@ private:
         }
         return true;
     }
+
+    void EnsureManualControlStream()
+    {
+        m_manualControlStreaming.store(true, std::memory_order_relaxed);
+    }
+
+    void DisableRemoteControl(bool stopManualStream)
+    {
+        m_remoteModeRequested.store(false, std::memory_order_relaxed);
+        if (stopManualStream) {
+            m_manualControlStreaming.store(false, std::memory_order_relaxed);
+        }
+        std::lock_guard<std::mutex> lock(m_remoteModeMtx);
+        m_lastRequestedRemoteMode.reset();
+        m_lastRemoteModeRequest = std::chrono::steady_clock::time_point{};
+    }
+
+    void SetManualControlNeutral()
+    {
+        std::lock_guard<std::mutex> lock(m_manualControlMtx);
+        m_manualControlInput = MavlinkSerial::ManualControlInput{};
+    }
+
+    MavlinkSerial::ManualControlInput GetManualControlSnapshot() const
+    {
+        std::lock_guard<std::mutex> lock(m_manualControlMtx);
+        return m_manualControlInput;
+    }
+
+    void SendManualControlSnapshot()
+    {
+        m_mavlink.SendManualControl(GetManualControlSnapshot());
+    }
+
+    void WarmupManualControlLink()
+    {
+        for (int i = 0; i < 3; ++i) {
+            SendManualControlSnapshot();
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        }
+    }
+
+    bool MaybeSyncRemoteFlightMode(bool force, std::string* err)
+    {
+        const RemoteFlightMode desired = DesiredRemoteFlightMode();
+        MavlinkSerial::FlightModeInfo currentMode{};
+        if (m_mavlink.GetFlightModeInfo(currentMode) &&
+            currentMode.mainMode == static_cast<uint8_t>(desired)) {
+            return true;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        {
+            std::lock_guard<std::mutex> lock(m_remoteModeMtx);
+            if (!force &&
+                m_lastRequestedRemoteMode &&
+                *m_lastRequestedRemoteMode == desired &&
+                (now - m_lastRemoteModeRequest) < std::chrono::milliseconds(600)) {
+                return true;
+            }
+            m_lastRequestedRemoteMode = desired;
+            m_lastRemoteModeRequest = now;
+        }
+
+        const bool ok = (desired == RemoteFlightMode::Position)
+                            ? m_mavlink.SetModePosition()
+                            : m_mavlink.SetModeAltitude();
+        if (!ok) {
+            if (err) {
+                *err = std::string("px4 ") + RemoteFlightModeToString(desired) + " rejected";
+            }
+            return false;
+        }
+
+        std::cout << "[px4] remote manual mode -> " << RemoteFlightModeToString(desired) << "\n";
+        return true;
+    }
+
+    void ManualControlLoop()
+    {
+        while (!m_manualLoopStop.load(std::memory_order_relaxed)) {
+            if (m_manualControlStreaming.load(std::memory_order_relaxed)) {
+                SendManualControlSnapshot();
+            }
+
+            if (m_remoteModeRequested.load(std::memory_order_relaxed)) {
+                MaybeSyncRemoteFlightMode(false, nullptr);
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
+
     MavlinkSerial& m_mavlink;
     LivePoseState& m_livePose;
     std::atomic<bool> m_streamStarted{false};
+    std::atomic<bool> m_manualControlStreaming{false};
+    std::atomic<bool> m_remoteModeRequested{false};
+    std::atomic<bool> m_manualLoopStop{false};
+    std::thread m_manualLoop;
+    mutable std::mutex m_manualControlMtx;
+    MavlinkSerial::ManualControlInput m_manualControlInput{};
+    mutable std::mutex m_remoteModeMtx;
+    std::optional<RemoteFlightMode> m_lastRequestedRemoteMode;
+    std::chrono::steady_clock::time_point m_lastRemoteModeRequest{};
 };
 
 MainRuntimeAliases BuildRuntimeAliases(const AppConfig& c)
@@ -663,9 +1170,23 @@ std::thread StartImuThread(const MainRuntimeAliases& a, ImuThreadState& s, std::
         if (!drdy.Open(a.gpiochip, a.drdyLine)) return;
         s.imuOk.store(true);
         uint8_t raw12[12]{}; uint8_t st = 0; spi.ReadReg(REG_INT_STATUS, st);
+        int64_t lastAcceptedTsNs = 0;
+        uint64_t lastNonMonotonicLogUs = 0;
         while (g_runningFlag.load() && !stop.load()) {
             int64_t tNs = 0;
             if (!drdy.WaitTs(1000, tNs)) continue;
+            if (lastAcceptedTsNs != 0 && tNs <= lastAcceptedTsNs) {
+                s.imuDrop.fetch_add(1, std::memory_order_relaxed);
+                const uint64_t nowUs = MonoTimeUs();
+                if ((lastNonMonotonicLogUs == 0) || (nowUs - lastNonMonotonicLogUs >= 1000000ULL)) {
+                    std::cerr << "[imu] dropped non-monotonic DRDY timestamp"
+                              << " prev_ns=" << lastAcceptedTsNs
+                              << " cur_ns=" << tNs
+                              << "\n";
+                    lastNonMonotonicLogUs = nowUs;
+                }
+                continue;
+            }
             ImuSample sample{}; sample.tNs = tNs;
             spi.ReadReg(REG_INT_STATUS, st);
             if (!spi.ReadRegs(a.imuStartReg, raw12, sizeof(raw12))) {
@@ -675,6 +1196,7 @@ std::thread StartImuThread(const MainRuntimeAliases& a, ImuThreadState& s, std::
             ImuScale cur{}; cur.accelLsbPerG = s.accelLsbPerG.load(); cur.gyroLsbPerDps = s.gyroLsbPerDps.load();
             ConvertRaw12AccelGyroToSi(raw12, cur, sample);
             s.imuBuffer.Push(sample);
+            lastAcceptedTsNs = tNs;
             s.imuCnt.fetch_add(1, std::memory_order_relaxed);
         }
     });
@@ -751,6 +1273,7 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     auto lastFeatureLog = std::chrono::steady_clock::now();
     auto lastImuWindowLog = std::chrono::steady_clock::now();
     auto lastImuWarmupLog = std::chrono::steady_clock::now();
+    auto lastImuRejectLog = std::chrono::steady_clock::now();
     int leftFeatureFrames = 0;
     int rightFeatureFrames = 0;
     size_t leftFeatureCount = 0;
@@ -762,6 +1285,8 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     bool stereoReferencePoseSet = false;
     unsigned long lastRawMapId = PoseContinuityMapper::kInvalidMapId;
     PoseContinuityMapper continuityMapper{};
+    VioStartupAligner startupAligner{};
+    OdomVelocityTracker odomVelocityTracker{};
     while (g_runningFlag.load() && !stop.load()) {
         if (useImu) {
             const uint64_t imuCnt = imuState.imuCnt.load(std::memory_order_relaxed);
@@ -800,6 +1325,11 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         std::vector<ORB_SLAM3::IMU::Point> vImu;
         if (useImu && lastFrameNs != 0) {
             vImu = imuState.imuBuffer.PopBetweenNs(lastFrameNs, frameNs, slackBeforeNs, slackAfterNs);
+            ImuWindowValidation imuWindow{};
+            const double prevFrameTime = static_cast<double>(lastFrameNs) * 1e-9;
+            const double frameTimeSec = static_cast<double>(frameNs) * 1e-9;
+            const double expectedImuDtSec = 1.0 / std::max(1, a.imuHz);
+            const bool imuWindowOk = SanitizeImuWindow(vImu, prevFrameTime, frameTimeSec, expectedImuDtSec, imuWindow);
             const auto now = std::chrono::steady_clock::now();
             if (now - lastImuWindowLog >= std::chrono::seconds(1)) {
                 std::cerr << "[imu-win] frame_dt_ms=" << ((frameNs - lastFrameNs) / 1e6)
@@ -808,9 +1338,29 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
                           << " imu_samples=" << vImu.size()
                           << " imu_cnt=" << imuState.imuCnt.load(std::memory_order_relaxed)
                           << " imu_drop=" << imuState.imuDrop.load(std::memory_order_relaxed)
+                          << " first_offset_ms=" << (vImu.empty() ? 0.0 : ((vImu.front().t - prevFrameTime) * 1e3))
+                          << " last_offset_ms=" << (vImu.empty() ? 0.0 : ((frameTimeSec - vImu.back().t) * 1e3))
+                          << " max_gap_ms=" << (imuWindow.largestGapSec * 1e3)
                           << " empty=" << (vImu.empty() ? "true" : "false")
                           << "\n";
                 lastImuWindowLog = now;
+            }
+            if (!imuWindowOk) {
+                if (now - lastImuRejectLog >= std::chrono::seconds(1)) {
+                    std::cerr << "[imu-win] rejected"
+                              << " reason=" << (imuWindow.failureReason ? imuWindow.failureReason : "unknown")
+                              << " in=" << imuWindow.inputCount
+                              << " out=" << imuWindow.outputCount
+                              << " drop_non_finite=" << imuWindow.droppedNonFinite
+                              << " drop_non_mono=" << imuWindow.droppedNonMonotonic
+                              << " drop_range=" << imuWindow.droppedOutOfRange
+                              << " first_offset_ms=" << (imuWindow.firstLeadSec * 1e3)
+                              << " last_offset_ms=" << (imuWindow.tailLagSec * 1e3)
+                              << " max_gap_ms=" << (imuWindow.largestGapSec * 1e3)
+                              << "\n";
+                    lastImuRejectLog = now;
+                }
+                continue;
             }
             if (vImu.empty() && !a.allowEmptyImu) continue;
         }
@@ -861,6 +1411,7 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
             }
         }
         const int state = SLAM.GetTrackingState();
+        const bool trackingUsable = IsTrackingPoseUsable(state);
         const unsigned long mapId = SLAM.GetCurrentMapId();
         const bool mapIdChanged = mapId != PoseContinuityMapper::kInvalidMapId && mapId != lastRawMapId;
         if (mapIdChanged) {
@@ -873,7 +1424,7 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         if (!useImu && stereoBodyExtrinsics.loaded) {
             Twc = Twc * stereoBodyExtrinsics.Tbc.inverse();
         }
-        if (!useImu && IsTrackingPoseUsable(state)) {
+        if (!useImu && trackingUsable) {
             if (!stereoReferencePoseSet) {
                 stereoReferencePose = Twc;
                 stereoReferencePoseSet = true;
@@ -888,12 +1439,16 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         pSlam.x = t.x(); pSlam.y = t.y(); pSlam.z = t.z();
         pSlam.qw = q.w(); pSlam.qx = q.x(); pSlam.qy = q.y(); pSlam.qz = q.z();
         MavlinkSerial::NormalizeQuat(pSlam.qw, pSlam.qx, pSlam.qy, pSlam.qz);
-        const MavlinkSerial::Pose p = useImu ? MavlinkSerial::EnuToNed(pSlam) : pSlam;
+        const MavlinkSerial::Pose pRaw = useImu ? MavlinkSerial::EnuToNed(pSlam) : pSlam;
+        OdomQualityMode odomQuality = OdomQualityMode::LOST;
+        const MavlinkSerial::Pose p = startupAligner.AlignPose(pRaw, trackingUsable, mav, odomQuality);
+        const MavlinkSerial::LinearVelocityNed velNed =
+            odomVelocityTracker.Update(p, frameNs, odomQuality, continuityMapper.GetResetMapCount());
         livePose.UpdatePose(RUNTIME_MODE_SLAM, static_cast<uint8_t>(state),
-                            continuityMapper.GetResetCounter(), continuityMapper.GetResetMapCount(), p);
-        mav.SendOdometry(MonoTimeUs(), p, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD,
+                            continuityMapper.GetResetCounter(), continuityMapper.GetResetMapCount(), p, odomQuality);
+        mav.SendOdometry(MonoTimeUs(), p, velNed, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD,
                          continuityMapper.GetResetCounter(),
-                         IsTrackingPoseUsable(state) ? OdomQualityMode::GOOD : OdomQualityMode::LOST);
+                         odomQuality);
     }
     cam.Close();
     std::cerr << "[session] slam camera closed\n";
@@ -1087,6 +1642,7 @@ public:
         cam.exposureUs = r.exposureUs;
         cam.gain = r.gain;
         m_config.app.sensorMode = r.sensorMode;
+        m_config.app.settings = DefaultSettingsForSensorMode(r.sensorMode);
         m_config.app.udp.ip = r.udpIp;
         m_config.app.udp.enable = !r.udpIp.empty();
         m_config.app.udp.sendImage = r.sendImage;
@@ -1273,6 +1829,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
     if (!c.UpdateRemoteConfig(r, &err)) return {ACK_E_BAD_ARGS, err.empty() ? "runtime cfg failed" : err};
     return {ACK_OK, "runtime cfg updated udp=" + r.udpIp +
                     " sensor=" + std::string(r.sensorMode == SensorMode::StereoImu ? "stereo-imu" : "stereo") +
+                    " settings=" + std::string(DefaultSettingsForSensorMode(r.sensorMode)) +
                     " img=" + (r.sendImage ? "on" : "off") +
                     " feat=" + (r.sendFeature ? "on" : "off") +
                     " map=" + (r.sendMap ? "on" : "off")};

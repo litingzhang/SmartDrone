@@ -5,6 +5,7 @@
 #include "tlv_parser.hpp"
 #include "tlv_protocol.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -25,14 +26,22 @@ public:
     RouteResult Handle(const TlvFrame& frame);
 
 private:
+    struct SeqTracker {
+        uint32_t lastSeq{0};
+        uint32_t lastSenderMs{0};
+        std::chrono::steady_clock::time_point lastRxTime{};
+        bool seen{false};
+    };
+
     static float ReadF32Le(const uint8_t* p);
     static uint32_t ReadU32Le(const uint8_t* p);
 
+    bool AcceptSeq(uint32_t seq, uint32_t senderMs, SeqTracker& tracker);
     RouteResult HandleMove(const TlvFrame& frame);
     RouteResult HandleSimple(uint8_t cmd);
 
     MavlinkHooks& m_hooks;
     std::unordered_map<uint8_t, Handler> m_handlers;
-    uint32_t m_lastSeq{0};
-    uint32_t m_lastMoveSeq{0};
+    SeqTracker m_cmdSeqTracker;
+    SeqTracker m_moveSeqTracker;
 };
