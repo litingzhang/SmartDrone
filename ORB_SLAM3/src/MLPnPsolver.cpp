@@ -112,7 +112,7 @@ namespace ORB_SLAM3 {
 	    vector<size_t> vAvailableIndices;
 
 	    int nCurrentIterations = 0;
-	    while(mnIterations<mRansacMaxIts || nCurrentIterations<nIterations)
+	    while(mnIterations<mRansacMaxIts && nCurrentIterations<nIterations)
 	    {
 	        nCurrentIterations++;
 	        mnIterations++;

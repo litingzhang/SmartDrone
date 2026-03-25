@@ -80,6 +80,7 @@ class LibcameraMonoCam {
         m_cam = std::move(cam);
         m_camIndex = camIndex;
         m_active.store(true, std::memory_order_relaxed);
+        m_streamFault.store(false, std::memory_order_relaxed);
         {
             std::lock_guard<std::mutex> lock(m_callbackMu);
             m_closing = false;
@@ -193,8 +194,11 @@ class LibcameraMonoCam {
             return false;
         }
         for (auto &r : m_requests) {
-            if (m_cam->queueRequest(r.get()) < 0)
+            if (m_cam->queueRequest(r.get()) < 0) {
+                m_streamFault.store(true, std::memory_order_relaxed);
+                std::cerr << "[cam] initial queueRequest failed cam=" << m_camIndex << "\n";
                 return false;
+            }
         }
         return true;
     }
@@ -214,7 +218,7 @@ class LibcameraMonoCam {
     void Close()
     {
         m_active.store(false, std::memory_order_relaxed);
-        m_sink = nullptr;
+        SetSink(nullptr);
         {
             std::lock_guard<std::mutex> lock(m_callbackMu);
             m_closing = true;
@@ -254,11 +258,16 @@ class LibcameraMonoCam {
         }
     }
 
-    void SetSink(std::function<void(FrameItem &&)> sink) { m_sink = std::move(sink); }
+    void SetSink(std::function<void(FrameItem &&)> sink)
+    {
+        std::lock_guard<std::mutex> lock(m_sinkMu);
+        m_sink = std::move(sink);
+    }
     PixelFormat PixelFmt() const { return m_config->at(0).pixelFormat; }
     Size SizeWH() const { return m_config->at(0).size; }
     int Stride() const { return m_config->at(0).stride; }
     void SetR16Normalize(bool on) { m_r16Normalize = on; }
+    bool Healthy() const { return !m_streamFault.load(std::memory_order_relaxed); }
 
   private:
     struct CallbackScope {
@@ -292,7 +301,38 @@ class LibcameraMonoCam {
     void WaitForCallbacks()
     {
         std::unique_lock<std::mutex> lock(m_callbackMu);
-        m_callbackCv.wait(lock, [this] { return m_callbacksInFlight == 0; });
+        while (m_callbacksInFlight != 0) {
+            if (m_callbackCv.wait_for(lock, std::chrono::seconds(1),
+                                      [this] { return m_callbacksInFlight == 0; })) {
+                break;
+            }
+            std::cerr << "[cam] waiting callbacks cam=" << m_camIndex
+                      << " in_flight=" << m_callbacksInFlight << "\n";
+        }
+    }
+
+    std::function<void(FrameItem &&)> CopySink() const
+    {
+        std::lock_guard<std::mutex> lock(m_sinkMu);
+        return m_sink;
+    }
+
+    bool RequeueRequest(Request *req)
+    {
+        if (!req || !m_cam)
+            return false;
+        req->reuse(Request::ReuseBuffers);
+        const int rc = m_cam->queueRequest(req);
+        if (rc < 0) {
+            const bool firstFault = !m_streamFault.exchange(true, std::memory_order_relaxed);
+            m_active.store(false, std::memory_order_relaxed);
+            if (firstFault) {
+                std::cerr << "[cam] queueRequest failed cam=" << m_camIndex
+                          << " rc=" << rc << "\n";
+            }
+            return false;
+        }
+        return true;
     }
 
     void OnRequestComplete(Request *req)
@@ -308,7 +348,7 @@ class LibcameraMonoCam {
         auto it = req->buffers().find(m_stream);
         if (it == req->buffers().end()) {
             if (m_active.load(std::memory_order_relaxed))
-                m_cam->queueRequest(req);
+                RequeueRequest(req);
             return;
         }
         FrameBuffer *buf = it->second;
@@ -328,8 +368,7 @@ class LibcameraMonoCam {
         auto mit = m_bufferMaps.find(buf);
         if (mit == m_bufferMaps.end() || mit->second.empty() || !mit->second[0].addr) {
             if (m_active.load(std::memory_order_relaxed)) {
-                req->reuse(Request::ReuseBuffers);
-                m_cam->queueRequest(req);
+                RequeueRequest(req);
             }
             return;
         }
@@ -338,8 +377,7 @@ class LibcameraMonoCam {
         auto frameSlot = AcquireFrameSlot();
         if (!frameSlot) {
             if (m_active.load(std::memory_order_relaxed)) {
-                req->reuse(Request::ReuseBuffers);
-                m_cam->queueRequest(req);
+                RequeueRequest(req);
             }
             return;
         }
@@ -376,12 +414,12 @@ class LibcameraMonoCam {
 
         item.gray = gray8;
         item.owner = std::shared_ptr<void>(std::move(frameSlot));
-        if (m_sink)
-            m_sink(std::move(item));
+        auto sink = CopySink();
+        if (sink)
+            sink(std::move(item));
 
         if (m_active.load(std::memory_order_relaxed)) {
-            req->reuse(Request::ReuseBuffers);
-            m_cam->queueRequest(req);
+            RequeueRequest(req);
         }
     }
 
@@ -430,8 +468,10 @@ class LibcameraMonoCam {
     std::vector<std::unique_ptr<Request>> m_requests;
     std::map<FrameBuffer *, std::vector<PlaneMap>> m_bufferMaps;
     std::function<void(FrameItem &&)> m_sink;
+    mutable std::mutex m_sinkMu;
     bool m_r16Normalize{false};
     std::atomic<bool> m_active{false};
+    std::atomic<bool> m_streamFault{false};
     std::mutex m_framePoolMu;
     std::shared_ptr<FramePoolState> m_framePool;
     std::mutex m_callbackMu;
@@ -446,7 +486,7 @@ class LibcameraStereoOV9281_TsPair {
 
     bool Open(int w, int h, int fps, bool aeDisable, int exposureUs, float gain, bool requestY8,
               int64_t pair_thresh_ns, int64_t keepWindowNs, int maxPairQueue = 8,
-              bool r16_normalize = false)
+              bool r16_normalize = false, int leftCamIndex = 0, int rightCamIndex = 1)
     {
         m_w = w;
         m_h = h;
@@ -454,6 +494,7 @@ class LibcameraStereoOV9281_TsPair {
         m_maxPairQueue = maxPairQueue;
         m_pairThreshNs = pair_thresh_ns;
         m_keepWindowNs = keepWindowNs;
+        m_acceptFrames.store(true, std::memory_order_relaxed);
 
         m_cm = std::make_unique<CameraManager>();
         if (m_cm->start()) {
@@ -467,8 +508,30 @@ class LibcameraStereoOV9281_TsPair {
             return false;
         }
 
-        m_camL = cams[0];
-        m_camR = cams[1];
+        const int camCount = static_cast<int>(cams.size());
+        if (leftCamIndex < 0 || leftCamIndex >= camCount ||
+            rightCamIndex < 0 || rightCamIndex >= camCount) {
+            std::cerr << "[cam] invalid camera index left=" << leftCamIndex
+                      << " right=" << rightCamIndex
+                      << " available=" << camCount << "\n";
+            for (int i = 0; i < camCount; ++i) {
+                std::cerr << "[cam] available index=" << i
+                          << " id=" << cams[static_cast<size_t>(i)]->id() << "\n";
+            }
+            return false;
+        }
+        if (leftCamIndex == rightCamIndex) {
+            std::cerr << "[cam] left and right camera index must differ, got "
+                      << leftCamIndex << "\n";
+            return false;
+        }
+
+        m_camL = cams[static_cast<size_t>(leftCamIndex)];
+        m_camR = cams[static_cast<size_t>(rightCamIndex)];
+        std::cerr << "[cam] selected left index=" << leftCamIndex
+                  << " id=" << m_camL->id() << "\n";
+        std::cerr << "[cam] selected right index=" << rightCamIndex
+                  << " id=" << m_camR->id() << "\n";
 
         auto sink = [&](FrameItem &&fi) { PushFrame(std::move(fi)); };
 
@@ -497,6 +560,7 @@ class LibcameraStereoOV9281_TsPair {
 
     void Close()
     {
+        m_acceptFrames.store(false, std::memory_order_relaxed);
         m_left.SetSink(nullptr);
         m_right.SetSink(nullptr);
         m_left.Stop();
@@ -523,7 +587,10 @@ class LibcameraStereoOV9281_TsPair {
     {
         std::unique_lock<std::mutex> lk(m_muPair);
         if (!m_cvPair.wait_for(lk, std::chrono::milliseconds(timeoutMs),
-                               [&] { return !m_paired.empty() || !g_runningFlag.load(); })) {
+                               [&] {
+                                   return !m_paired.empty() || !g_runningFlag.load() ||
+                                          !m_acceptFrames.load(std::memory_order_relaxed);
+                               })) {
             return false;
         }
         if (m_paired.empty())
@@ -544,6 +611,13 @@ class LibcameraStereoOV9281_TsPair {
 
     int64_t LastDtMs() const { return m_lastDtMs.load(); }
     uint32_t LastSeq() const { return m_lastSeq.load(); }
+    uint32_t LastRawSeqL() const { return m_lastRawSeq[0].load(std::memory_order_relaxed); }
+    uint32_t LastRawSeqR() const { return m_lastRawSeq[1].load(std::memory_order_relaxed); }
+    uint64_t RawCountL() const { return m_rawFrameCount[0].load(std::memory_order_relaxed); }
+    uint64_t RawCountR() const { return m_rawFrameCount[1].load(std::memory_order_relaxed); }
+    int64_t LastRejectDtUs() const { return m_lastRejectDtNs.load(std::memory_order_relaxed) / 1000; }
+    uint64_t DroppedUnpairedL() const { return m_droppedUnpaired[0].load(std::memory_order_relaxed); }
+    uint64_t DroppedUnpairedR() const { return m_droppedUnpaired[1].load(std::memory_order_relaxed); }
     size_t PendL() const
     {
         std::lock_guard<std::mutex> lk(m_muPair);
@@ -556,11 +630,16 @@ class LibcameraStereoOV9281_TsPair {
     }
     int64_t PairTolNs() const { return m_pairThreshNs; }
     uint64_t DroppedPaired() const { return m_droppedPaired.load(std::memory_order_relaxed); }
+    bool Healthy() const { return m_left.Healthy() && m_right.Healthy(); }
 
   private:
     void PushFrame(FrameItem &&fi)
     {
+        if (!m_acceptFrames.load(std::memory_order_relaxed))
+            return;
         std::lock_guard<std::mutex> lk(m_muPair);
+        if (!m_acceptFrames.load(std::memory_order_relaxed))
+            return;
         OnFrameLocked(std::move(fi));
     }
 
@@ -581,9 +660,12 @@ class LibcameraStereoOV9281_TsPair {
         const bool pairFromLeft = bestLeftDt <= bestRightDt;
         const int64_t bestDt = pairFromLeft ? bestLeftDt : bestRightDt;
         if (bestDt > m_pairThreshNs) {
+            m_lastRejectDtNs.store(bestDt == INT64_MAX ? -1 : bestDt, std::memory_order_relaxed);
             if (m_qL.front().tsNs <= m_qR.front().tsNs) {
+                m_droppedUnpaired[0].fetch_add(1, std::memory_order_relaxed);
                 m_qL.pop_front();
             } else {
+                m_droppedUnpaired[1].fetch_add(1, std::memory_order_relaxed);
                 m_qR.pop_front();
             }
             return true;
@@ -648,6 +730,10 @@ class LibcameraStereoOV9281_TsPair {
 
     void OnFrameLocked(FrameItem &&fi)
     {
+        if (fi.camIndex >= 0 && fi.camIndex < 2) {
+            m_lastRawSeq[fi.camIndex].store(fi.seq, std::memory_order_relaxed);
+            m_rawFrameCount[fi.camIndex].fetch_add(1, std::memory_order_relaxed);
+        }
         if (fi.camIndex == 0)
             m_qL.push_back(std::move(fi));
         else
@@ -671,8 +757,13 @@ class LibcameraStereoOV9281_TsPair {
     std::condition_variable m_cvPair;
     std::deque<FrameItem> m_qL, m_qR;
     std::deque<std::pair<FrameItem, FrameItem>> m_paired;
+    std::atomic<bool> m_acceptFrames{false};
 
     std::atomic<int64_t> m_lastDtMs{0};
     std::atomic<uint32_t> m_lastSeq{0};
     std::atomic<uint64_t> m_droppedPaired{0};
+    std::atomic<uint32_t> m_lastRawSeq[2]{{0}, {0}};
+    std::atomic<uint64_t> m_rawFrameCount[2]{{0}, {0}};
+    std::atomic<int64_t> m_lastRejectDtNs{0};
+    std::atomic<uint64_t> m_droppedUnpaired[2]{{0}, {0}};
 };

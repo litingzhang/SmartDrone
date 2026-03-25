@@ -2212,7 +2212,6 @@ void LoopClosing::RequestReset()
         unique_lock<mutex> lock(mMutexReset);
         mbResetRequested = true;
     }
-
     while(1)
     {
         {
@@ -2231,7 +2230,6 @@ void LoopClosing::RequestResetActiveMap(Map *pMap)
         mbResetActiveMapRequested = true;
         mpMapToReset = pMap;
     }
-
     while(1)
     {
         {

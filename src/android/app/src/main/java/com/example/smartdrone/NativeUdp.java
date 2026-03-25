@@ -23,6 +23,7 @@ public class NativeUdp {
     public static native int sendRuntimeConfig(
             int exposureUs,
             float gain,
+            int pairMs,
             int sensorMode,
             boolean sendImage,
             boolean sendFeature,

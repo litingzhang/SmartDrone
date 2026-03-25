@@ -18,7 +18,6 @@
 
 
 #include "Tracking.h"
-#include "System.h"
 
 #include "ORBmatcher.h"
 // #include "FrameDrawer.h"
@@ -34,9 +33,6 @@
 
 #include <mutex>
 #include <chrono>
-#include <algorithm>
-
-
 using namespace std;
 
 namespace ORB_SLAM3
@@ -115,11 +111,6 @@ int CountTrackedMapPoints(const Frame& frame)
     return tracked;
 }
 
-struct RelocCandidateOrder
-{
-    int index;
-    int bowMatches;
-};
 }
 
 
@@ -1860,7 +1851,6 @@ void Tracking::ResetFrameIMU()
 
 void Tracking::Track()
 {
-
     if (bStepByStep)
     {
         std::cout << "Tracking: Waiting to the next step" << std::endl;
@@ -3690,20 +3680,14 @@ bool Tracking::Relocalization()
     // If enough matches are found we setup a PnP solver
     ORBmatcher matcher(0.75,true);
 
-    thread_local vector<MLPnPsolver*> vpMLPnPsolvers;
-    thread_local vector<vector<MapPoint*> > vvpMapPointMatches;
-    thread_local vector<bool> vbDiscarded;
-    thread_local vector<RelocCandidateOrder> vCandidateOrder;
+    vector<MLPnPsolver*> vpMLPnPsolvers;
+    vpMLPnPsolvers.resize(nKFs);
 
-    for(MLPnPsolver* pSolver : vpMLPnPsolvers)
-        delete pSolver;
-
-    vpMLPnPsolvers.assign(nKFs, static_cast<MLPnPsolver*>(NULL));
-    vvpMapPointMatches.clear();
+    vector<vector<MapPoint*> > vvpMapPointMatches;
     vvpMapPointMatches.resize(nKFs);
-    vbDiscarded.assign(nKFs, false);
-    vCandidateOrder.clear();
-    vCandidateOrder.reserve(nKFs);
+
+    vector<bool> vbDiscarded;
+    vbDiscarded.resize(nKFs);
 
     int nCandidates=0;
 
@@ -3725,18 +3709,10 @@ bool Tracking::Relocalization()
                 MLPnPsolver* pSolver = new MLPnPsolver(mCurrentFrame,vvpMapPointMatches[i]);
                 pSolver->SetRansacParameters(0.99,10,300,6,0.5,5.991);  //This solver needs at least 6 points
                 vpMLPnPsolvers[i] = pSolver;
-                vCandidateOrder.push_back({i, nmatches});
                 nCandidates++;
             }
         }
     }
-
-    sort(vCandidateOrder.begin(), vCandidateOrder.end(),
-         [](const RelocCandidateOrder& lhs, const RelocCandidateOrder& rhs)
-         {
-             return lhs.bowMatches > rhs.bowMatches;
-         });
-
     // Alternatively perform some iterations of P4P RANSAC
     // Until we found a camera pose supported by enough inliers
     bool bMatch = false;
@@ -3744,9 +3720,8 @@ bool Tracking::Relocalization()
 
     while(nCandidates>0 && !bMatch)
     {
-        for(const RelocCandidateOrder& candidate : vCandidateOrder)
+        for(int i=0; i<nKFs; i++)
         {
-            const int i = candidate.index;
             if(vbDiscarded[i])
                 continue;
 
@@ -3843,7 +3818,6 @@ bool Tracking::Relocalization()
     {
         for(MLPnPsolver* pSolver : vpMLPnPsolvers)
             delete pSolver;
-        vpMLPnPsolvers.clear();
         return false;
     }
     else
@@ -3852,7 +3826,6 @@ bool Tracking::Relocalization()
         cout << "Relocalized!!" << endl;
         for(MLPnPsolver* pSolver : vpMLPnPsolvers)
             delete pSolver;
-        vpMLPnPsolvers.clear();
         return true;
     }
 

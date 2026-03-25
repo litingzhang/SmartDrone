@@ -44,30 +44,6 @@
 
 namespace ORB_SLAM3
 {
-namespace
-{
-g2o::SparseOptimizer& GetThreadLocalPoseOptimizer()
-{
-    thread_local g2o::SparseOptimizer optimizer;
-    thread_local bool initialized = false;
-
-    if(!initialized)
-    {
-        g2o::BlockSolver_6_3::LinearSolverType* linearSolver =
-                new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
-        g2o::BlockSolver_6_3* solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
-        g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
-        optimizer.setAlgorithm(solver);
-        optimizer.setVerbose(false);
-        initialized = true;
-    }
-
-    optimizer.clear();
-    optimizer.setVerbose(false);
-    return optimizer;
-}
-}
-
 bool sortByVal(const pair<MapPoint*, int> &a, const pair<MapPoint*, int> &b)
 {
     return (a.second < b.second);
@@ -837,7 +813,15 @@ void Optimizer::FullInertialBA(Map *pMap, int its, const bool bFixLocal, const l
 
 int Optimizer::PoseOptimization(Frame *pFrame)
 {
-    g2o::SparseOptimizer& optimizer = GetThreadLocalPoseOptimizer();
+    g2o::SparseOptimizer optimizer;
+    g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
+
+    linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
+
+    g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
+
+    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    optimizer.setAlgorithm(solver);
 
     int nInitialCorrespondences=0;
 
@@ -852,22 +836,16 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     // Set MapPoint vertices
     const int N = pFrame->N;
 
-    thread_local vector<ORB_SLAM3::EdgeSE3ProjectXYZOnlyPose*> vpEdgesMono;
-    thread_local vector<ORB_SLAM3::EdgeSE3ProjectXYZOnlyPoseToBody *> vpEdgesMono_FHR;
-    thread_local vector<size_t> vnIndexEdgeMono, vnIndexEdgeRight;
-    vpEdgesMono.clear();
-    vpEdgesMono_FHR.clear();
-    vnIndexEdgeMono.clear();
-    vnIndexEdgeRight.clear();
+    vector<ORB_SLAM3::EdgeSE3ProjectXYZOnlyPose*> vpEdgesMono;
+    vector<ORB_SLAM3::EdgeSE3ProjectXYZOnlyPoseToBody *> vpEdgesMono_FHR;
+    vector<size_t> vnIndexEdgeMono, vnIndexEdgeRight;
     vpEdgesMono.reserve(N);
     vpEdgesMono_FHR.reserve(N);
     vnIndexEdgeMono.reserve(N);
     vnIndexEdgeRight.reserve(N);
 
-    thread_local vector<g2o::EdgeStereoSE3ProjectXYZOnlyPose*> vpEdgesStereo;
-    thread_local vector<size_t> vnIndexEdgeStereo;
-    vpEdgesStereo.clear();
-    vnIndexEdgeStereo.clear();
+    vector<g2o::EdgeStereoSE3ProjectXYZOnlyPose*> vpEdgesStereo;
+    vector<size_t> vnIndexEdgeStereo;
     vpEdgesStereo.reserve(N);
     vnIndexEdgeStereo.reserve(N);
 
@@ -1123,7 +1101,6 @@ int Optimizer::PoseOptimization(Frame *pFrame)
 
         if(optimizer.edges().size()<10)
             break;
-
     }    
 
     // Recover optimized pose and return number of inliers

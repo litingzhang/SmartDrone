@@ -23,7 +23,7 @@ static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
 static constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
-static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 40;
+static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 42;
 
 static uint32_t NowMs32()
 {
@@ -194,6 +194,7 @@ Java_com_example_smartdrone_NativeUdp_sendRuntimeConfig(
     jclass,
     jint exposureUs,
     jfloat gain,
+    jint pairMs,
     jint sensorMode,
     jboolean sendImage,
     jboolean sendFeature,
@@ -211,6 +212,7 @@ Java_com_example_smartdrone_NativeUdp_sendRuntimeConfig(
     if (sendFeature == JNI_TRUE) streamFlags |= RUNTIME_CFG_FLAG_SEND_FEATURE;
     if (sendMap == JNI_TRUE) streamFlags |= RUNTIME_CFG_FLAG_SEND_MAP;
     payload.push_back(streamFlags);
+    WriteU16Le(payload, static_cast<uint16_t>(pairMs > 0 ? pairMs : 0));
     payload.resize(RUNTIME_CONFIG_PAYLOAD_LEN, 0);
 
     const std::vector<uint8_t> frame = MakeFrame(

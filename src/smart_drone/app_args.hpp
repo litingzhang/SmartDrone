@@ -31,6 +31,8 @@ struct CameraConfig {
     int width{640};
     int height{400};
     int fps{60};
+    int leftCamIndex{0};
+    int rightCamIndex{1};
     bool aeDisable{true};
     int exposureUs{5000};
     float gain{8.0f};
@@ -178,6 +180,11 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     config.camera.width = argReader.GetInt("--w", 640);
     config.camera.height = argReader.GetInt("--h", 400);
     config.camera.fps = argReader.GetInt("--fps", 60);
+    config.camera.leftCamIndex = argReader.GetInt("--left-cam-index", 0);
+    config.camera.rightCamIndex = argReader.GetInt("--right-cam-index", 1);
+    if (argReader.HasFlag("--swap-cams")) {
+        std::swap(config.camera.leftCamIndex, config.camera.rightCamIndex);
+    }
     config.camera.aeDisable = !argReader.HasFlag("--ae");
     config.camera.exposureUs = argReader.GetInt("--exp-us", 5000);
     config.camera.gain = argReader.GetFloat("--gain", 8.0f);

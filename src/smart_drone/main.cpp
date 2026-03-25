@@ -57,6 +57,7 @@ struct UnifiedConfig {
 struct RemoteRuntimeConfig {
     int exposureUs{3000};
     float gain{2.0f};
+    int pairMs{2};
     std::string udpIp;
     SensorMode sensorMode{SensorMode::Stereo};
     bool sendImage{true};
@@ -66,7 +67,7 @@ struct RemoteRuntimeConfig {
 
 struct MainRuntimeAliases {
     SensorMode sensorMode{SensorMode::Stereo};
-    int width{}, height{}, fps{}, exposureUs{}, pairMs{}, keepMs{}, pairQueue{};
+    int width{}, height{}, fps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{}, pairQueue{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{};
     bool sendImage{true}, sendFeature{true}, sendMap{true};
     float gain{};
@@ -383,14 +384,18 @@ struct VioStartupAligner {
             MavlinkSerial::Pose out = ComputeLostPose(nowUs);
             outQuality = havePublishedPose ? OdomQualityMode::WEAK : OdomQualityMode::LOST;
             trackingUsablePrev = false;
+            trackingReadySinceUs = 0;
             return out;
         }
 
+        if (!trackingUsablePrev) {
+            trackingReadySinceUs = nowUs;
+        }
         const bool trackingRecovered = !trackingUsablePrev;
         if (!TryAlignZ(poseNed, nowUs, trackingRecovered)) {
             MavlinkSerial::Pose out = havePublishedPose ? ComputeLostPose(nowUs) : poseNed;
             outQuality = havePublishedPose ? OdomQualityMode::WEAK : OdomQualityMode::LOST;
-            trackingUsablePrev = false;
+            trackingUsablePrev = true;
             return out;
         }
 
@@ -401,7 +406,7 @@ struct VioStartupAligner {
         lossActive = false;
         holdPose = out;
         havePublishedPose = true;
-        outQuality = (nowUs < weakUntilUs) ? OdomQualityMode::WEAK : OdomQualityMode::GOOD;
+        outQuality = (!zOffsetFromPx4 || nowUs < weakUntilUs) ? OdomQualityMode::WEAK : OdomQualityMode::GOOD;
         return out;
     }
 
@@ -486,6 +491,16 @@ private:
     bool TryAlignZ(const MavlinkSerial::Pose& poseNed, uint64_t nowUs, bool trackingRecovered)
     {
         if (haveZOffset) {
+            if (!zOffsetFromPx4 && HasFreshPx4LocalZ(nowUs)) {
+                zOffset = latestPx4Z - poseNed.z;
+                zOffsetFromPx4 = true;
+                weakUntilUs = nowUs + kWeakHoldUs;
+                std::cerr << "[pose] PX4 local height became available, VIO z realigned"
+                          << " px4_z=" << latestPx4Z
+                          << " vio_z=" << poseNed.z
+                          << " z_offset=" << zOffset << "\n";
+                return true;
+            }
             if ((trackingRecovered || lossActive) && havePublishedPose) {
                 zOffset = holdPose.z - poseNed.z;
                 weakUntilUs = nowUs + kWeakHoldUs;
@@ -500,6 +515,7 @@ private:
         if (HasFreshPx4LocalZ(nowUs)) {
             zOffset = latestPx4Z - poseNed.z;
             haveZOffset = true;
+            zOffsetFromPx4 = true;
             weakUntilUs = nowUs + kWeakHoldUs;
             std::cerr << "[pose] VIO z aligned to PX4 local height at startup"
                       << " px4_z=" << latestPx4Z
@@ -508,9 +524,17 @@ private:
             return true;
         }
 
-        if ((lastMissingLocalPosLogUs == 0) || (nowUs - lastMissingLocalPosLogUs >= 1000000ULL)) {
-            std::cerr << "[pose] waiting for fresh PX4 LOCAL_POSITION_NED before initial VIO z alignment\n";
-            lastMissingLocalPosLogUs = nowUs;
+        if (trackingReadySinceUs != 0 && (nowUs - trackingReadySinceUs) >= kStartupFallbackAlignUs) {
+            const float worldZ = havePublishedPose ? holdPose.z : 0.0f;
+            zOffset = worldZ - poseNed.z;
+            haveZOffset = true;
+            zOffsetFromPx4 = false;
+            weakUntilUs = nowUs + kWeakHoldUs;
+            std::cerr << "[pose] PX4 LOCAL_POSITION_NED missing, fallback z alignment enabled"
+                      << " world_z=" << worldZ
+                      << " vio_z=" << poseNed.z
+                      << " z_offset=" << zOffset << "\n";
+            return true;
         }
 
         return false;
@@ -519,6 +543,7 @@ private:
     static constexpr uint64_t kPx4LocalPositionMaxAgeUs = 500000ULL;
     static constexpr uint64_t kRangeSensorMaxAgeUs = 200000ULL;
     static constexpr uint64_t kWeakHoldUs = 1500000ULL;
+    static constexpr uint64_t kStartupFallbackAlignUs = 2000000ULL;
     static constexpr float kRangeHardFloorM = 0.35f;
     static constexpr float kRangeProtectionMaxStepM = 0.30f;
 
@@ -527,9 +552,10 @@ private:
     uint64_t weakUntilUs{0};
     uint64_t latestPx4ZReceivedUs{0};
     uint64_t lastLossLogUs{0};
-    uint64_t lastMissingLocalPosLogUs{0};
     uint64_t lastRangeProtectLogUs{0};
+    uint64_t trackingReadySinceUs{0};
     bool haveZOffset{false};
+    bool zOffsetFromPx4{false};
     bool haveLatestPx4Z{false};
     bool lossActive{false};
     bool trackingUsablePrev{false};
@@ -965,6 +991,7 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig& c)
     MainRuntimeAliases a{};
     a.sensorMode = c.sensorMode;
     a.width = c.camera.width; a.height = c.camera.height; a.fps = c.camera.fps;
+    a.leftCamIndex = c.camera.leftCamIndex; a.rightCamIndex = c.camera.rightCamIndex;
     a.aeDisable = c.camera.aeDisable; a.exposureUs = c.camera.exposureUs; a.gain = c.camera.gain;
     a.requestY8 = c.camera.requestY8; a.r16Norm = c.camera.r16Norm; a.pairMs = c.camera.pairMs;
     a.keepMs = c.camera.keepMs; a.pairQueue = c.camera.pairQueue;
@@ -1066,6 +1093,8 @@ void PrintStartupConfig(const AppConfig& app, const MainRuntimeAliases& a, Unifi
     std::cerr << "cam " << a.width << "x" << a.height << " @" << a.fps
               << " aeDisable=" << (a.aeDisable ? "true" : "false")
               << " exp_us=" << a.exposureUs << " gain=" << a.gain << " pixelFormat=R16\n";
+    std::cerr << "cam_select left_index=" << a.leftCamIndex
+              << " right_index=" << a.rightCamIndex << "\n";
     std::cerr << "pair_thresh=" << a.pairMs << "ms keep_window=" << a.keepMs
               << "ms pair_queue=" << a.pairQueue << "\n";
     std::cerr << "imuHz=" << a.imuHz << " udp=" << (a.udpEnable ? "Y" : "N")
@@ -1234,7 +1263,7 @@ bool OpenCamera(LibcameraStereoOV9281_TsPair& cam, const MainRuntimeAliases& a)
 {
     return cam.Open(a.width, a.height, a.fps, a.aeDisable, a.exposureUs, a.gain, a.requestY8,
                     (int64_t)a.pairMs * 1000000LL, (int64_t)a.keepMs * 1000000LL, a.pairQueue,
-                    a.r16Norm);
+                    a.r16Norm, a.leftCamIndex, a.rightCamIndex);
 }
 
 bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bool>& stop, LivePoseState& livePose)
@@ -1270,23 +1299,17 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     const int64_t slackBeforeNs = std::max<int64_t>(2 * imuDtNs, 5000000);
     const int64_t slackAfterNs = std::max<int64_t>(2 * imuDtNs, 5000000);
     const uint64_t imuWarmupSamples = static_cast<uint64_t>(std::max(20, a.imuHz / 2));
-    auto lastFeatureLog = std::chrono::steady_clock::now();
     auto lastImuWindowLog = std::chrono::steady_clock::now();
     auto lastImuWarmupLog = std::chrono::steady_clock::now();
     auto lastImuRejectLog = std::chrono::steady_clock::now();
-    int leftFeatureFrames = 0;
-    int rightFeatureFrames = 0;
-    size_t leftFeatureCount = 0;
-    size_t rightFeatureCount = 0;
     int64_t lastPointCloudUpdateNs = 0;
-    uint64_t lastDroppedPaired = 0;
-    auto lastPairDropLog = std::chrono::steady_clock::now();
     Sophus::SE3f stereoReferencePose{Sophus::SE3f()};
     bool stereoReferencePoseSet = false;
     unsigned long lastRawMapId = PoseContinuityMapper::kInvalidMapId;
     PoseContinuityMapper continuityMapper{};
     VioStartupAligner startupAligner{};
     OdomVelocityTracker odomVelocityTracker{};
+    bool sessionOk = true;
     while (g_runningFlag.load() && !stop.load()) {
         if (useImu) {
             const uint64_t imuCnt = imuState.imuCnt.load(std::memory_order_relaxed);
@@ -1306,19 +1329,13 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
             }
         }
         FrameItem L, R;
-        if (!cam.GrabPair(L, R, 1000, true)) continue;
-        const auto pairDropNow = std::chrono::steady_clock::now();
-        if (pairDropNow - lastPairDropLog >= std::chrono::seconds(1)) {
-            const uint64_t droppedPaired = cam.DroppedPaired();
-            if (droppedPaired != lastDroppedPaired) {
-                std::cerr << "[pair] dropped_stale=" << (droppedPaired - lastDroppedPaired)
-                          << " total=" << droppedPaired
-                          << " pend_l=" << cam.PendL()
-                          << " pend_r=" << cam.PendR()
-                          << "\n";
-                lastDroppedPaired = droppedPaired;
+        if (!cam.GrabPair(L, R, 1000, true)) {
+            if (!cam.Healthy()) {
+                std::cerr << "[slam] camera pipeline unhealthy, aborting session\n";
+                sessionOk = false;
+                break;
             }
-            lastPairDropLog = pairDropNow;
+            continue;
         }
         int64_t frameNs = (int64_t)((L.tsNs + R.tsNs) / 2);
         if (lastFrameNs != 0 && frameNs <= lastFrameNs) frameNs = lastFrameNs + frameStepNs;
@@ -1388,27 +1405,6 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
             }
             udp.Enqueue(0, L.seq, frameTime, L.gray, trackedLeftFeatures, a.sendImage, a.sendFeature);
             udp.Enqueue(1, R.seq, frameTime, R.gray, trackedRightFeatures, a.sendImage, a.sendFeature);
-            if (a.sendFeature) {
-                leftFeatureFrames += trackedLeftFeatures.empty() ? 0 : 1;
-                rightFeatureFrames += trackedRightFeatures.empty() ? 0 : 1;
-                leftFeatureCount += trackedLeftFeatures.size();
-                rightFeatureCount += trackedRightFeatures.size();
-            }
-            const auto now = std::chrono::steady_clock::now();
-            if (a.sendFeature && now - lastFeatureLog >= std::chrono::seconds(1)) {
-                std::cerr << "[feat] left_frames=" << leftFeatureFrames
-                          << " left_points=" << leftFeatureCount
-                          << " right_frames=" << rightFeatureFrames
-                          << " right_points=" << rightFeatureCount
-                          << " last_left=" << trackedLeftFeatures.size()
-                          << " last_right=" << trackedRightFeatures.size()
-                          << "\n";
-                lastFeatureLog = now;
-                leftFeatureFrames = 0;
-                rightFeatureFrames = 0;
-                leftFeatureCount = 0;
-                rightFeatureCount = 0;
-            }
         }
         const int state = SLAM.GetTrackingState();
         const bool trackingUsable = IsTrackingPoseUsable(state);
@@ -1428,7 +1424,6 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
             if (!stereoReferencePoseSet) {
                 stereoReferencePose = Twc;
                 stereoReferencePoseSet = true;
-                std::cerr << "[pose] stereo reference aligned to first tracked body pose\n";
             }
             Twc = stereoReferencePose.inverse() * Twc;
         }
@@ -1464,7 +1459,7 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     std::cerr << "[session] slam shutdown complete\n";
     livePose.SetRuntimeMode(RUNTIME_MODE_IDLE);
     std::cerr << "[session] slam exit\n";
-    return true;
+    return sessionOk;
 }
 
 bool RunCalibSession(const UnifiedConfig& cfg, std::atomic<bool>& stop, LivePoseState& livePose)
@@ -1497,33 +1492,19 @@ bool RunCalibSession(const UnifiedConfig& cfg, std::atomic<bool>& stop, LivePose
     }
     int saved = 0; int64_t lastPairNs = 0;
     const int64_t maxSaveDtNs = (int64_t)std::max(a.pairMs, 1) * 1000000LL;
-    int64_t lastDiagNs = NowNs();
+    bool sessionOk = true;
     while (g_runningFlag.load() && !stop.load()) {
         if (cfg.calib.maxFrames > 0 && saved >= cfg.calib.maxFrames) break;
         FrameItem L, R;
         if (!cam.GrabPair(L, R, 1000)) {
-            const int64_t nowNs = NowNs();
-            if (nowNs - lastDiagNs >= 1000000000LL) {
-                lastDiagNs = nowNs;
-                std::cerr << "[calib-wd] no pair 1s"
-                          << " last_seq=" << cam.LastSeq()
-                          << " dtMs=" << cam.LastDtMs()
-                          << " pendL=" << cam.PendL()
-                          << " pendR=" << cam.PendR()
-                          << " pairTolMs=" << a.pairMs
-                          << " pairTolNs=" << cam.PairTolNs()
-                          << "\n";
+            if (!cam.Healthy()) {
+                std::cerr << "[calib] camera pipeline unhealthy, aborting session\n";
+                sessionOk = false;
+                break;
             }
             continue;
         }
         const int64_t absDtLr = Abs64((int64_t)L.tsNs - (int64_t)R.tsNs);
-        if ((saved % 30) == 0) {
-            std::cerr << "[calib-pair] dt_lr_us=" << (absDtLr / 1000.0)
-                      << " max_save_dt_us=" << (maxSaveDtNs / 1000.0)
-                      << " seqL=" << L.seq
-                      << " seqR=" << R.seq
-                      << "\n";
-        }
         if (absDtLr > maxSaveDtNs) {
             static int droppedWide = 0;
             ++droppedWide;
@@ -1598,7 +1579,7 @@ bool RunCalibSession(const UnifiedConfig& cfg, std::atomic<bool>& stop, LivePose
     std::cerr << "[calib] out=" << outRoot << " saved=" << saved << " imuOk=" << (imuOk.load() ? "true" : "false") << "\n";
     livePose.SetRuntimeMode(RUNTIME_MODE_IDLE);
     std::cerr << "[session] calib exit\n";
-    return true;
+    return sessionOk;
 }
 
 class UnifiedRuntimeController {
@@ -1633,7 +1614,7 @@ public:
     }
     bool UpdateRemoteConfig(const RemoteRuntimeConfig& r, std::string* err)
     {
-        if (r.exposureUs <= 0 || !(r.gain > 0.0f)) {
+        if (r.exposureUs <= 0 || !(r.gain > 0.0f) || r.pairMs <= 0) {
             if (err) *err = "bad runtime config";
             return false;
         }
@@ -1641,6 +1622,7 @@ public:
         CameraConfig& cam = m_config.app.camera;
         cam.exposureUs = r.exposureUs;
         cam.gain = r.gain;
+        cam.pairMs = r.pairMs;
         m_config.app.sensorMode = r.sensorMode;
         m_config.app.settings = DefaultSettingsForSensorMode(r.sensorMode);
         m_config.app.udp.ip = r.udpIp;
@@ -1796,11 +1778,15 @@ RouteResult HandleRuntimeModeFrame(const TlvFrame& frame, UnifiedRuntimeControll
 
 RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer, UnifiedRuntimeController& c)
 {
-    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN) return {ACK_E_BAD_LEN, "bad runtime cfg len"};
+    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY) {
+        return {ACK_E_BAD_LEN, "bad runtime cfg len"};
+    }
     const uint8_t* p = frame.payload.data();
+    const UnifiedConfig currentCfg = c.CurrentConfig();
     RemoteRuntimeConfig r{};
     r.exposureUs = (int)ReadU32Le(&p[0]);
     r.gain = ReadF32Le(&p[4]);
+    r.pairMs = std::max(currentCfg.app.camera.pairMs, 1);
     if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
         return {ACK_E_BAD_ARGS, "bad runtime cfg args"};
     }
@@ -1815,9 +1801,15 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
         r.sendFeature = (streamFlags & RUNTIME_CFG_FLAG_SEND_FEATURE) != 0;
         r.sendMap = (streamFlags & RUNTIME_CFG_FLAG_SEND_MAP) != 0;
     }
-    const char* ipChars = reinterpret_cast<const char*>(&p[10]);
+    size_t ipOffset = 10;
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN) {
+        const int pairMs = (int)ReadU16Le(&p[RUNTIME_CONFIG_PAIR_MS_OFFSET]);
+        if (pairMs > 0) r.pairMs = pairMs;
+        ipOffset = RUNTIME_CONFIG_IP_OFFSET;
+    }
+    const char* ipChars = reinterpret_cast<const char*>(&p[ipOffset]);
     size_t ipLen = 0;
-    while (ipLen < 30 && ipChars[ipLen] != '\0') {
+    while (ipLen < RUNTIME_CONFIG_IP_LEN && ipChars[ipLen] != '\0') {
         ++ipLen;
     }
     r.udpIp.assign(ipChars, ipLen);
@@ -1830,6 +1822,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
     return {ACK_OK, "runtime cfg updated udp=" + r.udpIp +
                     " sensor=" + std::string(r.sensorMode == SensorMode::StereoImu ? "stereo-imu" : "stereo") +
                     " settings=" + std::string(DefaultSettingsForSensorMode(r.sensorMode)) +
+                    " pair_ms=" + std::to_string(r.pairMs) +
                     " img=" + (r.sendImage ? "on" : "off") +
                     " feat=" + (r.sendFeature ? "on" : "off") +
                     " map=" + (r.sendMap ? "on" : "off")};
