@@ -51,7 +51,7 @@
                     android:id="@+id/btnModeToggle"
                     android:layout_width="36dp"
                     android:layout_height="36dp"
-                    android:layout_gravity="top|start"
+                    android:layout_gravity="top|end"
                     android:background="@drawable/bg_circle_button"
                     android:contentDescription="toggle_settings"
                     android:padding="7dp"
@@ -61,9 +61,10 @@
 
                 <HorizontalScrollView
                     android:id="@+id/remoteControlsBar"
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="44dp"
+                    android:layout_gravity="top|end"
+                    android:layout_marginEnd="44dp"
                     android:fillViewport="false"
                     android:scrollbars="none">
 
@@ -220,9 +221,9 @@
                     android:id="@+id/mapPanel"
                     android:layout_width="260dp"
                     android:layout_height="180dp"
-                    android:layout_gravity="top|end"
+                    android:layout_gravity="top|start"
                     android:layout_marginTop="0dp"
-                    android:layout_marginEnd="0dp">
+                    android:layout_marginStart="0dp">
 
                     <com.example.smartdrone.Map3DView
                         android:id="@+id/map3dView"

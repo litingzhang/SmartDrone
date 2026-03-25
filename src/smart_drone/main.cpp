@@ -741,6 +741,7 @@ public:
     }
     bool Arm(std::string* err) override
     {
+        CancelAutoLanding();
         EnsureManualControlStream();
         SendManualControlSnapshot();
         if (!m_mavlink.Arm(true)) {
@@ -751,6 +752,7 @@ public:
     }
     bool Disarm(std::string* err) override
     {
+        CancelAutoLanding();
         SetManualControlNeutral();
         SendManualControlSnapshot();
         DisableRemoteControl(true);
@@ -762,6 +764,7 @@ public:
     }
     bool EmergencyStop(std::string* err) override
     {
+        CancelAutoLanding();
         m_mavlink.StopSetpointStream();
         m_streamStarted.store(false, std::memory_order_relaxed);
         DisableRemoteControl(true);
@@ -773,6 +776,7 @@ public:
     }
     bool SetOffboard(std::string* err) override
     {
+        CancelAutoLanding();
         EnsureManualControlStream();
         m_remoteModeRequested.store(true, std::memory_order_relaxed);
         WarmupManualControlLink();
@@ -785,6 +789,7 @@ public:
     }
     bool Hold(std::string* err) override
     {
+        CancelAutoLanding();
         EnsureManualControlStream();
         SetManualControlNeutral();
         SendManualControlSnapshot();
@@ -798,18 +803,27 @@ public:
     }
     bool Land(std::string* err) override
     {
+        CancelAutoLanding();
         m_mavlink.StopSetpointStream();
         m_streamStarted.store(false, std::memory_order_relaxed);
-        SetManualControlNeutral();
-        DisableRemoteControl(true);
-        if (!m_mavlink.SendLand()) {
-            if (err) *err = "px4 land rejected";
+        EnsureManualControlStream();
+        m_remoteModeRequested.store(true, std::memory_order_relaxed);
+        StartAutoLanding();
+        WarmupManualControlLink();
+        if (!MaybeSyncRemoteFlightMode(true, err)) {
+            CancelAutoLanding();
+            SetManualControlNeutral();
+            DisableRemoteControl(true);
+            if (err && err->empty()) *err = "px4 remote land mode rejected";
             return false;
         }
+        SendManualControlSnapshot();
+        std::cout << "[land] remote descent started\n";
         return true;
     }
     bool SetMoveGoal(const MoveGoal& goal, std::string* err) override
     {
+        CancelAutoLanding();
         if (goal.isRcJoystick) {
             MavlinkSerial::ManualControlInput input{};
             input.throttleNorm = ClampSignedUnit(goal.throttleNorm);
@@ -851,6 +865,22 @@ private:
         Position = MavlinkSerial::PX4_CUSTOM_MAIN_MODE_POSCTL,
     };
 
+    struct AutoLandingState {
+        bool active{false};
+        bool haveRangeWindow{false};
+        float rangeWindowMin{NAN};
+        float rangeWindowMax{NAN};
+        std::chrono::steady_clock::time_point rangeWindowStart{};
+        std::chrono::steady_clock::time_point lastDisarmAttempt{};
+    };
+
+    static constexpr float kAutoLandThrottleNorm = -0.6f;
+    static constexpr float kAutoLandStableRangeDeltaM = 0.03f;
+    static constexpr float kAutoLandNearGroundM = 0.35f;
+    static constexpr uint64_t kAutoLandRangeMaxAgeUs = 300000ULL;
+    static constexpr auto kAutoLandStableDuration = std::chrono::seconds(2);
+    static constexpr auto kAutoLandDisarmRetry = std::chrono::milliseconds(500);
+
     bool IsVioControlUsable() const
     {
         LivePoseState::Snapshot snapshot{};
@@ -869,6 +899,25 @@ private:
     static const char* RemoteFlightModeToString(RemoteFlightMode mode)
     {
         return mode == RemoteFlightMode::Position ? "POSCTL" : "ALTCTL";
+    }
+
+    void CancelAutoLanding()
+    {
+        bool wasActive = false;
+        {
+            std::lock_guard<std::mutex> lock(m_autoLandingMtx);
+            wasActive = m_autoLanding.active;
+            m_autoLanding = AutoLandingState{};
+        }
+        if (wasActive) {
+            SetManualControlNeutral();
+        }
+    }
+
+    bool IsAutoLandingActive() const
+    {
+        std::lock_guard<std::mutex> lock(m_autoLandingMtx);
+        return m_autoLanding.active;
     }
 
     bool EnsureSetpointStream()
@@ -902,6 +951,12 @@ private:
         m_manualControlInput = MavlinkSerial::ManualControlInput{};
     }
 
+    void SetManualControlInput(const MavlinkSerial::ManualControlInput& input)
+    {
+        std::lock_guard<std::mutex> lock(m_manualControlMtx);
+        m_manualControlInput = input;
+    }
+
     MavlinkSerial::ManualControlInput GetManualControlSnapshot() const
     {
         std::lock_guard<std::mutex> lock(m_manualControlMtx);
@@ -919,6 +974,20 @@ private:
             SendManualControlSnapshot();
             std::this_thread::sleep_for(std::chrono::milliseconds(40));
         }
+    }
+
+    void StartAutoLanding()
+    {
+        AutoLandingState next{};
+        next.active = true;
+        {
+            std::lock_guard<std::mutex> lock(m_autoLandingMtx);
+            m_autoLanding = next;
+        }
+
+        MavlinkSerial::ManualControlInput input{};
+        input.throttleNorm = kAutoLandThrottleNorm;
+        SetManualControlInput(input);
     }
 
     bool MaybeSyncRemoteFlightMode(bool force, std::string* err)
@@ -957,9 +1026,80 @@ private:
         return true;
     }
 
+    void UpdateAutoLanding()
+    {
+        if (!IsAutoLandingActive()) {
+            return;
+        }
+
+        MavlinkSerial::ManualControlInput input{};
+        input.throttleNorm = kAutoLandThrottleNorm;
+        SetManualControlInput(input);
+
+        MavlinkSerial::DownwardDistanceSensor range{};
+        if (!m_mavlink.GetDownwardDistanceSensor(range, kAutoLandRangeMaxAgeUs) ||
+            !std::isfinite(range.currentDistance)) {
+            return;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        bool shouldDisarm = false;
+        {
+            std::lock_guard<std::mutex> lock(m_autoLandingMtx);
+            if (!m_autoLanding.active) {
+                return;
+            }
+
+            if (!m_autoLanding.haveRangeWindow) {
+                m_autoLanding.haveRangeWindow = true;
+                m_autoLanding.rangeWindowMin = range.currentDistance;
+                m_autoLanding.rangeWindowMax = range.currentDistance;
+                m_autoLanding.rangeWindowStart = now;
+                return;
+            }
+
+            m_autoLanding.rangeWindowMin = std::min(m_autoLanding.rangeWindowMin, range.currentDistance);
+            m_autoLanding.rangeWindowMax = std::max(m_autoLanding.rangeWindowMax, range.currentDistance);
+
+            if ((now - m_autoLanding.rangeWindowStart) < kAutoLandStableDuration) {
+                return;
+            }
+
+            const bool rangeStable =
+                (m_autoLanding.rangeWindowMax - m_autoLanding.rangeWindowMin) <= kAutoLandStableRangeDeltaM;
+            const bool nearGround = range.currentDistance <= kAutoLandNearGroundM;
+            if (rangeStable && nearGround &&
+                (m_autoLanding.lastDisarmAttempt.time_since_epoch().count() == 0 ||
+                 (now - m_autoLanding.lastDisarmAttempt) >= kAutoLandDisarmRetry)) {
+                m_autoLanding.lastDisarmAttempt = now;
+                shouldDisarm = true;
+            } else {
+                m_autoLanding.rangeWindowMin = range.currentDistance;
+                m_autoLanding.rangeWindowMax = range.currentDistance;
+                m_autoLanding.rangeWindowStart = now;
+            }
+        }
+
+        if (!shouldDisarm) {
+            return;
+        }
+
+        if (!m_mavlink.Arm(false)) {
+            return;
+        }
+
+        CancelAutoLanding();
+        SetManualControlNeutral();
+        SendManualControlSnapshot();
+        DisableRemoteControl(true);
+        std::cout << "[land] touchdown detected by range stability, disarmed\n";
+    }
+
     void ManualControlLoop()
     {
         while (!m_manualLoopStop.load(std::memory_order_relaxed)) {
+            UpdateAutoLanding();
+
             if (m_manualControlStreaming.load(std::memory_order_relaxed)) {
                 SendManualControlSnapshot();
             }
@@ -982,6 +1122,8 @@ private:
     mutable std::mutex m_manualControlMtx;
     MavlinkSerial::ManualControlInput m_manualControlInput{};
     mutable std::mutex m_remoteModeMtx;
+    mutable std::mutex m_autoLandingMtx;
+    AutoLandingState m_autoLanding{};
     std::optional<RemoteFlightMode> m_lastRequestedRemoteMode;
     std::chrono::steady_clock::time_point m_lastRemoteModeRequest{};
 };

@@ -73,7 +73,8 @@ public class MainActivity extends Activity {
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
     private static final long RX_POLL_PERIOD_MS = 5L;
-    private static final float BUTTON_AXIS_MAGNITUDE = 1.0f;
+    private static final float BUTTON_AXIS_MAGNITUDE = 0.6f;
+    private static final float BUTTON_MAX_SPEED_MPS = 3.0f;
     private static final int VIDEO_MAGIC = 0x5643494D;
     private static final int VIDEO_HEADER_LEN = 36;
     private static final int MAX_RX_PACKETS_PER_TICK = 96;
@@ -1503,7 +1504,7 @@ public class MainActivity extends Activity {
         float yaw = leftX;
         float pitch = rightY;
         float roll = rightX;
-        sendMoveRcJoystickCommand(throttle, yaw, pitch, roll, 5.0f, "JOY RC");
+        sendMoveRcJoystickCommand(throttle, yaw, pitch, roll, BUTTON_MAX_SPEED_MPS, "JOY RC");
     }
 
     private void startJoystickLoop() {
