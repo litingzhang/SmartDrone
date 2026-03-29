@@ -3,7 +3,11 @@
 #include <cctype>
 #include <cstdint>
 #include <algorithm>
+#include <filesystem>
 #include <string>
+#include <vector>
+
+namespace fs = std::filesystem;
 
 enum class SensorMode {
     Stereo,
@@ -12,7 +16,7 @@ enum class SensorMode {
 
 inline const char* DefaultSettingsForSensorMode(SensorMode mode)
 {
-    return (mode == SensorMode::StereoImu) ? "stereo_inertial.yaml" : "stereo.yaml";
+    return (mode == SensorMode::StereoImu) ? "config/stereo_inertial.yaml" : "config/stereo.yaml";
 }
 
 inline SensorMode ParseSensorModeText(const std::string& text)
@@ -25,6 +29,62 @@ inline SensorMode ParseSensorModeText(const std::string& text)
         return SensorMode::StereoImu;
     }
     return SensorMode::Stereo;
+}
+
+inline std::string ResolveRuntimePath(const std::string& path, const char* argv0)
+{
+    if (path.empty()) {
+        return path;
+    }
+
+    const fs::path rawPath(path);
+    if (rawPath.is_absolute()) {
+        return rawPath.lexically_normal().string();
+    }
+
+    std::vector<fs::path> candidates;
+    candidates.push_back(fs::current_path() / rawPath);
+
+    try {
+        const fs::path exePath = fs::absolute(argv0 != nullptr ? fs::path(argv0) : fs::path{});
+        const fs::path exeDir = exePath.parent_path();
+        if (!exeDir.empty()) {
+            candidates.push_back(exeDir / rawPath);
+            const fs::path parent = exeDir.parent_path();
+            if (!parent.empty()) {
+                candidates.push_back(parent / rawPath);
+                const fs::path grandParent = parent.parent_path();
+                if (!grandParent.empty()) {
+                    candidates.push_back(grandParent / rawPath);
+                }
+            }
+        }
+    } catch (...) {
+    }
+
+    for (const auto& candidate : candidates) {
+        std::error_code ec;
+        if (fs::exists(candidate, ec)) {
+            return candidate.lexically_normal().string();
+        }
+    }
+
+    if (!candidates.empty()) {
+        return candidates.front().lexically_normal().string();
+    }
+    return rawPath.lexically_normal().string();
+}
+
+inline std::string ResolveSettingsForSensorMode(SensorMode mode, const std::string& currentSettingsPath)
+{
+    const fs::path targetName = fs::path(DefaultSettingsForSensorMode(mode)).filename();
+    if (!currentSettingsPath.empty()) {
+        const fs::path currentPath(currentSettingsPath);
+        if (currentPath.is_absolute()) {
+            return (currentPath.parent_path() / targetName).lexically_normal().string();
+        }
+    }
+    return ResolveRuntimePath(DefaultSettingsForSensorMode(mode), nullptr);
 }
 
 struct CameraConfig {
@@ -79,7 +139,7 @@ struct RuntimeConfig {
 
 struct AppConfig {
     std::string vocab{"ORBvoc.txt"};
-    std::string settings{"stereo.yaml"};
+    std::string settings{"config/stereo.yaml"};
     SensorMode sensorMode{SensorMode::Stereo};
     CameraConfig camera;
     UdpConfig udp;
@@ -173,10 +233,11 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     ArgReader argReader(argc, argv);
     AppConfig config;
 
-    config.vocab = argReader.GetString("--vocab", "ORBvoc.txt");
+    config.vocab = ResolveRuntimePath(argReader.GetString("--vocab", "ORBvoc.txt"), argc > 0 ? argv[0] : nullptr);
     config.sensorMode = ParseSensorModeText(argReader.GetString("--sensor-mode", "stereo"));
     const char* defaultSettings = DefaultSettingsForSensorMode(config.sensorMode);
-    config.settings = argReader.GetString("--settings", defaultSettings);
+    config.settings = ResolveRuntimePath(argReader.GetString("--settings", defaultSettings),
+                                         argc > 0 ? argv[0] : nullptr);
 
     config.camera.width = argReader.GetInt("--w", 640);
     config.camera.height = argReader.GetInt("--h", 400);

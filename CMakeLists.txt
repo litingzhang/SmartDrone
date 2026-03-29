@@ -106,7 +106,7 @@ function(configure_orb_target target_name)
 endfunction()
 
 set(SMART_DRONE_SOURCES
-  src/smart_drone/main.cpp
+  src/main.cpp
   src/common/tlv/tlv_cmd_router.cpp
 )
 
@@ -117,6 +117,5 @@ if(BUILD_SMART_DRONE OR BUILD_CALIB_RECORDER)
   target_include_directories(smart_drone PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/common/tlv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/smart_drone"
   )
 endif()

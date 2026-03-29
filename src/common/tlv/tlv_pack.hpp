@@ -29,6 +29,25 @@ inline void WriteF32Le(std::vector<uint8_t>& buffer, float value)
     WriteU32Le(buffer, raw);
 }
 
+inline uint16_t ReadU16Le(const uint8_t* p)
+{
+    return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+}
+
+inline uint32_t ReadU32Le(const uint8_t* p)
+{
+    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+           (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+}
+
+inline float ReadF32Le(const uint8_t* p)
+{
+    const uint32_t raw = ReadU32Le(p);
+    float out = 0.0f;
+    std::memcpy(&out, &raw, sizeof(out));
+    return out;
+}
+
 inline std::vector<uint8_t> MakeFrame(
     uint8_t ver,
     uint8_t cmd,

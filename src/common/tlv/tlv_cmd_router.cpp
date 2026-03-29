@@ -1,7 +1,6 @@
 #include "tlv_cmd_router.hpp"
 
 #include <cmath>
-#include <cstring>
 
 namespace {
 
@@ -56,21 +55,6 @@ bool TlvCmdRouter::AcceptSeq(uint32_t seq, uint32_t senderMs, SeqTracker& tracke
     tracker.lastSenderMs = senderMs;
     tracker.lastRxTime = now;
     return true;
-}
-
-float TlvCmdRouter::ReadF32Le(const uint8_t* p)
-{
-    const uint32_t raw = static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-                         (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
-    float out = 0.0f;
-    std::memcpy(&out, &raw, sizeof(out));
-    return out;
-}
-
-uint32_t TlvCmdRouter::ReadU32Le(const uint8_t* p)
-{
-    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-           (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
 }
 
 void TlvCmdRouter::RegisterDefaults()

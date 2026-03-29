@@ -10,10 +10,13 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 struct RouteResult {
     int16_t status{ACK_OK};
     std::string msg;
+    uint8_t responseCmd{0};
+    std::vector<uint8_t> responsePayload;
 };
 
 class TlvCmdRouter {
@@ -32,9 +35,6 @@ private:
         std::chrono::steady_clock::time_point lastRxTime{};
         bool seen{false};
     };
-
-    static float ReadF32Le(const uint8_t* p);
-    static uint32_t ReadU32Le(const uint8_t* p);
 
     bool AcceptSeq(uint32_t seq, uint32_t senderMs, SeqTracker& tracker);
     RouteResult HandleMove(const TlvFrame& frame);

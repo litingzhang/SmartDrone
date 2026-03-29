@@ -8,12 +8,26 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 struct UdpPeer {
     sockaddr_in addr{};
     socklen_t len{sizeof(sockaddr_in)};
     bool valid{false};
 };
+
+inline std::string UdpPeerToIpString(const UdpPeer& peer)
+{
+    if (!peer.valid) {
+        return {};
+    }
+    char ipText[INET_ADDRSTRLEN] = {};
+    const void* src = &(peer.addr.sin_addr);
+    if (::inet_ntop(AF_INET, src, ipText, sizeof(ipText)) == nullptr) {
+        return {};
+    }
+    return std::string(ipText);
+}
 
 class UdpServer {
 public:

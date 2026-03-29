@@ -20,6 +20,8 @@ public class NativeUdp {
             float roll,
             float maxV);
     public static native int sendRuntimeMode(int mode);
+    public static native int sendGetCapabilities();
+    public static native int sendGetConfig();
     public static native int sendRuntimeConfig(
             int exposureUs,
             float gain,

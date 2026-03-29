@@ -13,13 +13,13 @@
 
 struct ImuSample {
     int64_t tNs{};
-    float ax{}, ay{}, az{};  // m/s^2
-    float gx{}, gy{}, gz{};  // rad/s
+    float ax{}, ay{}, az{};
+    float gx{}, gy{}, gz{};
 };
 
 struct ImuScale {
-    float accelLsbPerG{2048.0f};     // default for 16g
-    float gyroLsbPerDps{16.4f};      // default for 2000 dps
+    float accelLsbPerG{2048.0f};
+    float gyroLsbPerDps{16.4f};
 };
 
 class ImuBuffer {
@@ -161,7 +161,7 @@ private:
     std::deque<ImuSample> m_queue;
     size_t m_lastUsedIdx{0};
     int m_keepSec{5};
-    int64_t m_purgeMarginNs{20000000};  // 20ms
+    int64_t m_purgeMarginNs{20000000};
 
     static ImuSample InterpolateSample(const ImuSample& a, const ImuSample& b, int64_t targetNs)
     {

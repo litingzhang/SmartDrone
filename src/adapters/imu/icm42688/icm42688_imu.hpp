@@ -7,8 +7,8 @@
 #include <cstdint>
 #include <iostream>
 
-#include "imu_buffer.hpp"
-#include "spi_dev.hpp"
+#include "core/application/imu_buffer.hpp"
+#include "platform/linux/spi/spi_dev.hpp"
 
 constexpr uint8_t REG_DEVICE_CONFIG = 0x11;
 constexpr uint8_t REG_INT_CONFIG = 0x14;

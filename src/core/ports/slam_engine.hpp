@@ -1,0 +1,49 @@
+#pragma once
+
+#include <cstdint>
+#include <vector>
+
+#include <opencv2/core/types.hpp>
+
+#include "camera_provider.hpp"
+#include "imu_provider.hpp"
+
+namespace smartdrone::core::ports {
+
+struct PoseEstimate {
+    bool valid{false};
+    float x{0.0f};
+    float y{0.0f};
+    float z{0.0f};
+    float qw{1.0f};
+    float qx{0.0f};
+    float qy{0.0f};
+    float qz{0.0f};
+};
+
+struct SlamInputBatch {
+    StereoFrame stereo;
+    double frameTimeSec{0.0};
+    std::vector<ImuReading> imu;
+};
+
+struct SlamOutput {
+    PoseEstimate pose;
+    bool poseValid{false};
+    int trackingState{0};
+    unsigned long mapId{0};
+    std::vector<cv::Point2f> leftFeatures;
+    std::vector<cv::Point2f> rightFeatures;
+    std::vector<float> pointCloudXyz;
+};
+
+class ISlamEngine {
+public:
+    virtual ~ISlamEngine() = default;
+
+    virtual bool Start() = 0;
+    virtual void Stop() = 0;
+    virtual SlamOutput Process(const SlamInputBatch& input, bool extractPointCloud) = 0;
+};
+
+}  // namespace smartdrone::core::ports

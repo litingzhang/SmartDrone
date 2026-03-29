@@ -44,9 +44,13 @@ public class MainActivity extends Activity {
     private static final int CMD_RUNTIME_MODE = 0x30;
     private static final int CMD_RUNTIME_CONFIG = 0x31;
     private static final int CMD_CALIB_CLEAN = 0x32;
+    private static final int CMD_GET_CAPABILITIES = 0x33;
+    private static final int CMD_GET_CONFIG = 0x34;
     private static final int CMD_ACK = 0xF0;
     private static final int CMD_STATE = 0xF1;
     private static final int CMD_POINT_CLOUD = 0xF2;
+    private static final int CMD_CAPABILITIES = 0xF3;
+    private static final int CMD_CONFIG = 0xF4;
 
     private static final int MODE_IDLE = 0;
     private static final int MODE_SLAM = 1;
@@ -184,6 +188,10 @@ public class MainActivity extends Activity {
     private boolean m_sendFeature = true;
     private boolean m_sendMap = true;
     private boolean m_showFeaturePoints = true;
+    private boolean m_supportsCalib = true;
+    private boolean m_supportsStereoImu = true;
+    private String m_lastCapabilitiesText = "";
+    private String m_lastConfigText = "";
 
     private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Map<Long, PendingAckAction> m_pendingAckActions = new HashMap<>();
@@ -830,6 +838,11 @@ public class MainActivity extends Activity {
                 return false;
             }
             m_vehicleIp = vehicleIp;
+            try {
+                NativeUdp.sendGetCapabilities();
+                NativeUdp.sendGetConfig();
+            } catch (Throwable ignored) {
+            }
             return true;
         } catch (Throwable t) {
             m_tvStatus.setText("Reconnect error: " + t.getMessage());
@@ -853,8 +866,9 @@ public class MainActivity extends Activity {
         m_updatingToggleUi = true;
         if (m_btnSensorMode != null) {
             m_btnSensorMode.setChecked(m_sensorMode == SENSOR_STEREO_IMU);
-            m_btnSensorMode.setEnabled(!sensorPending);
-            m_btnSensorMode.setAlpha(sensorPending ? 0.35f : 1.0f);
+            boolean enabled = !sensorPending && m_supportsStereoImu;
+            m_btnSensorMode.setEnabled(enabled);
+            m_btnSensorMode.setAlpha(enabled ? 1.0f : 0.35f);
         }
         if (m_btnToggleSlam != null) {
             m_btnToggleSlam.setChecked(m_runtimeMode == MODE_SLAM);
@@ -863,8 +877,9 @@ public class MainActivity extends Activity {
         }
         if (m_btnToggleCalib != null) {
             m_btnToggleCalib.setChecked(m_runtimeMode == MODE_CALIB);
-            m_btnToggleCalib.setEnabled(!runtimePending);
-            m_btnToggleCalib.setAlpha(runtimePending ? 0.35f : 1.0f);
+            boolean enabled = !runtimePending && m_supportsCalib;
+            m_btnToggleCalib.setEnabled(enabled);
+            m_btnToggleCalib.setAlpha(enabled ? 1.0f : 0.35f);
         }
         m_updatingToggleUi = false;
         if (m_btnCleanCalib != null) {
@@ -948,6 +963,18 @@ public class MainActivity extends Activity {
             m_tvStatus.setText(label + " sent seq=" + seq);
         } catch (Throwable t) {
             m_tvStatus.setText(label + " error: " + t.getMessage());
+        }
+    }
+
+    private void requestRuntimeMetadata() {
+        if (!ensureVehicleConnection()) {
+            return;
+        }
+        try {
+            NativeUdp.sendGetCapabilities();
+            NativeUdp.sendGetConfig();
+        } catch (Throwable t) {
+            m_tvStatus.setText("Query error: " + t.getMessage());
         }
     }
 
@@ -1045,6 +1072,103 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static Map<String, String> parseKeyValueText(String text) {
+        Map<String, String> out = new HashMap<>();
+        if (text == null || text.isEmpty()) {
+            return out;
+        }
+        String[] lines = text.split("\\r?\\n");
+        for (String line : lines) {
+            if (line == null) {
+                continue;
+            }
+            int pos = line.indexOf('=');
+            if (pos <= 0 || pos >= line.length() - 1) {
+                continue;
+            }
+            String key = line.substring(0, pos).trim();
+            String value = line.substring(pos + 1).trim();
+            if (!key.isEmpty()) {
+                out.put(key, value);
+            }
+        }
+        return out;
+    }
+
+    private static String readTlvTextPayload(byte[] rx, int expectedCmd) {
+        if (!isTlvPacket(rx) || rx.length < 17) {
+            return null;
+        }
+        int cmd = rx[3] & 0xFF;
+        if (cmd != expectedCmd) {
+            return null;
+        }
+        int len = readU16Le(rx, 5);
+        int total = 2 + (1 + 1 + 1 + 2 + 4 + 4) + len + 2;
+        if (rx.length < total) {
+            return null;
+        }
+        if (len <= 0) {
+            return "";
+        }
+        return new String(rx, 15, len);
+    }
+
+    private static boolean parseBooleanText(String value, boolean defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        if ("true".equalsIgnoreCase(value) || "on".equalsIgnoreCase(value) || "1".equals(value)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(value) || "off".equalsIgnoreCase(value) || "0".equals(value)) {
+            return false;
+        }
+        return defaultValue;
+    }
+
+    private static int parseRuntimeModeText(String value, int defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        switch (value.trim().toLowerCase(Locale.US)) {
+            case "slam":
+                return MODE_SLAM;
+            case "calib":
+                return MODE_CALIB;
+            case "idle":
+            default:
+                return MODE_IDLE;
+        }
+    }
+
+    private static int parseSensorModeText(String value, int defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        String normalized = value.trim().toLowerCase(Locale.US);
+        if ("stereo-imu".equals(normalized)) {
+            return SENSOR_STEREO_IMU;
+        }
+        if ("stereo".equals(normalized)) {
+            return SENSOR_STEREO;
+        }
+        return defaultValue;
+    }
+
+    private static boolean containsTokenList(String csv, String token) {
+        if (csv == null || token == null) {
+            return false;
+        }
+        String[] parts = csv.split(",");
+        for (String part : parts) {
+            if (token.equalsIgnoreCase(part.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private String decodeTlvAck(byte[] rx) {
         AckFrame ack = parseAckFrame(rx);
         if (ack.valid) {
@@ -1128,6 +1252,70 @@ public class MainActivity extends Activity {
             m_tvStatus.setText(decodeTlvAck(rx));
         }
         return true;
+    }
+
+    private boolean tryHandleCapabilitiesPacket(byte[] rx) {
+        String payloadText = readTlvTextPayload(rx, CMD_CAPABILITIES);
+        if (payloadText == null) {
+            return false;
+        }
+        m_lastCapabilitiesText = payloadText;
+        Map<String, String> values = parseKeyValueText(payloadText);
+        m_supportsCalib = containsTokenList(values.get("runtime_modes"), "calib");
+        m_supportsStereoImu = containsTokenList(values.get("perception_modes"), "stereo-imu");
+        updateRuntimeButtons();
+        m_tvStatus.setText(String.format(
+                Locale.US,
+                "Capabilities synced calib=%s stereo_imu=%s",
+                m_supportsCalib ? "yes" : "no",
+                m_supportsStereoImu ? "yes" : "no"));
+        return true;
+    }
+
+    private boolean tryHandleConfigPacket(byte[] rx) {
+        String payloadText = readTlvTextPayload(rx, CMD_CONFIG);
+        if (payloadText == null) {
+            return false;
+        }
+        m_lastConfigText = payloadText;
+        Map<String, String> values = parseKeyValueText(payloadText);
+
+        m_runtimeMode = parseRuntimeModeText(values.get("runtime.mode"), m_runtimeMode);
+        m_cfgExposureUs = quantizeExposureUs(parseI(values.get("camera.exposure_us"), m_cfgExposureUs));
+        m_cfgGain = quantizeGain(parseI(values.get("camera.gain"), m_cfgGain));
+        m_cfgPairMs = quantizePairMs(parseI(values.get("camera.pair_window_ms"), m_cfgPairMs));
+        m_cfgSlamFps = quantizeSlamFps(parseI(values.get("slam.input_fps"), m_cfgSlamFps));
+        m_sensorMode = parseSensorModeText(values.get("slam.perception_mode"), m_sensorMode);
+        m_sendImage = parseBooleanText(values.get("stream.send_image"), m_sendImage);
+        m_sendFeature = parseBooleanText(values.get("stream.send_feature"), m_sendFeature);
+        m_sendMap = parseBooleanText(values.get("stream.send_map"), m_sendMap);
+
+        updateConfigViews();
+        updateRuntimeButtons();
+        updateStreamToggleButtons();
+        updateFeatureToggleButton();
+        m_tvStatus.setText(String.format(
+                Locale.US,
+                "Config synced mode=%s sensor=%s slam=%dfps",
+                runtimeModeToText(m_runtimeMode),
+                sensorModeToText(m_sensorMode),
+                m_cfgSlamFps));
+        return true;
+    }
+
+    private static int parseI(String value, int defaultValue) {
+        try {
+            if (value == null || value.trim().isEmpty()) {
+                return defaultValue;
+            }
+            String normalized = value.trim();
+            if (normalized.contains(".")) {
+                return Math.round(Float.parseFloat(normalized));
+            }
+            return Integer.parseInt(normalized);
+        } catch (Throwable t) {
+            return defaultValue;
+        }
     }
 
     private String runtimeModeToText(int mode) {
@@ -1427,7 +1615,7 @@ public class MainActivity extends Activity {
         return mutable;
     }
 
-    private boolean isTlvPacket(byte[] rx) {
+    private static boolean isTlvPacket(byte[] rx) {
         return rx != null && rx.length >= 4
                 && (rx[0] & 0xFF) == 0xAA
                 && (rx[1] & 0xFF) == 0x55;
@@ -1455,6 +1643,12 @@ public class MainActivity extends Activity {
             }
             tryHandleStatePoseForMap(rx);
             if (tryHandleStatePacket(rx)) {
+                continue;
+            }
+            if (tryHandleCapabilitiesPacket(rx)) {
+                continue;
+            }
+            if (tryHandleConfigPacket(rx)) {
                 continue;
             }
             if (tryHandleAckPacket(rx)) {
@@ -1650,6 +1844,9 @@ public class MainActivity extends Activity {
         final int cm5CmdPort = 14550;
         final int phoneVideoPort = 5000;
         m_vehicleIp = cm5Ip;
+        if (m_etVehicleIp != null) {
+            m_etVehicleIp.setText(cm5Ip);
+        }
         boolean ok;
         try {
             ok = NativeUdp.init(cm5Ip, cm5CmdPort, phoneVideoPort);
@@ -1659,6 +1856,9 @@ public class MainActivity extends Activity {
         }
         if (ok) {
             m_tvStatus.setText("UDP ready cmd-> " + cm5Ip + ":" + cm5CmdPort + " video<-" + phoneVideoPort);
+        }
+        if (ok) {
+            requestRuntimeMetadata();
         }
 
         if (m_sbCfgExposure != null) {

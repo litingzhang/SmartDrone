@@ -20,9 +20,13 @@ enum TlvCmd : uint8_t {
     CMD_RUNTIME_MODE = 0x30,
     CMD_RUNTIME_CONFIG = 0x31,
     CMD_CALIB_CLEAN = 0x32,
+    CMD_GET_CAPABILITIES = 0x33,
+    CMD_GET_CONFIG = 0x34,
 
     CMD_ACK = 0xF0,
     CMD_STATE = 0xF1,
+    CMD_CAPABILITIES = 0xF3,
+    CMD_CONFIG = 0xF4,
 };
 
 // MOVE payload layout legacy (len=21):

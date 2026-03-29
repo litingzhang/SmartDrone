@@ -7,15 +7,19 @@ SmartDrone is a stereo / stereo-inertial drone runtime built around `ORB_SLAM3`,
 ```text
 .
 |- src/
-|  |- smart_drone/   # CM5 flight runtime entry and device-facing modules
+|  |- main.cpp       # CM5 flight runtime entry point
+|  |- core/          # Runtime orchestration, sessions, modes, shared models
+|  |- adapters/      # Camera / IMU / SLAM / telemetry concrete implementations
+|  |- platform/      # Linux and board-specific access layers
 |  |- common/tlv/    # Shared UDP/TLV control protocol and helpers
 |  `- android/       # Android app project
+|- config/           # Runtime settings files deployed with the app
 |- third_party/      # MAVLink and other external code
 |- ORB_SLAM3/        # SLAM dependency
 `- build/            # Generated build outputs
 ```
 
-The runtime entry point is [`src/smart_drone/main.cpp`](/d:/SmartDrone/src/smart_drone/main.cpp).
+The runtime entry point is [`src/main.cpp`](/d:/SmartDrone/src/main.cpp).
 
 ## Build
 
@@ -116,7 +120,7 @@ rosrun kalibr kalibr_calibrate_imu_camera \
 
 ## Upload
 
-Use the root `upload.sh` script to upload the runtime executable, `ORB_SLAM3` shared libraries, and calibration files to the target device:
+Use the root `upload.sh` script to upload the runtime executable, `ORB_SLAM3` shared libraries, and runtime config files to the target device:
 
 ```bash
 ./upload.sh
@@ -128,7 +132,8 @@ Default behavior:
 
 - Upload `build/cmake/smart_drone`
 - Upload `libORB_SLAM3.so`, `libDBoW2.so`, and `libg2o.so`
-- Upload the runtime calibration file used by the device
+- Create `~/config` on the target when needed
+- Upload `config/stereo.yaml` and `config/stereo_inertial.yaml`
 - Upload to temporary `*.new` files first, then atomically replace the final files with `mv`
 
 Optional environment variables:

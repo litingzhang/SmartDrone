@@ -3,11 +3,12 @@
 #include <arpa/inet.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
-#include <cerrno>
 #include <cstring>
 #include <deque>
 #include <iostream>
@@ -19,11 +20,10 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
-#include <array>
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
-// ---------------- UDP image sender ----------------
+
 class UdpImageSender {
   public:
     static constexpr uint8_t FLAG_FEATURE_POINTS = 0x01;
@@ -31,20 +31,20 @@ class UdpImageSender {
     static constexpr double MIN_FRAME_INTERVAL_SEC = 1.0 / MAX_IMAGE_FPS;
 
     struct Slot {
-        int camIndex;  // 0=L, 1=R
-        uint32_t seq;   // sequence for debug
-        double frameTime; // seconds
+        int camIndex;
+        uint32_t seq;
+        double frameTime;
         int width{0};
         int height{0};
         bool sendImage{true};
         bool sendFeature{false};
-        cv::Mat preview; // reusable preview storage
+        cv::Mat preview;
         std::vector<cv::Point2f> trackedPoints;
         std::vector<uint8_t> featureBuf;
     };
 
     bool Open(const std::string &ip, int port, int jpegQuality = 80,
-              int maxPayload = 1200, // safe under typical MTU (1500)
+              int maxPayload = 1200,
               int maxQueue = 4)
     {
         m_jpegQuality = std::max(10, std::min(95, jpegQuality));
@@ -98,17 +98,14 @@ class UdpImageSender {
             ::close(m_sock);
             m_sock = -1;
         }
-        {
-            for (int cam = 0; cam < 2; ++cam) {
-                std::lock_guard<std::mutex> lk(m_mu[cam]);
-                m_ready[cam].clear();
-                m_free[cam].clear();
-                m_slots[cam].clear();
-            }
+        for (int cam = 0; cam < 2; ++cam) {
+            std::lock_guard<std::mutex> lk(m_mu[cam]);
+            m_ready[cam].clear();
+            m_free[cam].clear();
+            m_slots[cam].clear();
         }
     }
 
-    // called from SLAM thread (non-blocking-ish)
     void Enqueue(int camIndex,
                  uint32_t seq,
                  double frameTime,
@@ -172,17 +169,17 @@ class UdpImageSender {
   private:
 #pragma pack(push, 1)
     struct PacketHeader {
-        uint32_t magic;      // 'VSIM' 0x5643494D (or any)
-        uint16_t version;    // 1
-        uint8_t camIndex;   // 0/1
-        uint8_t flags;       // reserved
-        uint32_t seq;        // camera sequence
-        double frameTime;      // seconds
-        uint32_t frameId;   // incremental id for this sender
-        uint16_t chunkIdx;  // 0..chunkCnt-1
-        uint16_t chunkCnt;  // total chunks
-        uint32_t totalSize; // jpeg bytes total
-        uint32_t chunkSize; // bytes in this packet payload
+        uint32_t magic;
+        uint16_t version;
+        uint8_t camIndex;
+        uint8_t flags;
+        uint32_t seq;
+        double frameTime;
+        uint32_t frameId;
+        uint16_t chunkIdx;
+        uint16_t chunkCnt;
+        uint32_t totalSize;
+        uint32_t chunkSize;
     };
 #pragma pack(pop)
 
