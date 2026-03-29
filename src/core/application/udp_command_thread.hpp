@@ -112,6 +112,8 @@ inline RouteResult HandleRuntimeConfigFrame(
     update.values[std::string(ConfigRegistry::kSlamInputFps)] = static_cast<int64_t>(r.slamInputFps);
     update.values[std::string(ConfigRegistry::kSlamPerceptionMode)] =
         std::string(r.sensorMode == SensorMode::StereoImu ? "stereo-imu" : "stereo");
+    update.values[std::string(ConfigRegistry::kStreamUdpEnabled)] = r.udpEnabled;
+    update.values[std::string(ConfigRegistry::kStreamUdpIp)] = r.udpIp;
     update.values[std::string(ConfigRegistry::kStreamSendImage)] = r.sendImage;
     update.values[std::string(ConfigRegistry::kStreamSendFeature)] = r.sendFeature;
     update.values[std::string(ConfigRegistry::kStreamSendMap)] = r.sendMap;

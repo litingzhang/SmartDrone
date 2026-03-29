@@ -40,6 +40,18 @@ public:
         return health;
     }
 
+    int64_t LastPairDtMs() const { return m_impl.LastDtMs(); }
+    int64_t LastRejectDtUs() const { return m_impl.LastRejectDtUs(); }
+    uint32_t LastRawSeqL() const { return m_impl.LastRawSeqL(); }
+    uint32_t LastRawSeqR() const { return m_impl.LastRawSeqR(); }
+    uint64_t RawCountL() const { return m_impl.RawCountL(); }
+    uint64_t RawCountR() const { return m_impl.RawCountR(); }
+    uint64_t DroppedUnpairedL() const { return m_impl.DroppedUnpairedL(); }
+    uint64_t DroppedUnpairedR() const { return m_impl.DroppedUnpairedR(); }
+    size_t PendingL() const { return m_impl.PendL(); }
+    size_t PendingR() const { return m_impl.PendR(); }
+    int64_t PairTolNs() const { return m_impl.PairTolNs(); }
+
 private:
     LibcameraStereoOV9281_TsPair& m_impl;
 };

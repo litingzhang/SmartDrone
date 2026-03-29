@@ -396,6 +396,7 @@ public:
             toAxis(input.yawNorm),
             buttons,
             buttons2,
+            0,
             0, 0, 0, 0, 0, 0, 0, 0);
         WriteMessage(msg);
     }

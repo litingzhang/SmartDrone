@@ -15,6 +15,8 @@ public:
     static constexpr std::string_view kSlamInputFps = "slam.input_fps";
     static constexpr std::string_view kSlamPerceptionMode = "slam.perception_mode";
     static constexpr std::string_view kSlamOperationMode = "slam.operation_mode";
+    static constexpr std::string_view kStreamUdpEnabled = "stream.udp_enabled";
+    static constexpr std::string_view kStreamUdpIp = "stream.udp_ip";
     static constexpr std::string_view kStreamSendImage = "stream.send_image";
     static constexpr std::string_view kStreamSendFeature = "stream.send_feature";
     static constexpr std::string_view kStreamSendMap = "stream.send_map";
@@ -28,6 +30,8 @@ public:
             Make(kSlamInputFps, "Input frame rate delivered to the SLAM engine", true, false, false),
             Make(kSlamPerceptionMode, "SLAM perception mode such as stereo or stereo-imu", false, true, false),
             Make(kSlamOperationMode, "SLAM operating mode such as mapping or localization", true, false, false),
+            Make(kStreamUdpEnabled, "Enable UDP preview and telemetry streaming", false, true, false),
+            Make(kStreamUdpIp, "Destination IP for UDP preview streaming", false, true, false),
             Make(kStreamSendImage, "Enable image preview streaming", false, true, false),
             Make(kStreamSendFeature, "Enable tracked feature streaming", false, true, false),
             Make(kStreamSendMap, "Enable pose and map streaming", false, true, false),

@@ -230,6 +230,12 @@ public:
             } else if (key == ConfigRegistry::kSlamPerceptionMode) {
                 if (const auto* v = std::get_if<std::string>(&value)) remote.sensorMode = ParseSensorModeText(*v);
                 else return {false, "slam.perception_mode type mismatch"};
+            } else if (key == ConfigRegistry::kStreamUdpEnabled) {
+                if (const auto* v = std::get_if<bool>(&value)) remote.udpEnabled = *v;
+                else return {false, "stream.udp_enabled type mismatch"};
+            } else if (key == ConfigRegistry::kStreamUdpIp) {
+                if (const auto* v = std::get_if<std::string>(&value)) remote.udpIp = *v;
+                else return {false, "stream.udp_ip type mismatch"};
             } else if (key == ConfigRegistry::kStreamSendImage) {
                 if (const auto* v = std::get_if<bool>(&value)) remote.sendImage = *v;
                 else return {false, "stream.send_image type mismatch"};
