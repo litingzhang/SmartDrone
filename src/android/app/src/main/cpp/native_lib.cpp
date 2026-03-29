@@ -195,6 +195,7 @@ Java_com_example_smartdrone_NativeUdp_sendRuntimeConfig(
     jint exposureUs,
     jfloat gain,
     jint pairMs,
+    jint slamFps,
     jint sensorMode,
     jboolean sendImage,
     jboolean sendFeature,
@@ -214,6 +215,9 @@ Java_com_example_smartdrone_NativeUdp_sendRuntimeConfig(
     payload.push_back(streamFlags);
     WriteU16Le(payload, static_cast<uint16_t>(pairMs > 0 ? pairMs : 0));
     payload.resize(RUNTIME_CONFIG_PAYLOAD_LEN, 0);
+    const uint16_t slamFpsValue = static_cast<uint16_t>(slamFps > 0 ? slamFps : 0);
+    payload[40] = static_cast<uint8_t>(slamFpsValue & 0xFF);
+    payload[41] = static_cast<uint8_t>((slamFpsValue >> 8) & 0xFF);
 
     const std::vector<uint8_t> frame = MakeFrame(
         1,

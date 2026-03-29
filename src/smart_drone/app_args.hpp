@@ -74,6 +74,7 @@ struct ImuRuntimeConfig {
 struct RuntimeConfig {
     int64_t offRejectNs{10'000'000};
     bool allowEmptyImu{false};
+    int slamInputFps{0};
 };
 
 struct AppConfig {
@@ -217,6 +218,7 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
 
     config.runtime.offRejectNs = argReader.GetInt64("--off-reject-ns", 10'000'000);
     config.runtime.allowEmptyImu = argReader.HasFlag("--allow-empty-imu");
+    config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 0);
 
     return config;
 }

@@ -69,6 +69,8 @@ public class MainActivity extends Activity {
     private static final int GAIN_MAX = 32;
     private static final int PAIR_MS_MIN = 1;
     private static final int PAIR_MS_MAX = 20;
+    private static final int SLAM_FPS_MIN = 1;
+    private static final int SLAM_FPS_MAX = 60;
 
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
@@ -119,9 +121,11 @@ public class MainActivity extends Activity {
     private TextView m_tvCfgExposureValue;
     private TextView m_tvCfgGainValue;
     private TextView m_tvCfgPairMsValue;
+    private TextView m_tvCfgSlamFpsValue;
     private SeekBar m_sbCfgExposure;
     private SeekBar m_sbCfgGain;
     private SeekBar m_sbCfgPairMs;
+    private SeekBar m_sbCfgSlamFps;
 
     private View m_joystickLeft;
     private View m_joystickRight;
@@ -161,6 +165,7 @@ public class MainActivity extends Activity {
     private int m_cfgExposureUs = 3000;
     private int m_cfgGain = 2;
     private int m_cfgPairMs = 5;
+    private int m_cfgSlamFps = 30;
     private int m_videoPktCount = 0;
     private int m_videoFrameOk = 0;
     private int m_videoDecodeFail = 0;
@@ -301,6 +306,10 @@ public class MainActivity extends Activity {
 
     private static int quantizePairMs(int pairMs) {
         return clampInt(pairMs, PAIR_MS_MIN, PAIR_MS_MAX);
+    }
+
+    private static int quantizeSlamFps(int slamFps) {
+        return clampInt(slamFps, SLAM_FPS_MIN, SLAM_FPS_MAX);
     }
 
     private static Float findPoseField(String text, String... keys) {
@@ -474,6 +483,9 @@ public class MainActivity extends Activity {
         if (m_tvCfgPairMsValue != null) {
             m_tvCfgPairMsValue.setText(String.format(Locale.US, "Pair Window: %d ms", m_cfgPairMs));
         }
+        if (m_tvCfgSlamFpsValue != null) {
+            m_tvCfgSlamFpsValue.setText(String.format(Locale.US, "SLAM FPS: %d", m_cfgSlamFps));
+        }
         if (m_sbCfgExposure != null) {
             int progress = (m_cfgExposureUs - EXPOSURE_MIN_US) / EXPOSURE_STEP_US;
             if (m_sbCfgExposure.getProgress() != progress) {
@@ -490,6 +502,12 @@ public class MainActivity extends Activity {
             int progress = m_cfgPairMs - PAIR_MS_MIN;
             if (m_sbCfgPairMs.getProgress() != progress) {
                 m_sbCfgPairMs.setProgress(progress);
+            }
+        }
+        if (m_sbCfgSlamFps != null) {
+            int progress = m_cfgSlamFps - SLAM_FPS_MIN;
+            if (m_sbCfgSlamFps.getProgress() != progress) {
+                m_sbCfgSlamFps.setProgress(progress);
             }
         }
     }
@@ -658,6 +676,7 @@ public class MainActivity extends Activity {
                 m_cfgExposureUs,
                 (float) m_cfgGain,
                 m_cfgPairMs,
+                m_cfgSlamFps,
                 m_sensorMode,
                 m_sendImage,
                 m_sendFeature,
@@ -737,15 +756,16 @@ public class MainActivity extends Activity {
             int exposureUs,
             float gain,
             int pairMs,
+            int slamFps,
             int sensorMode,
             boolean sendImage,
             boolean sendFeature,
             boolean sendMap) {
         try {
-            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, sensorMode, sendImage, sendFeature, sendMap);
+            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, sensorMode, sendImage, sendFeature, sendMap);
             m_tvStatus.setText(String.format(Locale.US,
-                    "CFG seq=%d exp=%d gain=%.1f pair=%dms sensor=%s img=%s feat=%s map=%s",
-                    seq, exposureUs, gain, pairMs, sensorModeToText(sensorMode),
+                    "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps sensor=%s img=%s feat=%s map=%s",
+                    seq, exposureUs, gain, pairMs, slamFps, sensorModeToText(sensorMode),
                     sendImage ? "on" : "off",
                     sendFeature ? "on" : "off",
                     sendMap ? "on" : "off"));
@@ -761,6 +781,7 @@ public class MainActivity extends Activity {
                 m_cfgExposureUs,
                 (float) m_cfgGain,
                 m_cfgPairMs,
+                m_cfgSlamFps,
                 m_sensorMode,
                 m_sendImage,
                 m_sendFeature,
@@ -771,6 +792,7 @@ public class MainActivity extends Activity {
             int exposureUs,
             float gain,
             int pairMs,
+            int slamFps,
             int sensorMode,
             boolean sendImage,
             boolean sendFeature,
@@ -784,7 +806,7 @@ public class MainActivity extends Activity {
         if (isPending(pendingKey)) {
             return;
         }
-        int seq = sendRuntimeConfig(exposureUs, gain, pairMs, sensorMode, sendImage, sendFeature, sendMap);
+        int seq = sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, sensorMode, sendImage, sendFeature, sendMap);
         if (seq < 0) {
             return;
         }
@@ -873,11 +895,13 @@ public class MainActivity extends Activity {
         final int exposureUs = m_cfgExposureUs;
         final float gain = (float) m_cfgGain;
         final int pairMs = m_cfgPairMs;
+        final int slamFps = m_cfgSlamFps;
         final int sensorMode = m_sensorMode;
         sendRuntimeConfigAwaitAck(
                 exposureUs,
                 gain,
                 pairMs,
+                slamFps,
                 sensorMode,
                 m_sendImage,
                 m_sendFeature,
@@ -1605,9 +1629,11 @@ public class MainActivity extends Activity {
         m_tvCfgExposureValue = findViewById(R.id.tvCfgExposureValue);
         m_tvCfgGainValue = findViewById(R.id.tvCfgGainValue);
         m_tvCfgPairMsValue = findViewById(R.id.tvCfgPairMsValue);
+        m_tvCfgSlamFpsValue = findViewById(R.id.tvCfgSlamFpsValue);
         m_sbCfgExposure = findViewById(R.id.sbCfgExposure);
         m_sbCfgGain = findViewById(R.id.sbCfgGain);
         m_sbCfgPairMs = findViewById(R.id.sbCfgPairMs);
+        m_sbCfgSlamFps = findViewById(R.id.sbCfgSlamFps);
 
         m_joystickLeft = findViewById(R.id.joystickLeft);
         m_joystickRight = findViewById(R.id.joystickRight);
@@ -1692,9 +1718,29 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        if (m_sbCfgSlamFps != null) {
+            m_sbCfgSlamFps.setMax(SLAM_FPS_MAX - SLAM_FPS_MIN);
+            m_sbCfgSlamFps.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    m_cfgSlamFps = SLAM_FPS_MIN + progress;
+                    updateConfigViews();
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {
+                }
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    sendCurrentRuntimeConfig("SLAM fps", PENDING_CONFIG, () -> { });
+                }
+            });
+        }
         m_cfgExposureUs = quantizeExposureUs(m_cfgExposureUs);
         m_cfgGain = quantizeGain(m_cfgGain);
         m_cfgPairMs = quantizePairMs(m_cfgPairMs);
+        m_cfgSlamFps = quantizeSlamFps(m_cfgSlamFps);
         updateConfigViews();
         updatePoseMapFromText();
         updateMapButtons();
@@ -1728,6 +1774,7 @@ public class MainActivity extends Activity {
                         m_cfgExposureUs,
                         (float) m_cfgGain,
                         m_cfgPairMs,
+                        m_cfgSlamFps,
                         m_sensorMode,
                         nextValue,
                         m_sendFeature,
@@ -1754,6 +1801,7 @@ public class MainActivity extends Activity {
                         m_cfgExposureUs,
                         (float) m_cfgGain,
                         m_cfgPairMs,
+                        m_cfgSlamFps,
                         m_sensorMode,
                         m_sendImage,
                         m_sendFeature,
@@ -1776,6 +1824,7 @@ public class MainActivity extends Activity {
                         m_cfgExposureUs,
                         (float) m_cfgGain,
                         m_cfgPairMs,
+                        m_cfgSlamFps,
                         m_sensorMode,
                         m_sendImage,
                         nextValue,
@@ -1873,10 +1922,12 @@ public class MainActivity extends Activity {
                 final int exposureUs = m_cfgExposureUs;
                 final float gain = (float) m_cfgGain;
                 final int pairMs = m_cfgPairMs;
+                final int slamFps = m_cfgSlamFps;
                 sendRuntimeConfigAwaitAck(
                         exposureUs,
                         gain,
                         pairMs,
+                        slamFps,
                         nextSensorMode,
                         m_sendImage,
                         m_sendFeature,

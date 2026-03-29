@@ -393,6 +393,30 @@
                             android:textColor="#667085"
                             android:textSize="10sp" />
 
+                        <TextView
+                            android:id="@+id/tvCfgSlamFpsValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="SLAM FPS: 30"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgSlamFps"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="SLAM fps slider" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingBottom="4dp"
+                            android:text="1 fps step, 1-60 fps"
+                            android:textColor="#667085"
+                            android:textSize="10sp" />
+
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="40dp"

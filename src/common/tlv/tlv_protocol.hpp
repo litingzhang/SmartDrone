@@ -38,12 +38,15 @@ constexpr uint8_t MOVE_FLAG_RC_JOYSTICK = 0x02;
 constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // RUNTIME_CONFIG payload v2 (len=42):
 // exposureUs(u32le) gain(f32le) sensorMode(u8) streamFlags(u8) pairMs(u16le) reservedOrIp[30]
+// reservedOrIp keeps backward compatibility with the legacy sender IP field.
+// v2 additionally stores slamInputFps(u16le) at the tail bytes [40,41].
 // legacy v1 (len=40) omitted pairMs and started reservedOrIp at byte 10.
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY = 40;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 42;
 constexpr uint16_t RUNTIME_CONFIG_PAIR_MS_OFFSET = 10;
 constexpr uint16_t RUNTIME_CONFIG_IP_OFFSET = 12;
 constexpr uint16_t RUNTIME_CONFIG_IP_LEN = 30;
+constexpr uint16_t RUNTIME_CONFIG_SLAM_FPS_OFFSET = 40;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;

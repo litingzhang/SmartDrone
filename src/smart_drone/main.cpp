@@ -58,6 +58,7 @@ struct RemoteRuntimeConfig {
     int exposureUs{3000};
     float gain{2.0f};
     int pairMs{2};
+    int slamInputFps{0};
     std::string udpIp;
     SensorMode sensorMode{SensorMode::Stereo};
     bool sendImage{true};
@@ -67,7 +68,8 @@ struct RemoteRuntimeConfig {
 
 struct MainRuntimeAliases {
     SensorMode sensorMode{SensorMode::Stereo};
-    int width{}, height{}, fps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{}, pairQueue{};
+    int width{}, height{}, fps{}, slamInputFps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{},
+        pairQueue{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{};
     bool sendImage{true}, sendFeature{true}, sendMap{true};
     float gain{};
@@ -82,6 +84,10 @@ struct MainRuntimeAliases {
 struct StereoBodyExtrinsics {
     Sophus::SE3f Tbc{Sophus::SE3f()};
     bool loaded{false};
+};
+
+struct LiveRuntimeTuning {
+    std::atomic<int> slamInputFps{0};
 };
 
 struct ImuThreadState {
@@ -224,6 +230,17 @@ bool IsTrackingPoseUsable(int trackingState)
 bool IsOdomQualityUsable(OdomQualityMode quality)
 {
     return quality != OdomQualityMode::LOST;
+}
+
+int ClampSlamInputFps(int requestedFps, int cameraFps)
+{
+    if (cameraFps <= 0) {
+        return std::max(1, requestedFps);
+    }
+    if (requestedFps <= 0) {
+        return cameraFps;
+    }
+    return std::clamp(requestedFps, 1, cameraFps);
 }
 
 struct ImuWindowValidation {
@@ -1119,6 +1136,7 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig& c)
     MainRuntimeAliases a{};
     a.sensorMode = c.sensorMode;
     a.width = c.camera.width; a.height = c.camera.height; a.fps = c.camera.fps;
+    a.slamInputFps = ClampSlamInputFps(c.runtime.slamInputFps, c.camera.fps);
     a.leftCamIndex = c.camera.leftCamIndex; a.rightCamIndex = c.camera.rightCamIndex;
     a.aeDisable = c.camera.aeDisable; a.exposureUs = c.camera.exposureUs; a.gain = c.camera.gain;
     a.requestY8 = c.camera.requestY8; a.r16Norm = c.camera.r16Norm; a.pairMs = c.camera.pairMs;
@@ -1225,6 +1243,9 @@ void PrintStartupConfig(const AppConfig& app, const MainRuntimeAliases& a, Unifi
               << " right_index=" << a.rightCamIndex << "\n";
     std::cerr << "pair_thresh=" << a.pairMs << "ms keep_window=" << a.keepMs
               << "ms pair_queue=" << a.pairQueue << "\n";
+    std::cerr << "slam_input_fps=" << a.slamInputFps
+              << " camera_fps=" << a.fps
+              << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
     std::cerr << "imuHz=" << a.imuHz << " udp=" << (a.udpEnable ? "Y" : "N")
               << " udpPort=" << a.udpPort << " cmdPort=" << a.cmdPort << "\n";
     std::cerr << "stream img=" << (a.sendImage ? "Y" : "N")
@@ -1394,7 +1415,11 @@ bool OpenCamera(LibcameraStereoOV9281_TsPair& cam, const MainRuntimeAliases& a)
                     a.r16Norm, a.leftCamIndex, a.rightCamIndex);
 }
 
-bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bool>& stop, LivePoseState& livePose)
+bool RunSlamSession(const UnifiedConfig& cfg,
+                    LiveRuntimeTuning& tuning,
+                    MavlinkSerial& mav,
+                    std::atomic<bool>& stop,
+                    LivePoseState& livePose)
 {
     const MainRuntimeAliases a = BuildRuntimeAliases(cfg.app);
     PrintStartupConfig(cfg.app, a, UnifiedMode::Slam);
@@ -1423,6 +1448,8 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     }
     int64_t lastFrameNs = 0;
     const int64_t frameStepNs = 1000000000LL / std::max(1, a.fps);
+    int64_t lastAcceptedSlamFrameNs = 0;
+    int lastLoggedSlamInputFps = -1;
     const int64_t imuDtNs = 1000000000LL / std::max(1, a.imuHz);
     const int64_t slackBeforeNs = std::max<int64_t>(2 * imuDtNs, 5000000);
     const int64_t slackAfterNs = std::max<int64_t>(2 * imuDtNs, 5000000);
@@ -1455,6 +1482,17 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
         }
         int64_t frameNs = (int64_t)((L.tsNs + R.tsNs) / 2);
         if (lastFrameNs != 0 && frameNs <= lastFrameNs) frameNs = lastFrameNs + frameStepNs;
+        const int slamInputFps = ClampSlamInputFps(tuning.slamInputFps.load(std::memory_order_relaxed), a.fps);
+        if (slamInputFps != lastLoggedSlamInputFps) {
+            std::cerr << "[slam] target_input_fps=" << slamInputFps
+                      << " camera_fps=" << a.fps
+                      << " frame_drop=" << (slamInputFps < a.fps ? "enabled" : "disabled") << "\n";
+            lastLoggedSlamInputFps = slamInputFps;
+        }
+        const int64_t slamFrameStepNs = 1000000000LL / std::max(1, slamInputFps);
+        if (lastAcceptedSlamFrameNs != 0 && (frameNs - lastAcceptedSlamFrameNs) < slamFrameStepNs) {
+            continue;
+        }
         std::vector<ORB_SLAM3::IMU::Point> vImu;
         if (useImu && lastFrameNs != 0) {
             vImu = imuState.imuBuffer.PopBetweenNs(lastFrameNs, frameNs, slackBeforeNs, slackAfterNs);
@@ -1469,6 +1507,7 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
             if (vImu.empty() && !a.allowEmptyImu) continue;
         }
         lastFrameNs = frameNs;
+        lastAcceptedSlamFrameNs = frameNs;
         const double frameTime = (double)frameNs * 1e-9;
         Sophus::SE3f Tcw = useImu ? SLAM.TrackStereo(L.gray, R.gray, frameTime, vImu)
                                   : SLAM.TrackStereo(L.gray, R.gray, frameTime);
@@ -1671,8 +1710,11 @@ bool RunCalibSession(const UnifiedConfig& cfg, std::atomic<bool>& stop, LivePose
 
 class UnifiedRuntimeController {
 public:
-    UnifiedRuntimeController(UnifiedConfig initialConfig, MavlinkSerial& mav, LivePoseState& livePose)
-        : m_config(std::move(initialConfig)), m_mav(mav), m_livePose(livePose) {}
+    UnifiedRuntimeController(UnifiedConfig initialConfig, LiveRuntimeTuning& tuning, MavlinkSerial& mav, LivePoseState& livePose)
+        : m_config(std::move(initialConfig)), m_tuning(tuning), m_mav(mav), m_livePose(livePose)
+    {
+        m_tuning.slamInputFps.store(m_config.app.runtime.slamInputFps, std::memory_order_relaxed);
+    }
     void Start() { m_worker = std::thread([this]() { Loop(); }); }
     void Stop()
     {
@@ -1701,15 +1743,25 @@ public:
     }
     bool UpdateRemoteConfig(const RemoteRuntimeConfig& r, std::string* err)
     {
-        if (r.exposureUs <= 0 || !(r.gain > 0.0f) || r.pairMs <= 0) {
+        if (r.exposureUs <= 0 || !(r.gain > 0.0f) || r.pairMs <= 0 || r.slamInputFps < 0) {
             if (err) *err = "bad runtime config";
             return false;
         }
         std::lock_guard<std::mutex> lock(m_mu);
         CameraConfig& cam = m_config.app.camera;
+        const bool exposureChanged = cam.exposureUs != r.exposureUs;
+        const bool gainChanged = cam.gain != r.gain;
+        const bool pairMsChanged = cam.pairMs != r.pairMs;
+        const bool sensorModeChanged = m_config.app.sensorMode != r.sensorMode;
+        const bool udpIpChanged = m_config.app.udp.ip != r.udpIp;
+        const bool udpEnableChanged = m_config.app.udp.enable != !r.udpIp.empty();
+        const bool sendImageChanged = m_config.app.udp.sendImage != r.sendImage;
+        const bool sendFeatureChanged = m_config.app.udp.sendFeature != r.sendFeature;
+        const bool sendMapChanged = m_config.app.udp.sendMap != r.sendMap;
         cam.exposureUs = r.exposureUs;
         cam.gain = r.gain;
         cam.pairMs = r.pairMs;
+        m_config.app.runtime.slamInputFps = r.slamInputFps;
         m_config.app.sensorMode = r.sensorMode;
         m_config.app.settings = DefaultSettingsForSensorMode(r.sensorMode);
         m_config.app.udp.ip = r.udpIp;
@@ -1717,7 +1769,11 @@ public:
         m_config.app.udp.sendImage = r.sendImage;
         m_config.app.udp.sendFeature = r.sendFeature;
         m_config.app.udp.sendMap = r.sendMap;
-        if (m_desiredMode != UnifiedMode::Idle) {
+        m_tuning.slamInputFps.store(r.slamInputFps, std::memory_order_relaxed);
+        const bool restartNeeded = exposureChanged || gainChanged || pairMsChanged || sensorModeChanged ||
+                                   udpIpChanged || udpEnableChanged || sendImageChanged ||
+                                   sendFeatureChanged || sendMapChanged;
+        if (restartNeeded && m_desiredMode != UnifiedMode::Idle) {
             m_restartRequested = true;
             m_sessionStop.store(true);
         }
@@ -1824,7 +1880,7 @@ private:
                           << "\n";
                 m_session = std::thread([this, cfg, startMode]() mutable {
                     bool ok = false;
-                    if (startMode == UnifiedMode::Slam) ok = RunSlamSession(cfg, m_mav, m_sessionStop, m_livePose);
+                    if (startMode == UnifiedMode::Slam) ok = RunSlamSession(cfg, m_tuning, m_mav, m_sessionStop, m_livePose);
                     else if (startMode == UnifiedMode::Calib) ok = RunCalibSession(cfg, m_sessionStop, m_livePose);
                     std::cerr << "[runtime] session function returned mode="
                               << (startMode == UnifiedMode::Slam ? "slam" : startMode == UnifiedMode::Calib ? "calib" : "idle")
@@ -1843,6 +1899,7 @@ private:
     std::mutex m_mu;
     std::condition_variable m_cv;
     UnifiedConfig m_config;
+    LiveRuntimeTuning& m_tuning;
     MavlinkSerial& m_mav;
     LivePoseState& m_livePose;
     UnifiedMode m_desiredMode{UnifiedMode::Idle}, m_activeMode{UnifiedMode::Idle};
@@ -1874,6 +1931,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
     r.exposureUs = (int)ReadU32Le(&p[0]);
     r.gain = ReadF32Le(&p[4]);
     r.pairMs = std::max(currentCfg.app.camera.pairMs, 1);
+    r.slamInputFps = currentCfg.app.runtime.slamInputFps;
     if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
         return {ACK_E_BAD_ARGS, "bad runtime cfg args"};
     }
@@ -1892,6 +1950,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN) {
         const int pairMs = (int)ReadU16Le(&p[RUNTIME_CONFIG_PAIR_MS_OFFSET]);
         if (pairMs > 0) r.pairMs = pairMs;
+        r.slamInputFps = (int)ReadU16Le(&p[RUNTIME_CONFIG_SLAM_FPS_OFFSET]);
         ipOffset = RUNTIME_CONFIG_IP_OFFSET;
     }
     const char* ipChars = reinterpret_cast<const char*>(&p[ipOffset]);
@@ -1910,6 +1969,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame& frame, const UdpPeer& peer,
                     " sensor=" + std::string(r.sensorMode == SensorMode::StereoImu ? "stereo-imu" : "stereo") +
                     " settings=" + std::string(DefaultSettingsForSensorMode(r.sensorMode)) +
                     " pair_ms=" + std::to_string(r.pairMs) +
+                    " slam_fps=" + std::to_string(ClampSlamInputFps(r.slamInputFps, currentCfg.app.camera.fps)) +
                     " img=" + (r.sendImage ? "on" : "off") +
                     " feat=" + (r.sendFeature ? "on" : "off") +
                     " map=" + (r.sendMap ? "on" : "off")};
@@ -2041,8 +2101,9 @@ int main(int argc, char** argv)
     MavlinkSerial mav("/dev/ttyAMA0", 921600);
     mav.StartRx();
     LivePoseState livePose;
+    LiveRuntimeTuning tuning;
     Px4UdpHooks hooks(mav, livePose);
-    UnifiedRuntimeController controller(cfg, mav, livePose);
+    UnifiedRuntimeController controller(cfg, tuning, mav, livePose);
     controller.Start();
     if (autoMode != UnifiedMode::Idle) controller.SetMode(autoMode, nullptr);
     std::thread udpCmdThread = StartUdpCommandThread(aliases.cmdPort, hooks, controller, livePose);
