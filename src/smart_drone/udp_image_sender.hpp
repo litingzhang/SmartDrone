@@ -66,8 +66,6 @@ class UdpImageSender {
             m_sock = -1;
             return false;
         }
-        std::cerr << "[udp] sending to " << ip << ":" << port << "\n";
-
         for (int cam = 0; cam < 2; ++cam) {
             std::lock_guard<std::mutex> lk(m_mu[cam]);
             m_slots[cam].assign(static_cast<size_t>(m_maxQueue + 2), Slot{});
@@ -192,11 +190,6 @@ class UdpImageSender {
     {
         std::vector<uchar> jpeg;
         std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, m_jpegQuality};
-        auto lastLog = std::chrono::steady_clock::now();
-        int encodedFrames = 0;
-        int sentPackets = 0;
-        int featurePackets = 0;
-
         while (m_running.load()) {
             size_t slotIndex = 0;
             {
@@ -240,8 +233,6 @@ class UdpImageSender {
 
                 total = (uint32_t)jpeg.size();
                 const uint16_t chunks = (uint16_t)((total + m_maxPayload - 1) / m_maxPayload);
-                encodedFrames++;
-
                 for (uint16_t ci = 0; ci < chunks; ++ci) {
                     const uint32_t off = (uint32_t)ci * (uint32_t)m_maxPayload;
                     const uint32_t left = total - off;
@@ -275,29 +266,11 @@ class UdpImageSender {
 
                     ssize_t sent = ::sendmsg(m_sock, &msg, 0);
                     (void)sent;
-                    sentPackets++;
                 }
             }
 
             if (slot.sendFeature && !slot.trackedPoints.empty()) {
                 SendFeaturePacket(slot, fid, slot.width, slot.height, slot.trackedPoints);
-                featurePackets++;
-            }
-
-            const auto now = std::chrono::steady_clock::now();
-            if (now - lastLog >= std::chrono::seconds(1)) {
-                std::cerr << "[udp] cam=" << camIndex
-                          << " encoded=" << encodedFrames
-                          << " packets=" << sentPackets
-                          << " featurePkt=" << featurePackets
-                          << " last_jpeg=" << total
-                          << " preview=" << slot.preview.cols << "x" << slot.preview.rows
-                          << " previewType=" << slot.preview.type()
-                          << "\n";
-                encodedFrames = 0;
-                sentPackets = 0;
-                featurePackets = 0;
-                lastLog = now;
             }
 
             std::lock_guard<std::mutex> lk(m_mu[camIndex]);

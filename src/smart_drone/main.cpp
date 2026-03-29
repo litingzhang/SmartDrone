@@ -449,10 +449,6 @@ private:
             if (havePublishedPose) {
                 holdPose = out;
             }
-            if ((lastLossLogUs == 0) || (nowUs - lastLossLogUs >= 1000000ULL)) {
-                std::cerr << "[pose] VIO tracking lost, freezing world pose and height\n";
-                lastLossLogUs = nowUs;
-            }
         }
 
         ApplyRangeProtection(out, nowUs);
@@ -477,15 +473,7 @@ private:
         }
 
         const float clearanceDeficit = std::min(kRangeProtectionMaxStepM, kRangeHardFloorM - latestRange.currentDistance);
-
-        if ((lastRangeProtectLogUs == 0) || (nowUs - lastRangeProtectLogUs >= 500000ULL)) {
-            std::cerr << "[pose] range protection alert"
-                      << " rng=" << latestRange.currentDistance
-                      << " hard_floor=" << kRangeHardFloorM
-                      << " clearance_deficit=" << clearanceDeficit
-                      << " z_override=disabled\n";
-            lastRangeProtectLogUs = nowUs;
-        }
+        (void)clearanceDeficit;
     }
 
     bool TryAlignZ(const MavlinkSerial::Pose& poseNed, uint64_t nowUs, bool trackingRecovered)
@@ -551,8 +539,6 @@ private:
     float latestPx4Z{0.0f};
     uint64_t weakUntilUs{0};
     uint64_t latestPx4ZReceivedUs{0};
-    uint64_t lastLossLogUs{0};
-    uint64_t lastRangeProtectLogUs{0};
     uint64_t trackingReadySinceUs{0};
     bool haveZOffset{false};
     bool zOffsetFromPx4{false};
@@ -1441,9 +1427,6 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
     const int64_t slackBeforeNs = std::max<int64_t>(2 * imuDtNs, 5000000);
     const int64_t slackAfterNs = std::max<int64_t>(2 * imuDtNs, 5000000);
     const uint64_t imuWarmupSamples = static_cast<uint64_t>(std::max(20, a.imuHz / 2));
-    auto lastImuWindowLog = std::chrono::steady_clock::now();
-    auto lastImuWarmupLog = std::chrono::steady_clock::now();
-    auto lastImuRejectLog = std::chrono::steady_clock::now();
     int64_t lastPointCloudUpdateNs = 0;
     Sophus::SE3f stereoReferencePose{Sophus::SE3f()};
     bool stereoReferencePoseSet = false;
@@ -1457,15 +1440,6 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
             const uint64_t imuCnt = imuState.imuCnt.load(std::memory_order_relaxed);
             const bool imuReady = imuState.imuOk.load(std::memory_order_relaxed) && imuCnt >= imuWarmupSamples;
             if (!imuReady) {
-                const auto now = std::chrono::steady_clock::now();
-                if (now - lastImuWarmupLog >= std::chrono::seconds(1)) {
-                    std::cerr << "[imu-warmup] waiting imu_ok="
-                              << (imuState.imuOk.load(std::memory_order_relaxed) ? "true" : "false")
-                              << " imu_cnt=" << imuCnt
-                              << " need=" << imuWarmupSamples
-                              << "\n";
-                    lastImuWarmupLog = now;
-                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
@@ -1489,36 +1463,7 @@ bool RunSlamSession(const UnifiedConfig& cfg, MavlinkSerial& mav, std::atomic<bo
             const double frameTimeSec = static_cast<double>(frameNs) * 1e-9;
             const double expectedImuDtSec = 1.0 / std::max(1, a.imuHz);
             const bool imuWindowOk = SanitizeImuWindow(vImu, prevFrameTime, frameTimeSec, expectedImuDtSec, imuWindow);
-            const auto now = std::chrono::steady_clock::now();
-            if (now - lastImuWindowLog >= std::chrono::seconds(1)) {
-                std::cerr << "[imu-win] frame_dt_ms=" << ((frameNs - lastFrameNs) / 1e6)
-                          << " slack_before_ms=" << (slackBeforeNs / 1e6)
-                          << " slack_after_ms=" << (slackAfterNs / 1e6)
-                          << " imu_samples=" << vImu.size()
-                          << " imu_cnt=" << imuState.imuCnt.load(std::memory_order_relaxed)
-                          << " imu_drop=" << imuState.imuDrop.load(std::memory_order_relaxed)
-                          << " first_offset_ms=" << (vImu.empty() ? 0.0 : ((vImu.front().t - prevFrameTime) * 1e3))
-                          << " last_offset_ms=" << (vImu.empty() ? 0.0 : ((frameTimeSec - vImu.back().t) * 1e3))
-                          << " max_gap_ms=" << (imuWindow.largestGapSec * 1e3)
-                          << " empty=" << (vImu.empty() ? "true" : "false")
-                          << "\n";
-                lastImuWindowLog = now;
-            }
             if (!imuWindowOk) {
-                if (now - lastImuRejectLog >= std::chrono::seconds(1)) {
-                    std::cerr << "[imu-win] rejected"
-                              << " reason=" << (imuWindow.failureReason ? imuWindow.failureReason : "unknown")
-                              << " in=" << imuWindow.inputCount
-                              << " out=" << imuWindow.outputCount
-                              << " drop_non_finite=" << imuWindow.droppedNonFinite
-                              << " drop_non_mono=" << imuWindow.droppedNonMonotonic
-                              << " drop_range=" << imuWindow.droppedOutOfRange
-                              << " first_offset_ms=" << (imuWindow.firstLeadSec * 1e3)
-                              << " last_offset_ms=" << (imuWindow.tailLagSec * 1e3)
-                              << " max_gap_ms=" << (imuWindow.largestGapSec * 1e3)
-                              << "\n";
-                    lastImuRejectLog = now;
-                }
                 continue;
             }
             if (vImu.empty() && !a.allowEmptyImu) continue;

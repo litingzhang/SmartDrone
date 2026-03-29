@@ -528,10 +528,6 @@ class LibcameraStereoOV9281_TsPair {
 
         m_camL = cams[static_cast<size_t>(leftCamIndex)];
         m_camR = cams[static_cast<size_t>(rightCamIndex)];
-        std::cerr << "[cam] selected left index=" << leftCamIndex
-                  << " id=" << m_camL->id() << "\n";
-        std::cerr << "[cam] selected right index=" << rightCamIndex
-                  << " id=" << m_camR->id() << "\n";
 
         auto sink = [&](FrameItem &&fi) { PushFrame(std::move(fi)); };
 
