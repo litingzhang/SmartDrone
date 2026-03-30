@@ -95,8 +95,30 @@ apt-get install -y --no-install-recommends python3-scipy
 
 ### 2. Generate Stereo Calibration Parameters
 
+The repository root [`make_rosbag.py`](/d:/SmartDrone/make_rosbag.py) now generates both bags in one run:
+
 ```bash
 python3 make_rosbag.py
+```
+
+By default it reads:
+
+- `/data/calib_A/cam0`, `/data/calib_A/cam1`, `/data/calib_A/imu.csv`
+- `/data/calib_B/cam0`, `/data/calib_B/cam1`, `/data/calib_B/imu.csv`
+
+And writes:
+
+- `/data/calib_A.bag`
+- `/data/calib_B.bag`
+
+The bag generator also:
+
+- removes trailing invalid camera images automatically
+- trims trailing IMU samples after the last valid camera frame
+
+Then run stereo camera calibration on `calib_A.bag`:
+
+```bash
 rosrun kalibr kalibr_calibrate_cameras \
   --bag /data/calib_A.bag \
   --target /data/aprilgrid.yaml \
@@ -107,16 +129,44 @@ rosrun kalibr kalibr_calibrate_cameras \
 
 ### 3. Generate Stereo-IMU Calibration Parameters
 
-Use this step to generate `stereo_imu.yaml`:
+Then run stereo-IMU calibration on `calib_B.bag`:
 
 ```bash
-python3 make_rosbag.py
 rosrun kalibr kalibr_calibrate_imu_camera \
   --bag /data/calib_B.bag \
   --cam /data/calib_A-camchain.yaml \
   --imu /data/imu.yaml \
   --target /data/aprilgrid.yaml
 ```
+
+### 4. Convert Kalibr Results To Runtime YAML
+
+After Kalibr finishes, use [`convert_kalibr_to_smartdrone_yaml.py`](/d:/SmartDrone/convert_kalibr_to_smartdrone_yaml.py) to convert the Kalibr output into SmartDrone runtime configs:
+
+```bash
+python3 convert_kalibr_to_smartdrone_yaml.py \
+  --camchain /data/calib_A-camchain-imucam.yaml \
+  --imu /data/imu.yaml
+```
+
+This generates:
+
+- `config/stereo.yaml`
+- `config/stereo_inertial.yaml`
+- `config/mono_inertial_right.yaml`
+
+You can also point the converter directly at a remote Kalibr result directory:
+
+```bash
+python3 convert_kalibr_to_smartdrone_yaml.py \
+  --kalibr-root ltz@192.168.0.50:~/workspace/kalibr_data/calib_runs
+```
+
+The converter will try to:
+
+- find the latest `*camchain-imucam.yaml` or `*camchain.yaml` under that directory
+- read `imu.yaml` from the parent Kalibr data directory
+- write the SmartDrone YAML files locally
 
 ## Upload
 
@@ -134,6 +184,7 @@ Default behavior:
 - Upload `libORB_SLAM3.so`, `libDBoW2.so`, and `libg2o.so`
 - Create `~/config` on the target when needed
 - Upload `config/stereo.yaml` and `config/stereo_inertial.yaml`
+- Upload `config/mono_right.yaml` and `config/mono_inertial_right.yaml`
 - Upload to temporary `*.new` files first, then atomically replace the final files with `mv`
 
 Optional environment variables:

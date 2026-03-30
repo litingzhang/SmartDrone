@@ -18,6 +18,8 @@ public:
         capabilities.perceptionModes = {
             domain::PerceptionMode::Stereo,
             domain::PerceptionMode::StereoImu,
+            domain::PerceptionMode::Mono,
+            domain::PerceptionMode::MonoImu,
         };
         capabilities.slamModes = {
             domain::SlamOperationMode::Mapping,

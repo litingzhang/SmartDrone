@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Make ROS1 bag for Kalibr from your recorder outputs.
+Make ROS1 bags for Kalibr from your recorder outputs.
+
+Default behavior:
+- read `/data/calib_A` and write `/data/calib_A.bag`
+- read `/data/calib_B` and write `/data/calib_B.bag`
 
 Assumptions (matches your C++ recorder):
 - cam0_dir / cam1_dir either contain `data.csv` with `timestamp_ns,filename`,
@@ -9,12 +13,6 @@ Assumptions (matches your C++ recorder):
 - imu.csv columns (your C++ fprintf):
   #timestamp [ns],w_x [rad/s],w_y [rad/s],w_z [rad/s],a_x [m/s^2],a_y [m/s^2],a_z [m/s^2]
   i.e. gyro first, accel last.
-
-Key fixes vs your buggy script:
-1) IMU column order is corrected (gyro first, accel last).
-2) Camera timestamps are preserved as recorded; no synthetic camera monotonic fixup.
-3) Only enforce strict monotonicity for IMU if needed.
-4) Use integer ns -> rospy.Time(secs,nsecs) to avoid float precision issues.
 """
 
 import os, re, csv, sys
@@ -86,6 +84,42 @@ def load_camera_items(dirpath: str):
     return list_images_ns(dirpath)
 
 
+def is_valid_image_file(path: str) -> bool:
+    try:
+        if os.path.getsize(path) <= 0:
+            return False
+    except OSError:
+        return False
+
+    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    return img is not None
+
+
+def prune_tail_invalid_images(items, camera_name: str):
+    """
+    Delete trailing invalid images in-place on disk and return the trimmed list.
+    An image is treated as invalid when it is zero-byte, missing, or OpenCV
+    cannot decode it. Only removes images at the tail, because these are usually
+    incomplete writes after a stopped capture session.
+    """
+    trimmed = list(items)
+    removed = []
+    while trimmed:
+        _, path = trimmed[-1]
+        if is_valid_image_file(path):
+            break
+        removed.append(path)
+        try:
+            os.remove(path)
+            print(f"[warn] removed trailing invalid image {camera_name}: {path}")
+        except OSError as e:
+            print(f"[warn] failed to remove trailing invalid image {camera_name}: {path} ({e})")
+        trimmed.pop()
+    if removed:
+        print(f"[info] pruned {len(removed)} trailing invalid images on {camera_name}")
+    return trimmed
+
+
 def read_imu_csv_ns(path: str):
     """
     Returns list of tuples:
@@ -118,19 +152,26 @@ def read_imu_csv_ns(path: str):
     return out
 
 
+def trim_tail_imu_after(last_valid_ns: int, imu_items):
+    """
+    Drop IMU samples after the last valid camera timestamp so the bag does not
+    keep a trailing IMU-only tail after broken final images were removed.
+    """
+    if last_valid_ns < 0:
+        return []
+    trimmed = [row for row in imu_items if row[0] <= last_valid_ns]
+    dropped = len(imu_items) - len(trimmed)
+    if dropped > 0:
+        print(f"[info] trimmed {dropped} trailing imu samples after t_ns={last_valid_ns}")
+    return trimmed
+
+
 def ensure_dir(p: str):
     if not os.path.isdir(p):
         raise RuntimeError(f"Directory not found: {p}")
 
 
-def main():
-    # ---- edit these paths if needed ----
-    cam0_dir = "/data/calib_B/cam0"
-    cam1_dir = "/data/calib_B/cam1"
-    imu_csv  = "/data/calib_B/imu.csv"
-    out_bag  = "/data/calib_B_fixed.bag"
-    # -----------------------------------
-
+def write_bag(cam0_dir: str, cam1_dir: str, imu_csv: str, out_bag: str):
     ensure_dir(cam0_dir)
     ensure_dir(cam1_dir)
     if not os.path.isfile(imu_csv):
@@ -140,12 +181,18 @@ def main():
     cam1 = load_camera_items(cam1_dir)
     imu  = read_imu_csv_ns(imu_csv)
 
+    cam0 = prune_tail_invalid_images(cam0, "cam0")
+    cam1 = prune_tail_invalid_images(cam1, "cam1")
+
     if not cam0:
         raise RuntimeError(f"No images in {cam0_dir}")
     if not cam1:
         raise RuntimeError(f"No images in {cam1_dir}")
+
+    last_valid_cam_ns = min(cam0[-1][0], cam1[-1][0])
+    imu = trim_tail_imu_after(last_valid_cam_ns, imu)
     if not imu:
-        raise RuntimeError(f"No imu samples in {imu_csv}")
+        raise RuntimeError(f"No imu samples in {imu_csv} after trimming")
 
     # t0 in ns (use earliest among all)
     t0_ns = min(cam0[0][0], cam1[0][0], imu[0][0])
@@ -222,6 +269,29 @@ def main():
             print(f"[warn] skipped {skipped_cam_dups[topic]} duplicate frames on {topic}")
 
     print("[done] wrote:", out_bag)
+
+
+def main():
+    jobs = [
+        {
+            "name": "calib_A",
+            "cam0_dir": "/data/calib_runs/calib_data_0/cam0",
+            "cam1_dir": "/data/calib_runs/calib_data_0/cam1",
+            "imu_csv": "/data/calib_runs/calib_data_0/imu.csv",
+            "out_bag": "/data/calib_runs/calib_data_0.bag",
+        },
+        {
+            "name": "calib_B",
+            "cam0_dir": "/data/calib_runs/calib_data_1/cam0",
+            "cam1_dir": "/data/calib_runs/calib_data_1/cam1",
+            "imu_csv": "/data/calib_runs/calib_data_1/imu.csv",
+            "out_bag": "/data/calib_runs/calib_data_1.bag",
+        },
+    ]
+
+    for job in jobs:
+        print(f"[info] ===== {job['name']} =====")
+        write_bag(job["cam0_dir"], job["cam1_dir"], job["imu_csv"], job["out_bag"])
 
 
 if __name__ == "__main__":

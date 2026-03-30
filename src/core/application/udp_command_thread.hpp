@@ -33,6 +33,17 @@ using BuildCapabilitiesPayloadFn = std::function<std::vector<uint8_t>()>;
 using BuildConfigPayloadFn = std::function<std::vector<uint8_t>(const UnifiedConfig&, smartdrone::core::domain::RuntimeMode)>;
 using PeerToIpStringFn = std::function<std::string(const UdpPeer&)>;
 
+inline SensorMode ParseRuntimeSensorMode(uint8_t value)
+{
+    switch (value) {
+        case RUNTIME_SENSOR_STEREO_IMU: return SensorMode::StereoImu;
+        case RUNTIME_SENSOR_MONO: return SensorMode::Mono;
+        case RUNTIME_SENSOR_MONO_IMU: return SensorMode::MonoImu;
+        case RUNTIME_SENSOR_STEREO:
+        default: return SensorMode::Stereo;
+    }
+}
+
 inline RouteResult HandleRuntimeModeFrame(const TlvFrame& frame, UnifiedRuntimeController& controller)
 {
     using ControllerMode = smartdrone::core::domain::RuntimeMode;
@@ -74,7 +85,7 @@ inline RouteResult HandleRuntimeConfigFrame(
     if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
         return {ACK_E_BAD_ARGS, "bad runtime cfg args"};
     }
-    r.sensorMode = (p[8] == RUNTIME_SENSOR_STEREO_IMU) ? SensorMode::StereoImu : SensorMode::Stereo;
+    r.sensorMode = ParseRuntimeSensorMode(p[8]);
     const uint8_t streamFlags = p[9];
     if (streamFlags == 0) {
         r.sendImage = true;
@@ -111,7 +122,7 @@ inline RouteResult HandleRuntimeConfigFrame(
     update.values[std::string(ConfigRegistry::kCameraPairWindowMs)] = static_cast<int64_t>(r.pairMs);
     update.values[std::string(ConfigRegistry::kSlamInputFps)] = static_cast<int64_t>(r.slamInputFps);
     update.values[std::string(ConfigRegistry::kSlamPerceptionMode)] =
-        std::string(r.sensorMode == SensorMode::StereoImu ? "stereo-imu" : "stereo");
+        std::string(ToSensorModeText(r.sensorMode));
     update.values[std::string(ConfigRegistry::kStreamUdpEnabled)] = r.udpEnabled;
     update.values[std::string(ConfigRegistry::kStreamUdpIp)] = r.udpIp;
     update.values[std::string(ConfigRegistry::kStreamSendImage)] = r.sendImage;

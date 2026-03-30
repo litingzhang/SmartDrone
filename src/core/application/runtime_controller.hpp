@@ -258,7 +258,7 @@ public:
         const int clampedSlamFps = remote.slamInputFps <= 0 ? cameraFps : std::min(cameraFps, remote.slamInputFps);
         return {
             true,
-            "runtime cfg updated sensor=" + std::string(remote.sensorMode == SensorMode::StereoImu ? "stereo-imu" : "stereo") +
+            "runtime cfg updated sensor=" + std::string(ToSensorModeText(remote.sensorMode)) +
                 " pair_ms=" + std::to_string(remote.pairMs) +
                 " slam_fps=" + std::to_string(clampedSlamFps)
         };

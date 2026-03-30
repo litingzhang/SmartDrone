@@ -232,6 +232,7 @@ inline MainRuntimeAliases BuildRuntimeAliases(const AppConfig& c)
     a.gyroFsDps = c.imu.gyroFsDps;
     a.imuStartReg = c.imu.imuStartReg;
     a.allowEmptyImu = c.runtime.allowEmptyImu;
+    a.debugRightOnlyFeatures = c.runtime.debugRightOnlyFeatures;
     a.rtImu = c.imu.rtImu;
     a.rtPrio = c.imu.rtPrio;
     return a;
@@ -240,6 +241,7 @@ inline MainRuntimeAliases BuildRuntimeAliases(const AppConfig& c)
 inline void PrintStartupConfig(const AppConfig& app, const MainRuntimeAliases& a, ControllerMode mode)
 {
     std::cerr << "mode=" << smartdrone::core::domain::ToString(mode) << "\n";
+    std::cerr << "sensor_mode=" << ToSensorModeText(a.sensorMode) << "\n";
     std::cerr << "cam " << a.width << "x" << a.height << " @" << a.fps
               << " aeDisable=" << (a.aeDisable ? "true" : "false")
               << " exp_us=" << a.exposureUs << " gain=" << a.gain << " pixelFormat=R16\n";
@@ -250,6 +252,7 @@ inline void PrintStartupConfig(const AppConfig& app, const MainRuntimeAliases& a
     std::cerr << "slam_input_fps=" << a.slamInputFps
               << " camera_fps=" << a.fps
               << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
+    std::cerr << "debug right_only_features=" << (a.debugRightOnlyFeatures ? "Y" : "N") << "\n";
     std::cerr << "imuHz=" << a.imuHz << " udp=" << (a.udpEnable ? "Y" : "N")
               << " udpPort=" << a.udpPort << " cmdPort=" << a.cmdPort << "\n";
     std::cerr << "stream img=" << (a.sendImage ? "Y" : "N")

@@ -450,33 +450,33 @@
 
                         <LinearLayout
                             android:layout_width="match_parent"
-                            android:layout_height="40dp"
+                            android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
                             android:background="#33FFFFFF"
                             android:gravity="center_vertical"
-                            android:orientation="horizontal"
+                            android:orientation="vertical"
                             android:paddingLeft="12dp"
-                            android:paddingRight="8dp">
+                            android:paddingTop="8dp"
+                            android:paddingRight="12dp"
+                            android:paddingBottom="8dp">
 
                             <TextView
-                                android:layout_width="0dp"
+                                android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="STEREO IMU"
+                                android:text="Sensor Mode"
                                 android:textColor="#183247"
                                 android:textSize="11sp"
                                 android:textStyle="bold" />
 
-                            <Switch
-                                android:id="@+id/btnSensorMode"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:minWidth="42dp"
-                                android:showText="false"
-                                android:splitTrack="false"
-                                android:switchMinWidth="42dp"
-                                android:thumb="@drawable/switch_thumb"
-                                android:track="@drawable/switch_track" />
+                            <Spinner
+                                android:id="@+id/spinnerSensorMode"
+                                android:layout_width="match_parent"
+                                android:layout_height="40dp"
+                                android:layout_marginTop="6dp"
+                                android:background="#F7FAFC"
+                                android:paddingLeft="10dp"
+                                android:paddingRight="10dp"
+                                android:spinnerMode="dropdown" />
                         </LinearLayout>
 
                         <LinearLayout

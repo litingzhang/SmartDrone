@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <future>
 #include <memory>
 #include <string>
 #include <thread>
@@ -9,6 +10,7 @@
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/features2d.hpp>
 
 #include "System.h"
 #include "adapters/camera/libcamera_stereo_camera.hpp"
@@ -61,6 +63,77 @@ inline double ComputeSharpnessLaplacianVar(const cv::Mat& gray)
     return stddev[0] * stddev[0];
 }
 
+inline std::vector<cv::Point2f> ComputeOrbDebugFeatures(const cv::Mat& gray)
+{
+    std::vector<cv::Point2f> points;
+    if (gray.empty()) {
+        return points;
+    }
+
+    std::vector<cv::KeyPoint> keypoints;
+    auto orb = cv::ORB::create(1000, 1.2f, 8, 31, 0, 2, cv::ORB::HARRIS_SCORE, 31, 20);
+    orb->detect(gray, keypoints);
+
+    points.reserve(keypoints.size());
+    for (const auto& keypoint : keypoints) {
+        points.push_back(keypoint.pt);
+    }
+    return points;
+}
+
+inline bool ShouldEnhanceLowLightFrame(double mean, double stddev)
+{
+    return mean < 35.0 || (mean < 50.0 && stddev < 18.0);
+}
+
+inline cv::Mat EnhanceLowLightGrayForSlam(const cv::Mat& gray)
+{
+    if (gray.empty()) {
+        return gray;
+    }
+
+    cv::Mat enhanced = gray.clone();
+    auto clahe = cv::createCLAHE(2.5, cv::Size(8, 8));
+    clahe->apply(enhanced, enhanced);
+    return enhanced;
+}
+
+inline void EnhanceStereoPairForSlamIfNeeded(const ports::StereoFrame& stereo,
+                                             double meanL,
+                                             double stdL,
+                                             double meanR,
+                                             double stdR,
+                                             ports::StereoFrame& out)
+{
+    out = stereo;
+    const bool enhanceL = ShouldEnhanceLowLightFrame(meanL, stdL);
+    const bool enhanceR = ShouldEnhanceLowLightFrame(meanR, stdR);
+    if (!enhanceL && !enhanceR) {
+        return;
+    }
+
+    std::future<cv::Mat> leftTask;
+    std::future<cv::Mat> rightTask;
+    if (enhanceL) {
+        leftTask = std::async(std::launch::async, [&stereo]() {
+            return EnhanceLowLightGrayForSlam(stereo.left.gray);
+        });
+    }
+    if (enhanceR) {
+        rightTask = std::async(std::launch::async, [&stereo]() {
+            return EnhanceLowLightGrayForSlam(stereo.right.gray);
+        });
+    }
+    if (enhanceL) {
+        out.left.gray = leftTask.get();
+        out.left.owner.reset();
+    }
+    if (enhanceR) {
+        out.right.gray = rightTask.get();
+        out.right.owner.reset();
+    }
+}
+
 inline bool IsTrackingPoseUsable(int trackingState)
 {
     return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::OK_KLT;
@@ -105,16 +178,24 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
                            std::atomic<bool>& runningFlag)
 {
     const MainRuntimeAliases a = BuildRuntimeAliases(cfg.app);
+    const bool monoMode = (a.sensorMode == SensorMode::Mono || a.sensorMode == SensorMode::MonoImu);
+    const bool monoImuMode = (a.sensorMode == SensorMode::MonoImu);
+    const bool useImu = (a.sensorMode == SensorMode::StereoImu || monoImuMode);
+    const auto orbSensor = monoImuMode ? ORB_SLAM3::System::IMU_MONOCULAR
+                                       : monoMode ? ORB_SLAM3::System::MONOCULAR
+                                                  : a.sensorMode == SensorMode::StereoImu ? ORB_SLAM3::System::IMU_STEREO
+                                                                                          : ORB_SLAM3::System::STEREO;
+    const auto orbInputMode = monoMode ? smartdrone::adapters::slam::OrbInputMode::MonoRight
+                                       : smartdrone::adapters::slam::OrbInputMode::Stereo;
     PrintStartupConfig(cfg.app, a, ControllerMode::Slam);
     livePose.SetRuntimeMode(RUNTIME_MODE_SLAM);
     Logger::Init("./stereo_vslam.log", 32 * 1024 * 1024, Logger::INFO, true);
     auto slamSystem = std::make_unique<ORB_SLAM3::System>(
         cfg.app.vocab,
         cfg.app.settings,
-        a.sensorMode == SensorMode::StereoImu ? ORB_SLAM3::System::IMU_STEREO
-                                              : ORB_SLAM3::System::STEREO,
+        orbSensor,
         false);
-    smartdrone::adapters::slam::OrbSlam3Engine slamEngine(std::move(slamSystem), a.sensorMode == SensorMode::StereoImu);
+    smartdrone::adapters::slam::OrbSlam3Engine slamEngine(std::move(slamSystem), orbInputMode, useImu);
     if (!slamEngine.Start()) {
         stop.store(true);
         return false;
@@ -127,7 +208,6 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
     }
     ImuThreadState imuState;
     std::thread imuThread;
-    const bool useImu = (a.sensorMode == SensorMode::StereoImu);
     if (useImu) imuThread = StartImuThread(a, imuState, stop, runningFlag);
     LibcameraStereoOV9281_TsPair cam;
     if (!OpenCamera(cam, a)) {
@@ -207,7 +287,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         const size_t pendingL = cameraProvider.PendingL();
         const size_t pendingR = cameraProvider.PendingR();
         const double pairTolMs = static_cast<double>(cameraProvider.PairTolNs()) * 1e-6;
-        const int64_t frameNs = stereoBatch.frameTimestampNs;
+        const int64_t frameNs = monoMode ? static_cast<int64_t>(R.timestampNs) : stereoBatch.frameTimestampNs;
         const double frameTime = static_cast<double>(frameNs) * 1e-9;
         // Publish EV/VIO with the stereo frame timestamp for both stereo and stereo-imu modes.
         // PX4 EV delay should compensate processing latency relative to this capture time.
@@ -239,13 +319,20 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         const auto imuEndTp = std::chrono::steady_clock::now();
         lastFrameNs = frameNs;
         smartdrone::core::ports::SlamInputBatch slamInput{};
-        slamInput.stereo = stereoBatch.stereo;
+        EnhanceStereoPairForSlamIfNeeded(stereoBatch.stereo, meanL, stdL, meanR, stdR, slamInput.stereo);
         slamInput.frameTimeSec = frameTime;
         slamInput.imu = std::move(imuReadings);
+        const bool debugRightOnlyFeatures = a.debugRightOnlyFeatures;
         const bool updatePointCloud =
-            a.sendMap && (frameNs - lastPointCloudUpdateNs) >= kPointCloudUpdateIntervalNs;
+            !debugRightOnlyFeatures && a.sendMap && (frameNs - lastPointCloudUpdateNs) >= kPointCloudUpdateIntervalNs;
         const auto slamStartTp = std::chrono::steady_clock::now();
-        const smartdrone::core::ports::SlamOutput slamOutput = slamEngine.Process(slamInput, updatePointCloud);
+        smartdrone::core::ports::SlamOutput slamOutput{};
+        if (debugRightOnlyFeatures) {
+            slamOutput.leftFeatures.clear();
+            slamOutput.rightFeatures = ComputeOrbDebugFeatures(R.gray);
+        } else {
+            slamOutput = slamEngine.Process(slamInput, updatePointCloud);
+        }
         const auto slamEndTp = std::chrono::steady_clock::now();
         const auto cloudStartTp = std::chrono::steady_clock::now();
         size_t pointCount = 0;
@@ -259,13 +346,17 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         const auto cloudEndTp = std::chrono::steady_clock::now();
         const auto udpStartTp = std::chrono::steady_clock::now();
         if (a.udpEnable && (a.sendImage || a.sendFeature || a.sendMap)) {
-            udp.Enqueue(0, L.sequence, frameTime, L.gray, slamOutput.leftFeatures, a.sendImage, a.sendFeature);
-            udp.Enqueue(1, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, a.sendImage, a.sendFeature);
+            if (monoMode) {
+                udp.Enqueue(1, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, a.sendImage, a.sendFeature);
+            } else {
+                udp.Enqueue(0, L.sequence, frameTime, L.gray, slamOutput.leftFeatures, a.sendImage, a.sendFeature);
+                udp.Enqueue(1, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, a.sendImage, a.sendFeature);
+            }
         }
         const auto udpEndTp = std::chrono::steady_clock::now();
-        const int state = slamOutput.trackingState;
-        const bool trackingUsable = IsTrackingPoseUsable(state);
-        const unsigned long mapId = slamOutput.mapId;
+        const int state = debugRightOnlyFeatures ? ORB_SLAM3::Tracking::LOST : slamOutput.trackingState;
+        const bool trackingUsable = !debugRightOnlyFeatures && IsTrackingPoseUsable(state);
+        const unsigned long mapId = debugRightOnlyFeatures ? 0UL : slamOutput.mapId;
         const bool mapIdChanged = mapId != PosePostprocessor::ContinuityMapper::kInvalidMapId && mapId != lastRawMapId;
         if (mapIdChanged) {
             lastRawMapId = mapId;
@@ -274,7 +365,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
             }
         }
         Sophus::SE3f twcRaw = haveLastValidTwcRaw ? lastValidTwcRaw : Sophus::SE3f();
-        if (slamOutput.poseValid) {
+        if (!debugRightOnlyFeatures && slamOutput.poseValid) {
             const Eigen::Quaternionf rawQ(
                 slamOutput.pose.qw,
                 slamOutput.pose.qx,
@@ -327,6 +418,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
             sizeof(dfxLine),
             "[slam_dfx] frame=%llu seqL=%u seqR=%u state=%d pose_valid=%d quality=%d "
             "imu_samples=%zu featL=%zu featR=%zu points=%zu "
+            "debug_right_only=%d "
             "pair rawSeqL=%u rawSeqR=%u rawCountL=%llu rawCountR=%llu pair_dt=%.3f reject_dt=%.3f tol=%.3f pendL=%zu pendR=%zu dropL=%llu dropR=%llu rate_drop=%llu "
             "img meanL=%.2f stdL=%.2f sharpL=%.2f meanR=%.2f stdR=%.2f sharpR=%.2f "
             "timing_ms frame_gap=%.3f mono_step=%.3f acquire=%.3f imu=%.3f slam=%.3f cloud=%.3f udp=%.3f post=%.3f live=%.3f publish=%.3f total=%.3f",
@@ -340,6 +432,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
             slamOutput.leftFeatures.size(),
             slamOutput.rightFeatures.size(),
             pointCount,
+            debugRightOnlyFeatures ? 1 : 0,
             static_cast<unsigned>(rawSeqL),
             static_cast<unsigned>(rawSeqR),
             static_cast<unsigned long long>(rawCountL),

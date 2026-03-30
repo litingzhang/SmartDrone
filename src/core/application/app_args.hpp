@@ -12,11 +12,19 @@ namespace fs = std::filesystem;
 enum class SensorMode {
     Stereo,
     StereoImu,
+    Mono,
+    MonoImu,
 };
 
 inline const char* DefaultSettingsForSensorMode(SensorMode mode)
 {
-    return (mode == SensorMode::StereoImu) ? "config/stereo_inertial.yaml" : "config/stereo.yaml";
+    switch (mode) {
+        case SensorMode::StereoImu: return "config/stereo_inertial.yaml";
+        case SensorMode::Mono: return "config/mono_right.yaml";
+        case SensorMode::MonoImu: return "config/mono_inertial_right.yaml";
+        case SensorMode::Stereo:
+        default: return "config/stereo.yaml";
+    }
 }
 
 inline SensorMode ParseSensorModeText(const std::string& text)
@@ -25,10 +33,27 @@ inline SensorMode ParseSensorModeText(const std::string& text)
     std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
     });
+    if (normalized == "mono-imu" || normalized == "imu-mono" || normalized == "mono_inertial") {
+        return SensorMode::MonoImu;
+    }
+    if (normalized == "mono" || normalized == "monocular") {
+        return SensorMode::Mono;
+    }
     if (normalized == "stereo-imu" || normalized == "imu-stereo" || normalized == "stereo_inertial") {
         return SensorMode::StereoImu;
     }
     return SensorMode::Stereo;
+}
+
+inline const char* ToSensorModeText(SensorMode mode)
+{
+    switch (mode) {
+        case SensorMode::StereoImu: return "stereo-imu";
+        case SensorMode::Mono: return "mono";
+        case SensorMode::MonoImu: return "mono-imu";
+        case SensorMode::Stereo:
+        default: return "stereo";
+    }
 }
 
 inline std::string ResolveRuntimePath(const std::string& path, const char* argv0)
@@ -135,6 +160,7 @@ struct RuntimeConfig {
     int64_t offRejectNs{10'000'000};
     bool allowEmptyImu{false};
     int slamInputFps{0};
+    bool debugRightOnlyFeatures{false};
 };
 
 struct AppConfig {
@@ -280,6 +306,7 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     config.runtime.offRejectNs = argReader.GetInt64("--off-reject-ns", 10'000'000);
     config.runtime.allowEmptyImu = argReader.HasFlag("--allow-empty-imu");
     config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 0);
+    config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");
 
     return config;
 }

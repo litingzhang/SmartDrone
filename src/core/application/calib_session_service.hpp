@@ -2,9 +2,14 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cerrno>
 #include <thread>
+#include <vector>
 
 #include <opencv2/opencv.hpp>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "adapters/stream/udp_image_sender.hpp"
 #include "core/application/calib_storage_helpers.hpp"
@@ -14,6 +19,70 @@
 #include "core/application/sensor_runtime_helpers.hpp"
 
 namespace smartdrone::core::application {
+
+inline void FlushAndSyncFile(FILE* file, const char* label)
+{
+    if (!file) {
+        return;
+    }
+    std::fflush(file);
+    const int fd = ::fileno(file);
+    if (fd >= 0 && ::fsync(fd) != 0) {
+        std::cerr << "[calib-sync] fsync failed label=" << label
+                  << " errno=" << errno << "\n";
+    }
+}
+
+inline void SyncPathFile(const fs::path& path)
+{
+    const int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        std::cerr << "[calib-sync] open failed path=" << path.string()
+                  << " errno=" << errno << "\n";
+        return;
+    }
+    if (::fsync(fd) != 0) {
+        std::cerr << "[calib-sync] fsync failed path=" << path.string()
+                  << " errno=" << errno << "\n";
+    }
+    ::close(fd);
+}
+
+inline void SyncDirPath(const fs::path& path)
+{
+    const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY);
+    if (fd < 0) {
+        std::cerr << "[calib-sync] open dir failed path=" << path.string()
+                  << " errno=" << errno << "\n";
+        return;
+    }
+    if (::fsync(fd) != 0) {
+        std::cerr << "[calib-sync] fsync dir failed path=" << path.string()
+                  << " errno=" << errno << "\n";
+    }
+    ::close(fd);
+}
+
+inline void FlushCalibOutputs(FILE* fCam0,
+                              FILE* fCam1,
+                              FILE* fImu,
+                              const std::vector<fs::path>& imagePaths,
+                              const fs::path& root,
+                              const fs::path& cam0Dir,
+                              const fs::path& cam1Dir)
+{
+    FlushAndSyncFile(fCam0, "cam0.csv");
+    FlushAndSyncFile(fCam1, "cam1.csv");
+    FlushAndSyncFile(fImu, "imu.csv");
+
+    for (const auto& imagePath : imagePaths) {
+        SyncPathFile(imagePath);
+    }
+
+    SyncDirPath(cam0Dir);
+    SyncDirPath(cam1Dir);
+    SyncDirPath(root);
+}
 
 inline bool RunCalibSession(const UnifiedConfig& cfg,
                             std::atomic<bool>& stop,
@@ -54,6 +123,7 @@ inline bool RunCalibSession(const UnifiedConfig& cfg,
         return false;
     }
     int saved = 0;
+    std::vector<fs::path> savedImagePaths;
     int64_t lastPairNs = 0;
     const int64_t maxSaveDtNs = static_cast<int64_t>(std::max(a.pairMs, 1)) * 1000000LL;
     bool sessionOk = true;
@@ -117,6 +187,8 @@ inline bool RunCalibSession(const UnifiedConfig& cfg,
         }
         std::fprintf(fCam0, "%lld,%s\n", static_cast<long long>(pairNs), name.c_str());
         std::fprintf(fCam1, "%lld,%s\n", static_cast<long long>(pairNs), name.c_str());
+        savedImagePaths.push_back(fnL);
+        savedImagePaths.push_back(fnR);
         if (a.udpEnable && a.sendImage) {
             udp.Enqueue(0, L.seq, pairNs * 1e-9, L.gray, {}, true, false);
             udp.Enqueue(1, R.seq, pairNs * 1e-9, R.gray, {}, true, false);
@@ -141,9 +213,8 @@ inline bool RunCalibSession(const UnifiedConfig& cfg,
         udp.Close();
         std::cerr << "[session] calib udp closed\n";
     }
-    std::fflush(fCam0);
-    std::fflush(fCam1);
-    std::fflush(fImu);
+    std::cerr << "[calib-sync] flushing outputs on calib stop saved=" << saved << "\n";
+    FlushCalibOutputs(fCam0, fCam1, fImu, savedImagePaths, root, cam0Dir, cam1Dir);
     std::fclose(fCam0);
     std::fclose(fCam1);
     std::fclose(fImu);

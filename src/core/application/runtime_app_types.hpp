@@ -34,7 +34,7 @@ struct MainRuntimeAliases {
     SensorMode sensorMode{SensorMode::Stereo};
     int width{}, height{}, fps{}, slamInputFps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{},
         pairQueue{};
-    bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{};
+    bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{}, debugRightOnlyFeatures{};
     bool sendImage{true}, sendFeature{true}, sendMap{true};
     float gain{};
     std::string udpIp, spiDev, gpiochip;

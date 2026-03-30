@@ -14,6 +14,7 @@ import android.os.Looper;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
@@ -21,6 +22,7 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.SeekBar;
+import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 
@@ -57,6 +59,8 @@ public class MainActivity extends Activity {
     private static final int MODE_CALIB = 2;
     private static final int SENSOR_STEREO = 0;
     private static final int SENSOR_STEREO_IMU = 1;
+    private static final int SENSOR_MONO = 2;
+    private static final int SENSOR_MONO_IMU = 3;
     private static final long ACK_PENDING_TIMEOUT_MS = 3000L;
     private static final String PENDING_ARM = "arm";
     private static final String PENDING_EMERGENCY_STOP = "emergency_stop";
@@ -111,7 +115,7 @@ public class MainActivity extends Activity {
     private Button m_btnLand;
     private Switch m_btnToggleSlam;
     private Switch m_btnToggleCalib;
-    private Switch m_btnSensorMode;
+    private Spinner m_spinnerSensorMode;
     private Button m_btnCleanCalib;
     private Switch m_btnRemoteToggle;
     private Switch m_btnDebugToggle;
@@ -190,8 +194,11 @@ public class MainActivity extends Activity {
     private boolean m_showFeaturePoints = true;
     private boolean m_supportsCalib = true;
     private boolean m_supportsStereoImu = true;
+    private boolean m_supportsMono = true;
+    private boolean m_supportsMonoImu = true;
     private String m_lastCapabilitiesText = "";
     private String m_lastConfigText = "";
+    private int[] m_availableSensorModes = new int[]{SENSOR_STEREO, SENSOR_STEREO_IMU, SENSOR_MONO, SENSOR_MONO_IMU};
 
     private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Map<Long, PendingAckAction> m_pendingAckActions = new HashMap<>();
@@ -864,11 +871,11 @@ public class MainActivity extends Activity {
         boolean sensorPending = isPending(PENDING_SENSOR) || isPending(PENDING_RUNTIME);
         boolean runtimePending = isPending(PENDING_RUNTIME);
         m_updatingToggleUi = true;
-        if (m_btnSensorMode != null) {
-            m_btnSensorMode.setChecked(m_sensorMode == SENSOR_STEREO_IMU);
-            boolean enabled = !sensorPending && m_supportsStereoImu;
-            m_btnSensorMode.setEnabled(enabled);
-            m_btnSensorMode.setAlpha(enabled ? 1.0f : 0.35f);
+        updateSensorModeSpinner();
+        if (m_spinnerSensorMode != null) {
+            boolean enabled = !sensorPending && m_availableSensorModes.length > 0;
+            m_spinnerSensorMode.setEnabled(enabled);
+            m_spinnerSensorMode.setAlpha(enabled ? 1.0f : 0.35f);
         }
         if (m_btnToggleSlam != null) {
             m_btnToggleSlam.setChecked(m_runtimeMode == MODE_SLAM);
@@ -885,6 +892,72 @@ public class MainActivity extends Activity {
         if (m_btnCleanCalib != null) {
             setButtonState(m_btnCleanCalib, true, isPending(PENDING_CLEAN_CALIB), "#546E7A");
         }
+    }
+
+    private void updateSensorModeSpinner() {
+        if (m_spinnerSensorMode == null) {
+            return;
+        }
+
+        int[] supportedModes = getSupportedSensorModes();
+        boolean changed = m_availableSensorModes.length != supportedModes.length;
+        if (!changed) {
+            for (int i = 0; i < supportedModes.length; ++i) {
+                if (m_availableSensorModes[i] != supportedModes[i]) {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        if (changed || m_spinnerSensorMode.getAdapter() == null) {
+            m_availableSensorModes = supportedModes;
+            String[] labels = new String[m_availableSensorModes.length];
+            for (int i = 0; i < m_availableSensorModes.length; ++i) {
+                labels[i] = sensorModeToText(m_availableSensorModes[i]);
+            }
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                    this,
+                    android.R.layout.simple_spinner_item,
+                    labels);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            m_spinnerSensorMode.setAdapter(adapter);
+        } else {
+            m_availableSensorModes = supportedModes;
+        }
+
+        int targetIndex = findSensorModeIndex(m_sensorMode);
+        if (targetIndex < 0) {
+            targetIndex = 0;
+        }
+        if (m_spinnerSensorMode.getSelectedItemPosition() != targetIndex) {
+            m_spinnerSensorMode.setSelection(targetIndex, false);
+        }
+    }
+
+    private int[] getSupportedSensorModes() {
+        int[] scratch = new int[4];
+        int count = 0;
+        scratch[count++] = SENSOR_STEREO;
+        if (m_supportsStereoImu) {
+            scratch[count++] = SENSOR_STEREO_IMU;
+        }
+        if (m_supportsMono) {
+            scratch[count++] = SENSOR_MONO;
+        }
+        if (m_supportsMonoImu) {
+            scratch[count++] = SENSOR_MONO_IMU;
+        }
+        return Arrays.copyOf(scratch, count);
+    }
+
+    private int findSensorModeIndex(int sensorMode) {
+        for (int i = 0; i < m_availableSensorModes.length; ++i) {
+            if (m_availableSensorModes[i] == sensorMode) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private void updateFlightButtons() {
@@ -1147,6 +1220,12 @@ public class MainActivity extends Activity {
             return defaultValue;
         }
         String normalized = value.trim().toLowerCase(Locale.US);
+        if ("mono-imu".equals(normalized)) {
+            return SENSOR_MONO_IMU;
+        }
+        if ("mono".equals(normalized)) {
+            return SENSOR_MONO;
+        }
         if ("stereo-imu".equals(normalized)) {
             return SENSOR_STEREO_IMU;
         }
@@ -1263,12 +1342,16 @@ public class MainActivity extends Activity {
         Map<String, String> values = parseKeyValueText(payloadText);
         m_supportsCalib = containsTokenList(values.get("runtime_modes"), "calib");
         m_supportsStereoImu = containsTokenList(values.get("perception_modes"), "stereo-imu");
+        m_supportsMono = containsTokenList(values.get("perception_modes"), "mono");
+        m_supportsMonoImu = containsTokenList(values.get("perception_modes"), "mono-imu");
         updateRuntimeButtons();
         m_tvStatus.setText(String.format(
                 Locale.US,
-                "Capabilities synced calib=%s stereo_imu=%s",
+                "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s",
                 m_supportsCalib ? "yes" : "no",
-                m_supportsStereoImu ? "yes" : "no"));
+                m_supportsStereoImu ? "yes" : "no",
+                m_supportsMono ? "yes" : "no",
+                m_supportsMonoImu ? "yes" : "no"));
         return true;
     }
 
@@ -1330,7 +1413,17 @@ public class MainActivity extends Activity {
     }
 
     private String sensorModeToText(int sensorMode) {
-        return sensorMode == SENSOR_STEREO_IMU ? "Stereo-IMU" : "Stereo";
+        switch (sensorMode) {
+            case SENSOR_STEREO_IMU:
+                return "Stereo-IMU";
+            case SENSOR_MONO:
+                return "Mono";
+            case SENSOR_MONO_IMU:
+                return "Mono-IMU";
+            case SENSOR_STEREO:
+            default:
+                return "Stereo";
+        }
     }
 
     private interface AckSuccess {
@@ -1792,7 +1885,7 @@ public class MainActivity extends Activity {
         m_btnLand = findViewById(R.id.btnLand);
         m_btnToggleSlam = findViewById(R.id.btnToggleSlam);
         m_btnToggleCalib = findViewById(R.id.btnToggleCalib);
-        m_btnSensorMode = findViewById(R.id.btnSensorMode);
+        m_spinnerSensorMode = findViewById(R.id.spinnerSensorMode);
         m_btnRemoteToggle = findViewById(R.id.btnRemoteToggle);
         m_btnDebugToggle = findViewById(R.id.btnDebugToggle);
         m_btnMapClear = findViewById(R.id.btnMapClear);
@@ -2113,31 +2206,41 @@ public class MainActivity extends Activity {
             m_btnCleanCalib.setOnClickListener(v ->
                     sendSimpleCmdAwaitAck("CLEAN_CALIB", CMD_CALIB_CLEAN, PENDING_CLEAN_CALIB, () -> { }));
         }
-        if (m_btnSensorMode != null) {
-            m_btnSensorMode.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                if (m_updatingToggleUi) {
-                    return;
+        if (m_spinnerSensorMode != null) {
+            m_spinnerSensorMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                    if (m_updatingToggleUi || position < 0 || position >= m_availableSensorModes.length) {
+                        return;
+                    }
+                    final int nextSensorMode = m_availableSensorModes[position];
+                    if (nextSensorMode == m_sensorMode) {
+                        return;
+                    }
+                    final int exposureUs = m_cfgExposureUs;
+                    final float gain = (float) m_cfgGain;
+                    final int pairMs = m_cfgPairMs;
+                    final int slamFps = m_cfgSlamFps;
+                    sendRuntimeConfigAwaitAck(
+                            exposureUs,
+                            gain,
+                            pairMs,
+                            slamFps,
+                            nextSensorMode,
+                            m_sendImage,
+                            m_sendFeature,
+                            m_sendMap,
+                            "Sensor mode",
+                            PENDING_SENSOR,
+                            () -> {
+                                m_sensorMode = nextSensorMode;
+                                updateRuntimeButtons();
+                            });
                 }
-                final int nextSensorMode = isChecked ? SENSOR_STEREO_IMU : SENSOR_STEREO;
-                final int exposureUs = m_cfgExposureUs;
-                final float gain = (float) m_cfgGain;
-                final int pairMs = m_cfgPairMs;
-                final int slamFps = m_cfgSlamFps;
-                sendRuntimeConfigAwaitAck(
-                        exposureUs,
-                        gain,
-                        pairMs,
-                        slamFps,
-                        nextSensorMode,
-                        m_sendImage,
-                        m_sendFeature,
-                        m_sendMap,
-                        "Sensor mode",
-                        PENDING_SENSOR,
-                        () -> {
-                            m_sensorMode = nextSensorMode;
-                            updateRuntimeButtons();
-                        });
+
+                @Override
+                public void onNothingSelected(AdapterView<?> parent) {
+                }
             });
         }
 

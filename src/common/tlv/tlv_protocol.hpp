@@ -68,6 +68,8 @@ enum RuntimeMode : uint8_t {
 enum RuntimeSensorMode : uint8_t {
     RUNTIME_SENSOR_STEREO = 0,
     RUNTIME_SENSOR_STEREO_IMU = 1,
+    RUNTIME_SENSOR_MONO = 2,
+    RUNTIME_SENSOR_MONO_IMU = 3,
 };
 
 enum FrameType : uint8_t {

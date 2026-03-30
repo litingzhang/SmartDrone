@@ -1,6 +1,7 @@
 #pragma once
 
 #include <utility>
+#include <cstdint>
 #include <memory>
 #include <cmath>
 #include <vector>
@@ -14,10 +15,16 @@
 
 namespace smartdrone::adapters::slam {
 
+enum class OrbInputMode : uint8_t {
+    Stereo,
+    MonoLeft,
+    MonoRight,
+};
+
 class OrbSlam3Engine final : public core::ports::ISlamEngine {
 public:
-    OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, bool useImu)
-        : m_system(std::move(system)), m_useImu(useImu)
+    OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, OrbInputMode inputMode, bool useImu)
+        : m_system(std::move(system)), m_inputMode(inputMode), m_useImu(useImu)
     {
     }
 
@@ -38,6 +45,10 @@ public:
         }
 
         Sophus::SE3f tcw;
+        const bool monoMode = (m_inputMode != OrbInputMode::Stereo);
+        const cv::Mat& monoImage =
+            (m_inputMode == OrbInputMode::MonoRight) ? input.stereo.right.gray : input.stereo.left.gray;
+
         if (m_useImu) {
             std::vector<ORB_SLAM3::IMU::Point> imuPoints;
             imuPoints.reserve(input.imu.size());
@@ -47,16 +58,24 @@ public:
                     cv::Point3f(sample.gx, sample.gy, sample.gz),
                     static_cast<double>(sample.timestampNs) * 1e-9);
             }
-            tcw = m_system->TrackStereo(
-                input.stereo.left.gray,
-                input.stereo.right.gray,
-                input.frameTimeSec,
-                imuPoints);
+            if (monoMode) {
+                tcw = m_system->TrackMonocular(monoImage, input.frameTimeSec, imuPoints);
+            } else {
+                tcw = m_system->TrackStereo(
+                    input.stereo.left.gray,
+                    input.stereo.right.gray,
+                    input.frameTimeSec,
+                    imuPoints);
+            }
         } else {
-            tcw = m_system->TrackStereo(
-                input.stereo.left.gray,
-                input.stereo.right.gray,
-                input.frameTimeSec);
+            if (monoMode) {
+                tcw = m_system->TrackMonocular(monoImage, input.frameTimeSec);
+            } else {
+                tcw = m_system->TrackStereo(
+                    input.stereo.left.gray,
+                    input.stereo.right.gray,
+                    input.frameTimeSec);
+            }
         }
 
         out.trackingState = m_system->GetTrackingState();
@@ -76,21 +95,28 @@ public:
         out.pose.qy = q.y();
         out.pose.qz = q.z();
 
+        const int leftWidth = monoMode ? monoImage.cols : input.stereo.left.gray.cols;
+        const int leftHeight = monoMode ? monoImage.rows : input.stereo.left.gray.rows;
         ORB_SLAM3::TrackedVisualData visual = m_system->ExtractTrackedVisualData(
-            input.stereo.left.gray.cols,
-            input.stereo.left.gray.rows,
-            input.stereo.right.gray.cols,
-            input.stereo.right.gray.rows,
+            leftWidth,
+            leftHeight,
+            monoMode ? 0 : input.stereo.right.gray.cols,
+            monoMode ? 0 : input.stereo.right.gray.rows,
             extractPointCloud,
             120);
-        out.leftFeatures = std::move(visual.leftFeatures);
-        out.rightFeatures = std::move(visual.rightFeatures);
+        if (m_inputMode == OrbInputMode::MonoRight) {
+            out.rightFeatures = std::move(visual.leftFeatures);
+        } else {
+            out.leftFeatures = std::move(visual.leftFeatures);
+            out.rightFeatures = std::move(visual.rightFeatures);
+        }
         out.pointCloudXyz = std::move(visual.pointCloudXyz);
         return out;
     }
 
 private:
     std::unique_ptr<ORB_SLAM3::System> m_system;
+    OrbInputMode m_inputMode{OrbInputMode::Stereo};
     bool m_useImu{false};
 };
 
