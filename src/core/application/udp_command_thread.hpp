@@ -89,8 +89,8 @@ inline RouteResult HandleRuntimeConfigFrame(
     const uint8_t streamFlags = p[9];
     if (streamFlags == 0) {
         r.sendImage = true;
-        r.sendFeature = true;
-        r.sendMap = true;
+        r.sendFeature = false;
+        r.sendMap = false;
     } else {
         r.sendImage = (streamFlags & RUNTIME_CFG_FLAG_SEND_IMAGE) != 0;
         r.sendFeature = (streamFlags & RUNTIME_CFG_FLAG_SEND_FEATURE) != 0;

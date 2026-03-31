@@ -120,7 +120,7 @@ Then run stereo camera calibration on `calib_A.bag`:
 
 ```bash
 rosrun kalibr kalibr_calibrate_cameras \
-  --bag /data/calib_A.bag \
+  --bag /data/calib_runs/calib_data_0.bag \
   --target /data/aprilgrid.yaml \
   --models pinhole-radtan pinhole-radtan \
   --topics /cam0/image_raw /cam1/image_raw \
@@ -133,8 +133,8 @@ Then run stereo-IMU calibration on `calib_B.bag`:
 
 ```bash
 rosrun kalibr kalibr_calibrate_imu_camera \
-  --bag /data/calib_B.bag \
-  --cam /data/calib_A-camchain.yaml \
+  --bag /data/calib_runs/calib_data_1.bag \
+  --cam /data/calib_runs/calib_data_0-camchain.yaml \
   --imu /data/imu.yaml \
   --target /data/aprilgrid.yaml
 ```

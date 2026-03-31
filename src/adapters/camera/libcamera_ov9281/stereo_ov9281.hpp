@@ -579,25 +579,51 @@ class LibcameraStereoOV9281_TsPair {
         m_cm.reset();
     }
 
-    bool GrabPair(FrameItem &L, FrameItem &R, int timeoutMs = 1000, bool preferLatest = false)
+    bool GrabPair(FrameItem &L, FrameItem &R, int timeoutMs = 1000, bool preferLatest = false, uint64_t minTimestampNs = 0)
     {
         std::unique_lock<std::mutex> lk(m_muPair);
         if (!m_cvPair.wait_for(lk, std::chrono::milliseconds(timeoutMs),
                                [&] {
-                                   return !m_paired.empty() || !g_runningFlag.load() ||
+                                   return HasEligiblePairLocked(minTimestampNs) || !g_runningFlag.load() ||
                                           !m_acceptFrames.load(std::memory_order_relaxed);
                                })) {
             return false;
         }
-        if (m_paired.empty())
+        if (!HasEligiblePairLocked(minTimestampNs))
             return false;
-        if (preferLatest && m_paired.size() > 1) {
-            const size_t staleCount = m_paired.size() - 1;
-            for (size_t i = 0; i < staleCount; ++i) {
+
+        size_t selectedIndex = 0;
+        if (minTimestampNs > 0) {
+            selectedIndex = m_paired.size();
+            for (size_t i = 0; i < m_paired.size(); ++i) {
+                if (PairTimestampNs(m_paired[i]) >= minTimestampNs) {
+                    selectedIndex = preferLatest ? i : i;
+                    if (!preferLatest) {
+                        break;
+                    }
+                }
+            }
+            if (preferLatest) {
+                for (size_t i = selectedIndex + 1; i < m_paired.size(); ++i) {
+                    if (PairTimestampNs(m_paired[i]) >= minTimestampNs) {
+                        selectedIndex = i;
+                    }
+                }
+            }
+            if (selectedIndex >= m_paired.size()) {
+                return false;
+            }
+        } else if (preferLatest && m_paired.size() > 1) {
+            selectedIndex = m_paired.size() - 1;
+        }
+
+        if (selectedIndex > 0) {
+            m_droppedPaired.fetch_add(selectedIndex, std::memory_order_relaxed);
+            for (size_t i = 0; i < selectedIndex; ++i) {
                 m_paired.pop_front();
             }
-            m_droppedPaired.fetch_add(staleCount, std::memory_order_relaxed);
         }
+
         auto &p = m_paired.front();
         L = std::move(p.first);
         R = std::move(p.second);
@@ -629,6 +655,27 @@ class LibcameraStereoOV9281_TsPair {
     bool Healthy() const { return m_left.Healthy() && m_right.Healthy(); }
 
   private:
+    uint64_t PairTimestampNs(const std::pair<FrameItem, FrameItem>& pair) const
+    {
+        return (pair.first.tsNs + pair.second.tsNs) / 2ULL;
+    }
+
+    bool HasEligiblePairLocked(uint64_t minTimestampNs) const
+    {
+        if (m_paired.empty()) {
+            return false;
+        }
+        if (minTimestampNs == 0) {
+            return true;
+        }
+        for (const auto& pair : m_paired) {
+            if (PairTimestampNs(pair) >= minTimestampNs) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void PushFrame(FrameItem &&fi)
     {
         if (!m_acceptFrames.load(std::memory_order_relaxed))

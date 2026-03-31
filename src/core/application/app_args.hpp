@@ -137,8 +137,8 @@ struct UdpConfig {
     int payload{1200};
     int queue{4};
     bool sendImage{true};
-    bool sendFeature{true};
-    bool sendMap{true};
+    bool sendFeature{false};
+    bool sendMap{false};
 };
 
 struct ImuRuntimeConfig {

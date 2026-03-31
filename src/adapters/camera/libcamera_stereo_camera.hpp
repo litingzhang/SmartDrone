@@ -12,11 +12,11 @@ public:
     bool Start() override { return true; }
     void Stop() override {}
 
-    bool GrabStereo(core::ports::StereoFrame& out, int timeoutMs, bool preferLatest) override
+    bool GrabStereo(core::ports::StereoFrame& out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs = 0) override
     {
         FrameItem left;
         FrameItem right;
-        if (!m_impl.GrabPair(left, right, timeoutMs, preferLatest)) {
+        if (!m_impl.GrabPair(left, right, timeoutMs, preferLatest, minTimestampNs)) {
             return false;
         }
         out.left.cameraId = left.camIndex;

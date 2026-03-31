@@ -31,7 +31,7 @@ public:
 
     virtual bool Start() = 0;
     virtual void Stop() = 0;
-    virtual bool GrabStereo(StereoFrame& out, int timeoutMs, bool preferLatest) = 0;
+    virtual bool GrabStereo(StereoFrame& out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs = 0) = 0;
     virtual CameraHealth GetHealth() const = 0;
 };
 

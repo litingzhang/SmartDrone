@@ -189,9 +189,9 @@ public class MainActivity extends Activity {
     private int m_featureMatchCount0 = 0;
     private int m_featureMatchCount1 = 0;
     private boolean m_sendImage = true;
-    private boolean m_sendFeature = true;
-    private boolean m_sendMap = true;
-    private boolean m_showFeaturePoints = true;
+    private boolean m_sendFeature = false;
+    private boolean m_sendMap = false;
+    private boolean m_showFeaturePoints = false;
     private boolean m_supportsCalib = true;
     private boolean m_supportsStereoImu = true;
     private boolean m_supportsMono = true;

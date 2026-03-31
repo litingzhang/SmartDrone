@@ -26,8 +26,8 @@ struct RemoteRuntimeConfig {
     bool udpEnabled{false};
     SensorMode sensorMode{SensorMode::Stereo};
     bool sendImage{true};
-    bool sendFeature{true};
-    bool sendMap{true};
+    bool sendFeature{false};
+    bool sendMap{false};
 };
 
 struct MainRuntimeAliases {
@@ -35,7 +35,7 @@ struct MainRuntimeAliases {
     int width{}, height{}, fps{}, slamInputFps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{},
         pairQueue{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{}, debugRightOnlyFeatures{};
-    bool sendImage{true}, sendFeature{true}, sendMap{true};
+    bool sendImage{true}, sendFeature{false}, sendMap{false};
     float gain{};
     std::string udpIp, spiDev, gpiochip;
     int udpPort{}, cmdPort{}, udpJpegQ{}, udpPayload{}, udpQueue{}, imuHz{}, accelFsG{}, gyroFsDps{},
