@@ -161,6 +161,7 @@ struct RuntimeConfig {
     bool allowEmptyImu{false};
     int slamInputFps{0};
     bool debugRightOnlyFeatures{false};
+    bool slamLowLightEnhance{false};
 };
 
 struct AppConfig {
@@ -307,6 +308,7 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     config.runtime.allowEmptyImu = argReader.HasFlag("--allow-empty-imu");
     config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 0);
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");
+    config.runtime.slamLowLightEnhance = argReader.HasFlag("--slam-lowlight-enhance");
 
     return config;
 }

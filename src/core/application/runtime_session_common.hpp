@@ -233,6 +233,7 @@ inline MainRuntimeAliases BuildRuntimeAliases(const AppConfig& c)
     a.imuStartReg = c.imu.imuStartReg;
     a.allowEmptyImu = c.runtime.allowEmptyImu;
     a.debugRightOnlyFeatures = c.runtime.debugRightOnlyFeatures;
+    a.slamLowLightEnhance = c.runtime.slamLowLightEnhance;
     a.rtImu = c.imu.rtImu;
     a.rtPrio = c.imu.rtPrio;
     return a;
@@ -253,6 +254,7 @@ inline void PrintStartupConfig(const AppConfig& app, const MainRuntimeAliases& a
               << " camera_fps=" << a.fps
               << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
     std::cerr << "debug right_only_features=" << (a.debugRightOnlyFeatures ? "Y" : "N") << "\n";
+    std::cerr << "slam lowlight_enhance=" << (a.slamLowLightEnhance ? "Y" : "N") << "\n";
     std::cerr << "imuHz=" << a.imuHz << " udp=" << (a.udpEnable ? "Y" : "N")
               << " udpPort=" << a.udpPort << " cmdPort=" << a.cmdPort << "\n";
     std::cerr << "stream img=" << (a.sendImage ? "Y" : "N")

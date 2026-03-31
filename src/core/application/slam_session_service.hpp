@@ -98,38 +98,41 @@ inline cv::Mat EnhanceLowLightGrayForSlam(const cv::Mat& gray)
     return enhanced;
 }
 
-inline void EnhanceStereoPairForSlamIfNeeded(const ports::StereoFrame& stereo,
-                                             double meanL,
-                                             double stdL,
-                                             double meanR,
-                                             double stdR,
-                                             ports::StereoFrame& out)
+inline void PrepareStereoPairForSlam(const ports::StereoFrame& stereo,
+                                     double meanL,
+                                     double stdL,
+                                     double meanR,
+                                     double stdR,
+                                     bool enableLowLightEnhance,
+                                     ports::StereoFrame& out)
 {
     out = stereo;
+    if (!enableLowLightEnhance) {
+        return;
+    }
+
     const bool enhanceL = ShouldEnhanceLowLightFrame(meanL, stdL);
     const bool enhanceR = ShouldEnhanceLowLightFrame(meanR, stdR);
     if (!enhanceL && !enhanceR) {
         return;
     }
 
-    std::future<cv::Mat> leftTask;
-    std::future<cv::Mat> rightTask;
-    if (enhanceL) {
-        leftTask = std::async(std::launch::async, [&stereo]() {
+    if (enhanceL && enhanceR) {
+        auto leftTask = std::async(std::launch::async, [&stereo]() {
             return EnhanceLowLightGrayForSlam(stereo.left.gray);
         });
-    }
-    if (enhanceR) {
-        rightTask = std::async(std::launch::async, [&stereo]() {
-            return EnhanceLowLightGrayForSlam(stereo.right.gray);
-        });
-    }
-    if (enhanceL) {
+        out.right.gray = EnhanceLowLightGrayForSlam(stereo.right.gray);
+        out.right.owner.reset();
         out.left.gray = leftTask.get();
         out.left.owner.reset();
+        return;
     }
-    if (enhanceR) {
-        out.right.gray = rightTask.get();
+
+    if (enhanceL) {
+        out.left.gray = EnhanceLowLightGrayForSlam(stereo.left.gray);
+        out.left.owner.reset();
+    } else if (enhanceR) {
+        out.right.gray = EnhanceLowLightGrayForSlam(stereo.right.gray);
         out.right.owner.reset();
     }
 }
@@ -148,24 +151,6 @@ inline std::vector<ORB_SLAM3::IMU::Point> ToOrbImuPoints(const std::vector<smart
             cv::Point3f(reading.ax, reading.ay, reading.az),
             cv::Point3f(reading.gx, reading.gy, reading.gz),
             static_cast<double>(reading.timestampNs) * 1e-9);
-    }
-    return out;
-}
-
-inline std::vector<smartdrone::core::ports::ImuReading> ToImuReadings(const std::vector<ORB_SLAM3::IMU::Point>& points)
-{
-    std::vector<smartdrone::core::ports::ImuReading> out;
-    out.reserve(points.size());
-    for (const auto& point : points) {
-        smartdrone::core::ports::ImuReading reading{};
-        reading.timestampNs = static_cast<int64_t>(point.t * 1e9);
-        reading.ax = point.a.x();
-        reading.ay = point.a.y();
-        reading.az = point.a.z();
-        reading.gx = point.w.x();
-        reading.gy = point.w.y();
-        reading.gz = point.w.z();
-        out.push_back(reading);
     }
     return out;
 }
@@ -300,28 +285,36 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         ComputeImageStats(R.gray, meanR, stdR);
         const double sharpL = ComputeSharpnessLaplacianVar(L.gray);
         const double sharpR = ComputeSharpnessLaplacianVar(R.gray);
+        smartdrone::core::ports::SlamInputBatch slamInput{};
         const auto imuStartTp = std::chrono::steady_clock::now();
-        std::vector<ORB_SLAM3::IMU::Point> vImu;
-        std::vector<smartdrone::core::ports::ImuReading> imuReadings;
         if (useImu && lastFrameNs != 0) {
-            imuReadings = imuProvider.PopWindow(lastFrameNs, frameNs);
-            vImu = ToOrbImuPoints(imuReadings);
+            const std::vector<smartdrone::core::ports::ImuReading> imuSamples = imuProvider.PopWindow(lastFrameNs, frameNs);
+            slamInput.imu = ToOrbImuPoints(imuSamples);
             ImuWindowValidation imuWindow{};
             const double prevFrameTime = static_cast<double>(lastFrameNs) * 1e-9;
             const double expectedImuDtSec = 1.0 / std::max(1, a.imuHz);
-            const bool imuWindowOk = SanitizeImuWindow(vImu, prevFrameTime, frameTime, expectedImuDtSec, imuWindow);
+            const bool imuWindowOk = SanitizeImuWindow(
+                slamInput.imu,
+                prevFrameTime,
+                frameTime,
+                expectedImuDtSec,
+                imuWindow);
             if (!imuWindowOk) {
                 continue;
             }
-            if (vImu.empty() && !a.allowEmptyImu) continue;
-            imuReadings = ToImuReadings(vImu);
+            if (slamInput.imu.empty() && !a.allowEmptyImu) continue;
         }
         const auto imuEndTp = std::chrono::steady_clock::now();
         lastFrameNs = frameNs;
-        smartdrone::core::ports::SlamInputBatch slamInput{};
-        EnhanceStereoPairForSlamIfNeeded(stereoBatch.stereo, meanL, stdL, meanR, stdR, slamInput.stereo);
+        PrepareStereoPairForSlam(
+            stereoBatch.stereo,
+            meanL,
+            stdL,
+            meanR,
+            stdR,
+            a.slamLowLightEnhance,
+            slamInput.stereo);
         slamInput.frameTimeSec = frameTime;
-        slamInput.imu = std::move(imuReadings);
         const bool debugRightOnlyFeatures = a.debugRightOnlyFeatures;
         const bool updatePointCloud =
             !debugRightOnlyFeatures && a.sendMap && (frameNs - lastPointCloudUpdateNs) >= kPointCloudUpdateIntervalNs;

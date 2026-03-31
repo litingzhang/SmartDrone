@@ -5,8 +5,8 @@
 
 #include <opencv2/core/types.hpp>
 
+#include "ImuTypes.h"
 #include "camera_provider.hpp"
-#include "imu_provider.hpp"
 
 namespace smartdrone::core::ports {
 
@@ -24,7 +24,7 @@ struct PoseEstimate {
 struct SlamInputBatch {
     StereoFrame stereo;
     double frameTimeSec{0.0};
-    std::vector<ImuReading> imu;
+    std::vector<ORB_SLAM3::IMU::Point> imu;
 };
 
 struct SlamOutput {

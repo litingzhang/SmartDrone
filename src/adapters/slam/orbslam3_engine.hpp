@@ -50,22 +50,14 @@ public:
             (m_inputMode == OrbInputMode::MonoRight) ? input.stereo.right.gray : input.stereo.left.gray;
 
         if (m_useImu) {
-            std::vector<ORB_SLAM3::IMU::Point> imuPoints;
-            imuPoints.reserve(input.imu.size());
-            for (const auto& sample : input.imu) {
-                imuPoints.emplace_back(
-                    cv::Point3f(sample.ax, sample.ay, sample.az),
-                    cv::Point3f(sample.gx, sample.gy, sample.gz),
-                    static_cast<double>(sample.timestampNs) * 1e-9);
-            }
             if (monoMode) {
-                tcw = m_system->TrackMonocular(monoImage, input.frameTimeSec, imuPoints);
+                tcw = m_system->TrackMonocular(monoImage, input.frameTimeSec, input.imu);
             } else {
                 tcw = m_system->TrackStereo(
                     input.stereo.left.gray,
                     input.stereo.right.gray,
                     input.frameTimeSec,
-                    imuPoints);
+                    input.imu);
             }
         } else {
             if (monoMode) {
