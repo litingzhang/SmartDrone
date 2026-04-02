@@ -41,24 +41,29 @@ constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
 constexpr uint16_t MOVE_RC_PAYLOAD_LEN = 21;
 constexpr uint8_t MOVE_FLAG_RC_JOYSTICK = 0x02;
 constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
-// RUNTIME_CONFIG payload v2 (len=42):
+// RUNTIME_CONFIG payload v3 (len=43):
 // exposureUs(u32le) gain(f32le) sensorMode(u8) streamFlags(u8) pairMs(u16le) reservedOrIp[30]
 // reservedOrIp keeps backward compatibility with the legacy sender IP field.
 // v2 additionally stores slamInputFps(u16le) at the tail bytes [40,41].
+// v3 additionally stores slamOperationMode(u8) at byte [42].
 // legacy v1 (len=40) omitted pairMs and started reservedOrIp at byte 10.
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY = 40;
-constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 42;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V2 = 42;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 43;
 constexpr uint16_t RUNTIME_CONFIG_PAIR_MS_OFFSET = 10;
 constexpr uint16_t RUNTIME_CONFIG_IP_OFFSET = 12;
 constexpr uint16_t RUNTIME_CONFIG_IP_LEN = 30;
 constexpr uint16_t RUNTIME_CONFIG_SLAM_FPS_OFFSET = 40;
+constexpr uint16_t RUNTIME_CONFIG_SLAM_MODE_OFFSET = 42;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
-// STATE payload:
-// runtimeMode(u8) trackingState(u8) resetCounter(u16le) resetMapCount(u16le)
+// STATE payload v2:
+// runtimeMode(u8) slamMode(u8) trackingState(u8) resetCounter(u16le) resetMapCount(u16le)
 // x/y/z/qw/qx/qy/qz (7 * f32le)
-constexpr uint16_t STATE_POSE_PAYLOAD_LEN = 34;
+// legacy v1 omitted slamMode and was 34 bytes.
+constexpr uint16_t STATE_POSE_PAYLOAD_LEN_LEGACY = 34;
+constexpr uint16_t STATE_POSE_PAYLOAD_LEN = 35;
 
 enum RuntimeMode : uint8_t {
     RUNTIME_MODE_IDLE = 0,
@@ -71,6 +76,14 @@ enum RuntimeSensorMode : uint8_t {
     RUNTIME_SENSOR_STEREO_IMU = 1,
     RUNTIME_SENSOR_MONO = 2,
     RUNTIME_SENSOR_MONO_IMU = 3,
+};
+
+enum RuntimeSlamMode : uint8_t {
+    RUNTIME_SLAM_MODE_MAPPING = 0,
+    RUNTIME_SLAM_MODE_LOCALIZATION = 1,
+    RUNTIME_SLAM_MODE_RELOCALIZATION = 2,
+    RUNTIME_SLAM_MODE_TRACKING_ONLY = 3,
+    RUNTIME_SLAM_MODE_AUTO = 4,
 };
 
 enum FrameType : uint8_t {

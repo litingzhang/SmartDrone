@@ -16,6 +16,7 @@
 #include <unordered_map>
 
 #include "common/mavlink.h"
+#include "common/thread_launch.hpp"
 #include "common/time_utils.hpp"
 #include "adapters/telemetry/mavlink_serial_transport.hpp"
 
@@ -145,8 +146,14 @@ public:
         m_havePx4Heartbeat.store(false);
         m_rxRunning.store(true);
         m_timesyncRunning.store(true);
-        m_rxThread = std::thread([this]() { this->RxLoop(); });
-        m_timesyncThread = std::thread([this]() { this->TimesyncLoop(); });
+        m_rxThread = SMARTDRONE_START_THREAD(
+            smartdrone::common::ThreadRole::MavlinkRx,
+            "Px4MavlinkGateway",
+            [this]() { this->RxLoop(); });
+        m_timesyncThread = SMARTDRONE_START_THREAD(
+            smartdrone::common::ThreadRole::MavlinkTimesync,
+            "Px4MavlinkGateway",
+            [this]() { this->TimesyncLoop(); });
     }
 
     void StopRx()
@@ -361,18 +368,21 @@ public:
         m_streamPeriodUs = static_cast<uint64_t>(1e6 / hz);
         StopSetpointStream();
         m_streaming.store(true);
-        m_streamThread = std::thread([this]() {
-            while (this->m_streaming.load()) {
-                const uint32_t tMs = MonoTimeMs32();
-                SetpointLocalNED sp;
-                {
-                    std::lock_guard<std::mutex> lk(this->m_spMtx);
-                    sp = this->m_spCurrent;
+        m_streamThread = SMARTDRONE_START_THREAD(
+            smartdrone::common::ThreadRole::MavlinkSetpointStream,
+            "Px4MavlinkGateway",
+            [this]() {
+                while (this->m_streaming.load()) {
+                    const uint32_t tMs = MonoTimeMs32();
+                    SetpointLocalNED sp;
+                    {
+                        std::lock_guard<std::mutex> lk(this->m_spMtx);
+                        sp = this->m_spCurrent;
+                    }
+                    this->SendSetPositionTargetLocalNed(tMs, sp, MAV_FRAME_LOCAL_NED);
+                    usleep(static_cast<useconds_t>(this->m_streamPeriodUs));
                 }
-                this->SendSetPositionTargetLocalNed(tMs, sp, MAV_FRAME_LOCAL_NED);
-                usleep(static_cast<useconds_t>(this->m_streamPeriodUs));
-            }
-        });
+            });
     }
 
     void StopSetpointStream()

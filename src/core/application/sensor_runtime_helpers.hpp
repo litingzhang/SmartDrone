@@ -10,6 +10,7 @@
 #include "System.h"
 #include "adapters/camera/libcamera_ov9281/stereo_ov9281.hpp"
 #include "adapters/imu/icm42688/icm42688_imu.hpp"
+#include "common/thread_launch.hpp"
 #include "common/time_utils.hpp"
 #include "core/application/runtime_session_common.hpp"
 #include "platform/linux/gpio/drdy_gpio.hpp"
@@ -24,7 +25,7 @@ inline std::thread StartImuThread(const MainRuntimeAliases& a,
     ImuScale init{};
     s.accelLsbPerG.store(init.accelLsbPerG);
     s.gyroLsbPerDps.store(init.gyroLsbPerDps);
-    return std::thread([&a, &s, &stop, &runningFlag]() {
+    return SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::Imu, "SensorRuntime", [&a, &s, &stop, &runningFlag]() {
         if (a.rtImu) SetThreadRealtime(a.rtPrio);
         SpiDev spi(a.spiDev);
         if (!spi.Open(a.spiSpeed, a.spiMode, a.spiBits)) return;
@@ -79,7 +80,10 @@ inline std::thread StartCalibImuWriterThread(const MainRuntimeAliases& a,
                                              std::atomic<bool>& stop,
                                              std::atomic<bool>& runningFlag)
 {
-    return std::thread([&a, fImu, &imuOk, &stop, &runningFlag]() {
+    return SMARTDRONE_START_THREAD(
+        smartdrone::common::ThreadRole::CalibImuWriter,
+        "SensorRuntime",
+        [&a, fImu, &imuOk, &stop, &runningFlag]() {
         SpiDev spi(a.spiDev);
         if (!spi.Open(a.spiSpeed, a.spiMode, a.spiBits)) return;
         ImuScale scale{};

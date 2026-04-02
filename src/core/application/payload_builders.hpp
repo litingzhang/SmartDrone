@@ -60,6 +60,7 @@ inline std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig& cfg, smartdr
     oss << "camera.pair_window_ms=" << cfg.app.camera.pairMs << "\n";
     oss << "slam.input_fps=" << cfg.app.runtime.slamInputFps << "\n";
     oss << "slam.perception_mode=" << ToSensorModeText(cfg.app.sensorMode) << "\n";
+    oss << "slam.operation_mode=" << smartdrone::core::domain::ToString(cfg.app.runtime.slamOperationMode) << "\n";
     oss << "slam.settings=" << cfg.app.settings << "\n";
     oss << "stream.udp_enabled=" << (cfg.app.udp.enable ? "true" : "false") << "\n";
     oss << "stream.udp_ip=" << cfg.app.udp.ip << "\n";

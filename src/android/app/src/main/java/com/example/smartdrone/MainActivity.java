@@ -62,6 +62,9 @@ public class MainActivity extends Activity {
     private static final int SENSOR_STEREO_IMU = 1;
     private static final int SENSOR_MONO = 2;
     private static final int SENSOR_MONO_IMU = 3;
+    private static final int SLAM_MODE_MAPPING = 0;
+    private static final int SLAM_MODE_LOCALIZATION = 1;
+    private static final int SLAM_MODE_AUTO = 4;
     private static final long ACK_PENDING_TIMEOUT_MS = 3000L;
     private static final String PENDING_ARM = "arm";
     private static final String PENDING_EMERGENCY_STOP = "emergency_stop";
@@ -119,6 +122,8 @@ public class MainActivity extends Activity {
     private Switch m_btnToggleSlam;
     private Switch m_btnToggleCalib;
     private Spinner m_spinnerSensorMode;
+    private Button m_btnQuickSlamAuto;
+    private Button m_btnQuickSlamManual;
     private Button m_btnCleanCalib;
     private Button m_btnRestartService;
     private Switch m_btnRemoteToggle;
@@ -179,6 +184,8 @@ public class MainActivity extends Activity {
     private int m_cfgGain = 2;
     private int m_cfgPairMs = 5;
     private int m_cfgSlamFps = SLAM_FPS_DEFAULT;
+    private int m_cfgSlamMode = SLAM_MODE_MAPPING;
+    private int m_effectiveSlamMode = SLAM_MODE_MAPPING;
     private int m_videoPktCount = 0;
     private int m_videoFrameOk = 0;
     private int m_videoDecodeFail = 0;
@@ -204,7 +211,6 @@ public class MainActivity extends Activity {
     private String m_lastCapabilitiesText = "";
     private String m_lastConfigText = "";
     private int[] m_availableSensorModes = new int[]{SENSOR_STEREO, SENSOR_STEREO_IMU, SENSOR_MONO, SENSOR_MONO_IMU};
-
     private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Map<Long, PendingAckAction> m_pendingAckActions = new HashMap<>();
     private final Set<String> m_pendingUiKeys = new HashSet<>();
@@ -401,17 +407,18 @@ public class MainActivity extends Activity {
             return false;
         }
         final int payloadLen = readFramePayloadLen(rx);
-        if (payloadLen < 34 || rx.length < 17 + payloadLen) {
+        if ((payloadLen != 34 && payloadLen != 35) || rx.length < 17 + payloadLen) {
             return false;
         }
         final int payloadOffset = 15;
-        final float x = readLeF32(rx, payloadOffset + 6);
-        final float y = readLeF32(rx, payloadOffset + 10);
-        final float z = readLeF32(rx, payloadOffset + 14);
-        final float qw = readLeF32(rx, payloadOffset + 18);
-        final float qx = readLeF32(rx, payloadOffset + 22);
-        final float qy = readLeF32(rx, payloadOffset + 26);
-        final float qz = readLeF32(rx, payloadOffset + 30);
+        final int poseOffset = payloadLen >= 35 ? payloadOffset + 7 : payloadOffset + 6;
+        final float x = readLeF32(rx, poseOffset);
+        final float y = readLeF32(rx, poseOffset + 4);
+        final float z = readLeF32(rx, poseOffset + 8);
+        final float qw = readLeF32(rx, poseOffset + 12);
+        final float qx = readLeF32(rx, poseOffset + 16);
+        final float qy = readLeF32(rx, poseOffset + 20);
+        final float qz = readLeF32(rx, poseOffset + 24);
         float mapX = x;
         float mapY = y;
         float mapZ = z;
@@ -545,8 +552,30 @@ public class MainActivity extends Activity {
                 m_sbCfgSlamFps.setProgress(progress);
             }
         }
+        updateQuickSlamModeButtons();
         } finally {
             m_updatingConfigUi = false;
+        }
+    }
+
+    private void updateQuickSlamModeButtons() {
+        final boolean pending = isPending(PENDING_CONFIG) || isPending(PENDING_RUNTIME);
+        final boolean autoEnabled = m_cfgSlamMode == SLAM_MODE_AUTO;
+        final int manualDisplayMode = autoEnabled ? m_effectiveSlamMode : m_cfgSlamMode;
+
+        if (m_btnQuickSlamAuto != null) {
+            m_btnQuickSlamAuto.setText(autoEnabled ? "Auto On" : "Auto Off");
+            setButtonState(m_btnQuickSlamAuto, autoEnabled, pending, "#1565C0");
+        }
+
+        if (m_btnQuickSlamManual != null) {
+            final boolean localization = manualDisplayMode == SLAM_MODE_LOCALIZATION;
+            m_btnQuickSlamManual.setText(localization ? "Localization" : "Mapping");
+            setButtonState(m_btnQuickSlamManual, localization, pending, "#1565C0");
+            if (autoEnabled && !pending) {
+                m_btnQuickSlamManual.setEnabled(false);
+                m_btnQuickSlamManual.setAlpha(0.2f);
+            }
         }
     }
 
@@ -726,6 +755,7 @@ public class MainActivity extends Activity {
                 (float) m_cfgGain,
                 m_cfgPairMs,
                 m_cfgSlamFps,
+                m_cfgSlamMode,
                 m_sensorMode,
                 m_sendImage,
                 m_sendFeature,
@@ -806,15 +836,16 @@ public class MainActivity extends Activity {
             float gain,
             int pairMs,
             int slamFps,
+            int slamMode,
             int sensorMode,
             boolean sendImage,
             boolean sendFeature,
             boolean sendMap) {
         try {
-            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, sensorMode, sendImage, sendFeature, sendMap);
+            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage, sendFeature, sendMap);
             m_tvStatus.setText(String.format(Locale.US,
-                    "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps sensor=%s img=%s feat=%s map=%s",
-                    seq, exposureUs, gain, pairMs, slamFps, sensorModeToText(sensorMode),
+                    "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s img=%s feat=%s map=%s",
+                    seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
                     sendImage ? "on" : "off",
                     sendFeature ? "on" : "off",
                     sendMap ? "on" : "off"));
@@ -831,6 +862,7 @@ public class MainActivity extends Activity {
                 (float) m_cfgGain,
                 m_cfgPairMs,
                 m_cfgSlamFps,
+                m_cfgSlamMode,
                 m_sensorMode,
                 m_sendImage,
                 m_sendFeature,
@@ -842,6 +874,7 @@ public class MainActivity extends Activity {
             float gain,
             int pairMs,
             int slamFps,
+            int slamMode,
             int sensorMode,
             boolean sendImage,
             boolean sendFeature,
@@ -855,7 +888,7 @@ public class MainActivity extends Activity {
         if (isPending(pendingKey)) {
             return;
         }
-        int seq = sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, sensorMode, sendImage, sendFeature, sendMap);
+        int seq = sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage, sendFeature, sendMap);
         if (seq < 0) {
             return;
         }
@@ -1023,12 +1056,14 @@ public class MainActivity extends Activity {
         final float gain = (float) m_cfgGain;
         final int pairMs = m_cfgPairMs;
         final int slamFps = m_cfgSlamFps;
+        final int slamMode = m_cfgSlamMode;
         final int sensorMode = m_sensorMode;
         sendRuntimeConfigAwaitAck(
                 exposureUs,
                 gain,
                 pairMs,
                 slamFps,
+                slamMode,
                 sensorMode,
                 m_sendImage,
                 m_sendFeature,
@@ -1274,6 +1309,23 @@ public class MainActivity extends Activity {
         return defaultValue;
     }
 
+    private static int parseSlamModeText(String value, int defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        String normalized = value.trim().toLowerCase(Locale.US);
+        if ("localization".equals(normalized) || "localisation".equals(normalized)) {
+            return SLAM_MODE_LOCALIZATION;
+        }
+        if ("auto".equals(normalized)) {
+            return SLAM_MODE_AUTO;
+        }
+        if ("mapping".equals(normalized)) {
+            return SLAM_MODE_MAPPING;
+        }
+        return defaultValue;
+    }
+
     private static boolean containsTokenList(String csv, String token) {
         if (csv == null || token == null) {
             return false;
@@ -1411,6 +1463,7 @@ public class MainActivity extends Activity {
             parsedSlamFps = SLAM_FPS_DEFAULT;
         }
         m_cfgSlamFps = quantizeSlamFps(parsedSlamFps);
+        m_cfgSlamMode = parseSlamModeText(values.get("slam.operation_mode"), m_cfgSlamMode);
         m_sensorMode = parseSensorModeText(values.get("slam.perception_mode"), m_sensorMode);
         m_sendImage = parseBooleanText(values.get("stream.send_image"), m_sendImage);
         m_sendFeature = parseBooleanText(values.get("stream.send_feature"), m_sendFeature);
@@ -1422,9 +1475,10 @@ public class MainActivity extends Activity {
         updateFeatureToggleButton();
         m_tvStatus.setText(String.format(
                 Locale.US,
-                "Config synced mode=%s sensor=%s slam=%dfps",
+                "Config synced mode=%s sensor=%s slam_mode=%s slam=%dfps",
                 runtimeModeToText(m_runtimeMode),
                 sensorModeToText(m_sensorMode),
+                slamModeToText(m_cfgSlamMode),
                 m_cfgSlamFps));
         return true;
     }
@@ -1466,6 +1520,18 @@ public class MainActivity extends Activity {
             case SENSOR_STEREO:
             default:
                 return "Stereo";
+        }
+    }
+
+    private String slamModeToText(int slamMode) {
+        switch (slamMode) {
+            case SLAM_MODE_LOCALIZATION:
+                return "Localization";
+            case SLAM_MODE_AUTO:
+                return "Auto";
+            case SLAM_MODE_MAPPING:
+            default:
+                return "Mapping";
         }
     }
 
@@ -1524,15 +1590,21 @@ public class MainActivity extends Activity {
         }
         int cmd = rx[3] & 0xFF;
         int len = readU16Le(rx, 5);
-        if (cmd != CMD_STATE || (len != 32 && len != 34) || rx.length < 15 + len + 2) {
+        if (cmd != CMD_STATE || (len != 32 && len != 34 && len != 35) || rx.length < 15 + len + 2) {
             return false;
         }
         int payloadOffset = 15;
         int runtimeMode = rx[payloadOffset] & 0xFF;
-        int trackingState = rx[payloadOffset + 1] & 0xFF;
-        int resetCounter = len >= 34 ? readU16Le(rx, payloadOffset + 2) : 0;
-        int resetMapCount = len >= 34 ? readU16Le(rx, payloadOffset + 4) : 0;
-        int poseOffset = len >= 34 ? payloadOffset + 6 : payloadOffset + 4;
+        int slamMode = m_effectiveSlamMode;
+        int trackingOffset = payloadOffset + 1;
+        if (len >= 35) {
+            slamMode = rx[payloadOffset + 1] & 0xFF;
+            trackingOffset = payloadOffset + 2;
+        }
+        int trackingState = rx[trackingOffset] & 0xFF;
+        int resetCounter = len >= 34 ? readU16Le(rx, trackingOffset + 1) : 0;
+        int resetMapCount = len >= 34 ? readU16Le(rx, trackingOffset + 3) : 0;
+        int poseOffset = len >= 34 ? trackingOffset + 5 : payloadOffset + 4;
         float x = readF32Le(rx, poseOffset);
         float y = readF32Le(rx, poseOffset + 4);
         float z = readF32Le(rx, poseOffset + 8);
@@ -1540,6 +1612,10 @@ public class MainActivity extends Activity {
         float qx = readF32Le(rx, poseOffset + 16);
         float qy = readF32Le(rx, poseOffset + 20);
         float qz = readF32Le(rx, poseOffset + 24);
+        if (slamMode == SLAM_MODE_MAPPING || slamMode == SLAM_MODE_LOCALIZATION) {
+            m_effectiveSlamMode = slamMode;
+            updateQuickSlamModeButtons();
+        }
         if (m_tvPose != null) {
             if (runtimeMode == MODE_SLAM) {
                 boolean hasValidPose = trackingState == 2 || trackingState == 5;
@@ -1929,6 +2005,8 @@ public class MainActivity extends Activity {
         m_btnToggleSlam = findViewById(R.id.btnToggleSlam);
         m_btnToggleCalib = findViewById(R.id.btnToggleCalib);
         m_spinnerSensorMode = findViewById(R.id.spinnerSensorMode);
+        m_btnQuickSlamAuto = findViewById(R.id.btnQuickSlamAuto);
+        m_btnQuickSlamManual = findViewById(R.id.btnQuickSlamManual);
         m_btnRemoteToggle = findViewById(R.id.btnRemoteToggle);
         m_btnDebugToggle = findViewById(R.id.btnDebugToggle);
         m_btnMapClear = findViewById(R.id.btnMapClear);
@@ -2090,6 +2168,7 @@ public class MainActivity extends Activity {
         m_cfgGain = quantizeGain(m_cfgGain);
         m_cfgPairMs = quantizePairMs(m_cfgPairMs);
         m_cfgSlamFps = quantizeSlamFps(m_cfgSlamFps);
+        m_cfgSlamMode = SLAM_MODE_MAPPING;
         updateConfigViews();
         updatePoseMapFromText();
         updateMapButtons();
@@ -2124,6 +2203,7 @@ public class MainActivity extends Activity {
                         (float) m_cfgGain,
                         m_cfgPairMs,
                         m_cfgSlamFps,
+                        m_cfgSlamMode,
                         m_sensorMode,
                         nextValue,
                         m_sendFeature,
@@ -2151,6 +2231,7 @@ public class MainActivity extends Activity {
                         (float) m_cfgGain,
                         m_cfgPairMs,
                         m_cfgSlamFps,
+                        m_cfgSlamMode,
                         m_sensorMode,
                         m_sendImage,
                         m_sendFeature,
@@ -2174,6 +2255,7 @@ public class MainActivity extends Activity {
                         (float) m_cfgGain,
                         m_cfgPairMs,
                         m_cfgSlamFps,
+                        m_cfgSlamMode,
                         m_sensorMode,
                         m_sendImage,
                         nextValue,
@@ -2288,6 +2370,7 @@ public class MainActivity extends Activity {
                             gain,
                             pairMs,
                             slamFps,
+                            m_cfgSlamMode,
                             nextSensorMode,
                             m_sendImage,
                             m_sendFeature,
@@ -2303,6 +2386,55 @@ public class MainActivity extends Activity {
                 @Override
                 public void onNothingSelected(AdapterView<?> parent) {
                 }
+            });
+        }
+        if (m_btnQuickSlamAuto != null) {
+            m_btnQuickSlamAuto.setOnClickListener(v -> {
+                final int nextSlamMode =
+                        (m_cfgSlamMode == SLAM_MODE_AUTO) ? SLAM_MODE_MAPPING : SLAM_MODE_AUTO;
+                sendRuntimeConfigAwaitAck(
+                        m_cfgExposureUs,
+                        (float) m_cfgGain,
+                        m_cfgPairMs,
+                        m_cfgSlamFps,
+                        nextSlamMode,
+                        m_sensorMode,
+                        m_sendImage,
+                        m_sendFeature,
+                        m_sendMap,
+                        nextSlamMode == SLAM_MODE_AUTO ? "Enable Auto" : "Disable Auto",
+                        PENDING_CONFIG,
+                        () -> {
+                            m_cfgSlamMode = nextSlamMode;
+                            updateConfigViews();
+                            updateRuntimeButtons();
+                        });
+            });
+        }
+        if (m_btnQuickSlamManual != null) {
+            m_btnQuickSlamManual.setOnClickListener(v -> {
+                if (m_cfgSlamMode == SLAM_MODE_AUTO) {
+                    return;
+                }
+                final int nextSlamMode =
+                        (m_cfgSlamMode == SLAM_MODE_LOCALIZATION) ? SLAM_MODE_MAPPING : SLAM_MODE_LOCALIZATION;
+                sendRuntimeConfigAwaitAck(
+                        m_cfgExposureUs,
+                        (float) m_cfgGain,
+                        m_cfgPairMs,
+                        m_cfgSlamFps,
+                        nextSlamMode,
+                        m_sensorMode,
+                        m_sendImage,
+                        m_sendFeature,
+                        m_sendMap,
+                        "Switch to " + slamModeToText(nextSlamMode),
+                        PENDING_CONFIG,
+                        () -> {
+                            m_cfgSlamMode = nextSlamMode;
+                            updateConfigViews();
+                            updateRuntimeButtons();
+                        });
             });
         }
 

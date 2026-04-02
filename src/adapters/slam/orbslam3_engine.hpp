@@ -11,6 +11,7 @@
 #include "ImuTypes.h"
 #include "TrackedVisualData.h"
 #include "System.h"
+#include "core/domain/runtime_mode.hpp"
 #include "core/ports/slam_engine.hpp"
 
 namespace smartdrone::adapters::slam {
@@ -30,6 +31,25 @@ public:
 
     bool Start() override { return static_cast<bool>(m_system); }
 
+    void SetOperationMode(core::domain::SlamOperationMode mode)
+    {
+        if (!m_system || m_operationMode == mode) {
+            return;
+        }
+
+        const bool localizationOnly =
+            mode == core::domain::SlamOperationMode::Localization ||
+            mode == core::domain::SlamOperationMode::Relocalization ||
+            mode == core::domain::SlamOperationMode::TrackingOnly;
+
+        if (localizationOnly) {
+            m_system->ActivateLocalizationMode();
+        } else {
+            m_system->DeactivateLocalizationMode();
+        }
+        m_operationMode = mode;
+    }
+
     void Stop() override
     {
         if (m_system) {
@@ -37,7 +57,9 @@ public:
         }
     }
 
-    core::ports::SlamOutput Process(const core::ports::SlamInputBatch& input, bool extractPointCloud) override
+    core::ports::SlamOutput Process(const core::ports::SlamInputBatch& input,
+                                    bool extractFeatures,
+                                    bool extractPointCloud) override
     {
         core::ports::SlamOutput out{};
         if (!m_system) {
@@ -87,6 +109,10 @@ public:
         out.pose.qy = q.y();
         out.pose.qz = q.z();
 
+        if (!extractFeatures && !extractPointCloud) {
+            return out;
+        }
+
         const int leftWidth = monoMode ? monoImage.cols : input.stereo.left.gray.cols;
         const int leftHeight = monoMode ? monoImage.rows : input.stereo.left.gray.rows;
         ORB_SLAM3::TrackedVisualData visual = m_system->ExtractTrackedVisualData(
@@ -96,13 +122,17 @@ public:
             monoMode ? 0 : input.stereo.right.gray.rows,
             extractPointCloud,
             120);
-        if (m_inputMode == OrbInputMode::MonoRight) {
-            out.rightFeatures = std::move(visual.leftFeatures);
-        } else {
-            out.leftFeatures = std::move(visual.leftFeatures);
-            out.rightFeatures = std::move(visual.rightFeatures);
+        if (extractFeatures) {
+            if (m_inputMode == OrbInputMode::MonoRight) {
+                out.rightFeatures = std::move(visual.leftFeatures);
+            } else {
+                out.leftFeatures = std::move(visual.leftFeatures);
+                out.rightFeatures = std::move(visual.rightFeatures);
+            }
         }
-        out.pointCloudXyz = std::move(visual.pointCloudXyz);
+        if (extractPointCloud) {
+            out.pointCloudXyz = std::move(visual.pointCloudXyz);
+        }
         return out;
     }
 
@@ -110,6 +140,7 @@ private:
     std::unique_ptr<ORB_SLAM3::System> m_system;
     OrbInputMode m_inputMode{OrbInputMode::Stereo};
     bool m_useImu{false};
+    core::domain::SlamOperationMode m_operationMode{core::domain::SlamOperationMode::Mapping};
 };
 
 }  // namespace smartdrone::adapters::slam

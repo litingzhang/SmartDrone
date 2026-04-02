@@ -197,6 +197,7 @@ inline MainRuntimeAliases BuildRuntimeAliases(const AppConfig& c)
 {
     MainRuntimeAliases a{};
     a.sensorMode = c.sensorMode;
+    a.slamOperationMode = c.runtime.slamOperationMode;
     a.width = c.camera.width;
     a.height = c.camera.height;
     a.fps = c.camera.fps;
@@ -253,6 +254,7 @@ inline void PrintStartupConfig(const AppConfig& app, const MainRuntimeAliases& a
     std::cerr << "slam_input_fps=" << a.slamInputFps
               << " camera_fps=" << a.fps
               << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
+    std::cerr << "slam_mode=" << smartdrone::core::domain::ToString(a.slamOperationMode) << "\n";
     std::cerr << "debug right_only_features=" << (a.debugRightOnlyFeatures ? "Y" : "N") << "\n";
     std::cerr << "slam lowlight_enhance=" << (a.slamLowLightEnhance ? "Y" : "N") << "\n";
     std::cerr << "imuHz=" << a.imuHz << " udp=" << (a.udpEnable ? "Y" : "N")

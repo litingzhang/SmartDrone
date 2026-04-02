@@ -142,6 +142,81 @@ inline bool IsTrackingPoseUsable(int trackingState)
     return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::OK_KLT;
 }
 
+inline uint8_t ToRuntimeSlamModeValue(smartdrone::core::domain::SlamOperationMode mode)
+{
+    switch (mode) {
+        case smartdrone::core::domain::SlamOperationMode::Localization:
+            return RUNTIME_SLAM_MODE_LOCALIZATION;
+        case smartdrone::core::domain::SlamOperationMode::Relocalization:
+            return RUNTIME_SLAM_MODE_RELOCALIZATION;
+        case smartdrone::core::domain::SlamOperationMode::TrackingOnly:
+            return RUNTIME_SLAM_MODE_TRACKING_ONLY;
+        case smartdrone::core::domain::SlamOperationMode::Auto:
+            return RUNTIME_SLAM_MODE_AUTO;
+        case smartdrone::core::domain::SlamOperationMode::Mapping:
+        default:
+            return RUNTIME_SLAM_MODE_MAPPING;
+    }
+}
+
+class AutoSlamModeController {
+public:
+    using SlamOperationMode = smartdrone::core::domain::SlamOperationMode;
+    using PoseQuality = smartdrone::core::ports::PoseQuality;
+
+    void Reset()
+    {
+        m_effectiveMode = SlamOperationMode::Mapping;
+        m_stableFrames = 0;
+        m_weakFrames = 0;
+    }
+
+    SlamOperationMode EffectiveMode() const { return m_effectiveMode; }
+
+    SlamOperationMode Observe(bool trackingUsable,
+                              PoseQuality quality,
+                              double frameGapMs,
+                              size_t leftFeatureCount,
+                              size_t rightFeatureCount)
+    {
+        const bool frameGapAcceptable = frameGapMs <= 0.0 || frameGapMs <= kStableFrameGapMs;
+        const bool featuresStable = leftFeatureCount >= kStableLeftFeatures && rightFeatureCount >= kStableRightFeatures;
+        const bool featuresWeak = leftFeatureCount < kWeakLeftFeatures || rightFeatureCount < kWeakRightFeatures;
+        const bool stableNow = trackingUsable && quality != PoseQuality::Lost && frameGapAcceptable && featuresStable;
+        const bool weakNow = !trackingUsable || quality == PoseQuality::Lost || !frameGapAcceptable || featuresWeak;
+
+        if (stableNow) {
+            ++m_stableFrames;
+            m_weakFrames = 0;
+        } else if (weakNow) {
+            ++m_weakFrames;
+            m_stableFrames = 0;
+        }
+
+        if (m_effectiveMode == SlamOperationMode::Mapping && m_stableFrames >= kFramesToLocalization) {
+            m_effectiveMode = SlamOperationMode::Localization;
+            m_stableFrames = 0;
+        } else if (m_effectiveMode == SlamOperationMode::Localization && m_weakFrames >= kFramesToMapping) {
+            m_effectiveMode = SlamOperationMode::Mapping;
+            m_weakFrames = 0;
+        }
+        return m_effectiveMode;
+    }
+
+private:
+    static constexpr int kFramesToLocalization = 12;
+    static constexpr int kFramesToMapping = 4;
+    static constexpr double kStableFrameGapMs = 75.0;
+    static constexpr size_t kStableLeftFeatures = 180;
+    static constexpr size_t kStableRightFeatures = 40;
+    static constexpr size_t kWeakLeftFeatures = 80;
+    static constexpr size_t kWeakRightFeatures = 20;
+
+    SlamOperationMode m_effectiveMode{SlamOperationMode::Mapping};
+    int m_stableFrames{0};
+    int m_weakFrames{0};
+};
+
 inline std::vector<ORB_SLAM3::IMU::Point> ToOrbImuPoints(const std::vector<smartdrone::core::ports::ImuReading>& readings)
 {
     std::vector<ORB_SLAM3::IMU::Point> out;
@@ -185,6 +260,22 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         stop.store(true);
         return false;
     }
+    AutoSlamModeController autoSlamModeController{};
+    auto requestedSlamMode = a.slamOperationMode;
+    auto effectiveSlamMode =
+        requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto
+            ? smartdrone::core::domain::SlamOperationMode::Mapping
+            : requestedSlamMode;
+    slamEngine.SetOperationMode(effectiveSlamMode);
+    if (requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
+        std::cerr << "[slam] operation_mode=auto effective_mode=mapping\n";
+    }
+    livePose.SetSlamMode(ToRuntimeSlamModeValue(effectiveSlamMode));
+    if (requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Relocalization ||
+        requestedSlamMode == smartdrone::core::domain::SlamOperationMode::TrackingOnly) {
+        std::cerr << "[slam] note: slam_mode=" << smartdrone::core::domain::ToString(a.slamOperationMode)
+                  << " currently maps to ORB-SLAM3 localization-only mode\n";
+    }
     const StereoBodyExtrinsics stereoBodyExtrinsics =
         (a.sensorMode == SensorMode::Stereo) ? LoadStereoBodyExtrinsics(cfg.app.settings) : StereoBodyExtrinsics{};
     UdpImageSender udp;
@@ -226,6 +317,28 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
     uint64_t rateLimitedDrops = 0;
     while (runningFlag.load() && !stop.load()) {
         const auto frameStartTp = std::chrono::steady_clock::now();
+        const auto configuredSlamMode = static_cast<smartdrone::core::domain::SlamOperationMode>(
+            tuning.slamOperationMode.load(std::memory_order_relaxed));
+        if (configuredSlamMode != requestedSlamMode) {
+            requestedSlamMode = configuredSlamMode;
+            autoSlamModeController.Reset();
+            effectiveSlamMode =
+                requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto
+                    ? smartdrone::core::domain::SlamOperationMode::Mapping
+                    : requestedSlamMode;
+            slamEngine.SetOperationMode(effectiveSlamMode);
+            std::cerr << "[slam] operation_mode -> "
+                      << smartdrone::core::domain::ToString(requestedSlamMode);
+            if (requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
+                std::cerr << " effective_mode=" << smartdrone::core::domain::ToString(effectiveSlamMode);
+            }
+            std::cerr << "\n";
+            if (requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Relocalization ||
+                requestedSlamMode == smartdrone::core::domain::SlamOperationMode::TrackingOnly) {
+                std::cerr << "[slam] note: requested mode currently maps to ORB-SLAM3 localization-only mode\n";
+            }
+            livePose.SetSlamMode(ToRuntimeSlamModeValue(effectiveSlamMode));
+        }
         if (useImu) {
             const uint64_t imuCnt = imuState.imuCnt.load(std::memory_order_relaxed);
             const bool imuReady = imuState.imuOk.load(std::memory_order_relaxed) && imuCnt >= imuWarmupSamples;
@@ -319,6 +432,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
             slamInput.stereo);
         slamInput.frameTimeSec = frameTime;
         const bool debugRightOnlyFeatures = a.debugRightOnlyFeatures;
+        const bool extractFeatures = sendFeature || requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto;
         const bool updatePointCloud =
             !debugRightOnlyFeatures && sendMap && (frameNs - lastPointCloudUpdateNs) >= kPointCloudUpdateIntervalNs;
         const auto slamStartTp = std::chrono::steady_clock::now();
@@ -327,7 +441,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
             slamOutput.leftFeatures.clear();
             slamOutput.rightFeatures = ComputeOrbDebugFeatures(R.gray);
         } else {
-            slamOutput = slamEngine.Process(slamInput, updatePointCloud);
+            slamOutput = slamEngine.Process(slamInput, extractFeatures, updatePointCloud);
         }
         const auto slamEndTp = std::chrono::steady_clock::now();
         const auto cloudStartTp = std::chrono::steady_clock::now();
@@ -406,6 +520,26 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
             state,
             poseResult.quality);
         const auto publishEndTp = std::chrono::steady_clock::now();
+        if (requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
+            const auto autoEffectiveMode = autoSlamModeController.Observe(
+                trackingUsable,
+                poseResult.quality,
+                frameGapMs,
+                slamOutput.leftFeatures.size(),
+                slamOutput.rightFeatures.size());
+            if (autoEffectiveMode != effectiveSlamMode) {
+                effectiveSlamMode = autoEffectiveMode;
+                slamEngine.SetOperationMode(effectiveSlamMode);
+                livePose.SetSlamMode(ToRuntimeSlamModeValue(effectiveSlamMode));
+                std::cerr << "[slam_auto] effective_mode -> "
+                          << smartdrone::core::domain::ToString(effectiveSlamMode)
+                          << " quality=" << static_cast<int>(poseResult.quality)
+                          << " state=" << state
+                          << " featL=" << slamOutput.leftFeatures.size()
+                          << " featR=" << slamOutput.rightFeatures.size()
+                          << " frame_gap_ms=" << frameGapMs << "\n";
+            }
+        }
         ++frameIndex;
         lastPublishedFrameNs = frameNs;
         char dfxLine[512];

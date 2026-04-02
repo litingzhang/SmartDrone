@@ -4,6 +4,7 @@
 #include <string>
 
 #include "core/application/app_args.hpp"
+#include "core/domain/runtime_mode.hpp"
 
 namespace smartdrone::core::application {
 
@@ -22,6 +23,7 @@ struct RemoteRuntimeConfig {
     float gain{2.0f};
     int pairMs{2};
     int slamInputFps{0};
+    domain::SlamOperationMode slamOperationMode{domain::SlamOperationMode::Mapping};
     std::string udpIp;
     bool udpEnabled{false};
     SensorMode sensorMode{SensorMode::Stereo};
@@ -32,6 +34,7 @@ struct RemoteRuntimeConfig {
 
 struct MainRuntimeAliases {
     SensorMode sensorMode{SensorMode::Stereo};
+    domain::SlamOperationMode slamOperationMode{domain::SlamOperationMode::Mapping};
     int width{}, height{}, fps{}, slamInputFps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{},
         pairQueue{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{}, debugRightOnlyFeatures{},
@@ -48,6 +51,7 @@ struct MainRuntimeAliases {
 
 struct LiveRuntimeTuning {
     std::atomic<int> slamInputFps{0};
+    std::atomic<uint8_t> slamOperationMode{static_cast<uint8_t>(domain::SlamOperationMode::Mapping)};
     std::atomic<bool> sendImage{true};
     std::atomic<bool> sendFeature{false};
     std::atomic<bool> sendMap{false};

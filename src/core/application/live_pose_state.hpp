@@ -16,6 +16,7 @@ struct LivePoseState {
         UdpPeer peer{};
         bool poseValid{false};
         uint8_t runtimeMode{RUNTIME_MODE_IDLE};
+        uint8_t slamMode{RUNTIME_SLAM_MODE_MAPPING};
         uint8_t trackingState{0xFF};
         OdomQualityMode odomQuality{OdomQualityMode::LOST};
         uint16_t resetCounter{0};
@@ -41,9 +42,17 @@ struct LivePoseState {
         runtimeMode = mode;
         if (mode != RUNTIME_MODE_SLAM) {
             poseValid = false;
+            slamMode = RUNTIME_SLAM_MODE_MAPPING;
             trackingState = 0xFF;
             odomQuality = OdomQualityMode::LOST;
         }
+        dirty = true;
+    }
+
+    void SetSlamMode(uint8_t mode)
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        slamMode = mode;
         dirty = true;
     }
 
@@ -78,6 +87,7 @@ struct LivePoseState {
         out.peer = latestPeer;
         out.poseValid = poseValid;
         out.runtimeMode = runtimeMode;
+        out.slamMode = slamMode;
         out.trackingState = trackingState;
         out.odomQuality = odomQuality;
         out.resetCounter = resetCounter;
@@ -99,6 +109,7 @@ struct LivePoseState {
         out.peer = latestPeer;
         out.poseValid = poseValid;
         out.runtimeMode = runtimeMode;
+        out.slamMode = slamMode;
         out.trackingState = trackingState;
         out.odomQuality = odomQuality;
         out.resetCounter = resetCounter;
@@ -116,6 +127,7 @@ struct LivePoseState {
     bool hasPeer{false};
     bool poseValid{false};
     uint8_t runtimeMode{RUNTIME_MODE_IDLE};
+    uint8_t slamMode{RUNTIME_SLAM_MODE_MAPPING};
     uint8_t trackingState{0xFF};
     OdomQualityMode odomQuality{OdomQualityMode::LOST};
     uint16_t resetCounter{0};

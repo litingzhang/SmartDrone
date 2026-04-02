@@ -12,6 +12,7 @@
 
 #include "System.h"
 #include "adapters/telemetry/px4_mavlink_gateway.hpp"
+#include "common/thread_launch.hpp"
 #include "common/tlv/mavlink_hooks.hpp"
 #include "core/application/live_pose_state.hpp"
 
@@ -21,7 +22,10 @@ class Px4UdpHooks final : public MavlinkHooks {
 public:
     Px4UdpHooks(Px4MavlinkGateway& mavlink, LivePoseState& livePose) : m_mavlink(mavlink), m_livePose(livePose)
     {
-        m_manualLoop = std::thread([this]() { ManualControlLoop(); });
+        m_manualLoop = SMARTDRONE_START_THREAD(
+            smartdrone::common::ThreadRole::ManualControl,
+            "Px4UdpHooks",
+            [this]() { ManualControlLoop(); });
     }
 
     ~Px4UdpHooks() override

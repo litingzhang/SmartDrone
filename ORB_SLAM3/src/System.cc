@@ -292,7 +292,8 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, 
         exit(-1);
     }
 
-    cv::Mat imLeftToFeed, imRightToFeed;
+    cv::Mat imLeftToFeed = imLeft;
+    cv::Mat imRightToFeed = imRight;
     if(settings_ && settings_->needToRectify()){
         cv::Mat M1l = settings_->M1l();
         cv::Mat M2l = settings_->M2l();
@@ -307,8 +308,9 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, 
         cv::resize(imRight,imRightToFeed,settings_->newImSize());
     }
     else{
-        imLeftToFeed = imLeft.clone();
-        imRightToFeed = imRight.clone();
+        // Reuse the input buffers when no rectification or resize is needed.
+        imLeftToFeed = imLeft;
+        imRightToFeed = imRight;
     }
 
     // Check mode change
@@ -374,8 +376,8 @@ Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const
         exit(-1);
     }
 
-    cv::Mat imToFeed = im.clone();
-    cv::Mat imDepthToFeed = depthmap.clone();
+    cv::Mat imToFeed = im;
+    cv::Mat imDepthToFeed = depthmap;
     if(settings_ && settings_->needToResize()){
         cv::Mat resizedIm;
         cv::resize(im,resizedIm,settings_->newImSize());
@@ -450,7 +452,7 @@ Sophus::SE3f System::TrackMonocular(const cv::Mat &im, const double &timestamp, 
         exit(-1);
     }
 
-    cv::Mat imToFeed = im.clone();
+    cv::Mat imToFeed = im;
     if(settings_ && settings_->needToResize()){
         cv::Mat resizedIm;
         cv::resize(im,resizedIm,settings_->newImSize());

@@ -27,6 +27,7 @@ public class NativeUdp {
             float gain,
             int pairMs,
             int slamFps,
+            int slamMode,
             int sensorMode,
             boolean sendImage,
             boolean sendFeature,

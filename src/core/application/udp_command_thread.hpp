@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 
+#include "common/thread_launch.hpp"
 #include "common/tlv/tlv_cmd_router.hpp"
 #include "common/tlv/tlv_pack.hpp"
 #include "common/tlv/tlv_parser.hpp"
@@ -48,6 +49,20 @@ inline SensorMode ParseRuntimeSensorMode(uint8_t value)
     }
 }
 
+inline smartdrone::core::domain::SlamOperationMode ParseRuntimeSlamMode(uint8_t value)
+{
+    using smartdrone::core::domain::SlamOperationMode;
+
+    switch (value) {
+        case RUNTIME_SLAM_MODE_LOCALIZATION: return SlamOperationMode::Localization;
+        case RUNTIME_SLAM_MODE_RELOCALIZATION: return SlamOperationMode::Relocalization;
+        case RUNTIME_SLAM_MODE_TRACKING_ONLY: return SlamOperationMode::TrackingOnly;
+        case RUNTIME_SLAM_MODE_AUTO: return SlamOperationMode::Auto;
+        case RUNTIME_SLAM_MODE_MAPPING:
+        default: return SlamOperationMode::Mapping;
+    }
+}
+
 inline RouteResult HandleRuntimeModeFrame(const TlvFrame& frame, UnifiedRuntimeController& controller)
 {
     using ControllerMode = smartdrone::core::domain::RuntimeMode;
@@ -76,7 +91,9 @@ inline RouteResult HandleRuntimeConfigFrame(
     UnifiedRuntimeController& controller,
     const PeerToIpStringFn& peerToIpString)
 {
-    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY) {
+    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V2 &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY) {
         return {ACK_E_BAD_LEN, "bad runtime cfg len"};
     }
     const uint8_t* p = frame.payload.data();
@@ -86,6 +103,7 @@ inline RouteResult HandleRuntimeConfigFrame(
     r.gain = ReadF32Le(&p[4]);
     r.pairMs = currentCfg.app.camera.pairMs > 0 ? currentCfg.app.camera.pairMs : 1;
     r.slamInputFps = currentCfg.app.runtime.slamInputFps;
+    r.slamOperationMode = currentCfg.app.runtime.slamOperationMode;
     if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
         return {ACK_E_BAD_ARGS, "bad runtime cfg args"};
     }
@@ -101,11 +119,14 @@ inline RouteResult HandleRuntimeConfigFrame(
         r.sendMap = (streamFlags & RUNTIME_CFG_FLAG_SEND_MAP) != 0;
     }
     size_t ipOffset = 10;
-    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN) {
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V2) {
         const int pairMs = static_cast<int>(ReadU16Le(&p[RUNTIME_CONFIG_PAIR_MS_OFFSET]));
         if (pairMs > 0) r.pairMs = pairMs;
         r.slamInputFps = static_cast<int>(ReadU16Le(&p[RUNTIME_CONFIG_SLAM_FPS_OFFSET]));
         ipOffset = RUNTIME_CONFIG_IP_OFFSET;
+    }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN) {
+        r.slamOperationMode = ParseRuntimeSlamMode(p[RUNTIME_CONFIG_SLAM_MODE_OFFSET]);
     }
     const char* ipChars = reinterpret_cast<const char*>(&p[ipOffset]);
     size_t ipLen = 0;
@@ -125,6 +146,8 @@ inline RouteResult HandleRuntimeConfigFrame(
     update.values[std::string(ConfigRegistry::kCameraGain)] = static_cast<double>(r.gain);
     update.values[std::string(ConfigRegistry::kCameraPairWindowMs)] = static_cast<int64_t>(r.pairMs);
     update.values[std::string(ConfigRegistry::kSlamInputFps)] = static_cast<int64_t>(r.slamInputFps);
+    update.values[std::string(ConfigRegistry::kSlamOperationMode)] =
+        std::string(smartdrone::core::domain::ToString(r.slamOperationMode));
     update.values[std::string(ConfigRegistry::kSlamPerceptionMode)] =
         std::string(ToSensorModeText(r.sensorMode));
     update.values[std::string(ConfigRegistry::kStreamUdpEnabled)] = r.udpEnabled;
@@ -140,6 +163,7 @@ inline RouteResult HandleRuntimeConfigFrame(
     }
     return {ACK_OK, result.message + " udp=" + r.udpIp +
                         " settings=" + std::string(DefaultSettingsForSensorMode(r.sensorMode)) +
+                        " slam_mode=" + std::string(smartdrone::core::domain::ToString(r.slamOperationMode)) +
                         " img=" + (r.sendImage ? "on" : "off") +
                         " feat=" + (r.sendFeature ? "on" : "off") +
                         " map=" + (r.sendMap ? "on" : "off")};
@@ -244,14 +268,17 @@ inline std::thread StartUdpCommandThread(
     BuildConfigPayloadFn buildConfigPayload,
     PeerToIpStringFn peerToIpString)
 {
-    return std::thread([port,
-                        &hooks,
-                        &controller,
-                        &livePose,
-                        &runningFlag,
-                        buildCapabilitiesPayload = std::move(buildCapabilitiesPayload),
-                        buildConfigPayload = std::move(buildConfigPayload),
-                        peerToIpString = std::move(peerToIpString)]() {
+    return SMARTDRONE_START_THREAD(
+        smartdrone::common::ThreadRole::UdpCommand,
+        "UdpCommandThread",
+        [port,
+         &hooks,
+         &controller,
+         &livePose,
+         &runningFlag,
+         buildCapabilitiesPayload = std::move(buildCapabilitiesPayload),
+         buildConfigPayload = std::move(buildConfigPayload),
+         peerToIpString = std::move(peerToIpString)]() {
         UdpServer server;
         if (!server.Open(static_cast<uint16_t>(port))) {
             std::cerr << "[udp_cmd] open failed on 0.0.0.0:" << port << "\n";
@@ -312,25 +339,26 @@ inline std::thread StartUdpCommandThread(
                 LivePoseState::Snapshot snap{};
                 if (livePose.ConsumeSnapshot(snap) && snap.hasPeer) {
                     const UnifiedConfig currentCfg = controller.CurrentConfig();
-                    if (currentCfg.app.udp.sendMap) {
-                        std::vector<uint8_t> payload;
-                        payload.reserve(STATE_POSE_PAYLOAD_LEN);
-                        payload.push_back(snap.runtimeMode);
-                        payload.push_back(snap.trackingState);
-                        WriteU16Le(payload, snap.resetCounter);
-                        WriteU16Le(payload, snap.resetMapCount);
-                        WriteF32Le(payload, snap.x);
-                        WriteF32Le(payload, snap.y);
-                        WriteF32Le(payload, snap.z);
-                        WriteF32Le(payload, snap.qw);
-                        WriteF32Le(payload, snap.qx);
-                        WriteF32Le(payload, snap.qy);
-                        WriteF32Le(payload, snap.qz);
-                        std::vector<uint8_t> stateFrame =
-                            MakeFrame(TLV_VER, CMD_STATE, 0, snap.seq, MonoTimeMs32(),
-                                      payload.data(), static_cast<uint16_t>(payload.size()));
-                        server.SendTo(snap.peer, stateFrame.data(), stateFrame.size());
+                    std::vector<uint8_t> payload;
+                    payload.reserve(STATE_POSE_PAYLOAD_LEN);
+                    payload.push_back(snap.runtimeMode);
+                    payload.push_back(snap.slamMode);
+                    payload.push_back(snap.trackingState);
+                    WriteU16Le(payload, snap.resetCounter);
+                    WriteU16Le(payload, snap.resetMapCount);
+                    WriteF32Le(payload, snap.x);
+                    WriteF32Le(payload, snap.y);
+                    WriteF32Le(payload, snap.z);
+                    WriteF32Le(payload, snap.qw);
+                    WriteF32Le(payload, snap.qx);
+                    WriteF32Le(payload, snap.qy);
+                    WriteF32Le(payload, snap.qz);
+                    std::vector<uint8_t> stateFrame =
+                        MakeFrame(TLV_VER, CMD_STATE, 0, snap.seq, MonoTimeMs32(),
+                                  payload.data(), static_cast<uint16_t>(payload.size()));
+                    server.SendTo(snap.peer, stateFrame.data(), stateFrame.size());
 
+                    if (currentCfg.app.udp.sendMap) {
                         const size_t pointCount = snap.pointCloudXyz.size() / 3;
                         if (pointCount > 0 && snap.pointCloudSeq != lastSentPointCloudSeq) {
                             const size_t cappedPointCount = std::min(pointCount, kMaxPointCloudPointsPerFrame);

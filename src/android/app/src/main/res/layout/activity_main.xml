@@ -109,6 +109,38 @@
                     </LinearLayout>
                 </HorizontalScrollView>
 
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="top|end"
+                    android:layout_marginTop="44dp"
+                    android:gravity="end"
+                    android:orientation="vertical">
+
+                    <Button
+                        android:id="@+id/btnQuickSlamAuto"
+                        android:layout_width="96dp"
+                        android:layout_height="36dp"
+                        android:background="@drawable/bg_settings_button"
+                        android:minHeight="36dp"
+                        android:text="Auto Off"
+                        android:textColor="#FFFFFF"
+                        android:textSize="10sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btnQuickSlamManual"
+                        android:layout_width="96dp"
+                        android:layout_height="36dp"
+                        android:layout_marginTop="6dp"
+                        android:background="@drawable/bg_settings_button"
+                        android:minHeight="36dp"
+                        android:text="Mapping"
+                        android:textColor="#FFFFFF"
+                        android:textSize="10sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
                 <FrameLayout
                     android:id="@+id/joystickLeft"
                     android:layout_width="148dp"

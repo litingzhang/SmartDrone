@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "core/domain/runtime_mode.hpp"
+
 namespace fs = std::filesystem;
 
 enum class SensorMode {
@@ -54,6 +56,30 @@ inline const char* ToSensorModeText(SensorMode mode)
         case SensorMode::Stereo:
         default: return "stereo";
     }
+}
+
+inline smartdrone::core::domain::SlamOperationMode ParseSlamOperationModeText(const std::string& text)
+{
+    using smartdrone::core::domain::SlamOperationMode;
+
+    std::string normalized = text;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
+    if (normalized == "localization" || normalized == "localisation") {
+        return SlamOperationMode::Localization;
+    }
+    if (normalized == "relocalization" || normalized == "relocalisation") {
+        return SlamOperationMode::Relocalization;
+    }
+    if (normalized == "tracking-only" || normalized == "tracking_only" || normalized == "trackingonly") {
+        return SlamOperationMode::TrackingOnly;
+    }
+    if (normalized == "auto" || normalized == "auto-switch" || normalized == "auto_switch") {
+        return SlamOperationMode::Auto;
+    }
+    return SlamOperationMode::Mapping;
 }
 
 inline std::string ResolveRuntimePath(const std::string& path, const char* argv0)
@@ -120,7 +146,7 @@ struct CameraConfig {
     int rightCamIndex{1};
     bool aeDisable{true};
     int exposureUs{5000};
-    float gain{8.0f};
+    float gain{2.0f};
     bool requestY8{true};
     bool r16Norm{false};
     int pairMs{2};
@@ -160,6 +186,8 @@ struct RuntimeConfig {
     int64_t offRejectNs{10'000'000};
     bool allowEmptyImu{false};
     int slamInputFps{0};
+    smartdrone::core::domain::SlamOperationMode slamOperationMode{
+        smartdrone::core::domain::SlamOperationMode::Mapping};
     bool debugRightOnlyFeatures{false};
     bool slamLowLightEnhance{false};
 };
@@ -276,7 +304,7 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     }
     config.camera.aeDisable = !argReader.HasFlag("--ae");
     config.camera.exposureUs = argReader.GetInt("--exp-us", 5000);
-    config.camera.gain = argReader.GetFloat("--gain", 8.0f);
+    config.camera.gain = argReader.GetFloat("--gain", 2.0f);
     config.camera.requestY8 = !argReader.HasFlag("--no-y8");
     config.camera.r16Norm = argReader.HasFlag("--r16-norm");
     config.camera.pairMs = argReader.GetInt("--pair-ms", 2);
@@ -307,6 +335,7 @@ inline AppConfig ParseAppConfig(int argc, char** argv)
     config.runtime.offRejectNs = argReader.GetInt64("--off-reject-ns", 10'000'000);
     config.runtime.allowEmptyImu = argReader.HasFlag("--allow-empty-imu");
     config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 0);
+    config.runtime.slamOperationMode = ParseSlamOperationModeText(argReader.GetString("--slam-mode", "mapping"));
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");
     config.runtime.slamLowLightEnhance = argReader.HasFlag("--slam-lowlight-enhance");
 

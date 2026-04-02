@@ -13,6 +13,7 @@
 #include <variant>
 
 #include "adapters/telemetry/px4_mavlink_gateway.hpp"
+#include "common/thread_launch.hpp"
 #include "core/application/config_registry.hpp"
 #include "core/application/live_pose_state.hpp"
 #include "core/application/mode_manager.hpp"
@@ -49,12 +50,21 @@ public:
           m_cleanupCalibData(std::move(cleanupCalibData))
     {
         m_tuning.slamInputFps.store(m_config.app.runtime.slamInputFps, std::memory_order_relaxed);
+        m_tuning.slamOperationMode.store(
+            static_cast<uint8_t>(m_config.app.runtime.slamOperationMode),
+            std::memory_order_relaxed);
         m_tuning.sendImage.store(m_config.app.udp.sendImage, std::memory_order_relaxed);
         m_tuning.sendFeature.store(m_config.app.udp.sendFeature, std::memory_order_relaxed);
         m_tuning.sendMap.store(m_config.app.udp.sendMap, std::memory_order_relaxed);
     }
 
-    void Start() { m_worker = std::thread([this]() { Loop(); }); }
+    void Start()
+    {
+        m_worker = SMARTDRONE_START_THREAD(
+            smartdrone::common::ThreadRole::RuntimeWorker,
+            "UnifiedRuntimeController",
+            [this]() { Loop(); });
+    }
 
     void Stop()
     {
@@ -100,6 +110,7 @@ public:
         cam.gain = r.gain;
         cam.pairMs = r.pairMs;
         m_config.app.runtime.slamInputFps = r.slamInputFps;
+        m_config.app.runtime.slamOperationMode = r.slamOperationMode;
         m_config.app.sensorMode = r.sensorMode;
         m_config.app.settings = ResolveSettingsForSensorMode(r.sensorMode, m_config.app.settings);
         m_config.app.udp.ip = r.udpIp;
@@ -108,6 +119,7 @@ public:
         m_config.app.udp.sendFeature = r.sendFeature;
         m_config.app.udp.sendMap = r.sendMap;
         m_tuning.slamInputFps.store(r.slamInputFps, std::memory_order_relaxed);
+        m_tuning.slamOperationMode.store(static_cast<uint8_t>(r.slamOperationMode), std::memory_order_relaxed);
         m_tuning.sendImage.store(r.sendImage, std::memory_order_relaxed);
         m_tuning.sendFeature.store(r.sendFeature, std::memory_order_relaxed);
         m_tuning.sendMap.store(r.sendMap, std::memory_order_relaxed);
@@ -192,10 +204,13 @@ public:
                 return {true, msg};
             }
             case RuntimeAction::Type::ForceRestart:
-                std::thread([]() {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(150));
-                    std::raise(SIGKILL);
-                }).detach();
+                SMARTDRONE_START_DETACHED_THREAD(
+                    smartdrone::common::ThreadRole::RuntimeForceRestart,
+                    "UnifiedRuntimeController",
+                    []() {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                        std::raise(SIGKILL);
+                    });
                 return {true, "service restart scheduled"};
             case RuntimeAction::Type::ResetMap:
                 return {false, "reset map not implemented"};
@@ -214,6 +229,7 @@ public:
         remote.gain = current.app.camera.gain;
         remote.pairMs = current.app.camera.pairMs > 0 ? current.app.camera.pairMs : 1;
         remote.slamInputFps = current.app.runtime.slamInputFps;
+        remote.slamOperationMode = current.app.runtime.slamOperationMode;
         remote.sensorMode = current.app.sensorMode;
         remote.udpIp = current.app.udp.ip;
         remote.udpEnabled = current.app.udp.enable;
@@ -235,6 +251,9 @@ public:
             } else if (key == ConfigRegistry::kSlamInputFps) {
                 if (const auto* v = std::get_if<int64_t>(&value)) remote.slamInputFps = static_cast<int>(*v);
                 else return {false, "slam.input_fps type mismatch"};
+            } else if (key == ConfigRegistry::kSlamOperationMode) {
+                if (const auto* v = std::get_if<std::string>(&value)) remote.slamOperationMode = ParseSlamOperationModeText(*v);
+                else return {false, "slam.operation_mode type mismatch"};
             } else if (key == ConfigRegistry::kSlamPerceptionMode) {
                 if (const auto* v = std::get_if<std::string>(&value)) remote.sensorMode = ParseSensorModeText(*v);
                 else return {false, "slam.perception_mode type mismatch"};
@@ -267,6 +286,7 @@ public:
         return {
             true,
             "runtime cfg updated sensor=" + std::string(ToSensorModeText(remote.sensorMode)) +
+                " slam_mode=" + std::string(smartdrone::core::domain::ToString(remote.slamOperationMode)) +
                 " pair_ms=" + std::to_string(remote.pairMs) +
                 " slam_fps=" + std::to_string(clampedSlamFps)
         };
@@ -326,18 +346,21 @@ private:
                 }
             }
             if (startSession) {
-                m_session = std::thread([this, cfg, startMode]() mutable {
-                    bool ok = false;
-                    if (startMode == ControllerMode::Slam && m_slamSessionRunner) {
-                        ok = m_slamSessionRunner(cfg, m_tuning, m_mav, m_sessionStop, m_livePose);
-                    } else if (startMode == ControllerMode::Calib && m_calibSessionRunner) {
-                        ok = m_calibSessionRunner(cfg, m_sessionStop, m_livePose);
-                    }
-                    (void)ok;
-                    std::lock_guard<std::mutex> lock(m_mu);
-                    m_sessionDone = true;
-                    m_cv.notify_all();
-                });
+                m_session = SMARTDRONE_START_THREAD(
+                    smartdrone::common::ThreadRole::RuntimeSession,
+                    "UnifiedRuntimeController",
+                    [this, cfg, startMode]() mutable {
+                        bool ok = false;
+                        if (startMode == ControllerMode::Slam && m_slamSessionRunner) {
+                            ok = m_slamSessionRunner(cfg, m_tuning, m_mav, m_sessionStop, m_livePose);
+                        } else if (startMode == ControllerMode::Calib && m_calibSessionRunner) {
+                            ok = m_calibSessionRunner(cfg, m_sessionStop, m_livePose);
+                        }
+                        (void)ok;
+                        std::lock_guard<std::mutex> lock(m_mu);
+                        m_sessionDone = true;
+                        m_cv.notify_all();
+                    });
             }
         }
     }

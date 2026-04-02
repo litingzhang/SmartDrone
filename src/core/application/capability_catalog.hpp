@@ -24,7 +24,7 @@ public:
         capabilities.slamModes = {
             domain::SlamOperationMode::Mapping,
             domain::SlamOperationMode::Localization,
-            domain::SlamOperationMode::TrackingOnly,
+            domain::SlamOperationMode::Auto,
         };
         capabilities.cameraProviders = {"libcamera_stereo_ov9281"};
         capabilities.imuProviders = {"icm42688_spi"};

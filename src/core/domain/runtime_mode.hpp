@@ -24,6 +24,7 @@ enum class SlamOperationMode : uint8_t {
     Localization = 1,
     Relocalization = 2,
     TrackingOnly = 3,
+    Auto = 4,
 };
 
 struct RuntimeSelection {
@@ -62,6 +63,7 @@ inline const char* ToString(SlamOperationMode mode)
         case SlamOperationMode::Localization: return "localization";
         case SlamOperationMode::Relocalization: return "relocalization";
         case SlamOperationMode::TrackingOnly: return "tracking-only";
+        case SlamOperationMode::Auto: return "auto";
         default: return "unknown";
     }
 }

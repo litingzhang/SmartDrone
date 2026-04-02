@@ -24,6 +24,8 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 
+#include "common/thread_launch.hpp"
+
 class UdpImageSender {
   public:
     static constexpr uint8_t FLAG_FEATURE_POINTS = 0x01;
@@ -79,7 +81,10 @@ class UdpImageSender {
 
         m_running.store(true);
         for (int cam = 0; cam < 2; ++cam) {
-            m_th[cam] = std::thread([this, cam] { Loop(cam); });
+            const auto role = cam == 0
+                ? smartdrone::common::ThreadRole::UdpImageCam0
+                : smartdrone::common::ThreadRole::UdpImageCam1;
+            m_th[cam] = SMARTDRONE_START_THREAD(role, "UdpImageSender", [this, cam] { Loop(cam); });
         }
         return true;
     }
