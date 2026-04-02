@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <time.h>
 #include <unordered_map>
 
 #include "common/mavlink.h"
@@ -39,6 +40,13 @@ static inline void FillCovDiag21(float cov[21],
     cov[15] = varRoll;
     cov[18] = varPitch;
     cov[20] = varYaw;
+}
+
+static inline uint64_t ClockMonotonicNs()
+{
+    timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<uint64_t>(ts.tv_nsec);
 }
 
 class Px4MavlinkGateway {
@@ -119,14 +127,34 @@ public:
     void StartRx()
     {
         StopRx();
+        {
+            std::lock_guard<std::mutex> lk(m_timesyncMtx);
+            m_havePendingTimesync = false;
+            m_pendingTimesyncTs1Ns = 0;
+            m_pendingTimesyncSentNs = 0;
+            m_pendingTimesyncTargetSystem = 0;
+            m_pendingTimesyncTargetComponent = 0;
+            m_timesyncEstimatedOffsetNs = 0;
+            m_timesyncLastRttUs = 0;
+            m_timesyncSampleCount = 0;
+            m_timesyncInboundRequestCount = 0;
+            m_timesyncInboundResponseCount = 0;
+            m_lastTimesyncActivityUs = 0;
+            m_lastTimesyncLogUs = 0;
+        }
+        m_havePx4Heartbeat.store(false);
         m_rxRunning.store(true);
+        m_timesyncRunning.store(true);
         m_rxThread = std::thread([this]() { this->RxLoop(); });
+        m_timesyncThread = std::thread([this]() { this->TimesyncLoop(); });
     }
 
     void StopRx()
     {
         m_rxRunning.store(false);
+        m_timesyncRunning.store(false);
         if (m_rxThread.joinable()) m_rxThread.join();
+        if (m_timesyncThread.joinable()) m_timesyncThread.join();
     }
 
     uint8_t GetTargetSystem() const { return m_px4Sysid.load(); }
@@ -549,6 +577,81 @@ private:
         }
     }
 
+    void SendTimesyncMessage(int64_t tc1Ns, int64_t ts1Ns, uint8_t targetSystem, uint8_t targetComponent)
+    {
+        mavlink_message_t msg{};
+        mavlink_msg_timesync_pack(
+            m_sysid, m_compid, &msg,
+            tc1Ns, ts1Ns,
+            targetSystem, targetComponent);
+        WriteMessage(msg);
+    }
+
+    void SendTimesyncRequest(uint8_t targetSystem, uint8_t targetComponent)
+    {
+        const uint64_t nowNs = ClockMonotonicNs();
+        {
+            std::lock_guard<std::mutex> lk(m_timesyncMtx);
+            m_pendingTimesyncTs1Ns = static_cast<int64_t>(nowNs);
+            m_pendingTimesyncSentNs = nowNs;
+            m_pendingTimesyncTargetSystem = targetSystem;
+            m_pendingTimesyncTargetComponent = targetComponent;
+            m_havePendingTimesync = true;
+        }
+        SendTimesyncMessage(0, static_cast<int64_t>(nowNs), targetSystem, targetComponent);
+    }
+
+    void SendTimesyncResponse(int64_t requestTs1Ns, uint8_t targetSystem, uint8_t targetComponent)
+    {
+        const int64_t nowNs = static_cast<int64_t>(ClockMonotonicNs());
+        SendTimesyncMessage(nowNs, requestTs1Ns, targetSystem, targetComponent);
+    }
+
+    void SendTimesyncFollowUp(int64_t remoteStampNs, uint8_t targetSystem, uint8_t targetComponent)
+    {
+        const int64_t nowNs = static_cast<int64_t>(ClockMonotonicNs());
+        SendTimesyncMessage(nowNs, remoteStampNs, targetSystem, targetComponent);
+    }
+
+    void TimesyncLoop()
+    {
+        while (m_timesyncRunning.load()) {
+            if (!m_havePx4Heartbeat.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+            const uint8_t targetSystem = m_px4Sysid.load();
+            const uint8_t targetComponent = m_px4Compid.load();
+            if (targetSystem != 0 && targetComponent != 0) {
+                bool shouldSend = false;
+                bool timedOut = false;
+                bool recentlyActive = false;
+                const uint64_t nowNs = ClockMonotonicNs();
+                {
+                    std::lock_guard<std::mutex> lk(m_timesyncMtx);
+                    const uint64_t nowUs = nowNs / 1000ULL;
+                    recentlyActive =
+                        (m_lastTimesyncActivityUs != 0) &&
+                        (nowUs <= (m_lastTimesyncActivityUs + 2000000ULL));
+                    if (!m_havePendingTimesync) {
+                        shouldSend = true;
+                    } else if (nowNs > (m_pendingTimesyncSentNs + 500000000ULL)) {
+                        m_havePendingTimesync = false;
+                        shouldSend = true;
+                        timedOut = !recentlyActive;
+                    }
+                }
+                if (timedOut) {
+                    printf("[timesync] request timed out; retrying\n");
+                }
+                if (shouldSend) {
+                    SendTimesyncRequest(targetSystem, targetComponent);
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
     void RxLoop()
     {
         mavlink_message_t msg{};
@@ -570,6 +673,103 @@ private:
 
     void HandleMavlinkMessage(const mavlink_message_t& msg)
     {
+        if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
+            mavlink_timesync_t tsync{};
+            mavlink_msg_timesync_decode(&msg, &tsync);
+            const bool targetSystemMatch = (tsync.target_system == 0) || (tsync.target_system == m_sysid);
+            const bool targetComponentMatch = (tsync.target_component == 0) || (tsync.target_component == m_compid);
+            if (!targetSystemMatch || !targetComponentMatch) {
+                return;
+            }
+
+            if (tsync.tc1 == 0) {
+                bool shouldLog = false;
+                uint32_t requestCount = 0;
+                {
+                    std::lock_guard<std::mutex> lk(m_timesyncMtx);
+                    ++m_timesyncInboundRequestCount;
+                    requestCount = m_timesyncInboundRequestCount;
+                    const uint64_t nowUs = MonoTimeUs();
+                    m_lastTimesyncActivityUs = nowUs;
+                    if (requestCount <= 3 || (requestCount % 50) == 0 ||
+                        (nowUs > (m_lastTimesyncLogUs + 5000000ULL))) {
+                        m_lastTimesyncLogUs = nowUs;
+                        shouldLog = true;
+                    }
+                }
+                if (shouldLog) {
+                    printf("[timesync] rx PX4 request count=%u px4=%u/%u\n",
+                           requestCount,
+                           static_cast<unsigned>(msg.sysid),
+                           static_cast<unsigned>(msg.compid));
+                }
+                SendTimesyncResponse(tsync.ts1, msg.sysid, msg.compid);
+                return;
+            }
+
+            const uint64_t nowNs = ClockMonotonicNs();
+            bool matchedPending = false;
+            uint64_t pendingSentNs = 0;
+            {
+                std::lock_guard<std::mutex> lk(m_timesyncMtx);
+                if (m_havePendingTimesync &&
+                    tsync.ts1 == m_pendingTimesyncTs1Ns &&
+                    msg.sysid == m_pendingTimesyncTargetSystem &&
+                    msg.compid == m_pendingTimesyncTargetComponent) {
+                    matchedPending = true;
+                    pendingSentNs = m_pendingTimesyncSentNs;
+                    m_havePendingTimesync = false;
+                }
+            }
+
+            if (!matchedPending) {
+                return;
+            }
+
+            const int64_t observedOffsetNs =
+                static_cast<int64_t>((pendingSentNs + nowNs) / 2ULL) - tsync.tc1;
+            const uint64_t rttUs64 = (nowNs > pendingSentNs) ? ((nowNs - pendingSentNs) / 1000ULL) : 0ULL;
+            const uint32_t rttUs = (rttUs64 > 0xFFFFFFFFULL) ? 0xFFFFFFFFu : static_cast<uint32_t>(rttUs64);
+
+            int64_t filteredOffsetNs = observedOffsetNs;
+            uint32_t sampleCount = 0;
+            bool shouldLog = false;
+            {
+                std::lock_guard<std::mutex> lk(m_timesyncMtx);
+                if (m_timesyncSampleCount == 0) {
+                    m_timesyncEstimatedOffsetNs = observedOffsetNs;
+                } else {
+                    m_timesyncEstimatedOffsetNs =
+                        (m_timesyncEstimatedOffsetNs * 7 + observedOffsetNs) / 8;
+                }
+                ++m_timesyncInboundResponseCount;
+                m_timesyncLastRttUs = rttUs;
+                filteredOffsetNs = m_timesyncEstimatedOffsetNs;
+                sampleCount = ++m_timesyncSampleCount;
+                const uint64_t nowUs = nowNs / 1000ULL;
+                m_lastTimesyncActivityUs = nowUs;
+                if (sampleCount <= 5 || (sampleCount % 20) == 0 ||
+                    (nowUs > (m_lastTimesyncLogUs + 5000000ULL))) {
+                    m_lastTimesyncLogUs = nowUs;
+                    shouldLog = true;
+                }
+            }
+
+            if (shouldLog) {
+                printf("[timesync] samples=%u offset=%.3fms rtt=%.3fms px4=%u/%u\n",
+                       sampleCount,
+                       static_cast<double>(filteredOffsetNs) * 1e-6,
+                       static_cast<double>(rttUs) * 1e-3,
+                       static_cast<unsigned>(msg.sysid),
+                       static_cast<unsigned>(msg.compid));
+            }
+
+            // Feed PX4 with a response-shaped sample even if it is not actively initiating
+            // TIMESYNC requests on this link, so sync_stamp() can converge for EV timestamps.
+            SendTimesyncFollowUp(tsync.tc1, msg.sysid, msg.compid);
+            return;
+        }
+
         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
             mavlink_heartbeat_t hb{};
             mavlink_msg_heartbeat_decode(&msg, &hb);
@@ -586,6 +786,7 @@ private:
                     m_flightModeInfo = modeInfo;
                     m_haveFlightModeInfo = true;
                 }
+                m_havePx4Heartbeat.store(true);
                 m_px4Sysid.store(msg.sysid);
                 m_px4Compid.store(msg.compid);
                 MaybeRequestLocalPositionNedStream(msg.sysid, msg.compid);
@@ -703,15 +904,19 @@ private:
     uint64_t m_streamPeriodUs{50000};
     std::atomic<bool> m_rxRunning{false};
     std::thread m_rxThread;
+    std::atomic<bool> m_timesyncRunning{false};
+    std::thread m_timesyncThread;
     std::mutex m_ackMtx;
     std::condition_variable m_ackCv;
     std::unordered_map<uint16_t, AckInfo> m_ackMap;
     std::mutex m_txMtx;
+    mutable std::mutex m_timesyncMtx;
     mutable std::mutex m_flightModeMtx;
     mutable std::mutex m_localPosMtx;
     mutable std::mutex m_distanceSensorMtx;
     std::atomic<uint8_t> m_px4Sysid{1};
     std::atomic<uint8_t> m_px4Compid{1};
+    std::atomic<bool> m_havePx4Heartbeat{false};
     std::atomic<bool> m_localPosStreamRequested{false};
     std::atomic<bool> m_distanceSensorStreamRequested{false};
     FlightModeInfo m_flightModeInfo{};
@@ -720,4 +925,16 @@ private:
     bool m_haveLocalPosNed{false};
     DownwardDistanceSensor m_downwardDistanceSensor{};
     bool m_haveDownwardDistanceSensor{false};
+    bool m_havePendingTimesync{false};
+    int64_t m_pendingTimesyncTs1Ns{0};
+    uint64_t m_pendingTimesyncSentNs{0};
+    uint8_t m_pendingTimesyncTargetSystem{0};
+    uint8_t m_pendingTimesyncTargetComponent{0};
+    int64_t m_timesyncEstimatedOffsetNs{0};
+    uint32_t m_timesyncLastRttUs{0};
+    uint32_t m_timesyncSampleCount{0};
+    uint32_t m_timesyncInboundRequestCount{0};
+    uint32_t m_timesyncInboundResponseCount{0};
+    uint64_t m_lastTimesyncActivityUs{0};
+    uint64_t m_lastTimesyncLogUs{0};
 };

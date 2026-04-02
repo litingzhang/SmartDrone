@@ -164,6 +164,7 @@ public class MainActivity extends Activity {
     private boolean m_debugVisible = false;
     private boolean m_remoteVisible = false;
     private boolean m_updatingToggleUi = false;
+    private boolean m_updatingConfigUi = false;
     private boolean m_rxLoopRunning;
     private int m_runtimeMode = MODE_IDLE;
     private String m_vehicleIp = "10.42.0.1";
@@ -489,6 +490,11 @@ public class MainActivity extends Activity {
     }
 
     private void updateConfigViews() {
+        if (m_updatingConfigUi) {
+            return;
+        }
+        m_updatingConfigUi = true;
+        try {
         if (m_tvCfgExposureValue != null) {
             m_tvCfgExposureValue.setText(String.format(Locale.US, "Exposure: %d us", m_cfgExposureUs));
         }
@@ -524,6 +530,9 @@ public class MainActivity extends Activity {
             if (m_sbCfgSlamFps.getProgress() != progress) {
                 m_sbCfgSlamFps.setProgress(progress);
             }
+        }
+        } finally {
+            m_updatingConfigUi = false;
         }
     }
 
@@ -1959,6 +1968,9 @@ public class MainActivity extends Activity {
             m_sbCfgExposure.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
                 public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
                     m_cfgExposureUs = EXPOSURE_MIN_US + progress * EXPOSURE_STEP_US;
                     updateConfigViews();
                 }
@@ -1978,6 +1990,9 @@ public class MainActivity extends Activity {
             m_sbCfgGain.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
                 public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
                     m_cfgGain = GAIN_MIN + progress;
                     updateConfigViews();
                 }
@@ -1997,6 +2012,9 @@ public class MainActivity extends Activity {
             m_sbCfgPairMs.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
                 public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
                     m_cfgPairMs = PAIR_MS_MIN + progress;
                     updateConfigViews();
                 }
@@ -2016,6 +2034,9 @@ public class MainActivity extends Activity {
             m_sbCfgSlamFps.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
                 public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
                     m_cfgSlamFps = SLAM_FPS_MIN + progress;
                     updateConfigViews();
                 }
