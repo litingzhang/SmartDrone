@@ -14,6 +14,7 @@ struct RuntimeAction {
         StartRuntime,
         StopRuntime,
         CleanCalibration,
+        ForceRestart,
         ResetMap,
         SaveMap,
     };

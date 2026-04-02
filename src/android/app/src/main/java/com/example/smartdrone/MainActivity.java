@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
     private static final int CMD_CALIB_CLEAN = 0x32;
     private static final int CMD_GET_CAPABILITIES = 0x33;
     private static final int CMD_GET_CONFIG = 0x34;
+    private static final int CMD_FORCE_RESTART = 0x35;
     private static final int CMD_ACK = 0xF0;
     private static final int CMD_STATE = 0xF1;
     private static final int CMD_POINT_CLOUD = 0xF2;
@@ -70,6 +71,7 @@ public class MainActivity extends Activity {
     private static final String PENDING_SENSOR = "sensor";
     private static final String PENDING_CONFIG = "config";
     private static final String PENDING_CLEAN_CALIB = "clean_calib";
+    private static final String PENDING_RESTART_SERVICE = "restart_service";
     private static final int EXPOSURE_MIN_US = 500;
     private static final int EXPOSURE_MAX_US = 20000;
     private static final int EXPOSURE_STEP_US = 500;
@@ -79,6 +81,7 @@ public class MainActivity extends Activity {
     private static final int PAIR_MS_MAX = 20;
     private static final int SLAM_FPS_MIN = 1;
     private static final int SLAM_FPS_MAX = 60;
+    private static final int SLAM_FPS_DEFAULT = 20;
 
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
@@ -117,6 +120,7 @@ public class MainActivity extends Activity {
     private Switch m_btnToggleCalib;
     private Spinner m_spinnerSensorMode;
     private Button m_btnCleanCalib;
+    private Button m_btnRestartService;
     private Switch m_btnRemoteToggle;
     private Switch m_btnDebugToggle;
     private ImageButton m_btnMapClear;
@@ -174,7 +178,7 @@ public class MainActivity extends Activity {
     private int m_cfgExposureUs = 3000;
     private int m_cfgGain = 2;
     private int m_cfgPairMs = 5;
-    private int m_cfgSlamFps = 30;
+    private int m_cfgSlamFps = SLAM_FPS_DEFAULT;
     private int m_videoPktCount = 0;
     private int m_videoFrameOk = 0;
     private int m_videoDecodeFail = 0;
@@ -495,14 +499,18 @@ public class MainActivity extends Activity {
         }
         m_updatingConfigUi = true;
         try {
+        final boolean runtimeActive = isRuntimeActive();
         if (m_tvCfgExposureValue != null) {
             m_tvCfgExposureValue.setText(String.format(Locale.US, "Exposure: %d us", m_cfgExposureUs));
+            m_tvCfgExposureValue.setAlpha(runtimeActive ? 0.45f : 1.0f);
         }
         if (m_tvCfgGainValue != null) {
             m_tvCfgGainValue.setText(String.format(Locale.US, "Gain: %d", m_cfgGain));
+            m_tvCfgGainValue.setAlpha(runtimeActive ? 0.45f : 1.0f);
         }
         if (m_tvCfgPairMsValue != null) {
             m_tvCfgPairMsValue.setText(String.format(Locale.US, "Pair Window: %d ms", m_cfgPairMs));
+            m_tvCfgPairMsValue.setAlpha(runtimeActive ? 0.45f : 1.0f);
         }
         if (m_tvCfgSlamFpsValue != null) {
             m_tvCfgSlamFpsValue.setText(String.format(Locale.US, "SLAM FPS: %d", m_cfgSlamFps));
@@ -512,18 +520,24 @@ public class MainActivity extends Activity {
             if (m_sbCfgExposure.getProgress() != progress) {
                 m_sbCfgExposure.setProgress(progress);
             }
+            m_sbCfgExposure.setEnabled(!runtimeActive);
+            m_sbCfgExposure.setAlpha(runtimeActive ? 0.35f : 1.0f);
         }
         if (m_sbCfgGain != null) {
             int progress = m_cfgGain - GAIN_MIN;
             if (m_sbCfgGain.getProgress() != progress) {
                 m_sbCfgGain.setProgress(progress);
             }
+            m_sbCfgGain.setEnabled(!runtimeActive);
+            m_sbCfgGain.setAlpha(runtimeActive ? 0.35f : 1.0f);
         }
         if (m_sbCfgPairMs != null) {
             int progress = m_cfgPairMs - PAIR_MS_MIN;
             if (m_sbCfgPairMs.getProgress() != progress) {
                 m_sbCfgPairMs.setProgress(progress);
             }
+            m_sbCfgPairMs.setEnabled(!runtimeActive);
+            m_sbCfgPairMs.setAlpha(runtimeActive ? 0.35f : 1.0f);
         }
         if (m_sbCfgSlamFps != null) {
             int progress = m_cfgSlamFps - SLAM_FPS_MIN;
@@ -695,7 +709,18 @@ public class MainActivity extends Activity {
         renderVideoFrame(1);
     }
 
-    private void sendCurrentRuntimeConfig(String label, String pendingKey, AckSuccess onSuccess) {
+    private boolean isRuntimeActive() {
+        return m_runtimeMode == MODE_SLAM || m_runtimeMode == MODE_CALIB;
+    }
+
+    private String effectiveConfigLabel(String label, boolean appliesAfterRestart) {
+        if (appliesAfterRestart && isRuntimeActive()) {
+            return label + " (applies after stop/start)";
+        }
+        return label;
+    }
+
+    private void sendCurrentRuntimeConfig(String label, boolean appliesAfterRestart, String pendingKey, AckSuccess onSuccess) {
         sendRuntimeConfigAwaitAck(
                 m_cfgExposureUs,
                 (float) m_cfgGain,
@@ -705,7 +730,7 @@ public class MainActivity extends Activity {
                 m_sendImage,
                 m_sendFeature,
                 m_sendMap,
-                label,
+                effectiveConfigLabel(label, appliesAfterRestart),
                 pendingKey,
                 onSuccess);
     }
@@ -879,10 +904,11 @@ public class MainActivity extends Activity {
     private void updateRuntimeButtons() {
         boolean sensorPending = isPending(PENDING_SENSOR) || isPending(PENDING_RUNTIME);
         boolean runtimePending = isPending(PENDING_RUNTIME);
+        boolean runtimeActive = isRuntimeActive();
         m_updatingToggleUi = true;
         updateSensorModeSpinner();
         if (m_spinnerSensorMode != null) {
-            boolean enabled = !sensorPending && m_availableSensorModes.length > 0;
+            boolean enabled = !runtimeActive && !sensorPending && m_availableSensorModes.length > 0;
             m_spinnerSensorMode.setEnabled(enabled);
             m_spinnerSensorMode.setAlpha(enabled ? 1.0f : 0.35f);
         }
@@ -901,6 +927,10 @@ public class MainActivity extends Activity {
         if (m_btnCleanCalib != null) {
             setButtonState(m_btnCleanCalib, true, isPending(PENDING_CLEAN_CALIB), "#546E7A");
         }
+        if (m_btnRestartService != null) {
+            setButtonState(m_btnRestartService, true, isPending(PENDING_RESTART_SERVICE), "#6D4C41");
+        }
+        updateConfigViews();
     }
 
     private void updateSensorModeSpinner() {
@@ -1376,7 +1406,11 @@ public class MainActivity extends Activity {
         m_cfgExposureUs = quantizeExposureUs(parseI(values.get("camera.exposure_us"), m_cfgExposureUs));
         m_cfgGain = quantizeGain(parseI(values.get("camera.gain"), m_cfgGain));
         m_cfgPairMs = quantizePairMs(parseI(values.get("camera.pair_window_ms"), m_cfgPairMs));
-        m_cfgSlamFps = quantizeSlamFps(parseI(values.get("slam.input_fps"), m_cfgSlamFps));
+        int parsedSlamFps = parseI(values.get("slam.input_fps"), m_cfgSlamFps);
+        if (parsedSlamFps <= 0) {
+            parsedSlamFps = SLAM_FPS_DEFAULT;
+        }
+        m_cfgSlamFps = quantizeSlamFps(parsedSlamFps);
         m_sensorMode = parseSensorModeText(values.get("slam.perception_mode"), m_sensorMode);
         m_sendImage = parseBooleanText(values.get("stream.send_image"), m_sendImage);
         m_sendFeature = parseBooleanText(values.get("stream.send_feature"), m_sendFeature);
@@ -1907,6 +1941,7 @@ public class MainActivity extends Activity {
         m_featurePaint.setStrokeWidth(2.0f);
 
         m_btnCleanCalib = findViewById(R.id.btnCleanCalib);
+        m_btnRestartService = findViewById(R.id.btnRestartService);
 
         m_etVehicleIp = findViewById(R.id.etVehicleIp);
         if (m_etVehicleIp != null) {
@@ -1981,7 +2016,7 @@ public class MainActivity extends Activity {
 
                 @Override
                 public void onStopTrackingTouch(SeekBar seekBar) {
-                    sendCurrentRuntimeConfig("Exposure", PENDING_CONFIG, () -> { });
+                    sendCurrentRuntimeConfig("Exposure", true, PENDING_CONFIG, () -> { });
                 }
             });
         }
@@ -2003,7 +2038,7 @@ public class MainActivity extends Activity {
 
                 @Override
                 public void onStopTrackingTouch(SeekBar seekBar) {
-                    sendCurrentRuntimeConfig("Gain", PENDING_CONFIG, () -> { });
+                    sendCurrentRuntimeConfig("Gain", true, PENDING_CONFIG, () -> { });
                 }
             });
         }
@@ -2025,7 +2060,7 @@ public class MainActivity extends Activity {
 
                 @Override
                 public void onStopTrackingTouch(SeekBar seekBar) {
-                    sendCurrentRuntimeConfig("Pair window", PENDING_CONFIG, () -> { });
+                    sendCurrentRuntimeConfig("Pair window", true, PENDING_CONFIG, () -> { });
                 }
             });
         }
@@ -2047,7 +2082,7 @@ public class MainActivity extends Activity {
 
                 @Override
                 public void onStopTrackingTouch(SeekBar seekBar) {
-                    sendCurrentRuntimeConfig("SLAM fps", PENDING_CONFIG, () -> { });
+                    sendCurrentRuntimeConfig("SLAM fps", false, PENDING_CONFIG, () -> { });
                 }
             });
         }
@@ -2227,6 +2262,12 @@ public class MainActivity extends Activity {
             m_btnCleanCalib.setOnClickListener(v ->
                     sendSimpleCmdAwaitAck("CLEAN_CALIB", CMD_CALIB_CLEAN, PENDING_CLEAN_CALIB, () -> { }));
         }
+        if (m_btnRestartService != null) {
+            m_btnRestartService.setOnClickListener(v ->
+                    sendSimpleCmdAwaitAck("RESTART_SERVICE", CMD_FORCE_RESTART, PENDING_RESTART_SERVICE, () -> {
+                        m_tvStatus.setText("RESTART_SERVICE acked, waiting for reconnect");
+                    }));
+        }
         if (m_spinnerSensorMode != null) {
             m_spinnerSensorMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override
@@ -2251,7 +2292,7 @@ public class MainActivity extends Activity {
                             m_sendImage,
                             m_sendFeature,
                             m_sendMap,
-                            "Sensor mode",
+                            effectiveConfigLabel("Sensor mode", true),
                             PENDING_SENSOR,
                             () -> {
                                 m_sensorMode = nextSensorMode;

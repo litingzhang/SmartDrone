@@ -48,6 +48,9 @@ struct MainRuntimeAliases {
 
 struct LiveRuntimeTuning {
     std::atomic<int> slamInputFps{0};
+    std::atomic<bool> sendImage{true};
+    std::atomic<bool> sendFeature{false};
+    std::atomic<bool> sendMap{false};
 };
 
 }  // namespace smartdrone::core::application

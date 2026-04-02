@@ -28,6 +28,10 @@ namespace smartdrone::core::application {
 
 constexpr uint8_t kCmdPointCloud = 0xF2;
 constexpr uint16_t kPointCloudHeaderLen = 4;
+constexpr size_t kMaxTlvPayloadLen = 0xFFFFu;
+constexpr size_t kPointCloudPointStrideBytes = 12u;
+constexpr size_t kMaxPointCloudPointsPerFrame =
+    (kMaxTlvPayloadLen - kPointCloudHeaderLen) / kPointCloudPointStrideBytes;
 
 using BuildCapabilitiesPayloadFn = std::function<std::vector<uint8_t>()>;
 using BuildConfigPayloadFn = std::function<std::vector<uint8_t>(const UnifiedConfig&, smartdrone::core::domain::RuntimeMode)>;
@@ -153,6 +157,18 @@ inline RouteResult HandleCalibCleanFrame(const TlvFrame& frame, UnifiedRuntimeCo
     return {result.ok ? ACK_OK : ACK_E_BAD_STATE, result.message};
 }
 
+inline RouteResult HandleForceRestartFrame(const TlvFrame& frame, UnifiedRuntimeController& controller)
+{
+    if (frame.len != 0) {
+        return {ACK_E_BAD_LEN, "bad force restart len"};
+    }
+    RuntimeAction action{};
+    action.type = RuntimeAction::Type::ForceRestart;
+    RuntimeCommandService service(controller);
+    const auto result = service.ExecuteAction(action);
+    return {result.ok ? ACK_OK : ACK_E_BAD_STATE, result.message};
+}
+
 inline RouteResult HandleGetCapabilitiesFrame(const TlvFrame& frame, const BuildCapabilitiesPayloadFn& buildCapabilitiesPayload)
 {
     if (frame.len != 0) {
@@ -248,6 +264,7 @@ inline std::thread StartUdpCommandThread(
         uint8_t rx[2048]{};
         auto lastStateTx = std::chrono::steady_clock::now();
         auto lastRejectedPeerLog = std::chrono::steady_clock::time_point{};
+        uint32_t lastSentPointCloudSeq = 0;
         while (runningFlag.load()) {
             UdpPeer peer{};
             const int n = server.Recv(rx, sizeof(rx), &peer);
@@ -273,6 +290,7 @@ inline std::thread StartUdpCommandThread(
                     else if (frame->cmd == CMD_CALIB_CLEAN) rr = HandleCalibCleanFrame(*frame, controller);
                     else if (frame->cmd == CMD_GET_CAPABILITIES) rr = HandleGetCapabilitiesFrame(*frame, buildCapabilitiesPayload);
                     else if (frame->cmd == CMD_GET_CONFIG) rr = HandleGetConfigFrame(*frame, controller, buildConfigPayload);
+                    else if (frame->cmd == CMD_FORCE_RESTART) rr = HandleForceRestartFrame(*frame, controller);
                     else rr = router.Handle(*frame);
 
                     std::vector<uint8_t> ack = MakeAckFrame(frame->seq, frame->tMs, frame->cmd, frame->seq, rr.status);
@@ -314,18 +332,24 @@ inline std::thread StartUdpCommandThread(
                         server.SendTo(snap.peer, stateFrame.data(), stateFrame.size());
 
                         const size_t pointCount = snap.pointCloudXyz.size() / 3;
-                        if (pointCount > 0) {
+                        if (pointCount > 0 && snap.pointCloudSeq != lastSentPointCloudSeq) {
+                            const size_t cappedPointCount = std::min(pointCount, kMaxPointCloudPointsPerFrame);
                             std::vector<uint8_t> cloudPayload;
-                            cloudPayload.reserve(kPointCloudHeaderLen + pointCount * 12);
-                            WriteU16Le(cloudPayload, static_cast<uint16_t>(std::min<size_t>(pointCount, 0xFFFF)));
+                            cloudPayload.reserve(kPointCloudHeaderLen + cappedPointCount * kPointCloudPointStrideBytes);
+                            WriteU16Le(cloudPayload, static_cast<uint16_t>(cappedPointCount));
                             WriteU16Le(cloudPayload, static_cast<uint16_t>(snap.pointCloudSeq & 0xFFFFu));
-                            for (size_t i = 0; i < pointCount * 3; ++i) {
+                            for (size_t i = 0; i < cappedPointCount * 3; ++i) {
                                 WriteF32Le(cloudPayload, snap.pointCloudXyz[i]);
                             }
                             std::vector<uint8_t> cloudFrame =
                                 MakeFrame(TLV_VER, kCmdPointCloud, 0, snap.seq, MonoTimeMs32(),
                                           cloudPayload.data(), static_cast<uint16_t>(cloudPayload.size()));
                             server.SendTo(snap.peer, cloudFrame.data(), cloudFrame.size());
+                            lastSentPointCloudSeq = snap.pointCloudSeq;
+                            if (cappedPointCount < pointCount) {
+                                std::cerr << "[udp_cmd] point cloud truncated points=" << pointCount
+                                          << " sent=" << cappedPointCount << "\n";
+                            }
                         }
                     }
                 }

@@ -22,6 +22,7 @@ enum TlvCmd : uint8_t {
     CMD_CALIB_CLEAN = 0x32,
     CMD_GET_CAPABILITIES = 0x33,
     CMD_GET_CONFIG = 0x34,
+    CMD_FORCE_RESTART = 0x35,
 
     CMD_ACK = 0xF0,
     CMD_STATE = 0xF1,

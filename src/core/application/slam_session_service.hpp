@@ -188,7 +188,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
     const StereoBodyExtrinsics stereoBodyExtrinsics =
         (a.sensorMode == SensorMode::Stereo) ? LoadStereoBodyExtrinsics(cfg.app.settings) : StereoBodyExtrinsics{};
     UdpImageSender udp;
-    if (a.udpEnable && (a.sendImage || a.sendFeature)) {
+    if (a.udpEnable) {
         udp.Open(a.udpIp, a.udpPort, a.udpJpegQ, a.udpPayload, a.udpQueue);
     }
     ImuThreadState imuState;
@@ -261,6 +261,9 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         }
         auto& L = stereoBatch.stereo.left;
         auto& R = stereoBatch.stereo.right;
+        const bool sendImage = tuning.sendImage.load(std::memory_order_relaxed);
+        const bool sendFeature = tuning.sendFeature.load(std::memory_order_relaxed);
+        const bool sendMap = tuning.sendMap.load(std::memory_order_relaxed);
         const uint32_t rawSeqL = cameraProvider.LastRawSeqL();
         const uint32_t rawSeqR = cameraProvider.LastRawSeqR();
         const int64_t pairDtMs = cameraProvider.LastPairDtMs();
@@ -317,7 +320,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         slamInput.frameTimeSec = frameTime;
         const bool debugRightOnlyFeatures = a.debugRightOnlyFeatures;
         const bool updatePointCloud =
-            !debugRightOnlyFeatures && a.sendMap && (frameNs - lastPointCloudUpdateNs) >= kPointCloudUpdateIntervalNs;
+            !debugRightOnlyFeatures && sendMap && (frameNs - lastPointCloudUpdateNs) >= kPointCloudUpdateIntervalNs;
         const auto slamStartTp = std::chrono::steady_clock::now();
         smartdrone::core::ports::SlamOutput slamOutput{};
         if (debugRightOnlyFeatures) {
@@ -329,7 +332,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         const auto slamEndTp = std::chrono::steady_clock::now();
         const auto cloudStartTp = std::chrono::steady_clock::now();
         size_t pointCount = 0;
-        if (a.udpEnable && (a.sendImage || a.sendFeature || a.sendMap)) {
+        if (a.udpEnable && (sendImage || sendFeature || sendMap)) {
             if (updatePointCloud) {
                 livePose.UpdatePointCloud(slamOutput.pointCloudXyz);
                 lastPointCloudUpdateNs = frameNs;
@@ -338,12 +341,12 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         }
         const auto cloudEndTp = std::chrono::steady_clock::now();
         const auto udpStartTp = std::chrono::steady_clock::now();
-        if (a.udpEnable && (a.sendImage || a.sendFeature || a.sendMap)) {
+        if (a.udpEnable && (sendImage || sendFeature || sendMap)) {
             if (monoMode) {
-                udp.Enqueue(1, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, a.sendImage, a.sendFeature);
+                udp.Enqueue(1, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, sendImage, sendFeature);
             } else {
-                udp.Enqueue(0, L.sequence, frameTime, L.gray, slamOutput.leftFeatures, a.sendImage, a.sendFeature);
-                udp.Enqueue(1, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, a.sendImage, a.sendFeature);
+                udp.Enqueue(0, L.sequence, frameTime, L.gray, slamOutput.leftFeatures, sendImage, sendFeature);
+                udp.Enqueue(1, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, sendImage, sendFeature);
             }
         }
         const auto udpEndTp = std::chrono::steady_clock::now();
@@ -462,7 +465,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
     std::cerr << "[session] slam camera closed\n";
     if (imuThread.joinable()) imuThread.join();
     std::cerr << "[session] slam imu joined\n";
-    if (a.udpEnable && (a.sendImage || a.sendFeature)) {
+    if (a.udpEnable) {
         udp.Close();
         std::cerr << "[session] slam udp closed\n";
     }

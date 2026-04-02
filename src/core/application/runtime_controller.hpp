@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <functional>
 #include <mutex>
+#include <csignal>
 #include <string>
 #include <thread>
 #include <utility>
@@ -48,6 +49,9 @@ public:
           m_cleanupCalibData(std::move(cleanupCalibData))
     {
         m_tuning.slamInputFps.store(m_config.app.runtime.slamInputFps, std::memory_order_relaxed);
+        m_tuning.sendImage.store(m_config.app.udp.sendImage, std::memory_order_relaxed);
+        m_tuning.sendFeature.store(m_config.app.udp.sendFeature, std::memory_order_relaxed);
+        m_tuning.sendMap.store(m_config.app.udp.sendMap, std::memory_order_relaxed);
     }
 
     void Start() { m_worker = std::thread([this]() { Loop(); }); }
@@ -92,9 +96,6 @@ public:
         const bool sensorModeChanged = m_config.app.sensorMode != r.sensorMode;
         const bool udpIpChanged = m_config.app.udp.ip != r.udpIp;
         const bool udpEnableChanged = m_config.app.udp.enable != r.udpEnabled;
-        const bool sendImageChanged = m_config.app.udp.sendImage != r.sendImage;
-        const bool sendFeatureChanged = m_config.app.udp.sendFeature != r.sendFeature;
-        const bool sendMapChanged = m_config.app.udp.sendMap != r.sendMap;
         cam.exposureUs = r.exposureUs;
         cam.gain = r.gain;
         cam.pairMs = r.pairMs;
@@ -107,9 +108,10 @@ public:
         m_config.app.udp.sendFeature = r.sendFeature;
         m_config.app.udp.sendMap = r.sendMap;
         m_tuning.slamInputFps.store(r.slamInputFps, std::memory_order_relaxed);
-        const bool restartNeeded = exposureChanged || gainChanged || pairMsChanged || sensorModeChanged ||
-                                   udpIpChanged || udpEnableChanged || sendImageChanged ||
-                                   sendFeatureChanged || sendMapChanged;
+        m_tuning.sendImage.store(r.sendImage, std::memory_order_relaxed);
+        m_tuning.sendFeature.store(r.sendFeature, std::memory_order_relaxed);
+        m_tuning.sendMap.store(r.sendMap, std::memory_order_relaxed);
+        const bool restartNeeded = sensorModeChanged || udpIpChanged || udpEnableChanged;
         if (restartNeeded && m_modeManager.DesiredMode() != ControllerMode::Idle) {
             m_modeManager.RequestRestart();
             m_sessionStop.store(true);
@@ -189,6 +191,12 @@ public:
                 }
                 return {true, msg};
             }
+            case RuntimeAction::Type::ForceRestart:
+                std::thread([]() {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                    std::raise(SIGKILL);
+                }).detach();
+                return {true, "service restart scheduled"};
             case RuntimeAction::Type::ResetMap:
                 return {false, "reset map not implemented"};
             case RuntimeAction::Type::SaveMap:
