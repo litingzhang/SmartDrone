@@ -1,6 +1,9 @@
 package com.example.smartdrone;
 
 import com.example.smartdrone.R;
+import com.jcraft.jsch.ChannelExec;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.Session;
 
 import android.app.Activity;
 import android.graphics.Bitmap;
@@ -31,6 +34,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -100,6 +104,13 @@ public class MainActivity extends Activity {
     private static final String KEY_SETTINGS_VISIBLE = "settingsVisible";
     private static final String KEY_DEBUG_VISIBLE = "debugVisible";
     private static final String KEY_REMOTE_VISIBLE = "remoteVisible";
+    private static final String DEFAULT_SSH_USER = "ltz";
+    private static final String DEFAULT_SSH_PASSWORD = "123456";
+    private static final int SSH_PORT = 22;
+    private static final int SSH_CONNECT_TIMEOUT_MS = 4000;
+    private static final int SSH_COMMAND_TIMEOUT_MS = 4000;
+    private static final String SSH_KILL_COMMAND =
+            "pkill -f '(^|/)smart_drone( |$)' || pkill -x smart_drone";
     private static final String[] DEFAULT_VEHICLE_IPS = new String[]{
             "10.42.0.1",
             "192.168.0.105"
@@ -135,6 +146,8 @@ public class MainActivity extends Activity {
     private Switch m_btnFeatureToggle;
 
     private AutoCompleteTextView m_etVehicleIp;
+    private EditText m_etSshUser;
+    private EditText m_etSshPassword;
     private TextView m_tvCfgExposureValue;
     private TextView m_tvCfgGainValue;
     private TextView m_tvCfgPairMsValue;
@@ -895,6 +908,102 @@ public class MainActivity extends Activity {
         registerPendingAck(seq, CMD_RUNTIME_CONFIG, label, pendingKey, onSuccess);
     }
 
+    private void setPendingKey(String pendingKey) {
+        if (pendingKey == null || pendingKey.isEmpty()) {
+            return;
+        }
+        m_pendingUiKeys.add(pendingKey);
+        updateRuntimeButtons();
+        updateFlightButtons();
+    }
+
+    private void sshKillSmartDrone() {
+        if (isPending(PENDING_RESTART_SERVICE)) {
+            return;
+        }
+        final String host = m_etVehicleIp != null ? m_etVehicleIp.getText().toString().trim() : "";
+        final String user = m_etSshUser != null ? m_etSshUser.getText().toString().trim() : "";
+        final String password = m_etSshPassword != null ? m_etSshPassword.getText().toString() : "";
+        if (host.isEmpty()) {
+            m_tvStatus.setText("Vehicle IP is empty");
+            return;
+        }
+        if (user.isEmpty()) {
+            m_tvStatus.setText("SSH user is empty");
+            return;
+        }
+        setPendingKey(PENDING_RESTART_SERVICE);
+        m_tvStatus.setText(String.format(Locale.US, "SSH kill -> %s@%s", user, host));
+        new Thread(() -> {
+            Session session = null;
+            ChannelExec channel = null;
+            final java.io.ByteArrayOutputStream stdout = new java.io.ByteArrayOutputStream();
+            final java.io.ByteArrayOutputStream stderr = new java.io.ByteArrayOutputStream();
+            try {
+                JSch jsch = new JSch();
+                session = jsch.getSession(user, host, SSH_PORT);
+                if (!password.isEmpty()) {
+                    session.setPassword(password);
+                }
+                Properties config = new Properties();
+                config.put("StrictHostKeyChecking", "no");
+                if (!password.isEmpty()) {
+                    config.put("PreferredAuthentications", "password,keyboard-interactive");
+                }
+                session.setConfig(config);
+                session.connect(SSH_CONNECT_TIMEOUT_MS);
+
+                channel = (ChannelExec) session.openChannel("exec");
+                channel.setCommand(SSH_KILL_COMMAND);
+                channel.setInputStream(null);
+                channel.setOutputStream(stdout);
+                channel.setErrStream(stderr);
+                channel.connect(SSH_COMMAND_TIMEOUT_MS);
+
+                long deadline = System.currentTimeMillis() + SSH_COMMAND_TIMEOUT_MS;
+                while (!channel.isClosed() && System.currentTimeMillis() < deadline) {
+                    try {
+                        Thread.sleep(50L);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("SSH interrupted", interrupted);
+                    }
+                }
+                if (!channel.isClosed()) {
+                    throw new RuntimeException("SSH command timeout");
+                }
+                final int exitStatus = channel.getExitStatus();
+                final String stderrText = stderr.toString().trim();
+                final String stdoutText = stdout.toString().trim();
+                m_handler.post(() -> {
+                    clearPendingKey(PENDING_RESTART_SERVICE);
+                    if (exitStatus == 0) {
+                        m_tvStatus.setText("SSH kill sent, waiting for systemd auto-restart");
+                        m_handler.postDelayed(this::requestRuntimeMetadata, 1500L);
+                    } else {
+                        String detail = !stderrText.isEmpty()
+                                ? stderrText
+                                : (!stdoutText.isEmpty() ? stdoutText : ("exit=" + exitStatus));
+                        m_tvStatus.setText("SSH kill failed: " + detail);
+                    }
+                });
+            } catch (Throwable t) {
+                final String message = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+                m_handler.post(() -> {
+                    clearPendingKey(PENDING_RESTART_SERVICE);
+                    m_tvStatus.setText("SSH kill error: " + message);
+                });
+            } finally {
+                if (channel != null) {
+                    channel.disconnect();
+                }
+                if (session != null) {
+                    session.disconnect();
+                }
+            }
+        }, "ssh-kill-smart-drone").start();
+    }
+
     private boolean ensureVehicleConnection() {
         String vehicleIp = m_etVehicleIp.getText().toString().trim();
         if (vehicleIp.isEmpty()) {
@@ -1126,11 +1235,7 @@ public class MainActivity extends Activity {
     }
 
     private void registerPendingAck(long seq, int command, String label, String pendingKey, AckSuccess onSuccess) {
-        if (pendingKey != null && !pendingKey.isEmpty()) {
-            m_pendingUiKeys.add(pendingKey);
-            updateRuntimeButtons();
-            updateFlightButtons();
-        }
+        setPendingKey(pendingKey);
         Runnable timeoutRunnable = () -> {
             PendingAckAction removed = m_pendingAckActions.remove(seq);
             if (removed == null) {
@@ -2022,6 +2127,8 @@ public class MainActivity extends Activity {
         m_btnRestartService = findViewById(R.id.btnRestartService);
 
         m_etVehicleIp = findViewById(R.id.etVehicleIp);
+        m_etSshUser = findViewById(R.id.etSshUser);
+        m_etSshPassword = findViewById(R.id.etSshPassword);
         if (m_etVehicleIp != null) {
             ArrayAdapter<String> vehicleIpAdapter = new ArrayAdapter<>(
                     this,
@@ -2061,6 +2168,12 @@ public class MainActivity extends Activity {
         m_vehicleIp = cm5Ip;
         if (m_etVehicleIp != null) {
             m_etVehicleIp.setText(cm5Ip);
+        }
+        if (m_etSshUser != null) {
+            m_etSshUser.setText(DEFAULT_SSH_USER);
+        }
+        if (m_etSshPassword != null) {
+            m_etSshPassword.setText(DEFAULT_SSH_PASSWORD);
         }
         boolean ok;
         try {
@@ -2345,10 +2458,7 @@ public class MainActivity extends Activity {
                     sendSimpleCmdAwaitAck("CLEAN_CALIB", CMD_CALIB_CLEAN, PENDING_CLEAN_CALIB, () -> { }));
         }
         if (m_btnRestartService != null) {
-            m_btnRestartService.setOnClickListener(v ->
-                    sendSimpleCmdAwaitAck("RESTART_SERVICE", CMD_FORCE_RESTART, PENDING_RESTART_SERVICE, () -> {
-                        m_tvStatus.setText("RESTART_SERVICE acked, waiting for reconnect");
-                    }));
+            m_btnRestartService.setOnClickListener(v -> sshKillSmartDrone());
         }
         if (m_spinnerSensorMode != null) {
             m_spinnerSensorMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {

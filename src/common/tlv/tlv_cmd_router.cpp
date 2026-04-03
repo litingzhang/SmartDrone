@@ -2,60 +2,12 @@
 
 #include <cmath>
 
-namespace {
-
-constexpr uint32_t kSessionResetSeqThreshold = 32;
-constexpr auto kSessionResetIdleGap = std::chrono::milliseconds(750);
-
-bool IsTickAfter32(uint32_t value, uint32_t baseline)
-{
-    return static_cast<int32_t>(value - baseline) > 0;
-}
-
 bool IsFinite(float value)
 {
     return std::isfinite(value);
 }
 
-}  // namespace
-
 TlvCmdRouter::TlvCmdRouter(MavlinkHooks& hooks) : m_hooks(hooks) {}
-
-bool TlvCmdRouter::AcceptSeq(uint32_t seq, uint32_t senderMs, SeqTracker& tracker)
-{
-    const auto now = std::chrono::steady_clock::now();
-    if (seq == 0) {
-        return false;
-    }
-    if (!tracker.seen) {
-        tracker.lastSeq = seq;
-        tracker.lastSenderMs = senderMs;
-        tracker.lastRxTime = now;
-        tracker.seen = true;
-        return true;
-    }
-    if (seq > tracker.lastSeq) {
-        tracker.lastSeq = seq;
-        if (IsTickAfter32(senderMs, tracker.lastSenderMs) || senderMs == tracker.lastSenderMs) {
-            tracker.lastSenderMs = senderMs;
-        }
-        tracker.lastRxTime = now;
-        return true;
-    }
-
-    const bool senderClockAdvanced = IsTickAfter32(senderMs, tracker.lastSenderMs);
-    const bool idleGapExceeded = (now - tracker.lastRxTime) >= kSessionResetIdleGap;
-    const bool looksLikeClientRestart =
-        seq <= kSessionResetSeqThreshold && (senderClockAdvanced || idleGapExceeded);
-    if (!looksLikeClientRestart) {
-        return false;
-    }
-
-    tracker.lastSeq = seq;
-    tracker.lastSenderMs = senderMs;
-    tracker.lastRxTime = now;
-    return true;
-}
 
 void TlvCmdRouter::RegisterDefaults()
 {
@@ -74,9 +26,6 @@ RouteResult TlvCmdRouter::Handle(const TlvFrame& frame)
 {
     if (frame.ver != TLV_VER) {
         return {ACK_E_BAD_ARGS, "bad version"};
-    }
-    if (!AcceptSeq(frame.seq, frame.tMs, m_cmdSeqTracker)) {
-        return {ACK_E_BAD_STATE, "seq not monotonic"};
     }
 
     const auto it = m_handlers.find(frame.cmd);
@@ -136,10 +85,6 @@ RouteResult TlvCmdRouter::HandleMove(const TlvFrame& frame)
 {
     if (frame.len != MOVE_PAYLOAD_LEN && frame.len != MOVE_RC_PAYLOAD_LEN) {
         return {ACK_E_BAD_LEN, "bad move len"};
-    }
-
-    if (!AcceptSeq(frame.seq, frame.tMs, m_moveSeqTracker)) {
-        return {ACK_E_BAD_STATE, "old move dropped"};
     }
 
     const uint8_t* payload = frame.payload.data();
