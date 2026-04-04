@@ -37,6 +37,8 @@ Build targets:
 - `smart_drone`: build the main runtime executable only
 - `android`: build the Android app, defaulting to `:app:assembleDebug`
 - `all`: build `ORB_SLAM3` first, then the local C++ targets and Android app
+- `test`: build and run host-side unit tests
+- `replay`: build the host-side offline replay tool
 
 Android build behavior:
 
@@ -52,6 +54,14 @@ ANDROID_GRADLE_TASK=assembleRelease ./build.sh android
 ```
 
 This overrides the default Android Gradle task from `assembleDebug` to the value you provide.
+
+Optional build parallelism override:
+
+```bash
+BUILD_JOBS=8 ./build.sh replay
+```
+
+By default `build.sh` uses `$(nproc)`.
 
 ## Build Manually
 
@@ -71,6 +81,79 @@ rm -rf app/.cxx app/build
 ./gradlew :app:assembleDebug --no-daemon
 adb -d install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+## Tests
+
+Run the host-side unit tests with:
+
+```bash
+./build.sh test
+```
+
+This builds the `smart_drone_unit_tests` target and runs `ctest` in `build/unit-test`.
+
+Current host-side coverage includes:
+
+- `FrameTimingTracker`
+- `ModeManager`
+- `PerceptionPipeline`
+- `RuntimeConfigService`
+- replay dataset loading and IMU window extraction
+- replay runner plumbing with a fake SLAM engine
+
+## Offline Replay
+
+Use the host-side offline replay tool to feed recorded stereo images and IMU data into the local replay pipeline and export a pose CSV:
+
+```bash
+./build.sh replay
+./build/offline-replay/tests/smart_drone_offline_replay
+```
+
+Useful options:
+
+```bash
+./build/offline-replay/tests/smart_drone_offline_replay \
+  --dataset tests/data \
+  --out build/offline_replay_pose.csv \
+  --summary-json build/offline_replay_summary.json \
+  --sensor-mode stereo-imu
+```
+
+Stereo-only replay is often useful when a dataset does not contain enough motion to initialize stereo-inertial mode:
+
+```bash
+./build/offline-replay/tests/smart_drone_offline_replay \
+  --stereo-only \
+  --out build/offline_replay_pose_stereo.csv \
+  --summary-json build/offline_replay_stereo_summary.json
+```
+
+`--summary-json` writes a small machine-readable summary with:
+
+- `frames_out`
+- `pose_valid_frames`
+- `tracking_ok_frames`
+- `tracking_lost_frames`
+- `identity_pose_frames`
+
+The default vocabulary path resolves to `ORB_SLAM3/Vocabulary/ORBvoc.txt`.
+
+## Offline Replay Baseline
+
+The replay build also registers a stereo-only integration baseline in CTest:
+
+```bash
+cd build/offline-replay
+ctest -R OfflineReplayStereoOnly -V
+```
+
+The baseline runs the replay tool with `--stereo-only --summary-json ...` and then checks:
+
+- `tracking_ok_frames == frames_out`
+- `identity_pose_frames <= 1`
+
+This gives us a quick regression check for the current local stereo replay dataset without depending on IMU initialization quality.
 
 ## Calibration
 

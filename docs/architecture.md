@@ -71,6 +71,36 @@ The following ports form the long-term extension boundary:
 
 Every hardware- or library-specific implementation lives in `adapters/`.
 
+## Host-Side Test And Replay Harness
+
+The repository now includes a host-side validation layer under [`tests/`](/d:/SmartDrone/tests):
+
+- unit tests for core runtime logic
+- replay dataset loaders for recorded stereo images and IMU samples
+- a replay runner that feeds recorded data into `PerceptionPipeline`
+- an offline replay executable that can run real `ORB_SLAM3` on recorded datasets
+
+This keeps two workflows separate:
+
+1. CM5 runtime builds
+   - cross-compiled
+   - talks to real camera, IMU, MAVLink, and UDP transport
+
+2. Host-side replay and tests
+   - native host build
+   - reads `tests/data`
+   - can run either fake SLAM or real `ORB_SLAM3`
+   - exports pose CSV and summary JSON for regression checks
+
+The replay entry point is [`offline_replay_main.cpp`](/d:/SmartDrone/tests/offline_replay_main.cpp).
+
+The current stereo-only replay baseline is wired into CTest and checks:
+
+- `tracking_ok_frames == frames_out`
+- `identity_pose_frames <= 1`
+
+This is intentionally a host-side regression guard, not a replacement for on-device runtime validation.
+
 ## Runtime Mode Model
 
 Runtime control is split into three dimensions:
