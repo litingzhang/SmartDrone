@@ -65,6 +65,8 @@ public:
         if (!m_system) {
             return out;
         }
+        out.frameId = input.frameId;
+        out.captureTimestampNs = input.captureTimestampNs;
 
         Sophus::SE3f tcw;
         const bool monoMode = (m_inputMode != OrbInputMode::Stereo);

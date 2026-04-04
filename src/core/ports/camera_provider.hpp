@@ -10,6 +10,7 @@ namespace smartdrone::core::ports {
 struct ImageFrame {
     int cameraId{-1};
     uint64_t timestampNs{0};
+    int64_t arriveNs{0};
     uint32_t sequence{0};
     cv::Mat gray;
     std::shared_ptr<void> owner;

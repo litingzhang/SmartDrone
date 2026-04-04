@@ -21,11 +21,13 @@ public:
         }
         out.left.cameraId = left.camIndex;
         out.left.timestampNs = left.tsNs;
+        out.left.arriveNs = left.arriveNs;
         out.left.sequence = left.seq;
         out.left.gray = left.gray;
         out.left.owner = left.owner;
         out.right.cameraId = right.camIndex;
         out.right.timestampNs = right.tsNs;
+        out.right.arriveNs = right.arriveNs;
         out.right.sequence = right.seq;
         out.right.gray = right.gray;
         out.right.owner = right.owner;

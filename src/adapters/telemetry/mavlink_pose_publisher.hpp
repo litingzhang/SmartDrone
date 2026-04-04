@@ -9,7 +9,7 @@ class MavlinkPosePublisher final : public core::ports::IPosePublisher {
 public:
     explicit MavlinkPosePublisher(Px4MavlinkGateway& serial) : m_serial(serial) {}
 
-    void PublishPose(uint64_t timestampUs,
+    void PublishPose(uint64_t frameId,
                      const core::ports::PoseEstimate& pose,
                      const core::ports::VelocityEstimate& velocity,
                      uint8_t resetCounter,
@@ -41,7 +41,7 @@ public:
         }
 
         m_serial.SendOdometry(
-            timestampUs,
+            frameId,
             mavPose,
             mavVelocity,
             MAV_FRAME_LOCAL_NED,

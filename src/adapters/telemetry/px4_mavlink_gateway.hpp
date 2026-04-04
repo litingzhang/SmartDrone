@@ -19,6 +19,7 @@
 #include "common/thread_launch.hpp"
 #include "common/time_utils.hpp"
 #include "adapters/telemetry/mavlink_serial_transport.hpp"
+#include "core/application/frame_timing_tracker.hpp"
 
 enum class OdomQualityMode
 {
@@ -123,6 +124,12 @@ public:
     {
         StopRx();
         StopSetpointStream();
+    }
+
+    void SetFrameTimingTracker(smartdrone::core::application::FrameTimingTracker* tracker)
+    {
+        std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
+        m_frameTimingTracker = tracker;
     }
 
     void StartRx()
@@ -450,10 +457,52 @@ public:
         return got && (res == MAV_RESULT_ACCEPTED);
     }
 
-    void SendOdometry(uint64_t timestampUs,
+    struct OdomTimestampDebug {
+        uint64_t frameId{0};
+        uint64_t tCamNs{0};
+        uint64_t tCbNs{0};
+        uint64_t tSlamInNs{0};
+        uint64_t tPx4Ns{0};
+        uint64_t tSlamOutNs{0};
+        uint64_t tMavTxNs{0};
+        int64_t timesyncOffsetNs{0};
+        uint32_t timesyncRttUs{0};
+        bool timesyncValid{false};
+    };
+
+    bool GetTimesyncStatus(int64_t& offsetNs, uint32_t& rttUs, uint32_t& sampleCount) const
+    {
+        std::lock_guard<std::mutex> lk(m_timesyncMtx);
+        offsetNs = m_timesyncEstimatedOffsetNs;
+        rttUs = m_timesyncLastRttUs;
+        sampleCount = m_timesyncSampleCount;
+        return m_timesyncSampleCount != 0;
+    }
+
+    uint64_t MapMonotonicNsToPx4Ns(uint64_t monoNs, bool* outTimesyncValid = nullptr,
+                                   int64_t* outOffsetNs = nullptr,
+                                   uint32_t* outRttUs = nullptr,
+                                   uint32_t* outSampleCount = nullptr) const
+    {
+        int64_t offsetNs = 0;
+        uint32_t rttUs = 0;
+        uint32_t sampleCount = 0;
+        const bool valid = GetTimesyncStatus(offsetNs, rttUs, sampleCount);
+        if (outTimesyncValid) *outTimesyncValid = valid;
+        if (outOffsetNs) *outOffsetNs = offsetNs;
+        if (outRttUs) *outRttUs = rttUs;
+        if (outSampleCount) *outSampleCount = sampleCount;
+        if (!valid) {
+            return monoNs;
+        }
+        const int64_t px4NsSigned = static_cast<int64_t>(monoNs) - offsetNs;
+        return px4NsSigned > 0 ? static_cast<uint64_t>(px4NsSigned) : 0ULL;
+    }
+
+    void SendOdometry(uint64_t odomFrameId,
                       const Pose& poseNed,
                       const LinearVelocityNed& velNed = LinearVelocityNed{},
-                      uint8_t frameId = MAV_FRAME_LOCAL_NED,
+                      uint8_t mavFrameId = MAV_FRAME_LOCAL_NED,
                       uint8_t childFrameId = MAV_FRAME_BODY_FRD,
                       uint8_t resetCounter = 0,
                       OdomQualityMode mode = OdomQualityMode::GOOD)
@@ -499,10 +548,30 @@ public:
             quality = 0;
         }
 
+        smartdrone::core::application::FrameTimingRecord timing{};
+        const bool haveTiming = LookupFrameTiming(odomFrameId, timing);
+        OdomTimestampDebug debug{};
+        debug.frameId = odomFrameId;
+        debug.tCamNs = timing.tCamNs;
+        debug.tCbNs = timing.tCbNs;
+        debug.tSlamInNs = timing.tSlamInNs;
+        debug.tSlamOutNs = timing.tSlamOutNs;
+        debug.tMavTxNs = ClockMonotonicNs();
+        if (debug.tCamNs == 0) {
+            debug.tCamNs = debug.tMavTxNs;
+        }
+        debug.tPx4Ns = MapMonotonicNsToPx4Ns(
+            debug.tCamNs,
+            &debug.timesyncValid,
+            &debug.timesyncOffsetNs,
+            &debug.timesyncRttUs);
+        MarkFrameMavTx(odomFrameId, debug.tMavTxNs);
+        m_lastOdomTimestampDebug = debug;
+
         mavlink_msg_odometry_pack(
             m_sysid, m_compid, &msg,
-            timestampUs,
-            frameId,
+            debug.tPx4Ns / 1000ULL,
+            mavFrameId,
             childFrameId,
             poseNed.x, poseNed.y, poseNed.z,
             q,
@@ -515,6 +584,32 @@ public:
             quality);
 
         WriteMessage(msg);
+
+        const double queueLatencyMs =
+            (debug.tSlamInNs >= debug.tCbNs && debug.tCbNs != 0) ? (static_cast<double>(debug.tSlamInNs - debug.tCbNs) * 1e-6) : -1.0;
+        const double slamLatencyMs =
+            (debug.tSlamOutNs >= debug.tCamNs) ? (static_cast<double>(debug.tSlamOutNs - debug.tCamNs) * 1e-6) : -1.0;
+        const double sendLatencyMs =
+            (debug.tMavTxNs >= debug.tSlamOutNs && debug.tSlamOutNs != 0) ? (static_cast<double>(debug.tMavTxNs - debug.tSlamOutNs) * 1e-6) : -1.0;
+        const double totalLatencyMs =
+            (debug.tMavTxNs >= debug.tCamNs) ? (static_cast<double>(debug.tMavTxNs - debug.tCamNs) * 1e-6) : -1.0;
+        const double px4OffsetMs = static_cast<double>(debug.timesyncOffsetNs) * 1e-6;
+        printf("[odom_ts] frame=%llu timing=%d cam_ns=%llu cb_ns=%llu slam_in_ns=%llu px4_ns=%llu slam_out_ns=%llu mav_tx_ns=%llu sync=%d offset_ms=%.3f rtt_ms=%.3f queue_latency_ms=%.3f slam_latency_ms=%.3f send_latency_ms=%.3f total_latency_ms=%.3f\n",
+               static_cast<unsigned long long>(debug.frameId),
+               haveTiming ? 1 : 0,
+               static_cast<unsigned long long>(debug.tCamNs),
+               static_cast<unsigned long long>(debug.tCbNs),
+               static_cast<unsigned long long>(debug.tSlamInNs),
+               static_cast<unsigned long long>(debug.tPx4Ns),
+               static_cast<unsigned long long>(debug.tSlamOutNs),
+               static_cast<unsigned long long>(debug.tMavTxNs),
+               debug.timesyncValid ? 1 : 0,
+               px4OffsetMs,
+               static_cast<double>(debug.timesyncRttUs) * 1e-3,
+               queueLatencyMs,
+               slamLatencyMs,
+               sendLatencyMs,
+               totalLatencyMs);
     }
 
     static Pose EnuToNed(const Pose& pEnu)
@@ -557,6 +652,31 @@ public:
     }
 
 private:
+    static constexpr uint32_t kTimesyncMaxAcceptableRttUs = 50000;
+    static constexpr int64_t kTimesyncJumpResetThresholdNs = 50000000LL;
+    static constexpr int64_t kTimesyncJumpWarnThresholdNs = 10000000LL;
+
+    void ResetTimesyncEstimateLocked()
+    {
+        m_timesyncEstimatedOffsetNs = 0;
+        m_timesyncLastRttUs = 0;
+        m_timesyncSampleCount = 0;
+    }
+
+    bool LookupFrameTiming(uint64_t frameId, smartdrone::core::application::FrameTimingRecord& out) const
+    {
+        std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
+        return m_frameTimingTracker && m_frameTimingTracker->Lookup(frameId, out);
+    }
+
+    void MarkFrameMavTx(uint64_t frameId, uint64_t tMavTxNs)
+    {
+        std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
+        if (m_frameTimingTracker) {
+            m_frameTimingTracker->MarkMavTx(frameId, tMavTxNs);
+        }
+    }
+
     struct AckInfo {
         uint8_t result = 255;
         uint8_t progress = 0;
@@ -744,21 +864,45 @@ private:
             int64_t filteredOffsetNs = observedOffsetNs;
             uint32_t sampleCount = 0;
             bool shouldLog = false;
+            bool rejectedByRtt = false;
+            bool resetByJump = false;
+            bool jumpWarn = false;
+            int64_t jumpNs = 0;
             {
                 std::lock_guard<std::mutex> lk(m_timesyncMtx);
-                if (m_timesyncSampleCount == 0) {
-                    m_timesyncEstimatedOffsetNs = observedOffsetNs;
+                const bool haveEstimate = m_timesyncSampleCount != 0;
+                if (rttUs > kTimesyncMaxAcceptableRttUs) {
+                    rejectedByRtt = true;
+                    filteredOffsetNs = m_timesyncEstimatedOffsetNs;
+                    sampleCount = m_timesyncSampleCount;
                 } else {
-                    m_timesyncEstimatedOffsetNs =
-                        (m_timesyncEstimatedOffsetNs * 7 + observedOffsetNs) / 8;
+                    if (haveEstimate) {
+                        jumpNs = observedOffsetNs - m_timesyncEstimatedOffsetNs;
+                        const int64_t absJumpNs = jumpNs < 0 ? -jumpNs : jumpNs;
+                        if (absJumpNs > kTimesyncJumpResetThresholdNs) {
+                            ResetTimesyncEstimateLocked();
+                            resetByJump = true;
+                        } else if (absJumpNs > kTimesyncJumpWarnThresholdNs) {
+                            jumpWarn = true;
+                        }
+                    }
+
+                    if (m_timesyncSampleCount == 0) {
+                        m_timesyncEstimatedOffsetNs = observedOffsetNs;
+                    } else {
+                        m_timesyncEstimatedOffsetNs =
+                            (m_timesyncEstimatedOffsetNs * 7 + observedOffsetNs) / 8;
+                    }
+                    ++m_timesyncSampleCount;
+                    m_timesyncLastRttUs = rttUs;
+                    filteredOffsetNs = m_timesyncEstimatedOffsetNs;
+                    sampleCount = m_timesyncSampleCount;
                 }
                 ++m_timesyncInboundResponseCount;
-                m_timesyncLastRttUs = rttUs;
-                filteredOffsetNs = m_timesyncEstimatedOffsetNs;
-                sampleCount = ++m_timesyncSampleCount;
                 const uint64_t nowUs = nowNs / 1000ULL;
                 m_lastTimesyncActivityUs = nowUs;
-                if (sampleCount <= 5 || (sampleCount % 20) == 0 ||
+                if (rejectedByRtt || resetByJump || jumpWarn ||
+                    sampleCount <= 5 || (sampleCount != 0 && (sampleCount % 20) == 0) ||
                     (nowUs > (m_lastTimesyncLogUs + 5000000ULL))) {
                     m_lastTimesyncLogUs = nowUs;
                     shouldLog = true;
@@ -766,10 +910,13 @@ private:
             }
 
             if (shouldLog) {
-                printf("[timesync] samples=%u offset=%.3fms rtt=%.3fms px4=%u/%u\n",
+                printf("[timesync] samples=%u offset=%.3fms rtt=%.3fms accepted=%d reset=%d jump_ms=%.3f px4=%u/%u\n",
                        sampleCount,
                        static_cast<double>(filteredOffsetNs) * 1e-6,
                        static_cast<double>(rttUs) * 1e-3,
+                       rejectedByRtt ? 0 : 1,
+                       resetByJump ? 1 : 0,
+                       static_cast<double>(jumpNs) * 1e-6,
                        static_cast<unsigned>(msg.sysid),
                        static_cast<unsigned>(msg.compid));
             }
@@ -921,6 +1068,7 @@ private:
     std::unordered_map<uint16_t, AckInfo> m_ackMap;
     std::mutex m_txMtx;
     mutable std::mutex m_timesyncMtx;
+    mutable std::mutex m_frameTimingTrackerMtx;
     mutable std::mutex m_flightModeMtx;
     mutable std::mutex m_localPosMtx;
     mutable std::mutex m_distanceSensorMtx;
@@ -947,4 +1095,6 @@ private:
     uint32_t m_timesyncInboundResponseCount{0};
     uint64_t m_lastTimesyncActivityUs{0};
     uint64_t m_lastTimesyncLogUs{0};
+    OdomTimestampDebug m_lastOdomTimestampDebug{};
+    smartdrone::core::application::FrameTimingTracker* m_frameTimingTracker{nullptr};
 };

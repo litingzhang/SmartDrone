@@ -190,8 +190,8 @@ inline bool RunCalibSession(const UnifiedConfig& cfg,
         savedImagePaths.push_back(fnL);
         savedImagePaths.push_back(fnR);
         if (a.udpEnable && a.sendImage) {
-            udp.Enqueue(0, L.seq, pairNs * 1e-9, L.gray, {}, true, false);
-            udp.Enqueue(1, R.seq, pairNs * 1e-9, R.gray, {}, true, false);
+            udp.Enqueue(0, static_cast<uint64_t>(L.seq), L.seq, pairNs * 1e-9, L.gray, {}, true, false);
+            udp.Enqueue(1, static_cast<uint64_t>(R.seq), R.seq, pairNs * 1e-9, R.gray, {}, true, false);
         }
         if ((saved % 30) == 0) {
             std::cerr << "[calib-save] saved=" << (saved + 1)

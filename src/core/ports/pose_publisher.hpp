@@ -23,7 +23,7 @@ class IPosePublisher {
 public:
     virtual ~IPosePublisher() = default;
 
-    virtual void PublishPose(uint64_t timestampUs,
+    virtual void PublishPose(uint64_t frameId,
                              const PoseEstimate& pose,
                              const VelocityEstimate& velocity,
                              uint8_t resetCounter,

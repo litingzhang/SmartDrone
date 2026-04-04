@@ -23,11 +23,15 @@ struct PoseEstimate {
 
 struct SlamInputBatch {
     StereoFrame stereo;
+    uint64_t frameId{0};
+    int64_t captureTimestampNs{0};
     double frameTimeSec{0.0};
     std::vector<ORB_SLAM3::IMU::Point> imu;
 };
 
 struct SlamOutput {
+    uint64_t frameId{0};
+    int64_t captureTimestampNs{0};
     PoseEstimate pose;
     bool poseValid{false};
     int trackingState{0};

@@ -34,6 +34,7 @@ class UdpImageSender {
 
     struct Slot {
         int camIndex;
+        uint64_t frameId{0};
         uint32_t seq;
         double frameTime;
         int width{0};
@@ -112,6 +113,7 @@ class UdpImageSender {
     }
 
     void Enqueue(int camIndex,
+                 uint64_t frameId,
                  uint32_t seq,
                  double frameTime,
                  const cv::Mat &gray,
@@ -147,6 +149,7 @@ class UdpImageSender {
             const size_t slotIndex = m_free[camIndex].front();
             m_free[camIndex].pop_front();
             Slot& slot = m_slots[camIndex][slotIndex];
+            slot.frameId = frameId;
             slot.seq = seq;
             slot.frameTime = frameTime;
             slot.width = gray.cols;
@@ -206,8 +209,6 @@ class UdpImageSender {
 
             jpeg.clear();
             uint32_t total = 0;
-            const uint32_t fid = m_frameId.fetch_add(1, std::memory_order_relaxed);
-
             if (slot.sendImage) {
                 if (slot.preview.empty()) {
                     std::lock_guard<std::mutex> lk(m_mu[camIndex]);
@@ -248,7 +249,7 @@ class UdpImageSender {
                     h.flags = 0;
                     h.seq = slot.seq;
                     h.frameTime = slot.frameTime;
-                    h.frameId = fid;
+                    h.frameId = static_cast<uint32_t>(slot.frameId & 0xFFFFFFFFu);
                     h.chunkIdx = ci;
                     h.chunkCnt = chunks;
                     h.totalSize = total;
@@ -272,7 +273,8 @@ class UdpImageSender {
             }
 
             if (slot.sendFeature && !slot.trackedPoints.empty()) {
-                SendFeaturePacket(slot, fid, slot.width, slot.height, slot.trackedPoints);
+                SendFeaturePacket(slot, static_cast<uint32_t>(slot.frameId & 0xFFFFFFFFu),
+                                  slot.width, slot.height, slot.trackedPoints);
             }
 
             std::lock_guard<std::mutex> lk(m_mu[camIndex]);
@@ -375,6 +377,4 @@ class UdpImageSender {
     std::deque<size_t> m_ready[2];
     std::deque<size_t> m_free[2];
     double m_lastAcceptedFrameTime[2]{-1.0, -1.0};
-
-    std::atomic<uint32_t> m_frameId{1};
 };

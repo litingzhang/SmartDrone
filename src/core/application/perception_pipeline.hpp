@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "core/application/frame_timing_tracker.hpp"
 #include "core/ports/camera_provider.hpp"
 
 namespace smartdrone::core::application {
@@ -14,6 +15,7 @@ struct PerceptionPipelineConfig {
 
 struct StereoBatch {
     ports::StereoFrame stereo;
+    uint64_t frameId{0};
     int64_t frameTimestampNs{0};
     int64_t monotonicFrameStepNs{0};
 };
@@ -35,7 +37,8 @@ public:
     StereoAcquireStatus AcquireNextStereoBatch(ports::ICameraProvider& camera,
                                                int slamInputFps,
                                                int timeoutMs,
-                                               StereoBatch& out)
+                                               StereoBatch& out,
+                                               FrameTimingTracker* timingTracker = nullptr)
     {
         ports::StereoFrame stereo{};
         const int clampedSlamInputFps = ClampTargetFps(slamInputFps);
@@ -75,8 +78,16 @@ public:
         m_nextAcceptedFrameNs = frameNs + slamFrameStepNs;
 
         out.stereo = std::move(stereo);
+        out.frameId = m_nextFrameId++;
         out.frameTimestampNs = frameNs;
         out.monotonicFrameStepNs = frameStepNs;
+        if (timingTracker) {
+            const uint64_t tCamNs = static_cast<uint64_t>(frameNs);
+            const uint64_t tCbNs = static_cast<uint64_t>(std::max<int64_t>(
+                0,
+                (out.stereo.left.arriveNs + out.stereo.right.arriveNs) / 2LL));
+            timingTracker->UpsertCapture(out.frameId, tCamNs, tCbNs);
+        }
         return StereoAcquireStatus::Ok;
     }
 
@@ -93,6 +104,7 @@ private:
     int64_t m_lastDeliveredFrameNs{0};
     int64_t m_lastAcceptedFrameNs{0};
     int64_t m_nextAcceptedFrameNs{0};
+    uint64_t m_nextFrameId{1};
 };
 
 }  // namespace smartdrone::core::application

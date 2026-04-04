@@ -21,6 +21,7 @@
 #include "adapters/telemetry/px4_mavlink_gateway.hpp"
 #include "common/time_utils.hpp"
 #include "common/tlv/tlv_protocol.hpp"
+#include "core/application/frame_timing_tracker.hpp"
 #include "core/application/sensor_runtime_helpers.hpp"
 #include "core/application/live_pose_state.hpp"
 #include "core/application/perception_pipeline.hpp"
@@ -299,6 +300,8 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
     smartdrone::adapters::imu::Icm42688ImuProvider imuProvider(
         imuState.imuBuffer,
         smartdrone::adapters::imu::Icm42688ImuProviderConfig{slackBeforeNs, slackAfterNs});
+    FrameTimingTracker frameTimingTracker{};
+    mav.SetFrameTimingTracker(&frameTimingTracker);
     smartdrone::adapters::telemetry::MavlinkPosePublisher posePublisher(mav);
     PerceptionPipeline perceptionPipeline(PerceptionPipelineConfig{a.fps, true});
     int64_t lastFrameNs = 0;
@@ -358,7 +361,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         }
         const auto acquireStartTp = std::chrono::steady_clock::now();
         const StereoAcquireStatus acquireStatus =
-            perceptionPipeline.AcquireNextStereoBatch(cameraProvider, slamInputFps, 1000, stereoBatch);
+            perceptionPipeline.AcquireNextStereoBatch(cameraProvider, slamInputFps, 1000, stereoBatch, &frameTimingTracker);
         const auto acquireEndTp = std::chrono::steady_clock::now();
         if (acquireStatus == StereoAcquireStatus::Timeout) {
             continue;
@@ -390,9 +393,6 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         const double pairTolMs = static_cast<double>(cameraProvider.PairTolNs()) * 1e-6;
         const int64_t frameNs = monoMode ? static_cast<int64_t>(R.timestampNs) : stereoBatch.frameTimestampNs;
         const double frameTime = static_cast<double>(frameNs) * 1e-9;
-        // Publish EV/VIO with the stereo frame timestamp for both stereo and stereo-imu modes.
-        // PX4 EV delay should compensate processing latency relative to this capture time.
-        const uint64_t publishTimestampUs = static_cast<uint64_t>(frameNs / 1000LL);
         const double frameGapMs =
             (lastPublishedFrameNs != 0) ? static_cast<double>(frameNs - lastPublishedFrameNs) * 1e-6 : 0.0;
         const double monoStepMs = static_cast<double>(stereoBatch.monotonicFrameStepNs) * 1e-6;
@@ -430,13 +430,21 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
             stdR,
             a.slamLowLightEnhance,
             slamInput.stereo);
+        slamInput.frameId = stereoBatch.frameId;
+        slamInput.captureTimestampNs = frameNs;
         slamInput.frameTimeSec = frameTime;
         const bool debugRightOnlyFeatures = a.debugRightOnlyFeatures;
         const bool extractFeatures = sendFeature || requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto;
         const bool updatePointCloud =
             !debugRightOnlyFeatures && sendMap && (frameNs - lastPointCloudUpdateNs) >= kPointCloudUpdateIntervalNs;
         const auto slamStartTp = std::chrono::steady_clock::now();
+        const uint64_t slamInputTimestampNs =
+            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                slamStartTp.time_since_epoch()).count());
+        frameTimingTracker.MarkSlamIn(slamInput.frameId, slamInputTimestampNs);
         smartdrone::core::ports::SlamOutput slamOutput{};
+        slamOutput.frameId = slamInput.frameId;
+        slamOutput.captureTimestampNs = slamInput.captureTimestampNs;
         if (debugRightOnlyFeatures) {
             slamOutput.leftFeatures.clear();
             slamOutput.rightFeatures = ComputeOrbDebugFeatures(R.gray);
@@ -444,6 +452,10 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
             slamOutput = slamEngine.Process(slamInput, extractFeatures, updatePointCloud);
         }
         const auto slamEndTp = std::chrono::steady_clock::now();
+        const uint64_t slamOutputTimestampNs =
+            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                slamEndTp.time_since_epoch()).count());
+        frameTimingTracker.MarkSlamOut(slamInput.frameId, slamOutputTimestampNs);
         const auto cloudStartTp = std::chrono::steady_clock::now();
         size_t pointCount = 0;
         if (a.udpEnable && (sendImage || sendFeature || sendMap)) {
@@ -457,10 +469,10 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         const auto udpStartTp = std::chrono::steady_clock::now();
         if (a.udpEnable && (sendImage || sendFeature || sendMap)) {
             if (monoMode) {
-                udp.Enqueue(1, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, sendImage, sendFeature);
+                udp.Enqueue(1, slamOutput.frameId, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, sendImage, sendFeature);
             } else {
-                udp.Enqueue(0, L.sequence, frameTime, L.gray, slamOutput.leftFeatures, sendImage, sendFeature);
-                udp.Enqueue(1, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, sendImage, sendFeature);
+                udp.Enqueue(0, slamOutput.frameId, L.sequence, frameTime, L.gray, slamOutput.leftFeatures, sendImage, sendFeature);
+                udp.Enqueue(1, slamOutput.frameId, R.sequence, frameTime, R.gray, slamOutput.rightFeatures, sendImage, sendFeature);
             }
         }
         const auto udpEndTp = std::chrono::steady_clock::now();
@@ -512,7 +524,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         const auto livePoseEndTp = std::chrono::steady_clock::now();
         const auto publishStartTp = std::chrono::steady_clock::now();
         posePublisher.PublishPose(
-            publishTimestampUs,
+            slamOutput.frameId,
             poseResult.poseEstimate,
             poseResult.velocityEstimate,
             poseResult.resetCounter,
@@ -546,13 +558,14 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
         std::snprintf(
             dfxLine,
             sizeof(dfxLine),
-            "[slam_dfx] frame=%llu seqL=%u seqR=%u state=%d pose_valid=%d quality=%d "
+            "[slam_dfx] frame=%llu frame_id=%llu seqL=%u seqR=%u state=%d pose_valid=%d quality=%d "
             "imu_samples=%zu featL=%zu featR=%zu points=%zu "
             "debug_right_only=%d "
             "pair rawSeqL=%u rawSeqR=%u rawCountL=%llu rawCountR=%llu pair_dt=%.3f reject_dt=%.3f tol=%.3f pendL=%zu pendR=%zu dropL=%llu dropR=%llu rate_drop=%llu "
             "img meanL=%.2f stdL=%.2f sharpL=%.2f meanR=%.2f stdR=%.2f sharpR=%.2f "
             "timing_ms frame_gap=%.3f mono_step=%.3f acquire=%.3f imu=%.3f slam=%.3f cloud=%.3f udp=%.3f post=%.3f live=%.3f publish=%.3f total=%.3f",
             static_cast<unsigned long long>(frameIndex),
+            static_cast<unsigned long long>(slamOutput.frameId),
             static_cast<unsigned>(L.sequence),
             static_cast<unsigned>(R.sequence),
             state,
@@ -606,6 +619,7 @@ inline bool RunSlamSession(const UnifiedConfig& cfg,
     mav.StopSetpointStream();
     std::cerr << "[session] slam setpoint stopped\n";
     slamEngine.Stop();
+    mav.SetFrameTimingTracker(nullptr);
     std::cerr << "[session] slam shutdown complete\n";
     livePose.SetRuntimeMode(RUNTIME_MODE_IDLE);
     std::cerr << "[session] slam exit\n";
