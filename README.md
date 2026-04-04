@@ -7,11 +7,12 @@ SmartDrone is a stereo / stereo-inertial drone runtime built around `ORB_SLAM3`,
 ```text
 .
 |- src/
-|  |- main.cpp       # CM5 flight runtime entry point
-|  |- core/          # Runtime orchestration, sessions, modes, shared models
-|  |- adapters/      # Camera / IMU / SLAM / telemetry concrete implementations
-|  |- platform/      # Linux and board-specific access layers
-|  |- common/tlv/    # Shared UDP/TLV control protocol and helpers
+|  |- native/        # Native runtime sources and CMake target
+|  |  |- main.cpp    # CM5 flight runtime entry point
+|  |  |- core/       # Runtime orchestration, sessions, modes, shared models
+|  |  |- adapters/   # Camera / IMU / SLAM / telemetry concrete implementations
+|  |  |- platform/   # Linux and board-specific access layers
+|  |  `- common/tlv/ # Shared UDP/TLV control protocol and helpers
 |  `- android/       # Android app project
 |- config/           # Runtime settings files deployed with the app
 |- third_party/      # MAVLink and other external code
@@ -19,7 +20,7 @@ SmartDrone is a stereo / stereo-inertial drone runtime built around `ORB_SLAM3`,
 `- build/            # Generated build outputs
 ```
 
-The runtime entry point is [`src/main.cpp`](/d:/SmartDrone/src/main.cpp).
+The runtime entry point is [`src/native/main.cpp`](/d:/SmartDrone/src/native/main.cpp).
 
 ## Build
 

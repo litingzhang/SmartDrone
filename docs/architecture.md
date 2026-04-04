@@ -15,25 +15,28 @@ The architecture should keep these axes decoupled so that changing one axis does
 
 ```text
 src/
-  main.cpp               # composition root, bootstrapping, process entry
+  native/
+    main.cpp             # composition root, bootstrapping, process entry
 
-  core/
-    domain/              # stable data model and enums
-    ports/               # replaceable interfaces
-    application/         # runtime orchestration and use cases
+    core/
+      domain/            # stable data model and enums
+      ports/             # replaceable interfaces
+      application/       # runtime orchestration and use cases
 
-  adapters/
-    camera/              # libcamera, realsense, playback...
-    imu/                 # icm42688, mock imu...
-    slam/                # ORB-SLAM3, future engines
-    telemetry/           # MAVLink, ROS2, logging sinks
-    command/             # UDP/TLV, future transports
+    adapters/
+      camera/            # libcamera, realsense, playback...
+      imu/               # icm42688, mock imu...
+      slam/              # ORB-SLAM3, future engines
+      telemetry/         # MAVLink, ROS2, logging sinks
+      command/           # UDP/TLV, future transports
 
-  platform/
-    linux/               # gpio, spi, thread priority, clocks
+    platform/
+      linux/             # gpio, spi, thread priority, clocks
 
-  common/
-    tlv/                 # shared TLV framing helpers
+    common/
+      tlv/               # shared TLV framing helpers
+
+  android/               # Android control app
 
 config/
   stereo.yaml
@@ -126,6 +129,6 @@ This refactor starts by:
 - adding capability/config domain types
 - adding first-class ports for camera, IMU, SLAM, pose publisher, and command channel
 - adding adapter scaffolds for existing libcamera, ORB-SLAM3, MAVLink, and UDP/TLV implementations
-- extracting runtime mode state management into `core/application/mode_manager.hpp`
+- extracting runtime mode state management into `core/application/mode_manager.h`
 
 The current runtime still executes the old pipeline, but new code should build against the new boundaries.

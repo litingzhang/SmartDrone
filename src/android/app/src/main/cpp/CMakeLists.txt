@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 3.18)
 project(cm5udp)
 
 add_library(cm5udp SHARED
+    crc16_ccitt_false.cpp
     native_lib.cpp
+    tlv_pack.cpp
+    udp_client.cpp
 )
 
 target_compile_features(cm5udp PRIVATE cxx_std_17)

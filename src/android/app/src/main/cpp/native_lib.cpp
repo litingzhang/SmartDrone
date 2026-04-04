@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "tlv_pack.hpp"
-#include "udp_client.hpp"
+#include "tlv_pack.h"
+#include "udp_client.h"
 
 static UdpClient g_udpClient;
 static std::mutex g_mutex;
