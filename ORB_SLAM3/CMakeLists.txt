@@ -37,6 +37,8 @@ find_package(OpenCV 4.4)
       message(FATAL_ERROR "OpenCV > 4.4 not found.")
    endif()
 
+find_package(Boost REQUIRED COMPONENTS serialization)
+
 MESSAGE("OPENCV VERSION:")
 MESSAGE(${OpenCV_VERSION})
 
@@ -53,7 +55,8 @@ ${EIGEN3_INCLUDE_DIR}
 # ${Pangolin_INCLUDE_DIRS}
 )
 
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
+set(ORB_SLAM3_OUTPUT_DIR "${PROJECT_SOURCE_DIR}/lib" CACHE PATH "Output directory for ORB_SLAM3 shared library")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${ORB_SLAM3_OUTPUT_DIR})
 option(BUILD_EXAMPLES "Build ORB-SLAM3 examples" OFF)
 add_library(${PROJECT_NAME} SHARED
 src/System.cc
@@ -115,15 +118,16 @@ include/SerializationUtils.h
 include/Config.h
 include/Settings.h)
 
+add_subdirectory(Thirdparty/DBoW2)
 add_subdirectory(Thirdparty/g2o)
 
 target_link_libraries(${PROJECT_NAME}
 ${OpenCV_LIBS}
 ${EIGEN3_LIBS}
+Boost::serialization
 # ${Pangolin_LIBRARIES}
-${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
-${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
--lboost_serialization
+DBoW2
+g2o
 -lcrypto
 )
 

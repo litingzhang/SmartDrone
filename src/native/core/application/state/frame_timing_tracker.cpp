@@ -2,6 +2,8 @@
 
 namespace smartdrone::core::application {
 
+FrameTimingTracker::FrameTimingTracker(size_t maxRecords) : m_maxRecords(maxRecords > 0 ? maxRecords : 1) {}
+
 void FrameTimingTracker::UpsertCapture(uint64_t frameId, uint64_t tCamNs, uint64_t tCbNs)
 {
     std::lock_guard<std::mutex> lk(m_mutex);
@@ -53,7 +55,7 @@ FrameTimingRecord &FrameTimingTracker::EnsureRecordLocked(uint64_t frameId)
 
 void FrameTimingTracker::TrimLocked()
 {
-    while (m_order.size() > kMaxRecords) {
+    while (m_order.size() > m_maxRecords) {
         const uint64_t oldest = m_order.front();
         m_order.pop_front();
         m_records.erase(oldest);

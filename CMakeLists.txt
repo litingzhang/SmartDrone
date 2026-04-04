@@ -1,10 +1,19 @@
 cmake_minimum_required(VERSION 3.16)
 
+include(FetchContent)
+
 option(CROSS_AARCH64 "Enable aarch64 cross compile" ON)
 option(BUILD_SMART_DRONE "Build unified stereo runtime application" ON)
+option(ENABLE_UNIT_TESTS "Build unit tests" OFF)
+option(ENABLE_OFFLINE_REPLAY "Build host-side offline replay tool" OFF)
 
-if(NOT BUILD_SMART_DRONE)
-  message(FATAL_ERROR "BUILD_SMART_DRONE must be ON")
+if(NOT BUILD_SMART_DRONE AND NOT ENABLE_UNIT_TESTS AND NOT ENABLE_OFFLINE_REPLAY)
+  message(FATAL_ERROR "Enable BUILD_SMART_DRONE, ENABLE_UNIT_TESTS, or ENABLE_OFFLINE_REPLAY")
+endif()
+
+if((ENABLE_UNIT_TESTS OR ENABLE_OFFLINE_REPLAY) AND CROSS_AARCH64)
+  message(STATUS "Host-side tooling enabled, forcing CROSS_AARCH64=OFF")
+  set(CROSS_AARCH64 OFF CACHE BOOL "Enable aarch64 cross compile" FORCE)
 endif()
 
 if(CROSS_AARCH64)
@@ -42,16 +51,6 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 list(PREPEND CMAKE_PREFIX_PATH "${SYSROOT}/usr")
-
-set(ORB_SLAM3_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/ORB_SLAM3" CACHE PATH "ORB_SLAM3 root")
-set(ORB_LIB_DIR    "${ORB_SLAM3_ROOT}/lib")
-set(G2O_LIB_DIR    "${ORB_SLAM3_ROOT}/Thirdparty/g2o/lib")
-set(DBOW2_LIB_DIR  "${ORB_SLAM3_ROOT}/Thirdparty/DBoW2/lib")
-
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBCAMERA REQUIRED libcamera)
-
-find_package(OpenCV REQUIRED)
 
 function(configure_common_target target_name)
   target_include_directories(${target_name} PRIVATE
@@ -105,7 +104,52 @@ function(configure_orb_target target_name)
 endfunction()
 
 if(BUILD_SMART_DRONE)
+  set(ORB_SLAM3_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/ORB_SLAM3" CACHE PATH "ORB_SLAM3 root")
+  set(ORB_LIB_DIR    "${ORB_SLAM3_ROOT}/lib")
+  set(G2O_LIB_DIR    "${ORB_SLAM3_ROOT}/Thirdparty/g2o/lib")
+  set(DBOW2_LIB_DIR  "${ORB_SLAM3_ROOT}/Thirdparty/DBoW2/lib")
+endif()
+
+if(ENABLE_OFFLINE_REPLAY)
+  set(ORB_SLAM3_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/ORB_SLAM3")
+  set(ORB_SLAM3_OUTPUT_DIR "${CMAKE_BINARY_DIR}/orb_host/lib" CACHE PATH "Host ORB_SLAM3 output directory" FORCE)
+  set(DBOW2_OUTPUT_DIR "${CMAKE_BINARY_DIR}/orb_host/lib" CACHE PATH "Host DBoW2 output directory" FORCE)
+  set(G2O_OUTPUT_DIR "${CMAKE_BINARY_DIR}/orb_host/lib" CACHE PATH "Host g2o output directory" FORCE)
+  add_subdirectory(ORB_SLAM3 EXCLUDE_FROM_ALL)
+endif()
+
+if(BUILD_SMART_DRONE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(LIBCAMERA REQUIRED libcamera)
+  find_package(OpenCV REQUIRED)
+
   add_subdirectory(src/native)
   configure_common_target(smart_drone)
   configure_orb_target(smart_drone)
+endif()
+
+if(ENABLE_UNIT_TESTS)
+  find_package(GTest QUIET)
+  if(NOT GTest_FOUND)
+    message(STATUS "System GTest not found, fetching googletest...")
+    set(FETCHCONTENT_QUIET OFF)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+      googletest
+      URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+      DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(googletest)
+  else()
+    message(STATUS "Using system GTest")
+  endif()
+
+endif()
+
+if(ENABLE_UNIT_TESTS OR ENABLE_OFFLINE_REPLAY)
+  if(ENABLE_UNIT_TESTS)
+    enable_testing()
+  endif()
+  add_subdirectory(tests)
 endif()

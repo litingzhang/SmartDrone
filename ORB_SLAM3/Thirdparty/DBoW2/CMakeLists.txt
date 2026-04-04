@@ -37,9 +37,9 @@ if(NOT OpenCV_FOUND)
    endif()
 endif()
 
-set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
+set(DBOW2_OUTPUT_DIR "${PROJECT_SOURCE_DIR}/lib" CACHE PATH "Output directory for DBoW2 library")
+set(LIBRARY_OUTPUT_PATH ${DBOW2_OUTPUT_DIR})
 
 include_directories(${OpenCV_INCLUDE_DIRS})
 add_library(DBoW2 SHARED ${SRCS_DBOW2} ${SRCS_DUTILS})
 target_link_libraries(DBoW2 ${OpenCV_LIBS})
-
