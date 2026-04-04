@@ -15,7 +15,8 @@ struct PerceptionPipelineConfig {
 struct StereoBatch {
     ports::StereoFrame stereo;
     uint64_t frameId{0};
-    int64_t frameTimestampNs{0};
+    int64_t captureTimestampNs{0};
+    int64_t logicalFrameTimestampNs{0};
     int64_t monotonicFrameStepNs{0};
 };
 
@@ -37,9 +38,9 @@ class PerceptionPipeline {
 
   private:
     PerceptionPipelineConfig m_cfg;
-    int64_t m_lastDeliveredFrameNs{0};
-    int64_t m_lastAcceptedFrameNs{0};
-    int64_t m_nextAcceptedFrameNs{0};
+    int64_t m_lastDeliveredLogicalFrameNs{0};
+    int64_t m_lastAcceptedCaptureTimestampNs{0};
+    int64_t m_nextAcceptedLogicalFrameNs{0};
     uint64_t m_nextFrameId{1};
 };
 

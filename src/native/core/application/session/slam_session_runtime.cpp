@@ -80,8 +80,10 @@ bool SlamSessionRuntime::Start()
     Logger::Init("./stereo_vslam.log", 32 * 1024 * 1024, Logger::INFO, true);
     if (!m_slamEngine.Start()) {
         m_stop.store(true);
+        CleanupAfterStartFailure();
         return false;
     }
+    m_slamStarted = true;
 
     m_slamEngine.SetOperationMode(m_frameProcessorState.effectiveSlamMode);
     if (m_frameProcessorState.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
@@ -98,20 +100,24 @@ bool SlamSessionRuntime::Start()
         m_stereoBodyExtrinsics = LoadStereoBodyExtrinsics(m_cfg.app.settings);
     }
     if (m_aliases.udpEnable) {
-        m_udp.Open(m_aliases.udpIp, m_aliases.udpPort, m_aliases.udpJpegQ, m_aliases.udpPayload, m_aliases.udpQueue);
+        if (!m_udp.Open(m_aliases.udpIp, m_aliases.udpPort, m_aliases.udpJpegQ, m_aliases.udpPayload,
+                        m_aliases.udpQueue)) {
+            std::cerr << "[session] slam udp open failed\n";
+            m_stop.store(true);
+            CleanupAfterStartFailure();
+            return false;
+        }
+        m_udpOpen = true;
     }
     if (m_useImu) {
         m_imuThread = StartImuThread(m_aliases, m_imuState, m_stop, m_runningFlag);
     }
     if (!OpenCamera(m_cam, m_aliases)) {
         m_stop.store(true);
-        if (m_imuThread.joinable())
-            m_imuThread.join();
-        if (m_aliases.udpEnable)
-            m_udp.Close();
-        m_slamEngine.Stop();
+        CleanupAfterStartFailure();
         return false;
     }
+    m_cameraOpen = true;
 
     m_mav.SetFrameTimingTracker(&m_frameTimingTracker);
     return true;
@@ -119,19 +125,26 @@ bool SlamSessionRuntime::Start()
 
 void SlamSessionRuntime::Stop()
 {
-    m_cam.Close();
-    std::cerr << "[session] slam camera closed\n";
+    m_mav.SetFrameTimingTracker(nullptr);
+    if (m_cameraOpen) {
+        m_cam.Close();
+        m_cameraOpen = false;
+        std::cerr << "[session] slam camera closed\n";
+    }
     if (m_imuThread.joinable())
         m_imuThread.join();
     std::cerr << "[session] slam imu joined\n";
-    if (m_aliases.udpEnable) {
+    if (m_udpOpen) {
         m_udp.Close();
+        m_udpOpen = false;
         std::cerr << "[session] slam udp closed\n";
     }
     m_mav.StopSetpointStream();
     std::cerr << "[session] slam setpoint stopped\n";
-    m_slamEngine.Stop();
-    m_mav.SetFrameTimingTracker(nullptr);
+    if (m_slamStarted) {
+        m_slamEngine.Stop();
+        m_slamStarted = false;
+    }
     std::cerr << "[session] slam shutdown complete\n";
     m_livePose.SetRuntimeMode(RUNTIME_MODE_IDLE);
     std::cerr << "[session] slam exit\n";
@@ -162,6 +175,28 @@ SlamFrameProcessor &SlamSessionRuntime::FrameProcessor()
         m_frameProcessor = std::make_unique<SlamFrameProcessor>(*m_frameProcessorContext, m_frameProcessorState);
     }
     return *m_frameProcessor;
+}
+
+void SlamSessionRuntime::CleanupAfterStartFailure()
+{
+    m_mav.SetFrameTimingTracker(nullptr);
+    if (m_cameraOpen) {
+        m_cam.Close();
+        m_cameraOpen = false;
+    }
+    if (m_imuThread.joinable()) {
+        m_imuThread.join();
+    }
+    if (m_udpOpen) {
+        m_udp.Close();
+        m_udpOpen = false;
+    }
+    m_mav.StopSetpointStream();
+    if (m_slamStarted) {
+        m_slamEngine.Stop();
+        m_slamStarted = false;
+    }
+    m_livePose.SetRuntimeMode(RUNTIME_MODE_IDLE);
 }
 
 } // namespace smartdrone::core::application

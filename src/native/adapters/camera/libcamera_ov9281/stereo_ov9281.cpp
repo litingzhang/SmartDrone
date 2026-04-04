@@ -43,6 +43,7 @@ void SigIntHandler(int) { g_runningFlag.store(false); }
 bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex, int w, int h, int fps, bool aeDisable,
                             int exposureUs, float gain, bool requestY8)
 {
+    ResetOpenState();
     m_cam = std::move(cam);
     m_camIndex = camIndex;
     m_active.store(true, std::memory_order_relaxed);
@@ -58,12 +59,14 @@ bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex
     }
     if (m_cam->acquire()) {
         std::cerr << "Failed to acquire camera " << m_cam->id() << "\n";
+        ResetOpenState();
         return false;
     }
 
     m_config = m_cam->generateConfiguration({libcamera::StreamRole::Viewfinder});
     if (!m_config || m_config->size() < 1) {
         std::cerr << "Failed to generate config\n";
+        ResetOpenState();
         return false;
     }
 
@@ -85,29 +88,34 @@ bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex
 
     if (m_config->validate() == libcamera::CameraConfiguration::Invalid) {
         std::cerr << "Invalid camera configuration\n";
+        ResetOpenState();
         return false;
     }
 
     if (m_cam->configure(m_config.get())) {
         std::cerr << "Failed to configure camera\n";
+        ResetOpenState();
         return false;
     }
 
     m_stream = sc.stream();
     if (!m_stream) {
         std::cerr << "No stream after configure\n";
+        ResetOpenState();
         return false;
     }
 
     m_allocator = std::make_unique<libcamera::FrameBufferAllocator>(m_cam);
     if (m_allocator->allocate(m_stream) < 0) {
         std::cerr << "Failed to allocate buffers\n";
+        ResetOpenState();
         return false;
     }
 
     const auto &buffers = m_allocator->buffers(m_stream);
     if (buffers.empty()) {
         std::cerr << "No buffers allocated\n";
+        ResetOpenState();
         return false;
     }
 
@@ -122,6 +130,7 @@ bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex
             void *addr = MMapFD(fd, len, off);
             if (!addr) {
                 std::cerr << "mmap failed\n";
+                ResetOpenState();
                 return false;
             }
             planes.push_back({addr, len, off});
@@ -133,9 +142,11 @@ bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex
     for (auto &buf : buffers) {
         std::unique_ptr<libcamera::Request> req = m_cam->createRequest();
         if (!req) {
+            ResetOpenState();
             return false;
         }
         if (req->addBuffer(m_stream, buf.get()) < 0) {
+            ResetOpenState();
             return false;
         }
         m_requests.push_back(std::move(req));
@@ -161,12 +172,14 @@ bool LibcameraMonoCam::Start()
 {
     if (m_cam->start(&m_controls)) {
         std::cerr << "camera start failed\n";
+        ResetOpenState();
         return false;
     }
     for (auto &r : m_requests) {
         if (m_cam->queueRequest(r.get()) < 0) {
             m_streamFault.store(true, std::memory_order_relaxed);
             std::cerr << "[cam] initial queueRequest failed cam=" << m_camIndex << "\n";
+            ResetOpenState();
             return false;
         }
     }
@@ -436,6 +449,8 @@ bool LibcameraStereoOV9281_TsPair::Open(int w, int h, int fps, bool aeDisable, i
                                         bool requestY8, int64_t pairThreshNs, int64_t keepWindowNs, int maxPairQueue,
                                         bool r16Normalize, int leftCamIndex, int rightCamIndex)
 {
+    Close();
+    ResetPairingState();
     m_w = w;
     m_h = h;
     m_fps = fps;
@@ -447,12 +462,14 @@ bool LibcameraStereoOV9281_TsPair::Open(int w, int h, int fps, bool aeDisable, i
     m_cm = std::make_unique<libcamera::CameraManager>();
     if (m_cm->start()) {
         std::cerr << "CameraManager start failed\n";
+        Close();
         return false;
     }
 
     const auto &cams = m_cm->cameras();
     if (cams.size() < 2) {
         std::cerr << "Need 2 cameras, but found " << cams.size() << "\n";
+        Close();
         return false;
     }
 
@@ -463,10 +480,12 @@ bool LibcameraStereoOV9281_TsPair::Open(int w, int h, int fps, bool aeDisable, i
         for (int i = 0; i < camCount; ++i) {
             std::cerr << "[cam] available index=" << i << " id=" << cams[static_cast<size_t>(i)]->id() << "\n";
         }
+        Close();
         return false;
     }
     if (leftCamIndex == rightCamIndex) {
         std::cerr << "[cam] left and right camera index must differ, got " << leftCamIndex << "\n";
+        Close();
         return false;
     }
 
@@ -476,9 +495,11 @@ bool LibcameraStereoOV9281_TsPair::Open(int w, int h, int fps, bool aeDisable, i
     auto sink = [&](FrameItem &&fi) { PushFrame(std::move(fi)); };
 
     if (!m_left.Open(m_camL, 0, w, h, fps, aeDisable, exposureUs, gain, requestY8)) {
+        Close();
         return false;
     }
     if (!m_right.Open(m_camR, 1, w, h, fps, aeDisable, exposureUs, gain, requestY8)) {
+        Close();
         return false;
     }
 
@@ -488,9 +509,11 @@ bool LibcameraStereoOV9281_TsPair::Open(int w, int h, int fps, bool aeDisable, i
     m_right.SetSink(sink);
 
     if (!m_left.Start()) {
+        Close();
         return false;
     }
     if (!m_right.Start()) {
+        Close();
         return false;
     }
 
@@ -525,6 +548,7 @@ void LibcameraStereoOV9281_TsPair::Close()
         m_cm->stop();
     }
     m_cm.reset();
+    ResetPairingState();
 }
 
 bool LibcameraStereoOV9281_TsPair::GrabPair(FrameItem &L, FrameItem &R, int timeoutMs, bool preferLatest,
@@ -757,4 +781,27 @@ void LibcameraStereoOV9281_TsPair::OnFrameLocked(FrameItem &&fi)
     PurgeOldLocked();
     while (TryPairLocked()) {
     }
+}
+
+void LibcameraMonoCam::ResetOpenState()
+{
+    Close();
+}
+
+void LibcameraStereoOV9281_TsPair::ResetPairingState()
+{
+    std::lock_guard<std::mutex> lk(m_muPair);
+    m_qL.clear();
+    m_qR.clear();
+    m_paired.clear();
+    m_lastDtMs.store(0, std::memory_order_relaxed);
+    m_lastSeq.store(0, std::memory_order_relaxed);
+    m_droppedPaired.store(0, std::memory_order_relaxed);
+    m_lastRawSeq[0].store(0, std::memory_order_relaxed);
+    m_lastRawSeq[1].store(0, std::memory_order_relaxed);
+    m_rawFrameCount[0].store(0, std::memory_order_relaxed);
+    m_rawFrameCount[1].store(0, std::memory_order_relaxed);
+    m_lastRejectDtNs.store(0, std::memory_order_relaxed);
+    m_droppedUnpaired[0].store(0, std::memory_order_relaxed);
+    m_droppedUnpaired[1].store(0, std::memory_order_relaxed);
 }

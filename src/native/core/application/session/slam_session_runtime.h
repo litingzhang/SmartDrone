@@ -65,6 +65,11 @@ class SlamSessionRuntime {
     SlamFrameProcessor::State m_frameProcessorState;
     std::unique_ptr<SlamFrameProcessor::Context> m_frameProcessorContext;
     std::unique_ptr<SlamFrameProcessor> m_frameProcessor;
+    bool m_udpOpen{false};
+    bool m_cameraOpen{false};
+    bool m_slamStarted{false};
+
+    void CleanupAfterStartFailure();
 };
 
 } // namespace smartdrone::core::application

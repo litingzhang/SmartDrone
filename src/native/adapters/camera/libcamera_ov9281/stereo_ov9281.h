@@ -76,6 +76,7 @@ class LibcameraMonoCam {
     bool RequeueRequest(libcamera::Request *req);
     void OnRequestComplete(libcamera::Request *req);
     std::shared_ptr<FrameSlot> AcquireFrameSlot();
+    void ResetOpenState();
 
     std::shared_ptr<libcamera::Camera> m_cam;
     int m_camIndex{-1};
@@ -132,6 +133,7 @@ class LibcameraStereoOV9281_TsPair {
     size_t FindBestMatchIndex(const std::deque<FrameItem> &q, uint64_t targetTs) const;
     void PurgeOldLocked();
     void OnFrameLocked(FrameItem &&fi);
+    void ResetPairingState();
 
     int m_w{640};
     int m_h{400};

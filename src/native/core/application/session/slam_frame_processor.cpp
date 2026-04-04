@@ -93,10 +93,14 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const size_t pendingL = m_ctx.cameraProvider.PendingL();
     const size_t pendingR = m_ctx.cameraProvider.PendingR();
     const double pairTolMs = static_cast<double>(m_ctx.cameraProvider.PairTolNs()) * 1e-6;
-    const int64_t frameNs = m_ctx.monoMode ? static_cast<int64_t>(R.timestampNs) : stereoBatch.frameTimestampNs;
-    const double frameTime = static_cast<double>(frameNs) * 1e-9;
-    const double frameGapMs =
-        (m_state.lastPublishedFrameNs != 0) ? static_cast<double>(frameNs - m_state.lastPublishedFrameNs) * 1e-6 : 0.0;
+    const int64_t captureTimestampNs =
+        m_ctx.monoMode ? static_cast<int64_t>(R.timestampNs) : stereoBatch.captureTimestampNs;
+    const int64_t logicalFrameTimestampNs =
+        m_ctx.monoMode ? captureTimestampNs : stereoBatch.logicalFrameTimestampNs;
+    const double frameTime = static_cast<double>(captureTimestampNs) * 1e-9;
+    const double frameGapMs = (m_state.lastPublishedFrameNs != 0)
+                                  ? static_cast<double>(logicalFrameTimestampNs - m_state.lastPublishedFrameNs) * 1e-6
+                                  : 0.0;
     const double monoStepMs = static_cast<double>(stereoBatch.monotonicFrameStepNs) * 1e-6;
     double meanL = 0.0, stdL = 0.0, meanR = 0.0, stdR = 0.0;
     ComputeImageStats(L.gray, meanL, stdL);
@@ -108,7 +112,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const auto imuStartTp = std::chrono::steady_clock::now();
     if (m_ctx.useImu && m_state.lastFrameNs != 0) {
         const std::vector<smartdrone::core::ports::ImuReading> imuSamples =
-            m_ctx.imuProvider.PopWindow(m_state.lastFrameNs, frameNs);
+            m_ctx.imuProvider.PopWindow(m_state.lastFrameNs, captureTimestampNs);
         slamInput.imu = ToOrbImuPoints(imuSamples);
         ImuWindowValidation imuWindow{};
         const double prevFrameTime = static_cast<double>(m_state.lastFrameNs) * 1e-9;
@@ -123,18 +127,20 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         }
     }
     const auto imuEndTp = std::chrono::steady_clock::now();
-    m_state.lastFrameNs = frameNs;
+    m_state.lastFrameNs = captureTimestampNs;
 
     PrepareStereoPairForSlam(stereoBatch.stereo, meanL, stdL, meanR, stdR, m_ctx.aliases.slamLowLightEnhance,
                              slamInput.stereo);
     slamInput.frameId = stereoBatch.frameId;
-    slamInput.captureTimestampNs = frameNs;
+    slamInput.captureTimestampNs = captureTimestampNs;
     slamInput.frameTimeSec = frameTime;
     const bool debugRightOnlyFeatures = m_ctx.aliases.debugRightOnlyFeatures;
     const bool extractFeatures =
         sendFeature || m_state.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto;
     const bool updatePointCloud =
-        !debugRightOnlyFeatures && sendMap && (frameNs - m_state.lastPointCloudUpdateNs) >= kPointCloudUpdateIntervalNs;
+        !debugRightOnlyFeatures &&
+        sendMap &&
+        (captureTimestampNs - m_state.lastPointCloudUpdateNs) >= kPointCloudUpdateIntervalNs;
 
     const auto slamStartTp = std::chrono::steady_clock::now();
     const uint64_t slamInputTimestampNs = static_cast<uint64_t>(
@@ -159,7 +165,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     if (m_ctx.aliases.udpEnable && (sendImage || sendFeature || sendMap)) {
         if (updatePointCloud) {
             m_ctx.livePose.UpdatePointCloud(slamOutput.pointCloudXyz);
-            m_state.lastPointCloudUpdateNs = frameNs;
+            m_state.lastPointCloudUpdateNs = captureTimestampNs;
         }
         pointCount = slamOutput.pointCloudXyz.size() / 3;
     }
@@ -203,7 +209,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const auto postStartTp = std::chrono::steady_clock::now();
     const auto poseResult = m_ctx.posePostprocessor.ProcessPose(
         twcRaw, m_ctx.useImu, trackingUsable, state, mapId, m_ctx.stereoBodyExtrinsics.loaded,
-        m_ctx.stereoBodyExtrinsics.Tbc, m_state.stereoReferencePoseSet, m_state.stereoReferencePose, frameNs,
+        m_ctx.stereoBodyExtrinsics.Tbc, m_state.stereoReferencePoseSet, m_state.stereoReferencePose, captureTimestampNs,
         m_ctx.mav);
     const uint8_t effectiveResetCounter =
         ComposeResetCounter(m_state.sessionResetCounterBase, poseResult.resetCounter);
@@ -242,7 +248,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     }
 
     ++m_state.frameIndex;
-    m_state.lastPublishedFrameNs = frameNs;
+    m_state.lastPublishedFrameNs = logicalFrameTimestampNs;
     char dfxLine[512];
     std::snprintf(
         dfxLine, sizeof(dfxLine),

@@ -445,19 +445,16 @@ void Px4MavlinkGateway::SendOdometry(uint64_t odomFrameId, const Pose &poseNed, 
     diagnostics.tSlamInNs = timing.tSlamInNs;
     diagnostics.tSlamOutNs = timing.tSlamOutNs;
     diagnostics.tMavTxNs = ClockMonotonicNs();
-    if (diagnostics.tCamNs == 0) {
-        diagnostics.tCamNs = diagnostics.tMavTxNs;
+    if (!haveTiming || diagnostics.tCamNs == 0) {
+        printf("[odom_warn] frame=%llu missing capture timestamp; skipping odometry publish\n",
+               static_cast<unsigned long long>(odomFrameId));
+        return;
     }
     diagnostics.estimatedPx4TimeNs = EstimatePx4TimeFromCompanionMonotonicNs(
         diagnostics.tCamNs, &diagnostics.timesyncValid, &diagnostics.timesyncOffsetNs, &diagnostics.timesyncRttUs);
     MarkFrameMavTx(odomFrameId, diagnostics.tMavTxNs);
     m_lastOdomTimesyncDiagnostics = diagnostics;
     const uint64_t companionCaptureTimeUs = diagnostics.tCamNs / 1000ULL;
-
-    if (!haveTiming) {
-        printf("[odom_warn] frame=%llu missing frame timing, falling back to mav_tx monotonic timestamp\n",
-               static_cast<unsigned long long>(odomFrameId));
-    }
     if (diagnostics.estimatedPx4TimeNs == 0) {
         printf("[odom_warn] frame=%llu px4 timestamp mapped to zero cam_ns=%llu sync=%d offset_ns=%lld\n",
                static_cast<unsigned long long>(odomFrameId), static_cast<unsigned long long>(diagnostics.tCamNs),
@@ -494,16 +491,20 @@ void Px4MavlinkGateway::SendOdometry(uint64_t odomFrameId, const Pose &poseNed, 
                                       ? (static_cast<double>(diagnostics.tMavTxNs - diagnostics.tCamNs) * 1e-6)
                                       : -1.0;
     const double px4OffsetMs = static_cast<double>(diagnostics.timesyncOffsetNs) * 1e-6;
-    printf("[odom_ts] frame=%llu timing=%d cam_ns=%llu companion_us=%llu cb_ns=%llu slam_in_ns=%llu px4_est_ns=%llu "
-           "slam_out_ns=%llu mav_tx_ns=%llu sync=%d offset_ms=%.3f rtt_ms=%.3f queue_latency_ms=%.3f "
+    printf("[odom_ts] frame=%llu timing=%d reset=%u quality=%d cam_ns=%llu companion_us=%llu cb_ns=%llu "
+           "slam_in_ns=%llu px4_est_ns=%llu slam_out_ns=%llu mav_tx_ns=%llu "
+           "pos=[%.3f, %.3f, %.3f] q=[%.4f, %.4f, %.4f, %.4f] vel=[%.3f, %.3f, %.3f] "
+           "sync=%d offset_ms=%.3f rtt_ms=%.3f queue_latency_ms=%.3f "
            "slam_latency_ms=%.3f send_latency_ms=%.3f total_latency_ms=%.3f\n",
            static_cast<unsigned long long>(diagnostics.frameId), haveTiming ? 1 : 0,
+           static_cast<unsigned>(resetCounter), static_cast<int>(quality),
            static_cast<unsigned long long>(diagnostics.tCamNs),
            static_cast<unsigned long long>(companionCaptureTimeUs), static_cast<unsigned long long>(diagnostics.tCbNs),
            static_cast<unsigned long long>(diagnostics.tSlamInNs),
            static_cast<unsigned long long>(diagnostics.estimatedPx4TimeNs),
            static_cast<unsigned long long>(diagnostics.tSlamOutNs),
-           static_cast<unsigned long long>(diagnostics.tMavTxNs), diagnostics.timesyncValid ? 1 : 0, px4OffsetMs,
+           static_cast<unsigned long long>(diagnostics.tMavTxNs), poseNed.x, poseNed.y, poseNed.z, poseNed.qw,
+           poseNed.qx, poseNed.qy, poseNed.qz, vx, vy, vz, diagnostics.timesyncValid ? 1 : 0, px4OffsetMs,
            static_cast<double>(diagnostics.timesyncRttUs) * 1e-3, queueLatencyMs, slamLatencyMs, sendLatencyMs,
            totalLatencyMs);
 }
