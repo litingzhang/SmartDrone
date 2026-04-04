@@ -11,6 +11,20 @@
 
 namespace smartdrone::core::application {
 
+namespace {
+
+uint8_t ComposeResetCounter(uint8_t sessionBase, uint8_t continuityCounter)
+{
+    return static_cast<uint8_t>(sessionBase + continuityCounter);
+}
+
+uint16_t ComposeResetMapCount(uint16_t sessionBase, uint16_t continuityResetMapCount)
+{
+    return static_cast<uint16_t>(sessionBase + continuityResetMapCount);
+}
+
+} // namespace
+
 SlamFrameProcessor::SlamFrameProcessor(Context &context, State &state) : m_ctx(context), m_state(state) {}
 
 SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessionOk)
@@ -191,11 +205,15 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         twcRaw, m_ctx.useImu, trackingUsable, state, mapId, m_ctx.stereoBodyExtrinsics.loaded,
         m_ctx.stereoBodyExtrinsics.Tbc, m_state.stereoReferencePoseSet, m_state.stereoReferencePose, frameNs,
         m_ctx.mav);
+    const uint8_t effectiveResetCounter =
+        ComposeResetCounter(m_state.sessionResetCounterBase, poseResult.resetCounter);
+    const uint16_t effectiveResetMapCount =
+        ComposeResetMapCount(m_state.sessionResetMapCountBase, poseResult.resetMapCount);
     const auto postEndTp = std::chrono::steady_clock::now();
 
     const auto livePoseStartTp = std::chrono::steady_clock::now();
-    m_ctx.livePose.UpdatePose(RUNTIME_MODE_SLAM, static_cast<uint8_t>(state), poseResult.resetCounter,
-                              poseResult.resetMapCount, poseResult.alignedPose,
+    m_ctx.livePose.UpdatePose(RUNTIME_MODE_SLAM, static_cast<uint8_t>(state), effectiveResetCounter,
+                              effectiveResetMapCount, poseResult.alignedPose,
                               poseResult.quality == smartdrone::core::ports::PoseQuality::Good ? OdomQualityMode::GOOD
                               : poseResult.quality == smartdrone::core::ports::PoseQuality::Weak
                                   ? OdomQualityMode::WEAK
@@ -204,7 +222,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
 
     const auto publishStartTp = std::chrono::steady_clock::now();
     m_ctx.posePublisher.PublishPose(slamOutput.frameId, poseResult.poseEstimate, poseResult.velocityEstimate,
-                                    poseResult.resetCounter, poseResult.resetMapCount, state, poseResult.quality);
+                                    effectiveResetCounter, effectiveResetMapCount, state, poseResult.quality);
     const auto publishEndTp = std::chrono::steady_clock::now();
 
     if (m_state.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
@@ -229,6 +247,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     std::snprintf(
         dfxLine, sizeof(dfxLine),
         "[slam_dfx] frame=%llu frame_id=%llu seqL=%u seqR=%u state=%d pose_valid=%d quality=%d "
+        "reset=%u reset_map=%u "
         "imu_samples=%zu featL=%zu featR=%zu points=%zu "
         "debug_right_only=%d "
         "pair rawSeqL=%u rawSeqR=%u rawCountL=%llu rawCountR=%llu pair_dt=%.3f reject_dt=%.3f tol=%.3f pendL=%zu "
@@ -238,8 +257,10 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         "live=%.3f publish=%.3f total=%.3f",
         static_cast<unsigned long long>(m_state.frameIndex), static_cast<unsigned long long>(slamOutput.frameId),
         static_cast<unsigned>(L.sequence), static_cast<unsigned>(R.sequence), state,
-        poseResult.poseEstimate.valid ? 1 : 0, static_cast<int>(poseResult.quality), slamInput.imu.size(),
-        slamOutput.leftFeatures.size(), slamOutput.rightFeatures.size(), pointCount, debugRightOnlyFeatures ? 1 : 0,
+        poseResult.poseEstimate.valid ? 1 : 0, static_cast<int>(poseResult.quality),
+        static_cast<unsigned>(effectiveResetCounter), static_cast<unsigned>(effectiveResetMapCount),
+        slamInput.imu.size(), slamOutput.leftFeatures.size(), slamOutput.rightFeatures.size(), pointCount,
+        debugRightOnlyFeatures ? 1 : 0,
         static_cast<unsigned>(rawSeqL), static_cast<unsigned>(rawSeqR), static_cast<unsigned long long>(rawCountL),
         static_cast<unsigned long long>(rawCountR), static_cast<double>(pairDtMs), rejectDtMs, pairTolMs, pendingL,
         pendingR, static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),

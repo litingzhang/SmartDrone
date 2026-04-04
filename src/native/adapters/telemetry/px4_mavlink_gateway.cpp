@@ -65,7 +65,7 @@ void Px4MavlinkGateway::StartRx()
         m_pendingTimesyncSentNs = 0;
         m_pendingTimesyncTargetSystem = 0;
         m_pendingTimesyncTargetComponent = 0;
-        m_timesyncEstimatedOffsetNs = 0;
+        m_timesyncOffsetEstimateNs = 0;
         m_timesyncLastRttUs = 0;
         m_timesyncSampleCount = 0;
         m_timesyncInboundRequestCount = 0;
@@ -362,14 +362,15 @@ bool Px4MavlinkGateway::SendLand(int ackTimeoutMs, uint8_t targetSystem, uint8_t
 bool Px4MavlinkGateway::GetTimesyncStatus(int64_t &offsetNs, uint32_t &rttUs, uint32_t &sampleCount) const
 {
     std::lock_guard<std::mutex> lk(m_timesyncMtx);
-    offsetNs = m_timesyncEstimatedOffsetNs;
+    offsetNs = m_timesyncOffsetEstimateNs;
     rttUs = m_timesyncLastRttUs;
     sampleCount = m_timesyncSampleCount;
     return m_timesyncSampleCount != 0;
 }
 
-uint64_t Px4MavlinkGateway::MapMonotonicNsToPx4Ns(uint64_t monoNs, bool *outTimesyncValid, int64_t *outOffsetNs,
-                                                  uint32_t *outRttUs, uint32_t *outSampleCount) const
+uint64_t Px4MavlinkGateway::EstimatePx4TimeFromCompanionMonotonicNs(uint64_t companionMonoNs, bool *outTimesyncValid,
+                                                                    int64_t *outOffsetNs, uint32_t *outRttUs,
+                                                                    uint32_t *outSampleCount) const
 {
     int64_t offsetNs = 0;
     uint32_t rttUs = 0;
@@ -384,9 +385,9 @@ uint64_t Px4MavlinkGateway::MapMonotonicNsToPx4Ns(uint64_t monoNs, bool *outTime
     if (outSampleCount)
         *outSampleCount = sampleCount;
     if (!valid) {
-        return monoNs;
+        return companionMonoNs;
     }
-    const int64_t px4NsSigned = static_cast<int64_t>(monoNs) - offsetNs;
+    const int64_t px4NsSigned = static_cast<int64_t>(companionMonoNs) - offsetNs;
     return px4NsSigned > 0 ? static_cast<uint64_t>(px4NsSigned) : 0ULL;
 }
 
@@ -437,47 +438,74 @@ void Px4MavlinkGateway::SendOdometry(uint64_t odomFrameId, const Pose &poseNed, 
 
     smartdrone::core::application::FrameTimingRecord timing{};
     const bool haveTiming = LookupFrameTiming(odomFrameId, timing);
-    OdomTimestampDebug debug{};
-    debug.frameId = odomFrameId;
-    debug.tCamNs = timing.tCamNs;
-    debug.tCbNs = timing.tCbNs;
-    debug.tSlamInNs = timing.tSlamInNs;
-    debug.tSlamOutNs = timing.tSlamOutNs;
-    debug.tMavTxNs = ClockMonotonicNs();
-    if (debug.tCamNs == 0) {
-        debug.tCamNs = debug.tMavTxNs;
+    OdomTimesyncDiagnostics diagnostics{};
+    diagnostics.frameId = odomFrameId;
+    diagnostics.tCamNs = timing.tCamNs;
+    diagnostics.tCbNs = timing.tCbNs;
+    diagnostics.tSlamInNs = timing.tSlamInNs;
+    diagnostics.tSlamOutNs = timing.tSlamOutNs;
+    diagnostics.tMavTxNs = ClockMonotonicNs();
+    if (diagnostics.tCamNs == 0) {
+        diagnostics.tCamNs = diagnostics.tMavTxNs;
     }
-    debug.tPx4Ns =
-        MapMonotonicNsToPx4Ns(debug.tCamNs, &debug.timesyncValid, &debug.timesyncOffsetNs, &debug.timesyncRttUs);
-    MarkFrameMavTx(odomFrameId, debug.tMavTxNs);
-    m_lastOdomTimestampDebug = debug;
+    diagnostics.estimatedPx4TimeNs = EstimatePx4TimeFromCompanionMonotonicNs(
+        diagnostics.tCamNs, &diagnostics.timesyncValid, &diagnostics.timesyncOffsetNs, &diagnostics.timesyncRttUs);
+    MarkFrameMavTx(odomFrameId, diagnostics.tMavTxNs);
+    m_lastOdomTimesyncDiagnostics = diagnostics;
+    const uint64_t companionCaptureTimeUs = diagnostics.tCamNs / 1000ULL;
 
-    mavlink_msg_odometry_pack(m_sysid, m_compid, &msg, debug.tPx4Ns / 1000ULL, mavFrameId, childFrameId, poseNed.x,
+    if (!haveTiming) {
+        printf("[odom_warn] frame=%llu missing frame timing, falling back to mav_tx monotonic timestamp\n",
+               static_cast<unsigned long long>(odomFrameId));
+    }
+    if (diagnostics.estimatedPx4TimeNs == 0) {
+        printf("[odom_warn] frame=%llu px4 timestamp mapped to zero cam_ns=%llu sync=%d offset_ns=%lld\n",
+               static_cast<unsigned long long>(odomFrameId), static_cast<unsigned long long>(diagnostics.tCamNs),
+               diagnostics.timesyncValid ? 1 : 0, static_cast<long long>(diagnostics.timesyncOffsetNs));
+    }
+    if (m_lastEstimatedPx4OdomTimeNs != 0 && diagnostics.estimatedPx4TimeNs <= m_lastEstimatedPx4OdomTimeNs) {
+        printf("[odom_warn] frame=%llu non-monotonic px4 timestamp prev_frame=%llu prev_px4_ns=%llu px4_ns=%llu "
+               "cam_ns=%llu sync=%d offset_ms=%.3f\n",
+               static_cast<unsigned long long>(odomFrameId), static_cast<unsigned long long>(m_lastSentOdomFrameId),
+               static_cast<unsigned long long>(m_lastEstimatedPx4OdomTimeNs),
+               static_cast<unsigned long long>(diagnostics.estimatedPx4TimeNs),
+               static_cast<unsigned long long>(diagnostics.tCamNs), diagnostics.timesyncValid ? 1 : 0,
+               static_cast<double>(diagnostics.timesyncOffsetNs) * 1e-6);
+    }
+    m_lastSentOdomFrameId = odomFrameId;
+    m_lastEstimatedPx4OdomTimeNs = diagnostics.estimatedPx4TimeNs;
+
+    mavlink_msg_odometry_pack(m_sysid, m_compid, &msg, companionCaptureTimeUs, mavFrameId, childFrameId, poseNed.x,
                               poseNed.y, poseNed.z, q, vx, vy, vz, rollspeed, pitchspeed, yawspeed, poseCov, velCov,
                               resetCounter, estimatorType, quality);
 
     WriteMessage(msg);
 
-    const double queueLatencyMs = (debug.tSlamInNs >= debug.tCbNs && debug.tCbNs != 0)
-                                      ? (static_cast<double>(debug.tSlamInNs - debug.tCbNs) * 1e-6)
+    const double queueLatencyMs = (diagnostics.tSlamInNs >= diagnostics.tCbNs && diagnostics.tCbNs != 0)
+                                      ? (static_cast<double>(diagnostics.tSlamInNs - diagnostics.tCbNs) * 1e-6)
                                       : -1.0;
-    const double slamLatencyMs =
-        (debug.tSlamOutNs >= debug.tCamNs) ? (static_cast<double>(debug.tSlamOutNs - debug.tCamNs) * 1e-6) : -1.0;
-    const double sendLatencyMs = (debug.tMavTxNs >= debug.tSlamOutNs && debug.tSlamOutNs != 0)
-                                     ? (static_cast<double>(debug.tMavTxNs - debug.tSlamOutNs) * 1e-6)
+    const double slamLatencyMs = (diagnostics.tSlamOutNs >= diagnostics.tCamNs)
+                                     ? (static_cast<double>(diagnostics.tSlamOutNs - diagnostics.tCamNs) * 1e-6)
                                      : -1.0;
-    const double totalLatencyMs =
-        (debug.tMavTxNs >= debug.tCamNs) ? (static_cast<double>(debug.tMavTxNs - debug.tCamNs) * 1e-6) : -1.0;
-    const double px4OffsetMs = static_cast<double>(debug.timesyncOffsetNs) * 1e-6;
-    printf("[odom_ts] frame=%llu timing=%d cam_ns=%llu cb_ns=%llu slam_in_ns=%llu px4_ns=%llu slam_out_ns=%llu "
-           "mav_tx_ns=%llu sync=%d offset_ms=%.3f rtt_ms=%.3f queue_latency_ms=%.3f slam_latency_ms=%.3f "
-           "send_latency_ms=%.3f total_latency_ms=%.3f\n",
-           static_cast<unsigned long long>(debug.frameId), haveTiming ? 1 : 0,
-           static_cast<unsigned long long>(debug.tCamNs), static_cast<unsigned long long>(debug.tCbNs),
-           static_cast<unsigned long long>(debug.tSlamInNs), static_cast<unsigned long long>(debug.tPx4Ns),
-           static_cast<unsigned long long>(debug.tSlamOutNs), static_cast<unsigned long long>(debug.tMavTxNs),
-           debug.timesyncValid ? 1 : 0, px4OffsetMs, static_cast<double>(debug.timesyncRttUs) * 1e-3, queueLatencyMs,
-           slamLatencyMs, sendLatencyMs, totalLatencyMs);
+    const double sendLatencyMs = (diagnostics.tMavTxNs >= diagnostics.tSlamOutNs && diagnostics.tSlamOutNs != 0)
+                                     ? (static_cast<double>(diagnostics.tMavTxNs - diagnostics.tSlamOutNs) * 1e-6)
+                                     : -1.0;
+    const double totalLatencyMs = (diagnostics.tMavTxNs >= diagnostics.tCamNs)
+                                      ? (static_cast<double>(diagnostics.tMavTxNs - diagnostics.tCamNs) * 1e-6)
+                                      : -1.0;
+    const double px4OffsetMs = static_cast<double>(diagnostics.timesyncOffsetNs) * 1e-6;
+    printf("[odom_ts] frame=%llu timing=%d cam_ns=%llu companion_us=%llu cb_ns=%llu slam_in_ns=%llu px4_est_ns=%llu "
+           "slam_out_ns=%llu mav_tx_ns=%llu sync=%d offset_ms=%.3f rtt_ms=%.3f queue_latency_ms=%.3f "
+           "slam_latency_ms=%.3f send_latency_ms=%.3f total_latency_ms=%.3f\n",
+           static_cast<unsigned long long>(diagnostics.frameId), haveTiming ? 1 : 0,
+           static_cast<unsigned long long>(diagnostics.tCamNs),
+           static_cast<unsigned long long>(companionCaptureTimeUs), static_cast<unsigned long long>(diagnostics.tCbNs),
+           static_cast<unsigned long long>(diagnostics.tSlamInNs),
+           static_cast<unsigned long long>(diagnostics.estimatedPx4TimeNs),
+           static_cast<unsigned long long>(diagnostics.tSlamOutNs),
+           static_cast<unsigned long long>(diagnostics.tMavTxNs), diagnostics.timesyncValid ? 1 : 0, px4OffsetMs,
+           static_cast<double>(diagnostics.timesyncRttUs) * 1e-3, queueLatencyMs, slamLatencyMs, sendLatencyMs,
+           totalLatencyMs);
 }
 
 Px4MavlinkGateway::Pose Px4MavlinkGateway::EnuToNed(const Pose &pEnu)
@@ -530,7 +558,7 @@ void Px4MavlinkGateway::NormalizeQuat(float &w, float &x, float &y, float &z)
 
 void Px4MavlinkGateway::ResetTimesyncEstimateLocked()
 {
-    m_timesyncEstimatedOffsetNs = 0;
+    m_timesyncOffsetEstimateNs = 0;
     m_timesyncLastRttUs = 0;
     m_timesyncSampleCount = 0;
 }
@@ -736,11 +764,11 @@ void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t &msg)
             const bool haveEstimate = m_timesyncSampleCount != 0;
             if (rttUs > kTimesyncMaxAcceptableRttUs) {
                 rejectedByRtt = true;
-                filteredOffsetNs = m_timesyncEstimatedOffsetNs;
+                filteredOffsetNs = m_timesyncOffsetEstimateNs;
                 sampleCount = m_timesyncSampleCount;
             } else {
                 if (haveEstimate) {
-                    jumpNs = observedOffsetNs - m_timesyncEstimatedOffsetNs;
+                    jumpNs = observedOffsetNs - m_timesyncOffsetEstimateNs;
                     const int64_t absJumpNs = jumpNs < 0 ? -jumpNs : jumpNs;
                     if (absJumpNs > kTimesyncJumpResetThresholdNs) {
                         ResetTimesyncEstimateLocked();
@@ -751,13 +779,13 @@ void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t &msg)
                 }
 
                 if (m_timesyncSampleCount == 0) {
-                    m_timesyncEstimatedOffsetNs = observedOffsetNs;
+                    m_timesyncOffsetEstimateNs = observedOffsetNs;
                 } else {
-                    m_timesyncEstimatedOffsetNs = (m_timesyncEstimatedOffsetNs * 7 + observedOffsetNs) / 8;
+                    m_timesyncOffsetEstimateNs = (m_timesyncOffsetEstimateNs * 7 + observedOffsetNs) / 8;
                 }
                 ++m_timesyncSampleCount;
                 m_timesyncLastRttUs = rttUs;
-                filteredOffsetNs = m_timesyncEstimatedOffsetNs;
+                filteredOffsetNs = m_timesyncOffsetEstimateNs;
                 sampleCount = m_timesyncSampleCount;
             }
             ++m_timesyncInboundResponseCount;

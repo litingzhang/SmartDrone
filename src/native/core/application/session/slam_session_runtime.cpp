@@ -13,6 +13,9 @@ namespace smartdrone::core::application {
 
 namespace {
 
+std::atomic<uint32_t> g_slamSessionResetCounter{0};
+std::atomic<uint32_t> g_slamSessionResetMapCount{0};
+
 ORB_SLAM3::System::eSensor ResolveOrbSensor(const MainRuntimeAliases &aliases)
 {
     const bool monoMode = aliases.sensorMode == SensorMode::Mono || aliases.sensorMode == SensorMode::MonoImu;
@@ -40,8 +43,12 @@ SlamFrameProcessor::State MakeInitialFrameProcessorState(const MainRuntimeAliase
     const auto effectiveSlamMode = requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto
                                        ? smartdrone::core::domain::SlamOperationMode::Mapping
                                        : requestedSlamMode;
+    const uint32_t sessionResetCounter = g_slamSessionResetCounter.fetch_add(1, std::memory_order_relaxed) + 1;
+    const uint32_t sessionResetMapCount = g_slamSessionResetMapCount.fetch_add(1, std::memory_order_relaxed) + 1;
     SlamFrameProcessor::State state;
     state.imuWarmupSamples = static_cast<uint64_t>(std::max(20, aliases.imuHz / 2));
+    state.sessionResetCounterBase = static_cast<uint8_t>(sessionResetCounter & 0xFFu);
+    state.sessionResetMapCountBase = static_cast<uint16_t>(sessionResetMapCount & 0xFFFFu);
     state.requestedSlamMode = requestedSlamMode;
     state.effectiveSlamMode = effectiveSlamMode;
     return state;

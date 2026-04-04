@@ -57,6 +57,8 @@ class SlamFrameProcessor {
         uint64_t frameIndex{0};
         int64_t lastPublishedFrameNs{0};
         uint64_t rateLimitedDrops{0};
+        uint8_t sessionResetCounterBase{0};
+        uint16_t sessionResetMapCountBase{0};
         smartdrone::core::domain::SlamOperationMode requestedSlamMode{
             smartdrone::core::domain::SlamOperationMode::Mapping};
         smartdrone::core::domain::SlamOperationMode effectiveSlamMode{

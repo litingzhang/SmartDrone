@@ -70,12 +70,12 @@ class Px4MavlinkGateway {
         float yawspeed = NAN;
     };
 
-    struct OdomTimestampDebug {
+    struct OdomTimesyncDiagnostics {
         uint64_t frameId{0};
         uint64_t tCamNs{0};
         uint64_t tCbNs{0};
         uint64_t tSlamInNs{0};
-        uint64_t tPx4Ns{0};
+        uint64_t estimatedPx4TimeNs{0};
         uint64_t tSlamOutNs{0};
         uint64_t tMavTxNs{0};
         int64_t timesyncOffsetNs{0};
@@ -126,8 +126,9 @@ class Px4MavlinkGateway {
                            uint8_t targetSystem = 0);
     bool SendLand(int ackTimeoutMs = 800, uint8_t targetSystem = 1, uint8_t targetComponent = 1);
     bool GetTimesyncStatus(int64_t &offsetNs, uint32_t &rttUs, uint32_t &sampleCount) const;
-    uint64_t MapMonotonicNsToPx4Ns(uint64_t monoNs, bool *outTimesyncValid = nullptr, int64_t *outOffsetNs = nullptr,
-                                   uint32_t *outRttUs = nullptr, uint32_t *outSampleCount = nullptr) const;
+    uint64_t EstimatePx4TimeFromCompanionMonotonicNs(uint64_t companionMonoNs, bool *outTimesyncValid = nullptr,
+                                                     int64_t *outOffsetNs = nullptr, uint32_t *outRttUs = nullptr,
+                                                     uint32_t *outSampleCount = nullptr) const;
     void SendOdometry(uint64_t odomFrameId, const Pose &poseNed, const LinearVelocityNed &velNed = LinearVelocityNed{},
                       uint8_t mavFrameId = MAV_FRAME_LOCAL_NED, uint8_t childFrameId = MAV_FRAME_BODY_FRD,
                       uint8_t resetCounter = 0, OdomQualityMode mode = OdomQualityMode::GOOD);
@@ -198,13 +199,15 @@ class Px4MavlinkGateway {
     uint64_t m_pendingTimesyncSentNs{0};
     uint8_t m_pendingTimesyncTargetSystem{0};
     uint8_t m_pendingTimesyncTargetComponent{0};
-    int64_t m_timesyncEstimatedOffsetNs{0};
+    int64_t m_timesyncOffsetEstimateNs{0};
     uint32_t m_timesyncLastRttUs{0};
     uint32_t m_timesyncSampleCount{0};
     uint32_t m_timesyncInboundRequestCount{0};
     uint32_t m_timesyncInboundResponseCount{0};
     uint64_t m_lastTimesyncActivityUs{0};
     uint64_t m_lastTimesyncLogUs{0};
-    OdomTimestampDebug m_lastOdomTimestampDebug{};
+    OdomTimesyncDiagnostics m_lastOdomTimesyncDiagnostics{};
+    uint64_t m_lastSentOdomFrameId{0};
+    uint64_t m_lastEstimatedPx4OdomTimeNs{0};
     smartdrone::core::application::FrameTimingTracker *m_frameTimingTracker{nullptr};
 };
