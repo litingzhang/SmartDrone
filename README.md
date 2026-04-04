@@ -187,20 +187,20 @@ python3 make_rosbag.py
 
 By default it reads:
 
-- `/data/calib_A/cam0`, `/data/calib_A/cam1`, `/data/calib_A/imu.csv`
-- `/data/calib_B/cam0`, `/data/calib_B/cam1`, `/data/calib_B/imu.csv`
+- `/data/calib_data_0/cam0`, `/data/calib_data_0/cam1`, `/data/calib_data_0/imu.csv`
+- `/data/calib_data_1/cam0`, `/data/calib_data_1/cam1`, `/data/calib_data_1/imu.csv`
 
 And writes:
 
-- `/data/calib_A.bag`
-- `/data/calib_B.bag`
+- `/data/calib_data_0.bag`
+- `/data/calib_data_1.bag`
 
 The bag generator also:
 
 - removes trailing invalid camera images automatically
 - trims trailing IMU samples after the last valid camera frame
 
-Then run stereo camera calibration on `calib_A.bag`:
+Then run stereo camera calibration on `calib_data_0.bag`:
 
 ```bash
 rosrun kalibr kalibr_calibrate_cameras \
@@ -213,7 +213,7 @@ rosrun kalibr kalibr_calibrate_cameras \
 
 ### 3. Generate Stereo-IMU Calibration Parameters
 
-Then run stereo-IMU calibration on `calib_B.bag`:
+Then run stereo-IMU calibration on `calib_data_1.bag`:
 
 ```bash
 rosrun kalibr kalibr_calibrate_imu_camera \
