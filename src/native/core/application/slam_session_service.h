@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <vector>
@@ -10,6 +11,9 @@
 #include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "core/application/live_pose_state.h"
 #include "core/application/runtime_app_types.h"
+#include "core/ports/camera_provider.h"
+#include "core/ports/imu_provider.h"
+#include "core/ports/pose_publisher.h"
 
 namespace smartdrone::core::application {
 

@@ -1,6 +1,7 @@
 #include "core/application/calib_session_service.h"
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstdio>
 #include <iostream>
 #include <thread>
@@ -140,7 +141,7 @@ bool RunCalibSession(
             }
             continue;
         }
-        const int64_t absDtLr = Abs64(static_cast<int64_t>(L.tsNs) - static_cast<int64_t>(R.tsNs));
+        const int64_t absDtLr = std::llabs(static_cast<int64_t>(L.tsNs) - static_cast<int64_t>(R.tsNs));
         if (absDtLr > maxSaveDtNs) {
             static int droppedWide = 0;
             ++droppedWide;

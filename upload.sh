@@ -39,7 +39,7 @@ TARGET_HOST="${TARGET_HOST:-ltz@192.168.0.105}"
 REMOTE_DIR="${REMOTE_DIR:-/home/ltz}"
 REMOTE_SERVICE="${REMOTE_SERVICE:-smart_drone}"
 
-SMART_DRONE_BIN="$SCRIPT_DIR/build/cmake/smart_drone"
+SMART_DRONE_BIN="$SCRIPT_DIR/build/cmake/src/native/smart_drone"
 ORB_SO="$SCRIPT_DIR/ORB_SLAM3/lib/libORB_SLAM3.so"
 DBOW2_SO="$SCRIPT_DIR/ORB_SLAM3/Thirdparty/DBoW2/lib/libDBoW2.so"
 G2O_SO="$SCRIPT_DIR/ORB_SLAM3/Thirdparty/g2o/lib/libg2o.so"
