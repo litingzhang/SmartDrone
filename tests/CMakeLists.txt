@@ -91,4 +91,29 @@ if(ENABLE_OFFLINE_REPLAY)
     ${OpenCV_LIBS}
     Threads::Threads
   )
+
+  set(OFFLINE_REPLAY_STEREO_ONLY_SUMMARY "${CMAKE_CURRENT_BINARY_DIR}/offline_replay_stereo_only_summary.json")
+  set(OFFLINE_REPLAY_STEREO_ONLY_CSV "${CMAKE_CURRENT_BINARY_DIR}/offline_replay_stereo_only_pose.csv")
+
+  add_test(
+    NAME OfflineReplayStereoOnlySummary
+    COMMAND smart_drone_offline_replay
+            --dataset "${CMAKE_CURRENT_SOURCE_DIR}/data"
+            --stereo-only
+            --out "${OFFLINE_REPLAY_STEREO_ONLY_CSV}"
+            --summary-json "${OFFLINE_REPLAY_STEREO_ONLY_SUMMARY}"
+  )
+  set_tests_properties(OfflineReplayStereoOnlySummary PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
+
+  add_test(
+    NAME OfflineReplayStereoOnlyBaseline
+    COMMAND "${CMAKE_COMMAND}"
+            -DSUMMARY_JSON=${OFFLINE_REPLAY_STEREO_ONLY_SUMMARY}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/validate_offline_replay_summary.cmake"
+  )
+  set_tests_properties(OfflineReplayStereoOnlyBaseline PROPERTIES
+    DEPENDS OfflineReplayStereoOnlySummary
+  )
 endif()

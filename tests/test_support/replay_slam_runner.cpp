@@ -66,7 +66,9 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
              output.pose, imuWindow.size()});
     }
 
-    m_slamEngine.Stop();
+    if (m_cfg.shutdownEngineOnFinish) {
+        m_slamEngine.Stop();
+    }
     if (m_cfg.useImu) {
         m_imu.Stop();
     }

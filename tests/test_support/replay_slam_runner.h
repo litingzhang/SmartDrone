@@ -20,6 +20,7 @@ struct ReplaySlamRunnerConfig {
     int timeoutMs{1000};
     bool extractFeatures{false};
     bool extractPointCloud{false};
+    bool shutdownEngineOnFinish{true};
 };
 
 struct ReplayPoseSample {
