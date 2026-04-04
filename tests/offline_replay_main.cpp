@@ -18,7 +18,7 @@ namespace {
 struct OfflineReplayOptions {
     fs::path datasetRoot{fs::path(TESTS_SOURCE_DIR) / "data"};
     fs::path outputCsv{"build/offline_replay_pose.csv"};
-    std::string vocab{"ORBvoc.txt"};
+    std::string vocab{"ORB_SLAM3/Vocabulary/ORBvoc.txt"};
     std::string settings{"config/stereo.yaml"};
     SensorMode sensorMode{SensorMode::StereoImu};
     smartdrone::core::domain::SlamOperationMode slamMode{smartdrone::core::domain::SlamOperationMode::Mapping};

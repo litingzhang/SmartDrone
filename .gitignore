@@ -4,3 +4,4 @@ temp
 *gradle*
 .cxx
 .vscode
+tests/data/
