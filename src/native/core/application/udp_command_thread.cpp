@@ -342,7 +342,8 @@ std::thread StartUdpCommandThread(
                         server.SendTo(snap.peer, stateFrame.data(), stateFrame.size());
 
                         if (currentCfg.app.udp.sendMap) {
-                            const size_t pointCount = snap.pointCloudXyz.size() / 3;
+                            const std::shared_ptr<const std::vector<float>>& pointCloudXyz = snap.pointCloudXyz;
+                            const size_t pointCount = pointCloudXyz ? (pointCloudXyz->size() / 3) : 0;
                             if (pointCount > 0 && snap.pointCloudSeq != lastSentPointCloudSeq) {
                                 const size_t cappedPointCount = std::min(pointCount, kMaxPointCloudPointsPerFrame);
                                 std::vector<uint8_t> cloudPayload;
@@ -350,7 +351,7 @@ std::thread StartUdpCommandThread(
                                 WriteU16Le(cloudPayload, static_cast<uint16_t>(cappedPointCount));
                                 WriteU16Le(cloudPayload, static_cast<uint16_t>(snap.pointCloudSeq & 0xFFFFu));
                                 for (size_t i = 0; i < cappedPointCount * 3; ++i) {
-                                    WriteF32Le(cloudPayload, snap.pointCloudXyz[i]);
+                                    WriteF32Le(cloudPayload, (*pointCloudXyz)[i]);
                                 }
                                 std::vector<uint8_t> cloudFrame =
                                     MakeFrame(TLV_VER, kCmdPointCloud, 0, snap.seq, MonoTimeMs32(),

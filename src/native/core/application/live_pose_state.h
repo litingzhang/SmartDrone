@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -24,7 +25,7 @@ struct LivePoseState {
         float x{0.0f}, y{0.0f}, z{0.0f};
         float qw{1.0f}, qx{0.0f}, qy{0.0f}, qz{0.0f};
         uint32_t seq{0};
-        std::vector<float> pointCloudXyz;
+        std::shared_ptr<const std::vector<float>> pointCloudXyz;
         uint32_t pointCloudSeq{0};
     };
 
@@ -54,7 +55,7 @@ struct LivePoseState {
     uint16_t resetMapCount{0};
     float x{0.0f}, y{0.0f}, z{0.0f};
     float qw{1.0f}, qx{0.0f}, qy{0.0f}, qz{0.0f};
-    std::vector<float> pointCloudXyz;
+    std::shared_ptr<const std::vector<float>> pointCloudXyz;
     uint32_t pointCloudSeq{0};
     uint32_t txSeq{1};
     bool dirty{false};

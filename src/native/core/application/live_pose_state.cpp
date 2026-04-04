@@ -63,7 +63,7 @@ void LivePoseState::UpdatePose(
 void LivePoseState::UpdatePointCloud(std::vector<float> xyz)
 {
     std::lock_guard<std::mutex> lock(mu);
-    pointCloudXyz = std::move(xyz);
+    pointCloudXyz = std::make_shared<const std::vector<float>>(std::move(xyz));
     ++pointCloudSeq;
     dirty = true;
 }
