@@ -1,8 +1,8 @@
-#include "core/application/payload_builders.h"
+#include "core/application/runtime/payload_builders.h"
 
 #include <sstream>
 
-#include "core/application/capability_catalog.h"
+#include "core/application/config/capability_catalog.h"
 
 namespace smartdrone::core::application {
 

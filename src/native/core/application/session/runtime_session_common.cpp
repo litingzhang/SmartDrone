@@ -1,4 +1,4 @@
-#include "core/application/runtime_session_common.h"
+#include "core/application/session/runtime_session_common.h"
 
 #include <algorithm>
 #include <cmath>

@@ -1,4 +1,4 @@
-#include "core/application/capability_catalog.h"
+#include "core/application/config/capability_catalog.h"
 
 namespace smartdrone::core::application {
 

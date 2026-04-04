@@ -1,4 +1,4 @@
-#include "core/application/udp_command_thread.h"
+#include "core/application/runtime/udp_command_thread.h"
 
 #include <algorithm>
 #include <chrono>
@@ -11,8 +11,8 @@
 #include "common/tlv/tlv_cmd_router.h"
 #include "common/tlv/tlv_pack.h"
 #include "common/tlv/tlv_parser.h"
-#include "core/application/config_registry.h"
-#include "core/application/runtime_command_service.h"
+#include "core/application/config/config_registry.h"
+#include "core/application/runtime/runtime_command_service.h"
 
 namespace smartdrone::core::application {
 namespace {

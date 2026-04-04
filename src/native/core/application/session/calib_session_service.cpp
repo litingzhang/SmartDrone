@@ -1,4 +1,4 @@
-#include "core/application/calib_session_service.h"
+#include "core/application/session/calib_session_service.h"
 
 #include <cerrno>
 #include <cstdlib>
@@ -14,9 +14,9 @@
 
 #include "adapters/stream/udp_image_sender.h"
 #include "common/tlv/tlv_protocol.h"
-#include "core/application/calib_storage_helpers.h"
-#include "core/application/runtime_session_common.h"
-#include "core/application/sensor_runtime_helpers.h"
+#include "core/application/session/calib_storage_helpers.h"
+#include "core/application/session/runtime_session_common.h"
+#include "core/application/session/sensor_runtime_helpers.h"
 
 namespace smartdrone::core::application {
 

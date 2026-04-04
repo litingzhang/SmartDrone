@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "core/application/imu_buffer.h"
+#include "core/application/state/imu_buffer.h"
 #include "platform/linux/spi/spi_dev.h"
 
 constexpr uint8_t REG_DEVICE_CONFIG = 0x11;

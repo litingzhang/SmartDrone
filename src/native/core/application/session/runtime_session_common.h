@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "core/application/imu_buffer.h"
-#include "core/application/runtime_app_types.h"
+#include "core/application/state/imu_buffer.h"
+#include "core/application/config/runtime_app_types.h"
 #include "core/domain/runtime_mode.h"
 #include <sophus/se3.hpp>
 

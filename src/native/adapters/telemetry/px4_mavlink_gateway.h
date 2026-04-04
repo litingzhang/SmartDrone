@@ -12,7 +12,7 @@
 
 #include "adapters/telemetry/mavlink_serial_transport.h"
 #include "common/mavlink.h"
-#include "core/application/frame_timing_tracker.h"
+#include "core/application/state/frame_timing_tracker.h"
 
 enum class OdomQualityMode
 {

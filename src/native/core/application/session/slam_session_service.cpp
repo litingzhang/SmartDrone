@@ -1,4 +1,4 @@
-#include "core/application/slam_session_service.h"
+#include "core/application/session/slam_session_service.h"
 
 #include <cstdio>
 #include <future>
@@ -18,11 +18,11 @@
 #include "common/logger.h"
 #include "common/time_utils.h"
 #include "common/tlv/tlv_protocol.h"
-#include "core/application/frame_timing_tracker.h"
-#include "core/application/perception_pipeline.h"
-#include "core/application/pose_postprocessor.h"
-#include "core/application/runtime_session_common.h"
-#include "core/application/sensor_runtime_helpers.h"
+#include "core/application/state/frame_timing_tracker.h"
+#include "core/application/state/perception_pipeline.h"
+#include "core/application/state/pose_postprocessor.h"
+#include "core/application/session/runtime_session_common.h"
+#include "core/application/session/sensor_runtime_helpers.h"
 
 namespace smartdrone::core::application {
 

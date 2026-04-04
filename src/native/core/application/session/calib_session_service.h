@@ -4,8 +4,8 @@
 #include <cstdio>
 #include <vector>
 
-#include "core/application/live_pose_state.h"
-#include "core/application/runtime_app_types.h"
+#include "core/application/state/live_pose_state.h"
+#include "core/application/config/runtime_app_types.h"
 
 namespace smartdrone::core::application {
 

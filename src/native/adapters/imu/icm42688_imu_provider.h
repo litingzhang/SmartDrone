@@ -3,7 +3,7 @@
 #include <vector>
 
 #include "ImuTypes.h"
-#include "core/application/imu_buffer.h"
+#include "core/application/state/imu_buffer.h"
 #include "core/ports/imu_provider.h"
 
 namespace smartdrone::adapters::imu {

@@ -1,4 +1,4 @@
-#include "core/application/sensor_runtime_helpers.h"
+#include "core/application/session/sensor_runtime_helpers.h"
 
 #include <atomic>
 #include <cstdint>

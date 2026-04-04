@@ -1,4 +1,4 @@
-#include "core/application/config_registry.h"
+#include "core/application/config/config_registry.h"
 
 #include <string>
 

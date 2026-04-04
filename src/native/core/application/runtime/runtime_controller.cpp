@@ -1,4 +1,4 @@
-#include "core/application/runtime_controller.h"
+#include "core/application/runtime/runtime_controller.h"
 
 #include <algorithm>
 #include <chrono>
@@ -7,8 +7,8 @@
 #include <variant>
 
 #include "common/thread_launch.h"
-#include "core/application/app_args.h"
-#include "core/application/config_registry.h"
+#include "core/application/config/app_args.h"
+#include "core/application/config/config_registry.h"
 
 namespace smartdrone::core::application {
 

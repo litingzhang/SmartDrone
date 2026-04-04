@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "core/application/runtime_app_types.h"
+#include "core/application/config/runtime_app_types.h"
 #include "core/domain/runtime_mode.h"
 
 namespace smartdrone::core::application {

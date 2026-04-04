@@ -5,7 +5,7 @@
 #include <thread>
 
 #include "adapters/camera/libcamera_ov9281/stereo_ov9281.h"
-#include "core/application/runtime_session_common.h"
+#include "core/application/session/runtime_session_common.h"
 
 namespace smartdrone::core::application {
 

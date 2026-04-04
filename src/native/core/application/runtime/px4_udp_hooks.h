@@ -11,7 +11,7 @@
 #include "System.h"
 #include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "common/tlv/mavlink_hooks.h"
-#include "core/application/live_pose_state.h"
+#include "core/application/state/live_pose_state.h"
 
 namespace smartdrone::core::application {
 

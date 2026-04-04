@@ -3,7 +3,7 @@
 #include <atomic>
 #include <string>
 
-#include "core/application/app_args.h"
+#include "core/application/config/app_args.h"
 #include "core/domain/runtime_mode.h"
 
 namespace smartdrone::core::application {

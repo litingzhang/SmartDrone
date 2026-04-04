@@ -10,10 +10,10 @@
 
 #include "common/tlv/tlv_protocol.h"
 #include "common/tlv/udp_server.h"
-#include "core/application/live_pose_state.h"
-#include "core/application/px4_udp_hooks.h"
-#include "core/application/runtime_app_types.h"
-#include "core/application/runtime_controller.h"
+#include "core/application/state/live_pose_state.h"
+#include "core/application/runtime/px4_udp_hooks.h"
+#include "core/application/config/runtime_app_types.h"
+#include "core/application/runtime/runtime_controller.h"
 
 namespace smartdrone::core::application {
 

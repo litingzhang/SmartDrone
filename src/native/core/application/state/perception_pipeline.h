@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "core/application/frame_timing_tracker.h"
+#include "core/application/state/frame_timing_tracker.h"
 #include "core/ports/camera_provider.h"
 
 namespace smartdrone::core::application {
