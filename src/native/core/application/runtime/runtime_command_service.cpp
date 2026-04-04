@@ -2,18 +2,13 @@
 
 namespace smartdrone::core::application {
 
-RuntimeCommandService::RuntimeCommandService(IRuntimeCommandTarget& target) : m_target(target)
-{
-}
+RuntimeCommandService::RuntimeCommandService(IRuntimeCommandTarget &target) : m_target(target) {}
 
-CommandResult RuntimeCommandService::ExecuteAction(const RuntimeAction& action)
+CommandResult RuntimeCommandService::ExecuteAction(const RuntimeAction &action)
 {
     return m_target.ExecuteAction(action);
 }
 
-CommandResult RuntimeCommandService::ApplyConfig(const ConfigUpdate& update)
-{
-    return m_target.ApplyConfig(update);
-}
+CommandResult RuntimeCommandService::ApplyConfig(const ConfigUpdate &update) { return m_target.ApplyConfig(update); }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

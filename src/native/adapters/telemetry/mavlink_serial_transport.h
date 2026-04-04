@@ -8,21 +8,21 @@
 namespace smartdrone::adapters::telemetry {
 
 class MavlinkSerialTransport {
-public:
+  public:
     MavlinkSerialTransport() = default;
-    MavlinkSerialTransport(const std::string& dev, int baud);
+    MavlinkSerialTransport(const std::string &dev, int baud);
     ~MavlinkSerialTransport();
 
-    void Open(const std::string& dev, int baud);
+    void Open(const std::string &dev, int baud);
     void Close();
-    bool WriteAll(const uint8_t* data, size_t len, int timeoutMs = 200);
+    bool WriteAll(const uint8_t *data, size_t len, int timeoutMs = 200);
     int PollReadable(int timeoutMs) const;
-    ssize_t Read(uint8_t* buffer, size_t len) const;
+    ssize_t Read(uint8_t *buffer, size_t len) const;
 
-private:
+  private:
     static unsigned int BaudToTermios(int baud);
 
     int m_fd{-1};
 };
 
-}  // namespace smartdrone::adapters::telemetry
+} // namespace smartdrone::adapters::telemetry

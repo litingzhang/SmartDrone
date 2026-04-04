@@ -7,12 +7,10 @@
 
 namespace smartdrone::core::application {
 
-Px4UdpHooks::Px4UdpHooks(Px4MavlinkGateway& mavlink, LivePoseState& livePose) : m_mavlink(mavlink), m_livePose(livePose)
+Px4UdpHooks::Px4UdpHooks(Px4MavlinkGateway &mavlink, LivePoseState &livePose) : m_mavlink(mavlink), m_livePose(livePose)
 {
-    m_manualLoop = SMARTDRONE_START_THREAD(
-        smartdrone::common::ThreadRole::ManualControl,
-        "Px4UdpHooks",
-        [this]() { ManualControlLoop(); });
+    m_manualLoop = SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::ManualControl, "Px4UdpHooks",
+                                           [this]() { ManualControlLoop(); });
 }
 
 Px4UdpHooks::~Px4UdpHooks()
@@ -23,75 +21,69 @@ Px4UdpHooks::~Px4UdpHooks()
     }
 }
 
-float Px4UdpHooks::ClampSignedUnit(float value)
-{
-    return std::max(-1.0f, std::min(1.0f, value));
-}
+float Px4UdpHooks::ClampSignedUnit(float value) { return std::max(-1.0f, std::min(1.0f, value)); }
 
 bool Px4UdpHooks::IsTrackingPoseUsable(int trackingState)
 {
     return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::OK_KLT;
 }
 
-bool Px4UdpHooks::IsOdomQualityUsable(OdomQualityMode quality)
-{
-    return quality != OdomQualityMode::LOST;
-}
+bool Px4UdpHooks::IsOdomQualityUsable(OdomQualityMode quality) { return quality != OdomQualityMode::LOST; }
 
 VehicleGate Px4UdpHooks::GetGate() const
 {
     LivePoseState::Snapshot snapshot{};
     const bool hasSnapshot = m_livePose.ReadSnapshot(snapshot);
-    const bool vioOk = hasSnapshot &&
-                       snapshot.runtimeMode == RUNTIME_MODE_SLAM &&
-                       snapshot.poseValid &&
-                       IsTrackingPoseUsable(snapshot.trackingState) &&
-                       IsOdomQualityUsable(snapshot.odomQuality);
+    const bool vioOk = hasSnapshot && snapshot.runtimeMode == RUNTIME_MODE_SLAM && snapshot.poseValid &&
+                       IsTrackingPoseUsable(snapshot.trackingState) && IsOdomQualityUsable(snapshot.odomQuality);
     VehicleGate gate{};
     gate.vioOk = vioOk;
     gate.offboardReady = vioOk;
     return gate;
 }
 
-bool Px4UdpHooks::Arm(std::string* err)
+bool Px4UdpHooks::Arm(std::string *err)
 {
     CancelAutoLanding();
     EnsureManualControlStream();
     SendManualControlSnapshot();
     if (!m_mavlink.Arm(true)) {
-        if (err) *err = "px4 arm rejected";
+        if (err)
+            *err = "px4 arm rejected";
         return false;
     }
     return true;
 }
 
-bool Px4UdpHooks::Disarm(std::string* err)
+bool Px4UdpHooks::Disarm(std::string *err)
 {
     CancelAutoLanding();
     SetManualControlNeutral();
     SendManualControlSnapshot();
     DisableRemoteControl(true);
     if (!m_mavlink.Arm(false)) {
-        if (err) *err = "px4 disarm rejected";
+        if (err)
+            *err = "px4 disarm rejected";
         return false;
     }
     return true;
 }
 
-bool Px4UdpHooks::EmergencyStop(std::string* err)
+bool Px4UdpHooks::EmergencyStop(std::string *err)
 {
     CancelAutoLanding();
     m_mavlink.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
     DisableRemoteControl(true);
     if (!m_mavlink.EmergencyStop()) {
-        if (err) *err = "px4 emergency stop rejected";
+        if (err)
+            *err = "px4 emergency stop rejected";
         return false;
     }
     return true;
 }
 
-bool Px4UdpHooks::SetOffboard(std::string* err)
+bool Px4UdpHooks::SetOffboard(std::string *err)
 {
     CancelAutoLanding();
     EnsureManualControlStream();
@@ -99,13 +91,14 @@ bool Px4UdpHooks::SetOffboard(std::string* err)
     WarmupManualControlLink();
     if (!MaybeSyncRemoteFlightMode(true, err)) {
         m_remoteModeRequested.store(false, std::memory_order_relaxed);
-        if (err && err->empty()) *err = "px4 remote mode rejected";
+        if (err && err->empty())
+            *err = "px4 remote mode rejected";
         return false;
     }
     return true;
 }
 
-bool Px4UdpHooks::Hold(std::string* err)
+bool Px4UdpHooks::Hold(std::string *err)
 {
     CancelAutoLanding();
     EnsureManualControlStream();
@@ -114,13 +107,14 @@ bool Px4UdpHooks::Hold(std::string* err)
     m_remoteModeRequested.store(true, std::memory_order_relaxed);
     if (!MaybeSyncRemoteFlightMode(true, err)) {
         m_remoteModeRequested.store(false, std::memory_order_relaxed);
-        if (err && err->empty()) *err = "px4 hold mode rejected";
+        if (err && err->empty())
+            *err = "px4 hold mode rejected";
         return false;
     }
     return true;
 }
 
-bool Px4UdpHooks::Land(std::string* err)
+bool Px4UdpHooks::Land(std::string *err)
 {
     CancelAutoLanding();
     m_mavlink.StopSetpointStream();
@@ -133,7 +127,8 @@ bool Px4UdpHooks::Land(std::string* err)
         CancelAutoLanding();
         SetManualControlNeutral();
         DisableRemoteControl(true);
-        if (err && err->empty()) *err = "px4 remote land mode rejected";
+        if (err && err->empty())
+            *err = "px4 remote land mode rejected";
         return false;
     }
     SendManualControlSnapshot();
@@ -141,7 +136,7 @@ bool Px4UdpHooks::Land(std::string* err)
     return true;
 }
 
-bool Px4UdpHooks::SetMoveGoal(const MoveGoal& goal, std::string* err)
+bool Px4UdpHooks::SetMoveGoal(const MoveGoal &goal, std::string *err)
 {
     CancelAutoLanding();
     if (goal.isRcJoystick) {
@@ -160,19 +155,30 @@ bool Px4UdpHooks::SetMoveGoal(const MoveGoal& goal, std::string* err)
     }
 
     if (!EnsureSetpointStream()) {
-        if (err) *err = "setpoint stream start failed";
+        if (err)
+            *err = "setpoint stream start failed";
         return false;
     }
 
     Px4MavlinkGateway::SetpointLocalNED setpoint{};
     if (goal.isVelocity) {
-        setpoint.x = NAN; setpoint.y = NAN; setpoint.z = NAN;
-        setpoint.vx = goal.vx; setpoint.vy = goal.vy; setpoint.vz = goal.vz;
-        setpoint.yaw = NAN; setpoint.yawspeed = goal.yawRate;
+        setpoint.x = NAN;
+        setpoint.y = NAN;
+        setpoint.z = NAN;
+        setpoint.vx = goal.vx;
+        setpoint.vy = goal.vy;
+        setpoint.vz = goal.vz;
+        setpoint.yaw = NAN;
+        setpoint.yawspeed = goal.yawRate;
     } else {
-        setpoint.x = goal.x; setpoint.y = goal.y; setpoint.z = goal.z;
-        setpoint.vx = NAN; setpoint.vy = NAN; setpoint.vz = NAN;
-        setpoint.yaw = goal.yaw; setpoint.yawspeed = NAN;
+        setpoint.x = goal.x;
+        setpoint.y = goal.y;
+        setpoint.z = goal.z;
+        setpoint.vx = NAN;
+        setpoint.vy = NAN;
+        setpoint.vz = NAN;
+        setpoint.yaw = goal.yaw;
+        setpoint.yawspeed = NAN;
     }
     m_mavlink.UpdateStreamSetpoint(setpoint);
     return true;
@@ -181,11 +187,8 @@ bool Px4UdpHooks::SetMoveGoal(const MoveGoal& goal, std::string* err)
 bool Px4UdpHooks::IsVioControlUsable() const
 {
     LivePoseState::Snapshot snapshot{};
-    return m_livePose.ReadSnapshot(snapshot) &&
-           snapshot.runtimeMode == RUNTIME_MODE_SLAM &&
-           snapshot.poseValid &&
-           IsTrackingPoseUsable(snapshot.trackingState) &&
-           IsOdomQualityUsable(snapshot.odomQuality);
+    return m_livePose.ReadSnapshot(snapshot) && snapshot.runtimeMode == RUNTIME_MODE_SLAM && snapshot.poseValid &&
+           IsTrackingPoseUsable(snapshot.trackingState) && IsOdomQualityUsable(snapshot.odomQuality);
 }
 
 Px4UdpHooks::RemoteFlightMode Px4UdpHooks::DesiredRemoteFlightMode() const
@@ -193,7 +196,7 @@ Px4UdpHooks::RemoteFlightMode Px4UdpHooks::DesiredRemoteFlightMode() const
     return IsVioControlUsable() ? RemoteFlightMode::Position : RemoteFlightMode::Altitude;
 }
 
-const char* Px4UdpHooks::RemoteFlightModeToString(RemoteFlightMode mode)
+const char *Px4UdpHooks::RemoteFlightModeToString(RemoteFlightMode mode)
 {
     return mode == RemoteFlightMode::Position ? "POSCTL" : "ALTCTL";
 }
@@ -226,10 +229,7 @@ bool Px4UdpHooks::EnsureSetpointStream()
     return true;
 }
 
-void Px4UdpHooks::EnsureManualControlStream()
-{
-    m_manualControlStreaming.store(true, std::memory_order_relaxed);
-}
+void Px4UdpHooks::EnsureManualControlStream() { m_manualControlStreaming.store(true, std::memory_order_relaxed); }
 
 void Px4UdpHooks::DisableRemoteControl(bool stopManualStream)
 {
@@ -248,7 +248,7 @@ void Px4UdpHooks::SetManualControlNeutral()
     m_manualControlInput = Px4MavlinkGateway::ManualControlInput{};
 }
 
-void Px4UdpHooks::SetManualControlInput(const Px4MavlinkGateway::ManualControlInput& input)
+void Px4UdpHooks::SetManualControlInput(const Px4MavlinkGateway::ManualControlInput &input)
 {
     std::lock_guard<std::mutex> lock(m_manualControlMtx);
     m_manualControlInput = input;
@@ -260,10 +260,7 @@ Px4MavlinkGateway::ManualControlInput Px4UdpHooks::GetManualControlSnapshot() co
     return m_manualControlInput;
 }
 
-void Px4UdpHooks::SendManualControlSnapshot()
-{
-    m_mavlink.SendManualControl(GetManualControlSnapshot());
-}
+void Px4UdpHooks::SendManualControlSnapshot() { m_mavlink.SendManualControl(GetManualControlSnapshot()); }
 
 void Px4UdpHooks::WarmupManualControlLink()
 {
@@ -286,21 +283,18 @@ void Px4UdpHooks::StartAutoLanding()
     SetManualControlInput(input);
 }
 
-bool Px4UdpHooks::MaybeSyncRemoteFlightMode(bool force, std::string* err)
+bool Px4UdpHooks::MaybeSyncRemoteFlightMode(bool force, std::string *err)
 {
     const RemoteFlightMode desired = DesiredRemoteFlightMode();
     Px4MavlinkGateway::FlightModeInfo currentMode{};
-    if (m_mavlink.GetFlightModeInfo(currentMode) &&
-        currentMode.mainMode == static_cast<uint8_t>(desired)) {
+    if (m_mavlink.GetFlightModeInfo(currentMode) && currentMode.mainMode == static_cast<uint8_t>(desired)) {
         return true;
     }
 
     const auto now = std::chrono::steady_clock::now();
     {
         std::lock_guard<std::mutex> lock(m_remoteModeMtx);
-        if (!force &&
-            m_lastRequestedRemoteMode &&
-            *m_lastRequestedRemoteMode == desired &&
+        if (!force && m_lastRequestedRemoteMode && *m_lastRequestedRemoteMode == desired &&
             (now - m_lastRemoteModeRequest) < std::chrono::milliseconds(600)) {
             return true;
         }
@@ -308,9 +302,7 @@ bool Px4UdpHooks::MaybeSyncRemoteFlightMode(bool force, std::string* err)
         m_lastRemoteModeRequest = now;
     }
 
-    const bool ok = (desired == RemoteFlightMode::Position)
-                        ? m_mavlink.SetModePosition()
-                        : m_mavlink.SetModeAltitude();
+    const bool ok = (desired == RemoteFlightMode::Position) ? m_mavlink.SetModePosition() : m_mavlink.SetModeAltitude();
     if (!ok) {
         if (err) {
             *err = std::string("px4 ") + RemoteFlightModeToString(desired) + " rejected";
@@ -333,8 +325,7 @@ void Px4UdpHooks::UpdateAutoLanding()
     SetManualControlInput(input);
 
     Px4MavlinkGateway::DownwardDistanceSensor range{};
-    if (!m_mavlink.GetDownwardDistanceSensor(range, kAutoLandRangeMaxAgeUs) ||
-        !std::isfinite(range.currentDistance)) {
+    if (!m_mavlink.GetDownwardDistanceSensor(range, kAutoLandRangeMaxAgeUs) || !std::isfinite(range.currentDistance)) {
         return;
     }
 
@@ -408,4 +399,4 @@ void Px4UdpHooks::ManualControlLoop()
     }
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

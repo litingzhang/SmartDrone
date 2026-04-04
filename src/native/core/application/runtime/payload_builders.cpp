@@ -6,16 +6,17 @@
 
 namespace smartdrone::core::application {
 
-std::vector<uint8_t> TextPayloadFromString(const std::string& text)
+std::vector<uint8_t> TextPayloadFromString(const std::string &text)
 {
     return std::vector<uint8_t>(text.begin(), text.end());
 }
 
-std::string JoinStrings(const std::vector<std::string>& values, const char* sep)
+std::string JoinStrings(const std::vector<std::string> &values, const char *sep)
 {
     std::string out;
     for (size_t i = 0; i < values.size(); ++i) {
-        if (i > 0) out += sep;
+        if (i > 0)
+            out += sep;
         out += values[i];
     }
     return out;
@@ -25,14 +26,18 @@ std::vector<uint8_t> BuildCapabilitiesPayload()
 {
     const auto capabilities = CapabilityCatalog::BuildDefault();
     std::vector<std::string> runtimeModes;
-    for (const auto mode : capabilities.runtimeModes) runtimeModes.emplace_back(smartdrone::core::domain::ToString(mode));
+    for (const auto mode : capabilities.runtimeModes)
+        runtimeModes.emplace_back(smartdrone::core::domain::ToString(mode));
     std::vector<std::string> perceptionModes;
-    for (const auto mode : capabilities.perceptionModes) perceptionModes.emplace_back(smartdrone::core::domain::ToString(mode));
+    for (const auto mode : capabilities.perceptionModes)
+        perceptionModes.emplace_back(smartdrone::core::domain::ToString(mode));
     std::vector<std::string> slamModes;
-    for (const auto mode : capabilities.slamModes) slamModes.emplace_back(smartdrone::core::domain::ToString(mode));
+    for (const auto mode : capabilities.slamModes)
+        slamModes.emplace_back(smartdrone::core::domain::ToString(mode));
     std::vector<std::string> configKeys;
     configKeys.reserve(capabilities.configKeys.size());
-    for (const auto& item : capabilities.configKeys) configKeys.push_back(item.key);
+    for (const auto &item : capabilities.configKeys)
+        configKeys.push_back(item.key);
 
     std::ostringstream oss;
     oss << "runtime_modes=" << JoinStrings(runtimeModes, ",") << "\n";
@@ -46,7 +51,7 @@ std::vector<uint8_t> BuildCapabilitiesPayload()
     return TextPayloadFromString(oss.str());
 }
 
-std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig& cfg, smartdrone::core::domain::RuntimeMode runtimeMode)
+std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig &cfg, smartdrone::core::domain::RuntimeMode runtimeMode)
 {
     std::ostringstream oss;
     oss << "runtime.mode=" << smartdrone::core::domain::ToString(runtimeMode) << "\n";
@@ -65,4 +70,4 @@ std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig& cfg, smartdrone::co
     return TextPayloadFromString(oss.str());
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

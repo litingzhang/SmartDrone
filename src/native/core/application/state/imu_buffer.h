@@ -19,18 +19,15 @@ struct ImuScale {
 };
 
 class ImuBuffer {
-public:
-    void Push(const ImuSample& sample);
-    std::vector<ORB_SLAM3::IMU::Point> PopBetweenNs(
-        int64_t t0Ns,
-        int64_t t1Ns,
-        int64_t slackBeforeNs,
-        int64_t slackAfterNs);
+  public:
+    void Push(const ImuSample &sample);
+    std::vector<ORB_SLAM3::IMU::Point> PopBetweenNs(int64_t t0Ns, int64_t t1Ns, int64_t slackBeforeNs,
+                                                    int64_t slackAfterNs);
     size_t Size() const;
-    bool PeekFirstLast(int64_t& tFirst, int64_t& tLast) const;
+    bool PeekFirstLast(int64_t &tFirst, int64_t &tLast) const;
 
-private:
-    static ImuSample InterpolateSample(const ImuSample& a, const ImuSample& b, int64_t targetNs);
+  private:
+    static ImuSample InterpolateSample(const ImuSample &a, const ImuSample &b, int64_t targetNs);
 
     mutable std::mutex m_mutex;
     std::deque<ImuSample> m_queue;

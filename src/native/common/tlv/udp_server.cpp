@@ -7,23 +7,20 @@
 
 #include <string>
 
-std::string UdpPeerToIpString(const UdpPeer& peer)
+std::string UdpPeerToIpString(const UdpPeer &peer)
 {
     if (!peer.valid) {
         return {};
     }
     char ipText[INET_ADDRSTRLEN] = {};
-    const void* src = &(peer.addr.sin_addr);
+    const void *src = &(peer.addr.sin_addr);
     if (::inet_ntop(AF_INET, src, ipText, sizeof(ipText)) == nullptr) {
         return {};
     }
     return std::string(ipText);
 }
 
-UdpServer::~UdpServer()
-{
-    Close();
-}
+UdpServer::~UdpServer() { Close(); }
 
 bool UdpServer::Open(uint16_t port)
 {
@@ -42,7 +39,7 @@ bool UdpServer::Open(uint16_t port)
     local.sin_addr.s_addr = htonl(INADDR_ANY);
     local.sin_port = htons(port);
 
-    if (::bind(m_fd, reinterpret_cast<sockaddr*>(&local), sizeof(local)) < 0) {
+    if (::bind(m_fd, reinterpret_cast<sockaddr *>(&local), sizeof(local)) < 0) {
         Close();
         return false;
     }
@@ -60,7 +57,7 @@ void UdpServer::Close()
     }
 }
 
-int UdpServer::Recv(uint8_t* buf, size_t cap, UdpPeer* peerOut)
+int UdpServer::Recv(uint8_t *buf, size_t cap, UdpPeer *peerOut)
 {
     if (m_fd < 0) {
         return -1;
@@ -68,8 +65,7 @@ int UdpServer::Recv(uint8_t* buf, size_t cap, UdpPeer* peerOut)
 
     sockaddr_in src{};
     socklen_t srcLen = sizeof(src);
-    const ssize_t recvLen =
-        ::recvfrom(m_fd, buf, cap, 0, reinterpret_cast<sockaddr*>(&src), &srcLen);
+    const ssize_t recvLen = ::recvfrom(m_fd, buf, cap, 0, reinterpret_cast<sockaddr *>(&src), &srcLen);
     if (recvLen < 0) {
         return 0;
     }
@@ -82,17 +78,11 @@ int UdpServer::Recv(uint8_t* buf, size_t cap, UdpPeer* peerOut)
     return static_cast<int>(recvLen);
 }
 
-bool UdpServer::SendTo(const UdpPeer& peer, const uint8_t* data, size_t len)
+bool UdpServer::SendTo(const UdpPeer &peer, const uint8_t *data, size_t len)
 {
     if (m_fd < 0 || !peer.valid) {
         return false;
     }
-    const ssize_t sentLen = ::sendto(
-        m_fd,
-        data,
-        len,
-        0,
-        reinterpret_cast<const sockaddr*>(&peer.addr),
-        peer.len);
+    const ssize_t sentLen = ::sendto(m_fd, data, len, 0, reinterpret_cast<const sockaddr *>(&peer.addr), peer.len);
     return sentLen == static_cast<ssize_t>(len);
 }

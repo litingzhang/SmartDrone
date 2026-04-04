@@ -13,15 +13,8 @@
 
 namespace {
 
-void FillCovDiag21(
-    float cov[21],
-    float varX,
-    float varY,
-    float varZ,
-    float varRoll,
-    float varPitch,
-    float varYaw,
-    bool fillOffdiagZero = true)
+void FillCovDiag21(float cov[21], float varX, float varY, float varZ, float varRoll, float varPitch, float varYaw,
+                   bool fillOffdiagZero = true)
 {
     if (fillOffdiagZero) {
         for (int i = 0; i < 21; i++) {
@@ -43,9 +36,9 @@ uint64_t ClockMonotonicNs()
     return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<uint64_t>(ts.tv_nsec);
 }
 
-}  // namespace
+} // namespace
 
-Px4MavlinkGateway::Px4MavlinkGateway(const std::string& dev, int baud, uint8_t sysid, uint8_t compid)
+Px4MavlinkGateway::Px4MavlinkGateway(const std::string &dev, int baud, uint8_t sysid, uint8_t compid)
     : m_transport(dev, baud), m_sysid(sysid), m_compid(compid)
 {
 }
@@ -56,7 +49,7 @@ Px4MavlinkGateway::~Px4MavlinkGateway()
     StopSetpointStream();
 }
 
-void Px4MavlinkGateway::SetFrameTimingTracker(smartdrone::core::application::FrameTimingTracker* tracker)
+void Px4MavlinkGateway::SetFrameTimingTracker(smartdrone::core::application::FrameTimingTracker *tracker)
 {
     std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
     m_frameTimingTracker = tracker;
@@ -83,35 +76,27 @@ void Px4MavlinkGateway::StartRx()
     m_havePx4Heartbeat.store(false);
     m_rxRunning.store(true);
     m_timesyncRunning.store(true);
-    m_rxThread = SMARTDRONE_START_THREAD(
-        smartdrone::common::ThreadRole::MavlinkRx,
-        "Px4MavlinkGateway",
-        [this]() { this->RxLoop(); });
-    m_timesyncThread = SMARTDRONE_START_THREAD(
-        smartdrone::common::ThreadRole::MavlinkTimesync,
-        "Px4MavlinkGateway",
-        [this]() { this->TimesyncLoop(); });
+    m_rxThread = SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::MavlinkRx, "Px4MavlinkGateway",
+                                         [this]() { this->RxLoop(); });
+    m_timesyncThread = SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::MavlinkTimesync, "Px4MavlinkGateway",
+                                               [this]() { this->TimesyncLoop(); });
 }
 
 void Px4MavlinkGateway::StopRx()
 {
     m_rxRunning.store(false);
     m_timesyncRunning.store(false);
-    if (m_rxThread.joinable()) m_rxThread.join();
-    if (m_timesyncThread.joinable()) m_timesyncThread.join();
+    if (m_rxThread.joinable())
+        m_rxThread.join();
+    if (m_timesyncThread.joinable())
+        m_timesyncThread.join();
 }
 
-uint8_t Px4MavlinkGateway::GetTargetSystem() const
-{
-    return m_px4Sysid.load();
-}
+uint8_t Px4MavlinkGateway::GetTargetSystem() const { return m_px4Sysid.load(); }
 
-uint8_t Px4MavlinkGateway::GetTargetComponent() const
-{
-    return m_px4Compid.load();
-}
+uint8_t Px4MavlinkGateway::GetTargetComponent() const { return m_px4Compid.load(); }
 
-bool Px4MavlinkGateway::GetLocalPositionNed(LocalPositionNed& out, uint64_t maxAgeUs) const
+bool Px4MavlinkGateway::GetLocalPositionNed(LocalPositionNed &out, uint64_t maxAgeUs) const
 {
     std::lock_guard<std::mutex> lk(m_localPosMtx);
     if (!m_haveLocalPosNed) {
@@ -124,7 +109,7 @@ bool Px4MavlinkGateway::GetLocalPositionNed(LocalPositionNed& out, uint64_t maxA
     return true;
 }
 
-bool Px4MavlinkGateway::GetDownwardDistanceSensor(DownwardDistanceSensor& out, uint64_t maxAgeUs) const
+bool Px4MavlinkGateway::GetDownwardDistanceSensor(DownwardDistanceSensor &out, uint64_t maxAgeUs) const
 {
     std::lock_guard<std::mutex> lk(m_distanceSensorMtx);
     if (!m_haveDownwardDistanceSensor) {
@@ -137,7 +122,7 @@ bool Px4MavlinkGateway::GetDownwardDistanceSensor(DownwardDistanceSensor& out, u
     return true;
 }
 
-bool Px4MavlinkGateway::WaitCommandAck(uint16_t command, int timeoutMs, uint8_t& outResult)
+bool Px4MavlinkGateway::WaitCommandAck(uint16_t command, int timeoutMs, uint8_t &outResult)
 {
     std::unique_lock<std::mutex> lk(m_ackMtx);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
@@ -145,12 +130,13 @@ bool Px4MavlinkGateway::WaitCommandAck(uint16_t command, int timeoutMs, uint8_t&
         auto it = m_ackMap.find(command);
         return it != m_ackMap.end();
     };
-    if (!m_ackCv.wait_until(lk, deadline, pred)) return false;
+    if (!m_ackCv.wait_until(lk, deadline, pred))
+        return false;
     outResult = m_ackMap[command].result;
     return true;
 }
 
-bool Px4MavlinkGateway::GetFlightModeInfo(FlightModeInfo& out, uint64_t maxAgeUs) const
+bool Px4MavlinkGateway::GetFlightModeInfo(FlightModeInfo &out, uint64_t maxAgeUs) const
 {
     std::lock_guard<std::mutex> lk(m_flightModeMtx);
     if (!m_haveFlightModeInfo) {
@@ -163,44 +149,23 @@ bool Px4MavlinkGateway::GetFlightModeInfo(FlightModeInfo& out, uint64_t maxAgeUs
     return true;
 }
 
-void Px4MavlinkGateway::SendCommandLong(
-    uint16_t command,
-    float p1,
-    float p2,
-    float p3,
-    float p4,
-    float p5,
-    float p6,
-    float p7,
-    uint8_t targetSystem,
-    uint8_t targetComponent,
-    uint8_t confirmation)
+void Px4MavlinkGateway::SendCommandLong(uint16_t command, float p1, float p2, float p3, float p4, float p5, float p6,
+                                        float p7, uint8_t targetSystem, uint8_t targetComponent, uint8_t confirmation)
 {
     mavlink_message_t msg{};
-    mavlink_msg_command_long_pack(
-        m_sysid, m_compid, &msg,
-        targetSystem, targetComponent,
-        command, confirmation,
-        p1, p2, p3, p4, p5, p6, p7);
+    mavlink_msg_command_long_pack(m_sysid, m_compid, &msg, targetSystem, targetComponent, command, confirmation, p1, p2,
+                                  p3, p4, p5, p6, p7);
     WriteMessage(msg);
 }
 
-bool Px4MavlinkGateway::SendCommandLongAndWaitAck(
-    uint16_t command,
-    float p1,
-    float p2,
-    float p3,
-    float p4,
-    float p5,
-    float p6,
-    float p7,
-    int timeoutMs,
-    uint8_t targetSystem,
-    uint8_t targetComponent,
-    uint8_t* outResult)
+bool Px4MavlinkGateway::SendCommandLongAndWaitAck(uint16_t command, float p1, float p2, float p3, float p4, float p5,
+                                                  float p6, float p7, int timeoutMs, uint8_t targetSystem,
+                                                  uint8_t targetComponent, uint8_t *outResult)
 {
-    if (targetSystem == 0) targetSystem = GetTargetSystem();
-    if (targetComponent == 0) targetComponent = GetTargetComponent();
+    if (targetSystem == 0)
+        targetSystem = GetTargetSystem();
+    if (targetComponent == 0)
+        targetComponent = GetTargetComponent();
     {
         std::lock_guard<std::mutex> lk(m_ackMtx);
         m_ackMap.erase(command);
@@ -208,7 +173,8 @@ bool Px4MavlinkGateway::SendCommandLongAndWaitAck(
     SendCommandLong(command, p1, p2, p3, p4, p5, p6, p7, targetSystem, targetComponent);
     uint8_t res = 255;
     bool ok = WaitCommandAck(command, timeoutMs, res);
-    if (outResult) *outResult = res;
+    if (outResult)
+        *outResult = res;
     if (!ok) {
         printf("[ACK] TIMEOUT cmd=%u (target sys=%d comp=%d)\n", command, int(targetSystem), int(targetComponent));
     } else {
@@ -217,20 +183,14 @@ bool Px4MavlinkGateway::SendCommandLongAndWaitAck(
     return ok;
 }
 
-bool Px4MavlinkGateway::SetModePx4Main(uint8_t mainMode, int ackTimeoutMs, uint8_t targetSystem, uint8_t targetComponent)
+bool Px4MavlinkGateway::SetModePx4Main(uint8_t mainMode, int ackTimeoutMs, uint8_t targetSystem,
+                                       uint8_t targetComponent)
 {
     const float baseMode = static_cast<float>(MAV_MODE_FLAG_CUSTOM_MODE_ENABLED);
     const uint32_t customMode = static_cast<uint32_t>(mainMode) << 16;
     uint8_t res = 255;
-    bool got = SendCommandLongAndWaitAck(
-        MAV_CMD_DO_SET_MODE,
-        baseMode,
-        static_cast<float>(customMode),
-        0, 0, 0, 0, 0,
-        ackTimeoutMs,
-        targetSystem,
-        targetComponent,
-        &res);
+    bool got = SendCommandLongAndWaitAck(MAV_CMD_DO_SET_MODE, baseMode, static_cast<float>(customMode), 0, 0, 0, 0, 0,
+                                         ackTimeoutMs, targetSystem, targetComponent, &res);
     return got && (res == MAV_RESULT_ACCEPTED);
 }
 
@@ -252,42 +212,26 @@ bool Px4MavlinkGateway::SetModeAltitude(int ackTimeoutMs, uint8_t targetSystem, 
 bool Px4MavlinkGateway::Arm(bool doArm, int ackTimeoutMs, uint8_t targetSystem, uint8_t targetComponent)
 {
     uint8_t res = 255;
-    bool got = SendCommandLongAndWaitAck(
-        MAV_CMD_COMPONENT_ARM_DISARM,
-        doArm ? 1.0f : 0.0f,
-        0, 0, 0, 0, 0, 0,
-        ackTimeoutMs,
-        targetSystem,
-        targetComponent,
-        &res);
+    bool got = SendCommandLongAndWaitAck(MAV_CMD_COMPONENT_ARM_DISARM, doArm ? 1.0f : 0.0f, 0, 0, 0, 0, 0, 0,
+                                         ackTimeoutMs, targetSystem, targetComponent, &res);
     return got && (res == MAV_RESULT_ACCEPTED);
 }
 
 bool Px4MavlinkGateway::EmergencyStop(int ackTimeoutMs, uint8_t targetSystem, uint8_t targetComponent)
 {
     uint8_t res = 255;
-    bool got = SendCommandLongAndWaitAck(
-        MAV_CMD_COMPONENT_ARM_DISARM,
-        0.0f, 21196.0f,
-        0, 0, 0, 0, 0,
-        ackTimeoutMs,
-        targetSystem,
-        targetComponent,
-        &res);
+    bool got = SendCommandLongAndWaitAck(MAV_CMD_COMPONENT_ARM_DISARM, 0.0f, 21196.0f, 0, 0, 0, 0, 0, ackTimeoutMs,
+                                         targetSystem, targetComponent, &res);
     return got && (res == MAV_RESULT_ACCEPTED);
 }
 
-bool Px4MavlinkGateway::StartOffboardAndArm(
-    double,
-    double,
-    int warmupMs,
-    int ackTimeoutMs,
-    uint8_t targetSystem,
-    uint8_t targetComponent)
+bool Px4MavlinkGateway::StartOffboardAndArm(double, double, int warmupMs, int ackTimeoutMs, uint8_t targetSystem,
+                                            uint8_t targetComponent)
 {
     usleep(static_cast<useconds_t>(warmupMs) * 1000);
     if (!SetModeOffboard(ackTimeoutMs, targetSystem, targetComponent)) {
-        printf("[px4] OFFBOARD failed. Common causes: setpoints not streaming, estimator not ready, safety/RC checks.\n");
+        printf(
+            "[px4] OFFBOARD failed. Common causes: setpoints not streaming, estimator not ready, safety/RC checks.\n");
         return false;
     }
     usleep(200000);
@@ -299,57 +243,56 @@ bool Px4MavlinkGateway::StartOffboardAndArm(
     return true;
 }
 
-void Px4MavlinkGateway::SendSetPositionTargetLocalNed(uint32_t timeBootMs, const SetpointLocalNED& sp, uint8_t coordinateFrame)
+void Px4MavlinkGateway::SendSetPositionTargetLocalNed(uint32_t timeBootMs, const SetpointLocalNED &sp,
+                                                      uint8_t coordinateFrame)
 {
     uint16_t typeMask = 0;
     auto ign = [&](int bit) { typeMask |= (1u << bit); };
-    if (!std::isfinite(sp.x)) ign(0);
-    if (!std::isfinite(sp.y)) ign(1);
-    if (!std::isfinite(sp.z)) ign(2);
-    if (!std::isfinite(sp.vx)) ign(3);
-    if (!std::isfinite(sp.vy)) ign(4);
-    if (!std::isfinite(sp.vz)) ign(5);
-    if (!std::isfinite(sp.ax)) ign(6);
-    if (!std::isfinite(sp.ay)) ign(7);
-    if (!std::isfinite(sp.az)) ign(8);
+    if (!std::isfinite(sp.x))
+        ign(0);
+    if (!std::isfinite(sp.y))
+        ign(1);
+    if (!std::isfinite(sp.z))
+        ign(2);
+    if (!std::isfinite(sp.vx))
+        ign(3);
+    if (!std::isfinite(sp.vy))
+        ign(4);
+    if (!std::isfinite(sp.vz))
+        ign(5);
+    if (!std::isfinite(sp.ax))
+        ign(6);
+    if (!std::isfinite(sp.ay))
+        ign(7);
+    if (!std::isfinite(sp.az))
+        ign(8);
     ign(9);
-    if (!std::isfinite(sp.yaw)) ign(10);
-    if (!std::isfinite(sp.yawspeed)) ign(11);
+    if (!std::isfinite(sp.yaw))
+        ign(10);
+    if (!std::isfinite(sp.yawspeed))
+        ign(11);
 
     mavlink_message_t msg{};
     const uint8_t targetSystem = 1;
     const uint8_t targetComponent = 1;
     mavlink_msg_set_position_target_local_ned_pack(
-        m_sysid, m_compid, &msg,
-        timeBootMs,
-        targetSystem,
-        targetComponent,
-        coordinateFrame,
-        typeMask,
-        std::isfinite(sp.x) ? sp.x : 0.0f,
-        std::isfinite(sp.y) ? sp.y : 0.0f,
-        std::isfinite(sp.z) ? sp.z : 0.0f,
-        std::isfinite(sp.vx) ? sp.vx : 0.0f,
-        std::isfinite(sp.vy) ? sp.vy : 0.0f,
-        std::isfinite(sp.vz) ? sp.vz : 0.0f,
-        std::isfinite(sp.ax) ? sp.ax : 0.0f,
-        std::isfinite(sp.ay) ? sp.ay : 0.0f,
-        std::isfinite(sp.az) ? sp.az : 0.0f,
-        std::isfinite(sp.yaw) ? sp.yaw : 0.0f,
-        std::isfinite(sp.yawspeed) ? sp.yawspeed : 0.0f);
+        m_sysid, m_compid, &msg, timeBootMs, targetSystem, targetComponent, coordinateFrame, typeMask,
+        std::isfinite(sp.x) ? sp.x : 0.0f, std::isfinite(sp.y) ? sp.y : 0.0f, std::isfinite(sp.z) ? sp.z : 0.0f,
+        std::isfinite(sp.vx) ? sp.vx : 0.0f, std::isfinite(sp.vy) ? sp.vy : 0.0f, std::isfinite(sp.vz) ? sp.vz : 0.0f,
+        std::isfinite(sp.ax) ? sp.ax : 0.0f, std::isfinite(sp.ay) ? sp.ay : 0.0f, std::isfinite(sp.az) ? sp.az : 0.0f,
+        std::isfinite(sp.yaw) ? sp.yaw : 0.0f, std::isfinite(sp.yawspeed) ? sp.yawspeed : 0.0f);
     WriteMessage(msg);
 }
 
 void Px4MavlinkGateway::StartSetpointStreamHz(double hz)
 {
-    if (hz <= 0.0) hz = 20.0;
+    if (hz <= 0.0)
+        hz = 20.0;
     m_streamPeriodUs = static_cast<uint64_t>(1e6 / hz);
     StopSetpointStream();
     m_streaming.store(true);
-    m_streamThread = SMARTDRONE_START_THREAD(
-        smartdrone::common::ThreadRole::MavlinkSetpointStream,
-        "Px4MavlinkGateway",
-        [this]() {
+    m_streamThread =
+        SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::MavlinkSetpointStream, "Px4MavlinkGateway", [this]() {
             while (this->m_streaming.load()) {
                 const uint32_t tMs = MonoTimeMs32();
                 SetpointLocalNED sp;
@@ -366,10 +309,11 @@ void Px4MavlinkGateway::StartSetpointStreamHz(double hz)
 void Px4MavlinkGateway::StopSetpointStream()
 {
     m_streaming.store(false);
-    if (m_streamThread.joinable()) m_streamThread.join();
+    if (m_streamThread.joinable())
+        m_streamThread.join();
 }
 
-void Px4MavlinkGateway::UpdateStreamSetpoint(const SetpointLocalNED& spNed)
+void Px4MavlinkGateway::UpdateStreamSetpoint(const SetpointLocalNED &spNed)
 {
     std::lock_guard<std::mutex> lk(m_spMtx);
     m_spCurrent = spNed;
@@ -385,7 +329,8 @@ void Px4MavlinkGateway::UpdateStreamPosition(float xN, float yE, float zD, float
     UpdateStreamSetpoint(sp);
 }
 
-void Px4MavlinkGateway::SendManualControl(const ManualControlInput& input, uint16_t buttons, uint16_t buttons2, uint8_t targetSystem)
+void Px4MavlinkGateway::SendManualControl(const ManualControlInput &input, uint16_t buttons, uint16_t buttons2,
+                                          uint8_t targetSystem)
 {
     if (targetSystem == 0) {
         targetSystem = GetTargetSystem();
@@ -400,33 +345,21 @@ void Px4MavlinkGateway::SendManualControl(const ManualControlInput& input, uint1
     };
 
     mavlink_message_t msg{};
-    mavlink_msg_manual_control_pack(
-        m_sysid, m_compid, &msg,
-        targetSystem,
-        toAxis(input.pitchNorm),
-        toAxis(input.rollNorm),
-        toThrottleAxis(input.throttleNorm),
-        toAxis(input.yawNorm),
-        buttons,
-        buttons2,
-        0,
-        0, 0, 0, 0, 0, 0, 0, 0);
+    mavlink_msg_manual_control_pack(m_sysid, m_compid, &msg, targetSystem, toAxis(input.pitchNorm),
+                                    toAxis(input.rollNorm), toThrottleAxis(input.throttleNorm), toAxis(input.yawNorm),
+                                    buttons, buttons2, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     WriteMessage(msg);
 }
 
 bool Px4MavlinkGateway::SendLand(int ackTimeoutMs, uint8_t targetSystem, uint8_t targetComponent)
 {
     uint8_t res = 255;
-    bool got = SendCommandLongAndWaitAck(
-        MAV_CMD_NAV_LAND,
-        0, 0, 0, 0, 0, 0, 0,
-        ackTimeoutMs,
-        targetSystem, targetComponent,
-        &res);
+    bool got = SendCommandLongAndWaitAck(MAV_CMD_NAV_LAND, 0, 0, 0, 0, 0, 0, 0, ackTimeoutMs, targetSystem,
+                                         targetComponent, &res);
     return got && (res == MAV_RESULT_ACCEPTED);
 }
 
-bool Px4MavlinkGateway::GetTimesyncStatus(int64_t& offsetNs, uint32_t& rttUs, uint32_t& sampleCount) const
+bool Px4MavlinkGateway::GetTimesyncStatus(int64_t &offsetNs, uint32_t &rttUs, uint32_t &sampleCount) const
 {
     std::lock_guard<std::mutex> lk(m_timesyncMtx);
     offsetNs = m_timesyncEstimatedOffsetNs;
@@ -435,21 +368,21 @@ bool Px4MavlinkGateway::GetTimesyncStatus(int64_t& offsetNs, uint32_t& rttUs, ui
     return m_timesyncSampleCount != 0;
 }
 
-uint64_t Px4MavlinkGateway::MapMonotonicNsToPx4Ns(
-    uint64_t monoNs,
-    bool* outTimesyncValid,
-    int64_t* outOffsetNs,
-    uint32_t* outRttUs,
-    uint32_t* outSampleCount) const
+uint64_t Px4MavlinkGateway::MapMonotonicNsToPx4Ns(uint64_t monoNs, bool *outTimesyncValid, int64_t *outOffsetNs,
+                                                  uint32_t *outRttUs, uint32_t *outSampleCount) const
 {
     int64_t offsetNs = 0;
     uint32_t rttUs = 0;
     uint32_t sampleCount = 0;
     const bool valid = GetTimesyncStatus(offsetNs, rttUs, sampleCount);
-    if (outTimesyncValid) *outTimesyncValid = valid;
-    if (outOffsetNs) *outOffsetNs = offsetNs;
-    if (outRttUs) *outRttUs = rttUs;
-    if (outSampleCount) *outSampleCount = sampleCount;
+    if (outTimesyncValid)
+        *outTimesyncValid = valid;
+    if (outOffsetNs)
+        *outOffsetNs = offsetNs;
+    if (outRttUs)
+        *outRttUs = rttUs;
+    if (outSampleCount)
+        *outSampleCount = sampleCount;
     if (!valid) {
         return monoNs;
     }
@@ -457,14 +390,9 @@ uint64_t Px4MavlinkGateway::MapMonotonicNsToPx4Ns(
     return px4NsSigned > 0 ? static_cast<uint64_t>(px4NsSigned) : 0ULL;
 }
 
-void Px4MavlinkGateway::SendOdometry(
-    uint64_t odomFrameId,
-    const Pose& poseNed,
-    const LinearVelocityNed& velNed,
-    uint8_t mavFrameId,
-    uint8_t childFrameId,
-    uint8_t resetCounter,
-    OdomQualityMode mode)
+void Px4MavlinkGateway::SendOdometry(uint64_t odomFrameId, const Pose &poseNed, const LinearVelocityNed &velNed,
+                                     uint8_t mavFrameId, uint8_t childFrameId, uint8_t resetCounter,
+                                     OdomQualityMode mode)
 {
     mavlink_message_t msg;
     const float vx = velNed.x, vy = velNed.y, vz = velNed.z;
@@ -519,59 +447,40 @@ void Px4MavlinkGateway::SendOdometry(
     if (debug.tCamNs == 0) {
         debug.tCamNs = debug.tMavTxNs;
     }
-    debug.tPx4Ns = MapMonotonicNsToPx4Ns(
-        debug.tCamNs,
-        &debug.timesyncValid,
-        &debug.timesyncOffsetNs,
-        &debug.timesyncRttUs);
+    debug.tPx4Ns =
+        MapMonotonicNsToPx4Ns(debug.tCamNs, &debug.timesyncValid, &debug.timesyncOffsetNs, &debug.timesyncRttUs);
     MarkFrameMavTx(odomFrameId, debug.tMavTxNs);
     m_lastOdomTimestampDebug = debug;
 
-    mavlink_msg_odometry_pack(
-        m_sysid, m_compid, &msg,
-        debug.tPx4Ns / 1000ULL,
-        mavFrameId,
-        childFrameId,
-        poseNed.x, poseNed.y, poseNed.z,
-        q,
-        vx, vy, vz,
-        rollspeed, pitchspeed, yawspeed,
-        poseCov,
-        velCov,
-        resetCounter,
-        estimatorType,
-        quality);
+    mavlink_msg_odometry_pack(m_sysid, m_compid, &msg, debug.tPx4Ns / 1000ULL, mavFrameId, childFrameId, poseNed.x,
+                              poseNed.y, poseNed.z, q, vx, vy, vz, rollspeed, pitchspeed, yawspeed, poseCov, velCov,
+                              resetCounter, estimatorType, quality);
 
     WriteMessage(msg);
 
-    const double queueLatencyMs =
-        (debug.tSlamInNs >= debug.tCbNs && debug.tCbNs != 0) ? (static_cast<double>(debug.tSlamInNs - debug.tCbNs) * 1e-6) : -1.0;
+    const double queueLatencyMs = (debug.tSlamInNs >= debug.tCbNs && debug.tCbNs != 0)
+                                      ? (static_cast<double>(debug.tSlamInNs - debug.tCbNs) * 1e-6)
+                                      : -1.0;
     const double slamLatencyMs =
         (debug.tSlamOutNs >= debug.tCamNs) ? (static_cast<double>(debug.tSlamOutNs - debug.tCamNs) * 1e-6) : -1.0;
-    const double sendLatencyMs =
-        (debug.tMavTxNs >= debug.tSlamOutNs && debug.tSlamOutNs != 0) ? (static_cast<double>(debug.tMavTxNs - debug.tSlamOutNs) * 1e-6) : -1.0;
+    const double sendLatencyMs = (debug.tMavTxNs >= debug.tSlamOutNs && debug.tSlamOutNs != 0)
+                                     ? (static_cast<double>(debug.tMavTxNs - debug.tSlamOutNs) * 1e-6)
+                                     : -1.0;
     const double totalLatencyMs =
         (debug.tMavTxNs >= debug.tCamNs) ? (static_cast<double>(debug.tMavTxNs - debug.tCamNs) * 1e-6) : -1.0;
     const double px4OffsetMs = static_cast<double>(debug.timesyncOffsetNs) * 1e-6;
-    printf("[odom_ts] frame=%llu timing=%d cam_ns=%llu cb_ns=%llu slam_in_ns=%llu px4_ns=%llu slam_out_ns=%llu mav_tx_ns=%llu sync=%d offset_ms=%.3f rtt_ms=%.3f queue_latency_ms=%.3f slam_latency_ms=%.3f send_latency_ms=%.3f total_latency_ms=%.3f\n",
-           static_cast<unsigned long long>(debug.frameId),
-           haveTiming ? 1 : 0,
-           static_cast<unsigned long long>(debug.tCamNs),
-           static_cast<unsigned long long>(debug.tCbNs),
-           static_cast<unsigned long long>(debug.tSlamInNs),
-           static_cast<unsigned long long>(debug.tPx4Ns),
-           static_cast<unsigned long long>(debug.tSlamOutNs),
-           static_cast<unsigned long long>(debug.tMavTxNs),
-           debug.timesyncValid ? 1 : 0,
-           px4OffsetMs,
-           static_cast<double>(debug.timesyncRttUs) * 1e-3,
-           queueLatencyMs,
-           slamLatencyMs,
-           sendLatencyMs,
-           totalLatencyMs);
+    printf("[odom_ts] frame=%llu timing=%d cam_ns=%llu cb_ns=%llu slam_in_ns=%llu px4_ns=%llu slam_out_ns=%llu "
+           "mav_tx_ns=%llu sync=%d offset_ms=%.3f rtt_ms=%.3f queue_latency_ms=%.3f slam_latency_ms=%.3f "
+           "send_latency_ms=%.3f total_latency_ms=%.3f\n",
+           static_cast<unsigned long long>(debug.frameId), haveTiming ? 1 : 0,
+           static_cast<unsigned long long>(debug.tCamNs), static_cast<unsigned long long>(debug.tCbNs),
+           static_cast<unsigned long long>(debug.tSlamInNs), static_cast<unsigned long long>(debug.tPx4Ns),
+           static_cast<unsigned long long>(debug.tSlamOutNs), static_cast<unsigned long long>(debug.tMavTxNs),
+           debug.timesyncValid ? 1 : 0, px4OffsetMs, static_cast<double>(debug.timesyncRttUs) * 1e-3, queueLatencyMs,
+           slamLatencyMs, sendLatencyMs, totalLatencyMs);
 }
 
-Px4MavlinkGateway::Pose Px4MavlinkGateway::EnuToNed(const Pose& pEnu)
+Px4MavlinkGateway::Pose Px4MavlinkGateway::EnuToNed(const Pose &pEnu)
 {
     Pose out{};
     out.x = pEnu.y;
@@ -581,15 +490,19 @@ Px4MavlinkGateway::Pose Px4MavlinkGateway::EnuToNed(const Pose& pEnu)
     const float s = 0.7071067811865476f;
     const float qrW = 0.0f, qrX = s, qrY = s, qrZ = 0.0f;
 
-    auto qmul = [](float aw, float ax, float ay, float az, float bw, float bx, float by, float bz, float& ow, float& ox, float& oy, float& oz) {
+    auto qmul = [](float aw, float ax, float ay, float az, float bw, float bx, float by, float bz, float &ow, float &ox,
+                   float &oy, float &oz) {
         ow = aw * bw - ax * bx - ay * by - az * bz;
         ox = aw * bx + ax * bw + ay * bz - az * by;
         oy = aw * by - ax * bz + ay * bw + az * bx;
         oz = aw * bz + ax * by - ay * bx + az * bw;
     };
 
-    auto qconj = [](float w, float x, float y, float z, float& ow, float& ox, float& oy, float& oz) {
-        ow = w; ox = -x; oy = -y; oz = -z;
+    auto qconj = [](float w, float x, float y, float z, float &ow, float &ox, float &oy, float &oz) {
+        ow = w;
+        ox = -x;
+        oy = -y;
+        oz = -z;
     };
 
     float tW, tX, tY, tZ;
@@ -601,11 +514,18 @@ Px4MavlinkGateway::Pose Px4MavlinkGateway::EnuToNed(const Pose& pEnu)
     return out;
 }
 
-void Px4MavlinkGateway::NormalizeQuat(float& w, float& x, float& y, float& z)
+void Px4MavlinkGateway::NormalizeQuat(float &w, float &x, float &y, float &z)
 {
     const float n = std::sqrt(w * w + x * x + y * y + z * z);
-    if (n > 1e-9f) { w /= n; x /= n; y /= n; z /= n; }
-    else { w = 1; x = y = z = 0; }
+    if (n > 1e-9f) {
+        w /= n;
+        x /= n;
+        y /= n;
+        z /= n;
+    } else {
+        w = 1;
+        x = y = z = 0;
+    }
 }
 
 void Px4MavlinkGateway::ResetTimesyncEstimateLocked()
@@ -615,7 +535,7 @@ void Px4MavlinkGateway::ResetTimesyncEstimateLocked()
     m_timesyncSampleCount = 0;
 }
 
-bool Px4MavlinkGateway::LookupFrameTiming(uint64_t frameId, smartdrone::core::application::FrameTimingRecord& out) const
+bool Px4MavlinkGateway::LookupFrameTiming(uint64_t frameId, smartdrone::core::application::FrameTimingRecord &out) const
 {
     std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
     return m_frameTimingTracker && m_frameTimingTracker->Lookup(frameId, out);
@@ -629,20 +549,27 @@ void Px4MavlinkGateway::MarkFrameMavTx(uint64_t frameId, uint64_t tMavTxNs)
     }
 }
 
-const char* Px4MavlinkGateway::MavResultToStr(uint8_t r)
+const char *Px4MavlinkGateway::MavResultToStr(uint8_t r)
 {
     switch (r) {
-        case MAV_RESULT_ACCEPTED: return "ACCEPTED";
-        case MAV_RESULT_TEMPORARILY_REJECTED: return "TEMP_REJECTED";
-        case MAV_RESULT_DENIED: return "DENIED";
-        case MAV_RESULT_UNSUPPORTED: return "UNSUPPORTED";
-        case MAV_RESULT_FAILED: return "FAILED";
-        case MAV_RESULT_IN_PROGRESS: return "IN_PROGRESS";
-        default: return "UNKNOWN";
+    case MAV_RESULT_ACCEPTED:
+        return "ACCEPTED";
+    case MAV_RESULT_TEMPORARILY_REJECTED:
+        return "TEMP_REJECTED";
+    case MAV_RESULT_DENIED:
+        return "DENIED";
+    case MAV_RESULT_UNSUPPORTED:
+        return "UNSUPPORTED";
+    case MAV_RESULT_FAILED:
+        return "FAILED";
+    case MAV_RESULT_IN_PROGRESS:
+        return "IN_PROGRESS";
+    default:
+        return "UNKNOWN";
     }
 }
 
-void Px4MavlinkGateway::WriteMessage(const mavlink_message_t& msg)
+void Px4MavlinkGateway::WriteMessage(const mavlink_message_t &msg)
 {
     std::lock_guard<std::mutex> txLock(m_txMtx);
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
@@ -702,9 +629,7 @@ void Px4MavlinkGateway::TimesyncLoop()
             {
                 std::lock_guard<std::mutex> lk(m_timesyncMtx);
                 const uint64_t nowUs = nowNs / 1000ULL;
-                recentlyActive =
-                    (m_lastTimesyncActivityUs != 0) &&
-                    (nowUs <= (m_lastTimesyncActivityUs + 2000000ULL));
+                recentlyActive = (m_lastTimesyncActivityUs != 0) && (nowUs <= (m_lastTimesyncActivityUs + 2000000ULL));
                 if (!m_havePendingTimesync) {
                     shouldSend = true;
                 } else if (nowNs > (m_pendingTimesyncSentNs + 500000000ULL)) {
@@ -730,11 +655,13 @@ void Px4MavlinkGateway::RxLoop()
     mavlink_status_t status{};
     while (m_rxRunning.load()) {
         int pr = m_transport.PollReadable(200);
-        if (pr <= 0) continue;
+        if (pr <= 0)
+            continue;
 
         uint8_t buf[512];
         ssize_t n = m_transport.Read(buf, sizeof(buf));
-        if (n <= 0) continue;
+        if (n <= 0)
+            continue;
         for (ssize_t i = 0; i < n; i++) {
             if (mavlink_parse_char(MAVLINK_COMM_0, buf[i], &msg, &status)) {
                 HandleMavlinkMessage(msg);
@@ -743,7 +670,7 @@ void Px4MavlinkGateway::RxLoop()
     }
 }
 
-void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t& msg)
+void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t &msg)
 {
     if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
         mavlink_timesync_t tsync{};
@@ -763,16 +690,13 @@ void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t& msg)
                 requestCount = m_timesyncInboundRequestCount;
                 const uint64_t nowUs = MonoTimeUs();
                 m_lastTimesyncActivityUs = nowUs;
-                if (requestCount <= 3 || (requestCount % 50) == 0 ||
-                    (nowUs > (m_lastTimesyncLogUs + 5000000ULL))) {
+                if (requestCount <= 3 || (requestCount % 50) == 0 || (nowUs > (m_lastTimesyncLogUs + 5000000ULL))) {
                     m_lastTimesyncLogUs = nowUs;
                     shouldLog = true;
                 }
             }
             if (shouldLog) {
-                printf("[timesync] rx PX4 request count=%u px4=%u/%u\n",
-                       requestCount,
-                       static_cast<unsigned>(msg.sysid),
+                printf("[timesync] rx PX4 request count=%u px4=%u/%u\n", requestCount, static_cast<unsigned>(msg.sysid),
                        static_cast<unsigned>(msg.compid));
             }
             SendTimesyncResponse(tsync.ts1, msg.sysid, msg.compid);
@@ -784,10 +708,8 @@ void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t& msg)
         uint64_t pendingSentNs = 0;
         {
             std::lock_guard<std::mutex> lk(m_timesyncMtx);
-            if (m_havePendingTimesync &&
-                tsync.ts1 == m_pendingTimesyncTs1Ns &&
-                msg.sysid == m_pendingTimesyncTargetSystem &&
-                msg.compid == m_pendingTimesyncTargetComponent) {
+            if (m_havePendingTimesync && tsync.ts1 == m_pendingTimesyncTs1Ns &&
+                msg.sysid == m_pendingTimesyncTargetSystem && msg.compid == m_pendingTimesyncTargetComponent) {
                 matchedPending = true;
                 pendingSentNs = m_pendingTimesyncSentNs;
                 m_havePendingTimesync = false;
@@ -798,8 +720,7 @@ void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t& msg)
             return;
         }
 
-        const int64_t observedOffsetNs =
-            static_cast<int64_t>((pendingSentNs + nowNs) / 2ULL) - tsync.tc1;
+        const int64_t observedOffsetNs = static_cast<int64_t>((pendingSentNs + nowNs) / 2ULL) - tsync.tc1;
         const uint64_t rttUs64 = (nowNs > pendingSentNs) ? ((nowNs - pendingSentNs) / 1000ULL) : 0ULL;
         const uint32_t rttUs = (rttUs64 > 0xFFFFFFFFULL) ? 0xFFFFFFFFu : static_cast<uint32_t>(rttUs64);
 
@@ -832,8 +753,7 @@ void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t& msg)
                 if (m_timesyncSampleCount == 0) {
                     m_timesyncEstimatedOffsetNs = observedOffsetNs;
                 } else {
-                    m_timesyncEstimatedOffsetNs =
-                        (m_timesyncEstimatedOffsetNs * 7 + observedOffsetNs) / 8;
+                    m_timesyncEstimatedOffsetNs = (m_timesyncEstimatedOffsetNs * 7 + observedOffsetNs) / 8;
                 }
                 ++m_timesyncSampleCount;
                 m_timesyncLastRttUs = rttUs;
@@ -843,9 +763,8 @@ void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t& msg)
             ++m_timesyncInboundResponseCount;
             const uint64_t nowUs = nowNs / 1000ULL;
             m_lastTimesyncActivityUs = nowUs;
-            if (rejectedByRtt || resetByJump || jumpWarn ||
-                sampleCount <= 5 || (sampleCount != 0 && (sampleCount % 20) == 0) ||
-                (nowUs > (m_lastTimesyncLogUs + 5000000ULL))) {
+            if (rejectedByRtt || resetByJump || jumpWarn || sampleCount <= 5 ||
+                (sampleCount != 0 && (sampleCount % 20) == 0) || (nowUs > (m_lastTimesyncLogUs + 5000000ULL))) {
                 m_lastTimesyncLogUs = nowUs;
                 shouldLog = true;
             }
@@ -853,14 +772,9 @@ void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t& msg)
 
         if (shouldLog) {
             printf("[timesync] samples=%u offset=%.3fms rtt=%.3fms accepted=%d reset=%d jump_ms=%.3f px4=%u/%u\n",
-                   sampleCount,
-                   static_cast<double>(filteredOffsetNs) * 1e-6,
-                   static_cast<double>(rttUs) * 1e-3,
-                   rejectedByRtt ? 0 : 1,
-                   resetByJump ? 1 : 0,
-                   static_cast<double>(jumpNs) * 1e-6,
-                   static_cast<unsigned>(msg.sysid),
-                   static_cast<unsigned>(msg.compid));
+                   sampleCount, static_cast<double>(filteredOffsetNs) * 1e-6, static_cast<double>(rttUs) * 1e-3,
+                   rejectedByRtt ? 0 : 1, resetByJump ? 1 : 0, static_cast<double>(jumpNs) * 1e-6,
+                   static_cast<unsigned>(msg.sysid), static_cast<unsigned>(msg.compid));
         }
 
         SendTimesyncFollowUp(tsync.tc1, msg.sysid, msg.compid);
@@ -944,9 +858,8 @@ void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t& msg)
             m_ackMap[ack.command] = info;
         }
         m_ackCv.notify_all();
-        printf("[ACK] sys=%d, comp=%d cmd=%u result= %d(%s) progress=%d param2=%d\n",
-               int(msg.sysid), int(msg.compid), ack.command, int(ack.result), MavResultToStr(ack.result),
-               int(ack.progress), ack.result_param2);
+        printf("[ACK] sys=%d, comp=%d cmd=%u result= %d(%s) progress=%d param2=%d\n", int(msg.sysid), int(msg.compid),
+               ack.command, int(ack.result), MavResultToStr(ack.result), int(ack.progress), ack.result_param2);
         return;
     }
 
@@ -968,12 +881,9 @@ void Px4MavlinkGateway::MaybeRequestLocalPositionNedStream(uint8_t targetSystem,
         return;
     }
     constexpr float kIntervalUs = 50000.0f;
-    SendCommandLong(MAV_CMD_SET_MESSAGE_INTERVAL,
-                    static_cast<float>(MAVLINK_MSG_ID_LOCAL_POSITION_NED),
-                    kIntervalUs, 0, 0, 0, 0, 0,
-                    targetSystem, targetComponent);
-    printf("[mav] requested LOCAL_POSITION_NED @20Hz from sys=%d comp=%d\n",
-           int(targetSystem), int(targetComponent));
+    SendCommandLong(MAV_CMD_SET_MESSAGE_INTERVAL, static_cast<float>(MAVLINK_MSG_ID_LOCAL_POSITION_NED), kIntervalUs, 0,
+                    0, 0, 0, 0, targetSystem, targetComponent);
+    printf("[mav] requested LOCAL_POSITION_NED @20Hz from sys=%d comp=%d\n", int(targetSystem), int(targetComponent));
 }
 
 void Px4MavlinkGateway::MaybeRequestDistanceSensorStream(uint8_t targetSystem, uint8_t targetComponent)
@@ -983,10 +893,7 @@ void Px4MavlinkGateway::MaybeRequestDistanceSensorStream(uint8_t targetSystem, u
         return;
     }
     constexpr float kIntervalUs = 50000.0f;
-    SendCommandLong(MAV_CMD_SET_MESSAGE_INTERVAL,
-                    static_cast<float>(MAVLINK_MSG_ID_DISTANCE_SENSOR),
-                    kIntervalUs, 0, 0, 0, 0, 0,
-                    targetSystem, targetComponent);
-    printf("[mav] requested DISTANCE_SENSOR @20Hz from sys=%d comp=%d\n",
-           int(targetSystem), int(targetComponent));
+    SendCommandLong(MAV_CMD_SET_MESSAGE_INTERVAL, static_cast<float>(MAVLINK_MSG_ID_DISTANCE_SENSOR), kIntervalUs, 0, 0,
+                    0, 0, 0, targetSystem, targetComponent);
+    printf("[mav] requested DISTANCE_SENSOR @20Hz from sys=%d comp=%d\n", int(targetSystem), int(targetComponent));
 }

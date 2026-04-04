@@ -15,12 +15,12 @@ enum class SensorMode {
     MonoImu,
 };
 
-const char* DefaultSettingsForSensorMode(SensorMode mode);
-SensorMode ParseSensorModeText(const std::string& text);
-const char* ToSensorModeText(SensorMode mode);
-smartdrone::core::domain::SlamOperationMode ParseSlamOperationModeText(const std::string& text);
-std::string ResolveRuntimePath(const std::string& path, const char* argv0);
-std::string ResolveSettingsForSensorMode(SensorMode mode, const std::string& currentSettingsPath);
+const char *DefaultSettingsForSensorMode(SensorMode mode);
+SensorMode ParseSensorModeText(const std::string &text);
+const char *ToSensorModeText(SensorMode mode);
+smartdrone::core::domain::SlamOperationMode ParseSlamOperationModeText(const std::string &text);
+std::string ResolveRuntimePath(const std::string &path, const char *argv0);
+std::string ResolveSettingsForSensorMode(SensorMode mode, const std::string &currentSettingsPath);
 
 struct CameraConfig {
     int width{640};
@@ -70,8 +70,7 @@ struct RuntimeConfig {
     int64_t offRejectNs{10'000'000};
     bool allowEmptyImu{false};
     int slamInputFps{0};
-    smartdrone::core::domain::SlamOperationMode slamOperationMode{
-        smartdrone::core::domain::SlamOperationMode::Mapping};
+    smartdrone::core::domain::SlamOperationMode slamOperationMode{smartdrone::core::domain::SlamOperationMode::Mapping};
     bool debugRightOnlyFeatures{false};
     bool slamLowLightEnhance{false};
 };
@@ -87,21 +86,21 @@ struct AppConfig {
 };
 
 class ArgReader {
-public:
-    ArgReader(int argc, char** argv);
+  public:
+    ArgReader(int argc, char **argv);
 
-    std::string GetString(const char* name, const char* defaultValue) const;
-    int GetInt(const char* name, int defaultValue) const;
-    int64_t GetInt64(const char* name, int64_t defaultValue) const;
-    float GetFloat(const char* name, float defaultValue) const;
-    bool HasFlag(const char* name) const;
-    uint8_t GetUint8HexOrDec(const char* name, uint8_t defaultValue, const char* defaultText) const;
+    std::string GetString(const char *name, const char *defaultValue) const;
+    int GetInt(const char *name, int defaultValue) const;
+    int64_t GetInt64(const char *name, int64_t defaultValue) const;
+    float GetFloat(const char *name, float defaultValue) const;
+    bool HasFlag(const char *name) const;
+    uint8_t GetUint8HexOrDec(const char *name, uint8_t defaultValue, const char *defaultText) const;
 
-private:
-    static uint8_t ParseUint8HexOrDec(const std::string& text, uint8_t defaultValue);
+  private:
+    static uint8_t ParseUint8HexOrDec(const std::string &text, uint8_t defaultValue);
 
     int m_argc;
-    char** m_argv;
+    char **m_argv;
 };
 
-AppConfig ParseAppConfig(int argc, char** argv);
+AppConfig ParseAppConfig(int argc, char **argv);

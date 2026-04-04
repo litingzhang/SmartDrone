@@ -29,19 +29,14 @@ struct LivePoseState {
         uint32_t pointCloudSeq{0};
     };
 
-    void UpdatePeer(const UdpPeer& peer);
+    void UpdatePeer(const UdpPeer &peer);
     void SetRuntimeMode(uint8_t mode);
     void SetSlamMode(uint8_t mode);
-    void UpdatePose(
-        uint8_t mode,
-        uint8_t tracking,
-        uint16_t resetCounterIn,
-        uint16_t resetMapCountIn,
-        const Px4MavlinkGateway::Pose& p,
-        OdomQualityMode quality);
+    void UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCounterIn, uint16_t resetMapCountIn,
+                    const Px4MavlinkGateway::Pose &p, OdomQualityMode quality);
     void UpdatePointCloud(std::vector<float> xyz);
-    bool ConsumeSnapshot(Snapshot& out);
-    bool ReadSnapshot(Snapshot& out) const;
+    bool ConsumeSnapshot(Snapshot &out);
+    bool ReadSnapshot(Snapshot &out) const;
 
     mutable std::mutex mu;
     UdpPeer latestPeer{};
@@ -61,4 +56,4 @@ struct LivePoseState {
     bool dirty{false};
 };
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

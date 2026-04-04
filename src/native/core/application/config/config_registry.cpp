@@ -21,12 +21,8 @@ std::vector<domain::ConfigDescriptor> ConfigRegistry::DefaultDescriptors()
     };
 }
 
-domain::ConfigDescriptor ConfigRegistry::Make(
-    std::string_view key,
-    std::string_view description,
-    bool hotReloadable,
-    bool requiresPipelineRestart,
-    bool requiresDeviceRestart)
+domain::ConfigDescriptor ConfigRegistry::Make(std::string_view key, std::string_view description, bool hotReloadable,
+                                              bool requiresPipelineRestart, bool requiresDeviceRestart)
 {
     domain::ConfigDescriptor out{};
     out.key = std::string(key);
@@ -37,4 +33,4 @@ domain::ConfigDescriptor ConfigRegistry::Make(
     return out;
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

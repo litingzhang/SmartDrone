@@ -26,15 +26,15 @@ struct MoveGoal {
 };
 
 class GoalCache {
-public:
-    void Set(const MoveGoal& goal)
+  public:
+    void Set(const MoveGoal &goal)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_goal = goal;
         m_hasGoal = true;
     }
 
-    bool Get(MoveGoal* outGoal) const
+    bool Get(MoveGoal *outGoal) const
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (!m_hasGoal || outGoal == nullptr) {
@@ -44,7 +44,7 @@ public:
         return true;
     }
 
-private:
+  private:
     mutable std::mutex m_mutex;
     bool m_hasGoal{false};
     MoveGoal m_goal{};

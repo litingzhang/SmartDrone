@@ -27,13 +27,13 @@ struct CameraHealth {
 };
 
 class ICameraProvider {
-public:
+  public:
     virtual ~ICameraProvider() = default;
 
     virtual bool Start() = 0;
     virtual void Stop() = 0;
-    virtual bool GrabStereo(StereoFrame& out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs = 0) = 0;
+    virtual bool GrabStereo(StereoFrame &out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs = 0) = 0;
     virtual CameraHealth GetHealth() const = 0;
 };
 
-}  // namespace smartdrone::core::ports
+} // namespace smartdrone::core::ports

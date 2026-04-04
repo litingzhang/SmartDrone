@@ -1,10 +1,5 @@
 package com.example.smartdrone;
 
-import com.example.smartdrone.R;
-import com.jcraft.jsch.ChannelExec;
-import com.jcraft.jsch.JSch;
-import com.jcraft.jsch.Session;
-
 import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -28,7 +23,10 @@ import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
-
+import com.example.smartdrone.R;
+import com.jcraft.jsch.ChannelExec;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.Session;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -109,12 +107,8 @@ public class MainActivity extends Activity {
     private static final int SSH_PORT = 22;
     private static final int SSH_CONNECT_TIMEOUT_MS = 4000;
     private static final int SSH_COMMAND_TIMEOUT_MS = 4000;
-    private static final String SSH_KILL_COMMAND =
-            "pkill -f '(^|/)smart_drone( |$)' || pkill -x smart_drone";
-    private static final String[] DEFAULT_VEHICLE_IPS = new String[]{
-            "10.42.0.1",
-            "192.168.0.105"
-    };
+    private static final String SSH_KILL_COMMAND = "pkill -f '(^|/)smart_drone( |$)' || pkill -x smart_drone";
+    private static final String[] DEFAULT_VEHICLE_IPS = new String[] {"10.42.0.1", "192.168.0.105"};
     private ImageView m_ivVideoLeft;
     private ImageView m_ivVideoRight;
     private Map3DView m_map3dView;
@@ -223,7 +217,7 @@ public class MainActivity extends Activity {
     private boolean m_supportsMonoImu = true;
     private String m_lastCapabilitiesText = "";
     private String m_lastConfigText = "";
-    private int[] m_availableSensorModes = new int[]{SENSOR_STEREO, SENSOR_STEREO_IMU, SENSOR_MONO, SENSOR_MONO_IMU};
+    private int[] m_availableSensorModes = new int[] {SENSOR_STEREO, SENSOR_STEREO_IMU, SENSOR_MONO, SENSOR_MONO_IMU};
     private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Map<Long, PendingAckAction> m_pendingAckActions = new HashMap<>();
     private final Set<String> m_pendingUiKeys = new HashSet<>();
@@ -237,7 +231,8 @@ public class MainActivity extends Activity {
         int chunkReceived;
         int byteReceived;
 
-        void reset() {
+        void reset()
+        {
             frameId = -1;
             frameTimeSec = Double.NaN;
             chunkCount = 0;
@@ -265,7 +260,8 @@ public class MainActivity extends Activity {
         int[] ys;
         int count;
 
-        void reset() {
+        void reset()
+        {
             frameId = -1;
             frameTimeSec = Double.NaN;
             width = 0;
@@ -276,16 +272,13 @@ public class MainActivity extends Activity {
         }
     }
 
-    private final VideoAssembly[] m_videoAssemblies =
-            new VideoAssembly[]{new VideoAssembly(), new VideoAssembly()};
-    private final DisplayFrame[] m_displayFrames =
-            new DisplayFrame[]{new DisplayFrame(), new DisplayFrame()};
-    private final FeatureFrame[] m_featureFrames =
-            new FeatureFrame[]{new FeatureFrame(), new FeatureFrame()};
+    private final VideoAssembly[] m_videoAssemblies = new VideoAssembly[] {new VideoAssembly(), new VideoAssembly()};
+    private final DisplayFrame[] m_displayFrames = new DisplayFrame[] {new DisplayFrame(), new DisplayFrame()};
+    private final FeatureFrame[] m_featureFrames = new FeatureFrame[] {new FeatureFrame(), new FeatureFrame()};
 
     private final Runnable m_joystickLoop = new Runnable() {
-        @Override
-        public void run() {
+        @Override public void run()
+        {
             if (!m_joystickLoopRunning) {
                 return;
             }
@@ -295,8 +288,8 @@ public class MainActivity extends Activity {
     };
 
     private final Runnable m_rxLoop = new Runnable() {
-        @Override
-        public void run() {
+        @Override public void run()
+        {
             if (!m_rxLoopRunning) {
                 return;
             }
@@ -305,7 +298,8 @@ public class MainActivity extends Activity {
         }
     };
 
-    private static float parseF(EditText et, float defVal) {
+    private static float parseF(EditText et, float defVal)
+    {
         try {
             String s = et.getText().toString().trim();
             if (s.isEmpty()) {
@@ -317,7 +311,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static int parseI(EditText et, int defVal) {
+    private static int parseI(EditText et, int defVal)
+    {
         try {
             String s = et.getText().toString().trim();
             if (s.isEmpty()) {
@@ -329,35 +324,28 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static int clampInt(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
-    }
+    private static int clampInt(int value, int min, int max) { return Math.max(min, Math.min(max, value)); }
 
-    private static int quantizeExposureUs(int exposureUs) {
+    private static int quantizeExposureUs(int exposureUs)
+    {
         int clamped = clampInt(exposureUs, EXPOSURE_MIN_US, EXPOSURE_MAX_US);
-        int steps = Math.round((clamped - EXPOSURE_MIN_US) / (float) EXPOSURE_STEP_US);
+        int steps = Math.round((clamped - EXPOSURE_MIN_US) / (float)EXPOSURE_STEP_US);
         return EXPOSURE_MIN_US + steps * EXPOSURE_STEP_US;
     }
 
-    private static int quantizeGain(int gain) {
-        return clampInt(gain, GAIN_MIN, GAIN_MAX);
-    }
+    private static int quantizeGain(int gain) { return clampInt(gain, GAIN_MIN, GAIN_MAX); }
 
-    private static int quantizePairMs(int pairMs) {
-        return clampInt(pairMs, PAIR_MS_MIN, PAIR_MS_MAX);
-    }
+    private static int quantizePairMs(int pairMs) { return clampInt(pairMs, PAIR_MS_MIN, PAIR_MS_MAX); }
 
-    private static int quantizeSlamFps(int slamFps) {
-        return clampInt(slamFps, SLAM_FPS_MIN, SLAM_FPS_MAX);
-    }
+    private static int quantizeSlamFps(int slamFps) { return clampInt(slamFps, SLAM_FPS_MIN, SLAM_FPS_MAX); }
 
-    private static Float findPoseField(String text, String... keys) {
+    private static Float findPoseField(String text, String... keys)
+    {
         if (text == null) {
             return null;
         }
         for (String key : keys) {
-            Pattern pattern = Pattern.compile("(?i)\\b" + Pattern.quote(key)
-                    + "\\s*[:=]\\s*(-?\\d+(?:\\.\\d+)?)");
+            Pattern pattern = Pattern.compile("(?i)\\b" + Pattern.quote(key) + "\\s*[:=]\\s*(-?\\d+(?:\\.\\d+)?)");
             Matcher matcher = pattern.matcher(text);
             if (matcher.find()) {
                 try {
@@ -369,47 +357,50 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    private static int readLeU16(byte[] data, int offset) {
+    private static int readLeU16(byte[] data, int offset)
+    {
         return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
     }
 
-    private static int readFramePayloadLen(byte[] data) {
+    private static int readFramePayloadLen(byte[] data)
+    {
         if (data == null || data.length < 17) {
             return -1;
         }
         return readLeU16(data, 5);
     }
 
-    private static float readLeF32(byte[] data, int offset) {
-        int bits = (data[offset] & 0xFF)
-                | ((data[offset + 1] & 0xFF) << 8)
-                | ((data[offset + 2] & 0xFF) << 16)
-                | ((data[offset + 3] & 0xFF) << 24);
+    private static float readLeF32(byte[] data, int offset)
+    {
+        int bits = (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8) | ((data[offset + 2] & 0xFF) << 16) |
+                   ((data[offset + 3] & 0xFF) << 24);
         return Float.intBitsToFloat(bits);
     }
 
-    private static float clampUnit(float value) {
-        return Math.max(-1.0f, Math.min(1.0f, value));
-    }
+    private static float clampUnit(float value) { return Math.max(-1.0f, Math.min(1.0f, value)); }
 
-    private static float quatYawDeg(float qw, float qx, float qy, float qz) {
+    private static float quatYawDeg(float qw, float qx, float qy, float qz)
+    {
         double siny = 2.0 * (qw * qz + qx * qy);
         double cosy = 1.0 - 2.0 * (qy * qy + qz * qz);
-        return (float) Math.toDegrees(Math.atan2(siny, cosy));
+        return (float)Math.toDegrees(Math.atan2(siny, cosy));
     }
 
-    private static float quatPitchDeg(float qw, float qx, float qy, float qz) {
+    private static float quatPitchDeg(float qw, float qx, float qy, float qz)
+    {
         double sinp = 2.0 * (qw * qy - qz * qx);
-        return (float) Math.toDegrees(Math.asin(clampUnit((float) sinp)));
+        return (float)Math.toDegrees(Math.asin(clampUnit((float)sinp)));
     }
 
-    private static float quatRollDeg(float qw, float qx, float qy, float qz) {
+    private static float quatRollDeg(float qw, float qx, float qy, float qz)
+    {
         double sinr = 2.0 * (qw * qx + qy * qz);
         double cosr = 1.0 - 2.0 * (qx * qx + qy * qy);
-        return (float) Math.toDegrees(Math.atan2(sinr, cosr));
+        return (float)Math.toDegrees(Math.atan2(sinr, cosr));
     }
 
-    private boolean tryHandleStatePoseForMap(byte[] rx) {
+    private boolean tryHandleStatePoseForMap(byte[] rx)
+    {
         if (!m_sendMap) {
             return false;
         }
@@ -439,19 +430,13 @@ public class MainActivity extends Activity {
         float pitchDeg = quatPitchDeg(qw, qx, qy, qz);
         float yawDeg = quatYawDeg(qw, qx, qy, qz);
         if (m_map3dView != null) {
-            m_map3dView.setPose(
-                    mapX,
-                    mapY,
-                    mapZ,
-                    rollDeg,
-                    pitchDeg,
-                    yawDeg,
-                    true);
+            m_map3dView.setPose(mapX, mapY, mapZ, rollDeg, pitchDeg, yawDeg, true);
         }
         return true;
     }
 
-    private boolean tryHandlePointCloudPacket(byte[] rx) {
+    private boolean tryHandlePointCloudPacket(byte[] rx)
+    {
         if (!m_sendMap) {
             return false;
         }
@@ -486,7 +471,8 @@ public class MainActivity extends Activity {
         return true;
     }
 
-    private void updatePoseMapFromText() {
+    private void updatePoseMapFromText()
+    {
         if (m_map3dView == null || m_tvPose == null) {
             return;
         }
@@ -503,75 +489,71 @@ public class MainActivity extends Activity {
         if (x == null || y == null || z == null) {
             return;
         }
-        m_map3dView.setPose(
-                x,
-                y,
-                z,
-                roll != null ? roll : 0f,
-                pitch != null ? pitch : 0f,
-                yaw != null ? yaw : 0f,
-                true);
+        m_map3dView.setPose(x, y, z, roll != null ? roll : 0f, pitch != null ? pitch : 0f, yaw != null ? yaw : 0f,
+                            true);
     }
 
-    private void updateConfigViews() {
+    private void updateConfigViews()
+    {
         if (m_updatingConfigUi) {
             return;
         }
         m_updatingConfigUi = true;
         try {
-        final boolean runtimeActive = isRuntimeActive();
-        if (m_tvCfgExposureValue != null) {
-            m_tvCfgExposureValue.setText(String.format(Locale.US, "Exposure: %d us", m_cfgExposureUs));
-            m_tvCfgExposureValue.setAlpha(runtimeActive ? 0.45f : 1.0f);
-        }
-        if (m_tvCfgGainValue != null) {
-            m_tvCfgGainValue.setText(String.format(Locale.US, "Gain: %d", m_cfgGain));
-            m_tvCfgGainValue.setAlpha(runtimeActive ? 0.45f : 1.0f);
-        }
-        if (m_tvCfgPairMsValue != null) {
-            m_tvCfgPairMsValue.setText(String.format(Locale.US, "Pair Window: %d ms", m_cfgPairMs));
-            m_tvCfgPairMsValue.setAlpha(runtimeActive ? 0.45f : 1.0f);
-        }
-        if (m_tvCfgSlamFpsValue != null) {
-            m_tvCfgSlamFpsValue.setText(String.format(Locale.US, "SLAM FPS: %d", m_cfgSlamFps));
-        }
-        if (m_sbCfgExposure != null) {
-            int progress = (m_cfgExposureUs - EXPOSURE_MIN_US) / EXPOSURE_STEP_US;
-            if (m_sbCfgExposure.getProgress() != progress) {
-                m_sbCfgExposure.setProgress(progress);
+            final boolean runtimeActive = isRuntimeActive();
+            if (m_tvCfgExposureValue != null) {
+                m_tvCfgExposureValue.setText(String.format(Locale.US, "Exposure: %d us", m_cfgExposureUs));
+                m_tvCfgExposureValue.setAlpha(runtimeActive ? 0.45f : 1.0f);
             }
-            m_sbCfgExposure.setEnabled(!runtimeActive);
-            m_sbCfgExposure.setAlpha(runtimeActive ? 0.35f : 1.0f);
-        }
-        if (m_sbCfgGain != null) {
-            int progress = m_cfgGain - GAIN_MIN;
-            if (m_sbCfgGain.getProgress() != progress) {
-                m_sbCfgGain.setProgress(progress);
+            if (m_tvCfgGainValue != null) {
+                m_tvCfgGainValue.setText(String.format(Locale.US, "Gain: %d", m_cfgGain));
+                m_tvCfgGainValue.setAlpha(runtimeActive ? 0.45f : 1.0f);
             }
-            m_sbCfgGain.setEnabled(!runtimeActive);
-            m_sbCfgGain.setAlpha(runtimeActive ? 0.35f : 1.0f);
-        }
-        if (m_sbCfgPairMs != null) {
-            int progress = m_cfgPairMs - PAIR_MS_MIN;
-            if (m_sbCfgPairMs.getProgress() != progress) {
-                m_sbCfgPairMs.setProgress(progress);
+            if (m_tvCfgPairMsValue != null) {
+                m_tvCfgPairMsValue.setText(String.format(Locale.US, "Pair Window: %d ms", m_cfgPairMs));
+                m_tvCfgPairMsValue.setAlpha(runtimeActive ? 0.45f : 1.0f);
             }
-            m_sbCfgPairMs.setEnabled(!runtimeActive);
-            m_sbCfgPairMs.setAlpha(runtimeActive ? 0.35f : 1.0f);
-        }
-        if (m_sbCfgSlamFps != null) {
-            int progress = m_cfgSlamFps - SLAM_FPS_MIN;
-            if (m_sbCfgSlamFps.getProgress() != progress) {
-                m_sbCfgSlamFps.setProgress(progress);
+            if (m_tvCfgSlamFpsValue != null) {
+                m_tvCfgSlamFpsValue.setText(String.format(Locale.US, "SLAM FPS: %d", m_cfgSlamFps));
             }
-        }
-        updateQuickSlamModeButtons();
+            if (m_sbCfgExposure != null) {
+                int progress = (m_cfgExposureUs - EXPOSURE_MIN_US) / EXPOSURE_STEP_US;
+                if (m_sbCfgExposure.getProgress() != progress) {
+                    m_sbCfgExposure.setProgress(progress);
+                }
+                m_sbCfgExposure.setEnabled(!runtimeActive);
+                m_sbCfgExposure.setAlpha(runtimeActive ? 0.35f : 1.0f);
+            }
+            if (m_sbCfgGain != null) {
+                int progress = m_cfgGain - GAIN_MIN;
+                if (m_sbCfgGain.getProgress() != progress) {
+                    m_sbCfgGain.setProgress(progress);
+                }
+                m_sbCfgGain.setEnabled(!runtimeActive);
+                m_sbCfgGain.setAlpha(runtimeActive ? 0.35f : 1.0f);
+            }
+            if (m_sbCfgPairMs != null) {
+                int progress = m_cfgPairMs - PAIR_MS_MIN;
+                if (m_sbCfgPairMs.getProgress() != progress) {
+                    m_sbCfgPairMs.setProgress(progress);
+                }
+                m_sbCfgPairMs.setEnabled(!runtimeActive);
+                m_sbCfgPairMs.setAlpha(runtimeActive ? 0.35f : 1.0f);
+            }
+            if (m_sbCfgSlamFps != null) {
+                int progress = m_cfgSlamFps - SLAM_FPS_MIN;
+                if (m_sbCfgSlamFps.getProgress() != progress) {
+                    m_sbCfgSlamFps.setProgress(progress);
+                }
+            }
+            updateQuickSlamModeButtons();
         } finally {
             m_updatingConfigUi = false;
         }
     }
 
-    private void updateQuickSlamModeButtons() {
+    private void updateQuickSlamModeButtons()
+    {
         final boolean pending = isPending(PENDING_CONFIG) || isPending(PENDING_RUNTIME);
         final boolean autoEnabled = m_cfgSlamMode == SLAM_MODE_AUTO;
         final int manualDisplayMode = autoEnabled ? m_effectiveSlamMode : m_cfgSlamMode;
@@ -592,16 +574,16 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void updateMapButtons() {
+    private void updateMapButtons()
+    {
         if (m_btnMapZoom != null && m_map3dView != null) {
-            m_btnMapZoom.setImageResource(
-                    m_map3dView.isZoomedIn()
-                            ? android.R.drawable.ic_menu_zoom
-                            : android.R.drawable.ic_menu_search);
+            m_btnMapZoom.setImageResource(m_map3dView.isZoomedIn() ? android.R.drawable.ic_menu_zoom
+                                                                   : android.R.drawable.ic_menu_search);
         }
     }
 
-    private void updateStreamToggleButtons() {
+    private void updateStreamToggleButtons()
+    {
         m_updatingToggleUi = true;
         if (m_btnImageToggle != null) {
             m_btnImageToggle.setChecked(m_sendImage);
@@ -621,12 +603,14 @@ public class MainActivity extends Activity {
         m_updatingToggleUi = false;
     }
 
-    private void updateFeatureToggleButton() {
+    private void updateFeatureToggleButton()
+    {
         m_showFeaturePoints = m_sendFeature;
         updateStreamToggleButtons();
     }
 
-    private void updateDebugPanelVisibility() {
+    private void updateDebugPanelVisibility()
+    {
         if (m_debugPanel != null) {
             m_debugPanel.setVisibility(m_debugVisible && !m_settingsVisible ? View.VISIBLE : View.GONE);
         }
@@ -638,7 +622,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void updateRemoteControlsVisibility() {
+    private void updateRemoteControlsVisibility()
+    {
         if (m_remoteControlsBar != null) {
             m_remoteControlsBar.setVisibility(m_remoteVisible ? View.VISIBLE : View.GONE);
         }
@@ -656,7 +641,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void resetRemoteInputs() {
+    private void resetRemoteInputs()
+    {
         m_leftUpPressed = false;
         m_leftDownPressed = false;
         m_leftYawLeftPressed = false;
@@ -680,109 +666,103 @@ public class MainActivity extends Activity {
         void onStateChanged(boolean pressed);
     }
 
-    private void bindDirectionalButton(View button, DirectionButtonHandler handler) {
+    private void bindDirectionalButton(View button, DirectionButtonHandler handler)
+    {
         if (button == null) {
             return;
         }
         button.setAlpha(0.76f);
         button.setOnTouchListener((v, event) -> {
             switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                case MotionEvent.ACTION_POINTER_DOWN:
-                case MotionEvent.ACTION_MOVE:
-                    v.setPressed(true);
-                    v.setAlpha(1.0f);
-                    v.setScaleX(1.24f);
-                    v.setScaleY(1.24f);
-                    if (v instanceof ImageButton) {
-                        ((ImageButton) v).setColorFilter(Color.parseColor("#FFF1A8"));
-                    }
-                    handler.onStateChanged(true);
-                    return true;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_POINTER_UP:
-                    v.setPressed(false);
-                    v.setAlpha(0.76f);
-                    v.setScaleX(1.0f);
-                    v.setScaleY(1.0f);
-                    if (v instanceof ImageButton) {
-                        ((ImageButton) v).clearColorFilter();
-                    }
-                    handler.onStateChanged(false);
-                    v.performClick();
-                    return true;
-                case MotionEvent.ACTION_CANCEL:
-                    v.setPressed(false);
-                    v.setAlpha(0.76f);
-                    v.setScaleX(1.0f);
-                    v.setScaleY(1.0f);
-                    if (v instanceof ImageButton) {
-                        ((ImageButton) v).clearColorFilter();
-                    }
-                    handler.onStateChanged(false);
-                    return true;
-                default:
-                    return false;
+            case MotionEvent.ACTION_DOWN:
+            case MotionEvent.ACTION_POINTER_DOWN:
+            case MotionEvent.ACTION_MOVE:
+                v.setPressed(true);
+                v.setAlpha(1.0f);
+                v.setScaleX(1.24f);
+                v.setScaleY(1.24f);
+                if (v instanceof ImageButton) {
+                    ((ImageButton)v).setColorFilter(Color.parseColor("#FFF1A8"));
+                }
+                handler.onStateChanged(true);
+                return true;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_POINTER_UP:
+                v.setPressed(false);
+                v.setAlpha(0.76f);
+                v.setScaleX(1.0f);
+                v.setScaleY(1.0f);
+                if (v instanceof ImageButton) {
+                    ((ImageButton)v).clearColorFilter();
+                }
+                handler.onStateChanged(false);
+                v.performClick();
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                v.setPressed(false);
+                v.setAlpha(0.76f);
+                v.setScaleX(1.0f);
+                v.setScaleY(1.0f);
+                if (v instanceof ImageButton) {
+                    ((ImageButton)v).clearColorFilter();
+                }
+                handler.onStateChanged(false);
+                return true;
+            default:
+                return false;
             }
         });
     }
 
-    private void releaseDirectionalButton(View button) {
+    private void releaseDirectionalButton(View button)
+    {
         if (button != null) {
             button.setPressed(false);
             button.setAlpha(0.76f);
             button.setScaleX(1.0f);
             button.setScaleY(1.0f);
             if (button instanceof ImageButton) {
-                ((ImageButton) button).clearColorFilter();
+                ((ImageButton)button).clearColorFilter();
             }
         }
     }
 
-    private static float axisFromButtons(boolean positivePressed, boolean negativePressed) {
+    private static float axisFromButtons(boolean positivePressed, boolean negativePressed)
+    {
         if (positivePressed == negativePressed) {
             return 0f;
         }
         return positivePressed ? BUTTON_AXIS_MAGNITUDE : -BUTTON_AXIS_MAGNITUDE;
     }
 
-    private void refreshVideoFrames() {
+    private void refreshVideoFrames()
+    {
         renderVideoFrame(0);
         renderVideoFrame(1);
     }
 
-    private boolean isRuntimeActive() {
-        return m_runtimeMode == MODE_SLAM || m_runtimeMode == MODE_CALIB;
-    }
+    private boolean isRuntimeActive() { return m_runtimeMode == MODE_SLAM || m_runtimeMode == MODE_CALIB; }
 
-    private String effectiveConfigLabel(String label, boolean appliesAfterRestart) {
+    private String effectiveConfigLabel(String label, boolean appliesAfterRestart)
+    {
         if (appliesAfterRestart && isRuntimeActive()) {
             return label + " (applies after stop/start)";
         }
         return label;
     }
 
-    private void sendCurrentRuntimeConfig(String label, boolean appliesAfterRestart, String pendingKey, AckSuccess onSuccess) {
-        sendRuntimeConfigAwaitAck(
-                m_cfgExposureUs,
-                (float) m_cfgGain,
-                m_cfgPairMs,
-                m_cfgSlamFps,
-                m_cfgSlamMode,
-                m_sensorMode,
-                m_sendImage,
-                m_sendFeature,
-                m_sendMap,
-                effectiveConfigLabel(label, appliesAfterRestart),
-                pendingKey,
-                onSuccess);
+    private void sendCurrentRuntimeConfig(String label, boolean appliesAfterRestart, String pendingKey,
+                                          AckSuccess onSuccess)
+    {
+        sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
+                                  m_sensorMode, m_sendImage, m_sendFeature, m_sendMap,
+                                  effectiveConfigLabel(label, appliesAfterRestart), pendingKey, onSuccess);
     }
 
-    private static float clamp01(float v) {
-        return Math.max(0f, Math.min(1f, v));
-    }
+    private static float clamp01(float v) { return Math.max(0f, Math.min(1f, v)); }
 
-    private void sendSimpleCmd(String name, int cmd) {
+    private void sendSimpleCmd(String name, int cmd)
+    {
         try {
             int seq = NativeUdp.sendCmd(cmd);
             m_tvStatus.setText(name + " sent seq=" + seq + " cmd=0x" + Integer.toHexString(cmd));
@@ -791,7 +771,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void sendSimpleCmdAwaitAck(String name, int cmd, String pendingKey, AckSuccess onSuccess) {
+    private void sendSimpleCmdAwaitAck(String name, int cmd, String pendingKey, AckSuccess onSuccess)
+    {
         if (!ensureVehicleConnection()) {
             return;
         }
@@ -811,13 +792,15 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void sendHoldBurst(int count, String reason) {
+    private void sendHoldBurst(int count, String reason)
+    {
         for (int i = 0; i < count; ++i) {
             sendSimpleCmd(reason + "[" + (i + 1) + "/" + count + "]", CMD_HOLD);
         }
     }
 
-    private void requestRemoteControlModeIfNeeded() {
+    private void requestRemoteControlModeIfNeeded()
+    {
         if ("REMOTE".equals(m_lastFlightCommand) || isPending(PENDING_OFFBOARD)) {
             return;
         }
@@ -827,41 +810,29 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void sendMoveRcJoystickCommand(
-            float throttle,
-            float yaw,
-            float pitch,
-            float roll,
-            float maxV,
-            String reason) {
+    private void sendMoveRcJoystickCommand(float throttle, float yaw, float pitch, float roll, float maxV,
+                                           String reason)
+    {
         try {
             int seq = NativeUdp.sendMoveRcJoystick(FRAME_NED, throttle, yaw, pitch, roll, maxV);
             m_tvStatus.setText(String.format(Locale.US,
-                    "%s seq=%d REMOTE thr=%.2f yaw=%.2f pitch=%.2f roll=%.2f maxV=%.2f",
-                    reason, seq, throttle, yaw, pitch, roll, maxV));
+                                             "%s seq=%d REMOTE thr=%.2f yaw=%.2f pitch=%.2f roll=%.2f maxV=%.2f",
+                                             reason, seq, throttle, yaw, pitch, roll, maxV));
         } catch (Throwable t) {
             m_tvStatus.setText(reason + " error: " + t.getMessage());
         }
     }
 
-    private int sendRuntimeConfig(
-            int exposureUs,
-            float gain,
-            int pairMs,
-            int slamFps,
-            int slamMode,
-            int sensorMode,
-            boolean sendImage,
-            boolean sendFeature,
-            boolean sendMap) {
+    private int sendRuntimeConfig(int exposureUs, float gain, int pairMs, int slamFps, int slamMode, int sensorMode,
+                                  boolean sendImage, boolean sendFeature, boolean sendMap)
+    {
         try {
-            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage, sendFeature, sendMap);
-            m_tvStatus.setText(String.format(Locale.US,
-                    "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s img=%s feat=%s map=%s",
-                    seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
-                    sendImage ? "on" : "off",
-                    sendFeature ? "on" : "off",
-                    sendMap ? "on" : "off"));
+            int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
+                                                  sendFeature, sendMap);
+            m_tvStatus.setText(String.format(
+                Locale.US, "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s img=%s feat=%s map=%s",
+                seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
+                sendImage ? "on" : "off", sendFeature ? "on" : "off", sendMap ? "on" : "off"));
             return seq;
         } catch (Throwable t) {
             m_tvStatus.setText("CFG error: " + t.getMessage());
@@ -869,46 +840,32 @@ public class MainActivity extends Activity {
         }
     }
 
-    private int sendRuntimeConfig() {
-        return sendRuntimeConfig(
-                m_cfgExposureUs,
-                (float) m_cfgGain,
-                m_cfgPairMs,
-                m_cfgSlamFps,
-                m_cfgSlamMode,
-                m_sensorMode,
-                m_sendImage,
-                m_sendFeature,
-                m_sendMap);
+    private int sendRuntimeConfig()
+    {
+        return sendRuntimeConfig(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
+                                 m_sensorMode, m_sendImage, m_sendFeature, m_sendMap);
     }
 
-    private void sendRuntimeConfigAwaitAck(
-            int exposureUs,
-            float gain,
-            int pairMs,
-            int slamFps,
-            int slamMode,
-            int sensorMode,
-            boolean sendImage,
-            boolean sendFeature,
-            boolean sendMap,
-            String label,
-            String pendingKey,
-            AckSuccess onSuccess) {
+    private void sendRuntimeConfigAwaitAck(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
+                                           int sensorMode, boolean sendImage, boolean sendFeature, boolean sendMap,
+                                           String label, String pendingKey, AckSuccess onSuccess)
+    {
         if (!ensureVehicleConnection()) {
             return;
         }
         if (isPending(pendingKey)) {
             return;
         }
-        int seq = sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage, sendFeature, sendMap);
+        int seq =
+            sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage, sendFeature, sendMap);
         if (seq < 0) {
             return;
         }
         registerPendingAck(seq, CMD_RUNTIME_CONFIG, label, pendingKey, onSuccess);
     }
 
-    private void setPendingKey(String pendingKey) {
+    private void setPendingKey(String pendingKey)
+    {
         if (pendingKey == null || pendingKey.isEmpty()) {
             return;
         }
@@ -917,7 +874,8 @@ public class MainActivity extends Activity {
         updateFlightButtons();
     }
 
-    private void sshKillSmartDrone() {
+    private void sshKillSmartDrone()
+    {
         if (isPending(PENDING_RESTART_SERVICE)) {
             return;
         }
@@ -953,7 +911,7 @@ public class MainActivity extends Activity {
                 session.setConfig(config);
                 session.connect(SSH_CONNECT_TIMEOUT_MS);
 
-                channel = (ChannelExec) session.openChannel("exec");
+                channel = (ChannelExec)session.openChannel("exec");
                 channel.setCommand(SSH_KILL_COMMAND);
                 channel.setInputStream(null);
                 channel.setOutputStream(stdout);
@@ -982,8 +940,8 @@ public class MainActivity extends Activity {
                         m_handler.postDelayed(this::requestRuntimeMetadata, 1500L);
                     } else {
                         String detail = !stderrText.isEmpty()
-                                ? stderrText
-                                : (!stdoutText.isEmpty() ? stdoutText : ("exit=" + exitStatus));
+                                            ? stderrText
+                                            : (!stdoutText.isEmpty() ? stdoutText : ("exit=" + exitStatus));
                         m_tvStatus.setText("SSH kill failed: " + detail);
                     }
                 });
@@ -1004,7 +962,8 @@ public class MainActivity extends Activity {
         }, "ssh-kill-smart-drone").start();
     }
 
-    private boolean ensureVehicleConnection() {
+    private boolean ensureVehicleConnection()
+    {
         String vehicleIp = m_etVehicleIp.getText().toString().trim();
         if (vehicleIp.isEmpty()) {
             m_tvStatus.setText("Vehicle IP is empty");
@@ -1033,7 +992,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void setButtonState(Button button, boolean active, boolean pending, String color) {
+    private void setButtonState(Button button, boolean active, boolean pending, String color)
+    {
         if (button == null) {
             return;
         }
@@ -1043,7 +1003,8 @@ public class MainActivity extends Activity {
         button.setEnabled(!pending);
     }
 
-    private void updateRuntimeButtons() {
+    private void updateRuntimeButtons()
+    {
         boolean sensorPending = isPending(PENDING_SENSOR) || isPending(PENDING_RUNTIME);
         boolean runtimePending = isPending(PENDING_RUNTIME);
         boolean runtimeActive = isRuntimeActive();
@@ -1075,7 +1036,8 @@ public class MainActivity extends Activity {
         updateConfigViews();
     }
 
-    private void updateSensorModeSpinner() {
+    private void updateSensorModeSpinner()
+    {
         if (m_spinnerSensorMode == null) {
             return;
         }
@@ -1097,10 +1059,7 @@ public class MainActivity extends Activity {
             for (int i = 0; i < m_availableSensorModes.length; ++i) {
                 labels[i] = sensorModeToText(m_availableSensorModes[i]);
             }
-            ArrayAdapter<String> adapter = new ArrayAdapter<>(
-                    this,
-                    android.R.layout.simple_spinner_item,
-                    labels);
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
             adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             m_spinnerSensorMode.setAdapter(adapter);
         } else {
@@ -1116,7 +1075,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private int[] getSupportedSensorModes() {
+    private int[] getSupportedSensorModes()
+    {
         int[] scratch = new int[4];
         int count = 0;
         scratch[count++] = SENSOR_STEREO;
@@ -1132,7 +1092,8 @@ public class MainActivity extends Activity {
         return Arrays.copyOf(scratch, count);
     }
 
-    private int findSensorModeIndex(int sensorMode) {
+    private int findSensorModeIndex(int sensorMode)
+    {
         for (int i = 0; i < m_availableSensorModes.length; ++i) {
             if (m_availableSensorModes[i] == sensorMode) {
                 return i;
@@ -1141,20 +1102,23 @@ public class MainActivity extends Activity {
         return -1;
     }
 
-    private void updateFlightButtons() {
+    private void updateFlightButtons()
+    {
         if (m_btnArmToggle != null) {
             m_btnArmToggle.setText(m_armLatched ? "DISARM" : "ARM");
             setButtonState(m_btnArmToggle, true, isPending(PENDING_ARM), "#C62828");
         }
         if (m_btnEmergencyStop != null) {
-            setButtonState(m_btnEmergencyStop, "EMERGENCY_STOP".equals(m_lastFlightCommand), isPending(PENDING_EMERGENCY_STOP), "#B71C1C");
+            setButtonState(m_btnEmergencyStop, "EMERGENCY_STOP".equals(m_lastFlightCommand),
+                           isPending(PENDING_EMERGENCY_STOP), "#B71C1C");
         }
         if (m_btnLand != null) {
             setButtonState(m_btnLand, "LAND".equals(m_lastFlightCommand), isPending(PENDING_LAND), "#EF6C00");
         }
     }
 
-    private void sendRuntimeMode(int mode, String label) {
+    private void sendRuntimeMode(int mode, String label)
+    {
         if (!ensureVehicleConnection()) {
             return;
         }
@@ -1162,44 +1126,34 @@ public class MainActivity extends Activity {
             return;
         }
         final int exposureUs = m_cfgExposureUs;
-        final float gain = (float) m_cfgGain;
+        final float gain = (float)m_cfgGain;
         final int pairMs = m_cfgPairMs;
         final int slamFps = m_cfgSlamFps;
         final int slamMode = m_cfgSlamMode;
         final int sensorMode = m_sensorMode;
-        sendRuntimeConfigAwaitAck(
-                exposureUs,
-                gain,
-                pairMs,
-                slamFps,
-                slamMode,
-                sensorMode,
-                m_sendImage,
-                m_sendFeature,
-                m_sendMap,
-                label + " CFG",
-                PENDING_RUNTIME,
-                () -> {
-            try {
-                int seq = NativeUdp.sendRuntimeMode(mode);
-                if (seq < 0) {
-                    clearPendingKey(PENDING_RUNTIME);
-                    m_tvStatus.setText(label + " send failed");
-                    return;
-                }
-                registerPendingAck(seq, CMD_RUNTIME_MODE, label, PENDING_RUNTIME, () -> {
-                    m_runtimeMode = mode;
-                    updateRuntimeButtons();
-                });
-                m_tvStatus.setText(label + " sent seq=" + seq);
-            } catch (Throwable t) {
-                clearPendingKey(PENDING_RUNTIME);
-                m_tvStatus.setText(label + " error: " + t.getMessage());
-            }
-        });
+        sendRuntimeConfigAwaitAck(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, m_sendImage, m_sendFeature,
+                                  m_sendMap, label + " CFG", PENDING_RUNTIME, () -> {
+                                      try {
+                                          int seq = NativeUdp.sendRuntimeMode(mode);
+                                          if (seq < 0) {
+                                              clearPendingKey(PENDING_RUNTIME);
+                                              m_tvStatus.setText(label + " send failed");
+                                              return;
+                                          }
+                                          registerPendingAck(seq, CMD_RUNTIME_MODE, label, PENDING_RUNTIME, () -> {
+                                              m_runtimeMode = mode;
+                                              updateRuntimeButtons();
+                                          });
+                                          m_tvStatus.setText(label + " sent seq=" + seq);
+                                      } catch (Throwable t) {
+                                          clearPendingKey(PENDING_RUNTIME);
+                                          m_tvStatus.setText(label + " error: " + t.getMessage());
+                                      }
+                                  });
     }
 
-    private void stopRuntime(String label) {
+    private void stopRuntime(String label)
+    {
         if (!ensureVehicleConnection()) {
             return;
         }
@@ -1222,7 +1176,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void requestRuntimeMetadata() {
+    private void requestRuntimeMetadata()
+    {
         if (!ensureVehicleConnection()) {
             return;
         }
@@ -1234,9 +1189,11 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void registerPendingAck(long seq, int command, String label, String pendingKey, AckSuccess onSuccess) {
+    private void registerPendingAck(long seq, int command, String label, String pendingKey, AckSuccess onSuccess)
+    {
         setPendingKey(pendingKey);
-        Runnable timeoutRunnable = () -> {
+        Runnable timeoutRunnable = () ->
+        {
             PendingAckAction removed = m_pendingAckActions.remove(seq);
             if (removed == null) {
                 return;
@@ -1248,11 +1205,10 @@ public class MainActivity extends Activity {
         m_handler.postDelayed(timeoutRunnable, ACK_PENDING_TIMEOUT_MS);
     }
 
-    private boolean isPending(String pendingKey) {
-        return pendingKey != null && m_pendingUiKeys.contains(pendingKey);
-    }
+    private boolean isPending(String pendingKey) { return pendingKey != null && m_pendingUiKeys.contains(pendingKey); }
 
-    private void clearPendingKey(String pendingKey) {
+    private void clearPendingKey(String pendingKey)
+    {
         if (pendingKey == null || pendingKey.isEmpty()) {
             return;
         }
@@ -1261,70 +1217,68 @@ public class MainActivity extends Activity {
         updateFlightButtons();
     }
 
-    private static int readU16Le(byte[] data, int offset) {
+    private static int readU16Le(byte[] data, int offset)
+    {
         return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
     }
 
-    private static long readU32Le(byte[] data, int offset) {
-        return ((long) data[offset] & 0xFFL)
-                | (((long) data[offset + 1] & 0xFFL) << 8)
-                | (((long) data[offset + 2] & 0xFFL) << 16)
-                | (((long) data[offset + 3] & 0xFFL) << 24);
+    private static long readU32Le(byte[] data, int offset)
+    {
+        return ((long)data[offset] & 0xFFL) | (((long)data[offset + 1] & 0xFFL) << 8) |
+            (((long)data[offset + 2] & 0xFFL) << 16) | (((long)data[offset + 3] & 0xFFL) << 24);
     }
 
-    private static int readI16Le(byte[] data, int offset) {
+    private static int readI16Le(byte[] data, int offset)
+    {
         int v = readU16Le(data, offset);
         return (v >= 0x8000) ? (v - 0x10000) : v;
     }
 
-    private static int readI32Le(byte[] data, int offset) {
-        return (data[offset] & 0xFF)
-                | ((data[offset + 1] & 0xFF) << 8)
-                | ((data[offset + 2] & 0xFF) << 16)
-                | ((data[offset + 3] & 0xFF) << 24);
+    private static int readI32Le(byte[] data, int offset)
+    {
+        return (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8) | ((data[offset + 2] & 0xFF) << 16) |
+            ((data[offset + 3] & 0xFF) << 24);
     }
 
-    private static long readI64Le(byte[] data, int offset) {
-        return ((long) data[offset] & 0xFFL)
-                | (((long) data[offset + 1] & 0xFFL) << 8)
-                | (((long) data[offset + 2] & 0xFFL) << 16)
-                | (((long) data[offset + 3] & 0xFFL) << 24)
-                | (((long) data[offset + 4] & 0xFFL) << 32)
-                | (((long) data[offset + 5] & 0xFFL) << 40)
-                | (((long) data[offset + 6] & 0xFFL) << 48)
-                | (((long) data[offset + 7] & 0xFFL) << 56);
+    private static long readI64Le(byte[] data, int offset)
+    {
+        return ((long)data[offset] & 0xFFL) | (((long)data[offset + 1] & 0xFFL) << 8) |
+            (((long)data[offset + 2] & 0xFFL) << 16) | (((long)data[offset + 3] & 0xFFL) << 24) |
+            (((long)data[offset + 4] & 0xFFL) << 32) | (((long)data[offset + 5] & 0xFFL) << 40) |
+            (((long)data[offset + 6] & 0xFFL) << 48) | (((long)data[offset + 7] & 0xFFL) << 56);
     }
 
-    private static float readF32Le(byte[] data, int offset) {
-        return Float.intBitsToFloat(readI32Le(data, offset));
-    }
+    private static float readF32Le(byte[] data, int offset) { return Float.intBitsToFloat(readI32Le(data, offset)); }
 
-    private static double readF64Le(byte[] data, int offset) {
+    private static double readF64Le(byte[] data, int offset)
+    {
         return Double.longBitsToDouble(readI64Le(data, offset));
     }
 
-    private static String ackStatusToText(int status) {
+    private static String ackStatusToText(int status)
+    {
         switch (status) {
-            case 0:
-                return "ACK_OK";
-            case -1:
-                return "ACK_E_BAD_CRC";
-            case -2:
-                return "ACK_E_BAD_LEN";
-            case -3:
-                return "ACK_E_BAD_ARGS";
-            case -4:
-                return "ACK_E_BAD_STATE";
-            case -5:
-                return "ACK_E_UNKNOWN";
-            case -6:
-                return "ACK_E_INTERNAL";
-            default:
-                return "STATUS(" + status + ")";
+        case 0:
+            return "ACK_OK";
+        case -1:
+            return "ACK_E_BAD_CRC";
+        case -2:
+            return "ACK_E_BAD_LEN";
+        case -3:
+            return "ACK_E_BAD_ARGS";
+        case -4:
+            return "ACK_E_BAD_STATE";
+        case -5:
+            return "ACK_E_UNKNOWN";
+        case -6:
+            return "ACK_E_INTERNAL";
+        default:
+            return "STATUS(" + status + ")";
         }
     }
 
-    private static Map<String, String> parseKeyValueText(String text) {
+    private static Map<String, String> parseKeyValueText(String text)
+    {
         Map<String, String> out = new HashMap<>();
         if (text == null || text.isEmpty()) {
             return out;
@@ -1347,7 +1301,8 @@ public class MainActivity extends Activity {
         return out;
     }
 
-    private static String readTlvTextPayload(byte[] rx, int expectedCmd) {
+    private static String readTlvTextPayload(byte[] rx, int expectedCmd)
+    {
         if (!isTlvPacket(rx) || rx.length < 17) {
             return null;
         }
@@ -1366,7 +1321,8 @@ public class MainActivity extends Activity {
         return new String(rx, 15, len);
     }
 
-    private static boolean parseBooleanText(String value, boolean defaultValue) {
+    private static boolean parseBooleanText(String value, boolean defaultValue)
+    {
         if (value == null) {
             return defaultValue;
         }
@@ -1379,22 +1335,24 @@ public class MainActivity extends Activity {
         return defaultValue;
     }
 
-    private static int parseRuntimeModeText(String value, int defaultValue) {
+    private static int parseRuntimeModeText(String value, int defaultValue)
+    {
         if (value == null) {
             return defaultValue;
         }
         switch (value.trim().toLowerCase(Locale.US)) {
-            case "slam":
-                return MODE_SLAM;
-            case "calib":
-                return MODE_CALIB;
-            case "idle":
-            default:
-                return MODE_IDLE;
+        case "slam":
+            return MODE_SLAM;
+        case "calib":
+            return MODE_CALIB;
+        case "idle":
+        default:
+            return MODE_IDLE;
         }
     }
 
-    private static int parseSensorModeText(String value, int defaultValue) {
+    private static int parseSensorModeText(String value, int defaultValue)
+    {
         if (value == null) {
             return defaultValue;
         }
@@ -1414,7 +1372,8 @@ public class MainActivity extends Activity {
         return defaultValue;
     }
 
-    private static int parseSlamModeText(String value, int defaultValue) {
+    private static int parseSlamModeText(String value, int defaultValue)
+    {
         if (value == null) {
             return defaultValue;
         }
@@ -1431,7 +1390,8 @@ public class MainActivity extends Activity {
         return defaultValue;
     }
 
-    private static boolean containsTokenList(String csv, String token) {
+    private static boolean containsTokenList(String csv, String token)
+    {
         if (csv == null || token == null) {
             return false;
         }
@@ -1444,12 +1404,12 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    private String decodeTlvAck(byte[] rx) {
+    private String decodeTlvAck(byte[] rx)
+    {
         AckFrame ack = parseAckFrame(rx);
         if (ack.valid) {
-            return String.format(Locale.US,
-                    "ACK reqSeq=%d ackCmd=0x%02X ackSeq=%d status=%s",
-                    ack.reqSeq, ack.ackCmd, ack.ackSeq, ackStatusToText(ack.status));
+            return String.format(Locale.US, "ACK reqSeq=%d ackCmd=0x%02X ackSeq=%d status=%s", ack.reqSeq, ack.ackCmd,
+                                 ack.ackSeq, ackStatusToText(ack.status));
         }
         if (rx == null) {
             return "RX: null";
@@ -1468,16 +1428,15 @@ public class MainActivity extends Activity {
         long tMs = readU32Le(rx, 11);
         int total = 2 + (1 + 1 + 1 + 2 + 4 + 4) + len + 2;
         if (rx.length < total) {
-            return String.format(Locale.US,
-                    "RX partial ver=%d cmd=0x%02X len=%d bytes=%d need=%d",
-                    ver, cmd, len, rx.length, total);
+            return String.format(Locale.US, "RX partial ver=%d cmd=0x%02X len=%d bytes=%d need=%d", ver, cmd, len,
+                                 rx.length, total);
         }
-        return String.format(Locale.US,
-                "RX TLV ver=%d cmd=0x%02X flags=%d len=%d seq=%d tMs=%d",
-                ver, cmd, flags, len, seq, tMs);
+        return String.format(Locale.US, "RX TLV ver=%d cmd=0x%02X flags=%d len=%d seq=%d tMs=%d", ver, cmd, flags, len,
+                             seq, tMs);
     }
 
-    private AckFrame parseAckFrame(byte[] rx) {
+    private AckFrame parseAckFrame(byte[] rx)
+    {
         AckFrame out = new AckFrame();
         if (rx == null) {
             return out;
@@ -1506,7 +1465,8 @@ public class MainActivity extends Activity {
         return out;
     }
 
-    private boolean tryHandleAckPacket(byte[] rx) {
+    private boolean tryHandleAckPacket(byte[] rx)
+    {
         AckFrame ack = parseAckFrame(rx);
         if (!ack.valid) {
             return false;
@@ -1520,16 +1480,16 @@ public class MainActivity extends Activity {
             pending.onSuccess.run();
         }
         if (pending != null) {
-            m_tvStatus.setText(String.format(Locale.US,
-                    "%s ack=%s seq=%d",
-                    pending.label, ackStatusToText(ack.status), ack.ackSeq));
+            m_tvStatus.setText(
+                String.format(Locale.US, "%s ack=%s seq=%d", pending.label, ackStatusToText(ack.status), ack.ackSeq));
         } else {
             m_tvStatus.setText(decodeTlvAck(rx));
         }
         return true;
     }
 
-    private boolean tryHandleCapabilitiesPacket(byte[] rx) {
+    private boolean tryHandleCapabilitiesPacket(byte[] rx)
+    {
         String payloadText = readTlvTextPayload(rx, CMD_CAPABILITIES);
         if (payloadText == null) {
             return false;
@@ -1541,17 +1501,14 @@ public class MainActivity extends Activity {
         m_supportsMono = containsTokenList(values.get("perception_modes"), "mono");
         m_supportsMonoImu = containsTokenList(values.get("perception_modes"), "mono-imu");
         updateRuntimeButtons();
-        m_tvStatus.setText(String.format(
-                Locale.US,
-                "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s",
-                m_supportsCalib ? "yes" : "no",
-                m_supportsStereoImu ? "yes" : "no",
-                m_supportsMono ? "yes" : "no",
-                m_supportsMonoImu ? "yes" : "no"));
+        m_tvStatus.setText(String.format(Locale.US, "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s",
+                                         m_supportsCalib ? "yes" : "no", m_supportsStereoImu ? "yes" : "no",
+                                         m_supportsMono ? "yes" : "no", m_supportsMonoImu ? "yes" : "no"));
         return true;
     }
 
-    private boolean tryHandleConfigPacket(byte[] rx) {
+    private boolean tryHandleConfigPacket(byte[] rx)
+    {
         String payloadText = readTlvTextPayload(rx, CMD_CONFIG);
         if (payloadText == null) {
             return false;
@@ -1578,17 +1535,14 @@ public class MainActivity extends Activity {
         updateRuntimeButtons();
         updateStreamToggleButtons();
         updateFeatureToggleButton();
-        m_tvStatus.setText(String.format(
-                Locale.US,
-                "Config synced mode=%s sensor=%s slam_mode=%s slam=%dfps",
-                runtimeModeToText(m_runtimeMode),
-                sensorModeToText(m_sensorMode),
-                slamModeToText(m_cfgSlamMode),
-                m_cfgSlamFps));
+        m_tvStatus.setText(String.format(Locale.US, "Config synced mode=%s sensor=%s slam_mode=%s slam=%dfps",
+                                         runtimeModeToText(m_runtimeMode), sensorModeToText(m_sensorMode),
+                                         slamModeToText(m_cfgSlamMode), m_cfgSlamFps));
         return true;
     }
 
-    private static int parseI(String value, int defaultValue) {
+    private static int parseI(String value, int defaultValue)
+    {
         try {
             if (value == null || value.trim().isEmpty()) {
                 return defaultValue;
@@ -1603,40 +1557,43 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String runtimeModeToText(int mode) {
+    private String runtimeModeToText(int mode)
+    {
         switch (mode) {
-            case MODE_SLAM:
-                return "SLAM";
-            case MODE_CALIB:
-                return "CALIB";
-            default:
-                return "IDLE";
+        case MODE_SLAM:
+            return "SLAM";
+        case MODE_CALIB:
+            return "CALIB";
+        default:
+            return "IDLE";
         }
     }
 
-    private String sensorModeToText(int sensorMode) {
+    private String sensorModeToText(int sensorMode)
+    {
         switch (sensorMode) {
-            case SENSOR_STEREO_IMU:
-                return "Stereo-IMU";
-            case SENSOR_MONO:
-                return "Mono";
-            case SENSOR_MONO_IMU:
-                return "Mono-IMU";
-            case SENSOR_STEREO:
-            default:
-                return "Stereo";
+        case SENSOR_STEREO_IMU:
+            return "Stereo-IMU";
+        case SENSOR_MONO:
+            return "Mono";
+        case SENSOR_MONO_IMU:
+            return "Mono-IMU";
+        case SENSOR_STEREO:
+        default:
+            return "Stereo";
         }
     }
 
-    private String slamModeToText(int slamMode) {
+    private String slamModeToText(int slamMode)
+    {
         switch (slamMode) {
-            case SLAM_MODE_LOCALIZATION:
-                return "Localization";
-            case SLAM_MODE_AUTO:
-                return "Auto";
-            case SLAM_MODE_MAPPING:
-            default:
-                return "Mapping";
+        case SLAM_MODE_LOCALIZATION:
+            return "Localization";
+        case SLAM_MODE_AUTO:
+            return "Auto";
+        case SLAM_MODE_MAPPING:
+        default:
+            return "Mapping";
         }
     }
 
@@ -1651,7 +1608,8 @@ public class MainActivity extends Activity {
         final AckSuccess onSuccess;
         final Runnable onTimeout;
 
-        PendingAckAction(int command, String label, String pendingKey, AckSuccess onSuccess, Runnable onTimeout) {
+        PendingAckAction(int command, String label, String pendingKey, AckSuccess onSuccess, Runnable onTimeout)
+        {
             this.command = command;
             this.label = label;
             this.pendingKey = pendingKey;
@@ -1668,28 +1626,30 @@ public class MainActivity extends Activity {
         int status;
     }
 
-    private String trackingStateToText(int trackingState) {
+    private String trackingStateToText(int trackingState)
+    {
         switch (trackingState) {
-            case 0:
-                return "NO_IMAGES_YET";
-            case 1:
-                return "NOT_INITIALIZED";
-            case 2:
-                return "OK";
-            case 3:
-                return "RECENTLY_LOST";
-            case 4:
-                return "LOST";
-            case 5:
-                return "OK_KLT";
-            case 0xFF:
-                return "INVALID";
-            default:
-                return "STATE(" + trackingState + ")";
+        case 0:
+            return "NO_IMAGES_YET";
+        case 1:
+            return "NOT_INITIALIZED";
+        case 2:
+            return "OK";
+        case 3:
+            return "RECENTLY_LOST";
+        case 4:
+            return "LOST";
+        case 5:
+            return "OK_KLT";
+        case 0xFF:
+            return "INVALID";
+        default:
+            return "STATE(" + trackingState + ")";
         }
     }
 
-    private boolean tryHandleStatePacket(byte[] rx) {
+    private boolean tryHandleStatePacket(byte[] rx)
+    {
         if (!isTlvPacket(rx) || rx.length < 15) {
             return false;
         }
@@ -1733,10 +1693,10 @@ public class MainActivity extends Activity {
                     qy = Float.NaN;
                     qz = Float.NaN;
                 }
-                m_tvPose.setText(String.format(Locale.US,
-                        "Pose %s trk=%s rst=%d map_rst=%d\np[%.2f %.2f %.2f]\nq[%.2f %.2f %.2f %.2f]",
-                        runtimeModeToText(runtimeMode), trackingStateToText(trackingState),
-                        resetCounter, resetMapCount, x, y, z, qw, qx, qy, qz));
+                m_tvPose.setText(String.format(
+                    Locale.US, "Pose %s trk=%s rst=%d map_rst=%d\np[%.2f %.2f %.2f]\nq[%.2f %.2f %.2f %.2f]",
+                    runtimeModeToText(runtimeMode), trackingStateToText(trackingState), resetCounter, resetMapCount, x,
+                    y, z, qw, qx, qy, qz));
             } else if (runtimeMode == MODE_CALIB) {
                 m_tvPose.setText("Pose hidden in CALIB");
             } else {
@@ -1746,7 +1706,8 @@ public class MainActivity extends Activity {
         return true;
     }
 
-    private boolean tryHandleVideoPacket(byte[] rx) {
+    private boolean tryHandleVideoPacket(byte[] rx)
+    {
         if (rx == null || rx.length < VIDEO_HEADER_LEN) {
             return false;
         }
@@ -1791,10 +1752,8 @@ public class MainActivity extends Activity {
         }
 
         VideoAssembly assembly = m_videoAssemblies[camIndex];
-        boolean needReset = frameId != assembly.frameId
-                || assembly.chunks == null
-                || assembly.chunkCount != chunkCnt
-                || assembly.totalSize != totalSize;
+        boolean needReset = frameId != assembly.frameId || assembly.chunks == null || assembly.chunkCount != chunkCnt ||
+                            assembly.totalSize != totalSize;
         if (needReset) {
             assembly.frameId = frameId;
             assembly.frameTimeSec = frameTimeSec;
@@ -1850,7 +1809,8 @@ public class MainActivity extends Activity {
         return true;
     }
 
-    private boolean tryHandleFeaturePacket(byte[] rx, int camIndex) {
+    private boolean tryHandleFeaturePacket(byte[] rx, int camIndex)
+    {
         int frameId = readI32Le(rx, 20);
         int chunkIdx = readU16Le(rx, 24);
         int chunkCnt = readU16Le(rx, 26);
@@ -1891,7 +1851,8 @@ public class MainActivity extends Activity {
         return true;
     }
 
-    private void renderVideoFrame(int camIndex) {
+    private void renderVideoFrame(int camIndex)
+    {
         DisplayFrame displayFrame = m_displayFrames[camIndex];
         ImageView target = (camIndex == 0) ? m_ivVideoLeft : m_ivVideoRight;
         if (displayFrame.bitmap == null || target == null) {
@@ -1899,9 +1860,8 @@ public class MainActivity extends Activity {
         }
         Bitmap output = displayFrame.bitmap;
         FeatureFrame featureFrame = m_featureFrames[camIndex];
-        if (m_sendFeature && m_showFeaturePoints
-                && featureFrame.xs != null
-                && Math.abs(featureFrame.frameTimeSec - displayFrame.frameTimeSec) <= FRAME_MATCH_TOLERANCE_SEC) {
+        if (m_sendFeature && m_showFeaturePoints && featureFrame.xs != null &&
+            Math.abs(featureFrame.frameTimeSec - displayFrame.frameTimeSec) <= FRAME_MATCH_TOLERANCE_SEC) {
             output = overlayFeaturePoints(displayFrame.bitmap, featureFrame);
             if (displayFrame.overlayFrameId != featureFrame.frameId) {
                 displayFrame.overlayFrameId = featureFrame.frameId;
@@ -1916,14 +1876,15 @@ public class MainActivity extends Activity {
         target.setImageBitmap(output);
     }
 
-    private Bitmap overlayFeaturePoints(Bitmap source, FeatureFrame featureFrame) {
+    private Bitmap overlayFeaturePoints(Bitmap source, FeatureFrame featureFrame)
+    {
         Bitmap mutable = source.copy(Bitmap.Config.ARGB_8888, true);
         if (mutable == null) {
             return source;
         }
         Canvas canvas = new Canvas(mutable);
-        float scaleX = (featureFrame.width > 0) ? ((float) mutable.getWidth() / (float) featureFrame.width) : 1.0f;
-        float scaleY = (featureFrame.height > 0) ? ((float) mutable.getHeight() / (float) featureFrame.height) : 1.0f;
+        float scaleX = (featureFrame.width > 0) ? ((float)mutable.getWidth() / (float)featureFrame.width) : 1.0f;
+        float scaleY = (featureFrame.height > 0) ? ((float)mutable.getHeight() / (float)featureFrame.height) : 1.0f;
         for (int i = 0; i < featureFrame.count; ++i) {
             float x = featureFrame.xs[i] * scaleX;
             float y = featureFrame.ys[i] * scaleY;
@@ -1932,13 +1893,13 @@ public class MainActivity extends Activity {
         return mutable;
     }
 
-    private static boolean isTlvPacket(byte[] rx) {
-        return rx != null && rx.length >= 4
-                && (rx[0] & 0xFF) == 0xAA
-                && (rx[1] & 0xFF) == 0x55;
+    private static boolean isTlvPacket(byte[] rx)
+    {
+        return rx != null && rx.length >= 4 && (rx[0] & 0xFF) == 0xAA && (rx[1] & 0xFF) == 0x55;
     }
 
-    private void tickRxLoop() {
+    private void tickRxLoop()
+    {
         for (int i = 0; i < MAX_RX_PACKETS_PER_TICK; ++i) {
             byte[] rx;
             try {
@@ -1978,7 +1939,8 @@ public class MainActivity extends Activity {
         updateVideoStatsView();
     }
 
-    private void updateVideoStatsView() {
+    private void updateVideoStatsView()
+    {
         if (m_tvVideoStats == null) {
             return;
         }
@@ -1987,18 +1949,17 @@ public class MainActivity extends Activity {
             return;
         }
         m_lastVideoStatsMs = nowMs;
-        final String lastSeen = (m_lastVideoPacketMs == 0L)
-                ? "never"
-                : String.format(Locale.US, "%dms", (nowMs - m_lastVideoPacketMs));
-        m_tvVideoStats.setText(String.format(Locale.US,
-                "Video pkt=%d feat=%d(L%d/R%d) fuse=%d(L%d/R%d) ok=%d fail=%d bad=%d L=%d R=%d last=%s",
-                m_videoPktCount, m_featurePktCount, m_featurePktCount0, m_featurePktCount1,
-                m_featureMatchCount, m_featureMatchCount0, m_featureMatchCount1,
-                m_videoFrameOk, m_videoDecodeFail,
-                m_videoInvalidPkt, m_videoCamFrameOk0, m_videoCamFrameOk1, lastSeen));
+        final String lastSeen =
+            (m_lastVideoPacketMs == 0L) ? "never" : String.format(Locale.US, "%dms", (nowMs - m_lastVideoPacketMs));
+        m_tvVideoStats.setText(String.format(
+            Locale.US, "Video pkt=%d feat=%d(L%d/R%d) fuse=%d(L%d/R%d) ok=%d fail=%d bad=%d L=%d R=%d last=%s",
+            m_videoPktCount, m_featurePktCount, m_featurePktCount0, m_featurePktCount1, m_featureMatchCount,
+            m_featureMatchCount0, m_featureMatchCount1, m_videoFrameOk, m_videoDecodeFail, m_videoInvalidPkt,
+            m_videoCamFrameOk0, m_videoCamFrameOk1, lastSeen));
     }
 
-    private void tickJoystickControl() {
+    private void tickJoystickControl()
+    {
         long nowMs = System.currentTimeMillis();
         if (m_lastJoystickTickMs == 0L) {
             m_lastJoystickTickMs = nowMs;
@@ -2011,19 +1972,17 @@ public class MainActivity extends Activity {
         }
 
         float leftY = axisFromButtons(m_leftUpPressed, m_leftDownPressed);
-        float leftX = (leftY == 0f)
-                ? axisFromButtons(m_leftYawRightPressed, m_leftYawLeftPressed)
-                : 0f;
+        float leftX = (leftY == 0f) ? axisFromButtons(m_leftYawRightPressed, m_leftYawLeftPressed) : 0f;
         float rightX = axisFromButtons(m_rightRightPressed, m_rightLeftPressed);
         float rightY = axisFromButtons(m_rightForwardPressed, m_rightBackPressed);
 
-        float leftMag = clamp01((float) Math.hypot(leftX, leftY));
-        float rightMag = clamp01((float) Math.hypot(rightX, rightY));
+        float leftMag = clamp01((float)Math.hypot(leftX, leftY));
+        float rightMag = clamp01((float)Math.hypot(rightX, rightY));
         boolean active = leftX != 0f || leftY != 0f || rightX != 0f || rightY != 0f;
 
-        m_tvJoystickState.setText(String.format(Locale.US,
-                "REMOTE L[up=%.2f yaw=%.2f] R[fwd=%.2f right=%.2f] magL=%.2f magR=%.2f %s",
-                leftY, leftX, rightY, rightX, leftMag, rightMag, active ? "ACTIVE" : "CENTER"));
+        m_tvJoystickState.setText(
+            String.format(Locale.US, "REMOTE L[up=%.2f yaw=%.2f] R[fwd=%.2f right=%.2f] magL=%.2f magR=%.2f %s", leftY,
+                          leftX, rightY, rightX, leftMag, rightMag, active ? "ACTIVE" : "CENTER"));
 
         if (!active) {
             if (m_lastJoystickActive) {
@@ -2042,7 +2001,8 @@ public class MainActivity extends Activity {
         sendMoveRcJoystickCommand(throttle, yaw, pitch, roll, BUTTON_MAX_SPEED_MPS, "JOY RC");
     }
 
-    private void startJoystickLoop() {
+    private void startJoystickLoop()
+    {
         if (m_joystickLoopRunning) {
             return;
         }
@@ -2051,12 +2011,14 @@ public class MainActivity extends Activity {
         m_handler.post(m_joystickLoop);
     }
 
-    private void stopJoystickLoop() {
+    private void stopJoystickLoop()
+    {
         m_joystickLoopRunning = false;
         m_handler.removeCallbacks(m_joystickLoop);
     }
 
-    private void startRxLoop() {
+    private void startRxLoop()
+    {
         if (m_rxLoopRunning) {
             return;
         }
@@ -2064,12 +2026,14 @@ public class MainActivity extends Activity {
         m_handler.post(m_rxLoop);
     }
 
-    private void stopRxLoop() {
+    private void stopRxLoop()
+    {
         m_rxLoopRunning = false;
         m_handler.removeCallbacks(m_rxLoop);
     }
 
-    private void setSettingsVisible(boolean visible) {
+    private void setSettingsVisible(boolean visible)
+    {
         if (m_pageCommand == null) {
             return;
         }
@@ -2078,19 +2042,14 @@ public class MainActivity extends Activity {
         updateDebugPanelVisibility();
     }
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    @Override protected void onCreate(Bundle savedInstanceState)
+    {
         super.onCreate(savedInstanceState);
-        getWindow().setFlags(
-                WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_main);
         View decorView = getWindow().getDecorView();
-        decorView.setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+                                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
 
         m_ivVideoLeft = findViewById(R.id.ivVideoLeft);
         m_ivVideoRight = findViewById(R.id.ivVideoRight);
@@ -2130,10 +2089,8 @@ public class MainActivity extends Activity {
         m_etSshUser = findViewById(R.id.etSshUser);
         m_etSshPassword = findViewById(R.id.etSshPassword);
         if (m_etVehicleIp != null) {
-            ArrayAdapter<String> vehicleIpAdapter = new ArrayAdapter<>(
-                    this,
-                    R.layout.dropdown_vehicle_ip_item,
-                    DEFAULT_VEHICLE_IPS);
+            ArrayAdapter<String> vehicleIpAdapter =
+                new ArrayAdapter<>(this, R.layout.dropdown_vehicle_ip_item, DEFAULT_VEHICLE_IPS);
             m_etVehicleIp.setAdapter(vehicleIpAdapter);
             m_etVehicleIp.setOnClickListener(v -> m_etVehicleIp.showDropDown());
             m_etVehicleIp.setOnFocusChangeListener((v, hasFocus) -> {
@@ -2192,8 +2149,8 @@ public class MainActivity extends Activity {
         if (m_sbCfgExposure != null) {
             m_sbCfgExposure.setMax((EXPOSURE_MAX_US - EXPOSURE_MIN_US) / EXPOSURE_STEP_US);
             m_sbCfgExposure.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override
-                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
                     if (m_updatingConfigUi || !fromUser) {
                         return;
                     }
@@ -2201,21 +2158,19 @@ public class MainActivity extends Activity {
                     updateConfigViews();
                 }
 
-                @Override
-                public void onStartTrackingTouch(SeekBar seekBar) {
-                }
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
 
-                @Override
-                public void onStopTrackingTouch(SeekBar seekBar) {
-                    sendCurrentRuntimeConfig("Exposure", true, PENDING_CONFIG, () -> { });
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("Exposure", true, PENDING_CONFIG, () -> {});
                 }
             });
         }
         if (m_sbCfgGain != null) {
             m_sbCfgGain.setMax(GAIN_MAX - GAIN_MIN);
             m_sbCfgGain.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override
-                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
                     if (m_updatingConfigUi || !fromUser) {
                         return;
                     }
@@ -2223,21 +2178,19 @@ public class MainActivity extends Activity {
                     updateConfigViews();
                 }
 
-                @Override
-                public void onStartTrackingTouch(SeekBar seekBar) {
-                }
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
 
-                @Override
-                public void onStopTrackingTouch(SeekBar seekBar) {
-                    sendCurrentRuntimeConfig("Gain", true, PENDING_CONFIG, () -> { });
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("Gain", true, PENDING_CONFIG, () -> {});
                 }
             });
         }
         if (m_sbCfgPairMs != null) {
             m_sbCfgPairMs.setMax(PAIR_MS_MAX - PAIR_MS_MIN);
             m_sbCfgPairMs.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override
-                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
                     if (m_updatingConfigUi || !fromUser) {
                         return;
                     }
@@ -2245,21 +2198,19 @@ public class MainActivity extends Activity {
                     updateConfigViews();
                 }
 
-                @Override
-                public void onStartTrackingTouch(SeekBar seekBar) {
-                }
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
 
-                @Override
-                public void onStopTrackingTouch(SeekBar seekBar) {
-                    sendCurrentRuntimeConfig("Pair window", true, PENDING_CONFIG, () -> { });
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("Pair window", true, PENDING_CONFIG, () -> {});
                 }
             });
         }
         if (m_sbCfgSlamFps != null) {
             m_sbCfgSlamFps.setMax(SLAM_FPS_MAX - SLAM_FPS_MIN);
             m_sbCfgSlamFps.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override
-                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
                     if (m_updatingConfigUi || !fromUser) {
                         return;
                     }
@@ -2267,13 +2218,11 @@ public class MainActivity extends Activity {
                     updateConfigViews();
                 }
 
-                @Override
-                public void onStartTrackingTouch(SeekBar seekBar) {
-                }
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
 
-                @Override
-                public void onStopTrackingTouch(SeekBar seekBar) {
-                    sendCurrentRuntimeConfig("SLAM fps", false, PENDING_CONFIG, () -> { });
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("SLAM fps", false, PENDING_CONFIG, () -> {});
                 }
             });
         }
@@ -2311,26 +2260,18 @@ public class MainActivity extends Activity {
                     return;
                 }
                 final boolean nextValue = isChecked;
-                sendRuntimeConfigAwaitAck(
-                        m_cfgExposureUs,
-                        (float) m_cfgGain,
-                        m_cfgPairMs,
-                        m_cfgSlamFps,
-                        m_cfgSlamMode,
-                        m_sensorMode,
-                        nextValue,
-                        m_sendFeature,
-                        m_sendMap,
-                        "Image stream",
-                        PENDING_CONFIG,
-                        () -> {
-                            m_sendImage = nextValue;
-                            if (!m_sendImage) {
-                                if (m_ivVideoLeft != null) m_ivVideoLeft.setImageDrawable(null);
-                                if (m_ivVideoRight != null) m_ivVideoRight.setImageDrawable(null);
-                            }
-                            updateStreamToggleButtons();
-                        });
+                sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
+                                          m_sensorMode, nextValue, m_sendFeature, m_sendMap, "Image stream",
+                                          PENDING_CONFIG, () -> {
+                                              m_sendImage = nextValue;
+                                              if (!m_sendImage) {
+                                                  if (m_ivVideoLeft != null)
+                                                      m_ivVideoLeft.setImageDrawable(null);
+                                                  if (m_ivVideoRight != null)
+                                                      m_ivVideoRight.setImageDrawable(null);
+                                              }
+                                              updateStreamToggleButtons();
+                                          });
             });
         }
         if (m_btnMapToggle != null) {
@@ -2339,22 +2280,12 @@ public class MainActivity extends Activity {
                     return;
                 }
                 final boolean nextValue = isChecked;
-                sendRuntimeConfigAwaitAck(
-                        m_cfgExposureUs,
-                        (float) m_cfgGain,
-                        m_cfgPairMs,
-                        m_cfgSlamFps,
-                        m_cfgSlamMode,
-                        m_sensorMode,
-                        m_sendImage,
-                        m_sendFeature,
-                        nextValue,
-                        "Map stream",
-                        PENDING_CONFIG,
-                        () -> {
-                            m_sendMap = nextValue;
-                            updateStreamToggleButtons();
-                        });
+                sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
+                                          m_sensorMode, m_sendImage, m_sendFeature, nextValue, "Map stream",
+                                          PENDING_CONFIG, () -> {
+                                              m_sendMap = nextValue;
+                                              updateStreamToggleButtons();
+                                          });
             });
         }
         if (m_btnFeatureToggle != null) {
@@ -2363,24 +2294,14 @@ public class MainActivity extends Activity {
                     return;
                 }
                 final boolean nextValue = isChecked;
-                sendRuntimeConfigAwaitAck(
-                        m_cfgExposureUs,
-                        (float) m_cfgGain,
-                        m_cfgPairMs,
-                        m_cfgSlamFps,
-                        m_cfgSlamMode,
-                        m_sensorMode,
-                        m_sendImage,
-                        nextValue,
-                        m_sendMap,
-                        "Feature stream",
-                        PENDING_CONFIG,
-                        () -> {
-                            m_sendFeature = nextValue;
-                            m_showFeaturePoints = nextValue;
-                            refreshVideoFrames();
-                            updateStreamToggleButtons();
-                        });
+                sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
+                                          m_sensorMode, m_sendImage, nextValue, m_sendMap, "Feature stream",
+                                          PENDING_CONFIG, () -> {
+                                              m_sendFeature = nextValue;
+                                              m_showFeaturePoints = nextValue;
+                                              refreshVideoFrames();
+                                              updateStreamToggleButtons();
+                                          });
             });
         }
         if (m_btnDebugToggle != null) {
@@ -2438,12 +2359,12 @@ public class MainActivity extends Activity {
             });
         }
         if (m_btnEmergencyStop != null) {
-            m_btnEmergencyStop.setOnClickListener(v ->
-                    sendSimpleCmdAwaitAck("EMERGENCY_STOP", CMD_EMERGENCY_STOP, PENDING_EMERGENCY_STOP, () -> {
-                        m_armLatched = false;
-                        m_lastFlightCommand = "EMERGENCY_STOP";
-                        updateFlightButtons();
-                    }));
+            m_btnEmergencyStop.setOnClickListener(
+                v -> sendSimpleCmdAwaitAck("EMERGENCY_STOP", CMD_EMERGENCY_STOP, PENDING_EMERGENCY_STOP, () -> {
+                    m_armLatched = false;
+                    m_lastFlightCommand = "EMERGENCY_STOP";
+                    updateFlightButtons();
+                }));
         }
         if (m_btnLand != null) {
             m_btnLand.setOnClickListener(v -> {
@@ -2454,16 +2375,16 @@ public class MainActivity extends Activity {
             });
         }
         if (m_btnCleanCalib != null) {
-            m_btnCleanCalib.setOnClickListener(v ->
-                    sendSimpleCmdAwaitAck("CLEAN_CALIB", CMD_CALIB_CLEAN, PENDING_CLEAN_CALIB, () -> { }));
+            m_btnCleanCalib.setOnClickListener(
+                v -> sendSimpleCmdAwaitAck("CLEAN_CALIB", CMD_CALIB_CLEAN, PENDING_CLEAN_CALIB, () -> {}));
         }
         if (m_btnRestartService != null) {
             m_btnRestartService.setOnClickListener(v -> sshKillSmartDrone());
         }
         if (m_spinnerSensorMode != null) {
             m_spinnerSensorMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                @Override
-                public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id)
+                {
                     if (m_updatingToggleUi || position < 0 || position >= m_availableSensorModes.length) {
                         return;
                     }
@@ -2472,53 +2393,31 @@ public class MainActivity extends Activity {
                         return;
                     }
                     final int exposureUs = m_cfgExposureUs;
-                    final float gain = (float) m_cfgGain;
+                    final float gain = (float)m_cfgGain;
                     final int pairMs = m_cfgPairMs;
                     final int slamFps = m_cfgSlamFps;
-                    sendRuntimeConfigAwaitAck(
-                            exposureUs,
-                            gain,
-                            pairMs,
-                            slamFps,
-                            m_cfgSlamMode,
-                            nextSensorMode,
-                            m_sendImage,
-                            m_sendFeature,
-                            m_sendMap,
-                            effectiveConfigLabel("Sensor mode", true),
-                            PENDING_SENSOR,
-                            () -> {
-                                m_sensorMode = nextSensorMode;
-                                updateRuntimeButtons();
-                            });
+                    sendRuntimeConfigAwaitAck(exposureUs, gain, pairMs, slamFps, m_cfgSlamMode, nextSensorMode,
+                                              m_sendImage, m_sendFeature, m_sendMap,
+                                              effectiveConfigLabel("Sensor mode", true), PENDING_SENSOR, () -> {
+                                                  m_sensorMode = nextSensorMode;
+                                                  updateRuntimeButtons();
+                                              });
                 }
 
-                @Override
-                public void onNothingSelected(AdapterView<?> parent) {
-                }
+                @Override public void onNothingSelected(AdapterView<?> parent) {}
             });
         }
         if (m_btnQuickSlamAuto != null) {
             m_btnQuickSlamAuto.setOnClickListener(v -> {
-                final int nextSlamMode =
-                        (m_cfgSlamMode == SLAM_MODE_AUTO) ? SLAM_MODE_MAPPING : SLAM_MODE_AUTO;
-                sendRuntimeConfigAwaitAck(
-                        m_cfgExposureUs,
-                        (float) m_cfgGain,
-                        m_cfgPairMs,
-                        m_cfgSlamFps,
-                        nextSlamMode,
-                        m_sensorMode,
-                        m_sendImage,
-                        m_sendFeature,
-                        m_sendMap,
-                        nextSlamMode == SLAM_MODE_AUTO ? "Enable Auto" : "Disable Auto",
-                        PENDING_CONFIG,
-                        () -> {
-                            m_cfgSlamMode = nextSlamMode;
-                            updateConfigViews();
-                            updateRuntimeButtons();
-                        });
+                final int nextSlamMode = (m_cfgSlamMode == SLAM_MODE_AUTO) ? SLAM_MODE_MAPPING : SLAM_MODE_AUTO;
+                sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, nextSlamMode,
+                                          m_sensorMode, m_sendImage, m_sendFeature, m_sendMap,
+                                          nextSlamMode == SLAM_MODE_AUTO ? "Enable Auto" : "Disable Auto",
+                                          PENDING_CONFIG, () -> {
+                                              m_cfgSlamMode = nextSlamMode;
+                                              updateConfigViews();
+                                              updateRuntimeButtons();
+                                          });
             });
         }
         if (m_btnQuickSlamManual != null) {
@@ -2527,24 +2426,14 @@ public class MainActivity extends Activity {
                     return;
                 }
                 final int nextSlamMode =
-                        (m_cfgSlamMode == SLAM_MODE_LOCALIZATION) ? SLAM_MODE_MAPPING : SLAM_MODE_LOCALIZATION;
-                sendRuntimeConfigAwaitAck(
-                        m_cfgExposureUs,
-                        (float) m_cfgGain,
-                        m_cfgPairMs,
-                        m_cfgSlamFps,
-                        nextSlamMode,
-                        m_sensorMode,
-                        m_sendImage,
-                        m_sendFeature,
-                        m_sendMap,
-                        "Switch to " + slamModeToText(nextSlamMode),
-                        PENDING_CONFIG,
-                        () -> {
-                            m_cfgSlamMode = nextSlamMode;
-                            updateConfigViews();
-                            updateRuntimeButtons();
-                        });
+                    (m_cfgSlamMode == SLAM_MODE_LOCALIZATION) ? SLAM_MODE_MAPPING : SLAM_MODE_LOCALIZATION;
+                sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, nextSlamMode,
+                                          m_sensorMode, m_sendImage, m_sendFeature, m_sendMap,
+                                          "Switch to " + slamModeToText(nextSlamMode), PENDING_CONFIG, () -> {
+                                              m_cfgSlamMode = nextSlamMode;
+                                              updateConfigViews();
+                                              updateRuntimeButtons();
+                                          });
             });
         }
 
@@ -2579,19 +2468,16 @@ public class MainActivity extends Activity {
         startRxLoop();
     }
 
-    @Override
-    protected void onResume() {
+    @Override protected void onResume()
+    {
         super.onResume();
         View decorView = getWindow().getDecorView();
-        decorView.setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+                                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
 
-    @Override
-    protected void onDestroy() {
+    @Override protected void onDestroy()
+    {
         stopRxLoop();
         stopJoystickLoop();
         super.onDestroy();
@@ -2601,8 +2487,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
+    @Override protected void onSaveInstanceState(Bundle outState)
+    {
         outState.putBoolean(KEY_SETTINGS_VISIBLE, m_settingsVisible);
         outState.putBoolean(KEY_DEBUG_VISIBLE, m_debugVisible);
         outState.putBoolean(KEY_REMOTE_VISIBLE, m_remoteVisible);

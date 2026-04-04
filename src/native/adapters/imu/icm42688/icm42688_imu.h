@@ -17,16 +17,6 @@ constexpr uint8_t REG_INT_SOURCE0 = 0x65;
 int16_t Be16ToI16(uint8_t hi, uint8_t lo);
 bool SetThreadRealtime(int priority);
 uint8_t OdrCodeFromHz(int hz);
-bool BuildFsBitsAndScale(
-    int accelFsG,
-    int gyroFsDps,
-    uint8_t& accelFsBits,
-    uint8_t& gyroFsBits,
-    ImuScale& scale);
-bool IcmResetAndConfig(
-    SpiDev& spi,
-    int imuHz,
-    int accelFsG,
-    int gyroFsDps,
-    ImuScale& scaleOut);
-void ConvertRaw12AccelGyroToSi(const uint8_t raw12[12], const ImuScale& scale, ImuSample& sample);
+bool BuildFsBitsAndScale(int accelFsG, int gyroFsDps, uint8_t &accelFsBits, uint8_t &gyroFsBits, ImuScale &scale);
+bool IcmResetAndConfig(SpiDev &spi, int imuHz, int accelFsG, int gyroFsDps, ImuScale &scaleOut);
+void ConvertRaw12AccelGyroToSi(const uint8_t raw12[12], const ImuScale &scale, ImuSample &sample);

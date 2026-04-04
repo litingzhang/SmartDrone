@@ -11,15 +11,15 @@ struct VehicleGate {
 };
 
 class MavlinkHooks {
-public:
+  public:
     virtual ~MavlinkHooks() = default;
 
     virtual VehicleGate GetGate() const = 0;
-    virtual bool Arm(std::string* err) = 0;
-    virtual bool Disarm(std::string* err) = 0;
-    virtual bool EmergencyStop(std::string* err) = 0;
-    virtual bool SetOffboard(std::string* err) = 0;
-    virtual bool Hold(std::string* err) = 0;
-    virtual bool Land(std::string* err) = 0;
-    virtual bool SetMoveGoal(const MoveGoal& goal, std::string* err) = 0;
+    virtual bool Arm(std::string *err) = 0;
+    virtual bool Disarm(std::string *err) = 0;
+    virtual bool EmergencyStop(std::string *err) = 0;
+    virtual bool SetOffboard(std::string *err) = 0;
+    virtual bool Hold(std::string *err) = 0;
+    virtual bool Land(std::string *err) = 0;
+    virtual bool SetMoveGoal(const MoveGoal &goal, std::string *err) = 0;
 };

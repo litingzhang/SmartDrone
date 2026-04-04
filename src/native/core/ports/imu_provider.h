@@ -16,7 +16,7 @@ struct ImuReading {
 };
 
 class IImuProvider {
-public:
+  public:
     virtual ~IImuProvider() = default;
 
     virtual bool Start() = 0;
@@ -25,4 +25,4 @@ public:
     virtual std::vector<ImuReading> PopWindow(int64_t fromNs, int64_t toNs) = 0;
 };
 
-}  // namespace smartdrone::core::ports
+} // namespace smartdrone::core::ports

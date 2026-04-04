@@ -29,4 +29,4 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault()
     return capabilities;
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

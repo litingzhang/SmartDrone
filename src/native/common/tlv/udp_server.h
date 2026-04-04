@@ -12,17 +12,17 @@ struct UdpPeer {
     bool valid{false};
 };
 
-std::string UdpPeerToIpString(const UdpPeer& peer);
+std::string UdpPeerToIpString(const UdpPeer &peer);
 
 class UdpServer {
-public:
+  public:
     ~UdpServer();
 
     bool Open(uint16_t port);
     void Close();
-    int Recv(uint8_t* buf, size_t cap, UdpPeer* peerOut);
-    bool SendTo(const UdpPeer& peer, const uint8_t* data, size_t len);
+    int Recv(uint8_t *buf, size_t cap, UdpPeer *peerOut);
+    bool SendTo(const UdpPeer &peer, const uint8_t *data, size_t len);
 
-private:
+  private:
     int m_fd{-1};
 };

@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "core/application/state/imu_buffer.h"
 #include "core/application/config/runtime_app_types.h"
+#include "core/application/state/imu_buffer.h"
 #include "core/domain/runtime_mode.h"
 #include <sophus/se3.hpp>
 
@@ -45,19 +45,15 @@ struct ImuWindowValidation {
     double largestGapSec{0.0};
     double firstLeadSec{0.0};
     double tailLagSec{0.0};
-    const char* failureReason{nullptr};
+    const char *failureReason{nullptr};
 };
 
-bool IsFiniteImuPoint(const ORB_SLAM3::IMU::Point& p);
-bool SanitizeImuWindow(
-    std::vector<ORB_SLAM3::IMU::Point>& vImu,
-    double prevFrameTime,
-    double frameTime,
-    double expectedImuDtSec,
-    ImuWindowValidation& stats);
-std::optional<Sophus::SE3f> ReadSe3Node(const cv::FileNode& node);
-StereoBodyExtrinsics LoadStereoBodyExtrinsics(const std::string& settingsPath);
-MainRuntimeAliases BuildRuntimeAliases(const AppConfig& c);
-void PrintStartupConfig(const AppConfig& app, const MainRuntimeAliases& a, ControllerMode mode);
+bool IsFiniteImuPoint(const ORB_SLAM3::IMU::Point &p);
+bool SanitizeImuWindow(std::vector<ORB_SLAM3::IMU::Point> &vImu, double prevFrameTime, double frameTime,
+                       double expectedImuDtSec, ImuWindowValidation &stats);
+std::optional<Sophus::SE3f> ReadSe3Node(const cv::FileNode &node);
+StereoBodyExtrinsics LoadStereoBodyExtrinsics(const std::string &settingsPath);
+MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c);
+void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, ControllerMode mode);
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

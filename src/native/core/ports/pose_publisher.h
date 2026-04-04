@@ -20,16 +20,11 @@ enum class PoseQuality : uint8_t {
 };
 
 class IPosePublisher {
-public:
+  public:
     virtual ~IPosePublisher() = default;
 
-    virtual void PublishPose(uint64_t frameId,
-                             const PoseEstimate& pose,
-                             const VelocityEstimate& velocity,
-                             uint8_t resetCounter,
-                             uint16_t resetMapCount,
-                             int trackingState,
-                             PoseQuality quality) = 0;
+    virtual void PublishPose(uint64_t frameId, const PoseEstimate &pose, const VelocityEstimate &velocity,
+                             uint8_t resetCounter, uint16_t resetMapCount, int trackingState, PoseQuality quality) = 0;
 };
 
-}  // namespace smartdrone::core::ports
+} // namespace smartdrone::core::ports

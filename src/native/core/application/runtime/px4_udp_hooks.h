@@ -16,20 +16,20 @@
 namespace smartdrone::core::application {
 
 class Px4UdpHooks final : public MavlinkHooks {
-public:
-    Px4UdpHooks(Px4MavlinkGateway& mavlink, LivePoseState& livePose);
+  public:
+    Px4UdpHooks(Px4MavlinkGateway &mavlink, LivePoseState &livePose);
     ~Px4UdpHooks() override;
 
     VehicleGate GetGate() const override;
-    bool Arm(std::string* err) override;
-    bool Disarm(std::string* err) override;
-    bool EmergencyStop(std::string* err) override;
-    bool SetOffboard(std::string* err) override;
-    bool Hold(std::string* err) override;
-    bool Land(std::string* err) override;
-    bool SetMoveGoal(const MoveGoal& goal, std::string* err) override;
+    bool Arm(std::string *err) override;
+    bool Disarm(std::string *err) override;
+    bool EmergencyStop(std::string *err) override;
+    bool SetOffboard(std::string *err) override;
+    bool Hold(std::string *err) override;
+    bool Land(std::string *err) override;
+    bool SetMoveGoal(const MoveGoal &goal, std::string *err) override;
 
-private:
+  private:
     enum class RemoteFlightMode : uint8_t {
         Altitude = Px4MavlinkGateway::PX4_CUSTOM_MAIN_MODE_ALTCTL,
         Position = Px4MavlinkGateway::PX4_CUSTOM_MAIN_MODE_POSCTL,
@@ -57,24 +57,24 @@ private:
 
     bool IsVioControlUsable() const;
     RemoteFlightMode DesiredRemoteFlightMode() const;
-    static const char* RemoteFlightModeToString(RemoteFlightMode mode);
+    static const char *RemoteFlightModeToString(RemoteFlightMode mode);
     void CancelAutoLanding();
     bool IsAutoLandingActive() const;
     bool EnsureSetpointStream();
     void EnsureManualControlStream();
     void DisableRemoteControl(bool stopManualStream);
     void SetManualControlNeutral();
-    void SetManualControlInput(const Px4MavlinkGateway::ManualControlInput& input);
+    void SetManualControlInput(const Px4MavlinkGateway::ManualControlInput &input);
     Px4MavlinkGateway::ManualControlInput GetManualControlSnapshot() const;
     void SendManualControlSnapshot();
     void WarmupManualControlLink();
     void StartAutoLanding();
-    bool MaybeSyncRemoteFlightMode(bool force, std::string* err);
+    bool MaybeSyncRemoteFlightMode(bool force, std::string *err);
     void UpdateAutoLanding();
     void ManualControlLoop();
 
-    Px4MavlinkGateway& m_mavlink;
-    LivePoseState& m_livePose;
+    Px4MavlinkGateway &m_mavlink;
+    LivePoseState &m_livePose;
     std::atomic<bool> m_streamStarted{false};
     std::atomic<bool> m_manualControlStreaming{false};
     std::atomic<bool> m_remoteModeRequested{false};
@@ -89,4 +89,4 @@ private:
     std::chrono::steady_clock::time_point m_lastRemoteModeRequest{};
 };
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

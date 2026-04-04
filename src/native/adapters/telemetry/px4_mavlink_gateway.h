@@ -14,25 +14,17 @@
 #include "common/mavlink.h"
 #include "core/application/state/frame_timing_tracker.h"
 
-enum class OdomQualityMode
-{
-    GOOD,
-    WEAK,
-    LOST
-};
+enum class OdomQualityMode { GOOD, WEAK, LOST };
 
 class Px4MavlinkGateway {
-public:
+  public:
     struct Pose {
         float x, y, z;
         float qw, qx, qy, qz;
     };
 
     struct LinearVelocityNed {
-        LinearVelocityNed(float xIn = NAN, float yIn = NAN, float zIn = NAN)
-            : x(xIn), y(yIn), z(zIn)
-        {
-        }
+        LinearVelocityNed(float xIn = NAN, float yIn = NAN, float zIn = NAN) : x(xIn), y(yIn), z(zIn) {}
 
         float x;
         float y;
@@ -96,93 +88,53 @@ public:
     static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_POSCTL = 3;
     static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6;
 
-    explicit Px4MavlinkGateway(
-        const std::string& dev,
-        int baud,
-        uint8_t sysid = 42,
-        uint8_t compid = MAV_COMP_ID_VISUAL_INERTIAL_ODOMETRY);
+    explicit Px4MavlinkGateway(const std::string &dev, int baud, uint8_t sysid = 42,
+                               uint8_t compid = MAV_COMP_ID_VISUAL_INERTIAL_ODOMETRY);
     ~Px4MavlinkGateway();
 
-    void SetFrameTimingTracker(smartdrone::core::application::FrameTimingTracker* tracker);
+    void SetFrameTimingTracker(smartdrone::core::application::FrameTimingTracker *tracker);
     void StartRx();
     void StopRx();
     uint8_t GetTargetSystem() const;
     uint8_t GetTargetComponent() const;
-    bool GetLocalPositionNed(LocalPositionNed& out, uint64_t maxAgeUs = 500000) const;
-    bool GetDownwardDistanceSensor(DownwardDistanceSensor& out, uint64_t maxAgeUs = 200000) const;
-    bool WaitCommandAck(uint16_t command, int timeoutMs, uint8_t& outResult);
-    bool GetFlightModeInfo(FlightModeInfo& out, uint64_t maxAgeUs = 1500000) const;
-    void SendCommandLong(
-        uint16_t command,
-        float p1 = 0,
-        float p2 = 0,
-        float p3 = 0,
-        float p4 = 0,
-        float p5 = 0,
-        float p6 = 0,
-        float p7 = 0,
-        uint8_t targetSystem = 1,
-        uint8_t targetComponent = 1,
-        uint8_t confirmation = 0);
-    bool SendCommandLongAndWaitAck(
-        uint16_t command,
-        float p1 = 0,
-        float p2 = 0,
-        float p3 = 0,
-        float p4 = 0,
-        float p5 = 0,
-        float p6 = 0,
-        float p7 = 0,
-        int timeoutMs = 800,
-        uint8_t targetSystem = 0,
-        uint8_t targetComponent = 0,
-        uint8_t* outResult = nullptr);
-    bool SetModePx4Main(uint8_t mainMode, int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
+    bool GetLocalPositionNed(LocalPositionNed &out, uint64_t maxAgeUs = 500000) const;
+    bool GetDownwardDistanceSensor(DownwardDistanceSensor &out, uint64_t maxAgeUs = 200000) const;
+    bool WaitCommandAck(uint16_t command, int timeoutMs, uint8_t &outResult);
+    bool GetFlightModeInfo(FlightModeInfo &out, uint64_t maxAgeUs = 1500000) const;
+    void SendCommandLong(uint16_t command, float p1 = 0, float p2 = 0, float p3 = 0, float p4 = 0, float p5 = 0,
+                         float p6 = 0, float p7 = 0, uint8_t targetSystem = 1, uint8_t targetComponent = 1,
+                         uint8_t confirmation = 0);
+    bool SendCommandLongAndWaitAck(uint16_t command, float p1 = 0, float p2 = 0, float p3 = 0, float p4 = 0,
+                                   float p5 = 0, float p6 = 0, float p7 = 0, int timeoutMs = 800,
+                                   uint8_t targetSystem = 0, uint8_t targetComponent = 0, uint8_t *outResult = nullptr);
+    bool SetModePx4Main(uint8_t mainMode, int ackTimeoutMs = 800, uint8_t targetSystem = 0,
+                        uint8_t targetComponent = 0);
     bool SetModeOffboard(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     bool SetModePosition(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     bool SetModeAltitude(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     bool Arm(bool doArm, int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     bool EmergencyStop(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
-    bool StartOffboardAndArm(
-        double unused1,
-        double unused2,
-        int warmupMs = 800,
-        int ackTimeoutMs = 1000,
-        uint8_t targetSystem = 0,
-        uint8_t targetComponent = 0);
-    void SendSetPositionTargetLocalNed(
-        uint32_t timeBootMs,
-        const SetpointLocalNED& sp,
-        uint8_t coordinateFrame = MAV_FRAME_LOCAL_NED);
+    bool StartOffboardAndArm(double unused1, double unused2, int warmupMs = 800, int ackTimeoutMs = 1000,
+                             uint8_t targetSystem = 0, uint8_t targetComponent = 0);
+    void SendSetPositionTargetLocalNed(uint32_t timeBootMs, const SetpointLocalNED &sp,
+                                       uint8_t coordinateFrame = MAV_FRAME_LOCAL_NED);
     void StartSetpointStreamHz(double hz = 20.0);
     void StopSetpointStream();
-    void UpdateStreamSetpoint(const SetpointLocalNED& spNed);
+    void UpdateStreamSetpoint(const SetpointLocalNED &spNed);
     void UpdateStreamPosition(float xN, float yE, float zD, float yawRad = NAN);
-    void SendManualControl(
-        const ManualControlInput& input,
-        uint16_t buttons = 0,
-        uint16_t buttons2 = 0,
-        uint8_t targetSystem = 0);
+    void SendManualControl(const ManualControlInput &input, uint16_t buttons = 0, uint16_t buttons2 = 0,
+                           uint8_t targetSystem = 0);
     bool SendLand(int ackTimeoutMs = 800, uint8_t targetSystem = 1, uint8_t targetComponent = 1);
-    bool GetTimesyncStatus(int64_t& offsetNs, uint32_t& rttUs, uint32_t& sampleCount) const;
-    uint64_t MapMonotonicNsToPx4Ns(
-        uint64_t monoNs,
-        bool* outTimesyncValid = nullptr,
-        int64_t* outOffsetNs = nullptr,
-        uint32_t* outRttUs = nullptr,
-        uint32_t* outSampleCount = nullptr) const;
-    void SendOdometry(
-        uint64_t odomFrameId,
-        const Pose& poseNed,
-        const LinearVelocityNed& velNed = LinearVelocityNed{},
-        uint8_t mavFrameId = MAV_FRAME_LOCAL_NED,
-        uint8_t childFrameId = MAV_FRAME_BODY_FRD,
-        uint8_t resetCounter = 0,
-        OdomQualityMode mode = OdomQualityMode::GOOD);
-    static Pose EnuToNed(const Pose& pEnu);
-    static void NormalizeQuat(float& w, float& x, float& y, float& z);
+    bool GetTimesyncStatus(int64_t &offsetNs, uint32_t &rttUs, uint32_t &sampleCount) const;
+    uint64_t MapMonotonicNsToPx4Ns(uint64_t monoNs, bool *outTimesyncValid = nullptr, int64_t *outOffsetNs = nullptr,
+                                   uint32_t *outRttUs = nullptr, uint32_t *outSampleCount = nullptr) const;
+    void SendOdometry(uint64_t odomFrameId, const Pose &poseNed, const LinearVelocityNed &velNed = LinearVelocityNed{},
+                      uint8_t mavFrameId = MAV_FRAME_LOCAL_NED, uint8_t childFrameId = MAV_FRAME_BODY_FRD,
+                      uint8_t resetCounter = 0, OdomQualityMode mode = OdomQualityMode::GOOD);
+    static Pose EnuToNed(const Pose &pEnu);
+    static void NormalizeQuat(float &w, float &x, float &y, float &z);
 
-private:
+  private:
     static constexpr uint32_t kTimesyncMaxAcceptableRttUs = 50000;
     static constexpr int64_t kTimesyncJumpResetThresholdNs = 50000000LL;
     static constexpr int64_t kTimesyncJumpWarnThresholdNs = 10000000LL;
@@ -195,17 +147,17 @@ private:
     };
 
     void ResetTimesyncEstimateLocked();
-    bool LookupFrameTiming(uint64_t frameId, smartdrone::core::application::FrameTimingRecord& out) const;
+    bool LookupFrameTiming(uint64_t frameId, smartdrone::core::application::FrameTimingRecord &out) const;
     void MarkFrameMavTx(uint64_t frameId, uint64_t tMavTxNs);
-    static const char* MavResultToStr(uint8_t r);
-    void WriteMessage(const mavlink_message_t& msg);
+    static const char *MavResultToStr(uint8_t r);
+    void WriteMessage(const mavlink_message_t &msg);
     void SendTimesyncMessage(int64_t tc1Ns, int64_t ts1Ns, uint8_t targetSystem, uint8_t targetComponent);
     void SendTimesyncRequest(uint8_t targetSystem, uint8_t targetComponent);
     void SendTimesyncResponse(int64_t requestTs1Ns, uint8_t targetSystem, uint8_t targetComponent);
     void SendTimesyncFollowUp(int64_t remoteStampNs, uint8_t targetSystem, uint8_t targetComponent);
     void TimesyncLoop();
     void RxLoop();
-    void HandleMavlinkMessage(const mavlink_message_t& msg);
+    void HandleMavlinkMessage(const mavlink_message_t &msg);
     void MaybeRequestLocalPositionNedStream(uint8_t targetSystem, uint8_t targetComponent);
     void MaybeRequestDistanceSensorStream(uint8_t targetSystem, uint8_t targetComponent);
 
@@ -254,5 +206,5 @@ private:
     uint64_t m_lastTimesyncActivityUs{0};
     uint64_t m_lastTimesyncLogUs{0};
     OdomTimestampDebug m_lastOdomTimestampDebug{};
-    smartdrone::core::application::FrameTimingTracker* m_frameTimingTracker{nullptr};
+    smartdrone::core::application::FrameTimingTracker *m_frameTimingTracker{nullptr};
 };

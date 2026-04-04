@@ -42,12 +42,12 @@ struct SlamOutput {
 };
 
 class ISlamEngine {
-public:
+  public:
     virtual ~ISlamEngine() = default;
 
     virtual bool Start() = 0;
     virtual void Stop() = 0;
-    virtual SlamOutput Process(const SlamInputBatch& input, bool extractFeatures, bool extractPointCloud) = 0;
+    virtual SlamOutput Process(const SlamInputBatch &input, bool extractFeatures, bool extractPointCloud) = 0;
 };
 
-}  // namespace smartdrone::core::ports
+} // namespace smartdrone::core::ports

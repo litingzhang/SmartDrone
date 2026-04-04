@@ -4,7 +4,7 @@
 
 namespace smartdrone::core::application {
 
-void LivePoseState::UpdatePeer(const UdpPeer& peer)
+void LivePoseState::UpdatePeer(const UdpPeer &peer)
 {
     if (!peer.valid) {
         return;
@@ -35,13 +35,8 @@ void LivePoseState::SetSlamMode(uint8_t mode)
     dirty = true;
 }
 
-void LivePoseState::UpdatePose(
-    uint8_t mode,
-    uint8_t tracking,
-    uint16_t resetCounterIn,
-    uint16_t resetMapCountIn,
-    const Px4MavlinkGateway::Pose& p,
-    OdomQualityMode quality)
+void LivePoseState::UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCounterIn, uint16_t resetMapCountIn,
+                               const Px4MavlinkGateway::Pose &p, OdomQualityMode quality)
 {
     std::lock_guard<std::mutex> lock(mu);
     runtimeMode = mode;
@@ -68,7 +63,7 @@ void LivePoseState::UpdatePointCloud(std::vector<float> xyz)
     dirty = true;
 }
 
-bool LivePoseState::ConsumeSnapshot(Snapshot& out)
+bool LivePoseState::ConsumeSnapshot(Snapshot &out)
 {
     std::lock_guard<std::mutex> lock(mu);
     if (!hasPeer || !dirty) {
@@ -98,7 +93,7 @@ bool LivePoseState::ConsumeSnapshot(Snapshot& out)
     return true;
 }
 
-bool LivePoseState::ReadSnapshot(Snapshot& out) const
+bool LivePoseState::ReadSnapshot(Snapshot &out) const
 {
     std::lock_guard<std::mutex> lock(mu);
     if (!hasPeer) {
@@ -127,4 +122,4 @@ bool LivePoseState::ReadSnapshot(Snapshot& out) const
     return true;
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

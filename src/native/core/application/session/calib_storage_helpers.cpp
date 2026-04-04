@@ -5,25 +5,22 @@
 
 namespace smartdrone::core::application {
 
-void EnsureDir(const fs::path& p)
+void EnsureDir(const fs::path &p)
 {
     std::error_code ec;
     fs::create_directories(p, ec);
 }
 
-std::string TsToName(int64_t tNs)
-{
-    return std::to_string(tNs) + ".png";
-}
+std::string TsToName(int64_t tNs) { return std::to_string(tNs) + ".png"; }
 
-void SetupFileBuffer(FILE* f, size_t bytes)
+void SetupFileBuffer(FILE *f, size_t bytes)
 {
     if (f) {
         setvbuf(f, nullptr, _IOFBF, bytes);
     }
 }
 
-bool TryParseCalibIndex(const std::string& name, int& indexOut)
+bool TryParseCalibIndex(const std::string &name, int &indexOut)
 {
     static const std::string prefix = "calib_data_";
     if (name.rfind(prefix, 0) != 0) {
@@ -46,12 +43,12 @@ bool TryParseCalibIndex(const std::string& name, int& indexOut)
     }
 }
 
-std::string MakeCalibSessionDir(const std::string& root)
+std::string MakeCalibSessionDir(const std::string &root)
 {
     EnsureDir(fs::path(root));
     int maxIndex = -1;
     std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(root, ec)) {
+    for (const auto &entry : fs::directory_iterator(root, ec)) {
         if (ec || !entry.is_directory()) {
             continue;
         }
@@ -63,14 +60,14 @@ std::string MakeCalibSessionDir(const std::string& root)
     return (fs::path(root) / ("calib_data_" + std::to_string(maxIndex + 1))).string();
 }
 
-int CleanupCalibDataDirs(const std::string& root)
+int CleanupCalibDataDirs(const std::string &root)
 {
     int removed = 0;
     std::error_code ec;
     if (!fs::exists(root, ec)) {
         return 0;
     }
-    for (const auto& entry : fs::directory_iterator(root, ec)) {
+    for (const auto &entry : fs::directory_iterator(root, ec)) {
         if (ec || !entry.is_directory()) {
             continue;
         }
@@ -87,4 +84,4 @@ int CleanupCalibDataDirs(const std::string& root)
     return removed;
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

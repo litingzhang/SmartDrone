@@ -16,22 +16,20 @@ enum class OrbInputMode : uint8_t {
 };
 
 class OrbSlam3Engine final : public core::ports::ISlamEngine {
-public:
+  public:
     OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, OrbInputMode inputMode, bool useImu);
 
     bool Start() override;
     void SetOperationMode(core::domain::SlamOperationMode mode);
     void Stop() override;
-    core::ports::SlamOutput Process(
-        const core::ports::SlamInputBatch& input,
-        bool extractFeatures,
-        bool extractPointCloud) override;
+    core::ports::SlamOutput Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
+                                    bool extractPointCloud) override;
 
-private:
+  private:
     std::unique_ptr<ORB_SLAM3::System> m_system;
     OrbInputMode m_inputMode{OrbInputMode::Stereo};
     bool m_useImu{false};
     core::domain::SlamOperationMode m_operationMode{core::domain::SlamOperationMode::Mapping};
 };
 
-}  // namespace smartdrone::adapters::slam
+} // namespace smartdrone::adapters::slam

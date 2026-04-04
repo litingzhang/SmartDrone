@@ -5,16 +5,11 @@
 
 namespace smartdrone::core::application {
 
-PerceptionPipeline::PerceptionPipeline(PerceptionPipelineConfig cfg) : m_cfg(cfg)
-{
-}
+PerceptionPipeline::PerceptionPipeline(PerceptionPipelineConfig cfg) : m_cfg(cfg) {}
 
-StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(
-    ports::ICameraProvider& camera,
-    int slamInputFps,
-    int timeoutMs,
-    StereoBatch& out,
-    FrameTimingTracker* timingTracker)
+StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(ports::ICameraProvider &camera, int slamInputFps,
+                                                               int timeoutMs, StereoBatch &out,
+                                                               FrameTimingTracker *timingTracker)
 {
     ports::StereoFrame stereo{};
     const int clampedSlamInputFps = ClampTargetFps(slamInputFps);
@@ -22,7 +17,8 @@ StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(
     uint64_t minTimestampNs = 0;
     if (m_lastAcceptedFrameNs != 0) {
         const int64_t toleranceNs = std::max<int64_t>(2000000LL, slamFrameStepNs / 20);
-        minTimestampNs = static_cast<uint64_t>(std::max<int64_t>(0, m_lastAcceptedFrameNs + slamFrameStepNs - toleranceNs));
+        minTimestampNs =
+            static_cast<uint64_t>(std::max<int64_t>(0, m_lastAcceptedFrameNs + slamFrameStepNs - toleranceNs));
     }
 
     if (!camera.GrabStereo(stereo, timeoutMs, m_cfg.preferLatestFrame, minTimestampNs)) {
@@ -54,9 +50,8 @@ StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(
     out.monotonicFrameStepNs = frameStepNs;
     if (timingTracker) {
         const uint64_t tCamNs = static_cast<uint64_t>(frameNs);
-        const uint64_t tCbNs = static_cast<uint64_t>(std::max<int64_t>(
-            0,
-            (out.stereo.left.arriveNs + out.stereo.right.arriveNs) / 2LL));
+        const uint64_t tCbNs =
+            static_cast<uint64_t>(std::max<int64_t>(0, (out.stereo.left.arriveNs + out.stereo.right.arriveNs) / 2LL));
         timingTracker->UpsertCapture(out.frameId, tCamNs, tCbNs);
     }
     return StereoAcquireStatus::Ok;
@@ -70,4 +65,4 @@ int PerceptionPipeline::ClampTargetFps(int requestedFps) const
     return std::clamp(requestedFps, 1, std::max(1, m_cfg.cameraFps));
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

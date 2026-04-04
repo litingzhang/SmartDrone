@@ -2,15 +2,9 @@
 
 namespace smartdrone::core::application {
 
-ModeManager::RuntimeMode ModeManager::DesiredMode() const
-{
-    return m_desiredMode;
-}
+ModeManager::RuntimeMode ModeManager::DesiredMode() const { return m_desiredMode; }
 
-ModeManager::RuntimeMode ModeManager::ActiveMode() const
-{
-    return m_activeMode;
-}
+ModeManager::RuntimeMode ModeManager::ActiveMode() const { return m_activeMode; }
 
 void ModeManager::RequestMode(RuntimeMode mode)
 {
@@ -18,15 +12,9 @@ void ModeManager::RequestMode(RuntimeMode mode)
     m_restartRequested = true;
 }
 
-void ModeManager::RequestRestart()
-{
-    m_restartRequested = true;
-}
+void ModeManager::RequestRestart() { m_restartRequested = true; }
 
-bool ModeManager::RestartRequested() const
-{
-    return m_restartRequested;
-}
+bool ModeManager::RestartRequested() const { return m_restartRequested; }
 
 bool ModeManager::ShouldStopActiveSession() const
 {
@@ -45,4 +33,4 @@ void ModeManager::MarkSessionLaunching(RuntimeMode mode)
     m_restartRequested = false;
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

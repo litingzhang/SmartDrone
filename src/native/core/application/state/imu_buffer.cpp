@@ -6,7 +6,7 @@
 #include <limits>
 #include <mutex>
 
-void ImuBuffer::Push(const ImuSample& sample)
+void ImuBuffer::Push(const ImuSample &sample)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_queue.push_back(sample);
@@ -20,11 +20,8 @@ void ImuBuffer::Push(const ImuSample& sample)
     }
 }
 
-std::vector<ORB_SLAM3::IMU::Point> ImuBuffer::PopBetweenNs(
-    int64_t t0Ns,
-    int64_t t1Ns,
-    int64_t slackBeforeNs,
-    int64_t slackAfterNs)
+std::vector<ORB_SLAM3::IMU::Point> ImuBuffer::PopBetweenNs(int64_t t0Ns, int64_t t1Ns, int64_t slackBeforeNs,
+                                                           int64_t slackAfterNs)
 {
     std::vector<ORB_SLAM3::IMU::Point> out;
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -41,15 +38,13 @@ std::vector<ORB_SLAM3::IMU::Point> ImuBuffer::PopBetweenNs(
         ++i;
     }
 
-    auto appendSample = [&out](const ImuSample& sample) {
+    auto appendSample = [&out](const ImuSample &sample) {
         const double ts = static_cast<double>(sample.tNs) * 1e-9;
-        out.emplace_back(
-            cv::Point3f(sample.ax, sample.ay, sample.az),
-            cv::Point3f(sample.gx, sample.gy, sample.gz),
-            ts);
+        out.emplace_back(cv::Point3f(sample.ax, sample.ay, sample.az), cv::Point3f(sample.gx, sample.gy, sample.gz),
+                         ts);
     };
 
-    auto appendInterpolatedSample = [&appendSample](const ImuSample& a, const ImuSample& b, int64_t targetNs) {
+    auto appendInterpolatedSample = [&appendSample](const ImuSample &a, const ImuSample &b, int64_t targetNs) {
         appendSample(InterpolateSample(a, b, targetNs));
     };
 
@@ -62,7 +57,7 @@ std::vector<ORB_SLAM3::IMU::Point> ImuBuffer::PopBetweenNs(
 
     int64_t lastAppendedTsNs = std::numeric_limits<int64_t>::min();
 
-    auto appendUnique = [&](const ImuSample& sample) {
+    auto appendUnique = [&](const ImuSample &sample) {
         if (sample.tNs != lastAppendedTsNs) {
             appendSample(sample);
             lastAppendedTsNs = sample.tNs;
@@ -72,9 +67,8 @@ std::vector<ORB_SLAM3::IMU::Point> ImuBuffer::PopBetweenNs(
     if (startIdx < m_queue.size() && m_queue[startIdx].tNs == t0Ns) {
         appendUnique(m_queue[startIdx]);
         ++startIdx;
-    } else if (startIdx > 0 && startIdx < m_queue.size() &&
-               m_queue[startIdx - 1].tNs < t0Ns && m_queue[startIdx].tNs > t0Ns &&
-               m_queue[startIdx].tNs <= rangeEndNs) {
+    } else if (startIdx > 0 && startIdx < m_queue.size() && m_queue[startIdx - 1].tNs < t0Ns &&
+               m_queue[startIdx].tNs > t0Ns && m_queue[startIdx].tNs <= rangeEndNs) {
         appendInterpolatedSample(m_queue[startIdx - 1], m_queue[startIdx], t0Ns);
         lastAppendedTsNs = t0Ns;
     } else if (startIdx > 0 && m_queue[startIdx - 1].tNs >= rangeStartNs) {
@@ -93,8 +87,7 @@ std::vector<ORB_SLAM3::IMU::Point> ImuBuffer::PopBetweenNs(
     if (!haveExactTrailing) {
         if (j < m_queue.size() && m_queue[j].tNs == t1Ns) {
             appendUnique(m_queue[j]);
-        } else if (j > 0 && j < m_queue.size() &&
-                   m_queue[j - 1].tNs < t1Ns && m_queue[j].tNs > t1Ns &&
+        } else if (j > 0 && j < m_queue.size() && m_queue[j - 1].tNs < t1Ns && m_queue[j].tNs > t1Ns &&
                    m_queue[j].tNs <= rangeEndNs) {
             appendInterpolatedSample(m_queue[j - 1], m_queue[j], t1Ns);
             lastAppendedTsNs = t1Ns;
@@ -128,7 +121,7 @@ size_t ImuBuffer::Size() const
     return m_queue.size();
 }
 
-bool ImuBuffer::PeekFirstLast(int64_t& tFirst, int64_t& tLast) const
+bool ImuBuffer::PeekFirstLast(int64_t &tFirst, int64_t &tLast) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_queue.empty()) {
@@ -139,7 +132,7 @@ bool ImuBuffer::PeekFirstLast(int64_t& tFirst, int64_t& tLast) const
     return true;
 }
 
-ImuSample ImuBuffer::InterpolateSample(const ImuSample& a, const ImuSample& b, int64_t targetNs)
+ImuSample ImuBuffer::InterpolateSample(const ImuSample &a, const ImuSample &b, int64_t targetNs)
 {
     if (b.tNs <= a.tNs || targetNs <= a.tNs) {
         ImuSample out = a;
@@ -152,8 +145,7 @@ ImuSample ImuBuffer::InterpolateSample(const ImuSample& a, const ImuSample& b, i
         return out;
     }
 
-    const float alpha = static_cast<float>(targetNs - a.tNs) /
-                        static_cast<float>(b.tNs - a.tNs);
+    const float alpha = static_cast<float>(targetNs - a.tNs) / static_cast<float>(b.tNs - a.tNs);
     ImuSample out{};
     out.tNs = targetNs;
     out.ax = a.ax + (b.ax - a.ax) * alpha;

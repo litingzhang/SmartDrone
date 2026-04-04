@@ -15,28 +15,27 @@
 
 namespace smartdrone::core::application {
 
-std::thread StartImuThread(
-    const MainRuntimeAliases& a,
-    ImuThreadState& s,
-    std::atomic<bool>& stop,
-    std::atomic<bool>& runningFlag)
+std::thread StartImuThread(const MainRuntimeAliases &a, ImuThreadState &s, std::atomic<bool> &stop,
+                           std::atomic<bool> &runningFlag)
 {
     ImuScale init{};
     s.accelLsbPerG.store(init.accelLsbPerG);
     s.gyroLsbPerDps.store(init.gyroLsbPerDps);
     return SMARTDRONE_START_THREAD(
-        smartdrone::common::ThreadRole::Imu,
-        "SensorRuntime",
-        [&a, &s, &stop, &runningFlag]() {
-            if (a.rtImu) SetThreadRealtime(a.rtPrio);
+        smartdrone::common::ThreadRole::Imu, "SensorRuntime", [&a, &s, &stop, &runningFlag]() {
+            if (a.rtImu)
+                SetThreadRealtime(a.rtPrio);
             SpiDev spi(a.spiDev);
-            if (!spi.Open(a.spiSpeed, a.spiMode, a.spiBits)) return;
+            if (!spi.Open(a.spiSpeed, a.spiMode, a.spiBits))
+                return;
             ImuScale scale{};
-            if (!IcmResetAndConfig(spi, a.imuHz, a.accelFsG, a.gyroFsDps, scale)) return;
+            if (!IcmResetAndConfig(spi, a.imuHz, a.accelFsG, a.gyroFsDps, scale))
+                return;
             s.accelLsbPerG.store(scale.accelLsbPerG);
             s.gyroLsbPerDps.store(scale.gyroLsbPerDps);
             DrdyGpio drdy;
-            if (!drdy.Open(a.gpiochip, a.drdyLine)) return;
+            if (!drdy.Open(a.gpiochip, a.drdyLine))
+                return;
             s.imuOk.store(true);
             uint8_t raw12[12]{};
             uint8_t st = 0;
@@ -45,15 +44,14 @@ std::thread StartImuThread(
             uint64_t lastNonMonotonicLogUs = 0;
             while (runningFlag.load() && !stop.load()) {
                 int64_t tNs = 0;
-                if (!drdy.WaitTs(1000, tNs)) continue;
+                if (!drdy.WaitTs(1000, tNs))
+                    continue;
                 if (lastAcceptedTsNs != 0 && tNs <= lastAcceptedTsNs) {
                     s.imuDrop.fetch_add(1, std::memory_order_relaxed);
                     const uint64_t nowUs = MonoTimeUs();
                     if ((lastNonMonotonicLogUs == 0) || (nowUs - lastNonMonotonicLogUs >= 1000000ULL)) {
                         std::cerr << "[imu] dropped non-monotonic DRDY timestamp"
-                                  << " prev_ns=" << lastAcceptedTsNs
-                                  << " cur_ns=" << tNs
-                                  << "\n";
+                                  << " prev_ns=" << lastAcceptedTsNs << " cur_ns=" << tNs << "\n";
                         lastNonMonotonicLogUs = nowUs;
                     }
                     continue;
@@ -76,23 +74,20 @@ std::thread StartImuThread(
         });
 }
 
-std::thread StartCalibImuWriterThread(
-    const MainRuntimeAliases& a,
-    FILE* fImu,
-    std::atomic<bool>& imuOk,
-    std::atomic<bool>& stop,
-    std::atomic<bool>& runningFlag)
+std::thread StartCalibImuWriterThread(const MainRuntimeAliases &a, FILE *fImu, std::atomic<bool> &imuOk,
+                                      std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
 {
     return SMARTDRONE_START_THREAD(
-        smartdrone::common::ThreadRole::CalibImuWriter,
-        "SensorRuntime",
-        [&a, fImu, &imuOk, &stop, &runningFlag]() {
+        smartdrone::common::ThreadRole::CalibImuWriter, "SensorRuntime", [&a, fImu, &imuOk, &stop, &runningFlag]() {
             SpiDev spi(a.spiDev);
-            if (!spi.Open(a.spiSpeed, a.spiMode, a.spiBits)) return;
+            if (!spi.Open(a.spiSpeed, a.spiMode, a.spiBits))
+                return;
             ImuScale scale{};
-            if (!IcmResetAndConfig(spi, a.imuHz, a.accelFsG, a.gyroFsDps, scale)) return;
+            if (!IcmResetAndConfig(spi, a.imuHz, a.accelFsG, a.gyroFsDps, scale))
+                return;
             DrdyGpio drdy;
-            if (!drdy.Open(a.gpiochip, a.drdyLine)) return;
+            if (!drdy.Open(a.gpiochip, a.drdyLine))
+                return;
             imuOk.store(true);
             uint8_t raw12[12]{};
             uint8_t st = 0;
@@ -100,44 +95,30 @@ std::thread StartCalibImuWriterThread(
             int lines = 0;
             while (runningFlag.load() && !stop.load()) {
                 int64_t tNs = 0;
-                if (!drdy.WaitTs(1000, tNs)) continue;
+                if (!drdy.WaitTs(1000, tNs))
+                    continue;
                 ImuSample sample{};
                 sample.tNs = tNs;
                 spi.ReadReg(REG_INT_STATUS, st);
-                if (!spi.ReadRegs(a.imuStartReg, raw12, sizeof(raw12))) continue;
+                if (!spi.ReadRegs(a.imuStartReg, raw12, sizeof(raw12)))
+                    continue;
                 ConvertRaw12AccelGyroToSi(raw12, scale, sample);
-                std::fprintf(
-                    fImu,
-                    "%lld,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f\n",
-                    static_cast<long long>(sample.tNs),
-                    static_cast<double>(sample.gx),
-                    static_cast<double>(sample.gy),
-                    static_cast<double>(sample.gz),
-                    static_cast<double>(sample.ax),
-                    static_cast<double>(sample.ay),
-                    static_cast<double>(sample.az));
-                if ((++lines % 800) == 0) std::fflush(fImu);
+                std::fprintf(fImu, "%lld,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f\n", static_cast<long long>(sample.tNs),
+                             static_cast<double>(sample.gx), static_cast<double>(sample.gy),
+                             static_cast<double>(sample.gz), static_cast<double>(sample.ax),
+                             static_cast<double>(sample.ay), static_cast<double>(sample.az));
+                if ((++lines % 800) == 0)
+                    std::fflush(fImu);
             }
             std::fflush(fImu);
         });
 }
 
-bool OpenCamera(LibcameraStereoOV9281_TsPair& cam, const MainRuntimeAliases& a)
+bool OpenCamera(LibcameraStereoOV9281_TsPair &cam, const MainRuntimeAliases &a)
 {
-    return cam.Open(
-        a.width,
-        a.height,
-        a.fps,
-        a.aeDisable,
-        a.exposureUs,
-        a.gain,
-        a.requestY8,
-        static_cast<int64_t>(a.pairMs) * 1000000LL,
-        static_cast<int64_t>(a.keepMs) * 1000000LL,
-        a.pairQueue,
-        a.r16Norm,
-        a.leftCamIndex,
-        a.rightCamIndex);
+    return cam.Open(a.width, a.height, a.fps, a.aeDisable, a.exposureUs, a.gain, a.requestY8,
+                    static_cast<int64_t>(a.pairMs) * 1000000LL, static_cast<int64_t>(a.keepMs) * 1000000LL, a.pairQueue,
+                    a.r16Norm, a.leftCamIndex, a.rightCamIndex);
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

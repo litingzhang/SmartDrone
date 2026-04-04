@@ -26,4 +26,4 @@ struct RuntimeCapabilities {
     std::vector<ConfigDescriptor> configKeys;
 };
 
-}  // namespace smartdrone::core::domain
+} // namespace smartdrone::core::domain

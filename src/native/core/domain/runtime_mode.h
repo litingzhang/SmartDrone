@@ -33,8 +33,8 @@ struct RuntimeSelection {
     SlamOperationMode slamMode{SlamOperationMode::Mapping};
 };
 
-const char* ToString(RuntimeMode mode);
-const char* ToString(PerceptionMode mode);
-const char* ToString(SlamOperationMode mode);
+const char *ToString(RuntimeMode mode);
+const char *ToString(PerceptionMode mode);
+const char *ToString(SlamOperationMode mode);
 
-}  // namespace smartdrone::core::domain
+} // namespace smartdrone::core::domain

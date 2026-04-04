@@ -1,11 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
 option(CROSS_AARCH64 "Enable aarch64 cross compile" ON)
-option(BUILD_CALIB_RECORDER "Compatibility switch; recorder is merged into smart_drone" ON)
 option(BUILD_SMART_DRONE "Build unified stereo runtime application" ON)
 
-if(NOT BUILD_CALIB_RECORDER AND NOT BUILD_SMART_DRONE)
-  message(FATAL_ERROR "At least one of BUILD_CALIB_RECORDER or BUILD_SMART_DRONE must be ON")
+if(NOT BUILD_SMART_DRONE)
+  message(FATAL_ERROR "BUILD_SMART_DRONE must be ON")
 endif()
 
 if(CROSS_AARCH64)
@@ -105,7 +104,7 @@ function(configure_orb_target target_name)
   )
 endfunction()
 
-if(BUILD_SMART_DRONE OR BUILD_CALIB_RECORDER)
+if(BUILD_SMART_DRONE)
   add_subdirectory(src/native)
   configure_common_target(smart_drone)
   configure_orb_target(smart_drone)

@@ -5,10 +5,10 @@
 namespace smartdrone::adapters::command {
 
 class UdpTlvCommandChannel final : public core::ports::ICommandChannel {
-public:
+  public:
     bool Start() override;
     void Stop() override;
     bool Healthy() const override;
 };
 
-}  // namespace smartdrone::adapters::command
+} // namespace smartdrone::adapters::command

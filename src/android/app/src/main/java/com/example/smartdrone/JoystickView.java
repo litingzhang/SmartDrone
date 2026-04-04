@@ -34,22 +34,26 @@ public class JoystickView extends View {
     private int mAxisLock = AXIS_LOCK_NONE;
     private OnStickChangedListener mListener;
 
-    public JoystickView(Context context) {
+    public JoystickView(Context context)
+    {
         super(context);
         Init();
     }
 
-    public JoystickView(Context context, AttributeSet attrs) {
+    public JoystickView(Context context, AttributeSet attrs)
+    {
         super(context, attrs);
         Init();
     }
 
-    public JoystickView(Context context, AttributeSet attrs, int defStyleAttr) {
+    public JoystickView(Context context, AttributeSet attrs, int defStyleAttr)
+    {
         super(context, attrs, defStyleAttr);
         Init();
     }
 
-    private void Init() {
+    private void Init()
+    {
         mBasePaint.setStyle(Paint.Style.FILL);
         mBasePaint.setColor(Color.parseColor("#203A4A"));
 
@@ -63,36 +67,30 @@ public class JoystickView extends View {
         setClickable(true);
     }
 
-    public void SetOnStickChangedListener(OnStickChangedListener listener) {
-        mListener = listener;
-    }
+    public void SetOnStickChangedListener(OnStickChangedListener listener) { mListener = listener; }
 
-    public float GetXNorm() {
-        return mStickXNorm;
-    }
+    public float GetXNorm() { return mStickXNorm; }
 
-    public float GetYNorm() {
-        return mStickYNorm;
-    }
+    public float GetYNorm() { return mStickYNorm; }
 
-    public boolean IsActive() {
-        return mActive;
-    }
+    public boolean IsActive() { return mActive; }
 
-    public void SetCardinalAxisLockEnabled(boolean enabled) {
+    public void SetCardinalAxisLockEnabled(boolean enabled)
+    {
         mCardinalAxisLockEnabled = enabled;
         if (!enabled) {
             mAxisLock = AXIS_LOCK_NONE;
         }
     }
 
-    public void Reset() {
+    public void Reset()
+    {
         mAxisLock = AXIS_LOCK_NONE;
         UpdateStick(0f, 0f, false, true);
     }
 
-    @Override
-    protected void onSizeChanged(int w, int h, int oldW, int oldH) {
+    @Override protected void onSizeChanged(int w, int h, int oldW, int oldH)
+    {
         super.onSizeChanged(w, h, oldW, oldH);
         mCenterX = w * 0.5f;
         mCenterY = h * 0.5f;
@@ -100,8 +98,8 @@ public class JoystickView extends View {
         mKnobRadius = mBaseRadius * 0.28f;
     }
 
-    @Override
-    protected void onDraw(Canvas canvas) {
+    @Override protected void onDraw(Canvas canvas)
+    {
         super.onDraw(canvas);
 
         canvas.drawCircle(mCenterX, mCenterY, mBaseRadius, mBasePaint);
@@ -113,29 +111,30 @@ public class JoystickView extends View {
         canvas.drawCircle(knobX, knobY, mKnobRadius, mKnobPaint);
     }
 
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
+    @Override public boolean onTouchEvent(MotionEvent event)
+    {
         switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                mAxisLock = AXIS_LOCK_NONE;
-                HandleTouch(event.getX(), event.getY(), true);
-                return true;
-            case MotionEvent.ACTION_MOVE:
-                HandleTouch(event.getX(), event.getY(), true);
-                return true;
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                Reset();
-                return true;
-            default:
-                return super.onTouchEvent(event);
+        case MotionEvent.ACTION_DOWN:
+            mAxisLock = AXIS_LOCK_NONE;
+            HandleTouch(event.getX(), event.getY(), true);
+            return true;
+        case MotionEvent.ACTION_MOVE:
+            HandleTouch(event.getX(), event.getY(), true);
+            return true;
+        case MotionEvent.ACTION_UP:
+        case MotionEvent.ACTION_CANCEL:
+            Reset();
+            return true;
+        default:
+            return super.onTouchEvent(event);
         }
     }
 
-    private void HandleTouch(float x, float y, boolean active) {
+    private void HandleTouch(float x, float y, boolean active)
+    {
         float dx = x - mCenterX;
         float dy = y - mCenterY;
-        float dist = (float) Math.sqrt(dx * dx + dy * dy);
+        float dist = (float)Math.sqrt(dx * dx + dy * dy);
         if (dist > mBaseRadius && dist > 0f) {
             float scale = mBaseRadius / dist;
             dx *= scale;
@@ -165,7 +164,8 @@ public class JoystickView extends View {
         UpdateStick(xNorm, yNorm, active, true);
     }
 
-    private void UpdateStick(float xNorm, float yNorm, boolean active, boolean notify) {
+    private void UpdateStick(float xNorm, float yNorm, boolean active, boolean notify)
+    {
         mStickXNorm = Clamp(xNorm);
         mStickYNorm = Clamp(yNorm);
         mActive = active;
@@ -175,7 +175,5 @@ public class JoystickView extends View {
         }
     }
 
-    private static float Clamp(float v) {
-        return Math.max(-1f, Math.min(1f, v));
-    }
+    private static float Clamp(float v) { return Math.max(-1f, Math.min(1f, v)); }
 }

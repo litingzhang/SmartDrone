@@ -17,7 +17,7 @@
 
 #include "common/thread_launch.h"
 
-bool UdpImageSender::Open(const std::string& ip, int port, int jpegQuality, int maxPayload, int maxQueue)
+bool UdpImageSender::Open(const std::string &ip, int port, int jpegQuality, int maxPayload, int maxQueue)
 {
     m_jpegQuality = std::max(10, std::min(95, jpegQuality));
     m_maxPayload = std::max(400, maxPayload);
@@ -51,9 +51,8 @@ bool UdpImageSender::Open(const std::string& ip, int port, int jpegQuality, int 
 
     m_running.store(true);
     for (int cam = 0; cam < 2; ++cam) {
-        const auto role = cam == 0
-            ? smartdrone::common::ThreadRole::UdpImageCam0
-            : smartdrone::common::ThreadRole::UdpImageCam1;
+        const auto role =
+            cam == 0 ? smartdrone::common::ThreadRole::UdpImageCam0 : smartdrone::common::ThreadRole::UdpImageCam1;
         m_th[cam] = SMARTDRONE_START_THREAD(role, "UdpImageSender", [this, cam] { Loop(cam); });
     }
     return true;
@@ -82,15 +81,8 @@ void UdpImageSender::Close()
     }
 }
 
-void UdpImageSender::Enqueue(
-    int camIndex,
-    uint64_t frameId,
-    uint32_t seq,
-    double frameTime,
-    const cv::Mat& gray,
-    const std::vector<cv::Point2f>& trackedPoints,
-    bool sendImage,
-    bool sendFeature)
+void UdpImageSender::Enqueue(int camIndex, uint64_t frameId, uint32_t seq, double frameTime, const cv::Mat &gray,
+                             const std::vector<cv::Point2f> &trackedPoints, bool sendImage, bool sendFeature)
 {
     if (m_sock < 0 || camIndex < 0 || camIndex > 1) {
         return;
@@ -121,7 +113,7 @@ void UdpImageSender::Enqueue(
 
         const size_t slotIndex = m_free[camIndex].front();
         m_free[camIndex].pop_front();
-        Slot& slot = m_slots[camIndex][slotIndex];
+        Slot &slot = m_slots[camIndex][slotIndex];
         slot.frameId = frameId;
         slot.seq = seq;
         slot.frameTime = frameTime;
@@ -162,7 +154,7 @@ void UdpImageSender::Loop(int camIndex)
             slotIndex = m_ready[camIndex].front();
             m_ready[camIndex].pop_front();
         }
-        Slot& slot = m_slots[camIndex][slotIndex];
+        Slot &slot = m_slots[camIndex][slotIndex];
 
         jpeg.clear();
         uint32_t total = 0;
@@ -174,18 +166,15 @@ void UdpImageSender::Loop(int camIndex)
             }
             try {
                 cv::imencode(".jpg", slot.preview, jpeg, params);
-            } catch (const std::exception& e) {
+            } catch (const std::exception &e) {
                 std::cerr << "[udp] imencode exception: " << e.what() << "\n";
                 std::lock_guard<std::mutex> lk(m_mu[camIndex]);
                 m_free[camIndex].push_back(slotIndex);
                 continue;
             }
             if (jpeg.empty()) {
-                std::cerr << "[udp] empty jpeg cam=" << camIndex
-                          << " type=" << slot.preview.type()
-                          << " rows=" << slot.preview.rows
-                          << " cols=" << slot.preview.cols
-                          << "\n";
+                std::cerr << "[udp] empty jpeg cam=" << camIndex << " type=" << slot.preview.type()
+                          << " rows=" << slot.preview.rows << " cols=" << slot.preview.cols << "\n";
                 std::lock_guard<std::mutex> lk(m_mu[camIndex]);
                 m_free[camIndex].push_back(slotIndex);
                 continue;
@@ -196,7 +185,8 @@ void UdpImageSender::Loop(int camIndex)
             for (uint16_t ci = 0; ci < chunks; ++ci) {
                 const uint32_t off = static_cast<uint32_t>(ci) * static_cast<uint32_t>(m_maxPayload);
                 const uint32_t left = total - off;
-                const uint32_t pay = (left > static_cast<uint32_t>(m_maxPayload)) ? static_cast<uint32_t>(m_maxPayload) : left;
+                const uint32_t pay =
+                    (left > static_cast<uint32_t>(m_maxPayload)) ? static_cast<uint32_t>(m_maxPayload) : left;
 
                 PacketHeader h{};
                 h.magic = 0x5643494D;
@@ -229,12 +219,8 @@ void UdpImageSender::Loop(int camIndex)
         }
 
         if (slot.sendFeature && !slot.trackedPoints.empty()) {
-            SendFeaturePacket(
-                slot,
-                static_cast<uint32_t>(slot.frameId & 0xFFFFFFFFu),
-                slot.width,
-                slot.height,
-                slot.trackedPoints);
+            SendFeaturePacket(slot, static_cast<uint32_t>(slot.frameId & 0xFFFFFFFFu), slot.width, slot.height,
+                              slot.trackedPoints);
         }
 
         std::lock_guard<std::mutex> lk(m_mu[camIndex]);
@@ -242,12 +228,8 @@ void UdpImageSender::Loop(int camIndex)
     }
 }
 
-void UdpImageSender::SendFeaturePacket(
-    Slot& slot,
-    uint32_t frameId,
-    int width,
-    int height,
-    const std::vector<cv::Point2f>& trackedPoints)
+void UdpImageSender::SendFeaturePacket(Slot &slot, uint32_t frameId, int width, int height,
+                                       const std::vector<cv::Point2f> &trackedPoints)
 {
     if (m_sock < 0 || width <= 0 || height <= 0 || trackedPoints.empty()) {
         return;
@@ -256,13 +238,13 @@ void UdpImageSender::SendFeaturePacket(
     const size_t sendCount = std::min<size_t>(trackedPoints.size(), 160);
     const size_t payloadSize = 6 + sendCount * 4;
     slot.featureBuf.resize(payloadSize);
-    uint8_t* payload = slot.featureBuf.data();
+    uint8_t *payload = slot.featureBuf.data();
 
     WriteU16Le(payload, 0, static_cast<uint16_t>(std::min(width, 0xFFFF)));
     WriteU16Le(payload, 2, static_cast<uint16_t>(std::min(height, 0xFFFF)));
     WriteU16Le(payload, 4, static_cast<uint16_t>(sendCount));
     for (size_t i = 0; i < sendCount; ++i) {
-        const cv::Point2f& pt = trackedPoints[i];
+        const cv::Point2f &pt = trackedPoints[i];
         const int xi = std::clamp<int>(static_cast<int>(std::lround(pt.x)), 0, width - 1);
         const int yi = std::clamp<int>(static_cast<int>(std::lround(pt.y)), 0, height - 1);
         const size_t pointOffset = 6 + i * 4;
@@ -297,7 +279,7 @@ void UdpImageSender::SendFeaturePacket(
     ::sendmsg(m_sock, &msg, 0);
 }
 
-bool UdpImageSender::FillPreview(const cv::Mat& gray, cv::Mat& preview)
+bool UdpImageSender::FillPreview(const cv::Mat &gray, cv::Mat &preview)
 {
     if (gray.empty()) {
         preview.release();
@@ -317,7 +299,7 @@ bool UdpImageSender::FillPreview(const cv::Mat& gray, cv::Mat& preview)
     return true;
 }
 
-void UdpImageSender::WriteU16Le(uint8_t* out, size_t offset, uint16_t value)
+void UdpImageSender::WriteU16Le(uint8_t *out, size_t offset, uint16_t value)
 {
     out[offset] = static_cast<uint8_t>(value & 0xFF);
     out[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFF);

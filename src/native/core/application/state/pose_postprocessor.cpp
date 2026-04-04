@@ -6,10 +6,8 @@
 
 namespace smartdrone::core::application {
 
-Sophus::SE3f PosePostprocessor::ContinuityMapper::MapPose(
-    unsigned long mapId,
-    bool trackingUsable,
-    const Sophus::SE3f& rawPoseWc)
+Sophus::SE3f PosePostprocessor::ContinuityMapper::MapPose(unsigned long mapId, bool trackingUsable,
+                                                          const Sophus::SE3f &rawPoseWc)
 {
     if (mapId != kInvalidMapId && (!haveMapId || mapId != lastMapId)) {
         pendingReset = haveMapId;
@@ -51,11 +49,9 @@ uint16_t PosePostprocessor::ContinuityMapper::GetResetMapCount() const
     return static_cast<uint16_t>(resetMapCount & 0xFFFFu);
 }
 
-Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::AlignPose(
-    const Px4MavlinkGateway::Pose& poseNed,
-    bool trackingUsable,
-    Px4MavlinkGateway& mavlink,
-    PoseQuality& outQuality)
+Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::AlignPose(const Px4MavlinkGateway::Pose &poseNed,
+                                                                     bool trackingUsable, Px4MavlinkGateway &mavlink,
+                                                                     PoseQuality &outQuality)
 {
     const uint64_t nowUs = MonoTimeUs();
     RefreshPx4LocalZ(mavlink);
@@ -91,7 +87,7 @@ Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::AlignPose(
     return out;
 }
 
-void PosePostprocessor::StartupAligner::RefreshPx4LocalZ(Px4MavlinkGateway& mavlink)
+void PosePostprocessor::StartupAligner::RefreshPx4LocalZ(Px4MavlinkGateway &mavlink)
 {
     Px4MavlinkGateway::LocalPositionNed px4Local{};
     if (mavlink.GetLocalPositionNed(px4Local, kPx4LocalPositionMaxAgeUs)) {
@@ -101,7 +97,7 @@ void PosePostprocessor::StartupAligner::RefreshPx4LocalZ(Px4MavlinkGateway& mavl
     }
 }
 
-void PosePostprocessor::StartupAligner::RefreshRangeSensor(Px4MavlinkGateway& mavlink)
+void PosePostprocessor::StartupAligner::RefreshRangeSensor(Px4MavlinkGateway &mavlink)
 {
     Px4MavlinkGateway::DownwardDistanceSensor rng{};
     if (mavlink.GetDownwardDistanceSensor(rng, kRangeSensorMaxAgeUs)) {
@@ -134,7 +130,7 @@ Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::ComputeLostPose(uint6
     return out;
 }
 
-void PosePostprocessor::StartupAligner::ApplyRangeProtection(Px4MavlinkGateway::Pose&, uint64_t)
+void PosePostprocessor::StartupAligner::ApplyRangeProtection(Px4MavlinkGateway::Pose &, uint64_t)
 {
     if (!HasFreshRange()) {
         return;
@@ -147,10 +143,8 @@ void PosePostprocessor::StartupAligner::ApplyRangeProtection(Px4MavlinkGateway::
     }
 }
 
-bool PosePostprocessor::StartupAligner::TryAlignZ(
-    const Px4MavlinkGateway::Pose& poseNed,
-    uint64_t nowUs,
-    bool trackingRecovered)
+bool PosePostprocessor::StartupAligner::TryAlignZ(const Px4MavlinkGateway::Pose &poseNed, uint64_t nowUs,
+                                                  bool trackingRecovered)
 {
     if (haveZOffset) {
         if (!zOffsetFromPx4 && HasFreshPx4LocalZ(nowUs)) {
@@ -186,11 +180,9 @@ bool PosePostprocessor::StartupAligner::TryAlignZ(
     return false;
 }
 
-smartdrone::core::ports::VelocityEstimate PosePostprocessor::VelocityTracker::Update(
-    const Px4MavlinkGateway::Pose& pose,
-    int64_t frameNs,
-    PoseQuality quality,
-    uint16_t resetMapCount)
+smartdrone::core::ports::VelocityEstimate
+PosePostprocessor::VelocityTracker::Update(const Px4MavlinkGateway::Pose &pose, int64_t frameNs, PoseQuality quality,
+                                           uint16_t resetMapCount)
 {
     smartdrone::core::ports::VelocityEstimate out{};
 
@@ -241,11 +233,8 @@ smartdrone::core::ports::VelocityEstimate PosePostprocessor::VelocityTracker::Up
     return out;
 }
 
-void PosePostprocessor::VelocityTracker::ResetState(
-    const Px4MavlinkGateway::Pose& pose,
-    int64_t frameNs,
-    PoseQuality quality,
-    uint16_t resetMapCount)
+void PosePostprocessor::VelocityTracker::ResetState(const Px4MavlinkGateway::Pose &pose, int64_t frameNs,
+                                                    PoseQuality quality, uint16_t resetMapCount)
 {
     lastPose = pose;
     lastFrameNs = frameNs;
@@ -256,18 +245,12 @@ void PosePostprocessor::VelocityTracker::ResetState(
     haveLastPose = true;
 }
 
-PosePostprocessor::Result PosePostprocessor::ProcessPose(
-    const Sophus::SE3f& twcRaw,
-    bool useImu,
-    bool trackingUsable,
-    int,
-    unsigned long mapId,
-    bool stereoExtrinsicsLoaded,
-    const Sophus::SE3f& stereoBodyExtrinsics,
-    bool& stereoReferencePoseSet,
-    Sophus::SE3f& stereoReferencePose,
-    int64_t frameNs,
-    Px4MavlinkGateway& mavlink)
+PosePostprocessor::Result PosePostprocessor::ProcessPose(const Sophus::SE3f &twcRaw, bool useImu, bool trackingUsable,
+                                                         int, unsigned long mapId, bool stereoExtrinsicsLoaded,
+                                                         const Sophus::SE3f &stereoBodyExtrinsics,
+                                                         bool &stereoReferencePoseSet,
+                                                         Sophus::SE3f &stereoReferencePose, int64_t frameNs,
+                                                         Px4MavlinkGateway &mavlink)
 {
     Sophus::SE3f twc = twcRaw;
     if (!useImu && stereoExtrinsicsLoaded) {
@@ -317,4 +300,4 @@ PosePostprocessor::Result PosePostprocessor::ProcessPose(
     return out;
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

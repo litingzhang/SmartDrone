@@ -27,19 +27,15 @@ enum class StereoAcquireStatus : uint8_t {
 };
 
 class PerceptionPipeline {
-public:
+  public:
     explicit PerceptionPipeline(PerceptionPipelineConfig cfg);
 
-    StereoAcquireStatus AcquireNextStereoBatch(
-        ports::ICameraProvider& camera,
-        int slamInputFps,
-        int timeoutMs,
-        StereoBatch& out,
-        FrameTimingTracker* timingTracker = nullptr);
+    StereoAcquireStatus AcquireNextStereoBatch(ports::ICameraProvider &camera, int slamInputFps, int timeoutMs,
+                                               StereoBatch &out, FrameTimingTracker *timingTracker = nullptr);
 
     int ClampTargetFps(int requestedFps) const;
 
-private:
+  private:
     PerceptionPipelineConfig m_cfg;
     int64_t m_lastDeliveredFrameNs{0};
     int64_t m_lastAcceptedFrameNs{0};
@@ -47,4 +43,4 @@ private:
     uint64_t m_nextFrameId{1};
 };
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

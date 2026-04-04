@@ -6,16 +6,13 @@
 namespace smartdrone::adapters::camera {
 
 class LibcameraStereoCamera final : public core::ports::ICameraProvider {
-public:
-    explicit LibcameraStereoCamera(LibcameraStereoOV9281_TsPair& impl);
+  public:
+    explicit LibcameraStereoCamera(LibcameraStereoOV9281_TsPair &impl);
 
     bool Start() override;
     void Stop() override;
-    bool GrabStereo(
-        core::ports::StereoFrame& out,
-        int timeoutMs,
-        bool preferLatest,
-        uint64_t minTimestampNs = 0) override;
+    bool GrabStereo(core::ports::StereoFrame &out, int timeoutMs, bool preferLatest,
+                    uint64_t minTimestampNs = 0) override;
     core::ports::CameraHealth GetHealth() const override;
 
     int64_t LastPairDtMs() const;
@@ -30,8 +27,8 @@ public:
     size_t PendingR() const;
     int64_t PairTolNs() const;
 
-private:
-    LibcameraStereoOV9281_TsPair& m_impl;
+  private:
+    LibcameraStereoOV9281_TsPair &m_impl;
 };
 
-}  // namespace smartdrone::adapters::camera
+} // namespace smartdrone::adapters::camera

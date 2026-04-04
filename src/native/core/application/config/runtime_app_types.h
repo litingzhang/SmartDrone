@@ -42,8 +42,7 @@ struct MainRuntimeAliases {
     bool sendImage{true}, sendFeature{false}, sendMap{false};
     float gain{};
     std::string udpIp, spiDev, gpiochip;
-    int udpPort{}, cmdPort{}, udpJpegQ{}, udpPayload{}, udpQueue{}, imuHz{}, accelFsG{}, gyroFsDps{},
-        rtPrio{};
+    int udpPort{}, cmdPort{}, udpJpegQ{}, udpPayload{}, udpQueue{}, imuHz{}, accelFsG{}, gyroFsDps{}, rtPrio{};
     uint32_t spiSpeed{};
     uint8_t spiMode{}, spiBits{}, imuStartReg{};
     unsigned drdyLine{};
@@ -57,4 +56,4 @@ struct LiveRuntimeTuning {
     std::atomic<bool> sendMap{false};
 };
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

@@ -2,18 +2,10 @@
 
 namespace smartdrone::adapters::command {
 
-bool UdpTlvCommandChannel::Start()
-{
-    return true;
-}
+bool UdpTlvCommandChannel::Start() { return true; }
 
-void UdpTlvCommandChannel::Stop()
-{
-}
+void UdpTlvCommandChannel::Stop() {}
 
-bool UdpTlvCommandChannel::Healthy() const
-{
-    return true;
-}
+bool UdpTlvCommandChannel::Healthy() const { return true; }
 
-}  // namespace smartdrone::adapters::command
+} // namespace smartdrone::adapters::command

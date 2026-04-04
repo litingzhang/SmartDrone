@@ -7,15 +7,15 @@
 #include <string>
 
 class UdpClient {
-public:
+  public:
     ~UdpClient();
 
-    bool Open(const std::string& ip, uint16_t sendPort, uint16_t bindPort);
+    bool Open(const std::string &ip, uint16_t sendPort, uint16_t bindPort);
     void Close();
-    bool Send(const uint8_t* data, size_t len);
-    int Recv(uint8_t* out, size_t cap);
+    bool Send(const uint8_t *data, size_t len);
+    int Recv(uint8_t *out, size_t cap);
 
-private:
+  private:
     int m_fd{-1};
     sockaddr_in m_dstAddr{};
 };

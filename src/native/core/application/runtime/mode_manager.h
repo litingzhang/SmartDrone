@@ -5,7 +5,7 @@
 namespace smartdrone::core::application {
 
 class ModeManager {
-public:
+  public:
     using RuntimeMode = smartdrone::core::domain::RuntimeMode;
 
     RuntimeMode DesiredMode() const;
@@ -17,10 +17,10 @@ public:
     void MarkSessionJoined();
     void MarkSessionLaunching(RuntimeMode mode);
 
-private:
+  private:
     RuntimeMode m_desiredMode{RuntimeMode::Idle};
     RuntimeMode m_activeMode{RuntimeMode::Idle};
     bool m_restartRequested{false};
 };
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

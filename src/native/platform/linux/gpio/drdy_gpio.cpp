@@ -17,7 +17,7 @@ DrdyGpio::~DrdyGpio()
     }
 }
 
-bool DrdyGpio::Open(const std::string& chipPath, unsigned lineOffset)
+bool DrdyGpio::Open(const std::string &chipPath, unsigned lineOffset)
 {
     m_chip = gpiod_chip_open(chipPath.c_str());
     if (!m_chip) {
@@ -25,7 +25,7 @@ bool DrdyGpio::Open(const std::string& chipPath, unsigned lineOffset)
         return false;
     }
 
-    gpiod_line_settings* settings = gpiod_line_settings_new();
+    gpiod_line_settings *settings = gpiod_line_settings_new();
     if (!settings) {
         return false;
     }
@@ -33,7 +33,7 @@ bool DrdyGpio::Open(const std::string& chipPath, unsigned lineOffset)
     gpiod_line_settings_set_edge_detection(settings, GPIOD_LINE_EDGE_RISING);
     gpiod_line_settings_set_bias(settings, GPIOD_LINE_BIAS_PULL_UP);
 
-    gpiod_line_config* lineConfig = gpiod_line_config_new();
+    gpiod_line_config *lineConfig = gpiod_line_config_new();
     if (!lineConfig) {
         gpiod_line_settings_free(settings);
         return false;
@@ -47,7 +47,7 @@ bool DrdyGpio::Open(const std::string& chipPath, unsigned lineOffset)
         return false;
     }
 
-    gpiod_request_config* requestConfig = gpiod_request_config_new();
+    gpiod_request_config *requestConfig = gpiod_request_config_new();
     if (!requestConfig) {
         gpiod_line_config_free(lineConfig);
         return false;
@@ -67,7 +67,7 @@ bool DrdyGpio::Open(const std::string& chipPath, unsigned lineOffset)
     return m_eventBuffer != nullptr;
 }
 
-bool DrdyGpio::WaitTs(int timeoutMs, int64_t& tsNsOut)
+bool DrdyGpio::WaitTs(int timeoutMs, int64_t &tsNsOut)
 {
     const int64_t timeoutNs = (timeoutMs < 0) ? -1 : static_cast<int64_t>(timeoutMs) * 1000000LL;
     int ret = gpiod_line_request_wait_edge_events(m_request, timeoutNs);
@@ -83,7 +83,7 @@ bool DrdyGpio::WaitTs(int timeoutMs, int64_t& tsNsOut)
         }
 
         for (int i = 0; i < eventCount; ++i) {
-            gpiod_edge_event* event = gpiod_edge_event_buffer_get_event(m_eventBuffer, i);
+            gpiod_edge_event *event = gpiod_edge_event_buffer_get_event(m_eventBuffer, i);
             if (event) {
                 latestTsNs = static_cast<int64_t>(gpiod_edge_event_get_timestamp_ns(event));
             }

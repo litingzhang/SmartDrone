@@ -2,18 +2,11 @@
 
 namespace smartdrone::adapters::telemetry {
 
-MavlinkPosePublisher::MavlinkPosePublisher(Px4MavlinkGateway& serial) : m_serial(serial)
-{
-}
+MavlinkPosePublisher::MavlinkPosePublisher(Px4MavlinkGateway &serial) : m_serial(serial) {}
 
-void MavlinkPosePublisher::PublishPose(
-    uint64_t frameId,
-    const core::ports::PoseEstimate& pose,
-    const core::ports::VelocityEstimate& velocity,
-    uint8_t resetCounter,
-    uint16_t,
-    int,
-    core::ports::PoseQuality quality)
+void MavlinkPosePublisher::PublishPose(uint64_t frameId, const core::ports::PoseEstimate &pose,
+                                       const core::ports::VelocityEstimate &velocity, uint8_t resetCounter, uint16_t,
+                                       int, core::ports::PoseQuality quality)
 {
     Px4MavlinkGateway::Pose mavPose{};
     mavPose.x = pose.x;
@@ -38,14 +31,8 @@ void MavlinkPosePublisher::PublishPose(
         odomQuality = OdomQualityMode::LOST;
     }
 
-    m_serial.SendOdometry(
-        frameId,
-        mavPose,
-        mavVelocity,
-        MAV_FRAME_LOCAL_NED,
-        MAV_FRAME_BODY_FRD,
-        resetCounter,
-        odomQuality);
+    m_serial.SendOdometry(frameId, mavPose, mavVelocity, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, resetCounter,
+                          odomQuality);
 }
 
-}  // namespace smartdrone::adapters::telemetry
+} // namespace smartdrone::adapters::telemetry

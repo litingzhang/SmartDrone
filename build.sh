@@ -4,32 +4,29 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-  ./build.sh [calib_recorder|smart_drone|both|android|all]
+  ./build.sh [smart_drone|android|all] [--clean] [--reconfigure]
 
 Modes:
-  calib_recorder  Compatibility alias, builds unified smart_drone target
   smart_drone     Build the unified runtime target
-  both            Compatibility alias, builds unified smart_drone target
   android         Build the Android app (:app:assembleDebug)
-  all             Build ORB-SLAM3 first, then build unified smart_drone target and Android app
+  all             Build ORB-SLAM3 first, then build smart_drone and Android app
+
+Options:
+  --clean         Remove existing build directories before building
+  --reconfigure   Re-run CMake configure for native builds even if build dir already exists
 EOF
 }
 
-MODE="${1:-both}"
+MODE="${1:-smart_drone}"
+shift $(( $# > 0 ? 1 : 0 ))
 BUILD_ORB=0
-BUILD_CALIB_RECORDER=OFF
 BUILD_SMART_DRONE=OFF
 BUILD_ANDROID=0
+CLEAN_BUILD=0
+FORCE_RECONFIGURE=0
 
 case "$MODE" in
-    calib_recorder)
-        BUILD_CALIB_RECORDER=ON
-        ;;
     smart_drone)
-        BUILD_SMART_DRONE=ON
-        ;;
-    both)
-        BUILD_CALIB_RECORDER=ON
         BUILD_SMART_DRONE=ON
         ;;
     android)
@@ -37,7 +34,6 @@ case "$MODE" in
         ;;
     all)
         BUILD_ORB=1
-        BUILD_CALIB_RECORDER=ON
         BUILD_SMART_DRONE=ON
         BUILD_ANDROID=1
         ;;
@@ -50,6 +46,27 @@ case "$MODE" in
         exit 1
         ;;
 esac
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --clean)
+            CLEAN_BUILD=1
+            ;;
+        --reconfigure)
+            FORCE_RECONFIGURE=1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            usage
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SYSROOT="$(cd "$SCRIPT_DIR/../sysroots/cm5" && pwd)"
@@ -108,30 +125,37 @@ build_android_app() {
 
 echo "SYSROOT:$SYSROOT"
 echo "MODE:$MODE"
+echo "CLEAN_BUILD:$CLEAN_BUILD"
+echo "FORCE_RECONFIGURE:$FORCE_RECONFIGURE"
 
 if [ "$BUILD_ORB" -eq 1 ]; then
     echo "build ORB-SLAM3"
     cd "$SCRIPT_DIR/ORB_SLAM3"
-    rm -rf build
-    cmake -S . -B build \
-        -DSYSROOT="$SYSROOT" \
-        -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/toolchain/toolchain-cm5-aarch64.cmake"
+    if [ "$CLEAN_BUILD" -eq 1 ]; then
+        rm -rf build
+    fi
+    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -d build ]; then
+        cmake -S . -B build \
+            -DSYSROOT="$SYSROOT" \
+            -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/toolchain/toolchain-cm5-aarch64.cmake"
+    fi
     cmake --build build -j16
     cd - >/dev/null
 fi
 
-if [ "$BUILD_CALIB_RECORDER" = "ON" ] || [ "$BUILD_SMART_DRONE" = "ON" ]; then
-    rm -rf "$BUILD_DIR"
+if [ "$BUILD_SMART_DRONE" = "ON" ]; then
+    if [ "$CLEAN_BUILD" -eq 1 ]; then
+        rm -rf "$BUILD_DIR"
+    fi
     mkdir -p "$BUILD_DIR"
-    cmake -S . -B "$BUILD_DIR" \
-        -DSYSROOT="$SYSROOT" \
-        -DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config \
-        -DBUILD_CALIB_RECORDER="$BUILD_CALIB_RECORDER" \
-        -DBUILD_SMART_DRONE="$BUILD_SMART_DRONE"
+    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
+        cmake -S . -B "$BUILD_DIR" \
+            -DSYSROOT="$SYSROOT" \
+            -DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config \
+            -DBUILD_SMART_DRONE="$BUILD_SMART_DRONE"
+    fi
 
-    if [ "$MODE" = "calib_recorder" ]; then
-        cmake --build "$BUILD_DIR" --target smart_drone -j16
-    elif [ "$MODE" = "smart_drone" ]; then
+    if [ "$MODE" = "smart_drone" ]; then
         cmake --build "$BUILD_DIR" --target smart_drone -j16
     else
         cmake --build "$BUILD_DIR" -j16

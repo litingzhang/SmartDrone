@@ -4,23 +4,26 @@
 #include <cctype>
 #include <vector>
 
-const char* DefaultSettingsForSensorMode(SensorMode mode)
+const char *DefaultSettingsForSensorMode(SensorMode mode)
 {
     switch (mode) {
-        case SensorMode::StereoImu: return "config/stereo_inertial.yaml";
-        case SensorMode::Mono: return "config/mono_right.yaml";
-        case SensorMode::MonoImu: return "config/mono_inertial_right.yaml";
-        case SensorMode::Stereo:
-        default: return "config/stereo.yaml";
+    case SensorMode::StereoImu:
+        return "config/stereo_inertial.yaml";
+    case SensorMode::Mono:
+        return "config/mono_right.yaml";
+    case SensorMode::MonoImu:
+        return "config/mono_inertial_right.yaml";
+    case SensorMode::Stereo:
+    default:
+        return "config/stereo.yaml";
     }
 }
 
-SensorMode ParseSensorModeText(const std::string& text)
+SensorMode ParseSensorModeText(const std::string &text)
 {
     std::string normalized = text;
-    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (normalized == "mono-imu" || normalized == "imu-mono" || normalized == "mono_inertial") {
         return SensorMode::MonoImu;
     }
@@ -33,25 +36,28 @@ SensorMode ParseSensorModeText(const std::string& text)
     return SensorMode::Stereo;
 }
 
-const char* ToSensorModeText(SensorMode mode)
+const char *ToSensorModeText(SensorMode mode)
 {
     switch (mode) {
-        case SensorMode::StereoImu: return "stereo-imu";
-        case SensorMode::Mono: return "mono";
-        case SensorMode::MonoImu: return "mono-imu";
-        case SensorMode::Stereo:
-        default: return "stereo";
+    case SensorMode::StereoImu:
+        return "stereo-imu";
+    case SensorMode::Mono:
+        return "mono";
+    case SensorMode::MonoImu:
+        return "mono-imu";
+    case SensorMode::Stereo:
+    default:
+        return "stereo";
     }
 }
 
-smartdrone::core::domain::SlamOperationMode ParseSlamOperationModeText(const std::string& text)
+smartdrone::core::domain::SlamOperationMode ParseSlamOperationModeText(const std::string &text)
 {
     using smartdrone::core::domain::SlamOperationMode;
 
     std::string normalized = text;
-    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
     if (normalized == "localization" || normalized == "localisation") {
         return SlamOperationMode::Localization;
@@ -68,7 +74,7 @@ smartdrone::core::domain::SlamOperationMode ParseSlamOperationModeText(const std
     return SlamOperationMode::Mapping;
 }
 
-std::string ResolveRuntimePath(const std::string& path, const char* argv0)
+std::string ResolveRuntimePath(const std::string &path, const char *argv0)
 {
     if (path.empty()) {
         return path;
@@ -99,7 +105,7 @@ std::string ResolveRuntimePath(const std::string& path, const char* argv0)
     } catch (...) {
     }
 
-    for (const auto& candidate : candidates) {
+    for (const auto &candidate : candidates) {
         std::error_code ec;
         if (fs::exists(candidate, ec)) {
             return candidate.lexically_normal().string();
@@ -112,7 +118,7 @@ std::string ResolveRuntimePath(const std::string& path, const char* argv0)
     return rawPath.lexically_normal().string();
 }
 
-std::string ResolveSettingsForSensorMode(SensorMode mode, const std::string& currentSettingsPath)
+std::string ResolveSettingsForSensorMode(SensorMode mode, const std::string &currentSettingsPath)
 {
     const fs::path targetName = fs::path(DefaultSettingsForSensorMode(mode)).filename();
     if (!currentSettingsPath.empty()) {
@@ -124,11 +130,9 @@ std::string ResolveSettingsForSensorMode(SensorMode mode, const std::string& cur
     return ResolveRuntimePath(DefaultSettingsForSensorMode(mode), nullptr);
 }
 
-ArgReader::ArgReader(int argc, char** argv) : m_argc(argc), m_argv(argv)
-{
-}
+ArgReader::ArgReader(int argc, char **argv) : m_argc(argc), m_argv(argv) {}
 
-std::string ArgReader::GetString(const char* name, const char* defaultValue) const
+std::string ArgReader::GetString(const char *name, const char *defaultValue) const
 {
     for (int i = 1; i + 1 < m_argc; ++i) {
         if (std::string(m_argv[i]) == name) {
@@ -138,7 +142,7 @@ std::string ArgReader::GetString(const char* name, const char* defaultValue) con
     return defaultValue;
 }
 
-int ArgReader::GetInt(const char* name, int defaultValue) const
+int ArgReader::GetInt(const char *name, int defaultValue) const
 {
     for (int i = 1; i + 1 < m_argc; ++i) {
         if (std::string(m_argv[i]) == name) {
@@ -148,7 +152,7 @@ int ArgReader::GetInt(const char* name, int defaultValue) const
     return defaultValue;
 }
 
-int64_t ArgReader::GetInt64(const char* name, int64_t defaultValue) const
+int64_t ArgReader::GetInt64(const char *name, int64_t defaultValue) const
 {
     for (int i = 1; i + 1 < m_argc; ++i) {
         if (std::string(m_argv[i]) == name) {
@@ -158,7 +162,7 @@ int64_t ArgReader::GetInt64(const char* name, int64_t defaultValue) const
     return defaultValue;
 }
 
-float ArgReader::GetFloat(const char* name, float defaultValue) const
+float ArgReader::GetFloat(const char *name, float defaultValue) const
 {
     for (int i = 1; i + 1 < m_argc; ++i) {
         if (std::string(m_argv[i]) == name) {
@@ -168,7 +172,7 @@ float ArgReader::GetFloat(const char* name, float defaultValue) const
     return defaultValue;
 }
 
-bool ArgReader::HasFlag(const char* name) const
+bool ArgReader::HasFlag(const char *name) const
 {
     for (int i = 1; i < m_argc; ++i) {
         if (std::string(m_argv[i]) == name) {
@@ -178,12 +182,12 @@ bool ArgReader::HasFlag(const char* name) const
     return false;
 }
 
-uint8_t ArgReader::GetUint8HexOrDec(const char* name, uint8_t defaultValue, const char* defaultText) const
+uint8_t ArgReader::GetUint8HexOrDec(const char *name, uint8_t defaultValue, const char *defaultText) const
 {
     return ParseUint8HexOrDec(GetString(name, defaultText), defaultValue);
 }
 
-uint8_t ArgReader::ParseUint8HexOrDec(const std::string& text, uint8_t defaultValue)
+uint8_t ArgReader::ParseUint8HexOrDec(const std::string &text, uint8_t defaultValue)
 {
     try {
         int base = 10;
@@ -200,15 +204,16 @@ uint8_t ArgReader::ParseUint8HexOrDec(const std::string& text, uint8_t defaultVa
     }
 }
 
-AppConfig ParseAppConfig(int argc, char** argv)
+AppConfig ParseAppConfig(int argc, char **argv)
 {
     ArgReader argReader(argc, argv);
     AppConfig config;
 
     config.vocab = ResolveRuntimePath(argReader.GetString("--vocab", "ORBvoc.txt"), argc > 0 ? argv[0] : nullptr);
     config.sensorMode = ParseSensorModeText(argReader.GetString("--sensor-mode", "stereo"));
-    const char* defaultSettings = DefaultSettingsForSensorMode(config.sensorMode);
-    config.settings = ResolveRuntimePath(argReader.GetString("--settings", defaultSettings), argc > 0 ? argv[0] : nullptr);
+    const char *defaultSettings = DefaultSettingsForSensorMode(config.sensorMode);
+    config.settings =
+        ResolveRuntimePath(argReader.GetString("--settings", defaultSettings), argc > 0 ? argv[0] : nullptr);
 
     config.camera.width = argReader.GetInt("--w", 640);
     config.camera.height = argReader.GetInt("--h", 400);

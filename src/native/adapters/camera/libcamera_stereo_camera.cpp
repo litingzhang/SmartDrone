@@ -2,24 +2,14 @@
 
 namespace smartdrone::adapters::camera {
 
-LibcameraStereoCamera::LibcameraStereoCamera(LibcameraStereoOV9281_TsPair& impl) : m_impl(impl)
-{
-}
+LibcameraStereoCamera::LibcameraStereoCamera(LibcameraStereoOV9281_TsPair &impl) : m_impl(impl) {}
 
-bool LibcameraStereoCamera::Start()
-{
-    return true;
-}
+bool LibcameraStereoCamera::Start() { return true; }
 
-void LibcameraStereoCamera::Stop()
-{
-}
+void LibcameraStereoCamera::Stop() {}
 
-bool LibcameraStereoCamera::GrabStereo(
-    core::ports::StereoFrame& out,
-    int timeoutMs,
-    bool preferLatest,
-    uint64_t minTimestampNs)
+bool LibcameraStereoCamera::GrabStereo(core::ports::StereoFrame &out, int timeoutMs, bool preferLatest,
+                                       uint64_t minTimestampNs)
 {
     FrameItem left;
     FrameItem right;
@@ -49,59 +39,26 @@ core::ports::CameraHealth LibcameraStereoCamera::GetHealth() const
     return health;
 }
 
-int64_t LibcameraStereoCamera::LastPairDtMs() const
-{
-    return m_impl.LastDtMs();
-}
+int64_t LibcameraStereoCamera::LastPairDtMs() const { return m_impl.LastDtMs(); }
 
-int64_t LibcameraStereoCamera::LastRejectDtUs() const
-{
-    return m_impl.LastRejectDtUs();
-}
+int64_t LibcameraStereoCamera::LastRejectDtUs() const { return m_impl.LastRejectDtUs(); }
 
-uint32_t LibcameraStereoCamera::LastRawSeqL() const
-{
-    return m_impl.LastRawSeqL();
-}
+uint32_t LibcameraStereoCamera::LastRawSeqL() const { return m_impl.LastRawSeqL(); }
 
-uint32_t LibcameraStereoCamera::LastRawSeqR() const
-{
-    return m_impl.LastRawSeqR();
-}
+uint32_t LibcameraStereoCamera::LastRawSeqR() const { return m_impl.LastRawSeqR(); }
 
-uint64_t LibcameraStereoCamera::RawCountL() const
-{
-    return m_impl.RawCountL();
-}
+uint64_t LibcameraStereoCamera::RawCountL() const { return m_impl.RawCountL(); }
 
-uint64_t LibcameraStereoCamera::RawCountR() const
-{
-    return m_impl.RawCountR();
-}
+uint64_t LibcameraStereoCamera::RawCountR() const { return m_impl.RawCountR(); }
 
-uint64_t LibcameraStereoCamera::DroppedUnpairedL() const
-{
-    return m_impl.DroppedUnpairedL();
-}
+uint64_t LibcameraStereoCamera::DroppedUnpairedL() const { return m_impl.DroppedUnpairedL(); }
 
-uint64_t LibcameraStereoCamera::DroppedUnpairedR() const
-{
-    return m_impl.DroppedUnpairedR();
-}
+uint64_t LibcameraStereoCamera::DroppedUnpairedR() const { return m_impl.DroppedUnpairedR(); }
 
-size_t LibcameraStereoCamera::PendingL() const
-{
-    return m_impl.PendL();
-}
+size_t LibcameraStereoCamera::PendingL() const { return m_impl.PendL(); }
 
-size_t LibcameraStereoCamera::PendingR() const
-{
-    return m_impl.PendR();
-}
+size_t LibcameraStereoCamera::PendingR() const { return m_impl.PendR(); }
 
-int64_t LibcameraStereoCamera::PairTolNs() const
-{
-    return m_impl.PairTolNs();
-}
+int64_t LibcameraStereoCamera::PairTolNs() const { return m_impl.PairTolNs(); }
 
-}  // namespace smartdrone::adapters::camera
+} // namespace smartdrone::adapters::camera

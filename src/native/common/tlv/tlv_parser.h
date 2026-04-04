@@ -3,11 +3,11 @@
 #include "crc16_ccitt_false.h"
 #include "tlv_protocol.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <optional>
-#include <array>
 #include <vector>
 
 struct TlvFrame {
@@ -21,11 +21,11 @@ struct TlvFrame {
 };
 
 class TlvParser {
-public:
+  public:
     static constexpr size_t kMaxPayloadSize = 512;
     static constexpr size_t kMaxBufferSize = 4096;
 
-    void Push(const uint8_t* data, size_t size)
+    void Push(const uint8_t *data, size_t size)
     {
         if (data == nullptr || size == 0) {
             return;
@@ -112,11 +112,8 @@ public:
         }
     }
 
-private:
-    uint8_t ByteAt(size_t offset) const
-    {
-        return m_buffer[(m_head + offset) % kMaxBufferSize];
-    }
+  private:
+    uint8_t ByteAt(size_t offset) const { return m_buffer[(m_head + offset) % kMaxBufferSize]; }
 
     uint16_t CalcCrc(size_t offset, size_t len) const
     {
@@ -133,7 +130,7 @@ private:
         return crc;
     }
 
-    void CopyOut(size_t offset, uint8_t* dst, size_t len) const
+    void CopyOut(size_t offset, uint8_t *dst, size_t len) const
     {
         for (size_t i = 0; i < len; ++i) {
             dst[i] = ByteAt(offset + i);
@@ -149,16 +146,13 @@ private:
 
     uint16_t ReadU16LeAt(size_t offset) const
     {
-        return static_cast<uint16_t>(ByteAt(offset)) |
-               (static_cast<uint16_t>(ByteAt(offset + 1)) << 8);
+        return static_cast<uint16_t>(ByteAt(offset)) | (static_cast<uint16_t>(ByteAt(offset + 1)) << 8);
     }
 
     uint32_t ReadU32LeAt(size_t offset) const
     {
-        return static_cast<uint32_t>(ByteAt(offset)) |
-               (static_cast<uint32_t>(ByteAt(offset + 1)) << 8) |
-               (static_cast<uint32_t>(ByteAt(offset + 2)) << 16) |
-               (static_cast<uint32_t>(ByteAt(offset + 3)) << 24);
+        return static_cast<uint32_t>(ByteAt(offset)) | (static_cast<uint32_t>(ByteAt(offset + 1)) << 8) |
+               (static_cast<uint32_t>(ByteAt(offset + 2)) << 16) | (static_cast<uint32_t>(ByteAt(offset + 3)) << 24);
     }
 
     std::array<uint8_t, kMaxBufferSize> m_buffer{};

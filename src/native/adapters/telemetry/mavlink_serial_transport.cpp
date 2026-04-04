@@ -11,17 +11,11 @@
 
 namespace smartdrone::adapters::telemetry {
 
-MavlinkSerialTransport::MavlinkSerialTransport(const std::string& dev, int baud)
-{
-    Open(dev, baud);
-}
+MavlinkSerialTransport::MavlinkSerialTransport(const std::string &dev, int baud) { Open(dev, baud); }
 
-MavlinkSerialTransport::~MavlinkSerialTransport()
-{
-    Close();
-}
+MavlinkSerialTransport::~MavlinkSerialTransport() { Close(); }
 
-void MavlinkSerialTransport::Open(const std::string& dev, int baud)
+void MavlinkSerialTransport::Open(const std::string &dev, int baud)
 {
     Close();
     m_fd = ::open(dev.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
@@ -67,7 +61,7 @@ void MavlinkSerialTransport::Close()
     }
 }
 
-bool MavlinkSerialTransport::WriteAll(const uint8_t* data, size_t len, int timeoutMs)
+bool MavlinkSerialTransport::WriteAll(const uint8_t *data, size_t len, int timeoutMs)
 {
     if (m_fd < 0 || data == nullptr) {
         return false;
@@ -121,7 +115,7 @@ int MavlinkSerialTransport::PollReadable(int timeoutMs) const
     return ::poll(&pfd, 1, timeoutMs);
 }
 
-ssize_t MavlinkSerialTransport::Read(uint8_t* buffer, size_t len) const
+ssize_t MavlinkSerialTransport::Read(uint8_t *buffer, size_t len) const
 {
     if (m_fd < 0 || buffer == nullptr || len == 0) {
         return -1;
@@ -132,14 +126,19 @@ ssize_t MavlinkSerialTransport::Read(uint8_t* buffer, size_t len) const
 unsigned int MavlinkSerialTransport::BaudToTermios(int baud)
 {
     switch (baud) {
-        case 57600: return B57600;
-        case 115200: return B115200;
-        case 230400: return B230400;
-        case 460800: return B460800;
-        case 921600: return B921600;
-        default:
-            throw std::runtime_error("Unsupported baud for termios: " + std::to_string(baud));
+    case 57600:
+        return B57600;
+    case 115200:
+        return B115200;
+    case 230400:
+        return B230400;
+    case 460800:
+        return B460800;
+    case 921600:
+        return B921600;
+    default:
+        throw std::runtime_error("Unsupported baud for termios: " + std::to_string(baud));
     }
 }
 
-}  // namespace smartdrone::adapters::telemetry
+} // namespace smartdrone::adapters::telemetry

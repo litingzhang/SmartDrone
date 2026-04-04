@@ -11,7 +11,7 @@ struct RuntimeActionRequest {
 };
 
 class ICommandChannel {
-public:
+  public:
     virtual ~ICommandChannel() = default;
 
     virtual bool Start() = 0;
@@ -19,4 +19,4 @@ public:
     virtual bool Healthy() const = 0;
 };
 
-}  // namespace smartdrone::core::ports
+} // namespace smartdrone::core::ports

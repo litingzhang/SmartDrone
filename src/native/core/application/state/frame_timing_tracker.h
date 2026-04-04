@@ -18,15 +18,15 @@ struct FrameTimingRecord {
 };
 
 class FrameTimingTracker {
-public:
+  public:
     void UpsertCapture(uint64_t frameId, uint64_t tCamNs, uint64_t tCbNs);
     void MarkSlamIn(uint64_t frameId, uint64_t tSlamInNs);
     void MarkSlamOut(uint64_t frameId, uint64_t tSlamOutNs);
     void MarkMavTx(uint64_t frameId, uint64_t tMavTxNs);
-    bool Lookup(uint64_t frameId, FrameTimingRecord& out) const;
+    bool Lookup(uint64_t frameId, FrameTimingRecord &out) const;
 
-private:
-    FrameTimingRecord& EnsureRecordLocked(uint64_t frameId);
+  private:
+    FrameTimingRecord &EnsureRecordLocked(uint64_t frameId);
     void TrimLocked();
 
     static constexpr size_t kMaxRecords = 4096;
@@ -36,4 +36,4 @@ private:
     std::deque<uint64_t> m_order;
 };
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

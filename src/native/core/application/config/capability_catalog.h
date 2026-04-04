@@ -6,8 +6,8 @@
 namespace smartdrone::core::application {
 
 class CapabilityCatalog {
-public:
+  public:
     static domain::RuntimeCapabilities BuildDefault();
 };
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

@@ -10,9 +10,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-SpiDev::SpiDev(std::string devPath) : m_devPath(std::move(devPath))
-{
-}
+SpiDev::SpiDev(std::string devPath) : m_devPath(std::move(devPath)) {}
 
 SpiDev::~SpiDev()
 {
@@ -37,8 +35,7 @@ bool SpiDev::Open(uint32_t speedHz, uint8_t mode, uint8_t bitsPerWord)
         std::cerr << "SPI set bits failed: " << strerror(errno) << "\n";
         return false;
     }
-    if (ioctl(m_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speedHz) < 0 ||
-        ioctl(m_fd, SPI_IOC_RD_MAX_SPEED_HZ, &speedHz) < 0) {
+    if (ioctl(m_fd, SPI_IOC_WR_MAX_SPEED_HZ, &speedHz) < 0 || ioctl(m_fd, SPI_IOC_RD_MAX_SPEED_HZ, &speedHz) < 0) {
         std::cerr << "SPI set speed failed: " << strerror(errno) << "\n";
         return false;
     }
@@ -55,7 +52,7 @@ bool SpiDev::WriteReg(uint8_t reg, uint8_t val)
     return Transfer(tx, rx, sizeof(tx));
 }
 
-bool SpiDev::ReadReg(uint8_t reg, uint8_t& val)
+bool SpiDev::ReadReg(uint8_t reg, uint8_t &val)
 {
     uint8_t tx[2] = {static_cast<uint8_t>(SPI_READ_MASK | (reg & 0x7F)), 0x00};
     uint8_t rx[2] = {0, 0};
@@ -66,7 +63,7 @@ bool SpiDev::ReadReg(uint8_t reg, uint8_t& val)
     return true;
 }
 
-bool SpiDev::ReadRegs(uint8_t startReg, uint8_t* out, size_t len)
+bool SpiDev::ReadRegs(uint8_t startReg, uint8_t *out, size_t len)
 {
     std::vector<uint8_t> tx(len + 1, 0x00);
     std::vector<uint8_t> rx(len + 1, 0x00);
@@ -78,7 +75,7 @@ bool SpiDev::ReadRegs(uint8_t startReg, uint8_t* out, size_t len)
     return true;
 }
 
-bool SpiDev::Transfer(const uint8_t* tx, uint8_t* rx, size_t len)
+bool SpiDev::Transfer(const uint8_t *tx, uint8_t *rx, size_t len)
 {
     spi_ioc_transfer transfer{};
     transfer.tx_buf = reinterpret_cast<unsigned long>(tx);

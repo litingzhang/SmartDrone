@@ -35,22 +35,22 @@ struct CommandResult {
 };
 
 class IRuntimeCommandTarget {
-public:
+  public:
     virtual ~IRuntimeCommandTarget() = default;
 
-    virtual CommandResult ExecuteAction(const RuntimeAction& action) = 0;
-    virtual CommandResult ApplyConfig(const ConfigUpdate& update) = 0;
+    virtual CommandResult ExecuteAction(const RuntimeAction &action) = 0;
+    virtual CommandResult ApplyConfig(const ConfigUpdate &update) = 0;
 };
 
 class RuntimeCommandService {
-public:
-    explicit RuntimeCommandService(IRuntimeCommandTarget& target);
+  public:
+    explicit RuntimeCommandService(IRuntimeCommandTarget &target);
 
-    CommandResult ExecuteAction(const RuntimeAction& action);
-    CommandResult ApplyConfig(const ConfigUpdate& update);
+    CommandResult ExecuteAction(const RuntimeAction &action);
+    CommandResult ApplyConfig(const ConfigUpdate &update);
 
-private:
-    IRuntimeCommandTarget& m_target;
+  private:
+    IRuntimeCommandTarget &m_target;
 };
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application

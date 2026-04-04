@@ -8,7 +8,6 @@ import android.graphics.Path;
 import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.view.View;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -23,7 +22,8 @@ public class Map3DView extends View {
         final float y;
         final float z;
 
-        Point3(float x, float y, float z) {
+        Point3(float x, float y, float z)
+        {
             this.x = x;
             this.y = y;
             this.z = z;
@@ -58,22 +58,26 @@ public class Map3DView extends View {
     private float mViewCenterZ;
     private boolean mHasViewCenter;
 
-    public Map3DView(Context context) {
+    public Map3DView(Context context)
+    {
         super(context);
         init();
     }
 
-    public Map3DView(Context context, AttributeSet attrs) {
+    public Map3DView(Context context, AttributeSet attrs)
+    {
         super(context, attrs);
         init();
     }
 
-    public Map3DView(Context context, AttributeSet attrs, int defStyleAttr) {
+    public Map3DView(Context context, AttributeSet attrs, int defStyleAttr)
+    {
         super(context, attrs, defStyleAttr);
         init();
     }
 
-    private void init() {
+    private void init()
+    {
         m_panelPaint.setColor(Color.argb(170, 8, 15, 24));
         m_panelPaint.setStyle(Paint.Style.FILL);
 
@@ -110,7 +114,8 @@ public class Map3DView extends View {
         m_poseHaloPaint.setStrokeWidth(3f);
     }
 
-    public void setPose(float x, float y, float z, float rollDeg, float pitchDeg, float yawDeg, boolean valid) {
+    public void setPose(float x, float y, float z, float rollDeg, float pitchDeg, float yawDeg, boolean valid)
+    {
         mHasPose = valid;
         if (!valid) {
             invalidate();
@@ -152,7 +157,8 @@ public class Map3DView extends View {
         invalidate();
     }
 
-    public void setPointCloud(float[] xyz, int pointCount) {
+    public void setPointCloud(float[] xyz, int pointCount)
+    {
         if (xyz != null) {
             int count = Math.min(pointCount, xyz.length / 3);
             for (int i = 0; i < count; ++i) {
@@ -171,7 +177,8 @@ public class Map3DView extends View {
         invalidate();
     }
 
-    public void clearPointCloud() {
+    public void clearPointCloud()
+    {
         mCloud.clear();
         mTrack.clear();
         if (mHasPose) {
@@ -185,16 +192,16 @@ public class Map3DView extends View {
         invalidate();
     }
 
-    public void toggleZoom() {
+    public void toggleZoom()
+    {
         mZoomedIn = !mZoomedIn;
         invalidate();
     }
 
-    public boolean isZoomedIn() {
-        return mZoomedIn;
-    }
+    public boolean isZoomedIn() { return mZoomedIn; }
 
-    private boolean containsNearbyPoint(float x, float y, float z, float threshold) {
+    private boolean containsNearbyPoint(float x, float y, float z, float threshold)
+    {
         float threshold2 = threshold * threshold;
         for (int i = Math.max(0, mCloud.size() - 160); i < mCloud.size(); ++i) {
             Point3 point = mCloud.get(i);
@@ -208,8 +215,8 @@ public class Map3DView extends View {
         return false;
     }
 
-    @Override
-    protected void onDraw(Canvas canvas) {
+    @Override protected void onDraw(Canvas canvas)
+    {
         super.onDraw(canvas);
 
         float w = getWidth();
@@ -233,14 +240,16 @@ public class Map3DView extends View {
             drawTrack(canvas, cx, cy, scale);
             drawVehicle(canvas, cx, cy, scale);
             canvas.drawText(String.format(Locale.US, "P %.2f %.2f %.2f", mPosX, mPosY, mPosZ), 18f, 34f, m_textPaint);
-            canvas.drawText(String.format(Locale.US, "R %.0f  P %.0f  Y %.0f", mRollDeg, mPitchDeg, mYawDeg), 18f, 64f, m_textPaint);
+            canvas.drawText(String.format(Locale.US, "R %.0f  P %.0f  Y %.0f", mRollDeg, mPitchDeg, mYawDeg), 18f, 64f,
+                            m_textPaint);
             canvas.drawText(String.format(Locale.US, "Cloud %d", mCloud.size()), 18f, 94f, m_textPaint);
         } else {
             canvas.drawText("3D Map waiting pose", 18f, 34f, m_textPaint);
         }
     }
 
-    private void drawPointCloud(Canvas canvas, float cx, float cy, float scale) {
+    private void drawPointCloud(Canvas canvas, float cx, float cy, float scale)
+    {
         for (int i = 0; i < mCloud.size(); ++i) {
             Point3 point = mCloud.get(i);
             float[] p = project(cx, cy, scale, point.x, point.y, point.z);
@@ -248,14 +257,16 @@ public class Map3DView extends View {
         }
     }
 
-    private void drawGrid(Canvas canvas, float cx, float cy, float scale) {
+    private void drawGrid(Canvas canvas, float cx, float cy, float scale)
+    {
         for (int i = -4; i <= 4; ++i) {
             drawLine3(canvas, cx, cy, scale, -4f, i, 0f, 4f, i, 0f, m_gridPaint);
             drawLine3(canvas, cx, cy, scale, i, -4f, 0f, i, 4f, 0f, m_gridPaint);
         }
     }
 
-    private void drawWorldAxes(Canvas canvas, float cx, float cy, float scale) {
+    private void drawWorldAxes(Canvas canvas, float cx, float cy, float scale)
+    {
         drawLine3(canvas, cx, cy, scale, 0f, 0f, 0f, 1.5f, 0f, 0f, m_axisXPaint);
         drawLine3(canvas, cx, cy, scale, 0f, 0f, 0f, 0f, 1.5f, 0f, m_axisYPaint);
         drawLine3(canvas, cx, cy, scale, 0f, 0f, 0f, 0f, 0f, 1.15f, m_axisZPaint);
@@ -267,7 +278,8 @@ public class Map3DView extends View {
         canvas.drawText("D", pz[0] + 4f, pz[1], m_textPaint);
     }
 
-    private void drawTrack(Canvas canvas, float cx, float cy, float scale) {
+    private void drawTrack(Canvas canvas, float cx, float cy, float scale)
+    {
         if (mTrack.size() < 2) {
             float[] p = project(cx, cy, scale, mPosX, mPosY, mPosZ);
             canvas.drawCircle(p[0], p[1], 5f, m_dotPaint);
@@ -288,18 +300,17 @@ public class Map3DView extends View {
         canvas.drawCircle(p[0], p[1], 6f, m_dotPaint);
     }
 
-    private void drawVehicle(Canvas canvas, float cx, float cy, float scale) {
+    private void drawVehicle(Canvas canvas, float cx, float cy, float scale)
+    {
         float[] center = project(cx, cy, scale, mPosX, mPosY, mPosZ);
         canvas.drawCircle(center[0], center[1], 11f, m_poseHaloPaint);
         canvas.drawCircle(center[0], center[1], 5.5f, m_dotPaint);
 
         float size = 0.34f;
-        float[][] bodyPoints = new float[][]{
-                { size, 0f, 0f },
-                { -size * 0.7f, size * 0.42f, 0f },
-                { -size * 0.7f, -size * 0.42f, 0f },
-                { -size * 0.15f, 0f, size * 0.20f }
-        };
+        float[][] bodyPoints = new float[][] {{size, 0f, 0f},
+                                              {-size * 0.7f, size * 0.42f, 0f},
+                                              {-size * 0.7f, -size * 0.42f, 0f},
+                                              {-size * 0.15f, 0f, size * 0.20f}};
 
         float[][] worldPoints = new float[bodyPoints.length][3];
         for (int i = 0; i < bodyPoints.length; ++i) {
@@ -319,22 +330,23 @@ public class Map3DView extends View {
         float[] axisX = rotateBody(size * 1.25f, 0f, 0f);
         float[] axisY = rotateBody(0f, size * 1.05f, 0f);
         float[] axisZ = rotateBody(0f, 0f, size * 1.05f);
-        drawLine3(canvas, cx, cy, scale, mPosX, mPosY, mPosZ,
-                mPosX + axisX[0], mPosY + axisX[1], mPosZ + axisX[2], m_axisXPaint);
-        drawLine3(canvas, cx, cy, scale, mPosX, mPosY, mPosZ,
-                mPosX + axisY[0], mPosY + axisY[1], mPosZ + axisY[2], m_axisYPaint);
-        drawLine3(canvas, cx, cy, scale, mPosX, mPosY, mPosZ,
-                mPosX + axisZ[0], mPosY + axisZ[1], mPosZ + axisZ[2], m_axisZPaint);
+        drawLine3(canvas, cx, cy, scale, mPosX, mPosY, mPosZ, mPosX + axisX[0], mPosY + axisX[1], mPosZ + axisX[2],
+                  m_axisXPaint);
+        drawLine3(canvas, cx, cy, scale, mPosX, mPosY, mPosZ, mPosX + axisY[0], mPosY + axisY[1], mPosZ + axisY[2],
+                  m_axisYPaint);
+        drawLine3(canvas, cx, cy, scale, mPosX, mPosY, mPosZ, mPosX + axisZ[0], mPosY + axisZ[1], mPosZ + axisZ[2],
+                  m_axisZPaint);
 
         float[] nose = project(cx, cy, scale, mPosX + axisX[0], mPosY + axisX[1], mPosZ + axisX[2]);
         drawHeadingArrow(canvas, center[0], center[1], nose[0], nose[1]);
     }
 
-    private void drawHeadingArrow(Canvas canvas, float x0, float y0, float x1, float y1) {
+    private void drawHeadingArrow(Canvas canvas, float x0, float y0, float x1, float y1)
+    {
         canvas.drawLine(x0, y0, x1, y1, m_axisXPaint);
         float dx = x1 - x0;
         float dy = y1 - y0;
-        float len = (float) Math.hypot(dx, dy);
+        float len = (float)Math.hypot(dx, dy);
         if (len < 1f) {
             return;
         }
@@ -350,20 +362,21 @@ public class Map3DView extends View {
         canvas.drawLine(x1, y1, rx, ry, m_axisXPaint);
     }
 
-    private void drawEdge(Canvas canvas, float cx, float cy, float scale, float[] a, float[] b) {
+    private void drawEdge(Canvas canvas, float cx, float cy, float scale, float[] a, float[] b)
+    {
         drawLine3(canvas, cx, cy, scale, a[0], a[1], a[2], b[0], b[1], b[2], m_bodyPaint);
     }
 
-    private void drawLine3(Canvas canvas, float cx, float cy, float scale,
-                           float x0, float y0, float z0,
-                           float x1, float y1, float z1,
-                           Paint paint) {
+    private void drawLine3(Canvas canvas, float cx, float cy, float scale, float x0, float y0, float z0, float x1,
+                           float y1, float z1, Paint paint)
+    {
         float[] p0 = project(cx, cy, scale, x0, y0, z0);
         float[] p1 = project(cx, cy, scale, x1, y1, z1);
         canvas.drawLine(p0[0], p0[1], p1[0], p1[1], paint);
     }
 
-    private float[] rotateBody(float x, float y, float z) {
+    private float[] rotateBody(float x, float y, float z)
+    {
         double roll = Math.toRadians(mRollDeg);
         double pitch = Math.toRadians(mPitchDeg);
         double yaw = Math.toRadians(mYawDeg);
@@ -387,10 +400,11 @@ public class Map3DView extends View {
         double y3 = sy * x2 + cy * y2;
         double z3 = z2;
 
-        return new float[]{(float) x3, (float) y3, (float) z3};
+        return new float[] {(float)x3, (float)y3, (float)z3};
     }
 
-    private float[] project(float cx, float cy, float scale, float x, float y, float z) {
+    private float[] project(float cx, float cy, float scale, float x, float y, float z)
+    {
         float px = x;
         float py = y;
         float pz = z;
@@ -404,6 +418,6 @@ public class Map3DView extends View {
         pz = -pz;
         float sx = cx + (px - py) * scale;
         float sy = cy - (px + py) * scale * 0.45f - pz * scale * 1.35f;
-        return new float[]{sx, sy};
+        return new float[] {sx, sy};
     }
 }

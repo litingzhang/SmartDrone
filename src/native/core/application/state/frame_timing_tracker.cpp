@@ -5,7 +5,7 @@ namespace smartdrone::core::application {
 void FrameTimingTracker::UpsertCapture(uint64_t frameId, uint64_t tCamNs, uint64_t tCbNs)
 {
     std::lock_guard<std::mutex> lk(m_mutex);
-    FrameTimingRecord& rec = EnsureRecordLocked(frameId);
+    FrameTimingRecord &rec = EnsureRecordLocked(frameId);
     rec.tCamNs = tCamNs;
     rec.tCbNs = tCbNs;
 }
@@ -28,7 +28,7 @@ void FrameTimingTracker::MarkMavTx(uint64_t frameId, uint64_t tMavTxNs)
     EnsureRecordLocked(frameId).tMavTxNs = tMavTxNs;
 }
 
-bool FrameTimingTracker::Lookup(uint64_t frameId, FrameTimingRecord& out) const
+bool FrameTimingTracker::Lookup(uint64_t frameId, FrameTimingRecord &out) const
 {
     std::lock_guard<std::mutex> lk(m_mutex);
     const auto it = m_records.find(frameId);
@@ -39,10 +39,10 @@ bool FrameTimingTracker::Lookup(uint64_t frameId, FrameTimingRecord& out) const
     return true;
 }
 
-FrameTimingRecord& FrameTimingTracker::EnsureRecordLocked(uint64_t frameId)
+FrameTimingRecord &FrameTimingTracker::EnsureRecordLocked(uint64_t frameId)
 {
     auto [it, inserted] = m_records.try_emplace(frameId);
-    FrameTimingRecord& rec = it->second;
+    FrameTimingRecord &rec = it->second;
     if (inserted) {
         rec.frameId = frameId;
         m_order.push_back(frameId);
@@ -60,4 +60,4 @@ void FrameTimingTracker::TrimLocked()
     }
 }
 
-}  // namespace smartdrone::core::application
+} // namespace smartdrone::core::application
