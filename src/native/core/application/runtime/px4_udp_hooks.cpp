@@ -287,8 +287,17 @@ bool Px4UdpHooks::MaybeSyncRemoteFlightMode(bool force, std::string *err)
 {
     const RemoteFlightMode desired = DesiredRemoteFlightMode();
     Px4MavlinkGateway::FlightModeInfo currentMode{};
-    if (m_mavlink.GetFlightModeInfo(currentMode) && currentMode.mainMode == static_cast<uint8_t>(desired)) {
-        return true;
+    const bool haveCurrentMode = m_mavlink.GetFlightModeInfo(currentMode);
+    if (haveCurrentMode) {
+        if (currentMode.mainMode == static_cast<uint8_t>(desired)) {
+            return true;
+        }
+        // Keep remote control in POSCTL once it is available; do not auto-degrade to ALTCTL
+        // when VIO becomes temporarily unusable during RC flight.
+        if (desired == RemoteFlightMode::Altitude &&
+            currentMode.mainMode == static_cast<uint8_t>(RemoteFlightMode::Position)) {
+            return true;
+        }
     }
 
     const auto now = std::chrono::steady_clock::now();
