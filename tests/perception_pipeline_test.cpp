@@ -28,11 +28,13 @@ class FakeCameraProvider final : public ports::ICameraProvider {
     }
 
     ports::CameraHealth GetHealth() const override { return health; }
+    ports::CameraDiagnostics GetDiagnostics() const override { return diagnostics; }
 
     mutable int lastTimeoutMs{0};
     mutable bool lastPreferLatest{false};
     mutable uint64_t lastMinTimestampNs{0};
     ports::CameraHealth health{};
+    ports::CameraDiagnostics diagnostics{};
     std::deque<ports::StereoFrame> frames;
 };
 

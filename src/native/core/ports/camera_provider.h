@@ -26,6 +26,27 @@ struct CameraHealth {
     uint64_t droppedPairs{0};
 };
 
+struct CameraDiagnostics {
+    bool healthy{true};
+    bool acceptFrames{false};
+    uint32_t lastRawSeqL{0};
+    uint32_t lastRawSeqR{0};
+    uint64_t rawCountL{0};
+    uint64_t rawCountR{0};
+    uint64_t droppedPairs{0};
+    uint64_t droppedUnpairedL{0};
+    uint64_t droppedUnpairedR{0};
+    size_t pendingL{0};
+    size_t pendingR{0};
+    size_t pairedQueue{0};
+    int64_t pairTolNs{0};
+    int64_t lastPairDtMs{0};
+    int64_t lastRejectDtUs{0};
+    int64_t lastFrameAgeMsL{-1};
+    int64_t lastFrameAgeMsR{-1};
+    int64_t lastPairAgeMs{-1};
+};
+
 class ICameraProvider {
   public:
     virtual ~ICameraProvider() = default;
@@ -34,6 +55,7 @@ class ICameraProvider {
     virtual void Stop() = 0;
     virtual bool GrabStereo(StereoFrame &out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs = 0) = 0;
     virtual CameraHealth GetHealth() const = 0;
+    virtual CameraDiagnostics GetDiagnostics() const = 0;
 };
 
 } // namespace smartdrone::core::ports

@@ -53,6 +53,7 @@ class ReplayCameraProvider final : public smartdrone::core::ports::ICameraProvid
     bool GrabStereo(smartdrone::core::ports::StereoFrame &out, int timeoutMs, bool preferLatest,
                     uint64_t minTimestampNs) override;
     smartdrone::core::ports::CameraHealth GetHealth() const override;
+    smartdrone::core::ports::CameraDiagnostics GetDiagnostics() const override;
 
   private:
     const ReplayDataset &m_dataset;

@@ -594,6 +594,8 @@ bool LibcameraStereoOV9281_TsPair::GrabPair(FrameItem &L, FrameItem &R, int time
     L = std::move(p.first);
     R = std::move(p.second);
     m_paired.pop_front();
+    const int64_t pairMonoNs = std::max(L.arriveNs, R.arriveNs);
+    m_lastPairMonoNs.store(pairMonoNs, std::memory_order_relaxed);
     return true;
 }
 
@@ -641,6 +643,39 @@ int64_t LibcameraStereoOV9281_TsPair::PairTolNs() const { return m_pairThreshNs;
 uint64_t LibcameraStereoOV9281_TsPair::DroppedPaired() const { return m_droppedPaired.load(std::memory_order_relaxed); }
 
 bool LibcameraStereoOV9281_TsPair::Healthy() const { return m_left.Healthy() && m_right.Healthy(); }
+
+LibcameraStereoOV9281_TsPair::PairingDiagnostics LibcameraStereoOV9281_TsPair::GetDiagnostics() const
+{
+    PairingDiagnostics out{};
+    out.healthy = Healthy();
+    out.acceptFrames = m_acceptFrames.load(std::memory_order_relaxed);
+    out.lastRawSeqL = m_lastRawSeq[0].load(std::memory_order_relaxed);
+    out.lastRawSeqR = m_lastRawSeq[1].load(std::memory_order_relaxed);
+    out.rawCountL = m_rawFrameCount[0].load(std::memory_order_relaxed);
+    out.rawCountR = m_rawFrameCount[1].load(std::memory_order_relaxed);
+    out.droppedPaired = m_droppedPaired.load(std::memory_order_relaxed);
+    out.droppedUnpairedL = m_droppedUnpaired[0].load(std::memory_order_relaxed);
+    out.droppedUnpairedR = m_droppedUnpaired[1].load(std::memory_order_relaxed);
+    out.pairTolNs = m_pairThreshNs;
+    out.lastPairDtMs = m_lastDtMs.load(std::memory_order_relaxed);
+    out.lastRejectDtUs = LastRejectDtUs();
+
+    const int64_t nowNs =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    const int64_t lastArriveNsL = m_lastArriveNs[0].load(std::memory_order_relaxed);
+    const int64_t lastArriveNsR = m_lastArriveNs[1].load(std::memory_order_relaxed);
+    const int64_t lastPairMonoNs = m_lastPairMonoNs.load(std::memory_order_relaxed);
+    out.lastFrameAgeMsL = lastArriveNsL > 0 ? (nowNs - lastArriveNsL) / 1000000LL : -1;
+    out.lastFrameAgeMsR = lastArriveNsR > 0 ? (nowNs - lastArriveNsR) / 1000000LL : -1;
+    out.lastPairAgeMs = lastPairMonoNs > 0 ? (nowNs - lastPairMonoNs) / 1000000LL : -1;
+
+    std::lock_guard<std::mutex> lk(m_muPair);
+    out.pendingL = m_qL.size();
+    out.pendingR = m_qR.size();
+    out.pairedQueue = m_paired.size();
+    return out;
+}
 
 uint64_t LibcameraStereoOV9281_TsPair::PairTimestampNs(const std::pair<FrameItem, FrameItem> &pair) const
 {
@@ -771,6 +806,7 @@ void LibcameraStereoOV9281_TsPair::OnFrameLocked(FrameItem &&fi)
     if (fi.camIndex >= 0 && fi.camIndex < 2) {
         m_lastRawSeq[fi.camIndex].store(fi.seq, std::memory_order_relaxed);
         m_rawFrameCount[fi.camIndex].fetch_add(1, std::memory_order_relaxed);
+        m_lastArriveNs[fi.camIndex].store(fi.arriveNs, std::memory_order_relaxed);
     }
     if (fi.camIndex == 0) {
         m_qL.push_back(std::move(fi));
@@ -804,4 +840,7 @@ void LibcameraStereoOV9281_TsPair::ResetPairingState()
     m_lastRejectDtNs.store(0, std::memory_order_relaxed);
     m_droppedUnpaired[0].store(0, std::memory_order_relaxed);
     m_droppedUnpaired[1].store(0, std::memory_order_relaxed);
+    m_lastArriveNs[0].store(0, std::memory_order_relaxed);
+    m_lastArriveNs[1].store(0, std::memory_order_relaxed);
+    m_lastPairMonoNs.store(0, std::memory_order_relaxed);
 }

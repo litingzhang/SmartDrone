@@ -175,6 +175,14 @@ smartdrone::core::ports::CameraHealth ReplayCameraProvider::GetHealth() const
     return {true, 0};
 }
 
+smartdrone::core::ports::CameraDiagnostics ReplayCameraProvider::GetDiagnostics() const
+{
+    smartdrone::core::ports::CameraDiagnostics diagnostics{};
+    diagnostics.healthy = true;
+    diagnostics.acceptFrames = m_started;
+    return diagnostics;
+}
+
 ReplayImuProvider::ReplayImuProvider(const ReplayDataset &dataset) : m_dataset(dataset) {}
 
 bool ReplayImuProvider::Start()

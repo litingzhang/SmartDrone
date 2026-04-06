@@ -39,6 +39,31 @@ core::ports::CameraHealth LibcameraStereoCamera::GetHealth() const
     return health;
 }
 
+core::ports::CameraDiagnostics LibcameraStereoCamera::GetDiagnostics() const
+{
+    const auto diag = m_impl.GetDiagnostics();
+    core::ports::CameraDiagnostics out{};
+    out.healthy = diag.healthy;
+    out.acceptFrames = diag.acceptFrames;
+    out.lastRawSeqL = diag.lastRawSeqL;
+    out.lastRawSeqR = diag.lastRawSeqR;
+    out.rawCountL = diag.rawCountL;
+    out.rawCountR = diag.rawCountR;
+    out.droppedPairs = diag.droppedPaired;
+    out.droppedUnpairedL = diag.droppedUnpairedL;
+    out.droppedUnpairedR = diag.droppedUnpairedR;
+    out.pendingL = diag.pendingL;
+    out.pendingR = diag.pendingR;
+    out.pairedQueue = diag.pairedQueue;
+    out.pairTolNs = diag.pairTolNs;
+    out.lastPairDtMs = diag.lastPairDtMs;
+    out.lastRejectDtUs = diag.lastRejectDtUs;
+    out.lastFrameAgeMsL = diag.lastFrameAgeMsL;
+    out.lastFrameAgeMsR = diag.lastFrameAgeMsR;
+    out.lastPairAgeMs = diag.lastPairAgeMs;
+    return out;
+}
+
 int64_t LibcameraStereoCamera::LastPairDtMs() const { return m_impl.LastDtMs(); }
 
 int64_t LibcameraStereoCamera::LastRejectDtUs() const { return m_impl.LastRejectDtUs(); }

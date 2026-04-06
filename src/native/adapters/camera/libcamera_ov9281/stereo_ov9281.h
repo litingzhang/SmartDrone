@@ -101,6 +101,27 @@ class LibcameraMonoCam {
 
 class LibcameraStereoOV9281_TsPair {
   public:
+    struct PairingDiagnostics {
+        bool healthy{true};
+        bool acceptFrames{false};
+        uint32_t lastRawSeqL{0};
+        uint32_t lastRawSeqR{0};
+        uint64_t rawCountL{0};
+        uint64_t rawCountR{0};
+        uint64_t droppedPaired{0};
+        uint64_t droppedUnpairedL{0};
+        uint64_t droppedUnpairedR{0};
+        size_t pendingL{0};
+        size_t pendingR{0};
+        size_t pairedQueue{0};
+        int64_t pairTolNs{0};
+        int64_t lastPairDtMs{0};
+        int64_t lastRejectDtUs{0};
+        int64_t lastFrameAgeMsL{-1};
+        int64_t lastFrameAgeMsR{-1};
+        int64_t lastPairAgeMs{-1};
+    };
+
     static constexpr size_t kPairLookahead = 3;
 
     bool Open(int w, int h, int fps, bool aeDisable, int exposureUs, float gain, bool requestY8, int64_t pairThreshNs,
@@ -124,6 +145,7 @@ class LibcameraStereoOV9281_TsPair {
     int64_t PairTolNs() const;
     uint64_t DroppedPaired() const;
     bool Healthy() const;
+    PairingDiagnostics GetDiagnostics() const;
 
   private:
     uint64_t PairTimestampNs(const std::pair<FrameItem, FrameItem> &pair) const;
@@ -162,4 +184,6 @@ class LibcameraStereoOV9281_TsPair {
     std::atomic<uint64_t> m_rawFrameCount[2]{{0}, {0}};
     std::atomic<int64_t> m_lastRejectDtNs{0};
     std::atomic<uint64_t> m_droppedUnpaired[2]{{0}, {0}};
+    std::atomic<int64_t> m_lastArriveNs[2]{{0}, {0}};
+    std::atomic<int64_t> m_lastPairMonoNs{0};
 };

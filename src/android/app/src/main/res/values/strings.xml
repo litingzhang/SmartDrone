@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">SpaceInvader</string>
+    <string name="ctrl_alt_up">ALT+</string>
+    <string name="ctrl_alt_down">ALT-</string>
+    <string name="ctrl_yaw_left">YL</string>
+    <string name="ctrl_yaw_right">YR</string>
+    <string name="ctrl_forward">FWD</string>
+    <string name="ctrl_back">BACK</string>
+    <string name="ctrl_left">LF</string>
+    <string name="ctrl_right">RT</string>
 </resources>
