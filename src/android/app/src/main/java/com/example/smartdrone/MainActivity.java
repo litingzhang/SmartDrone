@@ -207,7 +207,7 @@ public class MainActivity extends Activity {
     private boolean m_joystickLoopRunning;
     private boolean m_lastJoystickActive;
     private boolean m_settingsVisible = false;
-    private boolean m_debugVisible = true;
+    private boolean m_debugVisible = false;
     private boolean m_remoteVisible = true;
     private boolean m_updatingToggleUi = false;
     private boolean m_updatingConfigUi = false;
@@ -1972,7 +1972,6 @@ public class MainActivity extends Activity {
             m_effectiveSlamMode = slamMode;
             updateQuickSlamModeButtons();
         }
-        final String px4ModeText = px4ModeToText(m_px4MainMode, m_px4SubMode);
         if (m_tvPose != null) {
             if (runtimeMode == MODE_SLAM) {
                 boolean hasValidPose = trackingState == 2 || trackingState == 5;
@@ -1985,16 +1984,15 @@ public class MainActivity extends Activity {
                     qy = Float.NaN;
                     qz = Float.NaN;
                 }
+                final float pitchDeg = quatPitchDeg(qw, qx, qy, qz);
+                final float rollDeg = quatRollDeg(qw, qx, qy, qz);
+                final float yawDeg = quatYawDeg(qw, qx, qy, qz);
                 m_tvPose.setText(String.format(
-                    Locale.US, "Pose %s px4=%s armed=%s trk=%s rst=%d map_rst=%d\np[%.2f %.2f %.2f]\nq[%.2f %.2f %.2f %.2f]",
-                    runtimeModeToText(runtimeMode), px4ModeText, m_armLatched ? "Y" : "N", trackingStateToText(trackingState),
-                    resetCounter, resetMapCount, x, y, z, qw, qx, qy, qz));
+                    Locale.US, "P %.2f %.2f %.2f\nR %.0f  P %.0f  Y %.0f", x, y, z, rollDeg, pitchDeg, yawDeg));
             } else if (runtimeMode == MODE_CALIB) {
-                m_tvPose.setText(String.format(Locale.US, "Pose hidden in CALIB\npx4=%s armed=%s", px4ModeText,
-                                               m_armLatched ? "Y" : "N"));
+                m_tvPose.setText("Waiting for vehicle pose...");
             } else {
-                m_tvPose.setText(String.format(Locale.US, "Pose idle\npx4=%s armed=%s", px4ModeText,
-                                               m_armLatched ? "Y" : "N"));
+                m_tvPose.setText("Waiting for vehicle pose...");
             }
         }
         return true;
@@ -2312,9 +2310,11 @@ public class MainActivity extends Activity {
         float rightMag = clamp01((float)Math.hypot(rightX, rightY));
         boolean active = leftX != 0f || leftY != 0f || rightX != 0f || rightY != 0f;
 
-        m_tvJoystickState.setText(
-            String.format(Locale.US, "REMOTE L[up=%.2f yaw=%.2f] R[fwd=%.2f right=%.2f] magL=%.2f magR=%.2f %s", leftY,
-                          leftX, rightY, rightX, leftMag, rightMag, active ? "ACTIVE" : "CENTER"));
+        if (m_tvJoystickState != null) {
+            m_tvJoystickState.setText(String.format(
+                Locale.US, "REMOTE L[up=%.2f yaw=%.2f] R[fwd=%.2f right=%.2f] magL=%.2f magR=%.2f %s", leftY, leftX,
+                rightY, rightX, leftMag, rightMag, active ? "ACTIVE" : "CENTER"));
+        }
 
         if (!active) {
             if (m_lastJoystickActive) {
@@ -2406,8 +2406,6 @@ public class MainActivity extends Activity {
         if (m_tvPose != null) {
             m_tvPose.setText("Waiting for vehicle pose...");
         }
-        m_tvVideoStats = findViewById(R.id.tvVideoStats);
-        m_tvJoystickState = findViewById(R.id.tvJoystickState);
         m_debugPanel = findViewById(R.id.debugPanel);
         m_remoteControlsBar = findViewById(R.id.remoteControlsBar);
         m_pageCommand = findViewById(R.id.pageCommand);
@@ -2700,7 +2698,7 @@ public class MainActivity extends Activity {
         m_btnModeToggle.setOnClickListener(v -> setSettingsVisible(!m_settingsVisible));
         if (savedInstanceState != null) {
             m_settingsVisible = savedInstanceState.getBoolean(KEY_SETTINGS_VISIBLE, false);
-            m_debugVisible = savedInstanceState.getBoolean(KEY_DEBUG_VISIBLE, true);
+            m_debugVisible = savedInstanceState.getBoolean(KEY_DEBUG_VISIBLE, false);
             m_remoteVisible = savedInstanceState.getBoolean(KEY_REMOTE_VISIBLE, true);
         }
         setSettingsVisible(m_settingsVisible);

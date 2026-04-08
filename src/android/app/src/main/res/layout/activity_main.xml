@@ -160,7 +160,7 @@
                         android:contentDescription="altitude_up"
                         android:padding="0dp"
                         android:scaleType="fitCenter"
-                        android:src="@drawable/ic_control_move_ground_forward" />
+                        android:src="@drawable/ic_control_altitude_up" />
 
                     <TextView
                         android:layout_width="99dp"
@@ -186,7 +186,7 @@
                         android:contentDescription="altitude_down"
                         android:padding="0dp"
                         android:scaleType="fitCenter"
-                        android:src="@drawable/ic_control_move_ground_back" />
+                        android:src="@drawable/ic_control_altitude_down" />
 
                     <TextView
                         android:layout_width="99dp"
@@ -212,7 +212,7 @@
                         android:contentDescription="yaw_left"
                         android:padding="0dp"
                         android:scaleType="fitCenter"
-                        android:src="@drawable/ic_control_move_ground_left" />
+                        android:src="@drawable/ic_control_yaw_left" />
 
                     <TextView
                         android:layout_width="99dp"
@@ -238,7 +238,7 @@
                         android:contentDescription="yaw_right"
                         android:padding="0dp"
                         android:scaleType="fitCenter"
-                        android:src="@drawable/ic_control_move_ground_right" />
+                        android:src="@drawable/ic_control_yaw_right" />
 
                     <TextView
                         android:layout_width="99dp"
@@ -892,6 +892,24 @@
         </FrameLayout>
     </LinearLayout>
 
+    <TextView
+        android:id="@+id/tvPose"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="18dp"
+        android:layout_marginTop="18dp"
+        android:background="#66101822"
+        android:elevation="6dp"
+        android:maxWidth="170dp"
+        android:paddingLeft="8dp"
+        android:paddingTop="5dp"
+        android:paddingRight="8dp"
+        android:paddingBottom="5dp"
+        android:text="Waiting for vehicle pose..."
+        android:textColor="#F2FFFFFF"
+        android:textSize="10sp" />
+
     <LinearLayout
         android:id="@+id/debugPanel"
         android:layout_width="260dp"
@@ -913,33 +931,6 @@
             android:text="cm5udp ready"
             android:textColor="#FFFFFF"
             android:textSize="11sp" />
-
-        <TextView
-            android:id="@+id/tvPose"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="Pose idle"
-            android:textColor="#CCFFFFFF"
-            android:textSize="10sp" />
-
-        <TextView
-            android:id="@+id/tvVideoStats"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="Video idle"
-            android:textColor="#B3FFFFFF"
-            android:textSize="10sp" />
-
-        <TextView
-            android:id="@+id/tvJoystickState"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="Remote idle"
-            android:textColor="#DDFFFFFF"
-            android:textSize="10sp" />
     </LinearLayout>
 
 </FrameLayout>

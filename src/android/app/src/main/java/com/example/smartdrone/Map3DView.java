@@ -239,12 +239,6 @@ public class Map3DView extends View {
         if (mHasPose) {
             drawTrack(canvas, cx, cy, scale);
             drawVehicle(canvas, cx, cy, scale);
-            canvas.drawText(String.format(Locale.US, "P %.2f %.2f %.2f", mPosX, mPosY, mPosZ), 18f, 34f, m_textPaint);
-            canvas.drawText(String.format(Locale.US, "R %.0f  P %.0f  Y %.0f", mRollDeg, mPitchDeg, mYawDeg), 18f, 64f,
-                            m_textPaint);
-            canvas.drawText(String.format(Locale.US, "Cloud %d", mCloud.size()), 18f, 94f, m_textPaint);
-        } else {
-            canvas.drawText("3D Map waiting pose", 18f, 34f, m_textPaint);
         }
     }
 
