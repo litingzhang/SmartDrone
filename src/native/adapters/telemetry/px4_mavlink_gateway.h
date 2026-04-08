@@ -84,7 +84,6 @@ class Px4MavlinkGateway {
     };
 
     static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_MANUAL = 1;
-    static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_ALTCTL = 2;
     static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_POSCTL = 3;
     static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6;
 
@@ -111,7 +110,6 @@ class Px4MavlinkGateway {
                         uint8_t targetComponent = 0);
     bool SetModeOffboard(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     bool SetModePosition(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
-    bool SetModeAltitude(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     bool Arm(bool doArm, int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     bool EmergencyStop(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     bool StartOffboardAndArm(double unused1, double unused2, int warmupMs = 800, int ackTimeoutMs = 1000,

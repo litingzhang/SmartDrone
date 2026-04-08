@@ -16,6 +16,7 @@ void TlvCmdRouter::RegisterDefaults()
     m_handlers[CMD_OFFBOARD] = [this](const TlvFrame &) { return HandleSimple(CMD_OFFBOARD); };
     m_handlers[CMD_HOLD] = [this](const TlvFrame &) { return HandleSimple(CMD_HOLD); };
     m_handlers[CMD_LAND] = [this](const TlvFrame &) { return HandleSimple(CMD_LAND); };
+    m_handlers[CMD_POSITION] = [this](const TlvFrame &) { return HandleSimple(CMD_POSITION); };
     m_handlers[CMD_MOVE] = [this](const TlvFrame &frame) { return HandleMove(frame); };
 }
 
@@ -70,6 +71,12 @@ RouteResult TlvCmdRouter::HandleSimple(uint8_t cmd)
     case CMD_LAND:
         if (!m_hooks.Land(&err)) {
             return {ACK_E_INTERNAL, err.empty() ? "land failed" : err};
+        }
+        return {ACK_OK, ""};
+
+    case CMD_POSITION:
+        if (!m_hooks.Position(&err)) {
+            return {ACK_E_INTERNAL, err.empty() ? "position failed" : err};
         }
         return {ACK_OK, ""};
 

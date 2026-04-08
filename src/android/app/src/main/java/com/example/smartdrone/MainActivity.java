@@ -45,6 +45,7 @@ public class MainActivity extends Activity {
     private static final int CMD_HOLD = 0x13;
     private static final int CMD_LAND = 0x14;
     private static final int CMD_EMERGENCY_STOP = 0x15;
+    private static final int CMD_POSITION = 0x16;
     private static final int CMD_RUNTIME_MODE = 0x30;
     private static final int CMD_RUNTIME_CONFIG = 0x31;
     private static final int CMD_CALIB_CLEAN = 0x32;
@@ -72,6 +73,7 @@ public class MainActivity extends Activity {
     private static final String PENDING_EMERGENCY_STOP = "emergency_stop";
     private static final String PENDING_OFFBOARD = "offboard";
     private static final String PENDING_LAND = "land";
+    private static final String PENDING_POSITION = "position";
     private static final String PENDING_RUNTIME = "runtime";
     private static final String PENDING_SENSOR = "sensor";
     private static final String PENDING_CONFIG = "config";
@@ -1113,7 +1115,11 @@ public class MainActivity extends Activity {
                            isPending(PENDING_EMERGENCY_STOP), "#B71C1C");
         }
         if (m_btnLand != null) {
-            setButtonState(m_btnLand, "LAND".equals(m_lastFlightCommand), isPending(PENDING_LAND), "#EF6C00");
+            final boolean landSelected = "LAND".equals(m_lastFlightCommand);
+            final boolean positionSelected = "POSITION".equals(m_lastFlightCommand);
+            m_btnLand.setText(landSelected ? "POSITION" : "LAND");
+            setButtonState(m_btnLand, landSelected || positionSelected, isPending(PENDING_LAND) || isPending(PENDING_POSITION),
+                           "#EF6C00");
         }
     }
 
@@ -2368,8 +2374,12 @@ public class MainActivity extends Activity {
         }
         if (m_btnLand != null) {
             m_btnLand.setOnClickListener(v -> {
-                sendSimpleCmdAwaitAck("LAND", CMD_LAND, PENDING_LAND, () -> {
-                    m_lastFlightCommand = "LAND";
+                final boolean sendPosition = "LAND".equals(m_lastFlightCommand);
+                final String nextLabel = sendPosition ? "POSITION" : "LAND";
+                final int nextCmd = sendPosition ? CMD_POSITION : CMD_LAND;
+                final String pendingKey = sendPosition ? PENDING_POSITION : PENDING_LAND;
+                sendSimpleCmdAwaitAck(nextLabel, nextCmd, pendingKey, () -> {
+                    m_lastFlightCommand = nextLabel;
                     updateFlightButtons();
                 });
             });

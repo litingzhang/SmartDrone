@@ -15,6 +15,7 @@ enum TlvCmd : uint8_t {
     CMD_HOLD = 0x13,
     CMD_LAND = 0x14,
     CMD_EMERGENCY_STOP = 0x15,
+    CMD_POSITION = 0x16,
 
     CMD_MOVE = 0x20,
     CMD_RUNTIME_MODE = 0x30,

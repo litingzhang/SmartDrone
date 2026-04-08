@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cstdint>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <thread>
 
@@ -26,15 +25,11 @@ class Px4UdpHooks final : public MavlinkHooks {
     bool EmergencyStop(std::string *err) override;
     bool SetOffboard(std::string *err) override;
     bool Hold(std::string *err) override;
+    bool Position(std::string *err) override;
     bool Land(std::string *err) override;
     bool SetMoveGoal(const MoveGoal &goal, std::string *err) override;
 
   private:
-    enum class RemoteFlightMode : uint8_t {
-        Altitude = Px4MavlinkGateway::PX4_CUSTOM_MAIN_MODE_ALTCTL,
-        Position = Px4MavlinkGateway::PX4_CUSTOM_MAIN_MODE_POSCTL,
-    };
-
     struct AutoLandingState {
         bool active{false};
         bool haveRangeWindow{false};
@@ -55,9 +50,6 @@ class Px4UdpHooks final : public MavlinkHooks {
     static bool IsTrackingPoseUsable(int trackingState);
     static bool IsOdomQualityUsable(OdomQualityMode quality);
 
-    bool IsVioControlUsable() const;
-    RemoteFlightMode DesiredRemoteFlightMode() const;
-    static const char *RemoteFlightModeToString(RemoteFlightMode mode);
     void CancelAutoLanding();
     bool IsAutoLandingActive() const;
     bool EnsureSetpointStream();
@@ -68,8 +60,7 @@ class Px4UdpHooks final : public MavlinkHooks {
     Px4MavlinkGateway::ManualControlInput GetManualControlSnapshot() const;
     void SendManualControlSnapshot();
     void WarmupManualControlLink();
-    void StartAutoLanding();
-    bool MaybeSyncRemoteFlightMode(bool force, std::string *err);
+    bool EnsurePositionMode(bool force, std::string *err);
     void UpdateAutoLanding();
     void ManualControlLoop();
 
@@ -85,8 +76,8 @@ class Px4UdpHooks final : public MavlinkHooks {
     mutable std::mutex m_remoteModeMtx;
     mutable std::mutex m_autoLandingMtx;
     AutoLandingState m_autoLanding{};
-    std::optional<RemoteFlightMode> m_lastRequestedRemoteMode;
-    std::chrono::steady_clock::time_point m_lastRemoteModeRequest{};
+    bool m_positionModeRequested{false};
+    std::chrono::steady_clock::time_point m_lastPositionModeRequest{};
 };
 
 } // namespace smartdrone::core::application

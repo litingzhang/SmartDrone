@@ -89,7 +89,7 @@ bool Px4UdpHooks::SetOffboard(std::string *err)
     EnsureManualControlStream();
     m_remoteModeRequested.store(true, std::memory_order_relaxed);
     WarmupManualControlLink();
-    if (!MaybeSyncRemoteFlightMode(true, err)) {
+    if (!EnsurePositionMode(true, err)) {
         m_remoteModeRequested.store(false, std::memory_order_relaxed);
         if (err && err->empty())
             *err = "px4 remote mode rejected";
@@ -104,11 +104,20 @@ bool Px4UdpHooks::Hold(std::string *err)
     EnsureManualControlStream();
     SetManualControlNeutral();
     SendManualControlSnapshot();
+    return true;
+}
+
+bool Px4UdpHooks::Position(std::string *err)
+{
+    CancelAutoLanding();
+    EnsureManualControlStream();
+    SetManualControlNeutral();
+    SendManualControlSnapshot();
     m_remoteModeRequested.store(true, std::memory_order_relaxed);
-    if (!MaybeSyncRemoteFlightMode(true, err)) {
+    if (!EnsurePositionMode(true, err)) {
         m_remoteModeRequested.store(false, std::memory_order_relaxed);
         if (err && err->empty())
-            *err = "px4 hold mode rejected";
+            *err = "px4 position mode rejected";
         return false;
     }
     return true;
@@ -119,20 +128,16 @@ bool Px4UdpHooks::Land(std::string *err)
     CancelAutoLanding();
     m_mavlink.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
-    EnsureManualControlStream();
-    m_remoteModeRequested.store(true, std::memory_order_relaxed);
-    StartAutoLanding();
-    WarmupManualControlLink();
-    if (!MaybeSyncRemoteFlightMode(true, err)) {
-        CancelAutoLanding();
-        SetManualControlNeutral();
-        DisableRemoteControl(true);
-        if (err && err->empty())
-            *err = "px4 remote land mode rejected";
+    SetManualControlNeutral();
+    SendManualControlSnapshot();
+    DisableRemoteControl(true);
+    if (!m_mavlink.SendLand()) {
+        if (err) {
+            *err = "px4 land command rejected";
+        }
         return false;
     }
-    SendManualControlSnapshot();
-    std::cout << "[land] remote descent started\n";
+    std::cout << "[land] MAV_CMD_NAV_LAND sent to PX4\n";
     return true;
 }
 
@@ -184,23 +189,6 @@ bool Px4UdpHooks::SetMoveGoal(const MoveGoal &goal, std::string *err)
     return true;
 }
 
-bool Px4UdpHooks::IsVioControlUsable() const
-{
-    LivePoseState::Snapshot snapshot{};
-    return m_livePose.ReadSnapshot(snapshot) && snapshot.runtimeMode == RUNTIME_MODE_SLAM && snapshot.poseValid &&
-           IsTrackingPoseUsable(snapshot.trackingState) && IsOdomQualityUsable(snapshot.odomQuality);
-}
-
-Px4UdpHooks::RemoteFlightMode Px4UdpHooks::DesiredRemoteFlightMode() const
-{
-    return IsVioControlUsable() ? RemoteFlightMode::Position : RemoteFlightMode::Altitude;
-}
-
-const char *Px4UdpHooks::RemoteFlightModeToString(RemoteFlightMode mode)
-{
-    return mode == RemoteFlightMode::Position ? "POSCTL" : "ALTCTL";
-}
-
 void Px4UdpHooks::CancelAutoLanding()
 {
     bool wasActive = false;
@@ -238,8 +226,8 @@ void Px4UdpHooks::DisableRemoteControl(bool stopManualStream)
         m_manualControlStreaming.store(false, std::memory_order_relaxed);
     }
     std::lock_guard<std::mutex> lock(m_remoteModeMtx);
-    m_lastRequestedRemoteMode.reset();
-    m_lastRemoteModeRequest = std::chrono::steady_clock::time_point{};
+    m_positionModeRequested = false;
+    m_lastPositionModeRequest = std::chrono::steady_clock::time_point{};
 }
 
 void Px4UdpHooks::SetManualControlNeutral()
@@ -270,56 +258,33 @@ void Px4UdpHooks::WarmupManualControlLink()
     }
 }
 
-void Px4UdpHooks::StartAutoLanding()
+bool Px4UdpHooks::EnsurePositionMode(bool force, std::string *err)
 {
-    AutoLandingState next{};
-    next.active = true;
-    {
-        std::lock_guard<std::mutex> lock(m_autoLandingMtx);
-        m_autoLanding = next;
-    }
-    Px4MavlinkGateway::ManualControlInput input{};
-    input.throttleNorm = kAutoLandThrottleNorm;
-    SetManualControlInput(input);
-}
-
-bool Px4UdpHooks::MaybeSyncRemoteFlightMode(bool force, std::string *err)
-{
-    const RemoteFlightMode desired = DesiredRemoteFlightMode();
     Px4MavlinkGateway::FlightModeInfo currentMode{};
     const bool haveCurrentMode = m_mavlink.GetFlightModeInfo(currentMode);
-    if (haveCurrentMode) {
-        if (currentMode.mainMode == static_cast<uint8_t>(desired)) {
-            return true;
-        }
-        // Keep remote control in POSCTL once it is available; do not auto-degrade to ALTCTL
-        // when VIO becomes temporarily unusable during RC flight.
-        if (desired == RemoteFlightMode::Altitude &&
-            currentMode.mainMode == static_cast<uint8_t>(RemoteFlightMode::Position)) {
-            return true;
-        }
+    if (haveCurrentMode && currentMode.mainMode == Px4MavlinkGateway::PX4_CUSTOM_MAIN_MODE_POSCTL) {
+        return true;
     }
 
     const auto now = std::chrono::steady_clock::now();
     {
         std::lock_guard<std::mutex> lock(m_remoteModeMtx);
-        if (!force && m_lastRequestedRemoteMode && *m_lastRequestedRemoteMode == desired &&
-            (now - m_lastRemoteModeRequest) < std::chrono::milliseconds(600)) {
+        if (!force && m_positionModeRequested &&
+            (now - m_lastPositionModeRequest) < std::chrono::milliseconds(600)) {
             return true;
         }
-        m_lastRequestedRemoteMode = desired;
-        m_lastRemoteModeRequest = now;
+        m_positionModeRequested = true;
+        m_lastPositionModeRequest = now;
     }
 
-    const bool ok = (desired == RemoteFlightMode::Position) ? m_mavlink.SetModePosition() : m_mavlink.SetModeAltitude();
-    if (!ok) {
+    if (!m_mavlink.SetModePosition()) {
         if (err) {
-            *err = std::string("px4 ") + RemoteFlightModeToString(desired) + " rejected";
+            *err = "px4 POSCTL rejected";
         }
         return false;
     }
 
-    std::cout << "[px4] remote manual mode -> " << RemoteFlightModeToString(desired) << "\n";
+    std::cout << "[px4] remote manual mode -> POSCTL\n";
     return true;
 }
 
@@ -401,7 +366,7 @@ void Px4UdpHooks::ManualControlLoop()
         }
 
         if (m_remoteModeRequested.load(std::memory_order_relaxed)) {
-            MaybeSyncRemoteFlightMode(false, nullptr);
+            EnsurePositionMode(false, nullptr);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(50));

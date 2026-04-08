@@ -20,6 +20,7 @@ class MavlinkHooks {
     virtual bool EmergencyStop(std::string *err) = 0;
     virtual bool SetOffboard(std::string *err) = 0;
     virtual bool Hold(std::string *err) = 0;
+    virtual bool Position(std::string *err) = 0;
     virtual bool Land(std::string *err) = 0;
     virtual bool SetMoveGoal(const MoveGoal &goal, std::string *err) = 0;
 };

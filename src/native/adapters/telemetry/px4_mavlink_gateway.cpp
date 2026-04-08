@@ -204,11 +204,6 @@ bool Px4MavlinkGateway::SetModePosition(int ackTimeoutMs, uint8_t targetSystem, 
     return SetModePx4Main(PX4_CUSTOM_MAIN_MODE_POSCTL, ackTimeoutMs, targetSystem, targetComponent);
 }
 
-bool Px4MavlinkGateway::SetModeAltitude(int ackTimeoutMs, uint8_t targetSystem, uint8_t targetComponent)
-{
-    return SetModePx4Main(PX4_CUSTOM_MAIN_MODE_ALTCTL, ackTimeoutMs, targetSystem, targetComponent);
-}
-
 bool Px4MavlinkGateway::Arm(bool doArm, int ackTimeoutMs, uint8_t targetSystem, uint8_t targetComponent)
 {
     uint8_t res = 255;
