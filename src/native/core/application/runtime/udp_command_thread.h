@@ -18,6 +18,7 @@
 namespace smartdrone::core::application {
 
 constexpr uint8_t kCmdPointCloud = 0xF2;
+constexpr uint8_t kCmdHeartbeat = CMD_HEARTBEAT;
 constexpr uint16_t kPointCloudHeaderLen = 4;
 constexpr size_t kMaxTlvPayloadLen = 0xFFFFu;
 constexpr size_t kPointCloudPointStrideBytes = 12u;

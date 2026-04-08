@@ -17,6 +17,9 @@
 namespace smartdrone::core::application {
 namespace {
 
+constexpr auto kHeartbeatPeriod = std::chrono::milliseconds(500);
+constexpr auto kHeartbeatTimeout = std::chrono::seconds(3);
+
 SensorMode ParseRuntimeSensorMode(uint8_t value)
 {
     switch (value) {
@@ -262,8 +265,13 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks &hooks, UnifiedRuntimeCo
             CommandPeerGate peerGate;
             uint8_t rx[2048]{};
             auto lastStateTx = std::chrono::steady_clock::now();
+            auto lastHeartbeatTx = std::chrono::steady_clock::time_point{};
+            auto lastHeartbeatRx = std::chrono::steady_clock::time_point{};
             auto lastRejectedPeerLog = std::chrono::steady_clock::time_point{};
             uint32_t lastSentPointCloudSeq = 0;
+            UdpPeer activePeer{};
+            bool haveHeartbeatPeer = false;
+            bool heartbeatLandTriggered = false;
             while (runningFlag.load()) {
                 UdpPeer peer{};
                 const int n = server.Recv(rx, sizeof(rx), &peer);
@@ -280,9 +288,16 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks &hooks, UnifiedRuntimeCo
                         }
                         continue;
                     }
+                    activePeer = peer;
                     livePose.UpdatePeer(peer);
                     parser.Push(rx, static_cast<size_t>(n));
                     while (auto frame = parser.TryPop()) {
+                        if (frame->cmd == CMD_HEARTBEAT) {
+                            haveHeartbeatPeer = true;
+                            heartbeatLandTriggered = false;
+                            lastHeartbeatRx = now;
+                            continue;
+                        }
                         RouteResult rr{};
                         if (frame->cmd == CMD_RUNTIME_MODE)
                             rr = HandleRuntimeModeFrame(*frame, controller);
@@ -315,6 +330,27 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks &hooks, UnifiedRuntimeCo
                 }
 
                 const auto now = std::chrono::steady_clock::now();
+                if (activePeer.valid && (lastHeartbeatTx.time_since_epoch().count() == 0 ||
+                                         (now - lastHeartbeatTx) >= kHeartbeatPeriod)) {
+                    lastHeartbeatTx = now;
+                    std::vector<uint8_t> heartbeatFrame =
+                        MakeFrame(TLV_VER, kCmdHeartbeat, 0, 0, MonoTimeMs32(), nullptr, 0);
+                    server.SendTo(activePeer, heartbeatFrame.data(), heartbeatFrame.size());
+                }
+                LivePoseState::Snapshot heartbeatSnapshot{};
+                const bool vehicleArmed = livePose.ReadSnapshot(heartbeatSnapshot) && heartbeatSnapshot.armed;
+                if (haveHeartbeatPeer && vehicleArmed && !heartbeatLandTriggered &&
+                    (now - lastHeartbeatRx) > kHeartbeatTimeout) {
+                    heartbeatLandTriggered = true;
+                    std::string err;
+                    if (!hooks.Land(&err)) {
+                        std::cerr << "[udp_cmd] heartbeat timeout land failed: " << err << "\n";
+                    } else {
+                        std::cerr << "[udp_cmd] heartbeat timeout >3s, LAND triggered\n";
+                    }
+                } else if (!vehicleArmed) {
+                    heartbeatLandTriggered = false;
+                }
                 if (now - lastStateTx >= std::chrono::milliseconds(100)) {
                     lastStateTx = now;
                     LivePoseState::Snapshot snap{};
@@ -325,6 +361,7 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks &hooks, UnifiedRuntimeCo
                         payload.push_back(snap.runtimeMode);
                         payload.push_back(snap.slamMode);
                         payload.push_back(snap.trackingState);
+                        payload.push_back(snap.armed ? 1u : 0u);
                         WriteU16Le(payload, snap.resetCounter);
                         WriteU16Le(payload, snap.resetMapCount);
                         WriteF32Le(payload, snap.x);
@@ -334,6 +371,8 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks &hooks, UnifiedRuntimeCo
                         WriteF32Le(payload, snap.qx);
                         WriteF32Le(payload, snap.qy);
                         WriteF32Le(payload, snap.qz);
+                        payload.push_back(snap.px4MainMode);
+                        payload.push_back(snap.px4SubMode);
                         std::vector<uint8_t> stateFrame =
                             MakeFrame(TLV_VER, CMD_STATE, 0, snap.seq, MonoTimeMs32(), payload.data(),
                                       static_cast<uint16_t>(payload.size()));

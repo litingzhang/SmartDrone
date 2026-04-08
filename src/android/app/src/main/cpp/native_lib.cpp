@@ -19,6 +19,7 @@ static constexpr uint8_t CMD_RUNTIME_MODE = 0x30;
 static constexpr uint8_t CMD_RUNTIME_CONFIG = 0x31;
 static constexpr uint8_t CMD_GET_CAPABILITIES = 0x33;
 static constexpr uint8_t CMD_GET_CONFIG = 0x34;
+static constexpr uint8_t CMD_HEARTBEAT = 0xF5;
 static constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
 static constexpr uint8_t MOVE_FLAG_RC_JOYSTICK = 0x02;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
@@ -149,6 +150,15 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendGetC
     std::lock_guard<std::mutex> lock(g_mutex);
     const uint32_t seq = g_seqCounter.fetch_add(1);
     const std::vector<uint8_t> frame = MakeFrame(1, CMD_GET_CONFIG, 0, seq, NowMs32(), nullptr, 0);
+    const bool ok = g_udpClient.Send(frame.data(), frame.size());
+    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+}
+
+extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendHeartbeat(JNIEnv *, jclass)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const uint32_t seq = g_seqCounter.fetch_add(1);
+    const std::vector<uint8_t> frame = MakeFrame(1, CMD_HEARTBEAT, 0, seq, NowMs32(), nullptr, 0);
     const bool ok = g_udpClient.Send(frame.data(), frame.size());
     return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
 }

@@ -27,6 +27,12 @@ import com.example.smartdrone.R;
 import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -57,6 +63,7 @@ public class MainActivity extends Activity {
     private static final int CMD_POINT_CLOUD = 0xF2;
     private static final int CMD_CAPABILITIES = 0xF3;
     private static final int CMD_CONFIG = 0xF4;
+    private static final int CMD_HEARTBEAT = 0xF5;
 
     private static final int MODE_IDLE = 0;
     private static final int MODE_SLAM = 1;
@@ -68,6 +75,20 @@ public class MainActivity extends Activity {
     private static final int SLAM_MODE_MAPPING = 0;
     private static final int SLAM_MODE_LOCALIZATION = 1;
     private static final int SLAM_MODE_AUTO = 4;
+    private static final int PX4_MAIN_MODE_MANUAL = 1;
+    private static final int PX4_MAIN_MODE_ALTCTL = 2;
+    private static final int PX4_MAIN_MODE_POSCTL = 3;
+    private static final int PX4_MAIN_MODE_AUTO = 4;
+    private static final int PX4_MAIN_MODE_ACRO = 5;
+    private static final int PX4_MAIN_MODE_OFFBOARD = 6;
+    private static final int PX4_MAIN_MODE_STABILIZED = 7;
+    private static final int PX4_AUTO_SUB_MODE_READY = 1;
+    private static final int PX4_AUTO_SUB_MODE_TAKEOFF = 2;
+    private static final int PX4_AUTO_SUB_MODE_LOITER = 3;
+    private static final int PX4_AUTO_SUB_MODE_MISSION = 4;
+    private static final int PX4_AUTO_SUB_MODE_RTL = 5;
+    private static final int PX4_AUTO_SUB_MODE_LAND = 6;
+    private static final int PX4_AUTO_SUB_MODE_FOLLOW_TARGET = 8;
     private static final long ACK_PENDING_TIMEOUT_MS = 3000L;
     private static final String PENDING_ARM = "arm";
     private static final String PENDING_EMERGENCY_STOP = "emergency_stop";
@@ -93,6 +114,8 @@ public class MainActivity extends Activity {
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
     private static final long RX_POLL_PERIOD_MS = 5L;
+    private static final long HEARTBEAT_PERIOD_MS = 500L;
+    private static final long HEARTBEAT_TIMEOUT_MS = 3000L;
     private static final float BUTTON_AXIS_MAGNITUDE = 0.6f;
     private static final float BUTTON_MAX_SPEED_MPS = 3.0f;
     private static final int VIDEO_MAGIC = 0x5643494D;
@@ -110,6 +133,11 @@ public class MainActivity extends Activity {
     private static final int SSH_CONNECT_TIMEOUT_MS = 4000;
     private static final int SSH_COMMAND_TIMEOUT_MS = 4000;
     private static final String SSH_KILL_COMMAND = "pkill -f '(^|/)smart_drone( |$)' || pkill -x smart_drone";
+    private static final int DEFAULT_CMD_PORT = 14550;
+    private static final int DEFAULT_PHONE_VIDEO_PORT = 5000;
+    private static final int DISCOVERY_PORT = 15000;
+    private static final int DISCOVERY_SOCKET_TIMEOUT_MS = 1000;
+    private static final String DISCOVERY_MAGIC = "smartdrone_discovery";
     private static final String[] DEFAULT_VEHICLE_IPS = new String[] {"10.42.0.1", "192.168.0.105"};
     private ImageView m_ivVideoLeft;
     private ImageView m_ivVideoRight;
@@ -179,15 +207,24 @@ public class MainActivity extends Activity {
     private boolean m_joystickLoopRunning;
     private boolean m_lastJoystickActive;
     private boolean m_settingsVisible = false;
-    private boolean m_debugVisible = false;
-    private boolean m_remoteVisible = false;
+    private boolean m_debugVisible = true;
+    private boolean m_remoteVisible = true;
     private boolean m_updatingToggleUi = false;
     private boolean m_updatingConfigUi = false;
     private boolean m_rxLoopRunning;
+    private boolean m_heartbeatLoopRunning;
+    private volatile boolean m_discoveryLoopRunning;
+    private Thread m_discoveryThread;
+    private boolean m_udpReady = false;
     private int m_runtimeMode = MODE_IDLE;
     private String m_vehicleIp = "10.42.0.1";
+    private String m_lastDiscoveredVehicleIp = "";
+    private int m_vehicleCmdPort = DEFAULT_CMD_PORT;
+    private int m_phoneVideoPort = DEFAULT_PHONE_VIDEO_PORT;
     private boolean m_armLatched = false;
     private String m_lastFlightCommand = "";
+    private int m_px4MainMode = 0;
+    private int m_px4SubMode = 0;
     private int m_sensorMode = SENSOR_STEREO;
     private int m_cfgExposureUs = 3000;
     private int m_cfgGain = 2;
@@ -213,6 +250,8 @@ public class MainActivity extends Activity {
     private boolean m_sendFeature = false;
     private boolean m_sendMap = false;
     private boolean m_showFeaturePoints = false;
+    private long m_lastVehicleHeartbeatMs = 0L;
+    private boolean m_vehicleHeartbeatTimeoutHandled = false;
     private boolean m_supportsCalib = true;
     private boolean m_supportsStereoImu = true;
     private boolean m_supportsMono = true;
@@ -278,6 +317,12 @@ public class MainActivity extends Activity {
     private final DisplayFrame[] m_displayFrames = new DisplayFrame[] {new DisplayFrame(), new DisplayFrame()};
     private final FeatureFrame[] m_featureFrames = new FeatureFrame[] {new FeatureFrame(), new FeatureFrame()};
 
+    private static final class DiscoveryAnnouncement {
+        String vehicleIp = "";
+        int cmdPort = DEFAULT_CMD_PORT;
+        int videoPort = DEFAULT_PHONE_VIDEO_PORT;
+    }
+
     private final Runnable m_joystickLoop = new Runnable() {
         @Override public void run()
         {
@@ -297,6 +342,17 @@ public class MainActivity extends Activity {
             }
             tickRxLoop();
             m_handler.postDelayed(this, RX_POLL_PERIOD_MS);
+        }
+    };
+
+    private final Runnable m_heartbeatLoop = new Runnable() {
+        @Override public void run()
+        {
+            if (!m_heartbeatLoopRunning) {
+                return;
+            }
+            tickHeartbeatLoop();
+            m_handler.postDelayed(this, HEARTBEAT_PERIOD_MS);
         }
     };
 
@@ -327,6 +383,101 @@ public class MainActivity extends Activity {
     }
 
     private static int clampInt(int value, int min, int max) { return Math.max(min, Math.min(max, value)); }
+
+    private static String px4ModeToText(int mainMode, int subMode)
+    {
+        switch (mainMode) {
+        case PX4_MAIN_MODE_MANUAL:
+            return "MANUAL";
+        case PX4_MAIN_MODE_ALTCTL:
+            return "ALTCTL";
+        case PX4_MAIN_MODE_POSCTL:
+            return "POSCTL";
+        case PX4_MAIN_MODE_AUTO:
+            switch (subMode) {
+            case PX4_AUTO_SUB_MODE_READY:
+                return "AUTO.READY";
+            case PX4_AUTO_SUB_MODE_TAKEOFF:
+                return "AUTO.TAKEOFF";
+            case PX4_AUTO_SUB_MODE_LOITER:
+                return "AUTO.LOITER";
+            case PX4_AUTO_SUB_MODE_MISSION:
+                return "AUTO.MISSION";
+            case PX4_AUTO_SUB_MODE_RTL:
+                return "AUTO.RTL";
+            case PX4_AUTO_SUB_MODE_LAND:
+                return "AUTO.LAND";
+            case PX4_AUTO_SUB_MODE_FOLLOW_TARGET:
+                return "AUTO.FOLLOW";
+            default:
+                return "AUTO(" + subMode + ")";
+            }
+        case PX4_MAIN_MODE_ACRO:
+            return "ACRO";
+        case PX4_MAIN_MODE_OFFBOARD:
+            return "OFFBOARD";
+        case PX4_MAIN_MODE_STABILIZED:
+            return "STABILIZED";
+        default:
+            return mainMode > 0 ? ("MODE(" + mainMode + ":" + subMode + ")") : "UNKNOWN";
+        }
+    }
+
+    private boolean isPx4LandMode()
+    {
+        return m_px4MainMode == PX4_MAIN_MODE_AUTO && m_px4SubMode == PX4_AUTO_SUB_MODE_LAND;
+    }
+
+    private boolean isPx4PositionMode()
+    {
+        return m_px4MainMode == PX4_MAIN_MODE_POSCTL;
+    }
+
+    private static int parseIntOrDefault(String text, int defaultValue)
+    {
+        try {
+            return Integer.parseInt(text);
+        } catch (Throwable ignored) {
+            return defaultValue;
+        }
+    }
+
+    private static DiscoveryAnnouncement parseDiscoveryAnnouncement(byte[] data, int len, InetAddress sourceAddress)
+    {
+        if (data == null || len <= 0 || sourceAddress == null) {
+            return null;
+        }
+        final String text = new String(data, 0, len, StandardCharsets.UTF_8).trim();
+        if (text.isEmpty() || !text.contains(DISCOVERY_MAGIC)) {
+            return null;
+        }
+        DiscoveryAnnouncement out = new DiscoveryAnnouncement();
+        out.vehicleIp = sourceAddress.getHostAddress();
+        String[] fields = text.split(";");
+        for (String rawField : fields) {
+            String field = rawField != null ? rawField.trim() : "";
+            if (field.isEmpty()) {
+                continue;
+            }
+            int eq = field.indexOf('=');
+            if (eq <= 0 || eq >= field.length() - 1) {
+                continue;
+            }
+            String key = field.substring(0, eq).trim().toLowerCase(Locale.US);
+            String value = field.substring(eq + 1).trim();
+            if ("ip".equals(key) && !value.isEmpty()) {
+                out.vehicleIp = value;
+            } else if ("cmd".equals(key)) {
+                out.cmdPort = parseIntOrDefault(value, DEFAULT_CMD_PORT);
+            } else if ("video".equals(key)) {
+                out.videoPort = parseIntOrDefault(value, DEFAULT_PHONE_VIDEO_PORT);
+            }
+        }
+        if (out.vehicleIp.isEmpty()) {
+            return null;
+        }
+        return out;
+    }
 
     private static int quantizeExposureUs(int exposureUs)
     {
@@ -413,11 +564,14 @@ public class MainActivity extends Activity {
             return false;
         }
         final int payloadLen = readFramePayloadLen(rx);
-        if ((payloadLen != 34 && payloadLen != 35) || rx.length < 17 + payloadLen) {
+        if ((payloadLen != 34 && payloadLen != 35 && payloadLen != 36 && payloadLen != 38) || rx.length < 17 + payloadLen) {
             return false;
         }
         final int payloadOffset = 15;
-        final int poseOffset = payloadLen >= 35 ? payloadOffset + 7 : payloadOffset + 6;
+        final int trackingOffset = payloadLen >= 35 ? payloadOffset + 2 : payloadOffset + 1;
+        final int armedOffset = payloadLen >= 36 ? trackingOffset + 1 : -1;
+        final int resetBaseOffset = armedOffset >= 0 ? (armedOffset + 1) : (trackingOffset + 1);
+        final int poseOffset = payloadLen >= 34 ? resetBaseOffset + 4 : payloadOffset + 4;
         final float x = readLeF32(rx, poseOffset);
         final float y = readLeF32(rx, poseOffset + 4);
         final float z = readLeF32(rx, poseOffset + 8);
@@ -470,6 +624,19 @@ public class MainActivity extends Activity {
         if (m_map3dView != null) {
             m_map3dView.setPointCloud(xyz, actualPointCount);
         }
+        return true;
+    }
+
+    private boolean tryHandleHeartbeatPacket(byte[] rx)
+    {
+        if (rx == null || rx.length < 17) {
+            return false;
+        }
+        if ((rx[0] & 0xFF) != 0xAA || (rx[1] & 0xFF) != 0x55 || (rx[3] & 0xFF) != CMD_HEARTBEAT) {
+            return false;
+        }
+        m_lastVehicleHeartbeatMs = System.currentTimeMillis();
+        m_vehicleHeartbeatTimeoutHandled = false;
         return true;
     }
 
@@ -971,26 +1138,130 @@ public class MainActivity extends Activity {
             m_tvStatus.setText("Vehicle IP is empty");
             return false;
         }
-        if (vehicleIp.equals(m_vehicleIp)) {
+        if (vehicleIp.equals(m_vehicleIp) && m_udpReady) {
             return true;
         }
+        return reconnectVehicle(vehicleIp, m_vehicleCmdPort, m_phoneVideoPort, true);
+    }
+
+    private boolean reconnectVehicle(String vehicleIp, int cmdPort, int videoPort, boolean updateStatus)
+    {
         try {
             NativeUdp.close();
-            boolean ok = NativeUdp.init(vehicleIp, 14550, 5000);
+            m_udpReady = false;
+            boolean ok = NativeUdp.init(vehicleIp, cmdPort, videoPort);
             if (!ok) {
-                m_tvStatus.setText("Reconnect failed: " + vehicleIp);
+                if (updateStatus) {
+                    m_tvStatus.setText("Reconnect failed: " + vehicleIp);
+                }
                 return false;
             }
             m_vehicleIp = vehicleIp;
+            m_vehicleCmdPort = cmdPort;
+            m_phoneVideoPort = videoPort;
+            m_udpReady = true;
+            m_lastVehicleHeartbeatMs = 0L;
+            m_vehicleHeartbeatTimeoutHandled = false;
             try {
                 NativeUdp.sendGetCapabilities();
                 NativeUdp.sendGetConfig();
             } catch (Throwable ignored) {
             }
+            if (updateStatus) {
+                m_tvStatus.setText("UDP ready cmd-> " + vehicleIp + ":" + cmdPort + " video<-" + videoPort);
+            }
             return true;
         } catch (Throwable t) {
-            m_tvStatus.setText("Reconnect error: " + t.getMessage());
+            if (updateStatus) {
+                m_tvStatus.setText("Reconnect error: " + t.getMessage());
+            }
             return false;
+        }
+    }
+
+    private void applyDiscoveredVehicle(DiscoveryAnnouncement announcement)
+    {
+        if (announcement == null || announcement.vehicleIp == null) {
+            return;
+        }
+        final String discoveredIp = announcement.vehicleIp.trim();
+        if (discoveredIp.isEmpty()) {
+            return;
+        }
+        final boolean changed = !discoveredIp.equals(m_vehicleIp) || !m_udpReady || announcement.cmdPort != m_vehicleCmdPort ||
+                                announcement.videoPort != m_phoneVideoPort;
+        m_lastDiscoveredVehicleIp = discoveredIp;
+        if (m_etVehicleIp != null && !discoveredIp.equals(m_etVehicleIp.getText().toString().trim())) {
+            m_etVehicleIp.setText(discoveredIp);
+        }
+        if (!changed) {
+            return;
+        }
+        if (reconnectVehicle(discoveredIp, announcement.cmdPort, announcement.videoPort, false)) {
+            m_tvStatus.setText(
+                "CM5 discovered " + discoveredIp + ", UDP ready cmd-> " + discoveredIp + ":" + announcement.cmdPort +
+                " video<-" + announcement.videoPort);
+            requestRuntimeMetadata();
+        } else {
+            m_tvStatus.setText("CM5 discovered " + discoveredIp + ", reconnect failed");
+        }
+    }
+
+    private void startDiscoveryLoop()
+    {
+        if (m_discoveryLoopRunning) {
+            return;
+        }
+        m_discoveryLoopRunning = true;
+        m_discoveryThread = new Thread(() -> {
+            DatagramSocket socket = null;
+            try {
+                socket = new DatagramSocket(null);
+                socket.setReuseAddress(true);
+                socket.setBroadcast(true);
+                socket.bind(new InetSocketAddress(DISCOVERY_PORT));
+                socket.setSoTimeout(DISCOVERY_SOCKET_TIMEOUT_MS);
+                byte[] buf = new byte[512];
+                while (m_discoveryLoopRunning) {
+                    DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                    try {
+                        socket.receive(packet);
+                    } catch (SocketTimeoutException timeout) {
+                        continue;
+                    }
+                    DiscoveryAnnouncement announcement =
+                        parseDiscoveryAnnouncement(packet.getData(), packet.getLength(), packet.getAddress());
+                    if (announcement == null) {
+                        continue;
+                    }
+                    m_handler.post(() -> applyDiscoveredVehicle(announcement));
+                }
+            } catch (Throwable t) {
+                final String message = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+                m_handler.post(() -> {
+                    if (m_tvStatus != null) {
+                        m_tvStatus.setText("Discovery error: " + message);
+                    }
+                });
+            } finally {
+                if (socket != null) {
+                    socket.close();
+                }
+            }
+        }, "cm5-discovery");
+        m_discoveryThread.start();
+    }
+
+    private void stopDiscoveryLoop()
+    {
+        m_discoveryLoopRunning = false;
+        if (m_discoveryThread != null) {
+            try {
+                m_discoveryThread.join(1500L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            m_discoveryThread = null;
         }
     }
 
@@ -1115,10 +1386,10 @@ public class MainActivity extends Activity {
                            isPending(PENDING_EMERGENCY_STOP), "#B71C1C");
         }
         if (m_btnLand != null) {
-            final boolean landSelected = "LAND".equals(m_lastFlightCommand);
-            final boolean positionSelected = "POSITION".equals(m_lastFlightCommand);
-            m_btnLand.setText(landSelected ? "POSITION" : "LAND");
-            setButtonState(m_btnLand, landSelected || positionSelected, isPending(PENDING_LAND) || isPending(PENDING_POSITION),
+            final boolean landMode = isPx4LandMode();
+            final boolean positionMode = isPx4PositionMode();
+            m_btnLand.setText(landMode ? "POSITION" : "LAND");
+            setButtonState(m_btnLand, landMode || positionMode, isPending(PENDING_LAND) || isPending(PENDING_POSITION),
                            "#EF6C00");
         }
     }
@@ -1661,21 +1932,30 @@ public class MainActivity extends Activity {
         }
         int cmd = rx[3] & 0xFF;
         int len = readU16Le(rx, 5);
-        if (cmd != CMD_STATE || (len != 32 && len != 34 && len != 35) || rx.length < 15 + len + 2) {
+        if (cmd != CMD_STATE || (len != 32 && len != 34 && len != 35 && len != 36 && len != 38) || rx.length < 15 + len + 2) {
             return false;
         }
         int payloadOffset = 15;
         int runtimeMode = rx[payloadOffset] & 0xFF;
         int slamMode = m_effectiveSlamMode;
         int trackingOffset = payloadOffset + 1;
+        int armedOffset = -1;
         if (len >= 35) {
             slamMode = rx[payloadOffset + 1] & 0xFF;
             trackingOffset = payloadOffset + 2;
         }
+        if (len >= 36) {
+            armedOffset = trackingOffset + 1;
+        }
         int trackingState = rx[trackingOffset] & 0xFF;
-        int resetCounter = len >= 34 ? readU16Le(rx, trackingOffset + 1) : 0;
-        int resetMapCount = len >= 34 ? readU16Le(rx, trackingOffset + 3) : 0;
-        int poseOffset = len >= 34 ? trackingOffset + 5 : payloadOffset + 4;
+        if (armedOffset >= 0) {
+            m_armLatched = (rx[armedOffset] & 0xFF) != 0;
+            updateFlightButtons();
+        }
+        int resetBaseOffset = (armedOffset >= 0) ? (armedOffset + 1) : (trackingOffset + 1);
+        int resetCounter = len >= 34 ? readU16Le(rx, resetBaseOffset) : 0;
+        int resetMapCount = len >= 34 ? readU16Le(rx, resetBaseOffset + 2) : 0;
+        int poseOffset = len >= 34 ? resetBaseOffset + 4 : payloadOffset + 4;
         float x = readF32Le(rx, poseOffset);
         float y = readF32Le(rx, poseOffset + 4);
         float z = readF32Le(rx, poseOffset + 8);
@@ -1683,10 +1963,16 @@ public class MainActivity extends Activity {
         float qx = readF32Le(rx, poseOffset + 16);
         float qy = readF32Le(rx, poseOffset + 20);
         float qz = readF32Le(rx, poseOffset + 24);
+        if (len >= 38) {
+            m_px4MainMode = rx[poseOffset + 28] & 0xFF;
+            m_px4SubMode = rx[poseOffset + 29] & 0xFF;
+            updateFlightButtons();
+        }
         if (slamMode == SLAM_MODE_MAPPING || slamMode == SLAM_MODE_LOCALIZATION) {
             m_effectiveSlamMode = slamMode;
             updateQuickSlamModeButtons();
         }
+        final String px4ModeText = px4ModeToText(m_px4MainMode, m_px4SubMode);
         if (m_tvPose != null) {
             if (runtimeMode == MODE_SLAM) {
                 boolean hasValidPose = trackingState == 2 || trackingState == 5;
@@ -1700,13 +1986,15 @@ public class MainActivity extends Activity {
                     qz = Float.NaN;
                 }
                 m_tvPose.setText(String.format(
-                    Locale.US, "Pose %s trk=%s rst=%d map_rst=%d\np[%.2f %.2f %.2f]\nq[%.2f %.2f %.2f %.2f]",
-                    runtimeModeToText(runtimeMode), trackingStateToText(trackingState), resetCounter, resetMapCount, x,
-                    y, z, qw, qx, qy, qz));
+                    Locale.US, "Pose %s px4=%s armed=%s trk=%s rst=%d map_rst=%d\np[%.2f %.2f %.2f]\nq[%.2f %.2f %.2f %.2f]",
+                    runtimeModeToText(runtimeMode), px4ModeText, m_armLatched ? "Y" : "N", trackingStateToText(trackingState),
+                    resetCounter, resetMapCount, x, y, z, qw, qx, qy, qz));
             } else if (runtimeMode == MODE_CALIB) {
-                m_tvPose.setText("Pose hidden in CALIB");
+                m_tvPose.setText(String.format(Locale.US, "Pose hidden in CALIB\npx4=%s armed=%s", px4ModeText,
+                                               m_armLatched ? "Y" : "N"));
             } else {
-                m_tvPose.setText("Pose idle");
+                m_tvPose.setText(String.format(Locale.US, "Pose idle\npx4=%s armed=%s", px4ModeText,
+                                               m_armLatched ? "Y" : "N"));
             }
         }
         return true;
@@ -1925,6 +2213,9 @@ public class MainActivity extends Activity {
             if (tryHandlePointCloudPacket(rx)) {
                 continue;
             }
+            if (tryHandleHeartbeatPacket(rx)) {
+                continue;
+            }
             tryHandleStatePoseForMap(rx);
             if (tryHandleStatePacket(rx)) {
                 continue;
@@ -1943,6 +2234,41 @@ public class MainActivity extends Activity {
             }
         }
         updateVideoStatsView();
+    }
+
+    private void tickHeartbeatLoop()
+    {
+        String vehicleIp = (m_etVehicleIp != null && m_etVehicleIp.getText() != null) ? m_etVehicleIp.getText().toString().trim()
+                                                                                       : "";
+        if (vehicleIp.isEmpty()) {
+            return;
+        }
+        if (!ensureVehicleConnection()) {
+            return;
+        }
+        try {
+            NativeUdp.sendHeartbeat();
+        } catch (Throwable t) {
+            m_tvStatus.setText("heartbeat send error: " + t.getMessage());
+        }
+
+        long nowMs = System.currentTimeMillis();
+        if (m_lastVehicleHeartbeatMs == 0L || (nowMs - m_lastVehicleHeartbeatMs) <= HEARTBEAT_TIMEOUT_MS) {
+            return;
+        }
+        if (!m_armLatched) {
+            m_vehicleHeartbeatTimeoutHandled = false;
+            return;
+        }
+        if (m_vehicleHeartbeatTimeoutHandled) {
+            return;
+        }
+        m_vehicleHeartbeatTimeoutHandled = true;
+        sendSimpleCmd("LAND(heartbeat timeout)", CMD_LAND);
+        m_armLatched = false;
+        m_lastFlightCommand = "LAND";
+        updateFlightButtons();
+        m_tvStatus.setText("Heartbeat timeout >3s, LAND triggered");
     }
 
     private void updateVideoStatsView()
@@ -2038,6 +2364,21 @@ public class MainActivity extends Activity {
         m_handler.removeCallbacks(m_rxLoop);
     }
 
+    private void startHeartbeatLoop()
+    {
+        if (m_heartbeatLoopRunning) {
+            return;
+        }
+        m_heartbeatLoopRunning = true;
+        m_handler.post(m_heartbeatLoop);
+    }
+
+    private void stopHeartbeatLoop()
+    {
+        m_heartbeatLoopRunning = false;
+        m_handler.removeCallbacks(m_heartbeatLoop);
+    }
+
     private void setSettingsVisible(boolean visible)
     {
         if (m_pageCommand == null) {
@@ -2062,6 +2403,9 @@ public class MainActivity extends Activity {
         m_map3dView = findViewById(R.id.map3dView);
         m_tvStatus = findViewById(R.id.tvStatus);
         m_tvPose = findViewById(R.id.tvPose);
+        if (m_tvPose != null) {
+            m_tvPose.setText("Waiting for vehicle pose...");
+        }
         m_tvVideoStats = findViewById(R.id.tvVideoStats);
         m_tvJoystickState = findViewById(R.id.tvJoystickState);
         m_debugPanel = findViewById(R.id.debugPanel);
@@ -2126,9 +2470,11 @@ public class MainActivity extends Activity {
         m_btnRightRight = findViewById(R.id.btnRightRight);
 
         final String cm5Ip = "10.42.0.1";
-        final int cm5CmdPort = 14550;
-        final int phoneVideoPort = 5000;
+        final int cm5CmdPort = DEFAULT_CMD_PORT;
+        final int phoneVideoPort = DEFAULT_PHONE_VIDEO_PORT;
         m_vehicleIp = cm5Ip;
+        m_vehicleCmdPort = cm5CmdPort;
+        m_phoneVideoPort = phoneVideoPort;
         if (m_etVehicleIp != null) {
             m_etVehicleIp.setText(cm5Ip);
         }
@@ -2143,14 +2489,21 @@ public class MainActivity extends Activity {
             ok = NativeUdp.init(cm5Ip, cm5CmdPort, phoneVideoPort);
         } catch (Throwable t) {
             ok = false;
+            m_udpReady = false;
             m_tvStatus.setText("Native init error: " + t.getMessage());
         }
         if (ok) {
+            m_udpReady = true;
             m_tvStatus.setText("UDP ready cmd-> " + cm5Ip + ":" + cm5CmdPort + " video<-" + phoneVideoPort);
+            m_lastVehicleHeartbeatMs = 0L;
+            m_vehicleHeartbeatTimeoutHandled = false;
+        } else {
+            m_udpReady = false;
         }
         if (ok) {
             requestRuntimeMetadata();
         }
+        startDiscoveryLoop();
 
         if (m_sbCfgExposure != null) {
             m_sbCfgExposure.setMax((EXPOSURE_MAX_US - EXPOSURE_MIN_US) / EXPOSURE_STEP_US);
@@ -2347,8 +2700,8 @@ public class MainActivity extends Activity {
         m_btnModeToggle.setOnClickListener(v -> setSettingsVisible(!m_settingsVisible));
         if (savedInstanceState != null) {
             m_settingsVisible = savedInstanceState.getBoolean(KEY_SETTINGS_VISIBLE, false);
-            m_debugVisible = savedInstanceState.getBoolean(KEY_DEBUG_VISIBLE, false);
-            m_remoteVisible = savedInstanceState.getBoolean(KEY_REMOTE_VISIBLE, false);
+            m_debugVisible = savedInstanceState.getBoolean(KEY_DEBUG_VISIBLE, true);
+            m_remoteVisible = savedInstanceState.getBoolean(KEY_REMOTE_VISIBLE, true);
         }
         setSettingsVisible(m_settingsVisible);
         updateDebugPanelVisibility();
@@ -2374,11 +2727,14 @@ public class MainActivity extends Activity {
         }
         if (m_btnLand != null) {
             m_btnLand.setOnClickListener(v -> {
-                final boolean sendPosition = "LAND".equals(m_lastFlightCommand);
+                final boolean sendPosition = isPx4LandMode();
                 final String nextLabel = sendPosition ? "POSITION" : "LAND";
                 final int nextCmd = sendPosition ? CMD_POSITION : CMD_LAND;
                 final String pendingKey = sendPosition ? PENDING_POSITION : PENDING_LAND;
                 sendSimpleCmdAwaitAck(nextLabel, nextCmd, pendingKey, () -> {
+                    if ("LAND".equals(nextLabel)) {
+                        m_armLatched = false;
+                    }
                     m_lastFlightCommand = nextLabel;
                     updateFlightButtons();
                 });
@@ -2476,6 +2832,7 @@ public class MainActivity extends Activity {
 
         startJoystickLoop();
         startRxLoop();
+        startHeartbeatLoop();
     }
 
     @Override protected void onResume()
@@ -2488,11 +2845,14 @@ public class MainActivity extends Activity {
 
     @Override protected void onDestroy()
     {
+        stopDiscoveryLoop();
         stopRxLoop();
         stopJoystickLoop();
+        stopHeartbeatLoop();
         super.onDestroy();
         try {
             NativeUdp.close();
+            m_udpReady = false;
         } catch (Throwable ignored) {
         }
     }

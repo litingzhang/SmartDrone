@@ -8,6 +8,7 @@
 
 #include "adapters/camera/libcamera_ov9281/stereo_ov9281.h"
 #include "adapters/telemetry/px4_mavlink_gateway.h"
+#include "common/discovery/udp_discovery_beacon.h"
 #include "common/tlv/udp_server.h"
 #include "core/application/runtime/payload_builders.h"
 #include "core/application/runtime/px4_udp_hooks.h"
@@ -30,6 +31,7 @@ using MainRuntimeAliases = smartdrone::core::application::MainRuntimeAliases;
 using Px4UdpHooks = smartdrone::core::application::Px4UdpHooks;
 using UnifiedConfig = smartdrone::core::application::UnifiedConfig;
 using UnifiedRuntimeController = smartdrone::core::application::UnifiedRuntimeController;
+constexpr int kDiscoveryPort = 15000;
 
 ControllerMode ParseAutoMode(std::string autoModeText)
 {
@@ -84,6 +86,8 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
             return smartdrone::core::application::BuildConfigPayload(currentConfig, currentMode);
         },
         [](const UdpPeer &peer) { return UdpPeerToIpString(peer); });
+    std::thread discoveryThread = smartdrone::common::discovery::StartUdpDiscoveryBeaconThread(
+        kDiscoveryPort, aliases.cmdPort, aliases.udpPort, g_runningFlag);
 
     while (g_runningFlag.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -92,6 +96,9 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
     controller.Stop();
     mav.StopSetpointStream();
     mav.StopRx();
+    if (discoveryThread.joinable()) {
+        discoveryThread.join();
+    }
     if (udpCmdThread.joinable()) {
         udpCmdThread.join();
     }

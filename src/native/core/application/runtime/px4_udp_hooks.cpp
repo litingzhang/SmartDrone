@@ -359,6 +359,11 @@ void Px4UdpHooks::UpdateAutoLanding()
 void Px4UdpHooks::ManualControlLoop()
 {
     while (!m_manualLoopStop.load(std::memory_order_relaxed)) {
+        Px4MavlinkGateway::FlightModeInfo flightMode{};
+        if (m_mavlink.GetFlightModeInfo(flightMode)) {
+            m_livePose.SetVehicleFlightState(flightMode.armed, flightMode.mainMode, flightMode.subMode);
+        }
+
         UpdateAutoLanding();
 
         if (m_manualControlStreaming.load(std::memory_order_relaxed)) {

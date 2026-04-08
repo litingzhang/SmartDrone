@@ -17,6 +17,7 @@ public class NativeUdp {
     public static native int sendRuntimeMode(int mode);
     public static native int sendGetCapabilities();
     public static native int sendGetConfig();
+    public static native int sendHeartbeat();
     public static native int sendRuntimeConfig(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
                                                int sensorMode, boolean sendImage, boolean sendFeature, boolean sendMap);
     public static native byte[] pollRecv();

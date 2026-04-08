@@ -35,6 +35,15 @@ void LivePoseState::SetSlamMode(uint8_t mode)
     dirty = true;
 }
 
+void LivePoseState::SetVehicleFlightState(bool armedIn, uint8_t px4MainModeIn, uint8_t px4SubModeIn)
+{
+    std::lock_guard<std::mutex> lock(mu);
+    armed = armedIn;
+    px4MainMode = px4MainModeIn;
+    px4SubMode = px4SubModeIn;
+    dirty = true;
+}
+
 void LivePoseState::UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCounterIn, uint16_t resetMapCountIn,
                                const Px4MavlinkGateway::Pose &p, OdomQualityMode quality)
 {
@@ -76,6 +85,9 @@ bool LivePoseState::ConsumeSnapshot(Snapshot &out)
     out.runtimeMode = runtimeMode;
     out.slamMode = slamMode;
     out.trackingState = trackingState;
+    out.armed = armed;
+    out.px4MainMode = px4MainMode;
+    out.px4SubMode = px4SubMode;
     out.odomQuality = odomQuality;
     out.resetCounter = resetCounter;
     out.resetMapCount = resetMapCount;
@@ -106,6 +118,9 @@ bool LivePoseState::ReadSnapshot(Snapshot &out) const
     out.runtimeMode = runtimeMode;
     out.slamMode = slamMode;
     out.trackingState = trackingState;
+    out.armed = armed;
+    out.px4MainMode = px4MainMode;
+    out.px4SubMode = px4SubMode;
     out.odomQuality = odomQuality;
     out.resetCounter = resetCounter;
     out.resetMapCount = resetMapCount;

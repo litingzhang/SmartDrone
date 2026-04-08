@@ -29,6 +29,7 @@ enum TlvCmd : uint8_t {
     CMD_STATE = 0xF1,
     CMD_CAPABILITIES = 0xF3,
     CMD_CONFIG = 0xF4,
+    CMD_HEARTBEAT = 0xF5,
 };
 
 // MOVE payload layout legacy (len=21):
@@ -59,12 +60,15 @@ constexpr uint16_t RUNTIME_CONFIG_SLAM_MODE_OFFSET = 42;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
-// STATE payload v2:
-// runtimeMode(u8) slamMode(u8) trackingState(u8) resetCounter(u16le) resetMapCount(u16le)
-// x/y/z/qw/qx/qy/qz (7 * f32le)
+// STATE payload v4:
+// runtimeMode(u8) slamMode(u8) trackingState(u8) armed(u8) resetCounter(u16le) resetMapCount(u16le)
+// x/y/z/qw/qx/qy/qz (7 * f32le) px4MainMode(u8) px4SubMode(u8)
+// legacy v3 omitted px4 mode fields and was 36 bytes; legacy v2 omitted armed and was 35 bytes;
 // legacy v1 omitted slamMode and was 34 bytes.
 constexpr uint16_t STATE_POSE_PAYLOAD_LEN_LEGACY = 34;
-constexpr uint16_t STATE_POSE_PAYLOAD_LEN = 35;
+constexpr uint16_t STATE_POSE_PAYLOAD_LEN_V2 = 35;
+constexpr uint16_t STATE_POSE_PAYLOAD_LEN_V3 = 36;
+constexpr uint16_t STATE_POSE_PAYLOAD_LEN = 38;
 
 enum RuntimeMode : uint8_t {
     RUNTIME_MODE_IDLE = 0,

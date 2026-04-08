@@ -19,6 +19,9 @@ struct LivePoseState {
         uint8_t runtimeMode{RUNTIME_MODE_IDLE};
         uint8_t slamMode{RUNTIME_SLAM_MODE_MAPPING};
         uint8_t trackingState{0xFF};
+        bool armed{false};
+        uint8_t px4MainMode{0};
+        uint8_t px4SubMode{0};
         OdomQualityMode odomQuality{OdomQualityMode::LOST};
         uint16_t resetCounter{0};
         uint16_t resetMapCount{0};
@@ -32,6 +35,7 @@ struct LivePoseState {
     void UpdatePeer(const UdpPeer &peer);
     void SetRuntimeMode(uint8_t mode);
     void SetSlamMode(uint8_t mode);
+    void SetVehicleFlightState(bool armedIn, uint8_t px4MainModeIn, uint8_t px4SubModeIn);
     void UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCounterIn, uint16_t resetMapCountIn,
                     const Px4MavlinkGateway::Pose &p, OdomQualityMode quality);
     void UpdatePointCloud(std::vector<float> xyz);
@@ -45,6 +49,9 @@ struct LivePoseState {
     uint8_t runtimeMode{RUNTIME_MODE_IDLE};
     uint8_t slamMode{RUNTIME_SLAM_MODE_MAPPING};
     uint8_t trackingState{0xFF};
+    bool armed{false};
+    uint8_t px4MainMode{0};
+    uint8_t px4SubMode{0};
     OdomQualityMode odomQuality{OdomQualityMode::LOST};
     uint16_t resetCounter{0};
     uint16_t resetMapCount{0};
