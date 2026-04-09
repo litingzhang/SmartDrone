@@ -22,7 +22,7 @@ struct RemoteRuntimeConfig {
     int exposureUs{3000};
     float gain{2.0f};
     int pairMs{2};
-    bool autoExposureEnabled{false};
+    bool autoExposureEnabled{true};
     int slamInputFps{0};
     domain::SlamOperationMode slamOperationMode{domain::SlamOperationMode::Mapping};
     std::string udpIp;

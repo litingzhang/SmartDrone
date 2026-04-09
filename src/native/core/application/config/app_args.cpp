@@ -223,7 +223,13 @@ AppConfig ParseAppConfig(int argc, char **argv)
     if (argReader.HasFlag("--swap-cams")) {
         std::swap(config.camera.leftCamIndex, config.camera.rightCamIndex);
     }
-    config.camera.aeDisable = !argReader.HasFlag("--ae");
+    config.camera.aeDisable = false;
+    if (argReader.HasFlag("--no-ae")) {
+        config.camera.aeDisable = true;
+    }
+    if (argReader.HasFlag("--ae")) {
+        config.camera.aeDisable = false;
+    }
     config.camera.exposureUs = argReader.GetInt("--exp-us", 5000);
     config.camera.gain = argReader.GetFloat("--gain", 2.0f);
     config.camera.requestY8 = !argReader.HasFlag("--no-y8");

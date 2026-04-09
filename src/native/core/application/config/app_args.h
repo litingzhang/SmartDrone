@@ -28,7 +28,7 @@ struct CameraConfig {
     int fps{60};
     int leftCamIndex{0};
     int rightCamIndex{1};
-    bool aeDisable{true};
+    bool aeDisable{false};
     int exposureUs{5000};
     float gain{2.0f};
     bool requestY8{true};

@@ -229,7 +229,7 @@ public class MainActivity extends Activity {
     private int m_sensorMode = SENSOR_STEREO;
     private int m_cfgExposureUs = 3000;
     private int m_cfgGain = 2;
-    private boolean m_cfgAutoExposure = false;
+    private boolean m_cfgAutoExposure = true;
     private int m_cfgPairMs = 5;
     private int m_cfgSlamFps = SLAM_FPS_DEFAULT;
     private int m_cfgSlamMode = SLAM_MODE_MAPPING;

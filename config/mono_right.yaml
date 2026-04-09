@@ -19,11 +19,11 @@ Camera1.p2: -0.0008298335755836476
 
 System.thFarPoints: 8.0
 
-ORBextractor.nFeatures: 1100
+ORBextractor.nFeatures: 1300
 ORBextractor.scaleFactor: 1.2
 ORBextractor.nLevels: 8
-ORBextractor.iniThFAST: 18
-ORBextractor.minThFAST: 5
+ORBextractor.iniThFAST: 15
+ORBextractor.minThFAST: 4
 
 Viewer.KeyFrameSize: 0.05
 Viewer.KeyFrameLineWidth: 1.0

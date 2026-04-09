@@ -89,6 +89,7 @@ class LibcameraMonoCam {
     std::function<void(FrameItem &&)> m_sink;
     mutable std::mutex m_sinkMu;
     bool m_r16Normalize{false};
+    bool m_aeConfiguredAuto{false};
     std::atomic<bool> m_active{false};
     std::atomic<bool> m_streamFault{false};
     std::mutex m_framePoolMu;

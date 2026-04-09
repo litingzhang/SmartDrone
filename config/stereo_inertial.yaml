@@ -48,11 +48,11 @@ IMU.NoiseAcc: 0.015
 IMU.GyroWalk: 0.0002
 IMU.AccWalk: 0.0003
 
-ORBextractor.nFeatures: 700
+ORBextractor.nFeatures: 900
 ORBextractor.scaleFactor: 1.2
 ORBextractor.nLevels: 8
-ORBextractor.iniThFAST: 22
-ORBextractor.minThFAST: 8
+ORBextractor.iniThFAST: 18
+ORBextractor.minThFAST: 6
 
 Viewer.KeyFrameSize: 0.05
 Viewer.KeyFrameLineWidth: 1.0

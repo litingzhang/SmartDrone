@@ -197,6 +197,7 @@ bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex
     const int32_t exposureCapUs =
         static_cast<int32_t>(std::max<int64_t>(1, std::min<int64_t>(kSlamAeMaxExposureUs, frameDurationUs - 500)));
     const float gainCap = kSlamAeMaxGain;
+    m_aeConfiguredAuto = !aeDisable;
 
     if (aeDisable) {
         const int32_t manualExposureUs = std::max<int32_t>(1, std::min<int32_t>(exposureUs, exposureCapUs));
@@ -495,8 +496,13 @@ void LibcameraMonoCam::OnRequestComplete(libcamera::Request *req)
         const std::optional<int32_t> metaExposureUs = meta.get(libcamera::controls::ExposureTime);
         const std::optional<float> metaGain = meta.get(libcamera::controls::AnalogueGain);
         const std::optional<bool> metaAe = meta.get(libcamera::controls::AeEnable);
+        const char *metaAeText = "na";
+        if (metaAe.has_value()) {
+            metaAeText = *metaAe ? "1" : "0";
+        }
         std::cerr << "[cam_isp] cam=" << m_camIndex << " seq=" << md.sequence
-                  << " ae=" << ((metaAe.has_value() && *metaAe) ? 1 : 0)
+                  << " ae_cfg=" << (m_aeConfiguredAuto ? "auto" : "manual")
+                  << " ae_meta=" << metaAeText
                   << " exp_us=" << (metaExposureUs.has_value() ? *metaExposureUs : -1)
                   << " gain=" << (metaGain.has_value() ? *metaGain : -1.0f) << "\n";
         if (metaExposureUs.has_value() && *metaExposureUs > kSlamAeMaxExposureUs) {
