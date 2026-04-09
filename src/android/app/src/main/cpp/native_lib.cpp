@@ -26,7 +26,7 @@ static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
 static constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
-static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 43;
+static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 44;
 
 static uint32_t NowMs32()
 {
@@ -165,7 +165,7 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendHear
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRuntimeConfig(
     JNIEnv *, jclass, jint exposureUs, jfloat gain, jint pairMs, jint slamFps, jint slamMode, jint sensorMode,
-    jboolean sendImage, jboolean sendFeature, jboolean sendMap)
+    jboolean sendImage, jboolean sendFeature, jboolean sendMap, jboolean autoExposure)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     const uint32_t seq = g_seqCounter.fetch_add(1);
@@ -188,6 +188,7 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
     payload[40] = static_cast<uint8_t>(slamFpsValue & 0xFF);
     payload[41] = static_cast<uint8_t>((slamFpsValue >> 8) & 0xFF);
     payload[42] = static_cast<uint8_t>(slamMode);
+    payload[43] = static_cast<uint8_t>(autoExposure == JNI_TRUE ? 1 : 0);
 
     const std::vector<uint8_t> frame =
         MakeFrame(1, CMD_RUNTIME_CONFIG, 0, seq, NowMs32(), payload.data(), static_cast<uint16_t>(payload.size()));

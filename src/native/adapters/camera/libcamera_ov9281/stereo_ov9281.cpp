@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <optional>
+#include <string_view>
 
 #include <sys/mman.h>
 #include <time.h>
@@ -32,6 +34,26 @@ int64_t NowNs()
     timespec ts{};
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return int64_t(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+}
+
+bool SetControlIfSupported(libcamera::Camera *camera, libcamera::ControlList &controls, const char *name,
+                           const libcamera::ControlValue &value)
+{
+    if (!camera || !name || name[0] == '\0') {
+        return false;
+    }
+    const libcamera::ControlInfoMap &controlMap = camera->controls();
+    for (const auto &[id, info] : controlMap) {
+        (void)info;
+        if (!id) {
+            continue;
+        }
+        if (std::string_view(id->name()) == name) {
+            controls.set(id->id(), value);
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -84,7 +106,18 @@ bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex
         m_controls.set(libcamera::controls::AeEnable, false);
         m_controls.set(libcamera::controls::ExposureTime, exposureUs);
         m_controls.set(libcamera::controls::AnalogueGain, gain);
+    } else {
+        // Explicitly hand exposure/gain back to libcamera ISP auto-control path.
+        m_controls.set(libcamera::controls::AeEnable, true);
     }
+
+    // Prefer ISP-side conservative image processing tuned for SLAM stability.
+    const bool nrSet = SetControlIfSupported(m_cam.get(), m_controls, "NoiseReductionMode", libcamera::ControlValue(1));
+    const bool sharpSet = SetControlIfSupported(m_cam.get(), m_controls, "Sharpness", libcamera::ControlValue(0.0f));
+    const bool tonemapSet = SetControlIfSupported(m_cam.get(), m_controls, "TonemapMode", libcamera::ControlValue(0));
+    std::cerr << "[cam] isp_hint cam=" << m_camIndex << " ae=" << (aeDisable ? "manual" : "auto")
+              << " nr=" << (nrSet ? "set" : "n/a") << " sharp=" << (sharpSet ? "set" : "n/a")
+              << " tonemap=" << (tonemapSet ? "set" : "n/a") << "\n";
 
     if (m_config->validate() == libcamera::CameraConfiguration::Invalid) {
         std::cerr << "Invalid camera configuration\n";
@@ -348,12 +381,23 @@ void LibcameraMonoCam::OnRequestComplete(libcamera::Request *req)
     }
     libcamera::FrameBuffer *buf = it->second;
     const libcamera::FrameMetadata &md = buf->metadata();
+    const libcamera::ControlList &meta = req->metadata();
 
     FrameItem item;
     item.camIndex = m_camIndex;
     item.arriveNs = NowNs();
     item.tsNs = md.timestamp;
     item.seq = md.sequence;
+
+    if ((md.sequence % 120u) == 0u) {
+        const std::optional<int32_t> metaExposureUs = meta.get(libcamera::controls::ExposureTime);
+        const std::optional<float> metaGain = meta.get(libcamera::controls::AnalogueGain);
+        const std::optional<bool> metaAe = meta.get(libcamera::controls::AeEnable);
+        std::cerr << "[cam_isp] cam=" << m_camIndex << " seq=" << md.sequence
+                  << " ae=" << ((metaAe.has_value() && *metaAe) ? 1 : 0)
+                  << " exp_us=" << (metaExposureUs.has_value() ? *metaExposureUs : -1)
+                  << " gain=" << (metaGain.has_value() ? *metaGain : -1.0f) << "\n";
+    }
 
     const libcamera::StreamConfiguration &sc = m_config->at(0);
     const int w = sc.size.width;

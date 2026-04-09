@@ -43,20 +43,23 @@ constexpr uint8_t MOVE_FLAG_VELOCITY = 0x01;
 constexpr uint16_t MOVE_RC_PAYLOAD_LEN = 21;
 constexpr uint8_t MOVE_FLAG_RC_JOYSTICK = 0x02;
 constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
-// RUNTIME_CONFIG payload v3 (len=43):
+// RUNTIME_CONFIG payload v4 (len=44):
 // exposureUs(u32le) gain(f32le) sensorMode(u8) streamFlags(u8) pairMs(u16le) reservedOrIp[30]
 // reservedOrIp keeps backward compatibility with the legacy sender IP field.
 // v2 additionally stores slamInputFps(u16le) at the tail bytes [40,41].
 // v3 additionally stores slamOperationMode(u8) at byte [42].
+// v4 additionally stores autoExposureEnabled(u8) at byte [43] (1=AE on, 0=manual exposure/gain).
 // legacy v1 (len=40) omitted pairMs and started reservedOrIp at byte 10.
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY = 40;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V2 = 42;
-constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 43;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V3 = 43;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 44;
 constexpr uint16_t RUNTIME_CONFIG_PAIR_MS_OFFSET = 10;
 constexpr uint16_t RUNTIME_CONFIG_IP_OFFSET = 12;
 constexpr uint16_t RUNTIME_CONFIG_IP_LEN = 30;
 constexpr uint16_t RUNTIME_CONFIG_SLAM_FPS_OFFSET = 40;
 constexpr uint16_t RUNTIME_CONFIG_SLAM_MODE_OFFSET = 42;
+constexpr uint16_t RUNTIME_CONFIG_AE_OFFSET = 43;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;

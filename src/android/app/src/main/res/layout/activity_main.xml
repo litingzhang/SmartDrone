@@ -561,6 +561,37 @@
                             android:textColor="#667085"
                             android:textSize="10sp" />
 
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Auto Exposure (ISP)"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnAutoExposureToggle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:minWidth="42dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="42dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
                         <TextView
                             android:id="@+id/tvCfgPairMsValue"
                             android:layout_width="match_parent"

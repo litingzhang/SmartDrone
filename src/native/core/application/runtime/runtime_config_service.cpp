@@ -30,8 +30,10 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         const bool sensorModeChanged = m_config.app.sensorMode != remote.sensorMode;
         const bool udpIpChanged = m_config.app.udp.ip != remote.udpIp;
         const bool udpEnableChanged = m_config.app.udp.enable != remote.udpEnabled;
+        const bool aeModeChanged = cam.aeDisable != (!remote.autoExposureEnabled);
         cam.exposureUs = remote.exposureUs;
         cam.gain = remote.gain;
+        cam.aeDisable = !remote.autoExposureEnabled;
         cam.pairMs = remote.pairMs;
         m_config.app.runtime.slamInputFps = remote.slamInputFps;
         m_config.app.runtime.slamOperationMode = remote.slamOperationMode;
@@ -42,7 +44,7 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         m_config.app.udp.sendImage = remote.sendImage;
         m_config.app.udp.sendFeature = remote.sendFeature;
         m_config.app.udp.sendMap = remote.sendMap;
-        restartNeeded = sensorModeChanged || udpIpChanged || udpEnableChanged;
+        restartNeeded = sensorModeChanged || udpIpChanged || udpEnableChanged || aeModeChanged;
     }
 
     m_tuning.slamInputFps.store(remote.slamInputFps, std::memory_order_relaxed);
@@ -75,6 +77,12 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
                 remote.gain = static_cast<float>(*vInt);
             } else {
                 return {false, "camera.gain type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kCameraAutoExposure) {
+            if (const auto *v = std::get_if<bool>(&value)) {
+                remote.autoExposureEnabled = *v;
+            } else {
+                return {false, "camera.auto_exposure type mismatch"};
             }
         } else if (key == ConfigRegistry::kCameraPairWindowMs) {
             if (const auto *v = std::get_if<int64_t>(&value)) {
@@ -152,6 +160,7 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     RemoteRuntimeConfig remote{};
     remote.exposureUs = currentConfig.app.camera.exposureUs;
     remote.gain = currentConfig.app.camera.gain;
+    remote.autoExposureEnabled = !currentConfig.app.camera.aeDisable;
     remote.pairMs = currentConfig.app.camera.pairMs > 0 ? currentConfig.app.camera.pairMs : 1;
     remote.slamInputFps = currentConfig.app.runtime.slamInputFps;
     remote.slamOperationMode = currentConfig.app.runtime.slamOperationMode;

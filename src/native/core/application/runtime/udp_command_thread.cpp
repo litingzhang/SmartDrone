@@ -80,7 +80,8 @@ RouteResult HandleRuntimeModeFrame(const TlvFrame &frame, UnifiedRuntimeControll
 RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer, UnifiedRuntimeController &controller,
                                      const PeerToIpStringFn &peerToIpString)
 {
-    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V2 &&
+    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V3 &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V2 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY) {
         return {ACK_E_BAD_LEN, "bad runtime cfg len"};
     }
@@ -90,6 +91,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     r.exposureUs = static_cast<int>(ReadU32Le(&p[0]));
     r.gain = ReadF32Le(&p[4]);
     r.pairMs = currentCfg.app.camera.pairMs > 0 ? currentCfg.app.camera.pairMs : 1;
+    r.autoExposureEnabled = !currentCfg.app.camera.aeDisable;
     r.slamInputFps = currentCfg.app.runtime.slamInputFps;
     r.slamOperationMode = currentCfg.app.runtime.slamOperationMode;
     if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
@@ -115,6 +117,9 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
         ipOffset = RUNTIME_CONFIG_IP_OFFSET;
     }
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN) {
+        r.autoExposureEnabled = p[RUNTIME_CONFIG_AE_OFFSET] != 0;
+    }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V3) {
         r.slamOperationMode = ParseRuntimeSlamMode(p[RUNTIME_CONFIG_SLAM_MODE_OFFSET]);
     }
     const char *ipChars = reinterpret_cast<const char *>(&p[ipOffset]);
@@ -133,6 +138,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     ConfigUpdate update{};
     update.values[std::string(ConfigRegistry::kCameraExposureUs)] = static_cast<int64_t>(r.exposureUs);
     update.values[std::string(ConfigRegistry::kCameraGain)] = static_cast<double>(r.gain);
+    update.values[std::string(ConfigRegistry::kCameraAutoExposure)] = r.autoExposureEnabled;
     update.values[std::string(ConfigRegistry::kCameraPairWindowMs)] = static_cast<int64_t>(r.pairMs);
     update.values[std::string(ConfigRegistry::kSlamInputFps)] = static_cast<int64_t>(r.slamInputFps);
     update.values[std::string(ConfigRegistry::kSlamOperationMode)] =
@@ -153,7 +159,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
                         " settings=" + std::string(DefaultSettingsForSensorMode(r.sensorMode)) +
                         " slam_mode=" + std::string(smartdrone::core::domain::ToString(r.slamOperationMode)) +
                         " img=" + (r.sendImage ? "on" : "off") + " feat=" + (r.sendFeature ? "on" : "off") +
-                        " map=" + (r.sendMap ? "on" : "off")};
+                        " map=" + (r.sendMap ? "on" : "off") + " ae=" + (r.autoExposureEnabled ? "on" : "off")};
 }
 
 RouteResult HandleCalibCleanFrame(const TlvFrame &frame, UnifiedRuntimeController &controller)

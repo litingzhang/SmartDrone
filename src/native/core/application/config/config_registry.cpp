@@ -9,6 +9,7 @@ std::vector<domain::ConfigDescriptor> ConfigRegistry::DefaultDescriptors()
     return {
         Make(kCameraExposureUs, "Camera exposure time in microseconds", false, true, true),
         Make(kCameraGain, "Camera analog gain", false, true, true),
+        Make(kCameraAutoExposure, "Enable camera auto exposure (CM5 ISP/libcamera controls)", false, true, true),
         Make(kCameraPairWindowMs, "Stereo pairing window in milliseconds", false, true, true),
         Make(kSlamInputFps, "Input frame rate delivered to the SLAM engine", true, false, false),
         Make(kSlamPerceptionMode, "SLAM perception mode such as stereo or stereo-imu", false, true, false),
