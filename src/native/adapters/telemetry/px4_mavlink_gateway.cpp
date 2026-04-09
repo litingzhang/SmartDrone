@@ -1,6 +1,7 @@
 #include "adapters/telemetry/px4_mavlink_gateway.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -355,8 +356,10 @@ void Px4MavlinkGateway::SendManualControl(const ManualControlInput &input, uint1
 bool Px4MavlinkGateway::SendLand(int ackTimeoutMs, uint8_t targetSystem, uint8_t targetComponent)
 {
     uint8_t res = 255;
-    bool got = SendCommandLongAndWaitAck(MAV_CMD_NAV_LAND, 0, 0, 0, 0, 0, 0, 0, ackTimeoutMs, targetSystem,
-                                         targetComponent, &res);
+    // Use NaN for optional landing target fields so PX4 lands at current location
+    // instead of interpreting 0/0/0 as an explicit target coordinate.
+    bool got = SendCommandLongAndWaitAck(MAV_CMD_NAV_LAND, NAN, NAN, NAN, NAN, NAN, NAN, NAN, ackTimeoutMs,
+                                         targetSystem, targetComponent, &res);
     return got && (res == MAV_RESULT_ACCEPTED);
 }
 

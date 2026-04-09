@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">SpaceInvader</string>
+    <string name="app_name">DroneLink</string>
     <string name="ctrl_alt_up">UP</string>
     <string name="ctrl_alt_down">DN</string>
     <string name="ctrl_yaw_left">YawL</string>
