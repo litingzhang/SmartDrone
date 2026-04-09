@@ -1,6 +1,7 @@
 #include "adapters/stream/udp_image_sender.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cmath>
 #include <cstring>
@@ -16,6 +17,142 @@
 #include <opencv2/imgcodecs.hpp>
 
 #include "common/thread_launch.h"
+
+namespace {
+
+struct PreviewCompressionState {
+    bool initialized{false};
+    double lo{0.0};
+    double hi{4095.0};
+    std::array<uint8_t, 65536> lut{};
+};
+
+std::vector<cv::Point2f> SelectGridSampledFeatures(const std::vector<cv::Point2f> &points, int width, int height,
+                                                   size_t maxCount)
+{
+    if (points.empty() || width <= 0 || height <= 0 || maxCount == 0) {
+        return {};
+    }
+
+    constexpr int kGridCols = 8;
+    constexpr int kGridRows = 6;
+    constexpr size_t kPerCellCap = 4;
+    constexpr size_t kCellCount = static_cast<size_t>(kGridCols * kGridRows);
+
+    std::array<std::vector<size_t>, kCellCount> cells{};
+    for (size_t i = 0; i < points.size(); ++i) {
+        const int xi = std::clamp<int>(static_cast<int>(std::lround(points[i].x)), 0, width - 1);
+        const int yi = std::clamp<int>(static_cast<int>(std::lround(points[i].y)), 0, height - 1);
+        const int gx = std::min(kGridCols - 1, (xi * kGridCols) / width);
+        const int gy = std::min(kGridRows - 1, (yi * kGridRows) / height);
+        const size_t cellIdx = static_cast<size_t>(gy * kGridCols + gx);
+        cells[cellIdx].push_back(i);
+    }
+
+    std::array<size_t, kCellCount> cursor{};
+    std::array<size_t, kCellCount> used{};
+    std::vector<cv::Point2f> selected;
+    selected.reserve(std::min(maxCount, points.size()));
+
+    bool madeProgress = true;
+    while (selected.size() < maxCount && madeProgress) {
+        madeProgress = false;
+        for (size_t cellIdx = 0; cellIdx < kCellCount && selected.size() < maxCount; ++cellIdx) {
+            auto &bucket = cells[cellIdx];
+            if (bucket.empty() || used[cellIdx] >= kPerCellCap || cursor[cellIdx] >= bucket.size()) {
+                continue;
+            }
+            selected.push_back(points[bucket[cursor[cellIdx]++]]);
+            used[cellIdx]++;
+            madeProgress = true;
+        }
+    }
+
+    return selected;
+}
+
+void Compress16To8Adaptive(const cv::Mat &src16, cv::Mat &dst8, int camIndex, uint32_t seq)
+{
+    static std::array<PreviewCompressionState, 2> states{};
+    const size_t idx = static_cast<size_t>((camIndex == 1) ? 1 : 0);
+    PreviewCompressionState &state = states[idx];
+
+    std::array<uint32_t, 4096> hist{};
+    uint32_t sampleCount = 0;
+    for (int y = 0; y < src16.rows; y += 2) {
+        const uint16_t *row = src16.ptr<uint16_t>(y);
+        for (int x = 0; x < src16.cols; x += 2) {
+            const uint16_t value = row[x];
+            const uint16_t bin = static_cast<uint16_t>(value >> 4);
+            hist[std::min<size_t>(bin, hist.size() - 1)]++;
+            ++sampleCount;
+        }
+    }
+    if (sampleCount == 0) {
+        dst8.create(src16.rows, src16.cols, CV_8UC1);
+        dst8.setTo(0);
+        return;
+    }
+
+    const uint32_t lowTarget = static_cast<uint32_t>(sampleCount * 0.01);
+    const uint32_t highTarget = static_cast<uint32_t>(sampleCount * 0.99);
+    uint32_t cumulative = 0;
+    int lowBin = 0;
+    int highBin = static_cast<int>(hist.size() - 1);
+    bool lowFound = false;
+    for (size_t i = 0; i < hist.size(); ++i) {
+        cumulative += hist[i];
+        if (!lowFound && cumulative >= lowTarget) {
+            lowBin = static_cast<int>(i);
+            lowFound = true;
+        }
+        if (cumulative >= highTarget) {
+            highBin = static_cast<int>(i);
+            break;
+        }
+    }
+
+    double targetLo = static_cast<double>(lowBin << 4);
+    double targetHi = static_cast<double>(highBin << 4);
+    if (targetHi <= targetLo + 64.0) {
+        targetHi = targetLo + 64.0;
+    }
+
+    if (!state.initialized) {
+        state.lo = targetLo;
+        state.hi = targetHi;
+        state.initialized = true;
+    } else {
+        state.lo = state.lo * 0.85 + targetLo * 0.15;
+        state.hi = state.hi * 0.85 + targetHi * 0.15;
+    }
+    if (state.hi <= state.lo + 64.0) {
+        state.hi = state.lo + 64.0;
+    }
+
+    const double invRange = 255.0 / (state.hi - state.lo);
+    for (int i = 0; i < 65536; ++i) {
+        const double v = (static_cast<double>(i) - state.lo) * invRange;
+        const int out = (v <= 0.0) ? 0 : (v >= 255.0) ? 255 : static_cast<int>(v + 0.5);
+        state.lut[static_cast<size_t>(i)] = static_cast<uint8_t>(out);
+    }
+
+    dst8.create(src16.rows, src16.cols, CV_8UC1);
+    for (int y = 0; y < src16.rows; ++y) {
+        const uint16_t *srcRow = src16.ptr<uint16_t>(y);
+        uint8_t *dstRow = dst8.ptr<uint8_t>(y);
+        for (int x = 0; x < src16.cols; ++x) {
+            dstRow[x] = state.lut[srcRow[x]];
+        }
+    }
+
+    if ((seq % 120u) == 0u) {
+        std::cerr << "[udp_preview_r16] cam=" << camIndex << " seq=" << seq << " lo=" << state.lo
+                  << " hi=" << state.hi << " samples=" << sampleCount << "\n";
+    }
+}
+
+} // namespace
 
 bool UdpImageSender::Open(const std::string &ip, int port, int jpegQuality, int maxPayload, int maxQueue)
 {
@@ -121,7 +258,7 @@ void UdpImageSender::Enqueue(int camIndex, uint64_t frameId, uint32_t seq, doubl
         slot.height = gray.rows;
         slot.sendImage = sendImage;
         slot.sendFeature = sendFeature;
-        if (sendImage && !FillPreview(gray, slot.preview)) {
+        if (sendImage && !FillPreview(camIndex, seq, gray, slot.preview)) {
             m_free[camIndex].push_back(slotIndex);
             return;
         }
@@ -235,7 +372,11 @@ void UdpImageSender::SendFeaturePacket(Slot &slot, uint32_t frameId, int width, 
         return;
     }
 
-    const size_t sendCount = std::min<size_t>(trackedPoints.size(), 160);
+    const std::vector<cv::Point2f> sampled = SelectGridSampledFeatures(trackedPoints, width, height, 160);
+    const size_t sendCount = sampled.size();
+    if (sendCount == 0) {
+        return;
+    }
     const size_t payloadSize = 6 + sendCount * 4;
     slot.featureBuf.resize(payloadSize);
     uint8_t *payload = slot.featureBuf.data();
@@ -244,7 +385,7 @@ void UdpImageSender::SendFeaturePacket(Slot &slot, uint32_t frameId, int width, 
     WriteU16Le(payload, 2, static_cast<uint16_t>(std::min(height, 0xFFFF)));
     WriteU16Le(payload, 4, static_cast<uint16_t>(sendCount));
     for (size_t i = 0; i < sendCount; ++i) {
-        const cv::Point2f &pt = trackedPoints[i];
+        const cv::Point2f &pt = sampled[i];
         const int xi = std::clamp<int>(static_cast<int>(std::lround(pt.x)), 0, width - 1);
         const int yi = std::clamp<int>(static_cast<int>(std::lround(pt.y)), 0, height - 1);
         const size_t pointOffset = 6 + i * 4;
@@ -279,7 +420,7 @@ void UdpImageSender::SendFeaturePacket(Slot &slot, uint32_t frameId, int width, 
     ::sendmsg(m_sock, &msg, 0);
 }
 
-bool UdpImageSender::FillPreview(const cv::Mat &gray, cv::Mat &preview)
+bool UdpImageSender::FillPreview(int camIndex, uint32_t seq, const cv::Mat &gray, cv::Mat &preview)
 {
     if (gray.empty()) {
         preview.release();
@@ -290,8 +431,7 @@ bool UdpImageSender::FillPreview(const cv::Mat &gray, cv::Mat &preview)
         preview.create(gray.rows, gray.cols, CV_8UC1);
         gray.copyTo(preview);
     } else if (gray.type() == CV_16UC1) {
-        preview.create(gray.rows, gray.cols, CV_8UC1);
-        gray.convertTo(preview, CV_8U, 1.0 / 256.0);
+        Compress16To8Adaptive(gray, preview, camIndex, seq);
     } else {
         preview.create(gray.rows, gray.cols, CV_8UC1);
         gray.convertTo(preview, CV_8U);

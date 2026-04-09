@@ -1,5 +1,7 @@
 #include "core/application/session/slam_processing_support.h"
 
+#include <algorithm>
+#include <cmath>
 #include <future>
 
 #include <opencv2/features2d.hpp>
@@ -59,6 +61,35 @@ std::vector<cv::Point2f> ComputeOrbDebugFeatures(const cv::Mat &gray)
 
 bool ShouldEnhanceLowLightFrame(double mean, double stddev) { return mean < 35.0 || (mean < 50.0 && stddev < 18.0); }
 
+namespace {
+
+cv::Mat ApplyGammaU8(const cv::Mat &gray, double gamma)
+{
+    cv::Mat out;
+    if (gray.empty()) {
+        return out;
+    }
+    if (gamma <= 0.0 || std::abs(gamma - 1.0) < 1e-3) {
+        gray.copyTo(out);
+        return out;
+    }
+
+    cv::Mat lut(1, 256, CV_8UC1);
+    uint8_t *lutPtr = lut.ptr<uint8_t>(0);
+    const double invGamma = 1.0 / gamma;
+    for (int i = 0; i < 256; ++i) {
+        const double normalized = static_cast<double>(i) / 255.0;
+        const double corrected = std::pow(normalized, invGamma);
+        lutPtr[i] = static_cast<uint8_t>(std::clamp<int>(static_cast<int>(std::lround(corrected * 255.0)), 0, 255));
+    }
+    cv::LUT(gray, lut, out);
+    return out;
+}
+
+bool IsLowTextureFrame(double stddev, double sharpness) { return stddev < 14.0 || sharpness < 95.0; }
+
+} // namespace
+
 cv::Mat EnhanceLowLightGrayForSlam(const cv::Mat &gray)
 {
     if (gray.empty()) {
@@ -72,36 +103,40 @@ cv::Mat EnhanceLowLightGrayForSlam(const cv::Mat &gray)
 }
 
 void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, double meanL, double stdL, double meanR, double stdR,
-                              bool enableLowLightEnhance, ports::StereoFrame &out)
+                              double sharpL, double sharpR, bool enableLowLightEnhance, ports::StereoFrame &out)
 {
     out = stereo;
     if (!enableLowLightEnhance) {
         return;
     }
 
-    const bool enhanceL = ShouldEnhanceLowLightFrame(meanL, stdL);
-    const bool enhanceR = ShouldEnhanceLowLightFrame(meanR, stdR);
-    if (!enhanceL && !enhanceR) {
+    const bool lowLightL = ShouldEnhanceLowLightFrame(meanL, stdL);
+    const bool lowLightR = ShouldEnhanceLowLightFrame(meanR, stdR);
+    const bool lowTextureL = IsLowTextureFrame(stdL, sharpL);
+    const bool lowTextureR = IsLowTextureFrame(stdR, sharpR);
+    const bool shouldEnhance = lowLightL || lowLightR || (lowTextureL && lowTextureR);
+    if (!shouldEnhance) {
         return;
     }
 
-    if (enhanceL && enhanceR) {
-        auto leftTask =
-            std::async(std::launch::async, [&stereo]() { return EnhanceLowLightGrayForSlam(stereo.left.gray); });
-        out.right.gray = EnhanceLowLightGrayForSlam(stereo.right.gray);
-        out.right.owner.reset();
-        out.left.gray = leftTask.get();
-        out.left.owner.reset();
-        return;
-    }
+    // Keep left/right photometric transform consistent to avoid stereo matcher drift.
+    const bool severeLowLight = (meanL < 25.0 || meanR < 25.0);
+    const double gamma = severeLowLight ? 1.45 : 1.20;
+    const double clipLimit = severeLowLight ? 3.0 : 2.3;
 
-    if (enhanceL) {
-        out.left.gray = EnhanceLowLightGrayForSlam(stereo.left.gray);
-        out.left.owner.reset();
-    } else if (enhanceR) {
-        out.right.gray = EnhanceLowLightGrayForSlam(stereo.right.gray);
-        out.right.owner.reset();
-    }
+    auto processOne = [gamma, clipLimit](const cv::Mat &in) {
+        cv::Mat gammaOut = ApplyGammaU8(in, gamma);
+        cv::Mat claheOut;
+        auto clahe = cv::createCLAHE(clipLimit, cv::Size(8, 8));
+        clahe->apply(gammaOut, claheOut);
+        return claheOut;
+    };
+
+    auto leftTask = std::async(std::launch::async, [&]() { return processOne(stereo.left.gray); });
+    out.right.gray = processOne(stereo.right.gray);
+    out.right.owner.reset();
+    out.left.gray = leftTask.get();
+    out.left.owner.reset();
 }
 
 bool IsTrackingPoseUsable(int trackingState)

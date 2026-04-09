@@ -22,7 +22,7 @@ std::vector<cv::Point2f> ComputeOrbDebugFeatures(const cv::Mat &gray);
 bool ShouldEnhanceLowLightFrame(double mean, double stddev);
 cv::Mat EnhanceLowLightGrayForSlam(const cv::Mat &gray);
 void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, double meanL, double stdL, double meanR, double stdR,
-                              bool enableLowLightEnhance, ports::StereoFrame &out);
+                              double sharpL, double sharpR, bool enableLowLightEnhance, ports::StereoFrame &out);
 bool IsTrackingPoseUsable(int trackingState);
 uint8_t ToRuntimeSlamModeValue(smartdrone::core::domain::SlamOperationMode mode);
 

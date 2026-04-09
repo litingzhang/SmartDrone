@@ -20,6 +20,25 @@
 
 namespace smartdrone::core::application {
 
+cv::Mat EnsureGray8ForCalib(const cv::Mat &src, bool &convertedOut)
+{
+    convertedOut = false;
+    if (src.empty()) {
+        return src;
+    }
+    if (src.type() == CV_8UC1) {
+        return src;
+    }
+    cv::Mat out;
+    if (src.type() == CV_16UC1) {
+        src.convertTo(out, CV_8U, 1.0 / 256.0);
+    } else {
+        src.convertTo(out, CV_8U);
+    }
+    convertedOut = true;
+    return out;
+}
+
 void FlushAndSyncFile(FILE *file, const char *label)
 {
     if (!file) {
@@ -154,8 +173,21 @@ bool RunCalibSession(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePose
                       << " rowsR=" << R.gray.rows << " colsR=" << R.gray.cols << "\n";
             continue;
         }
-        const bool okL = cv::imwrite(fnL.string(), L.gray);
-        const bool okR = cv::imwrite(fnR.string(), R.gray);
+        bool convertedL = false;
+        bool convertedR = false;
+        const cv::Mat calibGrayL = EnsureGray8ForCalib(L.gray, convertedL);
+        const cv::Mat calibGrayR = EnsureGray8ForCalib(R.gray, convertedR);
+        if (convertedL || convertedR) {
+            static int conversionLogCount = 0;
+            ++conversionLogCount;
+            if ((conversionLogCount % 30) == 1) {
+                std::cerr << "[calib-gray] converted to 8-bit"
+                          << " typeL=" << L.gray.type() << " typeR=" << R.gray.type()
+                          << " count=" << conversionLogCount << "\n";
+            }
+        }
+        const bool okL = cv::imwrite(fnL.string(), calibGrayL);
+        const bool okR = cv::imwrite(fnR.string(), calibGrayR);
         if (!okL || !okR) {
             std::cerr << "[calib-write] imwrite failed"
                       << " okL=" << (okL ? "true" : "false") << " okR=" << (okR ? "true" : "false")
@@ -169,8 +201,8 @@ bool RunCalibSession(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePose
         savedImagePaths.push_back(fnL);
         savedImagePaths.push_back(fnR);
         if (a.udpEnable && a.sendImage) {
-            udp.Enqueue(0, static_cast<uint64_t>(L.seq), L.seq, pairNs * 1e-9, L.gray, {}, true, false);
-            udp.Enqueue(1, static_cast<uint64_t>(R.seq), R.seq, pairNs * 1e-9, R.gray, {}, true, false);
+            udp.Enqueue(0, static_cast<uint64_t>(L.seq), L.seq, pairNs * 1e-9, calibGrayL, {}, true, false);
+            udp.Enqueue(1, static_cast<uint64_t>(R.seq), R.seq, pairNs * 1e-9, calibGrayR, {}, true, false);
         }
         if ((saved % 30) == 0) {
             std::cerr << "[calib-save] saved=" << (saved + 1) << " pathL=" << fnL.string() << " pathR=" << fnR.string()

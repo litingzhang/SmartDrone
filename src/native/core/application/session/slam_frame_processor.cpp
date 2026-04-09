@@ -126,8 +126,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const auto imuEndTp = std::chrono::steady_clock::now();
     m_state.lastFrameNs = captureTimestampNs;
 
-    PrepareStereoPairForSlam(stereoBatch.stereo, meanL, stdL, meanR, stdR, m_ctx.aliases.slamLowLightEnhance,
-                             slamInput.stereo);
+    PrepareStereoPairForSlam(stereoBatch.stereo, meanL, stdL, meanR, stdR, sharpL, sharpR,
+                             m_ctx.aliases.slamLowLightEnhance, slamInput.stereo);
     slamInput.frameId = stereoBatch.frameId;
     slamInput.captureTimestampNs = captureTimestampNs;
     slamInput.frameTimeSec = frameTime;

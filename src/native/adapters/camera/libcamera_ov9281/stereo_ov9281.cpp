@@ -1,6 +1,7 @@
 #include "adapters/camera/libcamera_ov9281/stereo_ov9281.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <iostream>
 #include <optional>
@@ -10,6 +11,16 @@
 #include <time.h>
 
 namespace {
+
+constexpr int32_t kSlamAeMaxExposureUs = 7000;
+constexpr float kSlamAeMaxGain = 6.0f;
+
+struct R16CompressionState {
+    bool initialized{false};
+    double lo{0.0};
+    double hi{4095.0};
+    std::array<uint8_t, 65536> lut{};
+};
 
 void *MMapFD(int fd, size_t len, off_t off = 0)
 {
@@ -56,6 +67,87 @@ bool SetControlIfSupported(libcamera::Camera *camera, libcamera::ControlList &co
     return false;
 }
 
+void CompressR16AdaptiveForSlam(const cv::Mat &src16, cv::Mat &dst8, int camIndex, uint32_t seq)
+{
+    static std::array<R16CompressionState, 2> states{};
+    const size_t stateIdx = static_cast<size_t>((camIndex == 1) ? 1 : 0);
+    R16CompressionState &state = states[stateIdx];
+
+    std::array<uint32_t, 4096> hist{};
+    uint32_t sampleCount = 0;
+    for (int y = 0; y < src16.rows; y += 2) {
+        const uint16_t *row = src16.ptr<uint16_t>(y);
+        for (int x = 0; x < src16.cols; x += 2) {
+            const uint16_t value = row[x];
+            const uint16_t bin = static_cast<uint16_t>(value >> 4);
+            hist[std::min<size_t>(bin, hist.size() - 1)]++;
+            ++sampleCount;
+        }
+    }
+    if (sampleCount == 0) {
+        dst8.create(src16.rows, src16.cols, CV_8UC1);
+        dst8.setTo(0);
+        return;
+    }
+
+    const uint32_t lowTargetCount = static_cast<uint32_t>(sampleCount * 0.01);
+    const uint32_t highTargetCount = static_cast<uint32_t>(sampleCount * 0.99);
+    uint32_t cumulative = 0;
+    int lowBin = 0;
+    int highBin = static_cast<int>(hist.size() - 1);
+    bool lowFound = false;
+    for (size_t i = 0; i < hist.size(); ++i) {
+        cumulative += hist[i];
+        if (!lowFound && cumulative >= lowTargetCount) {
+            lowBin = static_cast<int>(i);
+            lowFound = true;
+        }
+        if (cumulative >= highTargetCount) {
+            highBin = static_cast<int>(i);
+            break;
+        }
+    }
+
+    double targetLo = static_cast<double>(lowBin << 4);
+    double targetHi = static_cast<double>(highBin << 4);
+    if (targetHi <= targetLo + 64.0) {
+        targetHi = targetLo + 64.0;
+    }
+
+    if (!state.initialized) {
+        state.lo = targetLo;
+        state.hi = targetHi;
+        state.initialized = true;
+    } else {
+        state.lo = state.lo * 0.85 + targetLo * 0.15;
+        state.hi = state.hi * 0.85 + targetHi * 0.15;
+    }
+    if (state.hi <= state.lo + 64.0) {
+        state.hi = state.lo + 64.0;
+    }
+
+    const double invRange = 255.0 / (state.hi - state.lo);
+    for (int i = 0; i < 65536; ++i) {
+        const double v = (static_cast<double>(i) - state.lo) * invRange;
+        const int out = (v <= 0.0) ? 0 : (v >= 255.0) ? 255 : static_cast<int>(v + 0.5);
+        state.lut[static_cast<size_t>(i)] = static_cast<uint8_t>(out);
+    }
+
+    dst8.create(src16.rows, src16.cols, CV_8UC1);
+    for (int y = 0; y < src16.rows; ++y) {
+        const uint16_t *srcRow = src16.ptr<uint16_t>(y);
+        uint8_t *dstRow = dst8.ptr<uint8_t>(y);
+        for (int x = 0; x < src16.cols; ++x) {
+            dstRow[x] = state.lut[srcRow[x]];
+        }
+    }
+
+    if ((seq % 120u) == 0u) {
+        std::cerr << "[cam_r16] cam=" << camIndex << " seq=" << seq << " lo=" << state.lo << " hi=" << state.hi
+                  << " samples=" << sampleCount << "\n";
+    }
+}
+
 } // namespace
 
 std::atomic<bool> g_runningFlag{true};
@@ -99,16 +191,25 @@ bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex
         sc.pixelFormat = libcamera::formats::R8;
     }
 
-    const int64_t us = std::max<int64_t>(1, 1000000LL / std::max(1, fps));
-    m_controls.set(libcamera::controls::FrameDurationLimits, libcamera::Span<const int64_t, 2>({us, us}));
+    const int64_t frameDurationUs = std::max<int64_t>(1, 1000000LL / std::max(1, fps));
+    m_controls.set(libcamera::controls::FrameDurationLimits,
+                   libcamera::Span<const int64_t, 2>({frameDurationUs, frameDurationUs}));
+    const int32_t exposureCapUs =
+        static_cast<int32_t>(std::max<int64_t>(1, std::min<int64_t>(kSlamAeMaxExposureUs, frameDurationUs - 500)));
+    const float gainCap = kSlamAeMaxGain;
 
     if (aeDisable) {
+        const int32_t manualExposureUs = std::max<int32_t>(1, std::min<int32_t>(exposureUs, exposureCapUs));
+        const float manualGain = std::max(1.0f, std::min(gain, gainCap));
         m_controls.set(libcamera::controls::AeEnable, false);
-        m_controls.set(libcamera::controls::ExposureTime, exposureUs);
-        m_controls.set(libcamera::controls::AnalogueGain, gain);
+        m_controls.set(libcamera::controls::ExposureTime, manualExposureUs);
+        m_controls.set(libcamera::controls::AnalogueGain, manualGain);
     } else {
         // Explicitly hand exposure/gain back to libcamera ISP auto-control path.
         m_controls.set(libcamera::controls::AeEnable, true);
+        // Soft guidance for AE start point / cap preference where pipeline supports it.
+        m_controls.set(libcamera::controls::ExposureTime, exposureCapUs);
+        m_controls.set(libcamera::controls::AnalogueGain, std::max(1.0f, std::min(gain, gainCap)));
     }
 
     // Prefer ISP-side conservative image processing tuned for SLAM stability.
@@ -116,6 +217,7 @@ bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex
     const bool sharpSet = SetControlIfSupported(m_cam.get(), m_controls, "Sharpness", libcamera::ControlValue(0.0f));
     const bool tonemapSet = SetControlIfSupported(m_cam.get(), m_controls, "TonemapMode", libcamera::ControlValue(0));
     std::cerr << "[cam] isp_hint cam=" << m_camIndex << " ae=" << (aeDisable ? "manual" : "auto")
+              << " frame_us=" << frameDurationUs << " exp_cap_us=" << exposureCapUs << " gain_cap=" << gainCap
               << " nr=" << (nrSet ? "set" : "n/a") << " sharp=" << (sharpSet ? "set" : "n/a")
               << " tonemap=" << (tonemapSet ? "set" : "n/a") << "\n";
 
@@ -397,6 +499,15 @@ void LibcameraMonoCam::OnRequestComplete(libcamera::Request *req)
                   << " ae=" << ((metaAe.has_value() && *metaAe) ? 1 : 0)
                   << " exp_us=" << (metaExposureUs.has_value() ? *metaExposureUs : -1)
                   << " gain=" << (metaGain.has_value() ? *metaGain : -1.0f) << "\n";
+        if (metaExposureUs.has_value() && *metaExposureUs > kSlamAeMaxExposureUs) {
+            std::cerr << "[cam_isp_warn] cam=" << m_camIndex << " seq=" << md.sequence
+                      << " exposure high for slam exp_us=" << *metaExposureUs << " cap_us=" << kSlamAeMaxExposureUs
+                      << "\n";
+        }
+        if (metaGain.has_value() && *metaGain > kSlamAeMaxGain) {
+            std::cerr << "[cam_isp_warn] cam=" << m_camIndex << " seq=" << md.sequence
+                      << " gain high for slam gain=" << *metaGain << " cap=" << kSlamAeMaxGain << "\n";
+        }
     }
 
     const libcamera::StreamConfiguration &sc = m_config->at(0);
@@ -439,12 +550,7 @@ void LibcameraMonoCam::OnRequestComplete(libcamera::Request *req)
         if (!m_r16Normalize) {
             m16.convertTo(gray8, CV_8U, 1.0 / 256.0);
         } else {
-            double minv = 0;
-            double maxv = 0;
-            cv::minMaxLoc(m16, &minv, &maxv);
-            const double scale = (maxv > minv) ? (255.0 / (maxv - minv)) : 1.0;
-            const double shift = -minv * scale;
-            m16.convertTo(gray8, CV_8U, scale, shift);
+            CompressR16AdaptiveForSlam(m16, gray8, m_camIndex, md.sequence);
         }
     } else {
         cv::Mat g(h, w, CV_8UC1, static_cast<void *>(p0), static_cast<size_t>(stride));

@@ -60,7 +60,7 @@ class UdpImageSender {
     void Loop(int camIndex);
     void SendFeaturePacket(Slot &slot, uint32_t frameId, int width, int height,
                            const std::vector<cv::Point2f> &trackedPoints);
-    static bool FillPreview(const cv::Mat &gray, cv::Mat &preview);
+    static bool FillPreview(int camIndex, uint32_t seq, const cv::Mat &gray, cv::Mat &preview);
     static void WriteU16Le(uint8_t *out, size_t offset, uint16_t value);
 
     int m_sock{-1};
