@@ -113,12 +113,27 @@ bool Px4UdpHooks::Position(std::string *err)
     EnsureManualControlStream();
     SetManualControlNeutral();
     SendManualControlSnapshot();
+    Px4MavlinkGateway::FlightModeInfo beforeMode{};
+    const bool haveBeforeMode = m_mavlink.GetFlightModeInfo(beforeMode);
+    if (haveBeforeMode) {
+        std::cout << "[px4] POSITION requested from mode main=" << static_cast<int>(beforeMode.mainMode)
+                  << " sub=" << static_cast<int>(beforeMode.subMode) << " armed=" << (beforeMode.armed ? 1 : 0)
+                  << "\n";
+    } else {
+        std::cout << "[px4] POSITION requested (no heartbeat mode snapshot)\n";
+    }
     m_remoteModeRequested.store(true, std::memory_order_relaxed);
     if (!EnsurePositionMode(true, err)) {
         m_remoteModeRequested.store(false, std::memory_order_relaxed);
         if (err && err->empty())
             *err = "px4 position mode rejected";
         return false;
+    }
+    Px4MavlinkGateway::FlightModeInfo afterMode{};
+    if (m_mavlink.GetFlightModeInfo(afterMode)) {
+        std::cout << "[px4] POSITION result mode main=" << static_cast<int>(afterMode.mainMode)
+                  << " sub=" << static_cast<int>(afterMode.subMode) << " armed=" << (afterMode.armed ? 1 : 0)
+                  << "\n";
     }
     return true;
 }

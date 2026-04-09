@@ -13,6 +13,8 @@
 
 namespace {
 
+constexpr uint64_t kOdomTsLogEveryNFrames = 30;
+
 void FillCovDiag21(float cov[21], float varX, float varY, float varZ, float varRoll, float varPitch, float varYaw,
                    bool fillOffdiagZero = true)
 {
@@ -186,10 +188,14 @@ bool Px4MavlinkGateway::SendCommandLongAndWaitAck(uint16_t command, float p1, fl
 bool Px4MavlinkGateway::SetModePx4Main(uint8_t mainMode, int ackTimeoutMs, uint8_t targetSystem,
                                        uint8_t targetComponent)
 {
+    // PX4 handles MAV_CMD_DO_SET_MODE as:
+    // param1 = base mode flags, param2 = PX4 custom main mode, param3 = custom sub mode.
+    // Do not pack main/sub mode into a 32-bit heartbeat custom_mode here.
     const float baseMode = static_cast<float>(MAV_MODE_FLAG_CUSTOM_MODE_ENABLED);
-    const uint32_t customMode = static_cast<uint32_t>(mainMode) << 16;
+    const float customMainMode = static_cast<float>(mainMode);
+    const float customSubMode = 0.0f;
     uint8_t res = 255;
-    bool got = SendCommandLongAndWaitAck(MAV_CMD_DO_SET_MODE, baseMode, static_cast<float>(customMode), 0, 0, 0, 0, 0,
+    bool got = SendCommandLongAndWaitAck(MAV_CMD_DO_SET_MODE, baseMode, customMainMode, customSubMode, 0, 0, 0, 0,
                                          ackTimeoutMs, targetSystem, targetComponent, &res);
     return got && (res == MAV_RESULT_ACCEPTED);
 }
@@ -486,22 +492,20 @@ void Px4MavlinkGateway::SendOdometry(uint64_t odomFrameId, const Pose &poseNed, 
                                       ? (static_cast<double>(diagnostics.tMavTxNs - diagnostics.tCamNs) * 1e-6)
                                       : -1.0;
     const double px4OffsetMs = static_cast<double>(diagnostics.timesyncOffsetNs) * 1e-6;
-    printf("[odom_ts] frame=%llu timing=%d reset=%u quality=%d cam_ns=%llu companion_us=%llu cb_ns=%llu "
-           "slam_in_ns=%llu px4_est_ns=%llu slam_out_ns=%llu mav_tx_ns=%llu "
-           "pos=[%.3f, %.3f, %.3f] q=[%.4f, %.4f, %.4f, %.4f] vel=[%.3f, %.3f, %.3f] "
-           "sync=%d offset_ms=%.3f rtt_ms=%.3f queue_latency_ms=%.3f "
-           "slam_latency_ms=%.3f send_latency_ms=%.3f total_latency_ms=%.3f\n",
-           static_cast<unsigned long long>(diagnostics.frameId), haveTiming ? 1 : 0,
-           static_cast<unsigned>(resetCounter), static_cast<int>(quality),
-           static_cast<unsigned long long>(diagnostics.tCamNs),
-           static_cast<unsigned long long>(companionCaptureTimeUs), static_cast<unsigned long long>(diagnostics.tCbNs),
-           static_cast<unsigned long long>(diagnostics.tSlamInNs),
-           static_cast<unsigned long long>(diagnostics.estimatedPx4TimeNs),
-           static_cast<unsigned long long>(diagnostics.tSlamOutNs),
-           static_cast<unsigned long long>(diagnostics.tMavTxNs), poseNed.x, poseNed.y, poseNed.z, poseNed.qw,
-           poseNed.qx, poseNed.qy, poseNed.qz, vx, vy, vz, diagnostics.timesyncValid ? 1 : 0, px4OffsetMs,
-           static_cast<double>(diagnostics.timesyncRttUs) * 1e-3, queueLatencyMs, slamLatencyMs, sendLatencyMs,
-           totalLatencyMs);
+    const bool odomTsPeriodic = (kOdomTsLogEveryNFrames > 0) && ((diagnostics.frameId % kOdomTsLogEveryNFrames) == 0);
+    const bool odomTsAbnormal = !diagnostics.timesyncValid || totalLatencyMs > 120.0 || queueLatencyMs > 50.0 ||
+                                slamLatencyMs > 80.0 || sendLatencyMs > 30.0;
+    if (odomTsPeriodic || odomTsAbnormal) {
+        printf("[odom_ts] frame=%llu timing=%d reset=%u quality=%d cam_ns=%llu px4_est_ns=%llu "
+               "sync=%d offset_ms=%.3f rtt_ms=%.3f "
+               "queue_ms=%.3f slam_ms=%.3f send_ms=%.3f total_ms=%.3f\n",
+               static_cast<unsigned long long>(diagnostics.frameId), haveTiming ? 1 : 0,
+               static_cast<unsigned>(resetCounter), static_cast<int>(quality),
+               static_cast<unsigned long long>(diagnostics.tCamNs),
+               static_cast<unsigned long long>(diagnostics.estimatedPx4TimeNs), diagnostics.timesyncValid ? 1 : 0,
+               px4OffsetMs, static_cast<double>(diagnostics.timesyncRttUs) * 1e-3, queueLatencyMs, slamLatencyMs,
+               sendLatencyMs, totalLatencyMs);
+    }
 }
 
 Px4MavlinkGateway::Pose Px4MavlinkGateway::EnuToNed(const Pose &pEnu)

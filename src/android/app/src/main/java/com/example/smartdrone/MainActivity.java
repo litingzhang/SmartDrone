@@ -247,11 +247,12 @@ public class MainActivity extends Activity {
     private int m_featureMatchCount0 = 0;
     private int m_featureMatchCount1 = 0;
     private boolean m_sendImage = true;
-    private boolean m_sendFeature = false;
+    private boolean m_sendFeature = true;
     private boolean m_sendMap = false;
-    private boolean m_showFeaturePoints = false;
+    private boolean m_showFeaturePoints = true;
     private long m_lastVehicleHeartbeatMs = 0L;
     private boolean m_vehicleHeartbeatTimeoutHandled = false;
+    private boolean m_featureDefaultEnsured = false;
     private boolean m_supportsCalib = true;
     private boolean m_supportsStereoImu = true;
     private boolean m_supportsMono = true;
@@ -423,9 +424,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    private boolean isPx4LandMode()
+    private boolean isPx4AutoMode()
     {
-        return m_px4MainMode == PX4_MAIN_MODE_AUTO && m_px4SubMode == PX4_AUTO_SUB_MODE_LAND;
+        return m_px4MainMode == PX4_MAIN_MODE_AUTO;
     }
 
     private boolean isPx4PositionMode()
@@ -1386,10 +1387,10 @@ public class MainActivity extends Activity {
                            isPending(PENDING_EMERGENCY_STOP), "#B71C1C");
         }
         if (m_btnLand != null) {
-            final boolean landMode = isPx4LandMode();
+            final boolean autoMode = isPx4AutoMode();
             final boolean positionMode = isPx4PositionMode();
-            m_btnLand.setText(landMode ? "POSITION" : "LAND");
-            setButtonState(m_btnLand, landMode || positionMode, isPending(PENDING_LAND) || isPending(PENDING_POSITION),
+            m_btnLand.setText(autoMode ? "POSITION" : "LAND");
+            setButtonState(m_btnLand, autoMode || positionMode, isPending(PENDING_LAND) || isPending(PENDING_POSITION),
                            "#EF6C00");
         }
     }
@@ -1805,8 +1806,24 @@ public class MainActivity extends Activity {
         m_cfgSlamMode = parseSlamModeText(values.get("slam.operation_mode"), m_cfgSlamMode);
         m_sensorMode = parseSensorModeText(values.get("slam.perception_mode"), m_sensorMode);
         m_sendImage = parseBooleanText(values.get("stream.send_image"), m_sendImage);
-        m_sendFeature = parseBooleanText(values.get("stream.send_feature"), m_sendFeature);
+        final boolean remoteSendFeature = parseBooleanText(values.get("stream.send_feature"), m_sendFeature);
+        m_sendFeature = remoteSendFeature;
         m_sendMap = parseBooleanText(values.get("stream.send_map"), m_sendMap);
+
+        if (!m_featureDefaultEnsured) {
+            m_featureDefaultEnsured = true;
+            if (!remoteSendFeature) {
+                m_sendFeature = true;
+                m_showFeaturePoints = true;
+                sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
+                                          m_sensorMode, m_sendImage, true, m_sendMap, "Feature stream default",
+                                          PENDING_CONFIG, () -> {
+                                              m_sendFeature = true;
+                                              m_showFeaturePoints = true;
+                                              updateStreamToggleButtons();
+                                          });
+            }
+        }
 
         updateConfigViews();
         updateRuntimeButtons();
@@ -2725,7 +2742,7 @@ public class MainActivity extends Activity {
         }
         if (m_btnLand != null) {
             m_btnLand.setOnClickListener(v -> {
-                final boolean sendPosition = isPx4LandMode();
+                final boolean sendPosition = isPx4AutoMode();
                 final String nextLabel = sendPosition ? "POSITION" : "LAND";
                 final int nextCmd = sendPosition ? CMD_POSITION : CMD_LAND;
                 final String pendingKey = sendPosition ? PENDING_POSITION : PENDING_LAND;

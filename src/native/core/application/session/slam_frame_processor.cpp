@@ -13,6 +13,8 @@ namespace smartdrone::core::application {
 
 namespace {
 
+constexpr uint64_t kSlamDfxLogEveryNFrames = 30;
+
 uint8_t ComposeResetCounter(uint8_t sessionBase, uint8_t continuityCounter)
 {
     return static_cast<uint8_t>(sessionBase + continuityCounter);
@@ -82,17 +84,12 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const bool sendImage = m_ctx.tuning.sendImage.load(std::memory_order_relaxed);
     const bool sendFeature = m_ctx.tuning.sendFeature.load(std::memory_order_relaxed);
     const bool sendMap = m_ctx.tuning.sendMap.load(std::memory_order_relaxed);
-    const uint32_t rawSeqL = m_ctx.cameraProvider.LastRawSeqL();
-    const uint32_t rawSeqR = m_ctx.cameraProvider.LastRawSeqR();
     const int64_t pairDtMs = m_ctx.cameraProvider.LastPairDtMs();
     const double rejectDtMs = static_cast<double>(m_ctx.cameraProvider.LastRejectDtUs()) / 1000.0;
-    const uint64_t rawCountL = m_ctx.cameraProvider.RawCountL();
-    const uint64_t rawCountR = m_ctx.cameraProvider.RawCountR();
     const uint64_t dropUnpairedL = m_ctx.cameraProvider.DroppedUnpairedL();
     const uint64_t dropUnpairedR = m_ctx.cameraProvider.DroppedUnpairedR();
     const size_t pendingL = m_ctx.cameraProvider.PendingL();
     const size_t pendingR = m_ctx.cameraProvider.PendingR();
-    const double pairTolMs = static_cast<double>(m_ctx.cameraProvider.PairTolNs()) * 1e-6;
     const int64_t captureTimestampNs =
         m_ctx.monoMode ? static_cast<int64_t>(R.timestampNs) : stereoBatch.captureTimestampNs;
     const int64_t logicalFrameTimestampNs =
@@ -249,34 +246,32 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
 
     ++m_state.frameIndex;
     m_state.lastPublishedFrameNs = logicalFrameTimestampNs;
-    char dfxLine[512];
-    std::snprintf(
-        dfxLine, sizeof(dfxLine),
-        "[slam_dfx] frame=%llu frame_id=%llu seqL=%u seqR=%u state=%d pose_valid=%d quality=%d "
-        "reset=%u reset_map=%u "
-        "imu_samples=%zu featL=%zu featR=%zu points=%zu "
-        "debug_right_only=%d "
-        "pair rawSeqL=%u rawSeqR=%u rawCountL=%llu rawCountR=%llu pair_dt=%.3f reject_dt=%.3f tol=%.3f pendL=%zu "
-        "pendR=%zu dropL=%llu dropR=%llu rate_drop=%llu "
-        "img meanL=%.2f stdL=%.2f sharpL=%.2f meanR=%.2f stdR=%.2f sharpR=%.2f "
-        "timing_ms frame_gap=%.3f mono_step=%.3f acquire=%.3f imu=%.3f slam=%.3f cloud=%.3f udp=%.3f post=%.3f "
-        "live=%.3f publish=%.3f total=%.3f",
-        static_cast<unsigned long long>(m_state.frameIndex), static_cast<unsigned long long>(slamOutput.frameId),
-        static_cast<unsigned>(L.sequence), static_cast<unsigned>(R.sequence), state,
-        poseResult.poseEstimate.valid ? 1 : 0, static_cast<int>(poseResult.quality),
-        static_cast<unsigned>(effectiveResetCounter), static_cast<unsigned>(effectiveResetMapCount),
-        slamInput.imu.size(), slamOutput.leftFeatures.size(), slamOutput.rightFeatures.size(), pointCount,
-        debugRightOnlyFeatures ? 1 : 0,
-        static_cast<unsigned>(rawSeqL), static_cast<unsigned>(rawSeqR), static_cast<unsigned long long>(rawCountL),
-        static_cast<unsigned long long>(rawCountR), static_cast<double>(pairDtMs), rejectDtMs, pairTolMs, pendingL,
-        pendingR, static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
-        static_cast<unsigned long long>(m_state.rateLimitedDrops), meanL, stdL, sharpL, meanR, stdR, sharpR, frameGapMs,
-        monoStepMs, DurationMs(acquireStartTp, acquireEndTp), DurationMs(imuStartTp, imuEndTp),
-        DurationMs(slamStartTp, slamEndTp), DurationMs(cloudStartTp, cloudEndTp), DurationMs(udpStartTp, udpEndTp),
-        DurationMs(postStartTp, postEndTp), DurationMs(livePoseStartTp, livePoseEndTp),
-        DurationMs(publishStartTp, publishEndTp), DurationMs(frameStartTp, publishEndTp));
-    LOGI("%s", dfxLine);
-    std::cerr << dfxLine << "\n";
+    const double totalMs = DurationMs(frameStartTp, publishEndTp);
+    const bool slamDfxPeriodic = (kSlamDfxLogEveryNFrames > 0) && ((m_state.frameIndex % kSlamDfxLogEveryNFrames) == 0);
+    const bool slamDfxAbnormal = !poseResult.poseEstimate.valid || state <= 0 || totalMs > 80.0 ||
+                                 slamOutput.leftFeatures.empty() || slamOutput.rightFeatures.empty();
+    if (slamDfxPeriodic || slamDfxAbnormal) {
+        char dfxLine[384];
+        std::snprintf(
+            dfxLine, sizeof(dfxLine),
+            "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
+            "imu=%zu feat=%zu/%zu points=%zu "
+            "pair_dt=%.3f reject_dt=%.3f pend=%zu/%zu drop=%llu/%llu rate_drop=%llu "
+            "img_std=%.2f/%.2f sharp=%.2f/%.2f "
+            "timing_ms gap=%.3f mono=%.3f acquire=%.3f imu=%.3f slam=%.3f cloud=%.3f udp=%.3f post=%.3f "
+            "live=%.3f publish=%.3f total=%.3f",
+            static_cast<unsigned long long>(slamOutput.frameId), state, static_cast<int>(poseResult.quality),
+            poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
+            static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
+            slamOutput.rightFeatures.size(), pointCount, static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
+            static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
+            static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
+            monoStepMs, DurationMs(acquireStartTp, acquireEndTp), DurationMs(imuStartTp, imuEndTp),
+            DurationMs(slamStartTp, slamEndTp), DurationMs(cloudStartTp, cloudEndTp), DurationMs(udpStartTp, udpEndTp),
+            DurationMs(postStartTp, postEndTp), DurationMs(livePoseStartTp, livePoseEndTp),
+            DurationMs(publishStartTp, publishEndTp), totalMs);
+        LOGI("%s", dfxLine);
+    }
 
     return StepResult::Continue;
 }

@@ -47,7 +47,7 @@ struct UdpConfig {
     int payload{1200};
     int queue{4};
     bool sendImage{true};
-    bool sendFeature{false};
+    bool sendFeature{true};
     bool sendMap{false};
 };
 

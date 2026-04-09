@@ -28,7 +28,7 @@ struct RemoteRuntimeConfig {
     bool udpEnabled{false};
     SensorMode sensorMode{SensorMode::Stereo};
     bool sendImage{true};
-    bool sendFeature{false};
+    bool sendFeature{true};
     bool sendMap{false};
 };
 
@@ -39,7 +39,7 @@ struct MainRuntimeAliases {
         pairQueue{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{}, debugRightOnlyFeatures{},
         slamLowLightEnhance{};
-    bool sendImage{true}, sendFeature{false}, sendMap{false};
+    bool sendImage{true}, sendFeature{true}, sendMap{false};
     float gain{};
     std::string udpIp, spiDev, gpiochip;
     int udpPort{}, cmdPort{}, udpJpegQ{}, udpPayload{}, udpQueue{}, imuHz{}, accelFsG{}, gyroFsDps{}, rtPrio{};
@@ -52,7 +52,7 @@ struct LiveRuntimeTuning {
     std::atomic<int> slamInputFps{0};
     std::atomic<uint8_t> slamOperationMode{static_cast<uint8_t>(domain::SlamOperationMode::Mapping)};
     std::atomic<bool> sendImage{true};
-    std::atomic<bool> sendFeature{false};
+    std::atomic<bool> sendFeature{true};
     std::atomic<bool> sendMap{false};
 };
 
