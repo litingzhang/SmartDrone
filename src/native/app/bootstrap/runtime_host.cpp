@@ -55,7 +55,7 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
     const MainRuntimeAliases aliases = smartdrone::core::application::BuildRuntimeAliases(cfg.app);
     smartdrone::core::application::PrintStartupConfig(cfg.app, aliases, ControllerMode::Idle);
 
-    Px4MavlinkGateway mav("/dev/ttyAMA0", 921600);
+    Px4MavlinkGateway mav("/dev/ttyAMA0", 460800);
     mav.StartRx();
     LivePoseState livePose;
     LiveRuntimeTuning tuning;
