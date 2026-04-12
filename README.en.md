@@ -1,4 +1,4 @@
-# SmartDrone
+﻿# SmartDrone
 
 SmartDrone is a stereo / stereo-inertial drone runtime built around `ORB_SLAM3`, IMU input, UDP preview streaming, MAVLink pose publishing, and a small Android control app.
 
@@ -24,12 +24,12 @@ The runtime entry point is [`src/native/main.cpp`](/d:/SmartDrone/src/native/mai
 
 ## Build
 
-Use the repository root `build.sh` script as the unified build entry point:
+Use `scripts/build.sh` as the unified build entry point:
 
 ```bash
-./build.sh smart_drone
-./build.sh android
-./build.sh all
+./scripts/build.sh smart_drone
+./scripts/build.sh android
+./scripts/build.sh all
 ```
 
 Build targets:
@@ -50,7 +50,7 @@ Android build behavior:
 Optional environment variable:
 
 ```bash
-ANDROID_GRADLE_TASK=assembleRelease ./build.sh android
+ANDROID_GRADLE_TASK=assembleRelease ./scripts/build.sh android
 ```
 
 This overrides the default Android Gradle task from `assembleDebug` to the value you provide.
@@ -58,10 +58,10 @@ This overrides the default Android Gradle task from `assembleDebug` to the value
 Optional build parallelism override:
 
 ```bash
-BUILD_JOBS=8 ./build.sh replay
+BUILD_JOBS=8 ./scripts/build.sh replay
 ```
 
-By default `build.sh` uses `$(nproc)`.
+By default `scripts/build.sh` uses `$(nproc)`.
 
 ## Build Manually
 
@@ -69,8 +69,8 @@ By default `build.sh` uses `$(nproc)`.
 
 ```bash
 cd ~/SmartDrone
-./build.sh smart_drone
-./build.sh all
+./scripts/build.sh smart_drone
+./scripts/build.sh all
 ```
 
 ### Build the Android App
@@ -87,7 +87,7 @@ adb -d install -r app/build/outputs/apk/debug/app-debug.apk
 Run the host-side unit tests with:
 
 ```bash
-./build.sh test
+./scripts/build.sh test
 ```
 
 This builds the `smart_drone_unit_tests` target and runs `ctest` in `build/unit-test`.
@@ -106,7 +106,7 @@ Current host-side coverage includes:
 Use the host-side offline replay tool to feed recorded stereo images and IMU data into the local replay pipeline and export a pose CSV:
 
 ```bash
-./build.sh replay
+./scripts/build.sh replay
 ./build/offline-replay/tests/smart_drone_offline_replay
 ```
 
@@ -179,10 +179,10 @@ apt-get install -y --no-install-recommends python3-scipy
 
 ### 2. Generate Stereo Calibration Parameters
 
-The repository root [`make_rosbag.py`](/d:/SmartDrone/make_rosbag.py) now generates both bags in one run:
+The repository root [`scripts/make_rosbag.py`](/d:/SmartDrone/scripts/make_rosbag.py) now generates both bags in one run:
 
 ```bash
-python3 make_rosbag.py
+python3 scripts/make_rosbag.py
 ```
 
 By default it reads:
@@ -225,10 +225,10 @@ rosrun kalibr kalibr_calibrate_imu_camera \
 
 ### 4. Convert Kalibr Results To Runtime YAML
 
-After Kalibr finishes, use [`convert_kalibr_to_smartdrone_yaml.py`](/d:/SmartDrone/convert_kalibr_to_smartdrone_yaml.py) to convert the Kalibr output into SmartDrone runtime configs:
+After Kalibr finishes, use [`scripts/convert_kalibr_to_smartdrone_yaml.py`](/d:/SmartDrone/scripts/convert_kalibr_to_smartdrone_yaml.py) to convert the Kalibr output into SmartDrone runtime configs:
 
 ```bash
-python3 convert_kalibr_to_smartdrone_yaml.py \
+python3 scripts/convert_kalibr_to_smartdrone_yaml.py \
   --camchain /data/calib_A-camchain-imucam.yaml \
   --imu /data/imu.yaml
 ```
@@ -242,7 +242,7 @@ This generates:
 You can also point the converter directly at a remote Kalibr result directory:
 
 ```bash
-python3 convert_kalibr_to_smartdrone_yaml.py \
+python3 scripts/convert_kalibr_to_smartdrone_yaml.py \
   --kalibr-root ltz@192.168.0.50:~/workspace/kalibr_data/calib_runs
 ```
 
@@ -254,15 +254,15 @@ The converter will try to:
 
 ## Upload
 
-Use the root `upload.sh` script to upload the runtime executable, `ORB_SLAM3` shared libraries, and runtime config files to the target device:
+Use `scripts/upload.sh` to upload the runtime executable, `ORB_SLAM3` shared libraries, and runtime config files to the target device:
 
 ```bash
-./upload.sh
-./upload.sh --restart
-TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./upload.sh --restart
-./upload.sh --adb-ip 192.168.0.100 --adb-port 33707
-./upload.sh --restart --adb-ip 192.168.0.100 --adb-port 33707
-./upload.sh --adb-only --adb-ip 192.168.0.100 --adb-port 33707
+./scripts/upload.sh
+./scripts/upload.sh --restart
+TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./scripts/upload.sh --restart
+./scripts/upload.sh --adb-ip 192.168.0.100 --adb-port 33707
+./scripts/upload.sh --restart --adb-ip 192.168.0.100 --adb-port 33707
+./scripts/upload.sh --adb-only --adb-ip 192.168.0.100 --adb-port 33707
 ```
 
 Default behavior:
@@ -286,3 +286,4 @@ Optional Android deploy argument:
 
 - `--apk <path>`: APK path for `adb install -r`, default `src/android/app/build/outputs/apk/debug/app-debug.apk`
 - `--adb-only`: skip SSH/runtime upload and run Android `adb connect` + APK install only
+

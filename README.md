@@ -24,18 +24,18 @@ SmartDrone 是一个面向双目/双目惯性无人机运行时系统，包含�
 统一入口：
 
 ```bash
-./build.sh smart_drone
-./build.sh android
-./build.sh all
-./build.sh test
-./build.sh replay
+./scripts/build.sh smart_drone
+./scripts/build.sh android
+./scripts/build.sh all
+./scripts/build.sh test
+./scripts/build.sh replay
 ```
 
 可选参数：
 
 ```bash
-ANDROID_GRADLE_TASK=assembleRelease ./build.sh android
-BUILD_JOBS=8 ./build.sh all
+ANDROID_GRADLE_TASK=assembleRelease ./scripts/build.sh android
+BUILD_JOBS=8 ./scripts/build.sh all
 ```
 
 ## 3. Android 安装
@@ -51,22 +51,22 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 使用根目录脚本：
 
 ```bash
-./upload.sh
-./upload.sh --restart
-TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./upload.sh --restart
+./scripts/upload.sh
+./scripts/upload.sh --restart
+TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./scripts/upload.sh --restart
 ```
 
 仅安装 Android APK：
 
 ```bash
-./upload.sh --adb-only --adb-ip 192.168.0.100 --adb-port 33707 \
+./scripts/upload.sh --adb-only --adb-ip 192.168.0.100 --adb-port 33707 \
   --apk ./src/android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ## 5. 运行测试
 
 ```bash
-./build.sh test
+./scripts/build.sh test
 ```
 
 包含：
@@ -80,7 +80,7 @@ TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./upload.sh --restart
 ## 6. 离线回放
 
 ```bash
-./build.sh replay
+./scripts/build.sh replay
 ./build/offline-replay/tests/smart_drone_offline_replay \
   --dataset tests/data \
   --out build/offline_replay_pose.csv \
@@ -89,9 +89,9 @@ TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./upload.sh --restart
 
 ## 7. 标定流程
 
-1. 采集数据并生成 rosbag（`make_rosbag.py`）
+1. 采集数据并生成 rosbag（`scripts/make_rosbag.py`）
 2. 使用 Kalibr 完成双目与双目惯性标定
-3. 使用 `convert_kalibr_to_smartdrone_yaml.py` 生成运行时 YAML：
+3. 使用 `scripts/convert_kalibr_to_smartdrone_yaml.py` 生成运行时 YAML：
 
 - `config/stereo.yaml`
 - `config/stereo_inertial.yaml`
@@ -108,3 +108,4 @@ TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./upload.sh --restart
 - 架构文档（中文）：`docs/architecture.zh.md`
 - 架构文档（英文）：`docs/architecture.en.md`
 - README（英文）：`README.en.md`
+

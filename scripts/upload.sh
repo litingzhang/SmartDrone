@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-  ./upload.sh [--restart] [--adb-ip <ip> --adb-port <port>] [--apk <path>] [--adb-only]
+  ./scripts/upload.sh [--restart] [--adb-ip <ip> --adb-port <port>] [--apk <path>] [--adb-only]
 
 Environment variables:
   TARGET_HOST        SSH host, default: ltz@192.168.0.105
@@ -68,19 +68,20 @@ while [ $# -gt 0 ]; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TARGET_HOST="${TARGET_HOST:-ltz@192.168.0.105}"
 REMOTE_DIR="${REMOTE_DIR:-/home/ltz}"
 REMOTE_SERVICE="${REMOTE_SERVICE:-smart_drone}"
-APK_PATH="${APK_PATH:-$SCRIPT_DIR/src/android/app/build/outputs/apk/debug/app-debug.apk}"
+APK_PATH="${APK_PATH:-$REPO_ROOT/src/android/app/build/outputs/apk/debug/app-debug.apk}"
 
-SMART_DRONE_BIN="$SCRIPT_DIR/build/cmake/src/native/smart_drone"
-ORB_SO="$SCRIPT_DIR/ORB_SLAM3/lib/libORB_SLAM3.so"
-DBOW2_SO="$SCRIPT_DIR/ORB_SLAM3/Thirdparty/DBoW2/lib/libDBoW2.so"
-G2O_SO="$SCRIPT_DIR/ORB_SLAM3/Thirdparty/g2o/lib/libg2o.so"
-CALIB_YAML="$SCRIPT_DIR/config/stereo_inertial.yaml"
-STEREO_YAML="$SCRIPT_DIR/config/stereo.yaml"
-MONO_YAML="$SCRIPT_DIR/config/mono_right.yaml"
-MONO_IMU_YAML="$SCRIPT_DIR/config/mono_inertial_right.yaml"
+SMART_DRONE_BIN="$REPO_ROOT/build/cmake/src/native/smart_drone"
+ORB_SO="$REPO_ROOT/ORB_SLAM3/lib/libORB_SLAM3.so"
+DBOW2_SO="$REPO_ROOT/ORB_SLAM3/Thirdparty/DBoW2/lib/libDBoW2.so"
+G2O_SO="$REPO_ROOT/ORB_SLAM3/Thirdparty/g2o/lib/libg2o.so"
+CALIB_YAML="$REPO_ROOT/config/stereo_inertial.yaml"
+STEREO_YAML="$REPO_ROOT/config/stereo.yaml"
+MONO_YAML="$REPO_ROOT/config/mono_right.yaml"
+MONO_IMU_YAML="$REPO_ROOT/config/mono_inertial_right.yaml"
 
 require_file() {
     if [ ! -f "$1" ]; then

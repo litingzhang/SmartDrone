@@ -13,7 +13,7 @@ Outputs:
 - mono_inertial_right yaml for right-camera mono-imu mode
 
 Example:
-  python3 convert_kalibr_to_smartdrone_yaml.py \
+  python3 scripts/convert_kalibr_to_smartdrone_yaml.py \
     --camchain /data/calib_A-camchain-imucam.yaml \
     --imu /data/imu.yaml \
     --out-stereo-plain /data/stereo.yaml \

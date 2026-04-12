@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-  ./build.sh [smart_drone|android|all|test|replay] [--clean] [--reconfigure]
+  ./scripts/build.sh [smart_drone|android|all|test|replay] [--clean] [--reconfigure]
 
 Modes:
   smart_drone     Build the unified runtime target
@@ -79,11 +79,12 @@ while [ "$#" -gt 0 ]; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SYSROOT="$(cd "$SCRIPT_DIR/../sysroots/cm5" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/build/cmake"
-TEST_BUILD_DIR="$SCRIPT_DIR/build/unit-test"
-REPLAY_BUILD_DIR="$SCRIPT_DIR/build/offline-replay"
-ANDROID_DIR="$SCRIPT_DIR/src/android"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SYSROOT="$(cd "$REPO_ROOT/../sysroots/cm5" && pwd)"
+BUILD_DIR="$REPO_ROOT/build/cmake"
+TEST_BUILD_DIR="$REPO_ROOT/build/unit-test"
+REPLAY_BUILD_DIR="$REPO_ROOT/build/offline-replay"
+ANDROID_DIR="$REPO_ROOT/src/android"
 ANDROID_APP_DIR="$ANDROID_DIR/app"
 ANDROID_GRADLE_TASK="${ANDROID_GRADLE_TASK:-assembleDebug}"
 BUILD_JOBS="${BUILD_JOBS:-$(nproc)}"
@@ -144,14 +145,14 @@ echo "BUILD_JOBS:$BUILD_JOBS"
 
 if [ "$BUILD_ORB" -eq 1 ]; then
     echo "build ORB-SLAM3"
-    cd "$SCRIPT_DIR/ORB_SLAM3"
+    cd "$REPO_ROOT/ORB_SLAM3"
     if [ "$CLEAN_BUILD" -eq 1 ]; then
         rm -rf build
     fi
     if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -d build ]; then
         cmake -S . -B build \
             -DSYSROOT="$SYSROOT" \
-            -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/toolchain/toolchain-cm5-aarch64.cmake"
+            -DCMAKE_TOOLCHAIN_FILE="$REPO_ROOT/toolchain/toolchain-cm5-aarch64.cmake"
     fi
     cmake --build build -j"$BUILD_JOBS"
     cd - >/dev/null
@@ -163,7 +164,7 @@ if [ "$BUILD_SMART_DRONE" = "ON" ]; then
     fi
     mkdir -p "$BUILD_DIR"
     if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
-        cmake -S . -B "$BUILD_DIR" \
+        cmake -S "$REPO_ROOT" -B "$BUILD_DIR" \
             -DSYSROOT="$SYSROOT" \
             -DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config \
             -DBUILD_SMART_DRONE="$BUILD_SMART_DRONE"
@@ -182,7 +183,7 @@ if [ "$BUILD_TESTS" -eq 1 ]; then
     fi
     mkdir -p "$TEST_BUILD_DIR"
     if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -f "$TEST_BUILD_DIR/CMakeCache.txt" ]; then
-        cmake -S . -B "$TEST_BUILD_DIR" \
+        cmake -S "$REPO_ROOT" -B "$TEST_BUILD_DIR" \
             -DCROSS_AARCH64=OFF \
             -DBUILD_SMART_DRONE=OFF \
             -DENABLE_UNIT_TESTS=ON
@@ -197,7 +198,7 @@ if [ "$BUILD_REPLAY" -eq 1 ]; then
     fi
     mkdir -p "$REPLAY_BUILD_DIR"
     if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -f "$REPLAY_BUILD_DIR/CMakeCache.txt" ]; then
-        cmake -S . -B "$REPLAY_BUILD_DIR" \
+        cmake -S "$REPO_ROOT" -B "$REPLAY_BUILD_DIR" \
             -DCROSS_AARCH64=OFF \
             -DBUILD_SMART_DRONE=OFF \
             -DENABLE_OFFLINE_REPLAY=ON
