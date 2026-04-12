@@ -47,6 +47,7 @@ std::vector<uint8_t> BuildCapabilitiesPayload()
     oss << "imu_providers=" << JoinStrings(capabilities.imuProviders, ",") << "\n";
     oss << "slam_engines=" << JoinStrings(capabilities.slamEngines, ",") << "\n";
     oss << "command_channels=" << JoinStrings(capabilities.commandChannels, ",") << "\n";
+    oss << "behavior_notes=" << JoinStrings(capabilities.behaviorNotes, ";") << "\n";
     oss << "config_keys=" << JoinStrings(configKeys, ",") << "\n";
     return TextPayloadFromString(oss.str());
 }

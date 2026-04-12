@@ -73,6 +73,7 @@ struct RuntimeConfig {
     smartdrone::core::domain::SlamOperationMode slamOperationMode{smartdrone::core::domain::SlamOperationMode::Mapping};
     bool debugRightOnlyFeatures{false};
     bool slamLowLightEnhance{false};
+    bool jsonDiagnostics{false};
 };
 
 struct AppConfig {

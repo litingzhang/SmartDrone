@@ -9,6 +9,7 @@
 #include "adapters/camera/libcamera_ov9281/stereo_ov9281.h"
 #include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "common/discovery/udp_discovery_beacon.h"
+#include "common/runtime_state.h"
 #include "common/tlv/udp_server.h"
 #include "core/application/runtime/payload_builders.h"
 #include "core/application/runtime/px4_udp_hooks.h"
@@ -56,19 +57,20 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
     smartdrone::core::application::PrintStartupConfig(cfg.app, aliases, ControllerMode::Idle);
 
     Px4MavlinkGateway mav("/dev/ttyAMA0", 921600);
+    mav.SetJsonDiagnostics(cfg.app.runtime.jsonDiagnostics);
     mav.StartRx();
     LivePoseState livePose;
     LiveRuntimeTuning tuning;
     Px4UdpHooks hooks(mav, livePose);
     UnifiedRuntimeController controller(
-        cfg, tuning, mav, livePose, g_runningFlag,
-        [&runningFlag = g_runningFlag](const UnifiedConfig &sessionCfg, LiveRuntimeTuning &sessionTuning,
+        cfg, tuning, mav, livePose, smartdrone::common::g_runningFlag,
+        [&runningFlag = smartdrone::common::g_runningFlag](const UnifiedConfig &sessionCfg, LiveRuntimeTuning &sessionTuning,
                                        Px4MavlinkGateway &sessionMav, std::atomic<bool> &stop,
                                        LivePoseState &poseState) {
             return smartdrone::core::application::RunSlamSession(sessionCfg, sessionTuning, sessionMav, stop, poseState,
                                                                  runningFlag);
         },
-        [&runningFlag = g_runningFlag](const UnifiedConfig &sessionCfg, std::atomic<bool> &stop,
+        [&runningFlag = smartdrone::common::g_runningFlag](const UnifiedConfig &sessionCfg, std::atomic<bool> &stop,
                                        LivePoseState &poseState) {
             return smartdrone::core::application::RunCalibSession(sessionCfg, stop, poseState, runningFlag);
         },
@@ -80,16 +82,16 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
     }
 
     std::thread udpCmdThread = smartdrone::core::application::StartUdpCommandThread(
-        aliases.cmdPort, hooks, controller, livePose, g_runningFlag,
+        aliases.cmdPort, hooks, controller, livePose, smartdrone::common::g_runningFlag,
         []() { return smartdrone::core::application::BuildCapabilitiesPayload(); },
         [](const UnifiedConfig &currentConfig, ControllerMode currentMode) {
             return smartdrone::core::application::BuildConfigPayload(currentConfig, currentMode);
         },
         [](const UdpPeer &peer) { return UdpPeerToIpString(peer); });
     std::thread discoveryThread = smartdrone::common::discovery::StartUdpDiscoveryBeaconThread(
-        kDiscoveryPort, aliases.cmdPort, aliases.udpPort, g_runningFlag);
+        kDiscoveryPort, aliases.cmdPort, aliases.udpPort, smartdrone::common::g_runningFlag);
 
-    while (g_runningFlag.load()) {
+    while (smartdrone::common::g_runningFlag.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 

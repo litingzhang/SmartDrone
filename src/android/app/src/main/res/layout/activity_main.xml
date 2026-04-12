@@ -114,13 +114,44 @@
                     android:layout_height="wrap_content"
                     android:layout_gravity="top|end"
                     android:layout_marginTop="44dp"
-                    android:gravity="end"
-                    android:orientation="vertical">
+                    android:gravity="end|center_vertical"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="96dp"
+                        android:layout_height="36dp"
+                        android:background="#33000000"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingLeft="8dp"
+                        android:paddingRight="6dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="SLAM"
+                            android:textColor="#FFFFFF"
+                            android:textSize="10sp"
+                            android:textStyle="bold" />
+
+                        <Switch
+                            android:id="@+id/btnToggleSlam"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minWidth="42dp"
+                            android:showText="false"
+                            android:splitTrack="false"
+                            android:switchMinWidth="42dp"
+                            android:thumb="@drawable/switch_thumb"
+                            android:track="@drawable/switch_track" />
+                    </LinearLayout>
 
                     <Button
                         android:id="@+id/btnQuickSlamAuto"
                         android:layout_width="96dp"
                         android:layout_height="36dp"
+                        android:layout_marginStart="6dp"
                         android:background="@drawable/bg_settings_button"
                         android:minHeight="36dp"
                         android:text="Auto Off"
@@ -132,7 +163,7 @@
                         android:id="@+id/btnQuickSlamManual"
                         android:layout_width="96dp"
                         android:layout_height="36dp"
-                        android:layout_marginTop="6dp"
+                        android:layout_marginStart="6dp"
                         android:background="@drawable/bg_settings_button"
                         android:minHeight="36dp"
                         android:text="Mapping"
@@ -432,7 +463,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center"
-                    android:text="Runtime Settings"
+                    android:text="Settings"
                     android:textColor="#183247"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -469,46 +500,6 @@
                                 android:singleLine="true"
                                 android:completionThreshold="1"
                                 android:text=""
-                                android:textColor="#183247"
-                                android:textColorHint="#6B7A8C"
-                                android:textSize="12sp" />
-                        </LinearLayout>
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:orientation="horizontal">
-
-                            <EditText
-                                android:id="@+id/etSshUser"
-                                android:layout_width="0dp"
-                                android:layout_height="40dp"
-                                android:layout_weight="1"
-                                android:background="#F7FAFC"
-                                android:hint="SSH User"
-                                android:inputType="textPersonName"
-                                android:minHeight="40dp"
-                                android:paddingLeft="12dp"
-                                android:paddingRight="12dp"
-                                android:singleLine="true"
-                                android:textColor="#183247"
-                                android:textColorHint="#6B7A8C"
-                                android:textSize="12sp" />
-
-                            <EditText
-                                android:id="@+id/etSshPassword"
-                                android:layout_width="0dp"
-                                android:layout_height="40dp"
-                                android:layout_marginStart="8dp"
-                                android:layout_weight="1"
-                                android:background="#F7FAFC"
-                                android:hint="SSH Password"
-                                android:inputType="textPassword"
-                                android:minHeight="40dp"
-                                android:paddingLeft="12dp"
-                                android:paddingRight="12dp"
-                                android:singleLine="true"
                                 android:textColor="#183247"
                                 android:textColorHint="#6B7A8C"
                                 android:textSize="12sp" />
@@ -639,37 +630,6 @@
                             android:text="1 fps step, 1-60 fps"
                             android:textColor="#667085"
                             android:textSize="10sp" />
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="40dp"
-                            android:layout_marginTop="12dp"
-                            android:background="#33FFFFFF"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal"
-                            android:paddingLeft="12dp"
-                            android:paddingRight="8dp">
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="SLAM Engine"
-                                android:textColor="#183247"
-                                android:textSize="11sp"
-                                android:textStyle="bold" />
-
-                            <Switch
-                                android:id="@+id/btnToggleSlam"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:minWidth="46dp"
-                                android:showText="false"
-                                android:splitTrack="false"
-                                android:switchMinWidth="46dp"
-                                android:thumb="@drawable/switch_thumb"
-                                android:track="@drawable/switch_track" />
-                        </LinearLayout>
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -837,18 +797,6 @@
                             android:background="@drawable/bg_settings_button"
                             android:minHeight="40dp"
                             android:text="Calib Clean"
-                            android:textColor="#FFFFFF"
-                            android:textSize="11sp"
-                            android:textStyle="bold" />
-
-                        <Button
-                            android:id="@+id/btnRestartService"
-                            android:layout_width="match_parent"
-                            android:layout_height="40dp"
-                            android:layout_marginTop="8dp"
-                            android:background="@drawable/bg_settings_button"
-                            android:minHeight="40dp"
-                            android:text="SSH Kill SmartDrone"
                             android:textColor="#FFFFFF"
                             android:textSize="11sp"
                             android:textStyle="bold" />

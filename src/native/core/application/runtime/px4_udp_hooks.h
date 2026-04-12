@@ -60,6 +60,8 @@ class Px4UdpHooks final : public MavlinkHooks {
     Px4MavlinkGateway::ManualControlInput GetManualControlSnapshot() const;
     void SendManualControlSnapshot();
     void WarmupManualControlLink();
+    bool EnsureOffboardMode(bool force, std::string *err);
+    bool EnsureFlightMode(uint8_t mainMode, bool force, std::string *err, const char *modeName);
     bool EnsurePositionMode(bool force, std::string *err);
     void UpdateAutoLanding();
     void ManualControlLoop();
@@ -69,6 +71,7 @@ class Px4UdpHooks final : public MavlinkHooks {
     std::atomic<bool> m_streamStarted{false};
     std::atomic<bool> m_manualControlStreaming{false};
     std::atomic<bool> m_remoteModeRequested{false};
+    std::atomic<bool> m_offboardModeRequested{false};
     std::atomic<bool> m_manualLoopStop{false};
     std::thread m_manualLoop;
     mutable std::mutex m_manualControlMtx;
@@ -76,7 +79,8 @@ class Px4UdpHooks final : public MavlinkHooks {
     mutable std::mutex m_remoteModeMtx;
     mutable std::mutex m_autoLandingMtx;
     AutoLandingState m_autoLanding{};
-    bool m_positionModeRequested{false};
+    bool m_modeChangeRequested{false};
+    uint8_t m_requestedMainMode{0};
     std::chrono::steady_clock::time_point m_lastPositionModeRequest{};
 };
 

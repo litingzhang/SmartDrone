@@ -39,7 +39,7 @@ struct MainRuntimeAliases {
     int width{}, height{}, fps{}, slamInputFps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{},
         pairQueue{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{}, debugRightOnlyFeatures{},
-        slamLowLightEnhance{};
+        slamLowLightEnhance{}, jsonDiagnostics{};
     bool sendImage{true}, sendFeature{true}, sendMap{false};
     float gain{};
     std::string udpIp, spiDev, gpiochip;

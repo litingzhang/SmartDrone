@@ -16,6 +16,7 @@ enum class ThreadRole {
     UdpImageCam0,
     UdpImageCam1,
     UdpCommand,
+    DiscoveryBeacon,
     Imu,
     CalibImuWriter,
     ManualControl

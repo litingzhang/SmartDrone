@@ -17,9 +17,6 @@
 #include <libcamera/framebuffer_allocator.h>
 #include <libcamera/libcamera.h>
 
-extern std::atomic<bool> g_runningFlag;
-void SigIntHandler(int);
-
 struct FrameItem {
     int camIndex{-1};
     uint64_t tsNs{0};

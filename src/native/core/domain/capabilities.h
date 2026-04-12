@@ -23,6 +23,7 @@ struct RuntimeCapabilities {
     std::vector<std::string> imuProviders;
     std::vector<std::string> slamEngines;
     std::vector<std::string> commandChannels;
+    std::vector<std::string> behaviorNotes;
     std::vector<ConfigDescriptor> configKeys;
 };
 

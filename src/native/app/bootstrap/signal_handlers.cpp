@@ -2,14 +2,14 @@
 
 #include <csignal>
 
-#include "adapters/camera/libcamera_ov9281/stereo_ov9281.h"
+#include "common/runtime_state.h"
 
 namespace smartdrone::app::bootstrap {
 
 void InstallSignalHandlers()
 {
-    signal(SIGINT, SigIntHandler);
-    signal(SIGTERM, SigIntHandler);
+    signal(SIGINT, smartdrone::common::SigIntHandler);
+    signal(SIGTERM, smartdrone::common::SigIntHandler);
 }
 
 } // namespace smartdrone::app::bootstrap

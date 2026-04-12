@@ -265,6 +265,7 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.slamOperationMode = ParseSlamOperationModeText(argReader.GetString("--slam-mode", "mapping"));
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");
     config.runtime.slamLowLightEnhance = argReader.HasFlag("--slam-lowlight-enhance");
+    config.runtime.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");
 
     return config;
 }

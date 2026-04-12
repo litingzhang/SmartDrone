@@ -91,6 +91,7 @@ class Px4MavlinkGateway {
                                uint8_t compid = MAV_COMP_ID_VISUAL_INERTIAL_ODOMETRY);
     ~Px4MavlinkGateway();
 
+    void SetJsonDiagnostics(bool enabled);
     void SetFrameTimingTracker(smartdrone::core::application::FrameTimingTracker *tracker);
     void StartRx();
     void StopRx();
@@ -208,4 +209,5 @@ class Px4MavlinkGateway {
     uint64_t m_lastSentOdomFrameId{0};
     uint64_t m_lastEstimatedPx4OdomTimeNs{0};
     smartdrone::core::application::FrameTimingTracker *m_frameTimingTracker{nullptr};
+    std::atomic<bool> m_jsonDiagnostics{false};
 };

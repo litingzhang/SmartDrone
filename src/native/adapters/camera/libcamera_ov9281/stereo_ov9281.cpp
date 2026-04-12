@@ -10,6 +10,8 @@
 #include <sys/mman.h>
 #include <time.h>
 
+#include "common/runtime_state.h"
+
 namespace {
 
 constexpr int32_t kSlamAeMaxExposureUs = 7000;
@@ -149,10 +151,6 @@ void CompressR16AdaptiveForSlam(const cv::Mat &src16, cv::Mat &dst8, int camInde
 }
 
 } // namespace
-
-std::atomic<bool> g_runningFlag{true};
-
-void SigIntHandler(int) { g_runningFlag.store(false); }
 
 bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex, int w, int h, int fps, bool aeDisable,
                             int exposureUs, float gain, bool requestY8)
@@ -712,7 +710,7 @@ bool LibcameraStereoOV9281_TsPair::GrabPair(FrameItem &L, FrameItem &R, int time
 {
     std::unique_lock<std::mutex> lk(m_muPair);
     if (!m_cvPair.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&] {
-            return HasEligiblePairLocked(minTimestampNs) || !g_runningFlag.load() ||
+            return HasEligiblePairLocked(minTimestampNs) || !smartdrone::common::g_runningFlag.load() ||
                    !m_acceptFrames.load(std::memory_order_relaxed);
         })) {
         return false;

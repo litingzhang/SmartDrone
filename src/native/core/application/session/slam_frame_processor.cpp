@@ -251,25 +251,49 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const bool slamDfxAbnormal = !poseResult.poseEstimate.valid || state <= 0 || totalMs > 80.0 ||
                                  slamOutput.leftFeatures.empty() || slamOutput.rightFeatures.empty();
     if (slamDfxPeriodic || slamDfxAbnormal) {
-        char dfxLine[384];
-        std::snprintf(
-            dfxLine, sizeof(dfxLine),
-            "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
-            "imu=%zu feat=%zu/%zu points=%zu "
-            "pair_dt=%.3f reject_dt=%.3f pend=%zu/%zu drop=%llu/%llu rate_drop=%llu "
-            "img_std=%.2f/%.2f sharp=%.2f/%.2f "
-            "timing_ms gap=%.3f mono=%.3f acquire=%.3f imu=%.3f slam=%.3f cloud=%.3f udp=%.3f post=%.3f "
-            "live=%.3f publish=%.3f total=%.3f",
-            static_cast<unsigned long long>(slamOutput.frameId), state, static_cast<int>(poseResult.quality),
-            poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
-            static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
-            slamOutput.rightFeatures.size(), pointCount, static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
-            static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
-            static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
-            monoStepMs, DurationMs(acquireStartTp, acquireEndTp), DurationMs(imuStartTp, imuEndTp),
-            DurationMs(slamStartTp, slamEndTp), DurationMs(cloudStartTp, cloudEndTp), DurationMs(udpStartTp, udpEndTp),
-            DurationMs(postStartTp, postEndTp), DurationMs(livePoseStartTp, livePoseEndTp),
-            DurationMs(publishStartTp, publishEndTp), totalMs);
+        char dfxLine[768];
+        if (m_ctx.aliases.jsonDiagnostics) {
+            std::snprintf(
+                dfxLine, sizeof(dfxLine),
+                "{\"tag\":\"slam_dfx\",\"frame\":%llu,\"state\":%d,\"quality\":%d,\"pose_valid\":%d,"
+                "\"reset_counter\":%u,\"reset_map_count\":%u,"
+                "\"imu_count\":%zu,\"feat_left\":%zu,\"feat_right\":%zu,\"points\":%zu,"
+                "\"pair_dt_ms\":%.3f,\"reject_dt_ms\":%.3f,\"pending_left\":%zu,\"pending_right\":%zu,"
+                "\"drop_left\":%llu,\"drop_right\":%llu,\"rate_drop\":%llu,"
+                "\"img_std_left\":%.2f,\"img_std_right\":%.2f,\"sharp_left\":%.2f,\"sharp_right\":%.2f,"
+                "\"gap_ms\":%.3f,\"mono_step_ms\":%.3f,"
+                "\"acquire_ms\":%.3f,\"imu_ms\":%.3f,\"slam_ms\":%.3f,\"cloud_ms\":%.3f,\"udp_ms\":%.3f,"
+                "\"post_ms\":%.3f,\"live_ms\":%.3f,\"publish_ms\":%.3f,\"total_ms\":%.3f}",
+                static_cast<unsigned long long>(slamOutput.frameId), state, static_cast<int>(poseResult.quality),
+                poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
+                static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
+                slamOutput.rightFeatures.size(), pointCount, static_cast<double>(pairDtMs), rejectDtMs, pendingL,
+                pendingR, static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
+                static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
+                monoStepMs, DurationMs(acquireStartTp, acquireEndTp), DurationMs(imuStartTp, imuEndTp),
+                DurationMs(slamStartTp, slamEndTp), DurationMs(cloudStartTp, cloudEndTp), DurationMs(udpStartTp, udpEndTp),
+                DurationMs(postStartTp, postEndTp), DurationMs(livePoseStartTp, livePoseEndTp),
+                DurationMs(publishStartTp, publishEndTp), totalMs);
+        } else {
+            std::snprintf(
+                dfxLine, sizeof(dfxLine),
+                "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
+                "imu=%zu feat=%zu/%zu points=%zu "
+                "pair_dt=%.3f reject_dt=%.3f pend=%zu/%zu drop=%llu/%llu rate_drop=%llu "
+                "img_std=%.2f/%.2f sharp=%.2f/%.2f "
+                "timing_ms gap=%.3f mono=%.3f acquire=%.3f imu=%.3f slam=%.3f cloud=%.3f udp=%.3f post=%.3f "
+                "live=%.3f publish=%.3f total=%.3f",
+                static_cast<unsigned long long>(slamOutput.frameId), state, static_cast<int>(poseResult.quality),
+                poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
+                static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
+                slamOutput.rightFeatures.size(), pointCount, static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
+                static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
+                static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
+                monoStepMs, DurationMs(acquireStartTp, acquireEndTp), DurationMs(imuStartTp, imuEndTp),
+                DurationMs(slamStartTp, slamEndTp), DurationMs(cloudStartTp, cloudEndTp), DurationMs(udpStartTp, udpEndTp),
+                DurationMs(postStartTp, postEndTp), DurationMs(livePoseStartTp, livePoseEndTp),
+                DurationMs(publishStartTp, publishEndTp), totalMs);
+        }
         LOGI("%s", dfxLine);
     }
 

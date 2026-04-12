@@ -24,7 +24,7 @@ constexpr auto kDiscoveryPeriod = std::chrono::seconds(1);
 
 std::thread StartUdpDiscoveryBeaconThread(int discoveryPort, int cmdPort, int videoPort, std::atomic<bool> &runningFlag)
 {
-    return SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::UdpCommand, "UdpDiscoveryBeacon",
+    return SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::DiscoveryBeacon, "UdpDiscoveryBeacon",
                                    [discoveryPort, cmdPort, videoPort, &runningFlag]() {
                                        int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
                                        if (fd < 0) {

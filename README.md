@@ -260,6 +260,9 @@ Use the root `upload.sh` script to upload the runtime executable, `ORB_SLAM3` sh
 ./upload.sh
 ./upload.sh --restart
 TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./upload.sh --restart
+./upload.sh --adb-ip 192.168.0.100 --adb-port 33707
+./upload.sh --restart --adb-ip 192.168.0.100 --adb-port 33707
+./upload.sh --adb-only --adb-ip 192.168.0.100 --adb-port 33707
 ```
 
 Default behavior:
@@ -277,3 +280,9 @@ Optional environment variables:
 - `REMOTE_DIR`: default `/home/ltz`
 - `REMOTE_SERVICE`: default `smart_drone`
 - `RESTART_SERVICE`: if set to `1`, run `sudo systemctl restart smart_drone` after upload
+- `ADB_IP` / `ADB_PORT`: if both are set (or provided with `--adb-ip` / `--adb-port`), run Android `adb connect` and install APK
+
+Optional Android deploy argument:
+
+- `--apk <path>`: APK path for `adb install -r`, default `src/android/app/build/outputs/apk/debug/app-debug.apk`
+- `--adb-only`: skip SSH/runtime upload and run Android `adb connect` + APK install only

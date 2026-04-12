@@ -24,9 +24,6 @@ import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 import com.example.smartdrone.R;
-import com.jcraft.jsch.ChannelExec;
-import com.jcraft.jsch.JSch;
-import com.jcraft.jsch.Session;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -38,7 +35,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -99,7 +95,6 @@ public class MainActivity extends Activity {
     private static final String PENDING_SENSOR = "sensor";
     private static final String PENDING_CONFIG = "config";
     private static final String PENDING_CLEAN_CALIB = "clean_calib";
-    private static final String PENDING_RESTART_SERVICE = "restart_service";
     private static final int EXPOSURE_MIN_US = 500;
     private static final int EXPOSURE_MAX_US = 20000;
     private static final int EXPOSURE_STEP_US = 500;
@@ -127,12 +122,6 @@ public class MainActivity extends Activity {
     private static final String KEY_SETTINGS_VISIBLE = "settingsVisible";
     private static final String KEY_DEBUG_VISIBLE = "debugVisible";
     private static final String KEY_REMOTE_VISIBLE = "remoteVisible";
-    private static final String DEFAULT_SSH_USER = "ltz";
-    private static final String DEFAULT_SSH_PASSWORD = "123456";
-    private static final int SSH_PORT = 22;
-    private static final int SSH_CONNECT_TIMEOUT_MS = 4000;
-    private static final int SSH_COMMAND_TIMEOUT_MS = 4000;
-    private static final String SSH_KILL_COMMAND = "pkill -f '(^|/)smart_drone( |$)' || pkill -x smart_drone";
     private static final int DEFAULT_CMD_PORT = 14550;
     private static final int DEFAULT_PHONE_VIDEO_PORT = 5000;
     private static final int DISCOVERY_PORT = 15000;
@@ -161,7 +150,6 @@ public class MainActivity extends Activity {
     private Button m_btnQuickSlamAuto;
     private Button m_btnQuickSlamManual;
     private Button m_btnCleanCalib;
-    private Button m_btnRestartService;
     private Switch m_btnRemoteToggle;
     private Switch m_btnDebugToggle;
     private ImageButton m_btnMapClear;
@@ -171,8 +159,6 @@ public class MainActivity extends Activity {
     private Switch m_btnFeatureToggle;
 
     private AutoCompleteTextView m_etVehicleIp;
-    private EditText m_etSshUser;
-    private EditText m_etSshPassword;
     private TextView m_tvCfgExposureValue;
     private TextView m_tvCfgGainValue;
     private TextView m_tvCfgPairMsValue;
@@ -208,7 +194,7 @@ public class MainActivity extends Activity {
     private boolean m_joystickLoopRunning;
     private boolean m_lastJoystickActive;
     private boolean m_settingsVisible = false;
-    private boolean m_debugVisible = false;
+    private boolean m_debugVisible = true;
     private boolean m_remoteVisible = true;
     private boolean m_updatingToggleUi = false;
     private boolean m_updatingConfigUi = false;
@@ -1057,94 +1043,6 @@ public class MainActivity extends Activity {
         updateFlightButtons();
     }
 
-    private void sshKillSmartDrone()
-    {
-        if (isPending(PENDING_RESTART_SERVICE)) {
-            return;
-        }
-        final String host = m_etVehicleIp != null ? m_etVehicleIp.getText().toString().trim() : "";
-        final String user = m_etSshUser != null ? m_etSshUser.getText().toString().trim() : "";
-        final String password = m_etSshPassword != null ? m_etSshPassword.getText().toString() : "";
-        if (host.isEmpty()) {
-            m_tvStatus.setText("Vehicle IP is empty");
-            return;
-        }
-        if (user.isEmpty()) {
-            m_tvStatus.setText("SSH user is empty");
-            return;
-        }
-        setPendingKey(PENDING_RESTART_SERVICE);
-        m_tvStatus.setText(String.format(Locale.US, "SSH kill -> %s@%s", user, host));
-        new Thread(() -> {
-            Session session = null;
-            ChannelExec channel = null;
-            final java.io.ByteArrayOutputStream stdout = new java.io.ByteArrayOutputStream();
-            final java.io.ByteArrayOutputStream stderr = new java.io.ByteArrayOutputStream();
-            try {
-                JSch jsch = new JSch();
-                session = jsch.getSession(user, host, SSH_PORT);
-                if (!password.isEmpty()) {
-                    session.setPassword(password);
-                }
-                Properties config = new Properties();
-                config.put("StrictHostKeyChecking", "no");
-                if (!password.isEmpty()) {
-                    config.put("PreferredAuthentications", "password,keyboard-interactive");
-                }
-                session.setConfig(config);
-                session.connect(SSH_CONNECT_TIMEOUT_MS);
-
-                channel = (ChannelExec)session.openChannel("exec");
-                channel.setCommand(SSH_KILL_COMMAND);
-                channel.setInputStream(null);
-                channel.setOutputStream(stdout);
-                channel.setErrStream(stderr);
-                channel.connect(SSH_COMMAND_TIMEOUT_MS);
-
-                long deadline = System.currentTimeMillis() + SSH_COMMAND_TIMEOUT_MS;
-                while (!channel.isClosed() && System.currentTimeMillis() < deadline) {
-                    try {
-                        Thread.sleep(50L);
-                    } catch (InterruptedException interrupted) {
-                        Thread.currentThread().interrupt();
-                        throw new RuntimeException("SSH interrupted", interrupted);
-                    }
-                }
-                if (!channel.isClosed()) {
-                    throw new RuntimeException("SSH command timeout");
-                }
-                final int exitStatus = channel.getExitStatus();
-                final String stderrText = stderr.toString().trim();
-                final String stdoutText = stdout.toString().trim();
-                m_handler.post(() -> {
-                    clearPendingKey(PENDING_RESTART_SERVICE);
-                    if (exitStatus == 0) {
-                        m_tvStatus.setText("SSH kill sent, waiting for systemd auto-restart");
-                        m_handler.postDelayed(this::requestRuntimeMetadata, 1500L);
-                    } else {
-                        String detail = !stderrText.isEmpty()
-                                            ? stderrText
-                                            : (!stdoutText.isEmpty() ? stdoutText : ("exit=" + exitStatus));
-                        m_tvStatus.setText("SSH kill failed: " + detail);
-                    }
-                });
-            } catch (Throwable t) {
-                final String message = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
-                m_handler.post(() -> {
-                    clearPendingKey(PENDING_RESTART_SERVICE);
-                    m_tvStatus.setText("SSH kill error: " + message);
-                });
-            } finally {
-                if (channel != null) {
-                    channel.disconnect();
-                }
-                if (session != null) {
-                    session.disconnect();
-                }
-            }
-        }, "ssh-kill-smart-drone").start();
-    }
-
     private boolean ensureVehicleConnection()
     {
         String vehicleIp = m_etVehicleIp.getText().toString().trim();
@@ -1316,9 +1214,6 @@ public class MainActivity extends Activity {
         m_updatingToggleUi = false;
         if (m_btnCleanCalib != null) {
             setButtonState(m_btnCleanCalib, true, isPending(PENDING_CLEAN_CALIB), "#546E7A");
-        }
-        if (m_btnRestartService != null) {
-            setButtonState(m_btnRestartService, true, isPending(PENDING_RESTART_SERVICE), "#6D4C41");
         }
         updateConfigViews();
     }
@@ -2463,11 +2358,8 @@ public class MainActivity extends Activity {
         m_featurePaint.setStrokeWidth(2.0f);
 
         m_btnCleanCalib = findViewById(R.id.btnCleanCalib);
-        m_btnRestartService = findViewById(R.id.btnRestartService);
 
         m_etVehicleIp = findViewById(R.id.etVehicleIp);
-        m_etSshUser = findViewById(R.id.etSshUser);
-        m_etSshPassword = findViewById(R.id.etSshPassword);
         if (m_etVehicleIp != null) {
             ArrayAdapter<String> vehicleIpAdapter =
                 new ArrayAdapter<>(this, R.layout.dropdown_vehicle_ip_item, DEFAULT_VEHICLE_IPS);
@@ -2507,12 +2399,6 @@ public class MainActivity extends Activity {
         m_phoneVideoPort = phoneVideoPort;
         if (m_etVehicleIp != null) {
             m_etVehicleIp.setText(cm5Ip);
-        }
-        if (m_etSshUser != null) {
-            m_etSshUser.setText(DEFAULT_SSH_USER);
-        }
-        if (m_etSshPassword != null) {
-            m_etSshPassword.setText(DEFAULT_SSH_PASSWORD);
         }
         boolean ok;
         try {
@@ -2744,7 +2630,7 @@ public class MainActivity extends Activity {
         m_btnModeToggle.setOnClickListener(v -> setSettingsVisible(!m_settingsVisible));
         if (savedInstanceState != null) {
             m_settingsVisible = savedInstanceState.getBoolean(KEY_SETTINGS_VISIBLE, false);
-            m_debugVisible = savedInstanceState.getBoolean(KEY_DEBUG_VISIBLE, false);
+            m_debugVisible = savedInstanceState.getBoolean(KEY_DEBUG_VISIBLE, true);
             m_remoteVisible = savedInstanceState.getBoolean(KEY_REMOTE_VISIBLE, true);
         }
         setSettingsVisible(m_settingsVisible);
@@ -2787,9 +2673,6 @@ public class MainActivity extends Activity {
         if (m_btnCleanCalib != null) {
             m_btnCleanCalib.setOnClickListener(
                 v -> sendSimpleCmdAwaitAck("CLEAN_CALIB", CMD_CALIB_CLEAN, PENDING_CLEAN_CALIB, () -> {}));
-        }
-        if (m_btnRestartService != null) {
-            m_btnRestartService.setOnClickListener(v -> sshKillSmartDrone());
         }
         if (m_spinnerSensorMode != null) {
             m_spinnerSensorMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {

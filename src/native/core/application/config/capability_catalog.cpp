@@ -25,6 +25,11 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault()
     capabilities.imuProviders = {"icm42688_spi"};
     capabilities.slamEngines = {"orbslam3"};
     capabilities.commandChannels = {"udp_tlv"};
+    capabilities.behaviorNotes = {
+        "slam_mode.relocalization=maps_to_orbslam3_localization_only",
+        "slam_mode.tracking_only=maps_to_orbslam3_localization_only",
+        "slam_mode.auto=runtime_adaptive_switch_between_mapping_and_localization",
+    };
     capabilities.configKeys = ConfigRegistry::DefaultDescriptors();
     return capabilities;
 }

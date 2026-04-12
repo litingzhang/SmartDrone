@@ -52,6 +52,11 @@ Px4MavlinkGateway::~Px4MavlinkGateway()
     StopSetpointStream();
 }
 
+void Px4MavlinkGateway::SetJsonDiagnostics(bool enabled)
+{
+    m_jsonDiagnostics.store(enabled, std::memory_order_relaxed);
+}
+
 void Px4MavlinkGateway::SetFrameTimingTracker(smartdrone::core::application::FrameTimingTracker *tracker)
 {
     std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
@@ -499,15 +504,27 @@ void Px4MavlinkGateway::SendOdometry(uint64_t odomFrameId, const Pose &poseNed, 
     const bool odomTsAbnormal = !diagnostics.timesyncValid || totalLatencyMs > 120.0 || queueLatencyMs > 50.0 ||
                                 slamLatencyMs > 80.0 || sendLatencyMs > 30.0;
     if (odomTsPeriodic || odomTsAbnormal) {
-        printf("[odom_ts] frame=%llu timing=%d reset=%u quality=%d cam_ns=%llu px4_est_ns=%llu "
-               "sync=%d offset_ms=%.3f rtt_ms=%.3f "
-               "queue_ms=%.3f slam_ms=%.3f send_ms=%.3f total_ms=%.3f\n",
-               static_cast<unsigned long long>(diagnostics.frameId), haveTiming ? 1 : 0,
-               static_cast<unsigned>(resetCounter), static_cast<int>(quality),
-               static_cast<unsigned long long>(diagnostics.tCamNs),
-               static_cast<unsigned long long>(diagnostics.estimatedPx4TimeNs), diagnostics.timesyncValid ? 1 : 0,
-               px4OffsetMs, static_cast<double>(diagnostics.timesyncRttUs) * 1e-3, queueLatencyMs, slamLatencyMs,
-               sendLatencyMs, totalLatencyMs);
+        if (m_jsonDiagnostics.load(std::memory_order_relaxed)) {
+            printf("{\"tag\":\"odom_ts\",\"frame\":%llu,\"timing\":%d,\"reset\":%u,\"quality\":%d,"
+                   "\"cam_ns\":%llu,\"px4_est_ns\":%llu,\"sync\":%d,\"offset_ms\":%.3f,\"rtt_ms\":%.3f,"
+                   "\"queue_ms\":%.3f,\"slam_ms\":%.3f,\"send_ms\":%.3f,\"total_ms\":%.3f}\n",
+                   static_cast<unsigned long long>(diagnostics.frameId), haveTiming ? 1 : 0,
+                   static_cast<unsigned>(resetCounter), static_cast<int>(quality),
+                   static_cast<unsigned long long>(diagnostics.tCamNs),
+                   static_cast<unsigned long long>(diagnostics.estimatedPx4TimeNs), diagnostics.timesyncValid ? 1 : 0,
+                   px4OffsetMs, static_cast<double>(diagnostics.timesyncRttUs) * 1e-3, queueLatencyMs, slamLatencyMs,
+                   sendLatencyMs, totalLatencyMs);
+        } else {
+            printf("[odom_ts] frame=%llu timing=%d reset=%u quality=%d cam_ns=%llu px4_est_ns=%llu "
+                   "sync=%d offset_ms=%.3f rtt_ms=%.3f "
+                   "queue_ms=%.3f slam_ms=%.3f send_ms=%.3f total_ms=%.3f\n",
+                   static_cast<unsigned long long>(diagnostics.frameId), haveTiming ? 1 : 0,
+                   static_cast<unsigned>(resetCounter), static_cast<int>(quality),
+                   static_cast<unsigned long long>(diagnostics.tCamNs),
+                   static_cast<unsigned long long>(diagnostics.estimatedPx4TimeNs), diagnostics.timesyncValid ? 1 : 0,
+                   px4OffsetMs, static_cast<double>(diagnostics.timesyncRttUs) * 1e-3, queueLatencyMs, slamLatencyMs,
+                   sendLatencyMs, totalLatencyMs);
+        }
     }
 }
 

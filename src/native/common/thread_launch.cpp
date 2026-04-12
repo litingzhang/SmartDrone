@@ -35,6 +35,8 @@ const char *ThreadRoleName(ThreadRole role)
         return "udp_image_cam1";
     case ThreadRole::UdpCommand:
         return "udp_command";
+    case ThreadRole::DiscoveryBeacon:
+        return "discovery_beacon";
     case ThreadRole::Imu:
         return "imu";
     case ThreadRole::CalibImuWriter:

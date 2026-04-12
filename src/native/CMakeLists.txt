@@ -21,6 +21,7 @@ set(SMART_DRONE_ADAPTER_SOURCES
 
 set(SMART_DRONE_COMMON_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/common/discovery/udp_discovery_beacon.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_state.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/common/thread_launch.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/common/time_utils.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/common/tlv/crc16_ccitt_false.cpp"
