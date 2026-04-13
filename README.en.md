@@ -40,6 +40,18 @@ Build targets:
 - `test`: build and run host-side unit tests
 - `replay`: build the host-side offline replay tool
 
+Optional mode flags:
+
+- `--clean`: remove the corresponding build directory before building
+- `--reconfigure`: force CMake configure even when a cache already exists
+
+Examples:
+
+```bash
+./scripts/build.sh smart_drone --clean --reconfigure
+./scripts/build.sh all --clean
+```
+
 Android build behavior:
 
 - Prefer `src/android/gradlew`
@@ -267,7 +279,7 @@ TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./scripts/upload.sh --restart
 
 Default behavior:
 
-- Upload `build/cmake/smart_drone`
+- Upload `build/cmake/src/native/smart_drone`
 - Upload `libORB_SLAM3.so`, `libDBoW2.so`, and `libg2o.so`
 - Create `~/config` on the target when needed
 - Upload `config/stereo.yaml` and `config/stereo_inertial.yaml`
@@ -286,4 +298,8 @@ Optional Android deploy argument:
 
 - `--apk <path>`: APK path for `adb install -r`, default `src/android/app/build/outputs/apk/debug/app-debug.apk`
 - `--adb-only`: skip SSH/runtime upload and run Android `adb connect` + APK install only
+
+ADB note:
+
+- If either `--adb-ip` or `--adb-port` is set, both are required.
 

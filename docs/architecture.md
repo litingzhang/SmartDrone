@@ -510,6 +510,27 @@ sequenceDiagram
 - `stream.send_feature`
 - `stream.send_map`
 
+### 10.4 `T_b_c1` 参数说明（`config/*.yaml`）
+
+- 定义：`T_b_c1` 是 `body -> c1(左目相机)` 的 4x4 齐次外参（`SE3`）。
+- 读取逻辑：纯双目模式优先读取 `T_b_c1`，若不存在则回退读取 `IMU.T_b_c1`。
+- 生效条件：仅在 `SensorMode::Stereo`（不带 IMU）时由应用层后处理使用。
+- 变换用途：SLAM 原始位姿是左目相机位姿 `T_w_c1`，发布前会换算为机体位姿：
+  `T_w_b = T_w_c1 * (T_b_c1)^-1`。
+- 缺省行为：若 YAML 未提供 `T_b_c1/IMU.T_b_c1`，系统保留相机坐标系位姿并打印提示日志。
+
+### 10.5 位姿全路径处理（从 SLAM 到外发）
+
+1. ORB-SLAM3 输出 `T_cw`（相机位姿），`orbslam3_engine` 内部求逆得到 `T_w_c` 并输出平移+四元数。
+2. `SlamFrameProcessor` 将原始位姿送入 `PosePostprocessor::ProcessPose`。
+3. 纯双目模式下，若已加载 `T_b_c1`，执行 `T_w_b = T_w_c1 * (T_b_c1)^-1`，把左目位姿转换为机体位姿。
+4. 纯双目模式下首次可用跟踪帧会被设为会话参考原点，后续输出相对该原点的连续位姿。
+5. `ContinuityMapper` 在 map 切换/重定位后维护连续桥接，并累计 `resetCounter/resetMapCount`。
+6. `StartupAligner` 做启动对齐：优先用 PX4 本地 `z` 对齐，高度不可用时按超时策略回退，质量标记为 `Good/Weak/Lost`。
+7. 对外发布分两路并行：
+   - MAVLink：`MavlinkPosePublisher -> SendOdometry`，以 `MAV_FRAME_LOCAL_NED / MAV_FRAME_BODY_FRD` 发布里程计。
+   - UDP 状态：写入 `LivePoseState`，由 `udp_command_thread` 周期打包 `CMD_STATE`（包含位姿、reset 计数、飞控模式等）。
+
 ---
 
 ## 11. 实现状态摘要

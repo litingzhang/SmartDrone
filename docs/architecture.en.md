@@ -454,3 +454,68 @@ sequenceDiagram
     HOOK->>PX4: MAV_CMD_NAV_LAND
     PX4-->>HOOK: COMMAND_ACK accepted
 ```
+
+---
+
+## 10. Protocol and Config Quick Reference
+
+### 10.1 TLV Command Reference
+
+- control commands: `0x10`~`0x16`
+- movement command: `CMD_MOVE=0x20`
+- runtime commands: `CMD_RUNTIME_MODE=0x30`, `CMD_RUNTIME_CONFIG=0x31`
+- query commands: `CMD_GET_CAPABILITIES=0x33`, `CMD_GET_CONFIG=0x34`
+- response commands: `CMD_ACK=0xF0`, `CMD_STATE=0xF1`, `CMD_HEARTBEAT=0xF5`
+
+### 10.2 Key Timing Parameters
+
+- discovery beacon period: `1s`
+- heartbeat period: `500ms`
+- heartbeat LAND timeout: `3s`
+- command peer lock window: `5s`
+- state TX period: `100ms`
+
+### 10.3 Core Runtime Config Keys
+
+- `camera.exposure_us`
+- `camera.gain`
+- `camera.auto_exposure`
+- `camera.pair_window_ms`
+- `slam.input_fps`
+- `slam.perception_mode`
+- `slam.operation_mode`
+- `stream.udp_enabled`
+- `stream.udp_ip`
+- `stream.send_image`
+- `stream.send_feature`
+- `stream.send_map`
+
+### 10.4 `T_b_c1` Parameter (`config/*.yaml`)
+
+- Definition: `T_b_c1` is the 4x4 homogeneous extrinsic (`SE3`) from `body -> c1` (left camera).
+- Loading rule: in pure stereo mode, the runtime first reads `T_b_c1`, then falls back to `IMU.T_b_c1`.
+- Activation scope: this transform is applied only in `SensorMode::Stereo` (without IMU fusion).
+- Usage: raw SLAM pose is `T_w_c1`, then converted to body pose before publish:
+  `T_w_b = T_w_c1 * (T_b_c1)^-1`.
+- Default behavior: if neither `T_b_c1` nor `IMU.T_b_c1` exists, pose remains in camera frame and a log hint is printed.
+
+### 10.5 Full Pose Processing Path (SLAM to external outputs)
+
+1. ORB-SLAM3 outputs `T_cw`; `orbslam3_engine` inverts it to `T_w_c` and exports translation + quaternion.
+2. `SlamFrameProcessor` forwards the raw pose to `PosePostprocessor::ProcessPose`.
+3. In pure stereo mode with loaded `T_b_c1`, it converts `T_w_c1` to `T_w_b` using `T_w_b = T_w_c1 * (T_b_c1)^-1`.
+4. In pure stereo mode, the first usable tracking frame is used as a session reference origin to produce relative continuous output.
+5. `ContinuityMapper` bridges map switches/relocalization and updates `resetCounter/resetMapCount`.
+6. `StartupAligner` aligns startup pose (prefers PX4 local `z`, then fallback strategy), and sets `Good/Weak/Lost` quality.
+7. The final pose is published through two paths in parallel:
+   - MAVLink: `MavlinkPosePublisher -> SendOdometry` with `MAV_FRAME_LOCAL_NED / MAV_FRAME_BODY_FRD`.
+   - UDP state: stored in `LivePoseState`, then packed by `udp_command_thread` into `CMD_STATE`.
+
+---
+
+## 11. Implementation Status Summary
+
+- Core architecture is implemented, including control/data planes, session lifecycle, telemetry integration, and discovery link.
+- Discovery has been integrated with Android auto-connect behavior.
+- Setpoint behavior is split as designed: OFFBOARD streams setpoints; POSITION mode stops setpoint streaming.
+- Heartbeat timeout LAND is implemented on both companion and Android sides for redundant fail-safe coverage.
