@@ -26,13 +26,26 @@ static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
 static constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
-static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 44;
+static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 89;
 
 static uint32_t NowMs32()
 {
     using namespace std::chrono;
     const auto ms = duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
     return static_cast<uint32_t>(ms & 0xFFFFFFFFu);
+}
+
+static void WriteF32LeAt(std::vector<uint8_t> &payload, size_t offset, float value)
+{
+    if (offset + 4 > payload.size()) {
+        return;
+    }
+    uint32_t raw = 0;
+    std::memcpy(&raw, &value, sizeof(float));
+    payload[offset + 0] = static_cast<uint8_t>(raw & 0xFFu);
+    payload[offset + 1] = static_cast<uint8_t>((raw >> 8) & 0xFFu);
+    payload[offset + 2] = static_cast<uint8_t>((raw >> 16) & 0xFFu);
+    payload[offset + 3] = static_cast<uint8_t>((raw >> 24) & 0xFFu);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_com_example_smartdrone_NativeUdp_init(JNIEnv *env, jclass, jstring ip,
@@ -165,7 +178,9 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendHear
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRuntimeConfig(
     JNIEnv *, jclass, jint exposureUs, jfloat gain, jint pairMs, jint slamFps, jint slamMode, jint sensorMode,
-    jboolean sendImage, jboolean sendFeature, jboolean sendMap, jboolean autoExposure)
+    jboolean sendImage, jboolean sendFeature, jboolean sendMap, jboolean autoExposure, jboolean useCustomTbc,
+    jfloat tbcTx, jfloat tbcTy, jfloat tbcTz, jfloat tbcRollDeg, jfloat tbcPitchDeg, jfloat tbcYawDeg,
+    jint orbNFeatures, jfloat orbScaleFactor, jint orbNLevels, jint orbIniThFAST, jint orbMinThFAST)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     const uint32_t seq = g_seqCounter.fetch_add(1);
@@ -189,6 +204,18 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
     payload[41] = static_cast<uint8_t>((slamFpsValue >> 8) & 0xFF);
     payload[42] = static_cast<uint8_t>(slamMode);
     payload[43] = static_cast<uint8_t>(autoExposure == JNI_TRUE ? 1 : 0);
+    payload[44] = static_cast<uint8_t>(useCustomTbc == JNI_TRUE ? 1 : 0);
+    WriteF32LeAt(payload, 45, tbcTx);
+    WriteF32LeAt(payload, 49, tbcTy);
+    WriteF32LeAt(payload, 53, tbcTz);
+    WriteF32LeAt(payload, 57, tbcPitchDeg);
+    WriteF32LeAt(payload, 61, tbcRollDeg);
+    WriteF32LeAt(payload, 65, tbcYawDeg);
+    WriteF32LeAt(payload, 69, static_cast<float>(orbNFeatures));
+    WriteF32LeAt(payload, 73, orbScaleFactor);
+    WriteF32LeAt(payload, 77, static_cast<float>(orbNLevels));
+    WriteF32LeAt(payload, 81, static_cast<float>(orbIniThFAST));
+    WriteF32LeAt(payload, 85, static_cast<float>(orbMinThFAST));
 
     const std::vector<uint8_t> frame =
         MakeFrame(1, CMD_RUNTIME_CONFIG, 0, seq, NowMs32(), payload.data(), static_cast<uint16_t>(payload.size()));

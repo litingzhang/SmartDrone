@@ -21,6 +21,18 @@ class ConfigRegistry {
     static constexpr std::string_view kStreamSendImage = "stream.send_image";
     static constexpr std::string_view kStreamSendFeature = "stream.send_feature";
     static constexpr std::string_view kStreamSendMap = "stream.send_map";
+    static constexpr std::string_view kSlamUseCustomTbc = "slam.tbc_override_enabled";
+    static constexpr std::string_view kSlamTbcTx = "slam.tbc_tx_m";
+    static constexpr std::string_view kSlamTbcTy = "slam.tbc_ty_m";
+    static constexpr std::string_view kSlamTbcTz = "slam.tbc_tz_m";
+    static constexpr std::string_view kSlamTbcRollDeg = "slam.tbc_roll_deg";
+    static constexpr std::string_view kSlamTbcPitchDeg = "slam.tbc_pitch_deg";
+    static constexpr std::string_view kSlamTbcYawDeg = "slam.tbc_yaw_deg";
+    static constexpr std::string_view kSlamOrbNFeatures = "slam.orb_nfeatures";
+    static constexpr std::string_view kSlamOrbScaleFactor = "slam.orb_scale_factor";
+    static constexpr std::string_view kSlamOrbNLevels = "slam.orb_nlevels";
+    static constexpr std::string_view kSlamOrbIniThFast = "slam.orb_ini_th_fast";
+    static constexpr std::string_view kSlamOrbMinThFast = "slam.orb_min_th_fast";
 
     static std::vector<domain::ConfigDescriptor> DefaultDescriptors();
 

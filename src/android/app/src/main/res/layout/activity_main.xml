@@ -633,6 +633,229 @@
 
                         <LinearLayout
                             android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="T_b_c1 Override"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnTbcOverrideToggle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:minWidth="42dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="42dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tvCfgTbcXValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="T_b_c1 Tx: 0.000 m"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgTbcX"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Tbc X slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgTbcYValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="T_b_c1 Ty: 0.000 m"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgTbcY"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Tbc Y slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgTbcZValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="T_b_c1 Tz: 0.000 m"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgTbcZ"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Tbc Z slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgTbcRollValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Camera Roll: 0.0 deg"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgTbcRoll"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Tbc roll slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgTbcPitchValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Camera Pitch: 0.0 deg"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgTbcPitch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Tbc pitch slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgTbcYawValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Camera Yaw: 0.0 deg"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgTbcYaw"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Tbc yaw slider" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingBottom="4dp"
+                            android:text="x/y/z: 1 mm step (-0.30~0.30 m), roll/yaw: 0.1 deg (-10.0~10.0), pitch: 0.1 deg (-10.0~100.0)"
+                            android:textColor="#667085"
+                            android:textSize="10sp" />
+
+                        <TextView
+                            android:id="@+id/tvCfgOrbNFeaturesValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="ORB nFeatures: 1200"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgOrbNFeatures"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="ORB nfeatures slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgOrbScaleFactorValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="ORB scaleFactor: 1.20"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgOrbScaleFactor"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="ORB scale factor slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgOrbNLevelsValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="ORB nLevels: 8"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgOrbNLevels"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="ORB nlevels slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgOrbIniThFastValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="ORB iniThFAST: 16"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgOrbIniThFast"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="ORB iniThFAST slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgOrbMinThFastValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="ORB minThFAST: 6"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgOrbMinThFast"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="ORB minThFAST slider" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingBottom="4dp"
+                            android:text="ORB nFeatures: 50 step (500~3000), scaleFactor: 0.01 step (1.05~2.00), nLevels: 1 step (4~12), FAST: 1 step (2~40)"
+                            android:textColor="#667085"
+                            android:textSize="10sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
                             android:background="#33FFFFFF"

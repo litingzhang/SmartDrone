@@ -56,6 +56,7 @@ class SlamFrameProcessor {
         bool haveLastValidTwcRaw{false};
         uint64_t frameIndex{0};
         int64_t lastPublishedFrameNs{0};
+        int64_t lastFrameGapWarnLogNs{0};
         uint64_t rateLimitedDrops{0};
         uint8_t sessionResetCounterBase{0};
         uint16_t sessionResetMapCountBase{0};

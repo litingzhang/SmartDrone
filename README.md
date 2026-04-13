@@ -144,9 +144,27 @@ ADB 相关注意事项：
 - 控制链路：UDP TLV（命令/ACK/状态/心跳）
 - 飞控链路：MAVLink（串口 `/dev/ttyAMA0`）
 
-## 9. 相关文档
+## 9. 手机端运行时调参
 
-- 架构文档（中文）：`docs/architecture.zh.md`
+`CMD_RUNTIME_CONFIG` 现支持以下两类 SLAM 相关调参（由 Android 控制端下发）：
+
+- `T_b_c1` 运行时覆盖：`slam.tbc_override_enabled`（默认关闭）、`slam.tbc_tx_m / ty_m / tz_m`、`slam.tbc_roll_deg / pitch_deg / yaw_deg`（手机端范围：roll/yaw `-10.0~10.0`，pitch `-10.0~100.0`，步进 `0.1`）。
+- ORB 提取器参数：
+- `slam.orb_nfeatures`
+- `slam.orb_scale_factor`
+- `slam.orb_nlevels`
+- `slam.orb_ini_th_fast`
+- `slam.orb_min_th_fast`
+
+生效方式：
+
+- ORB 参数变更后会触发 SLAM 会话重启。
+- 启动 SLAM 前，运行时会基于当前 `settings` 生成 `*.runtime_orb.yaml`，覆盖 `ORBextractor.*` 后再初始化 ORB-SLAM3。
+- `slam.orb_min_th_fast` 必须小于等于 `slam.orb_ini_th_fast`，否则配置会被拒绝。
+
+## 10. 相关文档
+
+- 架构文档（中文）：`docs/architecture.md`
 - 架构文档（英文）：`docs/architecture.en.md`
 - README（英文）：`README.en.md`
 

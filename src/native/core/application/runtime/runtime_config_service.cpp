@@ -1,12 +1,25 @@
 #include "core/application/runtime/runtime_config_service.h"
 
 #include <algorithm>
+#include <cmath>
 #include <variant>
 
 #include "core/application/config/app_args.h"
 #include "core/application/config/config_registry.h"
+#include "core/application/session/runtime_session_common.h"
 
 namespace smartdrone::core::application {
+
+namespace {
+
+float ExtractPitchDegFromBodyToCam(const Sophus::SE3f &tbc)
+{
+    const Eigen::Matrix3f R = tbc.so3().matrix();
+    constexpr float kRadToDeg = 57.295779513082320876f;
+    return std::atan2(R(0, 2), R(2, 2)) * kRadToDeg;
+}
+
+} // namespace
 
 RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTuning &tuning, std::mutex &configMutex,
                                            RestartFn requestRestart)
@@ -22,8 +35,42 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         }
         return false;
     }
+    if (!std::isfinite(remote.tbcTx) || !std::isfinite(remote.tbcTy) || !std::isfinite(remote.tbcTz) ||
+        !std::isfinite(remote.tbcRollDeg) || !std::isfinite(remote.tbcPitchDeg) || !std::isfinite(remote.tbcYawDeg)) {
+        if (err) {
+            *err = "bad tbc override config";
+        }
+        return false;
+    }
+    if (remote.orbNFeatures <= 0 || !(remote.orbScaleFactor > 0.0f) || remote.orbNLevels <= 0 ||
+        remote.orbIniThFAST <= 0 || remote.orbMinThFAST <= 0) {
+        if (err) {
+            *err = "bad orb extractor config";
+        }
+        return false;
+    }
+    if (remote.orbMinThFAST > remote.orbIniThFAST) {
+        if (err) {
+            *err = "orb minThFAST must be <= iniThFAST";
+        }
+        return false;
+    }
+    if (remote.orbNFeatures < 100 || remote.orbNFeatures > 5000 || remote.orbScaleFactor < 1.01f ||
+        remote.orbScaleFactor > 3.0f || remote.orbNLevels < 1 || remote.orbNLevels > 16 ||
+        remote.orbIniThFAST > 100 || remote.orbMinThFAST > 100) {
+        if (err) {
+            *err = "orb extractor config out of range";
+        }
+        return false;
+    }
 
     bool restartNeeded = false;
+    float effectiveTbcTx = remote.tbcTx;
+    float effectiveTbcTy = remote.tbcTy;
+    float effectiveTbcTz = remote.tbcTz;
+    float effectiveTbcRollDeg = remote.tbcRollDeg;
+    float effectiveTbcPitchDeg = remote.tbcPitchDeg;
+    float effectiveTbcYawDeg = remote.tbcYawDeg;
     {
         std::lock_guard<std::mutex> lock(m_configMutex);
         CameraConfig &cam = m_config.app.camera;
@@ -31,12 +78,22 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         const bool udpIpChanged = m_config.app.udp.ip != remote.udpIp;
         const bool udpEnableChanged = m_config.app.udp.enable != remote.udpEnabled;
         const bool aeModeChanged = cam.aeDisable != (!remote.autoExposureEnabled);
+        const bool orbChanged = m_config.app.runtime.orbNFeatures != remote.orbNFeatures ||
+                                std::abs(m_config.app.runtime.orbScaleFactor - remote.orbScaleFactor) > 1e-6f ||
+                                m_config.app.runtime.orbNLevels != remote.orbNLevels ||
+                                m_config.app.runtime.orbIniThFAST != remote.orbIniThFAST ||
+                                m_config.app.runtime.orbMinThFAST != remote.orbMinThFAST;
         cam.exposureUs = remote.exposureUs;
         cam.gain = remote.gain;
         cam.aeDisable = !remote.autoExposureEnabled;
         cam.pairMs = remote.pairMs;
         m_config.app.runtime.slamInputFps = remote.slamInputFps;
         m_config.app.runtime.slamOperationMode = remote.slamOperationMode;
+        m_config.app.runtime.orbNFeatures = remote.orbNFeatures;
+        m_config.app.runtime.orbScaleFactor = remote.orbScaleFactor;
+        m_config.app.runtime.orbNLevels = remote.orbNLevels;
+        m_config.app.runtime.orbIniThFAST = remote.orbIniThFAST;
+        m_config.app.runtime.orbMinThFAST = remote.orbMinThFAST;
         m_config.app.sensorMode = remote.sensorMode;
         m_config.app.settings = ResolveSettingsForSensorMode(remote.sensorMode, m_config.app.settings);
         m_config.app.udp.ip = remote.udpIp;
@@ -44,7 +101,42 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         m_config.app.udp.sendImage = remote.sendImage;
         m_config.app.udp.sendFeature = remote.sendFeature;
         m_config.app.udp.sendMap = remote.sendMap;
-        restartNeeded = sensorModeChanged || udpIpChanged || udpEnableChanged || aeModeChanged;
+        m_config.app.runtime.useCustomTbc = remote.useCustomTbc;
+        if (remote.useCustomTbc) {
+            m_config.app.runtime.tbcTx = remote.tbcTx;
+            m_config.app.runtime.tbcTy = remote.tbcTy;
+            m_config.app.runtime.tbcTz = remote.tbcTz;
+            m_config.app.runtime.tbcRollDeg = remote.tbcRollDeg;
+            m_config.app.runtime.tbcPitchDeg = remote.tbcPitchDeg;
+            m_config.app.runtime.tbcYawDeg = remote.tbcYawDeg;
+        } else {
+            const auto extrinsics = LoadStereoBodyExtrinsics(m_config.app.settings);
+            if (extrinsics.loaded) {
+                const Eigen::Vector3f t = extrinsics.Tbc.translation();
+                m_config.app.runtime.tbcTx = t.x();
+                m_config.app.runtime.tbcTy = t.y();
+                m_config.app.runtime.tbcTz = t.z();
+                // Keep roll/yaw defaults neutral for narrow-range UI tuning, and
+                // preserve the previous "forward tilt" interpretation for pitch.
+                m_config.app.runtime.tbcRollDeg = 0.0f;
+                m_config.app.runtime.tbcPitchDeg = ExtractPitchDegFromBodyToCam(extrinsics.Tbc);
+                m_config.app.runtime.tbcYawDeg = 0.0f;
+            } else {
+                m_config.app.runtime.tbcTx = remote.tbcTx;
+                m_config.app.runtime.tbcTy = remote.tbcTy;
+                m_config.app.runtime.tbcTz = remote.tbcTz;
+                m_config.app.runtime.tbcRollDeg = remote.tbcRollDeg;
+                m_config.app.runtime.tbcPitchDeg = remote.tbcPitchDeg;
+                m_config.app.runtime.tbcYawDeg = remote.tbcYawDeg;
+            }
+        }
+        effectiveTbcTx = m_config.app.runtime.tbcTx;
+        effectiveTbcTy = m_config.app.runtime.tbcTy;
+        effectiveTbcTz = m_config.app.runtime.tbcTz;
+        effectiveTbcRollDeg = m_config.app.runtime.tbcRollDeg;
+        effectiveTbcPitchDeg = m_config.app.runtime.tbcPitchDeg;
+        effectiveTbcYawDeg = m_config.app.runtime.tbcYawDeg;
+        restartNeeded = sensorModeChanged || udpIpChanged || udpEnableChanged || aeModeChanged || orbChanged;
     }
 
     m_tuning.slamInputFps.store(remote.slamInputFps, std::memory_order_relaxed);
@@ -52,6 +144,13 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
     m_tuning.sendImage.store(remote.sendImage, std::memory_order_relaxed);
     m_tuning.sendFeature.store(remote.sendFeature, std::memory_order_relaxed);
     m_tuning.sendMap.store(remote.sendMap, std::memory_order_relaxed);
+    m_tuning.useCustomTbc.store(remote.useCustomTbc, std::memory_order_relaxed);
+    m_tuning.tbcTx.store(effectiveTbcTx, std::memory_order_relaxed);
+    m_tuning.tbcTy.store(effectiveTbcTy, std::memory_order_relaxed);
+    m_tuning.tbcTz.store(effectiveTbcTz, std::memory_order_relaxed);
+    m_tuning.tbcRollDeg.store(effectiveTbcRollDeg, std::memory_order_relaxed);
+    m_tuning.tbcPitchDeg.store(effectiveTbcPitchDeg, std::memory_order_relaxed);
+    m_tuning.tbcYawDeg.store(effectiveTbcYawDeg, std::memory_order_relaxed);
 
     if (restartNeeded && m_requestRestart) {
         m_requestRestart();
@@ -138,6 +237,100 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
             } else {
                 return {false, "stream.send_map type mismatch"};
             }
+        } else if (key == ConfigRegistry::kSlamUseCustomTbc) {
+            if (const auto *v = std::get_if<bool>(&value)) {
+                remote.useCustomTbc = *v;
+            } else {
+                return {false, "slam.tbc_override_enabled type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamTbcTx) {
+            if (const auto *v = std::get_if<double>(&value)) {
+                remote.tbcTx = static_cast<float>(*v);
+            } else if (const auto *vInt = std::get_if<int64_t>(&value)) {
+                remote.tbcTx = static_cast<float>(*vInt);
+            } else {
+                return {false, "slam.tbc_tx_m type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamTbcTy) {
+            if (const auto *v = std::get_if<double>(&value)) {
+                remote.tbcTy = static_cast<float>(*v);
+            } else if (const auto *vInt = std::get_if<int64_t>(&value)) {
+                remote.tbcTy = static_cast<float>(*vInt);
+            } else {
+                return {false, "slam.tbc_ty_m type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamTbcTz) {
+            if (const auto *v = std::get_if<double>(&value)) {
+                remote.tbcTz = static_cast<float>(*v);
+            } else if (const auto *vInt = std::get_if<int64_t>(&value)) {
+                remote.tbcTz = static_cast<float>(*vInt);
+            } else {
+                return {false, "slam.tbc_tz_m type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamTbcRollDeg) {
+            if (const auto *v = std::get_if<double>(&value)) {
+                remote.tbcRollDeg = static_cast<float>(*v);
+            } else if (const auto *vInt = std::get_if<int64_t>(&value)) {
+                remote.tbcRollDeg = static_cast<float>(*vInt);
+            } else {
+                return {false, "slam.tbc_roll_deg type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamTbcPitchDeg) {
+            if (const auto *v = std::get_if<double>(&value)) {
+                remote.tbcPitchDeg = static_cast<float>(*v);
+            } else if (const auto *vInt = std::get_if<int64_t>(&value)) {
+                remote.tbcPitchDeg = static_cast<float>(*vInt);
+            } else {
+                return {false, "slam.tbc_pitch_deg type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamTbcYawDeg) {
+            if (const auto *v = std::get_if<double>(&value)) {
+                remote.tbcYawDeg = static_cast<float>(*v);
+            } else if (const auto *vInt = std::get_if<int64_t>(&value)) {
+                remote.tbcYawDeg = static_cast<float>(*vInt);
+            } else {
+                return {false, "slam.tbc_yaw_deg type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamOrbNFeatures) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.orbNFeatures = static_cast<int>(*v);
+            } else if (const auto *vFloat = std::get_if<double>(&value)) {
+                remote.orbNFeatures = static_cast<int>(*vFloat);
+            } else {
+                return {false, "slam.orb_nfeatures type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamOrbScaleFactor) {
+            if (const auto *v = std::get_if<double>(&value)) {
+                remote.orbScaleFactor = static_cast<float>(*v);
+            } else if (const auto *vInt = std::get_if<int64_t>(&value)) {
+                remote.orbScaleFactor = static_cast<float>(*vInt);
+            } else {
+                return {false, "slam.orb_scale_factor type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamOrbNLevels) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.orbNLevels = static_cast<int>(*v);
+            } else if (const auto *vFloat = std::get_if<double>(&value)) {
+                remote.orbNLevels = static_cast<int>(*vFloat);
+            } else {
+                return {false, "slam.orb_nlevels type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamOrbIniThFast) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.orbIniThFAST = static_cast<int>(*v);
+            } else if (const auto *vFloat = std::get_if<double>(&value)) {
+                remote.orbIniThFAST = static_cast<int>(*vFloat);
+            } else {
+                return {false, "slam.orb_ini_th_fast type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamOrbMinThFast) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.orbMinThFAST = static_cast<int>(*v);
+            } else if (const auto *vFloat = std::get_if<double>(&value)) {
+                remote.orbMinThFAST = static_cast<int>(*vFloat);
+            } else {
+                return {false, "slam.orb_min_th_fast type mismatch"};
+            }
         } else {
             return {false, "unsupported config key: " + key};
         }
@@ -170,6 +363,18 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.sendImage = currentConfig.app.udp.sendImage;
     remote.sendFeature = currentConfig.app.udp.sendFeature;
     remote.sendMap = currentConfig.app.udp.sendMap;
+    remote.useCustomTbc = currentConfig.app.runtime.useCustomTbc;
+    remote.tbcTx = currentConfig.app.runtime.tbcTx;
+    remote.tbcTy = currentConfig.app.runtime.tbcTy;
+    remote.tbcTz = currentConfig.app.runtime.tbcTz;
+    remote.tbcRollDeg = currentConfig.app.runtime.tbcRollDeg;
+    remote.tbcPitchDeg = currentConfig.app.runtime.tbcPitchDeg;
+    remote.tbcYawDeg = currentConfig.app.runtime.tbcYawDeg;
+    remote.orbNFeatures = currentConfig.app.runtime.orbNFeatures;
+    remote.orbScaleFactor = currentConfig.app.runtime.orbScaleFactor;
+    remote.orbNLevels = currentConfig.app.runtime.orbNLevels;
+    remote.orbIniThFAST = currentConfig.app.runtime.orbIniThFAST;
+    remote.orbMinThFAST = currentConfig.app.runtime.orbMinThFAST;
     return remote;
 }
 

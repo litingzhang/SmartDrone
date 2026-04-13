@@ -107,6 +107,8 @@ Config domains:
 
 - camera: exposure/gain/AE/pair window
 - SLAM: input FPS/perception mode/operation mode
+- runtime `T_b_c1` override: enable flag, translation (tx/ty/tz), and rotation (roll/pitch/yaw)
+- ORB extractor: `nFeatures`, `scaleFactor`, `nLevels`, `iniThFAST`, `minThFAST`
 - stream: UDP IP and image/feature/map flags
 
 `ConfigRegistry` defines reload and restart semantics per key.
@@ -279,7 +281,7 @@ Concurrency properties:
 ### 8.4 Design for Extensibility
 
 - ports keep algorithm and device replacement open
-- TLV runtime-config payload supports version compatibility
+- TLV runtime-config payload supports version compatibility (`legacy/v2/v3/v4/v5/v6/v7`)
 - mode enums are extensible for future features
 
 ---
@@ -464,6 +466,7 @@ sequenceDiagram
 - control commands: `0x10`~`0x16`
 - movement command: `CMD_MOVE=0x20`
 - runtime commands: `CMD_RUNTIME_MODE=0x30`, `CMD_RUNTIME_CONFIG=0x31`
+- `CMD_RUNTIME_CONFIG` payload compatibility: `legacy/v2/v3/v4/v5/v6/v7`
 - query commands: `CMD_GET_CAPABILITIES=0x33`, `CMD_GET_CONFIG=0x34`
 - response commands: `CMD_ACK=0xF0`, `CMD_STATE=0xF1`, `CMD_HEARTBEAT=0xF5`
 
@@ -484,6 +487,18 @@ sequenceDiagram
 - `slam.input_fps`
 - `slam.perception_mode`
 - `slam.operation_mode`
+- `slam.tbc_override_enabled`
+- `slam.tbc_tx_m`
+- `slam.tbc_ty_m`
+- `slam.tbc_tz_m`
+- `slam.tbc_roll_deg`
+- `slam.tbc_pitch_deg`
+- `slam.tbc_yaw_deg`
+- `slam.orb_nfeatures`
+- `slam.orb_scale_factor`
+- `slam.orb_nlevels`
+- `slam.orb_ini_th_fast`
+- `slam.orb_min_th_fast`
 - `stream.udp_enabled`
 - `stream.udp_ip`
 - `stream.send_image`
@@ -510,6 +525,13 @@ sequenceDiagram
 7. The final pose is published through two paths in parallel:
    - MAVLink: `MavlinkPosePublisher -> SendOdometry` with `MAV_FRAME_LOCAL_NED / MAV_FRAME_BODY_FRD`.
    - UDP state: stored in `LivePoseState`, then packed by `udp_command_thread` into `CMD_STATE`.
+
+### 10.6 Runtime ORB Parameter Apply Path
+
+1. Android sends ORB parameters (`slam.orb_*`) via `CMD_RUNTIME_CONFIG`.
+2. `RuntimeConfigService` validates ranges and requests a session restart when ORB values change.
+3. Before SLAM startup, `SlamSessionRuntime` generates `*.runtime_orb.yaml` from the active settings file and overrides `ORBextractor.*`.
+4. ORB-SLAM3 is initialized from that runtime YAML; values are fixed for that session and further changes apply after restart.
 
 ---
 

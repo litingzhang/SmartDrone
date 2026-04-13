@@ -23,6 +23,15 @@ struct StereoBodyExtrinsics {
     bool loaded{false};
 };
 
+struct OrbExtractorSettings {
+    int nFeatures{0};
+    float scaleFactor{0.0f};
+    int nLevels{0};
+    int iniThFAST{0};
+    int minThFAST{0};
+    bool loaded{false};
+};
+
 struct ImuThreadState {
     ImuBuffer imuBuffer;
     std::atomic<bool> imuOk{false};
@@ -53,6 +62,7 @@ bool SanitizeImuWindow(std::vector<ORB_SLAM3::IMU::Point> &vImu, double prevFram
                        double expectedImuDtSec, ImuWindowValidation &stats);
 std::optional<Sophus::SE3f> ReadSe3Node(const cv::FileNode &node);
 StereoBodyExtrinsics LoadStereoBodyExtrinsics(const std::string &settingsPath);
+OrbExtractorSettings LoadOrbExtractorSettings(const std::string &settingsPath);
 MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c);
 void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, ControllerMode mode);
 

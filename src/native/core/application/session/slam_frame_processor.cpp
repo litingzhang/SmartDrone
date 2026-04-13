@@ -7,6 +7,8 @@
 #include <thread>
 #include <vector>
 
+#include <Eigen/Geometry>
+
 #include "common/logger.h"
 
 namespace smartdrone::core::application {
@@ -23,6 +25,19 @@ uint8_t ComposeResetCounter(uint8_t sessionBase, uint8_t continuityCounter)
 uint16_t ComposeResetMapCount(uint16_t sessionBase, uint16_t continuityResetMapCount)
 {
     return static_cast<uint16_t>(sessionBase + continuityResetMapCount);
+}
+
+Sophus::SE3f BuildBodyToCamFromRuntimeOverride(float tx, float ty, float tz, float rollDeg, float pitchDeg, float yawDeg)
+{
+    constexpr float kDegToRad = 0.017453292519943295769f;
+    const float rollRad = rollDeg * kDegToRad;
+    const float pitchRad = pitchDeg * kDegToRad;
+    const float yawRad = yawDeg * kDegToRad;
+    const Eigen::AngleAxisf rollRotation(rollRad, Eigen::Vector3f::UnitX());
+    const Eigen::AngleAxisf pitchRotation(pitchRad, Eigen::Vector3f::UnitY());
+    const Eigen::AngleAxisf yawRotation(yawRad, Eigen::Vector3f::UnitZ());
+    const Eigen::Quaternionf q = yawRotation * pitchRotation * rollRotation;
+    return Sophus::SE3f(Sophus::SO3f(q), Eigen::Vector3f(tx, ty, tz));
 }
 
 } // namespace
@@ -98,6 +113,19 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const double frameGapMs = (m_state.lastPublishedFrameNs != 0)
                                   ? static_cast<double>(logicalFrameTimestampNs - m_state.lastPublishedFrameNs) * 1e-6
                                   : 0.0;
+    if (frameGapMs > 0.0 && slamInputFps > 0) {
+        const double expectedFrameGapMs = 1000.0 / static_cast<double>(slamInputFps);
+        if (frameGapMs > expectedFrameGapMs) {
+            constexpr int64_t kGapWarnMinIntervalNs = 1000000000LL; // 1s
+            if (m_state.lastFrameGapWarnLogNs == 0 ||
+                (logicalFrameTimestampNs - m_state.lastFrameGapWarnLogNs) >= kGapWarnMinIntervalNs) {
+                std::cerr << "[slam_gap_warn] frame_gap_ms=" << frameGapMs
+                          << " expected_gap_ms=" << expectedFrameGapMs << " target_input_fps=" << slamInputFps
+                          << " camera_fps=" << m_ctx.aliases.fps << " frame=" << stereoBatch.frameId << "\n";
+                m_state.lastFrameGapWarnLogNs = logicalFrameTimestampNs;
+            }
+        }
+    }
     const double monoStepMs = static_cast<double>(stereoBatch.monotonicFrameStepNs) * 1e-6;
     double meanL = 0.0, stdL = 0.0, meanR = 0.0, stdR = 0.0;
     ComputeImageStats(L.gray, meanL, stdL);
@@ -204,10 +232,22 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     }
 
     const auto postStartTp = std::chrono::steady_clock::now();
+    bool useStereoBodyExtrinsics = m_ctx.stereoBodyExtrinsics.loaded;
+    Sophus::SE3f stereoBodyExtrinsics = m_ctx.stereoBodyExtrinsics.Tbc;
+    if (!m_ctx.useImu && !m_ctx.monoMode && m_ctx.tuning.useCustomTbc.load(std::memory_order_relaxed)) {
+        const float tx = m_ctx.tuning.tbcTx.load(std::memory_order_relaxed);
+        const float ty = m_ctx.tuning.tbcTy.load(std::memory_order_relaxed);
+        const float tz = m_ctx.tuning.tbcTz.load(std::memory_order_relaxed);
+        const float rollDeg = m_ctx.tuning.tbcRollDeg.load(std::memory_order_relaxed);
+        const float pitchDeg = m_ctx.tuning.tbcPitchDeg.load(std::memory_order_relaxed);
+        const float yawDeg = m_ctx.tuning.tbcYawDeg.load(std::memory_order_relaxed);
+        stereoBodyExtrinsics = BuildBodyToCamFromRuntimeOverride(tx, ty, tz, rollDeg, pitchDeg, yawDeg);
+        useStereoBodyExtrinsics = true;
+    }
+
     const auto poseResult = m_ctx.posePostprocessor.ProcessPose(
-        twcRaw, m_ctx.useImu, trackingUsable, state, mapId, m_ctx.stereoBodyExtrinsics.loaded,
-        m_ctx.stereoBodyExtrinsics.Tbc, m_state.stereoReferencePoseSet, m_state.stereoReferencePose, captureTimestampNs,
-        m_ctx.mav);
+        twcRaw, m_ctx.useImu, trackingUsable, state, mapId, useStereoBodyExtrinsics, stereoBodyExtrinsics,
+        m_state.stereoReferencePoseSet, m_state.stereoReferencePose, captureTimestampNs, m_ctx.mav);
     const uint8_t effectiveResetCounter =
         ComposeResetCounter(m_state.sessionResetCounterBase, poseResult.resetCounter);
     const uint16_t effectiveResetMapCount =

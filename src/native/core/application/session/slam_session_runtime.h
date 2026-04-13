@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
 #include <thread>
 
 #include "System.h"
@@ -47,6 +48,7 @@ class SlamSessionRuntime {
     bool m_useImu{false};
     ORB_SLAM3::System::eSensor m_orbSensor{ORB_SLAM3::System::STEREO};
     smartdrone::adapters::slam::OrbInputMode m_orbInputMode{smartdrone::adapters::slam::OrbInputMode::Stereo};
+    std::string m_effectiveSettingsPath;
 
     std::unique_ptr<ORB_SLAM3::System> m_slamSystem;
     smartdrone::adapters::slam::OrbSlam3Engine m_slamEngine;

@@ -147,6 +147,40 @@ StereoBodyExtrinsics LoadStereoBodyExtrinsics(const std::string &settingsPath)
     return extrinsics;
 }
 
+OrbExtractorSettings LoadOrbExtractorSettings(const std::string &settingsPath)
+{
+    OrbExtractorSettings settings;
+
+    cv::FileStorage fs(settingsPath, cv::FileStorage::READ);
+    if (!fs.isOpened()) {
+        std::cerr << "[slam] warning: failed to open settings for ORB extractor: " << settingsPath << "\n";
+        return settings;
+    }
+
+    const cv::FileNode nFeaturesNode = fs["ORBextractor.nFeatures"];
+    const cv::FileNode scaleFactorNode = fs["ORBextractor.scaleFactor"];
+    const cv::FileNode nLevelsNode = fs["ORBextractor.nLevels"];
+    const cv::FileNode iniThFastNode = fs["ORBextractor.iniThFAST"];
+    const cv::FileNode minThFastNode = fs["ORBextractor.minThFAST"];
+    if (nFeaturesNode.empty() || scaleFactorNode.empty() || nLevelsNode.empty() || iniThFastNode.empty() ||
+        minThFastNode.empty()) {
+        std::cerr << "[slam] warning: ORBextractor.* keys missing in settings: " << settingsPath << "\n";
+        return settings;
+    }
+
+    settings.nFeatures = static_cast<int>(nFeaturesNode);
+    settings.scaleFactor = static_cast<float>(scaleFactorNode);
+    settings.nLevels = static_cast<int>(nLevelsNode);
+    settings.iniThFAST = static_cast<int>(iniThFastNode);
+    settings.minThFAST = static_cast<int>(minThFastNode);
+    settings.loaded = settings.nFeatures > 0 && settings.scaleFactor > 0.0f && settings.nLevels > 0 &&
+                      settings.iniThFAST > 0 && settings.minThFAST > 0;
+    if (!settings.loaded) {
+        std::cerr << "[slam] warning: invalid ORBextractor.* values in settings: " << settingsPath << "\n";
+    }
+    return settings;
+}
+
 MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
 {
     MainRuntimeAliases a{};
@@ -207,6 +241,9 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
     std::cerr << "slam_input_fps=" << a.slamInputFps << " camera_fps=" << a.fps
               << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
     std::cerr << "slam_mode=" << smartdrone::core::domain::ToString(a.slamOperationMode) << "\n";
+    std::cerr << "orb nFeatures=" << app.runtime.orbNFeatures << " scaleFactor=" << app.runtime.orbScaleFactor
+              << " nLevels=" << app.runtime.orbNLevels << " iniThFAST=" << app.runtime.orbIniThFAST
+              << " minThFAST=" << app.runtime.orbMinThFAST << "\n";
     std::cerr << "debug right_only_features=" << (a.debugRightOnlyFeatures ? "Y" : "N") << "\n";
     std::cerr << "slam lowlight_enhance=" << (a.slamLowLightEnhance ? "Y" : "N") << "\n";
     std::cerr << "diagnostics json=" << (a.jsonDiagnostics ? "Y" : "N") << "\n";

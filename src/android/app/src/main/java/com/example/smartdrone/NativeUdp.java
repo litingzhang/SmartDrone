@@ -20,6 +20,9 @@ public class NativeUdp {
     public static native int sendHeartbeat();
     public static native int sendRuntimeConfig(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
                                                int sensorMode, boolean sendImage, boolean sendFeature, boolean sendMap,
-                                               boolean autoExposure);
+                                               boolean autoExposure, boolean useCustomTbc, float tbcTx, float tbcTy,
+                                               float tbcTz, float tbcRollDeg, float tbcPitchDeg, float tbcYawDeg,
+                                               int orbNFeatures, float orbScaleFactor, int orbNLevels,
+                                               int orbIniThFAST, int orbMinThFAST);
     public static native byte[] pollRecv();
 }

@@ -251,6 +251,13 @@ This generates:
 - `config/stereo_inertial.yaml`
 - `config/mono_inertial_right.yaml`
 
+`T_b_c1` notes (important):
+
+- `T_b_c1` in `config/stereo.yaml` is the extrinsic from `body -> c1 (left camera)`.
+- In pure stereo mode (`SensorMode::Stereo`), runtime converts SLAM left-camera pose to body pose before publishing.
+- Transform equation: `T_w_b = T_w_c1 * (T_b_c1)^-1`.
+- If neither `T_b_c1` nor `IMU.T_b_c1` exists, pose stays in camera frame in pure stereo mode.
+
 You can also point the converter directly at a remote Kalibr result directory:
 
 ```bash
@@ -302,4 +309,22 @@ Optional Android deploy argument:
 ADB note:
 
 - If either `--adb-ip` or `--adb-port` is set, both are required.
+
+## Mobile Runtime Tuning
+
+`CMD_RUNTIME_CONFIG` now supports two SLAM-related tuning groups from Android:
+
+- Runtime `T_b_c1` override: `slam.tbc_override_enabled` (default off), `slam.tbc_tx_m / ty_m / tz_m`, and `slam.tbc_roll_deg / pitch_deg / yaw_deg` (Android range: roll/yaw `-10.0~10.0`, pitch `-10.0~100.0`, step `0.1`).
+- ORB extractor parameters:
+- `slam.orb_nfeatures`
+- `slam.orb_scale_factor`
+- `slam.orb_nlevels`
+- `slam.orb_ini_th_fast`
+- `slam.orb_min_th_fast`
+
+Apply semantics:
+
+- ORB parameter changes trigger a SLAM session restart.
+- Before SLAM starts, runtime generates `*.runtime_orb.yaml` from the active settings file, overrides `ORBextractor.*`, then initializes ORB-SLAM3 with that file.
+- `slam.orb_min_th_fast` must be less than or equal to `slam.orb_ini_th_fast`; otherwise the config update is rejected.
 

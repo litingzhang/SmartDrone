@@ -74,6 +74,18 @@ struct RuntimeConfig {
     bool debugRightOnlyFeatures{false};
     bool slamLowLightEnhance{false};
     bool jsonDiagnostics{false};
+    bool useCustomTbc{false};
+    float tbcTx{0.0f};
+    float tbcTy{0.0f};
+    float tbcTz{0.0f};
+    float tbcRollDeg{0.0f};
+    float tbcPitchDeg{0.0f};
+    float tbcYawDeg{0.0f};
+    int orbNFeatures{0};
+    float orbScaleFactor{0.0f};
+    int orbNLevels{0};
+    int orbIniThFAST{0};
+    int orbMinThFAST{0};
 };
 
 struct AppConfig {

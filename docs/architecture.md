@@ -106,6 +106,8 @@ TLV 指令经 `TlvCmdRouter` -> `Px4UdpHooks`，主要能力：
 
 - 相机：曝光、增益、自动曝光、配对窗
 - SLAM：输入帧率、感知模式、工作模式
+- `T_b_c1` 运行时覆盖：开关、平移（tx/ty/tz）与姿态（roll/pitch/yaw）
+- ORB 提取器：`nFeatures`、`scaleFactor`、`nLevels`、`iniThFAST`、`minThFAST`
 - 流媒体：UDP 目标 IP、image/feature/map 开关
 
 `ConfigRegistry` 标注每个配置项的：
@@ -299,7 +301,7 @@ Peer 锁定策略：
 ### 8.4 Design for eXtensibility
 
 - Ports 接口保留设备与算法替换空间
-- TLV 命令字与 payload 版本兼容（runtime config 支持 legacy/v2/v3/v4）
+- TLV 命令字与 payload 版本兼容（runtime config 支持 legacy/v2/v3/v4/v5/v6/v7）
 - Runtime mode 与 slam mode 枚举支持持续扩展
 
 ---
@@ -484,6 +486,7 @@ sequenceDiagram
 - 控制命令：`0x10`~`0x16`
 - 运动命令：`CMD_MOVE=0x20`
 - 运行时命令：`CMD_RUNTIME_MODE=0x30`，`CMD_RUNTIME_CONFIG=0x31`
+- `CMD_RUNTIME_CONFIG` payload 兼容版本：`legacy/v2/v3/v4/v5/v6/v7`
 - 查询命令：`CMD_GET_CAPABILITIES=0x33`，`CMD_GET_CONFIG=0x34`
 - 回传命令：`CMD_ACK=0xF0`，`CMD_STATE=0xF1`，`CMD_HEARTBEAT=0xF5`
 
@@ -504,6 +507,18 @@ sequenceDiagram
 - `slam.input_fps`
 - `slam.perception_mode`
 - `slam.operation_mode`
+- `slam.tbc_override_enabled`
+- `slam.tbc_tx_m`
+- `slam.tbc_ty_m`
+- `slam.tbc_tz_m`
+- `slam.tbc_roll_deg`
+- `slam.tbc_pitch_deg`
+- `slam.tbc_yaw_deg`
+- `slam.orb_nfeatures`
+- `slam.orb_scale_factor`
+- `slam.orb_nlevels`
+- `slam.orb_ini_th_fast`
+- `slam.orb_min_th_fast`
 - `stream.udp_enabled`
 - `stream.udp_ip`
 - `stream.send_image`
@@ -530,6 +545,13 @@ sequenceDiagram
 7. 对外发布分两路并行：
    - MAVLink：`MavlinkPosePublisher -> SendOdometry`，以 `MAV_FRAME_LOCAL_NED / MAV_FRAME_BODY_FRD` 发布里程计。
    - UDP 状态：写入 `LivePoseState`，由 `udp_command_thread` 周期打包 `CMD_STATE`（包含位姿、reset 计数、飞控模式等）。
+
+### 10.6 ORB 参数运行时生效路径
+
+1. Android 通过 `CMD_RUNTIME_CONFIG` 下发 ORB 参数（`slam.orb_*`）。
+2. `RuntimeConfigService` 校验参数范围，并在参数变化时触发会话重启。
+3. `SlamSessionRuntime` 启动前基于当前 settings 生成 `*.runtime_orb.yaml`，覆盖 `ORBextractor.*`。
+4. ORB-SLAM3 使用该 runtime YAML 初始化；初始化后参数在本会话内固定，下一次配置变更通过重启生效。
 
 ---
 

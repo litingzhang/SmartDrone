@@ -5,8 +5,67 @@
 #include <utility>
 
 #include "common/thread_launch.h"
+#include "core/application/session/runtime_session_common.h"
 
 namespace smartdrone::core::application {
+
+namespace {
+
+float ExtractPitchDegFromBodyToCam(const Sophus::SE3f &tbc)
+{
+    const Eigen::Matrix3f R = tbc.so3().matrix();
+    constexpr float kRadToDeg = 57.295779513082320876f;
+    return std::atan2(R(0, 2), R(2, 2)) * kRadToDeg;
+}
+
+void SyncDefaultTbcFromSettings(UnifiedConfig &config)
+{
+    if (config.app.runtime.useCustomTbc) {
+        return;
+    }
+
+    const auto extrinsics = LoadStereoBodyExtrinsics(config.app.settings);
+    if (!extrinsics.loaded) {
+        return;
+    }
+
+    const Eigen::Vector3f t = extrinsics.Tbc.translation();
+    config.app.runtime.tbcTx = t.x();
+    config.app.runtime.tbcTy = t.y();
+    config.app.runtime.tbcTz = t.z();
+    // Keep roll/yaw defaults neutral for narrow-range UI tuning, and sync pitch
+    // to the existing "forward tilt" definition used before roll/yaw sliders.
+    config.app.runtime.tbcRollDeg = 0.0f;
+    config.app.runtime.tbcPitchDeg = ExtractPitchDegFromBodyToCam(extrinsics.Tbc);
+    config.app.runtime.tbcYawDeg = 0.0f;
+}
+
+void SyncDefaultOrbFromSettings(UnifiedConfig &config)
+{
+    if (config.app.runtime.orbNFeatures > 0 && config.app.runtime.orbScaleFactor > 0.0f &&
+        config.app.runtime.orbNLevels > 0 && config.app.runtime.orbIniThFAST > 0 &&
+        config.app.runtime.orbMinThFAST > 0) {
+        return;
+    }
+
+    const auto orb = LoadOrbExtractorSettings(config.app.settings);
+    if (!orb.loaded) {
+        config.app.runtime.orbNFeatures = 1200;
+        config.app.runtime.orbScaleFactor = 1.2f;
+        config.app.runtime.orbNLevels = 8;
+        config.app.runtime.orbIniThFAST = 16;
+        config.app.runtime.orbMinThFAST = 6;
+        return;
+    }
+
+    config.app.runtime.orbNFeatures = orb.nFeatures;
+    config.app.runtime.orbScaleFactor = orb.scaleFactor;
+    config.app.runtime.orbNLevels = orb.nLevels;
+    config.app.runtime.orbIniThFAST = orb.iniThFAST;
+    config.app.runtime.orbMinThFAST = orb.minThFAST;
+}
+
+} // namespace
 
 UnifiedRuntimeController::UnifiedRuntimeController(UnifiedConfig initialConfig, LiveRuntimeTuning &tuning,
                                                    Px4MavlinkGateway &mav, LivePoseState &livePose,
@@ -25,12 +84,22 @@ UnifiedRuntimeController::UnifiedRuntimeController(UnifiedConfig initialConfig, 
           runningFlag, tuning, mav, livePose, [this]() { return CurrentConfig(); }, std::move(slamSessionRunner),
           std::move(calibSessionRunner))
 {
+    SyncDefaultTbcFromSettings(m_config);
+    SyncDefaultOrbFromSettings(m_config);
+
     m_tuning.slamInputFps.store(m_config.app.runtime.slamInputFps, std::memory_order_relaxed);
     m_tuning.slamOperationMode.store(static_cast<uint8_t>(m_config.app.runtime.slamOperationMode),
                                      std::memory_order_relaxed);
     m_tuning.sendImage.store(m_config.app.udp.sendImage, std::memory_order_relaxed);
     m_tuning.sendFeature.store(m_config.app.udp.sendFeature, std::memory_order_relaxed);
     m_tuning.sendMap.store(m_config.app.udp.sendMap, std::memory_order_relaxed);
+    m_tuning.useCustomTbc.store(m_config.app.runtime.useCustomTbc, std::memory_order_relaxed);
+    m_tuning.tbcTx.store(m_config.app.runtime.tbcTx, std::memory_order_relaxed);
+    m_tuning.tbcTy.store(m_config.app.runtime.tbcTy, std::memory_order_relaxed);
+    m_tuning.tbcTz.store(m_config.app.runtime.tbcTz, std::memory_order_relaxed);
+    m_tuning.tbcRollDeg.store(m_config.app.runtime.tbcRollDeg, std::memory_order_relaxed);
+    m_tuning.tbcPitchDeg.store(m_config.app.runtime.tbcPitchDeg, std::memory_order_relaxed);
+    m_tuning.tbcYawDeg.store(m_config.app.runtime.tbcYawDeg, std::memory_order_relaxed);
 }
 
 void UnifiedRuntimeController::Start() { m_sessionSupervisor.Start(); }

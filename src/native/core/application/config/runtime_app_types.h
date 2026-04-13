@@ -31,6 +31,18 @@ struct RemoteRuntimeConfig {
     bool sendImage{true};
     bool sendFeature{true};
     bool sendMap{false};
+    bool useCustomTbc{false};
+    float tbcTx{0.0f};
+    float tbcTy{0.0f};
+    float tbcTz{0.0f};
+    float tbcRollDeg{0.0f};
+    float tbcPitchDeg{0.0f};
+    float tbcYawDeg{0.0f};
+    int orbNFeatures{0};
+    float orbScaleFactor{0.0f};
+    int orbNLevels{0};
+    int orbIniThFAST{0};
+    int orbMinThFAST{0};
 };
 
 struct MainRuntimeAliases {
@@ -55,6 +67,13 @@ struct LiveRuntimeTuning {
     std::atomic<bool> sendImage{true};
     std::atomic<bool> sendFeature{true};
     std::atomic<bool> sendMap{false};
+    std::atomic<bool> useCustomTbc{false};
+    std::atomic<float> tbcTx{0.0f};
+    std::atomic<float> tbcTy{0.0f};
+    std::atomic<float> tbcTz{0.0f};
+    std::atomic<float> tbcRollDeg{0.0f};
+    std::atomic<float> tbcPitchDeg{0.0f};
+    std::atomic<float> tbcYawDeg{0.0f};
 };
 
 } // namespace smartdrone::core::application

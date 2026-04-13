@@ -105,6 +105,23 @@ public class MainActivity extends Activity {
     private static final int SLAM_FPS_MIN = 1;
     private static final int SLAM_FPS_MAX = 60;
     private static final int SLAM_FPS_DEFAULT = 20;
+    private static final int TBC_TRANSLATION_MIN_MM = -300;
+    private static final int TBC_TRANSLATION_MAX_MM = 300;
+    private static final int TBC_ROLL_MIN_TENTH_DEG = -100;
+    private static final int TBC_ROLL_MAX_TENTH_DEG = 100;
+    private static final int TBC_PITCH_MIN_TENTH_DEG = -100;
+    private static final int TBC_PITCH_MAX_TENTH_DEG = 1000;
+    private static final int TBC_YAW_MIN_TENTH_DEG = -100;
+    private static final int TBC_YAW_MAX_TENTH_DEG = 100;
+    private static final int ORB_NFEATURES_MIN = 500;
+    private static final int ORB_NFEATURES_MAX = 3000;
+    private static final int ORB_NFEATURES_STEP = 50;
+    private static final int ORB_SCALE_MIN_CENTI = 105;
+    private static final int ORB_SCALE_MAX_CENTI = 200;
+    private static final int ORB_NLEVELS_MIN = 4;
+    private static final int ORB_NLEVELS_MAX = 12;
+    private static final int ORB_FAST_TH_MIN = 2;
+    private static final int ORB_FAST_TH_MAX = 40;
 
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
@@ -146,6 +163,7 @@ public class MainActivity extends Activity {
     private Switch m_btnToggleSlam;
     private Switch m_btnToggleCalib;
     private Switch m_btnAutoExposureToggle;
+    private Switch m_btnTbcOverrideToggle;
     private Spinner m_spinnerSensorMode;
     private Button m_btnQuickSlamAuto;
     private Button m_btnQuickSlamManual;
@@ -163,10 +181,32 @@ public class MainActivity extends Activity {
     private TextView m_tvCfgGainValue;
     private TextView m_tvCfgPairMsValue;
     private TextView m_tvCfgSlamFpsValue;
+    private TextView m_tvCfgTbcXValue;
+    private TextView m_tvCfgTbcYValue;
+    private TextView m_tvCfgTbcZValue;
+    private TextView m_tvCfgTbcRollValue;
+    private TextView m_tvCfgTbcPitchValue;
+    private TextView m_tvCfgTbcYawValue;
+    private TextView m_tvCfgOrbNFeaturesValue;
+    private TextView m_tvCfgOrbScaleFactorValue;
+    private TextView m_tvCfgOrbNLevelsValue;
+    private TextView m_tvCfgOrbIniThFastValue;
+    private TextView m_tvCfgOrbMinThFastValue;
     private SeekBar m_sbCfgExposure;
     private SeekBar m_sbCfgGain;
     private SeekBar m_sbCfgPairMs;
     private SeekBar m_sbCfgSlamFps;
+    private SeekBar m_sbCfgTbcX;
+    private SeekBar m_sbCfgTbcY;
+    private SeekBar m_sbCfgTbcZ;
+    private SeekBar m_sbCfgTbcRoll;
+    private SeekBar m_sbCfgTbcPitch;
+    private SeekBar m_sbCfgTbcYaw;
+    private SeekBar m_sbCfgOrbNFeatures;
+    private SeekBar m_sbCfgOrbScaleFactor;
+    private SeekBar m_sbCfgOrbNLevels;
+    private SeekBar m_sbCfgOrbIniThFast;
+    private SeekBar m_sbCfgOrbMinThFast;
 
     private View m_joystickLeft;
     private View m_joystickRight;
@@ -219,6 +259,18 @@ public class MainActivity extends Activity {
     private int m_cfgPairMs = 5;
     private int m_cfgSlamFps = SLAM_FPS_DEFAULT;
     private int m_cfgSlamMode = SLAM_MODE_MAPPING;
+    private boolean m_cfgUseCustomTbc = false;
+    private float m_cfgTbcTx = 0.0f;
+    private float m_cfgTbcTy = 0.0f;
+    private float m_cfgTbcTz = 0.0f;
+    private float m_cfgTbcRollDeg = 0.0f;
+    private float m_cfgTbcPitchDeg = 0.0f;
+    private float m_cfgTbcYawDeg = 0.0f;
+    private int m_cfgOrbNFeatures = 1200;
+    private float m_cfgOrbScaleFactor = 1.2f;
+    private int m_cfgOrbNLevels = 8;
+    private int m_cfgOrbIniThFast = 16;
+    private int m_cfgOrbMinThFast = 6;
     private int m_effectiveSlamMode = SLAM_MODE_MAPPING;
     private int m_videoPktCount = 0;
     private int m_videoFrameOk = 0;
@@ -431,6 +483,15 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static float parseFloatOrDefault(String text, float defaultValue)
+    {
+        try {
+            return Float.parseFloat(text);
+        } catch (Throwable ignored) {
+            return defaultValue;
+        }
+    }
+
     private static DiscoveryAnnouncement parseDiscoveryAnnouncement(byte[] data, int len, InetAddress sourceAddress)
     {
         if (data == null || len <= 0 || sourceAddress == null) {
@@ -480,6 +541,38 @@ public class MainActivity extends Activity {
     private static int quantizePairMs(int pairMs) { return clampInt(pairMs, PAIR_MS_MIN, PAIR_MS_MAX); }
 
     private static int quantizeSlamFps(int slamFps) { return clampInt(slamFps, SLAM_FPS_MIN, SLAM_FPS_MAX); }
+
+    private static float quantizeTbcTranslationM(float meters)
+    {
+        int mm = Math.round(meters * 1000.0f);
+        mm = clampInt(mm, TBC_TRANSLATION_MIN_MM, TBC_TRANSLATION_MAX_MM);
+        return mm / 1000.0f;
+    }
+
+    private static float quantizeTbcAngleDeg(float degrees, int minTenthDeg, int maxTenthDeg)
+    {
+        int tenthDeg = Math.round(degrees * 10.0f);
+        tenthDeg = clampInt(tenthDeg, minTenthDeg, maxTenthDeg);
+        return tenthDeg / 10.0f;
+    }
+
+    private static int quantizeOrbNFeatures(int value)
+    {
+        int clamped = clampInt(value, ORB_NFEATURES_MIN, ORB_NFEATURES_MAX);
+        int steps = Math.round((clamped - ORB_NFEATURES_MIN) / (float)ORB_NFEATURES_STEP);
+        return ORB_NFEATURES_MIN + steps * ORB_NFEATURES_STEP;
+    }
+
+    private static float quantizeOrbScaleFactor(float value)
+    {
+        int centi = Math.round(value * 100.0f);
+        centi = clampInt(centi, ORB_SCALE_MIN_CENTI, ORB_SCALE_MAX_CENTI);
+        return centi / 100.0f;
+    }
+
+    private static int quantizeOrbNLevels(int value) { return clampInt(value, ORB_NLEVELS_MIN, ORB_NLEVELS_MAX); }
+
+    private static int quantizeOrbFastThreshold(int value) { return clampInt(value, ORB_FAST_TH_MIN, ORB_FAST_TH_MAX); }
 
     private static Float findPoseField(String text, String... keys)
     {
@@ -660,6 +753,8 @@ public class MainActivity extends Activity {
         try {
             final boolean runtimeActive = isRuntimeActive();
             final boolean manualExposureEditable = !runtimeActive && !m_cfgAutoExposure;
+            final boolean tbcEditable = m_cfgUseCustomTbc && m_sensorMode == SENSOR_STEREO;
+            final boolean orbEditable = !runtimeActive;
             if (m_tvCfgExposureValue != null) {
                 m_tvCfgExposureValue.setText(
                     m_cfgAutoExposure ? "Exposure: Auto (ISP)" : String.format(Locale.US, "Exposure: %d us", m_cfgExposureUs));
@@ -675,6 +770,51 @@ public class MainActivity extends Activity {
             }
             if (m_tvCfgSlamFpsValue != null) {
                 m_tvCfgSlamFpsValue.setText(String.format(Locale.US, "SLAM FPS: %d", m_cfgSlamFps));
+            }
+            if (m_tvCfgTbcXValue != null) {
+                m_tvCfgTbcXValue.setText(String.format(Locale.US, "T_b_c1 Tx: %.3f m", m_cfgTbcTx));
+                m_tvCfgTbcXValue.setAlpha(tbcEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgTbcYValue != null) {
+                m_tvCfgTbcYValue.setText(String.format(Locale.US, "T_b_c1 Ty: %.3f m", m_cfgTbcTy));
+                m_tvCfgTbcYValue.setAlpha(tbcEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgTbcZValue != null) {
+                m_tvCfgTbcZValue.setText(String.format(Locale.US, "T_b_c1 Tz: %.3f m", m_cfgTbcTz));
+                m_tvCfgTbcZValue.setAlpha(tbcEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgTbcRollValue != null) {
+                m_tvCfgTbcRollValue.setText(String.format(Locale.US, "Camera Roll: %.1f deg", m_cfgTbcRollDeg));
+                m_tvCfgTbcRollValue.setAlpha(tbcEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgTbcPitchValue != null) {
+                m_tvCfgTbcPitchValue.setText(String.format(Locale.US, "Camera Pitch: %.1f deg", m_cfgTbcPitchDeg));
+                m_tvCfgTbcPitchValue.setAlpha(tbcEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgTbcYawValue != null) {
+                m_tvCfgTbcYawValue.setText(String.format(Locale.US, "Camera Yaw: %.1f deg", m_cfgTbcYawDeg));
+                m_tvCfgTbcYawValue.setAlpha(tbcEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgOrbNFeaturesValue != null) {
+                m_tvCfgOrbNFeaturesValue.setText(String.format(Locale.US, "ORB nFeatures: %d", m_cfgOrbNFeatures));
+                m_tvCfgOrbNFeaturesValue.setAlpha(orbEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgOrbScaleFactorValue != null) {
+                m_tvCfgOrbScaleFactorValue.setText(
+                    String.format(Locale.US, "ORB scaleFactor: %.2f", m_cfgOrbScaleFactor));
+                m_tvCfgOrbScaleFactorValue.setAlpha(orbEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgOrbNLevelsValue != null) {
+                m_tvCfgOrbNLevelsValue.setText(String.format(Locale.US, "ORB nLevels: %d", m_cfgOrbNLevels));
+                m_tvCfgOrbNLevelsValue.setAlpha(orbEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgOrbIniThFastValue != null) {
+                m_tvCfgOrbIniThFastValue.setText(String.format(Locale.US, "ORB iniThFAST: %d", m_cfgOrbIniThFast));
+                m_tvCfgOrbIniThFastValue.setAlpha(orbEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgOrbMinThFastValue != null) {
+                m_tvCfgOrbMinThFastValue.setText(String.format(Locale.US, "ORB minThFAST: %d", m_cfgOrbMinThFast));
+                m_tvCfgOrbMinThFastValue.setAlpha(orbEditable ? 1.0f : 0.45f);
             }
             if (m_sbCfgExposure != null) {
                 int progress = (m_cfgExposureUs - EXPOSURE_MIN_US) / EXPOSURE_STEP_US;
@@ -706,10 +846,102 @@ public class MainActivity extends Activity {
                     m_sbCfgSlamFps.setProgress(progress);
                 }
             }
+            if (m_sbCfgTbcX != null) {
+                final int progress = Math.round(m_cfgTbcTx * 1000.0f) - TBC_TRANSLATION_MIN_MM;
+                if (m_sbCfgTbcX.getProgress() != progress) {
+                    m_sbCfgTbcX.setProgress(progress);
+                }
+                m_sbCfgTbcX.setEnabled(tbcEditable);
+                m_sbCfgTbcX.setAlpha(tbcEditable ? 1.0f : 0.35f);
+            }
+            if (m_sbCfgTbcY != null) {
+                final int progress = Math.round(m_cfgTbcTy * 1000.0f) - TBC_TRANSLATION_MIN_MM;
+                if (m_sbCfgTbcY.getProgress() != progress) {
+                    m_sbCfgTbcY.setProgress(progress);
+                }
+                m_sbCfgTbcY.setEnabled(tbcEditable);
+                m_sbCfgTbcY.setAlpha(tbcEditable ? 1.0f : 0.35f);
+            }
+            if (m_sbCfgTbcZ != null) {
+                final int progress = Math.round(m_cfgTbcTz * 1000.0f) - TBC_TRANSLATION_MIN_MM;
+                if (m_sbCfgTbcZ.getProgress() != progress) {
+                    m_sbCfgTbcZ.setProgress(progress);
+                }
+                m_sbCfgTbcZ.setEnabled(tbcEditable);
+                m_sbCfgTbcZ.setAlpha(tbcEditable ? 1.0f : 0.35f);
+            }
+            if (m_sbCfgTbcRoll != null) {
+                final int progress = Math.round(m_cfgTbcRollDeg * 10.0f) - TBC_ROLL_MIN_TENTH_DEG;
+                if (m_sbCfgTbcRoll.getProgress() != progress) {
+                    m_sbCfgTbcRoll.setProgress(progress);
+                }
+                m_sbCfgTbcRoll.setEnabled(tbcEditable);
+                m_sbCfgTbcRoll.setAlpha(tbcEditable ? 1.0f : 0.35f);
+            }
+            if (m_sbCfgTbcPitch != null) {
+                final int progress = Math.round(m_cfgTbcPitchDeg * 10.0f) - TBC_PITCH_MIN_TENTH_DEG;
+                if (m_sbCfgTbcPitch.getProgress() != progress) {
+                    m_sbCfgTbcPitch.setProgress(progress);
+                }
+                m_sbCfgTbcPitch.setEnabled(tbcEditable);
+                m_sbCfgTbcPitch.setAlpha(tbcEditable ? 1.0f : 0.35f);
+            }
+            if (m_sbCfgTbcYaw != null) {
+                final int progress = Math.round(m_cfgTbcYawDeg * 10.0f) - TBC_YAW_MIN_TENTH_DEG;
+                if (m_sbCfgTbcYaw.getProgress() != progress) {
+                    m_sbCfgTbcYaw.setProgress(progress);
+                }
+                m_sbCfgTbcYaw.setEnabled(tbcEditable);
+                m_sbCfgTbcYaw.setAlpha(tbcEditable ? 1.0f : 0.35f);
+            }
+            if (m_sbCfgOrbNFeatures != null) {
+                final int progress = (m_cfgOrbNFeatures - ORB_NFEATURES_MIN) / ORB_NFEATURES_STEP;
+                if (m_sbCfgOrbNFeatures.getProgress() != progress) {
+                    m_sbCfgOrbNFeatures.setProgress(progress);
+                }
+                m_sbCfgOrbNFeatures.setEnabled(orbEditable);
+                m_sbCfgOrbNFeatures.setAlpha(orbEditable ? 1.0f : 0.35f);
+            }
+            if (m_sbCfgOrbScaleFactor != null) {
+                final int progress = Math.round(m_cfgOrbScaleFactor * 100.0f) - ORB_SCALE_MIN_CENTI;
+                if (m_sbCfgOrbScaleFactor.getProgress() != progress) {
+                    m_sbCfgOrbScaleFactor.setProgress(progress);
+                }
+                m_sbCfgOrbScaleFactor.setEnabled(orbEditable);
+                m_sbCfgOrbScaleFactor.setAlpha(orbEditable ? 1.0f : 0.35f);
+            }
+            if (m_sbCfgOrbNLevels != null) {
+                final int progress = m_cfgOrbNLevels - ORB_NLEVELS_MIN;
+                if (m_sbCfgOrbNLevels.getProgress() != progress) {
+                    m_sbCfgOrbNLevels.setProgress(progress);
+                }
+                m_sbCfgOrbNLevels.setEnabled(orbEditable);
+                m_sbCfgOrbNLevels.setAlpha(orbEditable ? 1.0f : 0.35f);
+            }
+            if (m_sbCfgOrbIniThFast != null) {
+                final int progress = m_cfgOrbIniThFast - ORB_FAST_TH_MIN;
+                if (m_sbCfgOrbIniThFast.getProgress() != progress) {
+                    m_sbCfgOrbIniThFast.setProgress(progress);
+                }
+                m_sbCfgOrbIniThFast.setEnabled(orbEditable);
+                m_sbCfgOrbIniThFast.setAlpha(orbEditable ? 1.0f : 0.35f);
+            }
+            if (m_sbCfgOrbMinThFast != null) {
+                final int progress = m_cfgOrbMinThFast - ORB_FAST_TH_MIN;
+                if (m_sbCfgOrbMinThFast.getProgress() != progress) {
+                    m_sbCfgOrbMinThFast.setProgress(progress);
+                }
+                m_sbCfgOrbMinThFast.setEnabled(orbEditable);
+                m_sbCfgOrbMinThFast.setAlpha(orbEditable ? 1.0f : 0.35f);
+            }
             if (m_btnAutoExposureToggle != null) {
                 m_btnAutoExposureToggle.setChecked(m_cfgAutoExposure);
                 m_btnAutoExposureToggle.setEnabled(!runtimeActive);
                 m_btnAutoExposureToggle.setAlpha(runtimeActive ? 0.35f : 1.0f);
+            }
+            if (m_btnTbcOverrideToggle != null) {
+                m_btnTbcOverrideToggle.setChecked(m_cfgUseCustomTbc);
+                m_btnTbcOverrideToggle.setAlpha(m_cfgUseCustomTbc ? 1.0f : 0.65f);
             }
             updateQuickSlamModeButtons();
         } finally {
@@ -989,17 +1221,27 @@ public class MainActivity extends Activity {
     }
 
     private int sendRuntimeConfig(int exposureUs, float gain, int pairMs, int slamFps, int slamMode, int sensorMode,
-                                  boolean sendImage, boolean sendFeature, boolean sendMap, boolean autoExposure)
+                                  boolean sendImage, boolean sendFeature, boolean sendMap, boolean autoExposure,
+                                  boolean useCustomTbc, float tbcTx, float tbcTy, float tbcTz, float tbcRollDeg,
+                                  float tbcPitchDeg, float tbcYawDeg, int orbNFeatures, float orbScaleFactor,
+                                  int orbNLevels, int orbIniThFast, int orbMinThFast)
     {
         try {
             int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
-                                                  sendFeature, sendMap, autoExposure);
+                                                  sendFeature, sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy,
+                                                  tbcTz, tbcRollDeg, tbcPitchDeg, tbcYawDeg, orbNFeatures,
+                                                  orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast);
             m_tvStatus.setText(String.format(
                 Locale.US,
-                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s img=%s feat=%s map=%s ae=%s",
+                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d",
                 seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
                 sendImage ? "on" : "off", sendFeature ? "on" : "off", sendMap ? "on" : "off",
-                autoExposure ? "on" : "off"));
+                autoExposure ? "on" : "off",
+                useCustomTbc
+                    ? String.format(Locale.US, "on(%.3f,%.3f,%.3f,r%.1f,p%.1f,y%.1f)", tbcTx, tbcTy, tbcTz,
+                                    tbcRollDeg, tbcPitchDeg, tbcYawDeg)
+                    : "off",
+                orbNFeatures, orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast));
             return seq;
         } catch (Throwable t) {
             m_tvStatus.setText("CFG error: " + t.getMessage());
@@ -1010,12 +1252,26 @@ public class MainActivity extends Activity {
     private int sendRuntimeConfig()
     {
         return sendRuntimeConfig(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                 m_sensorMode, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure);
+                                 m_sensorMode, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
+                                 m_cfgUseCustomTbc, m_cfgTbcTx, m_cfgTbcTy, m_cfgTbcTz, m_cfgTbcRollDeg,
+                                 m_cfgTbcPitchDeg, m_cfgTbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor,
+                                 m_cfgOrbNLevels, m_cfgOrbIniThFast, m_cfgOrbMinThFast);
     }
 
     private void sendRuntimeConfigAwaitAck(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
                                            int sensorMode, boolean sendImage, boolean sendFeature, boolean sendMap,
                                            boolean autoExposure,
+                                           String label, String pendingKey, AckSuccess onSuccess)
+    {
+        sendRuntimeConfigAwaitAck(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage, sendFeature,
+                                  sendMap, autoExposure, m_cfgUseCustomTbc, m_cfgTbcTx, m_cfgTbcTy, m_cfgTbcTz,
+                                  m_cfgTbcRollDeg, m_cfgTbcPitchDeg, m_cfgTbcYawDeg, label, pendingKey, onSuccess);
+    }
+
+    private void sendRuntimeConfigAwaitAck(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
+                                           int sensorMode, boolean sendImage, boolean sendFeature, boolean sendMap,
+                                           boolean autoExposure, boolean useCustomTbc, float tbcTx, float tbcTy,
+                                           float tbcTz, float tbcRollDeg, float tbcPitchDeg, float tbcYawDeg,
                                            String label, String pendingKey, AckSuccess onSuccess)
     {
         if (!ensureVehicleConnection()) {
@@ -1024,9 +1280,10 @@ public class MainActivity extends Activity {
         if (isPending(pendingKey)) {
             return;
         }
-        int seq =
-            sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage, sendFeature, sendMap,
-                              autoExposure);
+        int seq = sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage, sendFeature,
+                                    sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy, tbcTz, tbcRollDeg, tbcPitchDeg,
+                                    tbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor, m_cfgOrbNLevels,
+                                    m_cfgOrbIniThFast, m_cfgOrbMinThFast);
         if (seq < 0) {
             return;
         }
@@ -1713,6 +1970,25 @@ public class MainActivity extends Activity {
         }
         m_cfgSlamFps = quantizeSlamFps(parsedSlamFps);
         m_cfgSlamMode = parseSlamModeText(values.get("slam.operation_mode"), m_cfgSlamMode);
+        m_cfgUseCustomTbc = parseBooleanText(values.get("slam.tbc_override_enabled"), m_cfgUseCustomTbc);
+        m_cfgTbcTx = quantizeTbcTranslationM(parseFloatOrDefault(values.get("slam.tbc_tx_m"), m_cfgTbcTx));
+        m_cfgTbcTy = quantizeTbcTranslationM(parseFloatOrDefault(values.get("slam.tbc_ty_m"), m_cfgTbcTy));
+        m_cfgTbcTz = quantizeTbcTranslationM(parseFloatOrDefault(values.get("slam.tbc_tz_m"), m_cfgTbcTz));
+        m_cfgTbcRollDeg = quantizeTbcAngleDeg(parseFloatOrDefault(values.get("slam.tbc_roll_deg"), m_cfgTbcRollDeg),
+                                              TBC_ROLL_MIN_TENTH_DEG, TBC_ROLL_MAX_TENTH_DEG);
+        m_cfgTbcPitchDeg = quantizeTbcAngleDeg(parseFloatOrDefault(values.get("slam.tbc_pitch_deg"), m_cfgTbcPitchDeg),
+                                               TBC_PITCH_MIN_TENTH_DEG, TBC_PITCH_MAX_TENTH_DEG);
+        m_cfgTbcYawDeg = quantizeTbcAngleDeg(parseFloatOrDefault(values.get("slam.tbc_yaw_deg"), m_cfgTbcYawDeg),
+                                             TBC_YAW_MIN_TENTH_DEG, TBC_YAW_MAX_TENTH_DEG);
+        m_cfgOrbNFeatures = quantizeOrbNFeatures(parseI(values.get("slam.orb_nfeatures"), m_cfgOrbNFeatures));
+        m_cfgOrbScaleFactor =
+            quantizeOrbScaleFactor(parseFloatOrDefault(values.get("slam.orb_scale_factor"), m_cfgOrbScaleFactor));
+        m_cfgOrbNLevels = quantizeOrbNLevels(parseI(values.get("slam.orb_nlevels"), m_cfgOrbNLevels));
+        m_cfgOrbIniThFast = quantizeOrbFastThreshold(parseI(values.get("slam.orb_ini_th_fast"), m_cfgOrbIniThFast));
+        m_cfgOrbMinThFast = quantizeOrbFastThreshold(parseI(values.get("slam.orb_min_th_fast"), m_cfgOrbMinThFast));
+        if (m_cfgOrbMinThFast > m_cfgOrbIniThFast) {
+            m_cfgOrbMinThFast = m_cfgOrbIniThFast;
+        }
         m_sensorMode = parseSensorModeText(values.get("slam.perception_mode"), m_sensorMode);
         m_sendImage = parseBooleanText(values.get("stream.send_image"), m_sendImage);
         final boolean remoteSendFeature = parseBooleanText(values.get("stream.send_feature"), m_sendFeature);
@@ -1738,9 +2014,12 @@ public class MainActivity extends Activity {
         updateRuntimeButtons();
         updateStreamToggleButtons();
         updateFeatureToggleButton();
-        m_tvStatus.setText(String.format(Locale.US, "Config synced mode=%s sensor=%s slam_mode=%s slam=%dfps ae=%s",
+        m_tvStatus.setText(String.format(Locale.US,
+                                         "Config synced mode=%s sensor=%s slam_mode=%s slam=%dfps ae=%s tbc=%s orb=%d/%.2f/%d",
                                          runtimeModeToText(m_runtimeMode), sensorModeToText(m_sensorMode),
-                                         slamModeToText(m_cfgSlamMode), m_cfgSlamFps, m_cfgAutoExposure ? "on" : "off"));
+                                         slamModeToText(m_cfgSlamMode), m_cfgSlamFps, m_cfgAutoExposure ? "on" : "off",
+                                         m_cfgUseCustomTbc ? "override" : "yaml", m_cfgOrbNFeatures,
+                                         m_cfgOrbScaleFactor, m_cfgOrbNLevels));
         return true;
     }
 
@@ -2343,6 +2622,7 @@ public class MainActivity extends Activity {
         m_btnToggleSlam = findViewById(R.id.btnToggleSlam);
         m_btnToggleCalib = findViewById(R.id.btnToggleCalib);
         m_btnAutoExposureToggle = findViewById(R.id.btnAutoExposureToggle);
+        m_btnTbcOverrideToggle = findViewById(R.id.btnTbcOverrideToggle);
         m_spinnerSensorMode = findViewById(R.id.spinnerSensorMode);
         m_btnQuickSlamAuto = findViewById(R.id.btnQuickSlamAuto);
         m_btnQuickSlamManual = findViewById(R.id.btnQuickSlamManual);
@@ -2375,10 +2655,32 @@ public class MainActivity extends Activity {
         m_tvCfgGainValue = findViewById(R.id.tvCfgGainValue);
         m_tvCfgPairMsValue = findViewById(R.id.tvCfgPairMsValue);
         m_tvCfgSlamFpsValue = findViewById(R.id.tvCfgSlamFpsValue);
+        m_tvCfgTbcXValue = findViewById(R.id.tvCfgTbcXValue);
+        m_tvCfgTbcYValue = findViewById(R.id.tvCfgTbcYValue);
+        m_tvCfgTbcZValue = findViewById(R.id.tvCfgTbcZValue);
+        m_tvCfgTbcRollValue = findViewById(R.id.tvCfgTbcRollValue);
+        m_tvCfgTbcPitchValue = findViewById(R.id.tvCfgTbcPitchValue);
+        m_tvCfgTbcYawValue = findViewById(R.id.tvCfgTbcYawValue);
+        m_tvCfgOrbNFeaturesValue = findViewById(R.id.tvCfgOrbNFeaturesValue);
+        m_tvCfgOrbScaleFactorValue = findViewById(R.id.tvCfgOrbScaleFactorValue);
+        m_tvCfgOrbNLevelsValue = findViewById(R.id.tvCfgOrbNLevelsValue);
+        m_tvCfgOrbIniThFastValue = findViewById(R.id.tvCfgOrbIniThFastValue);
+        m_tvCfgOrbMinThFastValue = findViewById(R.id.tvCfgOrbMinThFastValue);
         m_sbCfgExposure = findViewById(R.id.sbCfgExposure);
         m_sbCfgGain = findViewById(R.id.sbCfgGain);
         m_sbCfgPairMs = findViewById(R.id.sbCfgPairMs);
         m_sbCfgSlamFps = findViewById(R.id.sbCfgSlamFps);
+        m_sbCfgTbcX = findViewById(R.id.sbCfgTbcX);
+        m_sbCfgTbcY = findViewById(R.id.sbCfgTbcY);
+        m_sbCfgTbcZ = findViewById(R.id.sbCfgTbcZ);
+        m_sbCfgTbcRoll = findViewById(R.id.sbCfgTbcRoll);
+        m_sbCfgTbcPitch = findViewById(R.id.sbCfgTbcPitch);
+        m_sbCfgTbcYaw = findViewById(R.id.sbCfgTbcYaw);
+        m_sbCfgOrbNFeatures = findViewById(R.id.sbCfgOrbNFeatures);
+        m_sbCfgOrbScaleFactor = findViewById(R.id.sbCfgOrbScaleFactor);
+        m_sbCfgOrbNLevels = findViewById(R.id.sbCfgOrbNLevels);
+        m_sbCfgOrbIniThFast = findViewById(R.id.sbCfgOrbIniThFast);
+        m_sbCfgOrbMinThFast = findViewById(R.id.sbCfgOrbMinThFast);
 
         m_joystickLeft = findViewById(R.id.joystickLeft);
         m_joystickRight = findViewById(R.id.joystickRight);
@@ -2501,10 +2803,256 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        if (m_sbCfgTbcX != null) {
+            m_sbCfgTbcX.setMax(TBC_TRANSLATION_MAX_MM - TBC_TRANSLATION_MIN_MM);
+            m_sbCfgTbcX.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgTbcTx = quantizeTbcTranslationM((TBC_TRANSLATION_MIN_MM + progress) / 1000.0f);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("T_b_c1 tx", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgTbcY != null) {
+            m_sbCfgTbcY.setMax(TBC_TRANSLATION_MAX_MM - TBC_TRANSLATION_MIN_MM);
+            m_sbCfgTbcY.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgTbcTy = quantizeTbcTranslationM((TBC_TRANSLATION_MIN_MM + progress) / 1000.0f);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("T_b_c1 ty", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgTbcZ != null) {
+            m_sbCfgTbcZ.setMax(TBC_TRANSLATION_MAX_MM - TBC_TRANSLATION_MIN_MM);
+            m_sbCfgTbcZ.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgTbcTz = quantizeTbcTranslationM((TBC_TRANSLATION_MIN_MM + progress) / 1000.0f);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("T_b_c1 tz", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgTbcRoll != null) {
+            m_sbCfgTbcRoll.setMax(TBC_ROLL_MAX_TENTH_DEG - TBC_ROLL_MIN_TENTH_DEG);
+            m_sbCfgTbcRoll.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgTbcRollDeg =
+                        quantizeTbcAngleDeg((TBC_ROLL_MIN_TENTH_DEG + progress) / 10.0f, TBC_ROLL_MIN_TENTH_DEG,
+                                            TBC_ROLL_MAX_TENTH_DEG);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("T_b_c1 roll", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgTbcPitch != null) {
+            m_sbCfgTbcPitch.setMax(TBC_PITCH_MAX_TENTH_DEG - TBC_PITCH_MIN_TENTH_DEG);
+            m_sbCfgTbcPitch.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgTbcPitchDeg =
+                        quantizeTbcAngleDeg((TBC_PITCH_MIN_TENTH_DEG + progress) / 10.0f, TBC_PITCH_MIN_TENTH_DEG,
+                                            TBC_PITCH_MAX_TENTH_DEG);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("T_b_c1 pitch", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgTbcYaw != null) {
+            m_sbCfgTbcYaw.setMax(TBC_YAW_MAX_TENTH_DEG - TBC_YAW_MIN_TENTH_DEG);
+            m_sbCfgTbcYaw.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgTbcYawDeg =
+                        quantizeTbcAngleDeg((TBC_YAW_MIN_TENTH_DEG + progress) / 10.0f, TBC_YAW_MIN_TENTH_DEG,
+                                            TBC_YAW_MAX_TENTH_DEG);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("T_b_c1 yaw", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgOrbNFeatures != null) {
+            m_sbCfgOrbNFeatures.setMax((ORB_NFEATURES_MAX - ORB_NFEATURES_MIN) / ORB_NFEATURES_STEP);
+            m_sbCfgOrbNFeatures.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgOrbNFeatures = quantizeOrbNFeatures(ORB_NFEATURES_MIN + progress * ORB_NFEATURES_STEP);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("ORB nFeatures", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgOrbScaleFactor != null) {
+            m_sbCfgOrbScaleFactor.setMax(ORB_SCALE_MAX_CENTI - ORB_SCALE_MIN_CENTI);
+            m_sbCfgOrbScaleFactor.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgOrbScaleFactor = quantizeOrbScaleFactor((ORB_SCALE_MIN_CENTI + progress) / 100.0f);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("ORB scaleFactor", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgOrbNLevels != null) {
+            m_sbCfgOrbNLevels.setMax(ORB_NLEVELS_MAX - ORB_NLEVELS_MIN);
+            m_sbCfgOrbNLevels.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgOrbNLevels = quantizeOrbNLevels(ORB_NLEVELS_MIN + progress);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("ORB nLevels", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgOrbIniThFast != null) {
+            m_sbCfgOrbIniThFast.setMax(ORB_FAST_TH_MAX - ORB_FAST_TH_MIN);
+            m_sbCfgOrbIniThFast.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgOrbIniThFast = quantizeOrbFastThreshold(ORB_FAST_TH_MIN + progress);
+                    if (m_cfgOrbMinThFast > m_cfgOrbIniThFast) {
+                        m_cfgOrbMinThFast = m_cfgOrbIniThFast;
+                    }
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("ORB iniThFAST", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgOrbMinThFast != null) {
+            m_sbCfgOrbMinThFast.setMax(ORB_FAST_TH_MAX - ORB_FAST_TH_MIN);
+            m_sbCfgOrbMinThFast.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgOrbMinThFast = quantizeOrbFastThreshold(ORB_FAST_TH_MIN + progress);
+                    if (m_cfgOrbMinThFast > m_cfgOrbIniThFast) {
+                        m_cfgOrbMinThFast = m_cfgOrbIniThFast;
+                    }
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("ORB minThFAST", false, PENDING_CONFIG, () -> {});
+                }
+            });
+        }
         m_cfgExposureUs = quantizeExposureUs(m_cfgExposureUs);
         m_cfgGain = quantizeGain(m_cfgGain);
         m_cfgPairMs = quantizePairMs(m_cfgPairMs);
         m_cfgSlamFps = quantizeSlamFps(m_cfgSlamFps);
+        m_cfgTbcTx = quantizeTbcTranslationM(m_cfgTbcTx);
+        m_cfgTbcTy = quantizeTbcTranslationM(m_cfgTbcTy);
+        m_cfgTbcTz = quantizeTbcTranslationM(m_cfgTbcTz);
+        m_cfgTbcRollDeg = quantizeTbcAngleDeg(m_cfgTbcRollDeg, TBC_ROLL_MIN_TENTH_DEG, TBC_ROLL_MAX_TENTH_DEG);
+        m_cfgTbcPitchDeg = quantizeTbcAngleDeg(m_cfgTbcPitchDeg, TBC_PITCH_MIN_TENTH_DEG, TBC_PITCH_MAX_TENTH_DEG);
+        m_cfgTbcYawDeg = quantizeTbcAngleDeg(m_cfgTbcYawDeg, TBC_YAW_MIN_TENTH_DEG, TBC_YAW_MAX_TENTH_DEG);
+        m_cfgOrbNFeatures = quantizeOrbNFeatures(m_cfgOrbNFeatures);
+        m_cfgOrbScaleFactor = quantizeOrbScaleFactor(m_cfgOrbScaleFactor);
+        m_cfgOrbNLevels = quantizeOrbNLevels(m_cfgOrbNLevels);
+        m_cfgOrbIniThFast = quantizeOrbFastThreshold(m_cfgOrbIniThFast);
+        m_cfgOrbMinThFast = quantizeOrbFastThreshold(m_cfgOrbMinThFast);
+        if (m_cfgOrbMinThFast > m_cfgOrbIniThFast) {
+            m_cfgOrbMinThFast = m_cfgOrbIniThFast;
+        }
         m_cfgSlamMode = SLAM_MODE_MAPPING;
         updateConfigViews();
         updatePoseMapFromText();
@@ -2561,6 +3109,22 @@ public class MainActivity extends Activity {
                                               m_cfgAutoExposure = nextValue;
                                               updateConfigViews();
                                           });
+            });
+        }
+        if (m_btnTbcOverrideToggle != null) {
+            m_btnTbcOverrideToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (m_updatingToggleUi) {
+                    return;
+                }
+                final boolean nextValue = isChecked;
+                sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
+                                          m_sensorMode, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
+                                          nextValue, m_cfgTbcTx, m_cfgTbcTy, m_cfgTbcTz, m_cfgTbcRollDeg,
+                                          m_cfgTbcPitchDeg, m_cfgTbcYawDeg,
+                                          "T_b_c1 override", PENDING_CONFIG, () -> {
+                    m_cfgUseCustomTbc = nextValue;
+                    updateConfigViews();
+                });
             });
         }
         if (m_btnMapToggle != null) {

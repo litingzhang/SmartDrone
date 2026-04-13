@@ -2,8 +2,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <cstddef>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <thread>
+#include <vector>
 
 #include "common/logger.h"
 #include "common/tlv/tlv_protocol.h"
@@ -12,6 +18,125 @@
 namespace smartdrone::core::application {
 
 namespace {
+
+std::string TrimCopy(const std::string &in)
+{
+    size_t begin = 0;
+    while (begin < in.size() && std::isspace(static_cast<unsigned char>(in[begin])) != 0) {
+        ++begin;
+    }
+    size_t end = in.size();
+    while (end > begin && std::isspace(static_cast<unsigned char>(in[end - 1])) != 0) {
+        --end;
+    }
+    return in.substr(begin, end - begin);
+}
+
+bool IsYamlKeyLine(const std::string &line, const std::string &key)
+{
+    const std::string trimmed = TrimCopy(line);
+    if (trimmed.rfind(key, 0) != 0) {
+        return false;
+    }
+    if (trimmed.size() <= key.size()) {
+        return false;
+    }
+    return trimmed[key.size()] == ':';
+}
+
+void ReplaceOrInsertYamlScalar(std::string &text, const std::string &key, const std::string &value)
+{
+    std::vector<std::string> lines;
+    {
+        std::istringstream input(text);
+        std::string line;
+        while (std::getline(input, line)) {
+            lines.push_back(line);
+        }
+    }
+
+    const std::string replacement = key + ": " + value;
+    bool replaced = false;
+    for (std::string &line : lines) {
+        if (IsYamlKeyLine(line, key)) {
+            line = replacement;
+            replaced = true;
+            break;
+        }
+    }
+
+    if (!replaced) {
+        size_t insertAt = lines.size();
+        for (size_t i = 0; i < lines.size(); ++i) {
+            if (TrimCopy(lines[i]) == "...") {
+                insertAt = i;
+                break;
+            }
+        }
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insertAt), replacement);
+    }
+
+    std::ostringstream output;
+    for (const std::string &line : lines) {
+        output << line << "\n";
+    }
+    text = output.str();
+}
+
+std::string BuildEffectiveSlamSettingsPath(const UnifiedConfig &cfg)
+{
+    if (cfg.app.runtime.orbNFeatures <= 0 || !(cfg.app.runtime.orbScaleFactor > 0.0f) ||
+        cfg.app.runtime.orbNLevels <= 0 || cfg.app.runtime.orbIniThFAST <= 0 || cfg.app.runtime.orbMinThFAST <= 0) {
+        return cfg.app.settings;
+    }
+
+    std::ifstream in(cfg.app.settings, std::ios::in);
+    if (!in.is_open()) {
+        std::cerr << "[slam] warning: failed to open settings for ORB override: " << cfg.app.settings << "\n";
+        return cfg.app.settings;
+    }
+
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    std::string content = buffer.str();
+    if (content.empty()) {
+        std::cerr << "[slam] warning: empty settings file for ORB override: " << cfg.app.settings << "\n";
+        return cfg.app.settings;
+    }
+
+    ReplaceOrInsertYamlScalar(content, "ORBextractor.nFeatures", std::to_string(cfg.app.runtime.orbNFeatures));
+    {
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(6) << cfg.app.runtime.orbScaleFactor;
+        ReplaceOrInsertYamlScalar(content, "ORBextractor.scaleFactor", ss.str());
+    }
+    ReplaceOrInsertYamlScalar(content, "ORBextractor.nLevels", std::to_string(cfg.app.runtime.orbNLevels));
+    ReplaceOrInsertYamlScalar(content, "ORBextractor.iniThFAST", std::to_string(cfg.app.runtime.orbIniThFAST));
+    ReplaceOrInsertYamlScalar(content, "ORBextractor.minThFAST", std::to_string(cfg.app.runtime.orbMinThFAST));
+
+    const fs::path sourcePath(cfg.app.settings);
+    const fs::path sourceDir = sourcePath.has_parent_path() ? sourcePath.parent_path() : fs::path(".");
+    const fs::path sourceStem = sourcePath.stem();
+    const fs::path targetPath = sourceDir / (sourceStem.string() + ".runtime_orb.yaml");
+
+    std::ofstream out(targetPath.string(), std::ios::out | std::ios::trunc);
+    if (!out.is_open()) {
+        std::cerr << "[slam] warning: failed to write runtime ORB settings file: " << targetPath.string() << "\n";
+        return cfg.app.settings;
+    }
+    out << content;
+    out.close();
+    if (!out) {
+        std::cerr << "[slam] warning: failed to flush runtime ORB settings file: " << targetPath.string() << "\n";
+        return cfg.app.settings;
+    }
+
+    std::cerr << "[slam] ORB settings override: nFeatures=" << cfg.app.runtime.orbNFeatures
+              << " scaleFactor=" << cfg.app.runtime.orbScaleFactor << " nLevels=" << cfg.app.runtime.orbNLevels
+              << " iniThFAST=" << cfg.app.runtime.orbIniThFAST << " minThFAST=" << cfg.app.runtime.orbMinThFAST
+              << " file=" << targetPath.string() << "\n";
+    return targetPath.string();
+}
 
 std::atomic<uint32_t> g_slamSessionResetCounter{0};
 std::atomic<uint32_t> g_slamSessionResetMapCount{0};
@@ -65,7 +190,8 @@ SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg, LiveRuntimeTuni
       m_orbSensor(ResolveOrbSensor(m_aliases)),
       m_orbInputMode(m_monoMode ? smartdrone::adapters::slam::OrbInputMode::MonoRight
                                 : smartdrone::adapters::slam::OrbInputMode::Stereo),
-      m_slamSystem(std::make_unique<ORB_SLAM3::System>(cfg.app.vocab, cfg.app.settings, m_orbSensor, false)),
+      m_effectiveSettingsPath(BuildEffectiveSlamSettingsPath(cfg)),
+      m_slamSystem(std::make_unique<ORB_SLAM3::System>(cfg.app.vocab, m_effectiveSettingsPath, m_orbSensor, false)),
       m_slamEngine(std::move(m_slamSystem), m_orbInputMode, m_useImu), m_cameraProvider(m_cam),
       m_imuProvider(m_imuState.imuBuffer, MakeImuProviderConfig(m_aliases)), m_posePublisher(mav),
       m_perceptionPipeline(PerceptionPipelineConfig{m_aliases.fps, true}),
@@ -97,7 +223,7 @@ bool SlamSessionRuntime::Start()
     }
 
     if (m_aliases.sensorMode == SensorMode::Stereo) {
-        m_stereoBodyExtrinsics = LoadStereoBodyExtrinsics(m_cfg.app.settings);
+        m_stereoBodyExtrinsics = LoadStereoBodyExtrinsics(m_effectiveSettingsPath);
     }
     if (m_aliases.udpEnable) {
         if (!m_udp.Open(m_aliases.udpIp, m_aliases.udpPort, m_aliases.udpJpegQ, m_aliases.udpPayload,

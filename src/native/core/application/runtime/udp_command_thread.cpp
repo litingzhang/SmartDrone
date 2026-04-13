@@ -80,7 +80,10 @@ RouteResult HandleRuntimeModeFrame(const TlvFrame &frame, UnifiedRuntimeControll
 RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer, UnifiedRuntimeController &controller,
                                      const PeerToIpStringFn &peerToIpString)
 {
-    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V3 &&
+    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V7 && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V6 &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V5 &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V3 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V2 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY) {
         return {ACK_E_BAD_LEN, "bad runtime cfg len"};
@@ -94,6 +97,18 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     r.autoExposureEnabled = !currentCfg.app.camera.aeDisable;
     r.slamInputFps = currentCfg.app.runtime.slamInputFps;
     r.slamOperationMode = currentCfg.app.runtime.slamOperationMode;
+    r.useCustomTbc = currentCfg.app.runtime.useCustomTbc;
+    r.tbcTx = currentCfg.app.runtime.tbcTx;
+    r.tbcTy = currentCfg.app.runtime.tbcTy;
+    r.tbcTz = currentCfg.app.runtime.tbcTz;
+    r.tbcRollDeg = currentCfg.app.runtime.tbcRollDeg;
+    r.tbcPitchDeg = currentCfg.app.runtime.tbcPitchDeg;
+    r.tbcYawDeg = currentCfg.app.runtime.tbcYawDeg;
+    r.orbNFeatures = currentCfg.app.runtime.orbNFeatures;
+    r.orbScaleFactor = currentCfg.app.runtime.orbScaleFactor;
+    r.orbNLevels = currentCfg.app.runtime.orbNLevels;
+    r.orbIniThFAST = currentCfg.app.runtime.orbIniThFAST;
+    r.orbMinThFAST = currentCfg.app.runtime.orbMinThFAST;
     if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
         return {ACK_E_BAD_ARGS, "bad runtime cfg args"};
     }
@@ -122,6 +137,24 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V3) {
         r.slamOperationMode = ParseRuntimeSlamMode(p[RUNTIME_CONFIG_SLAM_MODE_OFFSET]);
     }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V5) {
+        r.useCustomTbc = p[RUNTIME_CONFIG_TBC_OVERRIDE_ENABLE_OFFSET] != 0;
+        r.tbcTx = ReadF32Le(&p[RUNTIME_CONFIG_TBC_TX_OFFSET]);
+        r.tbcTy = ReadF32Le(&p[RUNTIME_CONFIG_TBC_TY_OFFSET]);
+        r.tbcTz = ReadF32Le(&p[RUNTIME_CONFIG_TBC_TZ_OFFSET]);
+        r.tbcPitchDeg = ReadF32Le(&p[RUNTIME_CONFIG_TBC_PITCH_DEG_OFFSET]);
+    }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V6) {
+        r.tbcRollDeg = ReadF32Le(&p[RUNTIME_CONFIG_TBC_ROLL_DEG_OFFSET]);
+        r.tbcYawDeg = ReadF32Le(&p[RUNTIME_CONFIG_TBC_YAW_DEG_OFFSET]);
+    }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V7) {
+        r.orbNFeatures = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_ORB_NFEATURES_OFFSET])));
+        r.orbScaleFactor = ReadF32Le(&p[RUNTIME_CONFIG_ORB_SCALE_FACTOR_OFFSET]);
+        r.orbNLevels = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_ORB_NLEVELS_OFFSET])));
+        r.orbIniThFAST = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_ORB_INI_TH_FAST_OFFSET])));
+        r.orbMinThFAST = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_ORB_MIN_TH_FAST_OFFSET])));
+    }
     const char *ipChars = reinterpret_cast<const char *>(&p[ipOffset]);
     size_t ipLen = 0;
     while (ipLen < RUNTIME_CONFIG_IP_LEN && ipChars[ipLen] != '\0') {
@@ -149,6 +182,18 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     update.values[std::string(ConfigRegistry::kStreamSendImage)] = r.sendImage;
     update.values[std::string(ConfigRegistry::kStreamSendFeature)] = r.sendFeature;
     update.values[std::string(ConfigRegistry::kStreamSendMap)] = r.sendMap;
+    update.values[std::string(ConfigRegistry::kSlamUseCustomTbc)] = r.useCustomTbc;
+    update.values[std::string(ConfigRegistry::kSlamTbcTx)] = static_cast<double>(r.tbcTx);
+    update.values[std::string(ConfigRegistry::kSlamTbcTy)] = static_cast<double>(r.tbcTy);
+    update.values[std::string(ConfigRegistry::kSlamTbcTz)] = static_cast<double>(r.tbcTz);
+    update.values[std::string(ConfigRegistry::kSlamTbcRollDeg)] = static_cast<double>(r.tbcRollDeg);
+    update.values[std::string(ConfigRegistry::kSlamTbcPitchDeg)] = static_cast<double>(r.tbcPitchDeg);
+    update.values[std::string(ConfigRegistry::kSlamTbcYawDeg)] = static_cast<double>(r.tbcYawDeg);
+    update.values[std::string(ConfigRegistry::kSlamOrbNFeatures)] = static_cast<int64_t>(r.orbNFeatures);
+    update.values[std::string(ConfigRegistry::kSlamOrbScaleFactor)] = static_cast<double>(r.orbScaleFactor);
+    update.values[std::string(ConfigRegistry::kSlamOrbNLevels)] = static_cast<int64_t>(r.orbNLevels);
+    update.values[std::string(ConfigRegistry::kSlamOrbIniThFast)] = static_cast<int64_t>(r.orbIniThFAST);
+    update.values[std::string(ConfigRegistry::kSlamOrbMinThFast)] = static_cast<int64_t>(r.orbMinThFAST);
 
     RuntimeCommandService service(controller);
     const auto result = service.ApplyConfig(update);
@@ -159,7 +204,8 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
                         " settings=" + std::string(DefaultSettingsForSensorMode(r.sensorMode)) +
                         " slam_mode=" + std::string(smartdrone::core::domain::ToString(r.slamOperationMode)) +
                         " img=" + (r.sendImage ? "on" : "off") + " feat=" + (r.sendFeature ? "on" : "off") +
-                        " map=" + (r.sendMap ? "on" : "off") + " ae=" + (r.autoExposureEnabled ? "on" : "off")};
+                        " map=" + (r.sendMap ? "on" : "off") + " ae=" + (r.autoExposureEnabled ? "on" : "off") +
+                        " tbc_override=" + (r.useCustomTbc ? "on" : "off")};
 }
 
 RouteResult HandleCalibCleanFrame(const TlvFrame &frame, UnifiedRuntimeController &controller)
