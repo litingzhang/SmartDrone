@@ -10,17 +10,6 @@
 
 namespace smartdrone::core::application {
 
-namespace {
-
-float ExtractPitchDegFromBodyToCam(const Sophus::SE3f &tbc)
-{
-    const Eigen::Matrix3f R = tbc.so3().matrix();
-    constexpr float kRadToDeg = 57.295779513082320876f;
-    return std::atan2(R(0, 2), R(2, 2)) * kRadToDeg;
-}
-
-} // namespace
-
 RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTuning &tuning, std::mutex &configMutex,
                                            RestartFn requestRestart)
     : m_config(config), m_tuning(tuning), m_configMutex(configMutex), m_requestRestart(std::move(requestRestart))
@@ -116,10 +105,10 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
                 m_config.app.runtime.tbcTx = t.x();
                 m_config.app.runtime.tbcTy = t.y();
                 m_config.app.runtime.tbcTz = t.z();
-                // Keep roll/yaw defaults neutral for narrow-range UI tuning, and
-                // preserve the previous "forward tilt" interpretation for pitch.
+                // Runtime override now applies a dynamic pitch delta on top of
+                // calibrated T_b_c1, so the neutral UI state is zero delta.
                 m_config.app.runtime.tbcRollDeg = 0.0f;
-                m_config.app.runtime.tbcPitchDeg = ExtractPitchDegFromBodyToCam(extrinsics.Tbc);
+                m_config.app.runtime.tbcPitchDeg = 0.0f;
                 m_config.app.runtime.tbcYawDeg = 0.0f;
             } else {
                 m_config.app.runtime.tbcTx = remote.tbcTx;

@@ -40,6 +40,13 @@ Sophus::SE3f BuildBodyToCamFromRuntimeOverride(float tx, float ty, float tz, flo
     return Sophus::SE3f(Sophus::SO3f(q), Eigen::Vector3f(tx, ty, tz));
 }
 
+Sophus::SE3f BuildBodyToCamPitchDelta(float pitchDeg)
+{
+    constexpr float kDegToRad = 0.017453292519943295769f;
+    const Eigen::AngleAxisf pitchRotation(pitchDeg * kDegToRad, Eigen::Vector3f::UnitY());
+    return Sophus::SE3f(Sophus::SO3f(Eigen::Quaternionf(pitchRotation)), Eigen::Vector3f::Zero());
+}
+
 } // namespace
 
 SlamFrameProcessor::SlamFrameProcessor(Context &context, State &state) : m_ctx(context), m_state(state) {}
@@ -235,13 +242,20 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     bool useStereoBodyExtrinsics = m_ctx.stereoBodyExtrinsics.loaded;
     Sophus::SE3f stereoBodyExtrinsics = m_ctx.stereoBodyExtrinsics.Tbc;
     if (!m_ctx.useImu && !m_ctx.monoMode && m_ctx.tuning.useCustomTbc.load(std::memory_order_relaxed)) {
-        const float tx = m_ctx.tuning.tbcTx.load(std::memory_order_relaxed);
-        const float ty = m_ctx.tuning.tbcTy.load(std::memory_order_relaxed);
-        const float tz = m_ctx.tuning.tbcTz.load(std::memory_order_relaxed);
-        const float rollDeg = m_ctx.tuning.tbcRollDeg.load(std::memory_order_relaxed);
         const float pitchDeg = m_ctx.tuning.tbcPitchDeg.load(std::memory_order_relaxed);
-        const float yawDeg = m_ctx.tuning.tbcYawDeg.load(std::memory_order_relaxed);
-        stereoBodyExtrinsics = BuildBodyToCamFromRuntimeOverride(tx, ty, tz, rollDeg, pitchDeg, yawDeg);
+        if (m_ctx.stereoBodyExtrinsics.loaded) {
+            // Runtime pitch is an incremental gimbal motion on top of the
+            // calibrated body->camera extrinsics. Right-multiplication makes a
+            // forward-facing camera sweep toward downward view as pitch grows.
+            stereoBodyExtrinsics = m_ctx.stereoBodyExtrinsics.Tbc * BuildBodyToCamPitchDelta(pitchDeg);
+        } else {
+            const float tx = m_ctx.tuning.tbcTx.load(std::memory_order_relaxed);
+            const float ty = m_ctx.tuning.tbcTy.load(std::memory_order_relaxed);
+            const float tz = m_ctx.tuning.tbcTz.load(std::memory_order_relaxed);
+            const float rollDeg = m_ctx.tuning.tbcRollDeg.load(std::memory_order_relaxed);
+            const float yawDeg = m_ctx.tuning.tbcYawDeg.load(std::memory_order_relaxed);
+            stereoBodyExtrinsics = BuildBodyToCamFromRuntimeOverride(tx, ty, tz, rollDeg, pitchDeg, yawDeg);
+        }
         useStereoBodyExtrinsics = true;
     }
 

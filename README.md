@@ -149,6 +149,7 @@ ADB 相关注意事项：
 `CMD_RUNTIME_CONFIG` 现支持以下两类 SLAM 相关调参（由 Android 控制端下发）：
 
 - `T_b_c1` 运行时覆盖：`slam.tbc_override_enabled`（默认关闭）、`slam.tbc_tx_m / ty_m / tz_m`、`slam.tbc_roll_deg / pitch_deg / yaw_deg`（手机端范围：roll/yaw `-10.0~10.0`，pitch `-10.0~100.0`，步进 `0.1`）。
+  在纯双目且 YAML 已加载 `T_b_c1` 时，手机端 `pitch_deg` 现在表示“在 YAML 基准外参上的动态俯仰增量”，适合做 `0~90°` 前视到下视切换；关闭覆盖时 UI 会回到 `pitch=0` 的中性位。
 - ORB 提取器参数：
 - `slam.orb_nfeatures`
 - `slam.orb_scale_factor`

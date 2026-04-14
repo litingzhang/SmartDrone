@@ -86,5 +86,36 @@ TEST(RuntimeConfigServiceTest, ApplyConfigRejectsTypeMismatch)
     EXPECT_EQ(result.message, "stream.udp_enabled type mismatch");
 }
 
+TEST(RuntimeConfigServiceTest, DisableTbcOverrideResetsPitchDeltaToZeroFromYamlBase)
+{
+    UnifiedConfig config = MakeConfig();
+    config.app.runtime.useCustomTbc = true;
+    config.app.runtime.tbcTx = 1.0f;
+    config.app.runtime.tbcTy = 2.0f;
+    config.app.runtime.tbcTz = 3.0f;
+    config.app.runtime.tbcRollDeg = 4.0f;
+    config.app.runtime.tbcPitchDeg = 55.0f;
+    config.app.runtime.tbcYawDeg = 6.0f;
+
+    LiveRuntimeTuning tuning{};
+    std::mutex configMutex;
+    RuntimeConfigService service(config, tuning, configMutex, []() {});
+
+    RemoteRuntimeConfig remote = RuntimeConfigService::BuildRemoteConfig(config);
+    remote.useCustomTbc = false;
+
+    std::string err;
+    ASSERT_TRUE(service.UpdateRemoteConfig(remote, &err)) << err;
+
+    EXPECT_FALSE(config.app.runtime.useCustomTbc);
+    EXPECT_NEAR(config.app.runtime.tbcTx, 0.0402277374f, 1e-5f);
+    EXPECT_NEAR(config.app.runtime.tbcTy, -0.0304024123f, 1e-5f);
+    EXPECT_NEAR(config.app.runtime.tbcTz, 0.0205949966f, 1e-5f);
+    EXPECT_FLOAT_EQ(config.app.runtime.tbcRollDeg, 0.0f);
+    EXPECT_FLOAT_EQ(config.app.runtime.tbcPitchDeg, 0.0f);
+    EXPECT_FLOAT_EQ(config.app.runtime.tbcYawDeg, 0.0f);
+    EXPECT_FLOAT_EQ(tuning.tbcPitchDeg.load(std::memory_order_relaxed), 0.0f);
+}
+
 } // namespace
 } // namespace smartdrone::core::application

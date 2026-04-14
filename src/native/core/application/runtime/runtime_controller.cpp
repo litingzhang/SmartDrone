@@ -11,13 +11,6 @@ namespace smartdrone::core::application {
 
 namespace {
 
-float ExtractPitchDegFromBodyToCam(const Sophus::SE3f &tbc)
-{
-    const Eigen::Matrix3f R = tbc.so3().matrix();
-    constexpr float kRadToDeg = 57.295779513082320876f;
-    return std::atan2(R(0, 2), R(2, 2)) * kRadToDeg;
-}
-
 void SyncDefaultTbcFromSettings(UnifiedConfig &config)
 {
     if (config.app.runtime.useCustomTbc) {
@@ -33,10 +26,10 @@ void SyncDefaultTbcFromSettings(UnifiedConfig &config)
     config.app.runtime.tbcTx = t.x();
     config.app.runtime.tbcTy = t.y();
     config.app.runtime.tbcTz = t.z();
-    // Keep roll/yaw defaults neutral for narrow-range UI tuning, and sync pitch
-    // to the existing "forward tilt" definition used before roll/yaw sliders.
+    // Runtime override now means "dynamic pitch on top of calibrated T_b_c1", so
+    // the neutral UI state is zero delta instead of the calibrated absolute pose.
     config.app.runtime.tbcRollDeg = 0.0f;
-    config.app.runtime.tbcPitchDeg = ExtractPitchDegFromBodyToCam(extrinsics.Tbc);
+    config.app.runtime.tbcPitchDeg = 0.0f;
     config.app.runtime.tbcYawDeg = 0.0f;
 }
 

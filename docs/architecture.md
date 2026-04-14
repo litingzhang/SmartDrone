@@ -107,6 +107,7 @@ TLV 指令经 `TlvCmdRouter` -> `Px4UdpHooks`，主要能力：
 - 相机：曝光、增益、自动曝光、配对窗
 - SLAM：输入帧率、感知模式、工作模式
 - `T_b_c1` 运行时覆盖：开关、平移（tx/ty/tz）与姿态（roll/pitch/yaw）
+  纯双目且已加载 YAML `T_b_c1` 时，运行时 `pitch` 解释为“相对基准外参的动态俯仰增量”，用于前视到下视等大角度俯仰。
 - ORB 提取器：`nFeatures`、`scaleFactor`、`nLevels`、`iniThFAST`、`minThFAST`
 - 流媒体：UDP 目标 IP、image/feature/map 开关
 
@@ -514,6 +515,7 @@ sequenceDiagram
 - `slam.tbc_roll_deg`
 - `slam.tbc_pitch_deg`
 - `slam.tbc_yaw_deg`
+  其中 `slam.tbc_pitch_deg` 在纯双目 + 已加载 YAML 外参时表示动态俯仰增量；`0` 为 YAML 基准姿态。
 - `slam.orb_nfeatures`
 - `slam.orb_scale_factor`
 - `slam.orb_nlevels`
