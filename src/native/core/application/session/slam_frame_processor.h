@@ -9,6 +9,7 @@
 #include "adapters/camera/libcamera_stereo_camera.h"
 #include "adapters/imu/icm42688_imu_provider.h"
 #include "adapters/slam/orbslam3_engine.h"
+#include "adapters/slam/xfeat_frontend_client.h"
 #include "adapters/stream/udp_image_sender.h"
 #include "adapters/telemetry/mavlink_pose_publisher.h"
 #include "adapters/telemetry/px4_mavlink_gateway.h"
@@ -33,6 +34,7 @@ class SlamFrameProcessor {
         LivePoseState &livePose;
         Px4MavlinkGateway &mav;
         smartdrone::adapters::slam::OrbSlam3Engine &slamEngine;
+        smartdrone::adapters::slam::XFeatFrontendClient *xfeatFrontendClient{nullptr};
         smartdrone::adapters::camera::LibcameraStereoCamera &cameraProvider;
         smartdrone::adapters::imu::Icm42688ImuProvider &imuProvider;
         smartdrone::adapters::telemetry::MavlinkPosePublisher &posePublisher;

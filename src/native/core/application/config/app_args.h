@@ -15,9 +15,16 @@ enum class SensorMode {
     MonoImu,
 };
 
+enum class FeatureFrontend {
+    Orb,
+    XFeat,
+};
+
 const char *DefaultSettingsForSensorMode(SensorMode mode);
 SensorMode ParseSensorModeText(const std::string &text);
 const char *ToSensorModeText(SensorMode mode);
+FeatureFrontend ParseFeatureFrontendText(const std::string &text);
+const char *ToFeatureFrontendText(FeatureFrontend frontend);
 smartdrone::core::domain::SlamOperationMode ParseSlamOperationModeText(const std::string &text);
 std::string ResolveRuntimePath(const std::string &path, const char *argv0);
 std::string ResolveSettingsForSensorMode(SensorMode mode, const std::string &currentSettingsPath);
@@ -71,6 +78,12 @@ struct RuntimeConfig {
     bool allowEmptyImu{false};
     int slamInputFps{0};
     smartdrone::core::domain::SlamOperationMode slamOperationMode{smartdrone::core::domain::SlamOperationMode::Mapping};
+    FeatureFrontend featureFrontend{FeatureFrontend::Orb};
+    std::string xfeatPython{"python3"};
+    std::string xfeatRepo;
+    std::string xfeatWorkerScript{"scripts/xfeat_keypoint_worker.py"};
+    int xfeatTopK{256};
+    int xfeatMaxPoints{160};
     bool debugRightOnlyFeatures{false};
     bool slamLowLightEnhance{false};
     bool jsonDiagnostics{false};

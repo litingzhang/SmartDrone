@@ -2,7 +2,31 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <vector>
+
+namespace {
+
+std::string ResolveFirstExistingRuntimePath(const std::vector<std::string> &candidates, const char *argv0)
+{
+    std::string firstResolved;
+    for (const std::string &candidate : candidates) {
+        if (candidate.empty()) {
+            continue;
+        }
+        const std::string resolved = ResolveRuntimePath(candidate, argv0);
+        if (firstResolved.empty()) {
+            firstResolved = resolved;
+        }
+        std::error_code ec;
+        if (fs::exists(resolved, ec)) {
+            return resolved;
+        }
+    }
+    return firstResolved;
+}
+
+} // namespace
 
 const char *DefaultSettingsForSensorMode(SensorMode mode)
 {
@@ -48,6 +72,28 @@ const char *ToSensorModeText(SensorMode mode)
     case SensorMode::Stereo:
     default:
         return "stereo";
+    }
+}
+
+FeatureFrontend ParseFeatureFrontendText(const std::string &text)
+{
+    std::string normalized = text;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (normalized == "xfeat" || normalized == "x-feat") {
+        return FeatureFrontend::XFeat;
+    }
+    return FeatureFrontend::Orb;
+}
+
+const char *ToFeatureFrontendText(FeatureFrontend frontend)
+{
+    switch (frontend) {
+    case FeatureFrontend::XFeat:
+        return "xfeat";
+    case FeatureFrontend::Orb:
+    default:
+        return "orb";
     }
 }
 
@@ -263,6 +309,44 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.allowEmptyImu = argReader.HasFlag("--allow-empty-imu");
     config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 0);
     config.runtime.slamOperationMode = ParseSlamOperationModeText(argReader.GetString("--slam-mode", "mapping"));
+    config.runtime.featureFrontend = ParseFeatureFrontendText(argReader.GetString("--feature-frontend", "orb"));
+    config.runtime.xfeatPython = argReader.GetString("--xfeat-python", "python3");
+    {
+        const char *home = std::getenv("HOME");
+        const std::string explicitRepo = argReader.GetString("--xfeat-repo", "");
+        if (!explicitRepo.empty()) {
+            config.runtime.xfeatRepo = ResolveRuntimePath(explicitRepo, argc > 0 ? argv[0] : nullptr);
+        } else {
+            std::vector<std::string> repoCandidates;
+            repoCandidates.emplace_back("accelerated_features");
+            repoCandidates.emplace_back("third_party/accelerated_features");
+            if (home != nullptr) {
+                repoCandidates.push_back((fs::path(home) / "accelerated_features").string());
+                repoCandidates.push_back((fs::path(home) / "third_party" / "accelerated_features").string());
+            }
+            config.runtime.xfeatRepo = ResolveFirstExistingRuntimePath(repoCandidates, argc > 0 ? argv[0] : nullptr);
+        }
+    }
+    {
+        const std::string explicitWorker = argReader.GetString("--xfeat-worker", "");
+        if (!explicitWorker.empty()) {
+            config.runtime.xfeatWorkerScript = ResolveRuntimePath(explicitWorker, argc > 0 ? argv[0] : nullptr);
+        } else {
+            const char *home = std::getenv("HOME");
+            std::vector<std::string> workerCandidates;
+            workerCandidates.emplace_back("scripts/xfeat_keypoint_worker.py");
+            workerCandidates.emplace_back("xfeat_keypoint_worker.py");
+            if (home != nullptr) {
+                workerCandidates.push_back((fs::path(home) / "workspace" / "SmartDrone" / "scripts" / "xfeat_keypoint_worker.py").string());
+                workerCandidates.push_back((fs::path(home) / "SmartDrone" / "scripts" / "xfeat_keypoint_worker.py").string());
+                workerCandidates.push_back((fs::path(home) / "xfeat_keypoint_worker.py").string());
+            }
+            config.runtime.xfeatWorkerScript =
+                ResolveFirstExistingRuntimePath(workerCandidates, argc > 0 ? argv[0] : nullptr);
+        }
+    }
+    config.runtime.xfeatTopK = argReader.GetInt("--xfeat-top-k", 256);
+    config.runtime.xfeatMaxPoints = argReader.GetInt("--xfeat-max-points", 160);
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");
     config.runtime.slamLowLightEnhance = argReader.HasFlag("--slam-lowlight-enhance");
     config.runtime.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");

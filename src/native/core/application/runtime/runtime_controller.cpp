@@ -83,6 +83,8 @@ UnifiedRuntimeController::UnifiedRuntimeController(UnifiedConfig initialConfig, 
     m_tuning.slamInputFps.store(m_config.app.runtime.slamInputFps, std::memory_order_relaxed);
     m_tuning.slamOperationMode.store(static_cast<uint8_t>(m_config.app.runtime.slamOperationMode),
                                      std::memory_order_relaxed);
+    m_tuning.featureFrontend.store(static_cast<uint8_t>(m_config.app.runtime.featureFrontend),
+                                   std::memory_order_relaxed);
     m_tuning.sendImage.store(m_config.app.udp.sendImage, std::memory_order_relaxed);
     m_tuning.sendFeature.store(m_config.app.udp.sendFeature, std::memory_order_relaxed);
     m_tuning.sendMap.store(m_config.app.udp.sendMap, std::memory_order_relaxed);

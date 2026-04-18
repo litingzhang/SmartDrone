@@ -61,6 +61,7 @@ std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig &cfg, smartdrone::co
     oss << "camera.auto_exposure=" << (cfg.app.camera.aeDisable ? "false" : "true") << "\n";
     oss << "camera.pair_window_ms=" << cfg.app.camera.pairMs << "\n";
     oss << "slam.input_fps=" << cfg.app.runtime.slamInputFps << "\n";
+    oss << "slam.feature_frontend=" << ToFeatureFrontendText(cfg.app.runtime.featureFrontend) << "\n";
     oss << "slam.perception_mode=" << ToSensorModeText(cfg.app.sensorMode) << "\n";
     oss << "slam.operation_mode=" << smartdrone::core::domain::ToString(cfg.app.runtime.slamOperationMode) << "\n";
     oss << "slam.tbc_override_enabled=" << (cfg.app.runtime.useCustomTbc ? "true" : "false") << "\n";

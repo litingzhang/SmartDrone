@@ -1574,6 +1574,62 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
     return mCurrentFrame.GetPose();
 }
 
+Sophus::SE3f Tracking::GrabImageStereoWithFeatures(const cv::Mat &imRectLeft, const cv::Mat &imRectRight,
+                                                   const ExternalStereoFrameData &features, const double &timestamp,
+                                                   string filename)
+{
+    mImGray = imRectLeft;
+    cv::Mat imGrayRight = imRectRight;
+    mImRight = imRectRight;
+
+    if(mImGray.channels()==3)
+    {
+        if(mbRGB)
+        {
+            cvtColor(mImGray,mImGray,cv::COLOR_RGB2GRAY);
+            cvtColor(imGrayRight,imGrayRight,cv::COLOR_RGB2GRAY);
+        }
+        else
+        {
+            cvtColor(mImGray,mImGray,cv::COLOR_BGR2GRAY);
+            cvtColor(imGrayRight,imGrayRight,cv::COLOR_BGR2GRAY);
+        }
+    }
+    else if(mImGray.channels()==4)
+    {
+        if(mbRGB)
+        {
+            cvtColor(mImGray,mImGray,cv::COLOR_RGBA2GRAY);
+            cvtColor(imGrayRight,imGrayRight,cv::COLOR_RGBA2GRAY);
+        }
+        else
+        {
+            cvtColor(mImGray,mImGray,cv::COLOR_BGRA2GRAY);
+            cvtColor(imGrayRight,imGrayRight,cv::COLOR_BGRA2GRAY);
+        }
+    }
+
+    if (mSensor == System::STEREO && !mpCamera2)
+        mCurrentFrame = Frame(mImGray, imGrayRight, timestamp, mpORBextractorLeft, mpORBextractorRight,
+                              mpORBVocabulary, mK, mDistCoef, mbf, mThDepth, mpCamera, features);
+    else if (mSensor == System::IMU_STEREO && !mpCamera2)
+        mCurrentFrame = Frame(mImGray, imGrayRight, timestamp, mpORBextractorLeft, mpORBextractorRight,
+                              mpORBVocabulary, mK, mDistCoef, mbf, mThDepth, mpCamera, features, &mLastFrame,
+                              *mpImuCalib);
+    else
+    {
+        cerr << "ERROR: external stereo feature injection currently supports rectified stereo without mpCamera2 only."
+             << endl;
+        return Sophus::SE3f();
+    }
+
+    mCurrentFrame.mNameFile = filename;
+    mCurrentFrame.mnDataset = mnNumDataset;
+
+    Track();
+    return mCurrentFrame.GetPose();
+}
+
 
 Sophus::SE3f Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const double &timestamp, string filename)
 {
@@ -1669,6 +1725,58 @@ Sophus::SE3f Tracking::GrabImageMonocular(const cv::Mat &im, const double &times
     lastID = mCurrentFrame.mnId;
     Track();
 
+    return mCurrentFrame.GetPose();
+}
+
+Sophus::SE3f Tracking::GrabImageMonocularWithFeatures(const cv::Mat &im, const ExternalMonoFrameData &features,
+                                                      const double &timestamp, string filename)
+{
+    mImGray = im;
+    if(mImGray.channels()==3)
+    {
+        if(mbRGB)
+            cvtColor(mImGray,mImGray,cv::COLOR_RGB2GRAY);
+        else
+            cvtColor(mImGray,mImGray,cv::COLOR_BGR2GRAY);
+    }
+    else if(mImGray.channels()==4)
+    {
+        if(mbRGB)
+            cvtColor(mImGray,mImGray,cv::COLOR_RGBA2GRAY);
+        else
+            cvtColor(mImGray,mImGray,cv::COLOR_BGRA2GRAY);
+    }
+
+    if (mSensor == System::MONOCULAR)
+    {
+        ORBextractor* scaleExtractor =
+            (mState==NOT_INITIALIZED || mState==NO_IMAGES_YET || (lastID - initID) < mMaxFrames)
+                ? mpIniORBextractor
+                : mpORBextractorLeft;
+        mCurrentFrame = Frame(mImGray, timestamp, scaleExtractor, mpORBVocabulary, mpCamera, mDistCoef, mbf,
+                              mThDepth, features);
+    }
+    else if(mSensor == System::IMU_MONOCULAR)
+    {
+        ORBextractor* scaleExtractor =
+            (mState==NOT_INITIALIZED || mState==NO_IMAGES_YET) ? mpIniORBextractor : mpORBextractorLeft;
+        mCurrentFrame = Frame(mImGray, timestamp, scaleExtractor, mpORBVocabulary, mpCamera, mDistCoef, mbf,
+                              mThDepth, features, &mLastFrame, *mpImuCalib);
+    }
+    else
+    {
+        cerr << "ERROR: external monocular feature injection requires monocular input sensor." << endl;
+        return Sophus::SE3f();
+    }
+
+    if (mState==NO_IMAGES_YET)
+        t0=timestamp;
+
+    mCurrentFrame.mNameFile = filename;
+    mCurrentFrame.mnDataset = mnNumDataset;
+
+    lastID = mCurrentFrame.mnId;
+    Track();
     return mCurrentFrame.GetPose();
 }
 

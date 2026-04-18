@@ -36,6 +36,12 @@ struct SlamOutput {
     bool poseValid{false};
     int trackingState{0};
     unsigned long mapId{0};
+    bool usedXFeatFrontend{false};
+    int xfeatRawLeftCount{0};
+    int xfeatRawRightCount{0};
+    int xfeatMatchedStereoCount{0};
+    int xfeatInjectedLeftCount{0};
+    int xfeatInjectedRightCount{0};
     std::vector<cv::Point2f> leftFeatures;
     std::vector<cv::Point2f> rightFeatures;
     std::vector<float> pointCloudXyz;

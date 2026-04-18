@@ -23,6 +23,6 @@ public class NativeUdp {
                                                boolean autoExposure, boolean useCustomTbc, float tbcTx, float tbcTy,
                                                float tbcTz, float tbcRollDeg, float tbcPitchDeg, float tbcYawDeg,
                                                int orbNFeatures, float orbScaleFactor, int orbNLevels,
-                                               int orbIniThFAST, int orbMinThFAST);
+                                               int orbIniThFAST, int orbMinThFAST, int featureFrontend);
     public static native byte[] pollRecv();
 }

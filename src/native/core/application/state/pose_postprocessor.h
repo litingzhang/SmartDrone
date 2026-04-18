@@ -47,28 +47,18 @@ class PosePostprocessor {
                                           Px4MavlinkGateway &mavlink, PoseQuality &outQuality);
 
       private:
-        void RefreshPx4LocalZ(Px4MavlinkGateway &mavlink);
         void RefreshRangeSensor(Px4MavlinkGateway &mavlink);
-        bool HasFreshPx4LocalZ(uint64_t nowUs) const;
         bool HasFreshRange() const;
         Px4MavlinkGateway::Pose ComputeLostPose(uint64_t nowUs);
         void ApplyRangeProtection(Px4MavlinkGateway::Pose &pose, uint64_t nowUs);
-        bool TryAlignZ(const Px4MavlinkGateway::Pose &poseNed, uint64_t nowUs, bool trackingRecovered);
 
-        static constexpr uint64_t kPx4LocalPositionMaxAgeUs = 500000ULL;
         static constexpr uint64_t kRangeSensorMaxAgeUs = 200000ULL;
         static constexpr uint64_t kWeakHoldUs = 1500000ULL;
-        static constexpr uint64_t kStartupFallbackAlignUs = 2000000ULL;
         static constexpr float kRangeHardFloorM = 0.35f;
 
         float zOffset{0.0f};
-        float latestPx4Z{0.0f};
         uint64_t weakUntilUs{0};
-        uint64_t latestPx4ZReceivedUs{0};
-        uint64_t trackingReadySinceUs{0};
         bool haveZOffset{false};
-        bool zOffsetFromPx4{false};
-        bool haveLatestPx4Z{false};
         bool lossActive{false};
         bool trackingUsablePrev{false};
         bool havePublishedPose{false};

@@ -212,6 +212,8 @@ bool SlamSessionRuntime::Start()
     m_slamStarted = true;
 
     m_slamEngine.SetOperationMode(m_frameProcessorState.effectiveSlamMode);
+    m_slamEngine.SetFeatureFrontend(m_aliases.featureFrontend);
+    m_slamEngine.SetXFeatFrontendClient(&m_xfeatFrontendClient);
     if (m_frameProcessorState.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
         std::cerr << "[slam] operation_mode=auto effective_mode=mapping\n";
     }
@@ -224,6 +226,23 @@ bool SlamSessionRuntime::Start()
 
     if (m_aliases.sensorMode == SensorMode::Stereo) {
         m_stereoBodyExtrinsics = LoadStereoBodyExtrinsics(m_effectiveSettingsPath);
+    }
+
+    if (!m_cfg.app.runtime.xfeatRepo.empty() && !m_cfg.app.runtime.xfeatWorkerScript.empty()) {
+        std::string xfeatErr;
+        if (m_xfeatFrontendClient.Start(m_cfg.app.runtime.xfeatPython, m_cfg.app.runtime.xfeatWorkerScript,
+                                        m_cfg.app.runtime.xfeatRepo, m_cfg.app.runtime.xfeatTopK,
+                                        m_cfg.app.runtime.xfeatMaxPoints, &xfeatErr)) {
+            std::cerr << "[slam] xfeat worker ready repo=" << m_cfg.app.runtime.xfeatRepo
+                      << " top_k=" << m_cfg.app.runtime.xfeatTopK
+                      << " max_points=" << m_cfg.app.runtime.xfeatMaxPoints << "\n";
+        } else if (m_aliases.featureFrontend == FeatureFrontend::XFeat) {
+            std::cerr << "[slam] warning: xfeat worker start failed: " << xfeatErr << "\n";
+        }
+    }
+    if (m_aliases.featureFrontend == FeatureFrontend::XFeat) {
+        std::cerr << "[slam] feature_frontend=xfeat selected; experimental external XFeat feature injection is enabled "
+                     "when the worker is available\n";
     }
     if (m_aliases.udpEnable) {
         if (!m_udp.Open(m_aliases.udpIp, m_aliases.udpPort, m_aliases.udpJpegQ, m_aliases.udpPayload,
@@ -271,6 +290,7 @@ void SlamSessionRuntime::Stop()
         m_slamEngine.Stop();
         m_slamStarted = false;
     }
+    m_xfeatFrontendClient.Stop();
     std::cerr << "[session] slam shutdown complete\n";
     m_livePose.SetRuntimeMode(RUNTIME_MODE_IDLE);
     std::cerr << "[session] slam exit\n";
@@ -293,8 +313,8 @@ SlamFrameProcessor &SlamSessionRuntime::FrameProcessor()
 {
     if (!m_frameProcessorContext) {
         m_frameProcessorContext = std::make_unique<SlamFrameProcessor::Context>(SlamFrameProcessor::Context{
-            m_aliases, m_monoMode, m_useImu, m_tuning, m_livePose, m_mav, m_slamEngine, m_cameraProvider, m_imuProvider,
-            m_posePublisher, m_udp, m_frameTimingTracker, m_perceptionPipeline, m_posePostprocessor,
+            m_aliases, m_monoMode, m_useImu, m_tuning, m_livePose, m_mav, m_slamEngine, &m_xfeatFrontendClient,
+            m_cameraProvider, m_imuProvider, m_posePublisher, m_udp, m_frameTimingTracker, m_perceptionPipeline, m_posePostprocessor,
             m_autoSlamModeController, m_stereoBodyExtrinsics});
     }
     if (!m_frameProcessor) {
@@ -317,6 +337,7 @@ void SlamSessionRuntime::CleanupAfterStartFailure()
         m_udp.Close();
         m_udpOpen = false;
     }
+    m_xfeatFrontendClient.Stop();
     m_mav.StopSetpointStream();
     if (m_slamStarted) {
         m_slamEngine.Stop();

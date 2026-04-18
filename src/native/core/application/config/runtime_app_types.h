@@ -25,6 +25,7 @@ struct RemoteRuntimeConfig {
     bool autoExposureEnabled{true};
     int slamInputFps{0};
     domain::SlamOperationMode slamOperationMode{domain::SlamOperationMode::Mapping};
+    FeatureFrontend featureFrontend{FeatureFrontend::Orb};
     std::string udpIp;
     bool udpEnabled{false};
     SensorMode sensorMode{SensorMode::Stereo};
@@ -48,6 +49,7 @@ struct RemoteRuntimeConfig {
 struct MainRuntimeAliases {
     SensorMode sensorMode{SensorMode::Stereo};
     domain::SlamOperationMode slamOperationMode{domain::SlamOperationMode::Mapping};
+    FeatureFrontend featureFrontend{FeatureFrontend::Orb};
     int width{}, height{}, fps{}, slamInputFps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{},
         pairQueue{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{}, debugRightOnlyFeatures{},
@@ -64,6 +66,7 @@ struct MainRuntimeAliases {
 struct LiveRuntimeTuning {
     std::atomic<int> slamInputFps{0};
     std::atomic<uint8_t> slamOperationMode{static_cast<uint8_t>(domain::SlamOperationMode::Mapping)};
+    std::atomic<uint8_t> featureFrontend{static_cast<uint8_t>(FeatureFrontend::Orb)};
     std::atomic<bool> sendImage{true};
     std::atomic<bool> sendFeature{true};
     std::atomic<bool> sendMap{false};

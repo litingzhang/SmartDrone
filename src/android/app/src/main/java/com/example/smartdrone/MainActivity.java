@@ -68,6 +68,8 @@ public class MainActivity extends Activity {
     private static final int SENSOR_STEREO_IMU = 1;
     private static final int SENSOR_MONO = 2;
     private static final int SENSOR_MONO_IMU = 3;
+    private static final int FEATURE_FRONTEND_ORB = 0;
+    private static final int FEATURE_FRONTEND_XFEAT = 1;
     private static final int SLAM_MODE_MAPPING = 0;
     private static final int SLAM_MODE_LOCALIZATION = 1;
     private static final int SLAM_MODE_AUTO = 4;
@@ -165,6 +167,7 @@ public class MainActivity extends Activity {
     private Switch m_btnAutoExposureToggle;
     private Switch m_btnTbcOverrideToggle;
     private Spinner m_spinnerSensorMode;
+    private Spinner m_spinnerFeatureFrontend;
     private Button m_btnQuickSlamAuto;
     private Button m_btnQuickSlamManual;
     private Button m_btnCleanCalib;
@@ -253,6 +256,7 @@ public class MainActivity extends Activity {
     private int m_px4MainMode = 0;
     private int m_px4SubMode = 0;
     private int m_sensorMode = SENSOR_STEREO;
+    private int m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
     private int m_cfgExposureUs = 3000;
     private int m_cfgGain = 2;
     private boolean m_cfgAutoExposure = true;
@@ -1152,7 +1156,7 @@ public class MainActivity extends Activity {
                                           AckSuccess onSuccess)
     {
         sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                  m_sensorMode, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
+                                  m_sensorMode, m_cfgFeatureFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
                                   effectiveConfigLabel(label, appliesAfterRestart), pendingKey, onSuccess);
     }
 
@@ -1198,10 +1202,12 @@ public class MainActivity extends Activity {
 
     private void requestRemoteControlModeIfNeeded()
     {
-        if ("REMOTE".equals(m_lastFlightCommand) || isPending(PENDING_OFFBOARD)) {
+        if ("REMOTE".equals(m_lastFlightCommand) || isPending(PENDING_POSITION)) {
             return;
         }
-        sendSimpleCmdAwaitAck("REMOTE", CMD_OFFBOARD, PENDING_OFFBOARD, () -> {
+        // Button-based RC control maps to MANUAL_CONTROL stream. POSCTL is the
+        // expected companion mode for that path; OFFBOARD uses setpoint stream.
+        sendSimpleCmdAwaitAck("REMOTE", CMD_POSITION, PENDING_POSITION, () -> {
             m_lastFlightCommand = "REMOTE";
             updateFlightButtons();
         });
@@ -1221,7 +1227,7 @@ public class MainActivity extends Activity {
     }
 
     private int sendRuntimeConfig(int exposureUs, float gain, int pairMs, int slamFps, int slamMode, int sensorMode,
-                                  boolean sendImage, boolean sendFeature, boolean sendMap, boolean autoExposure,
+                                  int featureFrontend, boolean sendImage, boolean sendFeature, boolean sendMap, boolean autoExposure,
                                   boolean useCustomTbc, float tbcTx, float tbcTy, float tbcTz, float tbcRollDeg,
                                   float tbcPitchDeg, float tbcYawDeg, int orbNFeatures, float orbScaleFactor,
                                   int orbNLevels, int orbIniThFast, int orbMinThFast)
@@ -1230,11 +1236,12 @@ public class MainActivity extends Activity {
             int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
                                                   sendFeature, sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy,
                                                   tbcTz, tbcRollDeg, tbcPitchDeg, tbcYawDeg, orbNFeatures,
-                                                  orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast);
+                                                  orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast, featureFrontend);
             m_tvStatus.setText(String.format(
                 Locale.US,
-                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d",
+                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s frontend=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d",
                 seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
+                featureFrontendToText(featureFrontend),
                 sendImage ? "on" : "off", sendFeature ? "on" : "off", sendMap ? "on" : "off",
                 autoExposure ? "on" : "off",
                 useCustomTbc
@@ -1252,24 +1259,24 @@ public class MainActivity extends Activity {
     private int sendRuntimeConfig()
     {
         return sendRuntimeConfig(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                 m_sensorMode, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
+                                 m_sensorMode, m_cfgFeatureFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
                                  m_cfgUseCustomTbc, m_cfgTbcTx, m_cfgTbcTy, m_cfgTbcTz, m_cfgTbcRollDeg,
                                  m_cfgTbcPitchDeg, m_cfgTbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor,
                                  m_cfgOrbNLevels, m_cfgOrbIniThFast, m_cfgOrbMinThFast);
     }
 
     private void sendRuntimeConfigAwaitAck(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
-                                           int sensorMode, boolean sendImage, boolean sendFeature, boolean sendMap,
+                                           int sensorMode, int featureFrontend, boolean sendImage, boolean sendFeature, boolean sendMap,
                                            boolean autoExposure,
                                            String label, String pendingKey, AckSuccess onSuccess)
     {
-        sendRuntimeConfigAwaitAck(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage, sendFeature,
+        sendRuntimeConfigAwaitAck(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, featureFrontend, sendImage, sendFeature,
                                   sendMap, autoExposure, m_cfgUseCustomTbc, m_cfgTbcTx, m_cfgTbcTy, m_cfgTbcTz,
                                   m_cfgTbcRollDeg, m_cfgTbcPitchDeg, m_cfgTbcYawDeg, label, pendingKey, onSuccess);
     }
 
     private void sendRuntimeConfigAwaitAck(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
-                                           int sensorMode, boolean sendImage, boolean sendFeature, boolean sendMap,
+                                           int sensorMode, int featureFrontend, boolean sendImage, boolean sendFeature, boolean sendMap,
                                            boolean autoExposure, boolean useCustomTbc, float tbcTx, float tbcTy,
                                            float tbcTz, float tbcRollDeg, float tbcPitchDeg, float tbcYawDeg,
                                            String label, String pendingKey, AckSuccess onSuccess)
@@ -1280,7 +1287,7 @@ public class MainActivity extends Activity {
         if (isPending(pendingKey)) {
             return;
         }
-        int seq = sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage, sendFeature,
+        int seq = sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, featureFrontend, sendImage, sendFeature,
                                     sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy, tbcTz, tbcRollDeg, tbcPitchDeg,
                                     tbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor, m_cfgOrbNLevels,
                                     m_cfgOrbIniThFast, m_cfgOrbMinThFast);
@@ -1452,10 +1459,16 @@ public class MainActivity extends Activity {
         boolean runtimeActive = isRuntimeActive();
         m_updatingToggleUi = true;
         updateSensorModeSpinner();
+        updateFeatureFrontendSpinner();
         if (m_spinnerSensorMode != null) {
             boolean enabled = !runtimeActive && !sensorPending && m_availableSensorModes.length > 0;
             m_spinnerSensorMode.setEnabled(enabled);
             m_spinnerSensorMode.setAlpha(enabled ? 1.0f : 0.35f);
+        }
+        if (m_spinnerFeatureFrontend != null) {
+            boolean enabled = !runtimeActive && !sensorPending;
+            m_spinnerFeatureFrontend.setEnabled(enabled);
+            m_spinnerFeatureFrontend.setAlpha(enabled ? 1.0f : 0.35f);
         }
         if (m_btnToggleSlam != null) {
             m_btnToggleSlam.setChecked(m_runtimeMode == MODE_SLAM);
@@ -1473,6 +1486,23 @@ public class MainActivity extends Activity {
             setButtonState(m_btnCleanCalib, true, isPending(PENDING_CLEAN_CALIB), "#546E7A");
         }
         updateConfigViews();
+    }
+
+    private void updateFeatureFrontendSpinner()
+    {
+        if (m_spinnerFeatureFrontend == null) {
+            return;
+        }
+        if (m_spinnerFeatureFrontend.getAdapter() == null) {
+            String[] labels = new String[] {featureFrontendToText(FEATURE_FRONTEND_ORB), featureFrontendToText(FEATURE_FRONTEND_XFEAT)};
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            m_spinnerFeatureFrontend.setAdapter(adapter);
+        }
+        int targetIndex = (m_cfgFeatureFrontend == FEATURE_FRONTEND_XFEAT) ? FEATURE_FRONTEND_XFEAT : FEATURE_FRONTEND_ORB;
+        if (m_spinnerFeatureFrontend.getSelectedItemPosition() != targetIndex) {
+            m_spinnerFeatureFrontend.setSelection(targetIndex, false);
+        }
     }
 
     private void updateSensorModeSpinner()
@@ -1574,8 +1604,9 @@ public class MainActivity extends Activity {
         final int slamFps = m_cfgSlamFps;
         final int slamMode = m_cfgSlamMode;
         final int sensorMode = m_sensorMode;
-        sendRuntimeConfigAwaitAck(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, m_sendImage, m_sendFeature,
-                                  m_sendMap, m_cfgAutoExposure, label + " CFG", PENDING_RUNTIME, () -> {
+        sendRuntimeConfigAwaitAck(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, m_cfgFeatureFrontend,
+                                  m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure, label + " CFG",
+                                  PENDING_RUNTIME, () -> {
                                       try {
                                           int seq = NativeUdp.sendRuntimeMode(mode);
                                           if (seq < 0) {
@@ -1815,6 +1846,21 @@ public class MainActivity extends Activity {
         return defaultValue;
     }
 
+    private static int parseFeatureFrontendText(String value, int defaultValue)
+    {
+        if (value == null) {
+            return defaultValue;
+        }
+        String normalized = value.trim().toLowerCase(Locale.US);
+        if ("xfeat".equals(normalized) || "x-feat".equals(normalized)) {
+            return FEATURE_FRONTEND_XFEAT;
+        }
+        if ("orb".equals(normalized)) {
+            return FEATURE_FRONTEND_ORB;
+        }
+        return defaultValue;
+    }
+
     private static int parseSlamModeText(String value, int defaultValue)
     {
         if (value == null) {
@@ -1970,6 +2016,7 @@ public class MainActivity extends Activity {
         }
         m_cfgSlamFps = quantizeSlamFps(parsedSlamFps);
         m_cfgSlamMode = parseSlamModeText(values.get("slam.operation_mode"), m_cfgSlamMode);
+        m_cfgFeatureFrontend = parseFeatureFrontendText(values.get("slam.feature_frontend"), m_cfgFeatureFrontend);
         m_cfgUseCustomTbc = parseBooleanText(values.get("slam.tbc_override_enabled"), m_cfgUseCustomTbc);
         m_cfgTbcTx = quantizeTbcTranslationM(parseFloatOrDefault(values.get("slam.tbc_tx_m"), m_cfgTbcTx));
         m_cfgTbcTy = quantizeTbcTranslationM(parseFloatOrDefault(values.get("slam.tbc_ty_m"), m_cfgTbcTy));
@@ -2001,7 +2048,8 @@ public class MainActivity extends Activity {
                 m_sendFeature = true;
                 m_showFeaturePoints = true;
                 sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                          m_sensorMode, m_sendImage, true, m_sendMap, m_cfgAutoExposure, "Feature stream default",
+                                          m_sensorMode, m_cfgFeatureFrontend, m_sendImage, true, m_sendMap, m_cfgAutoExposure,
+                                          "Feature stream default",
                                           PENDING_CONFIG, () -> {
                                               m_sendFeature = true;
                                               m_showFeaturePoints = true;
@@ -2015,8 +2063,9 @@ public class MainActivity extends Activity {
         updateStreamToggleButtons();
         updateFeatureToggleButton();
         m_tvStatus.setText(String.format(Locale.US,
-                                         "Config synced mode=%s sensor=%s slam_mode=%s slam=%dfps ae=%s tbc=%s orb=%d/%.2f/%d",
+                                         "Config synced mode=%s sensor=%s frontend=%s slam_mode=%s slam=%dfps ae=%s tbc=%s orb=%d/%.2f/%d",
                                          runtimeModeToText(m_runtimeMode), sensorModeToText(m_sensorMode),
+                                         featureFrontendToText(m_cfgFeatureFrontend),
                                          slamModeToText(m_cfgSlamMode), m_cfgSlamFps, m_cfgAutoExposure ? "on" : "off",
                                          m_cfgUseCustomTbc ? "override" : "yaml", m_cfgOrbNFeatures,
                                          m_cfgOrbScaleFactor, m_cfgOrbNLevels));
@@ -2063,6 +2112,17 @@ public class MainActivity extends Activity {
         case SENSOR_STEREO:
         default:
             return "Stereo";
+        }
+    }
+
+    private String featureFrontendToText(int featureFrontend)
+    {
+        switch (featureFrontend) {
+        case FEATURE_FRONTEND_XFEAT:
+            return "XFeat";
+        case FEATURE_FRONTEND_ORB:
+        default:
+            return "ORB";
         }
     }
 
@@ -2524,7 +2584,7 @@ public class MainActivity extends Activity {
         if (!active) {
             if (m_lastJoystickActive) {
                 m_lastJoystickActive = false;
-                sendHoldBurst(3, "HOLD(center)");
+                sendHoldBurst(1, "HOLD(center)");
             }
             return;
         }
@@ -2624,6 +2684,7 @@ public class MainActivity extends Activity {
         m_btnAutoExposureToggle = findViewById(R.id.btnAutoExposureToggle);
         m_btnTbcOverrideToggle = findViewById(R.id.btnTbcOverrideToggle);
         m_spinnerSensorMode = findViewById(R.id.spinnerSensorMode);
+        m_spinnerFeatureFrontend = findViewById(R.id.spinnerFeatureFrontend);
         m_btnQuickSlamAuto = findViewById(R.id.btnQuickSlamAuto);
         m_btnQuickSlamManual = findViewById(R.id.btnQuickSlamManual);
         m_btnRemoteToggle = findViewById(R.id.btnRemoteToggle);
@@ -3084,7 +3145,7 @@ public class MainActivity extends Activity {
                 }
                 final boolean nextValue = isChecked;
                 sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                          m_sensorMode, nextValue, m_sendFeature, m_sendMap, m_cfgAutoExposure, "Image stream",
+                                          m_sensorMode, m_cfgFeatureFrontend, nextValue, m_sendFeature, m_sendMap, m_cfgAutoExposure, "Image stream",
                                           PENDING_CONFIG, () -> {
                                               m_sendImage = nextValue;
                                               if (!m_sendImage) {
@@ -3104,7 +3165,7 @@ public class MainActivity extends Activity {
                 }
                 final boolean nextValue = isChecked;
                 sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                          m_sensorMode, m_sendImage, m_sendFeature, m_sendMap, nextValue,
+                                          m_sensorMode, m_cfgFeatureFrontend, m_sendImage, m_sendFeature, m_sendMap, nextValue,
                                           effectiveConfigLabel("Auto exposure", true), PENDING_CONFIG, () -> {
                                               m_cfgAutoExposure = nextValue;
                                               updateConfigViews();
@@ -3118,7 +3179,7 @@ public class MainActivity extends Activity {
                 }
                 final boolean nextValue = isChecked;
                 sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                          m_sensorMode, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
+                                          m_sensorMode, m_cfgFeatureFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
                                           nextValue, m_cfgTbcTx, m_cfgTbcTy, m_cfgTbcTz, m_cfgTbcRollDeg,
                                           m_cfgTbcPitchDeg, m_cfgTbcYawDeg,
                                           "T_b_c1 override", PENDING_CONFIG, () -> {
@@ -3134,7 +3195,7 @@ public class MainActivity extends Activity {
                 }
                 final boolean nextValue = isChecked;
                 sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                          m_sensorMode, m_sendImage, m_sendFeature, nextValue, m_cfgAutoExposure, "Map stream",
+                                          m_sensorMode, m_cfgFeatureFrontend, m_sendImage, m_sendFeature, nextValue, m_cfgAutoExposure, "Map stream",
                                           PENDING_CONFIG, () -> {
                                               m_sendMap = nextValue;
                                               updateStreamToggleButtons();
@@ -3148,7 +3209,7 @@ public class MainActivity extends Activity {
                 }
                 final boolean nextValue = isChecked;
                 sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                          m_sensorMode, m_sendImage, nextValue, m_sendMap, m_cfgAutoExposure, "Feature stream",
+                                          m_sensorMode, m_cfgFeatureFrontend, m_sendImage, nextValue, m_sendMap, m_cfgAutoExposure, "Feature stream",
                                           PENDING_CONFIG, () -> {
                                               m_sendFeature = nextValue;
                                               m_showFeaturePoints = nextValue;
@@ -3174,7 +3235,7 @@ public class MainActivity extends Activity {
                 m_remoteVisible = isChecked;
                 if (!m_remoteVisible) {
                     resetRemoteInputs();
-                    sendHoldBurst(3, "HOLD(remote off)");
+                    sendHoldBurst(1, "HOLD(remote off)");
                 } else {
                     requestRemoteControlModeIfNeeded();
                 }
@@ -3208,6 +3269,11 @@ public class MainActivity extends Activity {
                     m_armLatched = nextArm;
                     m_lastFlightCommand = nextArm ? "ARM" : "DISARM";
                     updateFlightButtons();
+                    if (nextArm) {
+                        // Prime REMOTE/OFFBOARD right after arming so the first UP tap
+                        // is not consumed by mode switching.
+                        requestRemoteControlModeIfNeeded();
+                    }
                 });
             });
         }
@@ -3254,9 +3320,31 @@ public class MainActivity extends Activity {
                     final int pairMs = m_cfgPairMs;
                     final int slamFps = m_cfgSlamFps;
                     sendRuntimeConfigAwaitAck(exposureUs, gain, pairMs, slamFps, m_cfgSlamMode, nextSensorMode,
-                                              m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
+                                              m_cfgFeatureFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
                                               effectiveConfigLabel("Sensor mode", true), PENDING_SENSOR, () -> {
                                                   m_sensorMode = nextSensorMode;
+                                                  updateRuntimeButtons();
+                                              });
+                }
+
+                @Override public void onNothingSelected(AdapterView<?> parent) {}
+            });
+        }
+        if (m_spinnerFeatureFrontend != null) {
+            m_spinnerFeatureFrontend.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id)
+                {
+                    if (m_updatingToggleUi || position < 0) {
+                        return;
+                    }
+                    final int nextFrontend = position == FEATURE_FRONTEND_XFEAT ? FEATURE_FRONTEND_XFEAT : FEATURE_FRONTEND_ORB;
+                    if (nextFrontend == m_cfgFeatureFrontend) {
+                        return;
+                    }
+                    sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
+                                              m_sensorMode, nextFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
+                                              effectiveConfigLabel("Feature frontend", true), PENDING_CONFIG, () -> {
+                                                  m_cfgFeatureFrontend = nextFrontend;
                                                   updateRuntimeButtons();
                                               });
                 }
@@ -3268,7 +3356,7 @@ public class MainActivity extends Activity {
             m_btnQuickSlamAuto.setOnClickListener(v -> {
                 final int nextSlamMode = (m_cfgSlamMode == SLAM_MODE_AUTO) ? SLAM_MODE_MAPPING : SLAM_MODE_AUTO;
                 sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, nextSlamMode,
-                                          m_sensorMode, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
+                                          m_sensorMode, m_cfgFeatureFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
                                           nextSlamMode == SLAM_MODE_AUTO ? "Enable Auto" : "Disable Auto",
                                           PENDING_CONFIG, () -> {
                                               m_cfgSlamMode = nextSlamMode;
@@ -3285,7 +3373,7 @@ public class MainActivity extends Activity {
                 final int nextSlamMode =
                     (m_cfgSlamMode == SLAM_MODE_LOCALIZATION) ? SLAM_MODE_MAPPING : SLAM_MODE_LOCALIZATION;
                 sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, nextSlamMode,
-                                          m_sensorMode, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
+                                          m_sensorMode, m_cfgFeatureFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
                                           "Switch to " + slamModeToText(nextSlamMode), PENDING_CONFIG, () -> {
                                               m_cfgSlamMode = nextSlamMode;
                                               updateConfigViews();

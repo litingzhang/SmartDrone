@@ -64,6 +64,7 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         std::lock_guard<std::mutex> lock(m_configMutex);
         CameraConfig &cam = m_config.app.camera;
         const bool sensorModeChanged = m_config.app.sensorMode != remote.sensorMode;
+        const bool frontendChanged = m_config.app.runtime.featureFrontend != remote.featureFrontend;
         const bool udpIpChanged = m_config.app.udp.ip != remote.udpIp;
         const bool udpEnableChanged = m_config.app.udp.enable != remote.udpEnabled;
         const bool aeModeChanged = cam.aeDisable != (!remote.autoExposureEnabled);
@@ -78,6 +79,7 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         cam.pairMs = remote.pairMs;
         m_config.app.runtime.slamInputFps = remote.slamInputFps;
         m_config.app.runtime.slamOperationMode = remote.slamOperationMode;
+        m_config.app.runtime.featureFrontend = remote.featureFrontend;
         m_config.app.runtime.orbNFeatures = remote.orbNFeatures;
         m_config.app.runtime.orbScaleFactor = remote.orbScaleFactor;
         m_config.app.runtime.orbNLevels = remote.orbNLevels;
@@ -125,11 +127,12 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         effectiveTbcRollDeg = m_config.app.runtime.tbcRollDeg;
         effectiveTbcPitchDeg = m_config.app.runtime.tbcPitchDeg;
         effectiveTbcYawDeg = m_config.app.runtime.tbcYawDeg;
-        restartNeeded = sensorModeChanged || udpIpChanged || udpEnableChanged || aeModeChanged || orbChanged;
+        restartNeeded = sensorModeChanged || frontendChanged || udpIpChanged || udpEnableChanged || aeModeChanged || orbChanged;
     }
 
     m_tuning.slamInputFps.store(remote.slamInputFps, std::memory_order_relaxed);
     m_tuning.slamOperationMode.store(static_cast<uint8_t>(remote.slamOperationMode), std::memory_order_relaxed);
+    m_tuning.featureFrontend.store(static_cast<uint8_t>(remote.featureFrontend), std::memory_order_relaxed);
     m_tuning.sendImage.store(remote.sendImage, std::memory_order_relaxed);
     m_tuning.sendFeature.store(remote.sendFeature, std::memory_order_relaxed);
     m_tuning.sendMap.store(remote.sendMap, std::memory_order_relaxed);
@@ -183,6 +186,12 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
                 remote.slamInputFps = static_cast<int>(*v);
             } else {
                 return {false, "slam.input_fps type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamFeatureFrontend) {
+            if (const auto *v = std::get_if<std::string>(&value)) {
+                remote.featureFrontend = ParseFeatureFrontendText(*v);
+            } else {
+                return {false, "slam.feature_frontend type mismatch"};
             }
         } else if (key == ConfigRegistry::kSlamOperationMode) {
             if (const auto *v = std::get_if<std::string>(&value)) {
@@ -333,6 +342,7 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
     const int cameraFps = currentConfig.app.camera.fps > 0 ? currentConfig.app.camera.fps : 1;
     const int clampedSlamFps = remote.slamInputFps <= 0 ? cameraFps : std::min(cameraFps, remote.slamInputFps);
     return {true, "runtime cfg updated sensor=" + std::string(ToSensorModeText(remote.sensorMode)) +
+                      " frontend=" + std::string(ToFeatureFrontendText(remote.featureFrontend)) +
                       " slam_mode=" + std::string(smartdrone::core::domain::ToString(remote.slamOperationMode)) +
                       " pair_ms=" + std::to_string(remote.pairMs) + " slam_fps=" + std::to_string(clampedSlamFps)};
 }
@@ -346,6 +356,7 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.pairMs = currentConfig.app.camera.pairMs > 0 ? currentConfig.app.camera.pairMs : 1;
     remote.slamInputFps = currentConfig.app.runtime.slamInputFps;
     remote.slamOperationMode = currentConfig.app.runtime.slamOperationMode;
+    remote.featureFrontend = currentConfig.app.runtime.featureFrontend;
     remote.sensorMode = currentConfig.app.sensorMode;
     remote.udpIp = currentConfig.app.udp.ip;
     remote.udpEnabled = currentConfig.app.udp.enable;

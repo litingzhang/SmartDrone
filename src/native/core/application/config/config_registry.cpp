@@ -12,6 +12,7 @@ std::vector<domain::ConfigDescriptor> ConfigRegistry::DefaultDescriptors()
         Make(kCameraAutoExposure, "Enable camera auto exposure (CM5 ISP/libcamera controls)", false, true, true),
         Make(kCameraPairWindowMs, "Stereo pairing window in milliseconds", false, true, true),
         Make(kSlamInputFps, "Input frame rate delivered to the SLAM engine", true, false, false),
+        Make(kSlamFeatureFrontend, "Feature frontend selection such as orb or xfeat", false, true, false),
         Make(kSlamPerceptionMode, "SLAM perception mode such as stereo or stereo-imu", false, true, false),
         Make(kSlamOperationMode, "SLAM operating mode such as mapping or localization", true, false, false),
         Make(kSlamUseCustomTbc, "Override T_b_c1 using runtime-configured translation and roll/pitch/yaw", true, false,

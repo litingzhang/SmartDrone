@@ -14,11 +14,11 @@ Outputs:
 
 Example:
   python3 scripts/convert_kalibr_to_smartdrone_yaml.py \
-    --camchain /data/calib_A-camchain-imucam.yaml \
-    --imu /data/imu.yaml \
-    --out-stereo-plain /data/stereo.yaml \
-    --out-stereo /data/stereo_inertial.yaml \
-    --out-mono-right /data/mono_inertial_right.yaml
+    --camchain ~/workspace/kalibr_data/calib_runs/calib_data_1-camchain-imucam.yaml \
+    --imu ~/workspace/kalibr_data/imu.yaml \
+    --out-stereo-plain config/stereo.yaml \
+    --out-stereo config/stereo_inertial.yaml \
+    --out-mono-right config/mono_inertial_right.yaml
 """
 
 import argparse
@@ -425,7 +425,7 @@ def main():
         raise RuntimeError("Need --camchain and --imu, or provide --kalibr-root plus discoverable files")
 
     camchain = read_yaml(camchain_path)
-    imu_cfg = read_yaml(imu_path)
+    imu_cfg = normalize_imu_config(read_yaml(imu_path))
 
     if "cam0" not in camchain or "cam1" not in camchain:
         raise RuntimeError("camchain yaml must contain cam0 and cam1")

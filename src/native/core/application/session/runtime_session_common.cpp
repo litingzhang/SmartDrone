@@ -186,6 +186,7 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
     MainRuntimeAliases a{};
     a.sensorMode = c.sensorMode;
     a.slamOperationMode = c.runtime.slamOperationMode;
+    a.featureFrontend = c.runtime.featureFrontend;
     a.width = c.camera.width;
     a.height = c.camera.height;
     a.fps = c.camera.fps;
@@ -241,6 +242,10 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
     std::cerr << "slam_input_fps=" << a.slamInputFps << " camera_fps=" << a.fps
               << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
     std::cerr << "slam_mode=" << smartdrone::core::domain::ToString(a.slamOperationMode) << "\n";
+    std::cerr << "feature_frontend=" << ToFeatureFrontendText(a.featureFrontend) << "\n";
+    std::cerr << "xfeat python=" << app.runtime.xfeatPython << " repo=" << app.runtime.xfeatRepo
+              << " worker=" << app.runtime.xfeatWorkerScript << " top_k=" << app.runtime.xfeatTopK
+              << " max_points=" << app.runtime.xfeatMaxPoints << "\n";
     std::cerr << "orb nFeatures=" << app.runtime.orbNFeatures << " scaleFactor=" << app.runtime.orbScaleFactor
               << " nLevels=" << app.runtime.orbNLevels << " iniThFAST=" << app.runtime.orbIniThFAST
               << " minThFAST=" << app.runtime.orbMinThFAST << "\n";

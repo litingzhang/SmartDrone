@@ -46,6 +46,7 @@ bool Px4UdpHooks::Arm(std::string *err)
 {
     CancelAutoLanding();
     EnsureManualControlStream();
+    SetManualControlNeutral();
     SendManualControlSnapshot();
     if (!m_mavlink.Arm(true)) {
         if (err)
@@ -328,14 +329,6 @@ Px4MavlinkGateway::ManualControlInput Px4UdpHooks::GetManualControlSnapshot() co
 }
 
 void Px4UdpHooks::SendManualControlSnapshot() { m_mavlink.SendManualControl(GetManualControlSnapshot()); }
-
-void Px4UdpHooks::WarmupManualControlLink()
-{
-    for (int i = 0; i < 3; ++i) {
-        SendManualControlSnapshot();
-        std::this_thread::sleep_for(std::chrono::milliseconds(40));
-    }
-}
 
 bool Px4UdpHooks::EnsureFlightMode(uint8_t mainMode, bool force, std::string *err, const char *modeName)
 {

@@ -97,6 +97,13 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
 
 void KeyFrame::ComputeBoW()
 {
+    if(mDescriptors.empty() || mDescriptors.type() != CV_8U || mpORBvocabulary == nullptr)
+    {
+        mBowVec.clear();
+        mFeatVec.clear();
+        return;
+    }
+
     if(mBowVec.empty() || mFeatVec.empty())
     {
         vector<cv::Mat> vCurrentDesc = Converter::toDescriptorVector(mDescriptors);

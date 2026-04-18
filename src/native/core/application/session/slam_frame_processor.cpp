@@ -77,6 +77,9 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
 
     const int slamInputFps =
         m_ctx.perceptionPipeline.ClampTargetFps(m_ctx.tuning.slamInputFps.load(std::memory_order_relaxed));
+    const FeatureFrontend configuredFrontend =
+        static_cast<FeatureFrontend>(m_ctx.tuning.featureFrontend.load(std::memory_order_relaxed));
+    m_ctx.slamEngine.SetFeatureFrontend(configuredFrontend);
     if (slamInputFps != m_state.lastLoggedSlamInputFps) {
         std::cerr << "[slam] target_input_fps=" << slamInputFps << " camera_fps=" << m_ctx.aliases.fps
                   << " frame_drop=" << (slamInputFps < m_ctx.aliases.fps ? "enabled" : "disabled") << "\n";
@@ -186,6 +189,33 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         slamOutput.rightFeatures = ComputeOrbDebugFeatures(R.gray);
     } else {
         slamOutput = m_ctx.slamEngine.Process(slamInput, extractFeatures, updatePointCloud);
+    }
+    if (!debugRightOnlyFeatures && extractFeatures && configuredFrontend == FeatureFrontend::XFeat) {
+        if (m_ctx.xfeatFrontendClient != nullptr && m_ctx.xfeatFrontendClient->Running()) {
+            std::string xfeatErr;
+            std::vector<cv::Point2f> xfeatLeft;
+            std::vector<cv::Point2f> xfeatRight;
+            bool leftOk = true;
+            bool rightOk = true;
+            if (!m_ctx.monoMode) {
+                leftOk = m_ctx.xfeatFrontendClient->Detect(L.gray, xfeatLeft, &xfeatErr);
+            }
+            rightOk = m_ctx.xfeatFrontendClient->Detect(R.gray, xfeatRight, &xfeatErr);
+            if (leftOk && rightOk) {
+                if (m_ctx.monoMode) {
+                    slamOutput.rightFeatures = std::move(xfeatRight);
+                    slamOutput.leftFeatures.clear();
+                } else {
+                    slamOutput.leftFeatures = std::move(xfeatLeft);
+                    slamOutput.rightFeatures = std::move(xfeatRight);
+                }
+            } else if ((m_state.frameIndex % kSlamDfxLogEveryNFrames) == 0) {
+                std::cerr << "[slam] warning: xfeat detect failed, falling back to ORB features: " << xfeatErr << "\n";
+            }
+        } else if ((m_state.frameIndex % kSlamDfxLogEveryNFrames) == 0) {
+            std::cerr << "[slam] warning: feature_frontend=xfeat requested but worker is unavailable; using ORB "
+                         "feature overlays\n";
+        }
     }
     const auto slamEndTp = std::chrono::steady_clock::now();
     const uint64_t slamOutputTimestampNs = static_cast<uint64_t>(
@@ -312,6 +342,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 "{\"tag\":\"slam_dfx\",\"frame\":%llu,\"state\":%d,\"quality\":%d,\"pose_valid\":%d,"
                 "\"reset_counter\":%u,\"reset_map_count\":%u,"
                 "\"imu_count\":%zu,\"feat_left\":%zu,\"feat_right\":%zu,\"points\":%zu,"
+                "\"xfeat_used\":%d,\"xfeat_raw_left\":%d,\"xfeat_raw_right\":%d,"
+                "\"xfeat_match_stereo\":%d,\"xfeat_injected_left\":%d,\"xfeat_injected_right\":%d,"
                 "\"pair_dt_ms\":%.3f,\"reject_dt_ms\":%.3f,\"pending_left\":%zu,\"pending_right\":%zu,"
                 "\"drop_left\":%llu,\"drop_right\":%llu,\"rate_drop\":%llu,"
                 "\"img_std_left\":%.2f,\"img_std_right\":%.2f,\"sharp_left\":%.2f,\"sharp_right\":%.2f,"
@@ -321,7 +353,9 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 static_cast<unsigned long long>(slamOutput.frameId), state, static_cast<int>(poseResult.quality),
                 poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
-                slamOutput.rightFeatures.size(), pointCount, static_cast<double>(pairDtMs), rejectDtMs, pendingL,
+                slamOutput.rightFeatures.size(), pointCount, slamOutput.usedXFeatFrontend ? 1 : 0,
+                slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount, slamOutput.xfeatMatchedStereoCount,
+                slamOutput.xfeatInjectedLeftCount, slamOutput.xfeatInjectedRightCount, static_cast<double>(pairDtMs), rejectDtMs, pendingL,
                 pendingR, static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
                 monoStepMs, DurationMs(acquireStartTp, acquireEndTp), DurationMs(imuStartTp, imuEndTp),
@@ -333,6 +367,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 dfxLine, sizeof(dfxLine),
                 "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
                 "imu=%zu feat=%zu/%zu points=%zu "
+                "xfeat=%s raw=%d/%d stereo=%d injected=%d/%d "
                 "pair_dt=%.3f reject_dt=%.3f pend=%zu/%zu drop=%llu/%llu rate_drop=%llu "
                 "img_std=%.2f/%.2f sharp=%.2f/%.2f "
                 "timing_ms gap=%.3f mono=%.3f acquire=%.3f imu=%.3f slam=%.3f cloud=%.3f udp=%.3f post=%.3f "
@@ -340,7 +375,10 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 static_cast<unsigned long long>(slamOutput.frameId), state, static_cast<int>(poseResult.quality),
                 poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
-                slamOutput.rightFeatures.size(), pointCount, static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
+                slamOutput.rightFeatures.size(), pointCount, slamOutput.usedXFeatFrontend ? "on" : "off",
+                slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount, slamOutput.xfeatMatchedStereoCount,
+                slamOutput.xfeatInjectedLeftCount, slamOutput.xfeatInjectedRightCount,
+                static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
                 static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
                 monoStepMs, DurationMs(acquireStartTp, acquireEndTp), DurationMs(imuStartTp, imuEndTp),

@@ -59,7 +59,6 @@ class Px4UdpHooks final : public MavlinkHooks {
     void SetManualControlInput(const Px4MavlinkGateway::ManualControlInput &input);
     Px4MavlinkGateway::ManualControlInput GetManualControlSnapshot() const;
     void SendManualControlSnapshot();
-    void WarmupManualControlLink();
     bool EnsureOffboardMode(bool force, std::string *err);
     bool EnsureFlightMode(uint8_t mainMode, bool force, std::string *err, const char *modeName);
     bool EnsurePositionMode(bool force, std::string *err);

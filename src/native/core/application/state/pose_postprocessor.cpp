@@ -54,26 +54,20 @@ Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::AlignPose(const Px4Ma
                                                                      PoseQuality &outQuality)
 {
     const uint64_t nowUs = MonoTimeUs();
-    RefreshPx4LocalZ(mavlink);
     RefreshRangeSensor(mavlink);
 
     if (!trackingUsable) {
         Px4MavlinkGateway::Pose out = ComputeLostPose(nowUs);
         outQuality = havePublishedPose ? PoseQuality::Weak : PoseQuality::Lost;
         trackingUsablePrev = false;
-        trackingReadySinceUs = 0;
         return out;
     }
 
-    if (!trackingUsablePrev) {
-        trackingReadySinceUs = nowUs;
-    }
-    const bool trackingRecovered = !trackingUsablePrev;
-    if (!TryAlignZ(poseNed, nowUs, trackingRecovered)) {
-        Px4MavlinkGateway::Pose out = havePublishedPose ? ComputeLostPose(nowUs) : poseNed;
-        outQuality = havePublishedPose ? PoseQuality::Weak : PoseQuality::Lost;
-        trackingUsablePrev = true;
-        return out;
+    if (!haveZOffset) {
+        const float worldZ = havePublishedPose ? holdPose.z : 0.0f;
+        zOffset = worldZ - poseNed.z;
+        haveZOffset = true;
+        weakUntilUs = nowUs + kWeakHoldUs;
     }
 
     Px4MavlinkGateway::Pose out = poseNed;
@@ -83,18 +77,8 @@ Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::AlignPose(const Px4Ma
     lossActive = false;
     holdPose = out;
     havePublishedPose = true;
-    outQuality = (!zOffsetFromPx4 || nowUs < weakUntilUs) ? PoseQuality::Weak : PoseQuality::Good;
+    outQuality = (nowUs < weakUntilUs) ? PoseQuality::Weak : PoseQuality::Good;
     return out;
-}
-
-void PosePostprocessor::StartupAligner::RefreshPx4LocalZ(Px4MavlinkGateway &mavlink)
-{
-    Px4MavlinkGateway::LocalPositionNed px4Local{};
-    if (mavlink.GetLocalPositionNed(px4Local, kPx4LocalPositionMaxAgeUs)) {
-        latestPx4Z = px4Local.z;
-        latestPx4ZReceivedUs = px4Local.receivedUs;
-        haveLatestPx4Z = true;
-    }
 }
 
 void PosePostprocessor::StartupAligner::RefreshRangeSensor(Px4MavlinkGateway &mavlink)
@@ -104,11 +88,6 @@ void PosePostprocessor::StartupAligner::RefreshRangeSensor(Px4MavlinkGateway &ma
         latestRange = rng;
         haveLatestRange = true;
     }
-}
-
-bool PosePostprocessor::StartupAligner::HasFreshPx4LocalZ(uint64_t nowUs) const
-{
-    return haveLatestPx4Z && (nowUs - latestPx4ZReceivedUs) <= kPx4LocalPositionMaxAgeUs;
 }
 
 bool PosePostprocessor::StartupAligner::HasFreshRange() const
@@ -141,43 +120,6 @@ void PosePostprocessor::StartupAligner::ApplyRangeProtection(Px4MavlinkGateway::
     if (latestRange.currentDistance >= kRangeHardFloorM) {
         return;
     }
-}
-
-bool PosePostprocessor::StartupAligner::TryAlignZ(const Px4MavlinkGateway::Pose &poseNed, uint64_t nowUs,
-                                                  bool trackingRecovered)
-{
-    if (haveZOffset) {
-        if (!zOffsetFromPx4 && HasFreshPx4LocalZ(nowUs)) {
-            zOffset = latestPx4Z - poseNed.z;
-            zOffsetFromPx4 = true;
-            weakUntilUs = nowUs + kWeakHoldUs;
-            return true;
-        }
-        if ((trackingRecovered || lossActive) && havePublishedPose) {
-            zOffset = holdPose.z - poseNed.z;
-            weakUntilUs = nowUs + kWeakHoldUs;
-        }
-        return true;
-    }
-
-    if (HasFreshPx4LocalZ(nowUs)) {
-        zOffset = latestPx4Z - poseNed.z;
-        haveZOffset = true;
-        zOffsetFromPx4 = true;
-        weakUntilUs = nowUs + kWeakHoldUs;
-        return true;
-    }
-
-    if (trackingReadySinceUs != 0 && (nowUs - trackingReadySinceUs) >= kStartupFallbackAlignUs) {
-        const float worldZ = havePublishedPose ? holdPose.z : 0.0f;
-        zOffset = worldZ - poseNed.z;
-        haveZOffset = true;
-        zOffsetFromPx4 = false;
-        weakUntilUs = nowUs + kWeakHoldUs;
-        return true;
-    }
-
-    return false;
 }
 
 smartdrone::core::ports::VelocityEstimate
@@ -264,9 +206,8 @@ PosePostprocessor::Result PosePostprocessor::ProcessPose(const Sophus::SE3f &twc
         twc = stereoReferencePose.inverse() * twc;
     }
 
-    const Sophus::SE3f twcContinuous = m_continuity.MapPose(mapId, trackingUsable, twc);
-    const Eigen::Vector3f t = twcContinuous.translation();
-    const Eigen::Quaternionf q(twcContinuous.so3().unit_quaternion());
+    const Eigen::Vector3f t = twc.translation();
+    const Eigen::Quaternionf q(twc.so3().unit_quaternion());
 
     Px4MavlinkGateway::Pose pSlam{};
     pSlam.x = t.x();
@@ -278,10 +219,10 @@ PosePostprocessor::Result PosePostprocessor::ProcessPose(const Sophus::SE3f &twc
     pSlam.qz = q.z();
     Px4MavlinkGateway::NormalizeQuat(pSlam.qw, pSlam.qx, pSlam.qy, pSlam.qz);
 
-    const Px4MavlinkGateway::Pose pRaw = useImu ? Px4MavlinkGateway::EnuToNed(pSlam) : pSlam;
+    Px4MavlinkGateway::Pose pRaw = useImu ? Px4MavlinkGateway::EnuToNed(pSlam) : pSlam;
     PoseQuality quality = PoseQuality::Lost;
     const Px4MavlinkGateway::Pose aligned = m_aligner.AlignPose(pRaw, trackingUsable, mavlink, quality);
-    const auto velocity = m_velocity.Update(aligned, frameNs, quality, m_continuity.GetResetMapCount());
+    const auto velocity = m_velocity.Update(aligned, frameNs, quality, 0);
 
     Result out{};
     out.alignedPose = aligned;
@@ -295,8 +236,8 @@ PosePostprocessor::Result PosePostprocessor::ProcessPose(const Sophus::SE3f &twc
     out.poseEstimate.qz = aligned.qz;
     out.velocityEstimate = velocity;
     out.quality = quality;
-    out.resetCounter = m_continuity.GetResetCounter();
-    out.resetMapCount = m_continuity.GetResetMapCount();
+    out.resetCounter = 0;
+    out.resetMapCount = 0;
     return out;
 }
 

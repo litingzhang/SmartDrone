@@ -110,6 +110,11 @@ public:
     // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
     // Returns the camera pose (empty if tracking fails).
     Sophus::SE3f TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp, const vector<IMU::Point>& vImuMeas = vector<IMU::Point>(), string filename="");
+    // Experimental external frontend entry point.
+    // Current matcher and BoW still assume ORB-compatible descriptors, and stereo pairs must already be matched.
+    Sophus::SE3f TrackStereoWithFeatures(const cv::Mat &imLeft, const cv::Mat &imRight,
+                                         const ExternalStereoFrameData &features, const double &timestamp,
+                                         const vector<IMU::Point>& vImuMeas = vector<IMU::Point>(), string filename="");
 
     // Process the given rgbd frame. Depthmap must be registered to the RGB frame.
     // Input image: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
@@ -121,6 +126,11 @@ public:
     // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
     // Returns the camera pose (empty if tracking fails).
     Sophus::SE3f TrackMonocular(const cv::Mat &im, const double &timestamp, const vector<IMU::Point>& vImuMeas = vector<IMU::Point>(), string filename="");
+    // Experimental external frontend entry point.
+    // Current matcher and BoW still assume ORB-compatible descriptors.
+    Sophus::SE3f TrackMonocularWithFeatures(const cv::Mat &im, const ExternalMonoFrameData &features,
+                                            const double &timestamp, const vector<IMU::Point>& vImuMeas = vector<IMU::Point>(),
+                                            string filename="");
 
 
     // This stops local mapping thread (map building) and performs only camera tracking.

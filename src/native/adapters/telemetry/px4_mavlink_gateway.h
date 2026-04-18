@@ -70,19 +70,6 @@ class Px4MavlinkGateway {
         float yawspeed = NAN;
     };
 
-    struct OdomTimesyncDiagnostics {
-        uint64_t frameId{0};
-        uint64_t tCamNs{0};
-        uint64_t tCbNs{0};
-        uint64_t tSlamInNs{0};
-        uint64_t estimatedPx4TimeNs{0};
-        uint64_t tSlamOutNs{0};
-        uint64_t tMavTxNs{0};
-        int64_t timesyncOffsetNs{0};
-        uint32_t timesyncRttUs{0};
-        bool timesyncValid{false};
-    };
-
     static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_MANUAL = 1;
     static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_POSCTL = 3;
     static constexpr uint8_t PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6;
@@ -113,8 +100,6 @@ class Px4MavlinkGateway {
     bool SetModePosition(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     bool Arm(bool doArm, int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     bool EmergencyStop(int ackTimeoutMs = 800, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
-    bool StartOffboardAndArm(double unused1, double unused2, int warmupMs = 800, int ackTimeoutMs = 1000,
-                             uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     void SendSetPositionTargetLocalNed(uint32_t timeBootMs, const SetpointLocalNED &sp,
                                        uint8_t coordinateFrame = MAV_FRAME_LOCAL_NED);
     void StartSetpointStreamHz(double hz = 20.0);
@@ -124,10 +109,6 @@ class Px4MavlinkGateway {
     void SendManualControl(const ManualControlInput &input, uint16_t buttons = 0, uint16_t buttons2 = 0,
                            uint8_t targetSystem = 0);
     bool SendLand(int ackTimeoutMs = 800, uint8_t targetSystem = 1, uint8_t targetComponent = 1);
-    bool GetTimesyncStatus(int64_t &offsetNs, uint32_t &rttUs, uint32_t &sampleCount) const;
-    uint64_t EstimatePx4TimeFromCompanionMonotonicNs(uint64_t companionMonoNs, bool *outTimesyncValid = nullptr,
-                                                     int64_t *outOffsetNs = nullptr, uint32_t *outRttUs = nullptr,
-                                                     uint32_t *outSampleCount = nullptr) const;
     void SendOdometry(uint64_t odomFrameId, const Pose &poseNed, const LinearVelocityNed &velNed = LinearVelocityNed{},
                       uint8_t mavFrameId = MAV_FRAME_LOCAL_NED, uint8_t childFrameId = MAV_FRAME_BODY_FRD,
                       uint8_t resetCounter = 0, OdomQualityMode mode = OdomQualityMode::GOOD);
@@ -135,10 +116,6 @@ class Px4MavlinkGateway {
     static void NormalizeQuat(float &w, float &x, float &y, float &z);
 
   private:
-    static constexpr uint32_t kTimesyncMaxAcceptableRttUs = 50000;
-    static constexpr int64_t kTimesyncJumpResetThresholdNs = 50000000LL;
-    static constexpr int64_t kTimesyncJumpWarnThresholdNs = 10000000LL;
-
     struct AckInfo {
         uint8_t result = 255;
         uint8_t progress = 0;
@@ -146,16 +123,10 @@ class Px4MavlinkGateway {
         std::chrono::steady_clock::time_point t;
     };
 
-    void ResetTimesyncEstimateLocked();
     bool LookupFrameTiming(uint64_t frameId, smartdrone::core::application::FrameTimingRecord &out) const;
     void MarkFrameMavTx(uint64_t frameId, uint64_t tMavTxNs);
     static const char *MavResultToStr(uint8_t r);
     void WriteMessage(const mavlink_message_t &msg);
-    void SendTimesyncMessage(int64_t tc1Ns, int64_t ts1Ns, uint8_t targetSystem, uint8_t targetComponent);
-    void SendTimesyncRequest(uint8_t targetSystem, uint8_t targetComponent);
-    void SendTimesyncResponse(int64_t requestTs1Ns, uint8_t targetSystem, uint8_t targetComponent);
-    void SendTimesyncFollowUp(int64_t remoteStampNs, uint8_t targetSystem, uint8_t targetComponent);
-    void TimesyncLoop();
     void RxLoop();
     void HandleMavlinkMessage(const mavlink_message_t &msg);
     void MaybeRequestLocalPositionNedStream(uint8_t targetSystem, uint8_t targetComponent);
@@ -171,13 +142,10 @@ class Px4MavlinkGateway {
     uint64_t m_streamPeriodUs{50000};
     std::atomic<bool> m_rxRunning{false};
     std::thread m_rxThread;
-    std::atomic<bool> m_timesyncRunning{false};
-    std::thread m_timesyncThread;
     std::mutex m_ackMtx;
     std::condition_variable m_ackCv;
     std::unordered_map<uint16_t, AckInfo> m_ackMap;
     std::mutex m_txMtx;
-    mutable std::mutex m_timesyncMtx;
     mutable std::mutex m_frameTimingTrackerMtx;
     mutable std::mutex m_flightModeMtx;
     mutable std::mutex m_localPosMtx;
@@ -193,21 +161,7 @@ class Px4MavlinkGateway {
     bool m_haveLocalPosNed{false};
     DownwardDistanceSensor m_downwardDistanceSensor{};
     bool m_haveDownwardDistanceSensor{false};
-    bool m_havePendingTimesync{false};
-    int64_t m_pendingTimesyncTs1Ns{0};
-    uint64_t m_pendingTimesyncSentNs{0};
-    uint8_t m_pendingTimesyncTargetSystem{0};
-    uint8_t m_pendingTimesyncTargetComponent{0};
-    int64_t m_timesyncOffsetEstimateNs{0};
-    uint32_t m_timesyncLastRttUs{0};
-    uint32_t m_timesyncSampleCount{0};
-    uint32_t m_timesyncInboundRequestCount{0};
-    uint32_t m_timesyncInboundResponseCount{0};
-    uint64_t m_lastTimesyncActivityUs{0};
-    uint64_t m_lastTimesyncLogUs{0};
-    OdomTimesyncDiagnostics m_lastOdomTimesyncDiagnostics{};
     uint64_t m_lastSentOdomFrameId{0};
-    uint64_t m_lastEstimatedPx4OdomTimeNs{0};
     smartdrone::core::application::FrameTimingTracker *m_frameTimingTracker{nullptr};
     std::atomic<bool> m_jsonDiagnostics{false};
 };

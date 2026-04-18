@@ -54,6 +54,7 @@ constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // v6 additionally stores rollDeg/yawDeg as f32le at [61..68].
 // v7 additionally stores ORB extractor params as f32le:
 // nFeatures [69..72], scaleFactor [73..76], nLevels [77..80], iniThFAST [81..84], minThFAST [85..88].
+// v8 additionally stores featureFrontend(u8) at byte [89] where 0=orb and 1=xfeat.
 // legacy v1 (len=40) omitted pairMs and started reservedOrIp at byte 10.
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY = 40;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V2 = 42;
@@ -62,6 +63,7 @@ constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 44;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V5 = 61;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V6 = 69;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V7 = 89;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V8 = 90;
 constexpr uint16_t RUNTIME_CONFIG_PAIR_MS_OFFSET = 10;
 constexpr uint16_t RUNTIME_CONFIG_IP_OFFSET = 12;
 constexpr uint16_t RUNTIME_CONFIG_IP_LEN = 30;
@@ -80,6 +82,7 @@ constexpr uint16_t RUNTIME_CONFIG_ORB_SCALE_FACTOR_OFFSET = 73;
 constexpr uint16_t RUNTIME_CONFIG_ORB_NLEVELS_OFFSET = 77;
 constexpr uint16_t RUNTIME_CONFIG_ORB_INI_TH_FAST_OFFSET = 81;
 constexpr uint16_t RUNTIME_CONFIG_ORB_MIN_TH_FAST_OFFSET = 85;
+constexpr uint16_t RUNTIME_CONFIG_FEATURE_FRONTEND_OFFSET = 89;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
@@ -112,6 +115,11 @@ enum RuntimeSlamMode : uint8_t {
     RUNTIME_SLAM_MODE_RELOCALIZATION = 2,
     RUNTIME_SLAM_MODE_TRACKING_ONLY = 3,
     RUNTIME_SLAM_MODE_AUTO = 4,
+};
+
+enum RuntimeFeatureFrontend : uint8_t {
+    RUNTIME_FEATURE_FRONTEND_ORB = 0,
+    RUNTIME_FEATURE_FRONTEND_XFEAT = 1,
 };
 
 enum FrameType : uint8_t {

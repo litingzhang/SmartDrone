@@ -35,6 +35,17 @@ SensorMode ParseRuntimeSensorMode(uint8_t value)
     }
 }
 
+FeatureFrontend ParseRuntimeFeatureFrontend(uint8_t value)
+{
+    switch (value) {
+    case RUNTIME_FEATURE_FRONTEND_XFEAT:
+        return FeatureFrontend::XFeat;
+    case RUNTIME_FEATURE_FRONTEND_ORB:
+    default:
+        return FeatureFrontend::Orb;
+    }
+}
+
 smartdrone::core::domain::SlamOperationMode ParseRuntimeSlamMode(uint8_t value)
 {
     using smartdrone::core::domain::SlamOperationMode;
@@ -80,7 +91,8 @@ RouteResult HandleRuntimeModeFrame(const TlvFrame &frame, UnifiedRuntimeControll
 RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer, UnifiedRuntimeController &controller,
                                      const PeerToIpStringFn &peerToIpString)
 {
-    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V7 && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V6 &&
+    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V8 && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V7 &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V6 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V5 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V3 &&
@@ -97,6 +109,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     r.autoExposureEnabled = !currentCfg.app.camera.aeDisable;
     r.slamInputFps = currentCfg.app.runtime.slamInputFps;
     r.slamOperationMode = currentCfg.app.runtime.slamOperationMode;
+    r.featureFrontend = currentCfg.app.runtime.featureFrontend;
     r.useCustomTbc = currentCfg.app.runtime.useCustomTbc;
     r.tbcTx = currentCfg.app.runtime.tbcTx;
     r.tbcTy = currentCfg.app.runtime.tbcTy;
@@ -155,6 +168,9 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
         r.orbIniThFAST = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_ORB_INI_TH_FAST_OFFSET])));
         r.orbMinThFAST = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_ORB_MIN_TH_FAST_OFFSET])));
     }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V8) {
+        r.featureFrontend = ParseRuntimeFeatureFrontend(p[RUNTIME_CONFIG_FEATURE_FRONTEND_OFFSET]);
+    }
     const char *ipChars = reinterpret_cast<const char *>(&p[ipOffset]);
     size_t ipLen = 0;
     while (ipLen < RUNTIME_CONFIG_IP_LEN && ipChars[ipLen] != '\0') {
@@ -174,6 +190,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     update.values[std::string(ConfigRegistry::kCameraAutoExposure)] = r.autoExposureEnabled;
     update.values[std::string(ConfigRegistry::kCameraPairWindowMs)] = static_cast<int64_t>(r.pairMs);
     update.values[std::string(ConfigRegistry::kSlamInputFps)] = static_cast<int64_t>(r.slamInputFps);
+    update.values[std::string(ConfigRegistry::kSlamFeatureFrontend)] = std::string(ToFeatureFrontendText(r.featureFrontend));
     update.values[std::string(ConfigRegistry::kSlamOperationMode)] =
         std::string(smartdrone::core::domain::ToString(r.slamOperationMode));
     update.values[std::string(ConfigRegistry::kSlamPerceptionMode)] = std::string(ToSensorModeText(r.sensorMode));
@@ -202,6 +219,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     }
     return {ACK_OK, result.message + " udp=" + r.udpIp +
                         " settings=" + std::string(DefaultSettingsForSensorMode(r.sensorMode)) +
+                        " frontend=" + std::string(ToFeatureFrontendText(r.featureFrontend)) +
                         " slam_mode=" + std::string(smartdrone::core::domain::ToString(r.slamOperationMode)) +
                         " img=" + (r.sendImage ? "on" : "off") + " feat=" + (r.sendFeature ? "on" : "off") +
                         " map=" + (r.sendMap ? "on" : "off") + " ae=" + (r.autoExposureEnabled ? "on" : "off") +

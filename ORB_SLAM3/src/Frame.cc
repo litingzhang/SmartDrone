@@ -40,6 +40,14 @@ namespace ORB_SLAM3
 namespace
 {
 
+cv::Mat TrimDescriptorRows(const cv::Mat& descriptors, size_t targetRows)
+{
+    if(descriptors.empty() || targetRows == 0)
+        return cv::Mat();
+    const int rows = std::min<int>(descriptors.rows, static_cast<int>(targetRows));
+    return descriptors.rowRange(0, rows).clone();
+}
+
 inline int PatchL1Distance11x11(const cv::Mat& leftLevel, int leftCenterX, int leftCenterY,
                                 const cv::Mat& rightLevel, int rightCenterX, int rightCenterY)
 {
@@ -448,6 +456,196 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     mpMutexImu = std::make_shared<std::mutex>();
 }
 
+Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeStamp, ORBextractor* extractorLeft,
+             ORBextractor* extractorRight, ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf,
+             const float &thDepth, GeometricCamera* pCamera, const ExternalStereoFrameData &external, Frame* pPrevF,
+             const IMU::Calib &ImuCalib)
+    :mpcpi(NULL), mpORBvocabulary(voc), mpORBextractorLeft(extractorLeft), mpORBextractorRight(extractorRight),
+     mTimeStamp(timeStamp), mK(K.clone()), mK_(Converter::toMatrix3f(K)), mDistCoef(distCoef.clone()), mbf(bf),
+     mThDepth(thDepth), mImuCalib(ImuCalib), mpImuPreintegrated(NULL), mpPrevFrame(pPrevF),
+     mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false),
+     mbImuPreintegrated(false), mpCamera(pCamera), mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
+{
+    mnId = nNextId++;
+
+    mnScaleLevels = mpORBextractorLeft->GetLevels();
+    mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
+    mfLogScaleFactor = log(mfScaleFactor);
+    mvScaleFactors = mpORBextractorLeft->GetScaleFactors();
+    mvInvScaleFactors = mpORBextractorLeft->GetInverseScaleFactors();
+    mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
+    mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
+
+    LoadExternalStereoFeatures(external);
+    if(mvKeys.empty())
+        return;
+
+    UndistortKeyPoints();
+
+    if(mbInitialComputations)
+    {
+        ComputeImageBounds(imLeft);
+
+        mfGridElementWidthInv=static_cast<float>(FRAME_GRID_COLS)/(mnMaxX-mnMinX);
+        mfGridElementHeightInv=static_cast<float>(FRAME_GRID_ROWS)/(mnMaxY-mnMinY);
+
+        fx = K.at<float>(0,0);
+        fy = K.at<float>(1,1);
+        cx = K.at<float>(0,2);
+        cy = K.at<float>(1,2);
+        invfx = 1.0f/fx;
+        invfy = 1.0f/fy;
+
+        mbInitialComputations=false;
+    }
+
+    mb = mbf/fx;
+
+    mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
+    mvbOutlier = vector<bool>(N,false);
+    mmProjectPoints.clear();
+    mmMatchedInImage.clear();
+
+    Nleft = -1;
+    Nright = -1;
+    mvLeftToRightMatch = vector<int>(0);
+    mvRightToLeftMatch = vector<int>(0);
+    mvStereo3Dpoints = vector<Eigen::Vector3f>(0);
+    monoLeft = -1;
+    monoRight = -1;
+
+    AssignFeaturesToGrid();
+
+    if(pPrevF)
+    {
+        if(pPrevF->HasVelocity())
+            SetVelocity(pPrevF->GetVelocity());
+    }
+    else
+    {
+        mVw.setZero();
+    }
+
+    mpMutexImu = std::make_shared<std::mutex>();
+}
+
+Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extractor, ORBVocabulary* voc,
+             GeometricCamera* pCamera, cv::Mat &distCoef, const float &bf, const float &thDepth,
+             const ExternalMonoFrameData &external, Frame* pPrevF, const IMU::Calib &ImuCalib)
+    :mpcpi(NULL), mpORBvocabulary(voc), mpORBextractorLeft(extractor), mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
+     mTimeStamp(timeStamp), mK(static_cast<Pinhole*>(pCamera)->toK()), mK_(static_cast<Pinhole*>(pCamera)->toK_()),
+     mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth), mImuCalib(ImuCalib), mpImuPreintegrated(NULL),
+     mpPrevFrame(pPrevF), mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false),
+     mbImuPreintegrated(false), mpCamera(pCamera), mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
+{
+    mnId = nNextId++;
+
+    mnScaleLevels = mpORBextractorLeft->GetLevels();
+    mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
+    mfLogScaleFactor = log(mfScaleFactor);
+    mvScaleFactors = mpORBextractorLeft->GetScaleFactors();
+    mvInvScaleFactors = mpORBextractorLeft->GetInverseScaleFactors();
+    mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
+    mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
+
+    LoadExternalMonoFeatures(external);
+    if(mvKeys.empty())
+        return;
+
+    UndistortKeyPoints();
+
+    mvuRight = vector<float>(N,-1.0f);
+    mvDepth = vector<float>(N,-1.0f);
+    mnCloseMPs = 0;
+    mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
+    mmProjectPoints.clear();
+    mmMatchedInImage.clear();
+    mvbOutlier = vector<bool>(N,false);
+
+    if(mbInitialComputations)
+    {
+        ComputeImageBounds(imGray);
+
+        mfGridElementWidthInv=static_cast<float>(FRAME_GRID_COLS)/static_cast<float>(mnMaxX-mnMinX);
+        mfGridElementHeightInv=static_cast<float>(FRAME_GRID_ROWS)/static_cast<float>(mnMaxY-mnMinY);
+
+        fx = static_cast<Pinhole*>(mpCamera)->toK().at<float>(0,0);
+        fy = static_cast<Pinhole*>(mpCamera)->toK().at<float>(1,1);
+        cx = static_cast<Pinhole*>(mpCamera)->toK().at<float>(0,2);
+        cy = static_cast<Pinhole*>(mpCamera)->toK().at<float>(1,2);
+        invfx = 1.0f/fx;
+        invfy = 1.0f/fy;
+
+        mbInitialComputations=false;
+    }
+
+    mb = mbf/fx;
+
+    Nleft = -1;
+    Nright = -1;
+    mvLeftToRightMatch = vector<int>(0);
+    mvRightToLeftMatch = vector<int>(0);
+    mvStereo3Dpoints = vector<Eigen::Vector3f>(0);
+    monoLeft = -1;
+    monoRight = -1;
+
+    AssignFeaturesToGrid();
+
+    if(pPrevF)
+    {
+        if(pPrevF->HasVelocity())
+            SetVelocity(pPrevF->GetVelocity());
+    }
+    else
+    {
+        mVw.setZero();
+    }
+
+    mpMutexImu = std::make_shared<std::mutex>();
+}
+
+void Frame::LoadExternalStereoFeatures(const ExternalStereoFrameData &external)
+{
+    mvKeys = external.leftKeypoints;
+    mvKeysRight = external.rightKeypoints;
+    mDescriptors = TrimDescriptorRows(external.leftDescriptors, mvKeys.size());
+    mDescriptorsRight = TrimDescriptorRows(external.rightDescriptors, mvKeysRight.size());
+
+    if(mDescriptors.rows < static_cast<int>(mvKeys.size()))
+        mvKeys.resize(static_cast<size_t>(mDescriptors.rows));
+    if(mDescriptorsRight.rows < static_cast<int>(mvKeysRight.size()))
+        mvKeysRight.resize(static_cast<size_t>(mDescriptorsRight.rows));
+
+    N = mvKeys.size();
+    mvuRight = vector<float>(N, -1.0f);
+    mvDepth = vector<float>(N, -1.0f);
+    mnCloseMPs = 0;
+
+    if(!external.matchedStereoPairs)
+        return;
+
+    const size_t pairCount = std::min(mvKeys.size(), mvKeysRight.size());
+    for(size_t i = 0; i < pairCount; ++i)
+    {
+        const float disparity = mvKeys[i].pt.x - mvKeysRight[i].pt.x;
+        if(disparity <= 0.0f)
+            continue;
+        mvuRight[i] = mvKeysRight[i].pt.x;
+        mvDepth[i] = mbf / disparity;
+        if(mvDepth[i] > 0.0f && mvDepth[i] < mThDepth)
+            ++mnCloseMPs;
+    }
+}
+
+void Frame::LoadExternalMonoFeatures(const ExternalMonoFrameData &external)
+{
+    mvKeys = external.keypoints;
+    mDescriptors = TrimDescriptorRows(external.descriptors, mvKeys.size());
+    if(mDescriptors.rows < static_cast<int>(mvKeys.size()))
+        mvKeys.resize(static_cast<size_t>(mDescriptors.rows));
+    N = mvKeys.size();
+}
+
 
 void Frame::AssignFeaturesToGrid()
 {
@@ -806,6 +1004,13 @@ bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 
 void Frame::ComputeBoW()
 {
+    if(mDescriptors.empty() || mDescriptors.type() != CV_8U || mpORBvocabulary == nullptr)
+    {
+        mBowVec.clear();
+        mFeatVec.clear();
+        return;
+    }
+
     if(mBowVec.empty())
     {
         vector<cv::Mat> vCurrentDesc = Converter::toDescriptorVector(mDescriptors);

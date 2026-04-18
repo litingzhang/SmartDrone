@@ -25,6 +25,8 @@
 
 #include "Thirdparty/DBoW2/DBoW2/FeatureVector.h"
 
+#include <cmath>
+#include <limits>
 #include<stdint-gcc.h>
 #include<array>
 
@@ -37,6 +39,7 @@ namespace ORB_SLAM3
         constexpr size_t kRotationHistogramLength = 30;
         constexpr float kProjectionNNRatio = 0.9f;
         using RotationHistogram = std::array<std::vector<int>, kRotationHistogramLength>;
+        constexpr int kFloatDescriptorDistanceScale = 256;
 
         RotationHistogram& GetRotationHistogramBuffer()
         {
@@ -51,6 +54,246 @@ namespace ORB_SLAM3
                 hist.clear();
                 hist.reserve(reserveCount);
             }
+        }
+
+        bool SupportsBoWMatching(const KeyFrame* pKF, const Frame& F)
+        {
+            return !pKF->mDescriptors.empty() && !F.mDescriptors.empty() && pKF->mDescriptors.type() == CV_8U &&
+                   F.mDescriptors.type() == CV_8U && !pKF->mFeatVec.empty() && !F.mFeatVec.empty();
+        }
+
+        void ComputeThreeMaximaLocal(std::vector<int>* histo, const int L, int &ind1, int &ind2, int &ind3)
+        {
+            int max1 = 0;
+            int max2 = 0;
+            int max3 = 0;
+            ind1 = -1;
+            ind2 = -1;
+            ind3 = -1;
+
+            for(int i = 0; i < L; ++i)
+            {
+                const int s = static_cast<int>(histo[i].size());
+                if(s > max1)
+                {
+                    max3 = max2;
+                    max2 = max1;
+                    max1 = s;
+                    ind3 = ind2;
+                    ind2 = ind1;
+                    ind1 = i;
+                }
+                else if(s > max2)
+                {
+                    max3 = max2;
+                    max2 = s;
+                    ind3 = ind2;
+                    ind2 = i;
+                }
+                else if(s > max3)
+                {
+                    max3 = s;
+                    ind3 = i;
+                }
+            }
+
+            if(max2 < static_cast<int>(0.1f * static_cast<float>(max1)))
+            {
+                ind2 = -1;
+                ind3 = -1;
+            }
+            else if(max3 < static_cast<int>(0.1f * static_cast<float>(max1)))
+            {
+                ind3 = -1;
+            }
+        }
+
+        int SearchByBruteForce(KeyFrame* pKF, Frame& F, vector<MapPoint*>& vpMapPointMatches, float nnratio,
+                               bool checkOrientation)
+        {
+            const vector<MapPoint*> vpMapPointsKF = pKF->GetMapPointMatches();
+            vpMapPointMatches.assign(F.N, static_cast<MapPoint*>(NULL));
+
+            RotationHistogram& rotHist = GetRotationHistogramBuffer();
+            ResetRotationHistogram(rotHist);
+            const float factor = 1.0f / ORBmatcher::HISTO_LENGTH;
+
+            int nmatches = 0;
+            for(size_t idxKF = 0; idxKF < vpMapPointsKF.size(); ++idxKF)
+            {
+                MapPoint* pMP = vpMapPointsKF[idxKF];
+                if(!pMP || pMP->isBad())
+                    continue;
+
+                int realIdxKF = static_cast<int>(idxKF);
+                if(pKF->NLeft != -1 && idxKF >= pKF->NLeft)
+                    realIdxKF = static_cast<int>(idxKF);
+
+                const cv::Mat dKF = pKF->mDescriptors.row(realIdxKF);
+                int bestDist1 = std::numeric_limits<int>::max();
+                int bestDist2 = std::numeric_limits<int>::max();
+                int bestIdxF = -1;
+
+                for(int idxF = 0; idxF < F.N; ++idxF)
+                {
+                    if(vpMapPointMatches[idxF])
+                        continue;
+
+                    const cv::Mat dF = F.mDescriptors.row(idxF);
+                    const int dist = ORBmatcher::DescriptorDistance(dKF, dF);
+                    if(dist < bestDist1)
+                    {
+                        bestDist2 = bestDist1;
+                        bestDist1 = dist;
+                        bestIdxF = idxF;
+                    }
+                    else if(dist < bestDist2)
+                    {
+                        bestDist2 = dist;
+                    }
+                }
+
+                if(bestIdxF < 0 || bestDist1 > ORBmatcher::TH_LOW)
+                    continue;
+                if(bestDist2 < std::numeric_limits<int>::max() &&
+                   static_cast<float>(bestDist1) > nnratio * static_cast<float>(bestDist2))
+                    continue;
+
+                vpMapPointMatches[bestIdxF] = pMP;
+                ++nmatches;
+
+                if(checkOrientation)
+                {
+                    const cv::KeyPoint& kpKF =
+                        (pKF->NLeft == -1) ? pKF->mvKeysUn[realIdxKF]
+                                           : (realIdxKF < pKF->NLeft) ? pKF->mvKeys[realIdxKF]
+                                                                      : pKF->mvKeysRight[realIdxKF - pKF->NLeft];
+                    const cv::KeyPoint& kpF =
+                        (!F.mpCamera2 || F.Nleft == -1) ? F.mvKeys[bestIdxF]
+                                                        : (bestIdxF >= F.Nleft) ? F.mvKeysRight[bestIdxF - F.Nleft]
+                                                                                : F.mvKeys[bestIdxF];
+                    float rot = kpKF.angle - kpF.angle;
+                    if(rot < 0.0f)
+                        rot += 360.0f;
+                    int bin = round(rot * factor);
+                    if(bin == ORBmatcher::HISTO_LENGTH)
+                        bin = 0;
+                    rotHist[bin].push_back(bestIdxF);
+                }
+            }
+
+            if(checkOrientation)
+            {
+                int ind1 = -1, ind2 = -1, ind3 = -1;
+                ComputeThreeMaximaLocal(rotHist.data(), ORBmatcher::HISTO_LENGTH, ind1, ind2, ind3);
+                for(int i = 0; i < ORBmatcher::HISTO_LENGTH; ++i)
+                {
+                    if(i == ind1 || i == ind2 || i == ind3)
+                        continue;
+                    for(size_t j = 0; j < rotHist[i].size(); ++j)
+                    {
+                        vpMapPointMatches[rotHist[i][j]] = static_cast<MapPoint*>(NULL);
+                        --nmatches;
+                    }
+                }
+            }
+
+            return nmatches;
+        }
+
+        int SearchByBruteForce(KeyFrame* pKF1, KeyFrame* pKF2, vector<MapPoint*>& vpMatches12, float nnratio,
+                               bool checkOrientation)
+        {
+            const vector<MapPoint*> vpMapPoints1 = pKF1->GetMapPointMatches();
+            const vector<MapPoint*> vpMapPoints2 = pKF2->GetMapPointMatches();
+            vpMatches12 = vector<MapPoint*>(vpMapPoints1.size(), static_cast<MapPoint*>(NULL));
+            vector<bool> vbMatched2(vpMapPoints2.size(), false);
+
+            RotationHistogram& rotHist = GetRotationHistogramBuffer();
+            ResetRotationHistogram(rotHist);
+            const float factor = 1.0f / ORBmatcher::HISTO_LENGTH;
+            int nmatches = 0;
+
+            for(size_t idx1 = 0; idx1 < vpMapPoints1.size(); ++idx1)
+            {
+                if(pKF1->NLeft != -1 && idx1 >= pKF1->mvKeysUn.size())
+                    continue;
+
+                MapPoint* pMP1 = vpMapPoints1[idx1];
+                if(!pMP1 || pMP1->isBad())
+                    continue;
+
+                const cv::Mat d1 = pKF1->mDescriptors.row(static_cast<int>(idx1));
+                int bestDist1 = std::numeric_limits<int>::max();
+                int bestDist2 = std::numeric_limits<int>::max();
+                int bestIdx2 = -1;
+
+                for(size_t idx2 = 0; idx2 < vpMapPoints2.size(); ++idx2)
+                {
+                    if(vbMatched2[idx2] || (pKF2->NLeft != -1 && idx2 >= pKF2->mvKeysUn.size()))
+                        continue;
+
+                    MapPoint* pMP2 = vpMapPoints2[idx2];
+                    if(!pMP2 || pMP2->isBad())
+                        continue;
+
+                    const cv::Mat d2 = pKF2->mDescriptors.row(static_cast<int>(idx2));
+                    const int dist = ORBmatcher::DescriptorDistance(d1, d2);
+                    if(dist < bestDist1)
+                    {
+                        bestDist2 = bestDist1;
+                        bestDist1 = dist;
+                        bestIdx2 = static_cast<int>(idx2);
+                    }
+                    else if(dist < bestDist2)
+                    {
+                        bestDist2 = dist;
+                    }
+                }
+
+                if(bestIdx2 < 0 || bestDist1 > ORBmatcher::TH_LOW)
+                    continue;
+                if(bestDist2 < std::numeric_limits<int>::max() &&
+                   static_cast<float>(bestDist1) > nnratio * static_cast<float>(bestDist2))
+                    continue;
+
+                vpMatches12[idx1] = vpMapPoints2[bestIdx2];
+                vbMatched2[bestIdx2] = true;
+                ++nmatches;
+
+                if(checkOrientation)
+                {
+                    float rot = pKF1->mvKeysUn[idx1].angle - pKF2->mvKeysUn[bestIdx2].angle;
+                    if(rot < 0.0f)
+                        rot += 360.0f;
+                    int bin = round(rot * factor);
+                    if(bin == ORBmatcher::HISTO_LENGTH)
+                        bin = 0;
+                    rotHist[bin].push_back(static_cast<int>(idx1));
+                }
+            }
+
+            if(checkOrientation)
+            {
+                int ind1 = -1, ind2 = -1, ind3 = -1;
+                ComputeThreeMaximaLocal(rotHist.data(), ORBmatcher::HISTO_LENGTH, ind1, ind2, ind3);
+                for(int i = 0; i < ORBmatcher::HISTO_LENGTH; ++i)
+                {
+                    if(i == ind1 || i == ind2 || i == ind3)
+                        continue;
+                    for(size_t j = 0; j < rotHist[i].size(); ++j)
+                    {
+                        const int idx1 = rotHist[i][j];
+                        if(vpMatches12[idx1])
+                        {
+                            vpMatches12[idx1] = static_cast<MapPoint*>(NULL);
+                            --nmatches;
+                        }
+                    }
+                }
+            }
+
+            return nmatches;
         }
     }
 
@@ -243,6 +486,11 @@ namespace ORB_SLAM3
 
     int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPointMatches)
     {
+        if(!SupportsBoWMatching(pKF, F))
+        {
+            return SearchByBruteForce(pKF, F, vpMapPointMatches, mfNNratio, mbCheckOrientation);
+        }
+
         const vector<MapPoint*> vpMapPointsKF = pKF->GetMapPointMatches();
 
         vpMapPointMatches.assign(F.N, static_cast<MapPoint*>(NULL));
@@ -783,6 +1031,12 @@ namespace ORB_SLAM3
 
     int ORBmatcher::SearchByBoW(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPoint *> &vpMatches12)
     {
+        if(pKF1->mDescriptors.type() != CV_8U || pKF2->mDescriptors.type() != CV_8U || pKF1->mFeatVec.empty() ||
+           pKF2->mFeatVec.empty())
+        {
+            return SearchByBruteForce(pKF1, pKF2, vpMatches12, mfNNratio, mbCheckOrientation);
+        }
+
         const vector<cv::KeyPoint> &vKeysUn1 = pKF1->mvKeysUn;
         const DBoW2::FeatureVector &vFeatVec1 = pKF1->mFeatVec;
         const vector<MapPoint*> vpMapPoints1 = pKF1->GetMapPointMatches();
@@ -2119,6 +2373,21 @@ namespace ORB_SLAM3
 // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
     int ORBmatcher::DescriptorDistance(const cv::Mat &a, const cv::Mat &b)
     {
+        if(a.empty() || b.empty())
+            return std::numeric_limits<int>::max();
+
+        if(a.type() == CV_32F && b.type() == CV_32F)
+        {
+            const float* pa = a.ptr<float>();
+            const float* pb = b.ptr<float>();
+            const int cols = std::min(a.cols, b.cols);
+            float dot = 0.0f;
+            for(int i = 0; i < cols; ++i)
+                dot += pa[i] * pb[i];
+            const float cosineDistance = std::max(0.0f, 1.0f - dot);
+            return static_cast<int>(std::round(cosineDistance * static_cast<float>(kFloatDescriptorDistanceScale)));
+        }
+
         const int *pa = a.ptr<int32_t>();
         const int *pb = b.ptr<int32_t>();
 
