@@ -6,7 +6,6 @@
 #include <string>
 #include <thread>
 
-#include "adapters/camera/libcamera_ov9281/stereo_ov9281.h"
 #include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "common/discovery/udp_discovery_beacon.h"
 #include "common/runtime_state.h"

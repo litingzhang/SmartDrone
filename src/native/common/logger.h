@@ -1,9 +1,8 @@
 // Usage:
 //   #include "logger.h"
 //   Logger::Init("/tmp/app.log", 8*1024*1024); // 8MB ring
-//   LOGI("hello %d", 123);
-//   LOGE("err: %s", msg);
-// Optional: #define LOGGER_OVERRIDE_PRINTF before including to redirect printf -> LOGF.
+//   Logger::Logf(Logger::INFO, "hello %d", 123);
+//   Logger::Logf(Logger::ERROR, "err: %s", msg);
 //
 // Notes:
 // - Fixed-size ring file. Writes wrap-around and overwrite old content.
@@ -339,22 +338,3 @@ class Logger {
     }
 };
 
-// Convenience macros
-#define LOGD(...) Logger::Logf(Logger::DEBUG, __VA_ARGS__)
-#define LOGI(...) Logger::Logf(Logger::INFO, __VA_ARGS__)
-#define LOGW(...) Logger::Logf(Logger::WARN, __VA_ARGS__)
-#define LOGE(...) Logger::Logf(Logger::ERROR, __VA_ARGS__)
-
-// If you want to replace printf usage in your codebase (only in files including this header)
-// define LOGGER_OVERRIDE_PRINTF before including logger.h
-#ifdef LOGGER_OVERRIDE_PRINTF
-static inline int LogPrintfCompat(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    Logger::VLogf(Logger::INFO, fmt, ap);
-    va_end(ap);
-    return 0; // printf returns chars; we ignore for simplicity
-}
-#define printf(...) LogPrintfCompat(__VA_ARGS__)
-#endif

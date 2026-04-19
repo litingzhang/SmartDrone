@@ -17,7 +17,7 @@ SmartDrone is a stereo / stereo-inertial drone runtime built around `ORB_SLAM3`,
 |- config/           # Runtime settings files deployed with the app
 |- third_party/      # MAVLink and other external code
 |- ORB_SLAM3/        # SLAM dependency
-`- build/            # Generated build outputs
+`- output/           # Build caches and packaged artifacts
 ```
 
 The runtime entry point is [`src/native/main.cpp`](/d:/SmartDrone/src/native/main.cpp).
@@ -40,7 +40,7 @@ Build targets:
 - `test`: build and run host-side unit tests
 - `replay`: build the host-side offline replay tool
 
-Optional mode flags:
+Build mode parameters:
 
 - `--clean`: remove the corresponding build directory before building
 - `--reconfigure`: force CMake configure even when a cache already exists
@@ -59,7 +59,7 @@ Android build behavior:
 - If no Gradle wrapper exists in the repo, the script falls back to the system `gradle`
 - Before building, the script removes `src/android/app/.cxx` to avoid stale CMake cache paths after repo moves or renames
 
-Optional environment variable:
+Android build parameter:
 
 ```bash
 ANDROID_GRADLE_TASK=assembleRelease ./scripts/build.sh android
@@ -67,13 +67,343 @@ ANDROID_GRADLE_TASK=assembleRelease ./scripts/build.sh android
 
 This overrides the default Android Gradle task from `assembleDebug` to the value you provide.
 
-Optional build parallelism override:
+Build parallelism parameter:
 
 ```bash
 BUILD_JOBS=8 ./scripts/build.sh replay
 ```
 
 By default `scripts/build.sh` uses `$(nproc)`.
+
+## From Scratch On CM5 / Jetson Orin NX
+
+The current repository is structured primarily for:
+
+- cross-compiling on an x86_64 Linux host
+- deploying the resulting artifacts to Raspberry Pi CM5 or Jetson Orin NX
+
+Execution sequence:
+
+1. Prepare a target device and install the runtime packages there first.
+2. Export a sysroot from that device.
+3. Cross-build on the host with `scripts/build.sh`.
+4. Upload `output/artifacts/<platform>` to the device.
+5. Run `smart_drone` on the device with the correct config, vocabulary, and Python/XFeat environment if needed.
+
+### 1. Host Build Machine Prerequisites
+
+Use an Ubuntu/Debian-like x86_64 host and install:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  git cmake build-essential pkg-config rsync \
+  gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+```
+
+Auxiliary tools:
+
+- `ninja-build` for manual CMake + Ninja workflows
+- `adb` for Android build and deployment workflows
+- `python3` for calibration conversion, replay, and auxiliary scripts
+
+### 2. Target Device Prerequisites
+
+Install the target-side packages on CM5 or Jetson before exporting the sysroot.
+
+For the default `libcamera_stereo_ov9281` provider:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  libopencv-dev \
+  libcamera-dev \
+  libgpiod-dev \
+  python3 python3-pip python3-venv
+```
+
+For the `uvc_stereo_opencv` provider:
+
+- `OpenCV` is still required
+- `libgpiod` is still required if you use the IMU path
+- `libcamera` is not required by that provider itself; it remains applicable on systems that may switch providers later
+
+Runtime prerequisites:
+
+- `ORBvoc.txt` must exist on the target, or you must start the runtime with `--vocab /path/to/ORBvoc.txt`
+- your selected runtime YAML in `config/` must exist on the target
+- if you run with stereo-IMU or mono-IMU modes, the SPI IMU node and GPIO line must be available on the target
+- if you run with the default MAVLink setup, `/dev/ttyAMA0` or your chosen serial device must exist and be accessible
+
+### 3. XFeat Runtime Environment
+
+XFeat is an optional component. The default ORB frontend does not require it.
+
+If you want `slam.feature_frontend=xfeat`, prepare Python on the target:
+
+```bash
+./scripts/install_xfeat_cm5.sh
+```
+
+This installs:
+
+- a Python virtualenv
+- CPU PyTorch wheels
+- the `accelerated_features` repository
+- OpenCV/tqdm demo dependencies when enabled
+
+After that, point runtime arguments or config to:
+
+- `--xfeat-python`
+- `--xfeat-repo`
+- `--xfeat-worker`
+
+### 4. Export a Sysroot
+
+The build scripts expect:
+
+- CM5 sysroot at `../sysroots/cm5` by default
+- Jetson sysroot at `../sysroots/jetson-orin-nx` by default
+
+Example export from the target device:
+
+```bash
+mkdir -p ~/sysroot-export
+sudo rsync -a --delete \
+  /lib /usr/lib /usr/include /usr/share/pkgconfig /usr/lib/aarch64-linux-gnu /lib/aarch64-linux-gnu \
+  ~/sysroot-export/
+```
+
+Then copy that exported tree to the host, for example as:
+
+- `../sysroots/cm5`
+- `../sysroots/jetson-orin-nx`
+
+The sysroot should contain at least:
+
+- `usr/include`
+- `usr/lib/aarch64-linux-gnu`
+- `usr/lib`
+- `lib/aarch64-linux-gnu`
+- target-side `pkgconfig` files
+
+### 5. Build For CM5
+
+If your sysroot is in the default location:
+
+```bash
+./scripts/build.sh smart_drone
+./scripts/build.sh all
+```
+
+If your sysroot is elsewhere:
+
+```bash
+export SYSROOT=/opt/sysroots/cm5
+./scripts/build.sh smart_drone --reconfigure
+./scripts/build.sh all --clean --reconfigure
+```
+
+Artifacts are written to:
+
+- `output/artifacts/cm5/bin/smart_drone`
+- `output/artifacts/cm5/lib/`
+- `output/artifacts/cm5/config/`
+
+### 6. Build For Jetson Orin NX
+
+If your sysroot is in the default location:
+
+```bash
+./scripts/build.sh smart_drone --jetson-orin-nx
+./scripts/build.sh all --jetson-orin-nx
+```
+
+If your sysroot is elsewhere:
+
+```bash
+export JETSON_SYSROOT=/opt/sysroots/jetson-orin-nx
+./scripts/build.sh smart_drone --jetson-orin-nx --reconfigure
+./scripts/build.sh all --jetson-orin-nx --clean --reconfigure
+```
+
+Artifacts are written to:
+
+- `output/artifacts/jetson-orin-nx/bin/smart_drone`
+- `output/artifacts/jetson-orin-nx/lib/`
+- `output/artifacts/jetson-orin-nx/config/`
+
+### 7. Deploy To The Device
+
+Use the built-in uploader:
+
+```bash
+./scripts/upload.sh --platform cm5 --restart
+./scripts/upload.sh --platform jetson-orin-nx --restart
+```
+
+Or set the target explicitly:
+
+```bash
+TARGET_HOST=ltz@192.168.0.105 REMOTE_DIR=/home/ltz \
+  ./scripts/upload.sh --platform cm5 --restart
+```
+
+The uploader expects these files to exist in `output/artifacts/<platform>`:
+
+- `bin/smart_drone`
+- `lib/libORB_SLAM3.so`
+- `lib/libDBoW2.so`
+- `lib/libg2o.so`
+- `config/stereo.yaml`
+- `config/stereo_inertial.yaml`
+- `config/mono_right.yaml`
+- `config/mono_inertial_right.yaml`
+
+### 8. Initial Run On The Device
+
+For manual execution instead of systemd:
+
+```bash
+cd /home/ltz
+export LD_LIBRARY_PATH=/home/ltz
+./smart_drone --auto-mode idle --settings config/stereo.yaml --vocab /path/to/ORBvoc.txt
+```
+
+Adjust these according to your setup:
+
+- `--settings config/stereo.yaml` for stereo
+- `--settings config/stereo_inertial.yaml` for stereo-IMU
+- `--settings config/mono_right.yaml` for mono
+- `--settings config/mono_inertial_right.yaml` for mono-IMU
+
+If you use the bundled `smart_drone.service`, review it first:
+
+- the sample unit file uses `User=user`, which you likely need to change
+- it assumes `WorkingDirectory=~`
+- it assumes `LD_LIBRARY_PATH=~`
+- it uses `ExecStart=~/smart_drone --auto-mode idle`
+
+### 9. Camera Provider Selection
+
+Build-time provider:
+
+```bash
+-DSMART_DRONE_CAMERA_PROVIDER=libcamera_stereo_ov9281
+```
+
+Supported values:
+
+- `libcamera_stereo_ov9281`
+- `uvc_stereo_opencv`
+
+Provider semantics:
+
+- `libcamera_stereo_ov9281` expects two libcamera streams and uses left/right timestamp pairing
+- `uvc_stereo_opencv` expects one UVC device returning a packed left-right frame
+- for `uvc_stereo_opencv`, configure:
+  - `camera.uvc_device_index`
+  - `camera.uvc_eye_width`
+  - `camera.uvc_eye_height`
+  - `camera.uvc_packed_stereo=true`
+
+### 10. Items Requiring Manual Preparation
+
+The following items still require manual preparation:
+
+- exporting and refreshing the target sysroot
+- making sure `ORBvoc.txt` is present on the device
+- preparing the XFeat Python environment when using the XFeat frontend
+- camera-specific permissions, device nodes, and service user setup
+- Jetson-specific camera integration if you do not use the current `libcamera` or packed-UVC paths
+
+### Jetson Orin NX Cross-Compile
+
+Directory convention:
+
+- build caches live under `output/build/...`
+- deployable artifacts live under `output/artifacts/...`
+
+Jetson Orin NX is now folded into the unified build entry point:
+
+```bash
+./scripts/build.sh smart_drone --jetson-orin-nx
+./scripts/build.sh all --jetson-orin-nx
+```
+
+Relevant files:
+
+- `toolchain/toolchain-jetson-orin-nx-aarch64.cmake`
+- `scripts/build.sh`
+
+Configuration defaults:
+
+- `JETSON_SYSROOT` defaults to `../sysroots/jetson-orin-nx`
+- `JETSON_TOOLCHAIN_PREFIX` defaults to `aarch64-linux-gnu`
+- native build directory is `output/build/jetson-orin-nx/smart_drone`
+- ORB-SLAM3 build directory is `output/build/jetson-orin-nx/orbslam3`
+- packaged artifacts go to `output/artifacts/jetson-orin-nx`
+
+Execution example:
+
+```bash
+export JETSON_SYSROOT=/opt/sysroots/jetson-orin-nx
+./scripts/build.sh smart_drone --jetson-orin-nx --reconfigure
+./scripts/build.sh all --jetson-orin-nx --clean --reconfigure
+```
+
+Disable ARM CPU tuning for the initial toolchain validation step, then enable target-specific tuning after the baseline build is verified:
+
+```bash
+cmake -S . -B output/build/jetson-orin-nx/smart_drone \
+  -DSYSROOT="$JETSON_SYSROOT" \
+  -DCMAKE_TOOLCHAIN_FILE=toolchain/toolchain-jetson-orin-nx-aarch64.cmake \
+  -DENABLE_ARM_CPU_TUNING=OFF
+```
+
+If you invoke CMake manually with the normalized layout, use:
+
+```bash
+cmake -S . -B output/build/jetson-orin-nx/smart_drone \
+  -DSYSROOT="$JETSON_SYSROOT" \
+  -DCMAKE_TOOLCHAIN_FILE=toolchain/toolchain-jetson-orin-nx-aarch64.cmake \
+  -DENABLE_ARM_CPU_TUNING=OFF
+```
+
+The native runtime now exposes the compiled camera provider as a CMake variable:
+
+```bash
+-DSMART_DRONE_CAMERA_PROVIDER=libcamera_stereo_ov9281
+```
+
+Two provider entry points are now reserved:
+
+- `libcamera_stereo_ov9281`
+- `uvc_stereo_opencv`
+
+`uvc_stereo_opencv` currently assumes one UVC device that outputs a packed left-right stereo frame:
+
+- `camera.uvc_device_index` selects the single UVC device
+- `camera.uvc_eye_width / camera.uvc_eye_height` describe the per-eye resolution
+- the actual requested UVC capture width is `2 * camera.uvc_eye_width`
+- `camera.uvc_packed_stereo=true` explicitly declares packed left-right stereo output
+- left and right images share the same capture timestamp to reduce software timestamp jitter
+
+The Jetson sysroot should contain at least:
+
+- `usr/include`
+- `usr/lib/aarch64-linux-gnu`
+- `usr/lib`
+- `lib/aarch64-linux-gnu`
+- target-side `pkgconfig` metadata
+- target-installed `OpenCV`, `libcamera`, and `gpiod`
+
+Jetson support boundary:
+
+- native `aarch64 + sysroot + pkg-config` cross-compilation is now wired in
+- the Python/XFeat worker environment still needs to be prepared on the target device
+- the runtime now has build-time entry points for both `libcamera_stereo_ov9281` and standard `uvc_stereo_opencv`; if Jetson uses a different camera stack, a dedicated provider is still required
+- a successful cross-build does not by itself guarantee that the Jetson camera pipeline is runnable unchanged
 
 ## Build Manually
 
@@ -94,6 +424,8 @@ rm -rf app/.cxx app/build
 adb -d install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+After the Android build, the script also syncs the newest APK to `output/artifacts/android/latest.apk`.
+
 ## Tests
 
 Run the host-side unit tests with:
@@ -102,9 +434,9 @@ Run the host-side unit tests with:
 ./scripts/build.sh test
 ```
 
-This builds the `smart_drone_unit_tests` target and runs `ctest` in `build/unit-test`.
+This builds the `smart_drone_unit_tests` target and runs `ctest` in `output/build/host/unit-test`.
 
-Current host-side coverage includes:
+Host-side coverage:
 
 - `FrameTimingTracker`
 - `ModeManager`
@@ -119,23 +451,23 @@ Use the host-side offline replay tool to feed recorded stereo images and IMU dat
 
 ```bash
 ./scripts/build.sh replay
-./build/offline-replay/tests/smart_drone_offline_replay
+./output/artifacts/host/offline-replay/smart_drone_offline_replay
 ```
 
-Useful options:
+Replay parameter examples:
 
 ```bash
-./build/offline-replay/tests/smart_drone_offline_replay \
+./output/artifacts/host/offline-replay/smart_drone_offline_replay \
   --dataset tests/data \
   --out build/offline_replay_pose.csv \
   --summary-json build/offline_replay_summary.json \
   --sensor-mode stereo-imu
 ```
 
-Stereo-only replay is often useful when a dataset does not contain enough motion to initialize stereo-inertial mode:
+Use stereo-only replay when a dataset does not contain sufficient motion to initialize stereo-inertial mode:
 
 ```bash
-./build/offline-replay/tests/smart_drone_offline_replay \
+./output/artifacts/host/offline-replay/smart_drone_offline_replay \
   --stereo-only \
   --out build/offline_replay_pose_stereo.csv \
   --summary-json build/offline_replay_stereo_summary.json
@@ -156,7 +488,7 @@ The default vocabulary path resolves to `ORB_SLAM3/Vocabulary/ORBvoc.txt`.
 The replay build also registers a stereo-only integration baseline in CTest:
 
 ```bash
-cd build/offline-replay
+cd output/build/host/offline-replay
 ctest -R OfflineReplayStereoOnly -V
 ```
 
@@ -165,13 +497,13 @@ The baseline runs the replay tool with `--stereo-only --summary-json ...` and th
 - `tracking_ok_frames == frames_out`
 - `identity_pose_frames <= 1`
 
-This gives us a quick regression check for the current local stereo replay dataset without depending on IMU initialization quality.
+This provides a regression check for the current local stereo replay dataset without depending on IMU initialization quality.
 
 ## Calibration
 
 ### 1. Start a Kalibr Environment
 
-Example Docker command:
+Docker command example:
 
 ```bash
 sudo docker run -it --rm \
@@ -258,7 +590,7 @@ This generates:
 - Transform equation: `T_w_b = T_w_c1 * (T_b_c1)^-1`.
 - If neither `T_b_c1` nor `IMU.T_b_c1` exists, pose stays in camera frame in pure stereo mode.
 
-You can also point the converter directly at a remote Kalibr result directory:
+The converter also accepts a remote Kalibr result directory:
 
 ```bash
 python3 scripts/convert_kalibr_to_smartdrone_yaml.py \
@@ -278,35 +610,41 @@ Use `scripts/upload.sh` to upload the runtime executable, `ORB_SLAM3` shared lib
 ```bash
 ./scripts/upload.sh
 ./scripts/upload.sh --restart
+./scripts/upload.sh --platform jetson-orin-nx --restart
 TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./scripts/upload.sh --restart
 ./scripts/upload.sh --adb-ip 192.168.0.100 --adb-port 33707
 ./scripts/upload.sh --restart --adb-ip 192.168.0.100 --adb-port 33707
 ./scripts/upload.sh --adb-only --adb-ip 192.168.0.100 --adb-port 33707
 ```
 
-Default behavior:
+Deployment behavior:
 
-- Upload `build/cmake/src/native/smart_drone`
+- Upload `output/artifacts/cm5/bin/smart_drone`
 - Upload `libORB_SLAM3.so`, `libDBoW2.so`, and `libg2o.so`
 - Create `~/config` on the target when needed
 - Upload `config/stereo.yaml` and `config/stereo_inertial.yaml`
 - Upload `config/mono_right.yaml` and `config/mono_inertial_right.yaml`
 - Upload to temporary `*.new` files first, then atomically replace the final files with `mv`
 
-Optional environment variables:
+Deployment environment variables:
 
 - `TARGET_HOST`: default `ltz@192.168.0.105`
 - `REMOTE_DIR`: default `/home/ltz`
 - `REMOTE_SERVICE`: default `smart_drone`
 - `RESTART_SERVICE`: if set to `1`, run `sudo systemctl restart smart_drone` after upload
+- `DEPLOY_PLATFORM`: default `cm5`, selects artifacts under `output/artifacts/<platform>`
 - `ADB_IP` / `ADB_PORT`: if both are set (or provided with `--adb-ip` / `--adb-port`), run Android `adb connect` and install APK
 
-Optional Android deploy argument:
+Android deployment parameters:
 
-- `--apk <path>`: APK path for `adb install -r`, default `src/android/app/build/outputs/apk/debug/app-debug.apk`
+- `--apk <path>`: APK path for `adb install -r`, default `output/artifacts/android/latest.apk`
 - `--adb-only`: skip SSH/runtime upload and run Android `adb connect` + APK install only
 
-ADB note:
+Deployment platform parameter:
+
+- `--platform <name>`: explicitly select artifacts under `output/artifacts/<name>`, for example `cm5` or `jetson-orin-nx`
+
+ADB constraints:
 
 - If either `--adb-ip` or `--adb-port` is set, both are required.
 
@@ -322,7 +660,7 @@ ADB note:
 - `slam.orb_ini_th_fast`
 - `slam.orb_min_th_fast`
 
-Apply semantics:
+Application semantics:
 
 - ORB parameter changes trigger a SLAM session restart.
 - Before SLAM starts, runtime generates `*.runtime_orb.yaml` from the active settings file, overrides `ORBextractor.*`, then initializes ORB-SLAM3 with that file.

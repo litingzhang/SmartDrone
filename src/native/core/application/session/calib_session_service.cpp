@@ -17,6 +17,7 @@
 #include "core/application/session/calib_storage_helpers.h"
 #include "core/application/session/runtime_session_common.h"
 #include "core/application/session/sensor_runtime_helpers.h"
+#include "core/ports/camera_provider.h"
 
 namespace smartdrone::core::application {
 
@@ -122,8 +123,9 @@ bool RunCalibSession(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePose
         udp.Open(a.udpIp, a.udpPort, a.udpJpegQ, a.udpPayload, a.udpQueue);
     std::atomic<bool> imuOk{false};
     std::thread imuThread = StartCalibImuWriterThread(a, fImu, imuOk, stop, runningFlag);
-    LibcameraStereoOV9281_TsPair cam;
-    if (!OpenCamera(cam, a)) {
+    std::unique_ptr<smartdrone::core::ports::ICameraProvider> cameraProvider = CreateCameraProvider();
+    const bool cameraOpened = cameraProvider && cameraProvider->Open(a);
+    if (!cameraOpened) {
         stop.store(true);
         if (imuThread.joinable())
             imuThread.join();
@@ -140,27 +142,32 @@ bool RunCalibSession(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePose
     while (runningFlag.load() && !stop.load()) {
         if (cfg.calib.maxFrames > 0 && saved >= cfg.calib.maxFrames)
             break;
-        FrameItem L;
-        FrameItem R;
-        if (!cam.GrabPair(L, R, 1000)) {
-            if (!cam.Healthy()) {
+        smartdrone::core::ports::StereoFrame stereo{};
+        if (!cameraProvider->GrabStereo(stereo, 1000, true)) {
+            if (!cameraProvider->GetHealth().healthy) {
                 std::cerr << "[calib] camera pipeline unhealthy, aborting session\n";
                 sessionOk = false;
                 break;
             }
             continue;
         }
-        const int64_t absDtLr = std::llabs(static_cast<int64_t>(L.tsNs) - static_cast<int64_t>(R.tsNs));
-        if (absDtLr > maxSaveDtNs) {
-            static int droppedWide = 0;
-            ++droppedWide;
-            if ((droppedWide % 10) == 1) {
-                std::cerr << "[calib-drop] dt_lr_us=" << (absDtLr / 1000.0)
-                          << " exceeds max_save_dt_us=" << (maxSaveDtNs / 1000.0) << " dropped=" << droppedWide << "\n";
+        const auto &L = stereo.left;
+        const auto &R = stereo.right;
+        if (cameraProvider->Semantics() == smartdrone::core::ports::CameraProviderSemantics::DualStreamPaired) {
+            const int64_t absDtLr =
+                std::llabs(static_cast<int64_t>(L.timestampNs) - static_cast<int64_t>(R.timestampNs));
+            if (absDtLr > maxSaveDtNs) {
+                static int droppedWide = 0;
+                ++droppedWide;
+                if ((droppedWide % 10) == 1) {
+                    std::cerr << "[calib-drop] dt_lr_us=" << (absDtLr / 1000.0)
+                              << " exceeds max_save_dt_us=" << (maxSaveDtNs / 1000.0) << " dropped=" << droppedWide
+                              << "\n";
+                }
+                continue;
             }
-            continue;
         }
-        int64_t pairNs = static_cast<int64_t>((L.tsNs + R.tsNs) / 2);
+        int64_t pairNs = static_cast<int64_t>((L.timestampNs + R.timestampNs) / 2);
         if (lastPairNs != 0 && pairNs <= lastPairNs)
             pairNs = lastPairNs + 1;
         lastPairNs = pairNs;
@@ -169,7 +176,8 @@ bool RunCalibSession(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePose
         const fs::path fnR = cam1Dir / name;
         if (L.gray.empty() || R.gray.empty()) {
             std::cerr << "[calib-write] empty image"
-                      << " seqL=" << L.seq << " seqR=" << R.seq << " rowsL=" << L.gray.rows << " colsL=" << L.gray.cols
+                      << " seqL=" << L.sequence << " seqR=" << R.sequence << " rowsL=" << L.gray.rows
+                      << " colsL=" << L.gray.cols
                       << " rowsR=" << R.gray.rows << " colsR=" << R.gray.cols << "\n";
             continue;
         }
@@ -201,8 +209,8 @@ bool RunCalibSession(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePose
         savedImagePaths.push_back(fnL);
         savedImagePaths.push_back(fnR);
         if (a.udpEnable && a.sendImage) {
-            udp.Enqueue(0, static_cast<uint64_t>(L.seq), L.seq, pairNs * 1e-9, calibGrayL, {}, true, false);
-            udp.Enqueue(1, static_cast<uint64_t>(R.seq), R.seq, pairNs * 1e-9, calibGrayR, {}, true, false);
+            udp.Enqueue(0, static_cast<uint64_t>(L.sequence), L.sequence, pairNs * 1e-9, calibGrayL, {}, true, false);
+            udp.Enqueue(1, static_cast<uint64_t>(R.sequence), R.sequence, pairNs * 1e-9, calibGrayR, {}, true, false);
         }
         if ((saved % 30) == 0) {
             std::cerr << "[calib-save] saved=" << (saved + 1) << " pathL=" << fnL.string() << " pathR=" << fnR.string()
@@ -213,7 +221,7 @@ bool RunCalibSession(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePose
             std::fflush(fCam1);
         }
     }
-    cam.Close();
+    cameraProvider->Stop();
     std::cerr << "[session] calib camera closed\n";
     stop.store(true);
     if (imuThread.joinable())

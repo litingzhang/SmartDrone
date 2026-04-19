@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-  ./scripts/build.sh [smart_drone|android|all|test|replay] [--clean] [--reconfigure]
+  ./scripts/build.sh [smart_drone|android|all|test|replay] [--clean] [--reconfigure] [--jetson-orin-nx]
 
 Modes:
   smart_drone     Build the unified runtime target
@@ -16,6 +16,8 @@ Modes:
 Options:
   --clean         Remove existing build directories before building
   --reconfigure   Re-run CMake configure for native builds even if build dir already exists
+  --jetson-orin-nx
+                  Cross-build native targets for Jetson Orin NX instead of the default CM5 profile
 EOF
 }
 
@@ -28,6 +30,8 @@ BUILD_TESTS=0
 BUILD_REPLAY=0
 CLEAN_BUILD=0
 FORCE_RECONFIGURE=0
+JETSON_ORIN_NX=0
+NATIVE_RECONFIGURE_REQUIRED=0
 
 case "$MODE" in
     smart_drone)
@@ -65,6 +69,9 @@ while [ "$#" -gt 0 ]; do
         --reconfigure)
             FORCE_RECONFIGURE=1
             ;;
+        --jetson-orin-nx)
+            JETSON_ORIN_NX=1
+            ;;
         -h|--help)
             usage
             exit 0
@@ -80,14 +87,101 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SYSROOT="$(cd "$REPO_ROOT/../sysroots/cm5" && pwd)"
-BUILD_DIR="$REPO_ROOT/build/cmake"
-TEST_BUILD_DIR="$REPO_ROOT/build/unit-test"
-REPLAY_BUILD_DIR="$REPO_ROOT/build/offline-replay"
+OUTPUT_ROOT="$REPO_ROOT/output"
+BUILD_DIR="$OUTPUT_ROOT/build/cm5/smart_drone"
+TEST_BUILD_DIR="$OUTPUT_ROOT/build/host/unit-test"
+REPLAY_BUILD_DIR="$OUTPUT_ROOT/build/host/offline-replay"
 ANDROID_DIR="$REPO_ROOT/src/android"
 ANDROID_APP_DIR="$ANDROID_DIR/app"
 ANDROID_GRADLE_TASK="${ANDROID_GRADLE_TASK:-assembleDebug}"
 BUILD_JOBS="${BUILD_JOBS:-$(nproc)}"
+PLATFORM_NAME="cm5"
+SYSROOT_DEFAULT="$REPO_ROOT/../sysroots/cm5"
+SYSROOT_ENV_NAME="SYSROOT"
+TOOLCHAIN_FILE="$REPO_ROOT/toolchain/toolchain-cm5-aarch64.cmake"
+TOOLCHAIN_PREFIX=""
+ORB_BUILD_DIR="$OUTPUT_ROOT/build/cm5/orbslam3"
+CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
+NATIVE_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/$PLATFORM_NAME"
+HOST_TEST_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host/unit-test"
+HOST_REPLAY_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host/offline-replay"
+ANDROID_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/android"
+
+if [ "$JETSON_ORIN_NX" -eq 1 ]; then
+    PLATFORM_NAME="jetson-orin-nx"
+    SYSROOT_DEFAULT="$REPO_ROOT/../sysroots/jetson-orin-nx"
+    SYSROOT_ENV_NAME="JETSON_SYSROOT"
+    TOOLCHAIN_FILE="$REPO_ROOT/toolchain/toolchain-jetson-orin-nx-aarch64.cmake"
+    TOOLCHAIN_PREFIX="${JETSON_TOOLCHAIN_PREFIX:-aarch64-linux-gnu}"
+    BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/smart_drone"
+    ORB_BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/orbslam3"
+fi
+
+NATIVE_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/$PLATFORM_NAME"
+
+SYSROOT="${SYSROOT:-$SYSROOT_DEFAULT}"
+if [ "$JETSON_ORIN_NX" -eq 1 ]; then
+    SYSROOT="${JETSON_SYSROOT:-$SYSROOT}"
+fi
+
+if [ "$BUILD_SMART_DRONE" = "ON" ] || [ "$BUILD_ORB" -eq 1 ]; then
+    if [ ! -d "$SYSROOT" ]; then
+        echo "Sysroot not found: $SYSROOT" >&2
+        echo "Set $SYSROOT_ENV_NAME=/path/to/sysroot and retry." >&2
+        exit 1
+    fi
+fi
+
+configure_native_args=(
+    -DSYSROOT="$SYSROOT"
+    -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
+)
+
+if [ -n "$TOOLCHAIN_FILE" ]; then
+    configure_native_args+=(-DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE")
+fi
+if [ -n "$TOOLCHAIN_PREFIX" ]; then
+    configure_native_args+=(-DJETSON_TOOLCHAIN_PREFIX="$TOOLCHAIN_PREFIX")
+fi
+
+copy_artifact() {
+    local src="$1"
+    local dst="$2"
+    mkdir -p "$(dirname "$dst")"
+    cp -f "$src" "$dst"
+}
+
+sync_native_artifacts() {
+    local native_bin="$BUILD_DIR/src/native/smart_drone"
+    if [ -f "$native_bin" ]; then
+        copy_artifact "$native_bin" "$NATIVE_ARTIFACTS_DIR/bin/smart_drone"
+    fi
+
+    local lib_dir="$NATIVE_ARTIFACTS_DIR/lib"
+    mkdir -p "$lib_dir"
+    for lib_name in libORB_SLAM3.so libDBoW2.so libg2o.so; do
+        if [ -f "$lib_dir/$lib_name" ]; then
+            :
+        fi
+    done
+
+    local config_dir="$NATIVE_ARTIFACTS_DIR/config"
+    mkdir -p "$config_dir"
+    for cfg in stereo.yaml stereo_inertial.yaml mono_right.yaml mono_inertial_right.yaml; do
+        if [ -f "$REPO_ROOT/config/$cfg" ]; then
+            copy_artifact "$REPO_ROOT/config/$cfg" "$config_dir/$cfg"
+        fi
+    done
+}
+
+sync_android_artifact() {
+    local apk_src
+    apk_src="$(find "$ANDROID_APP_DIR/build/outputs/apk" -type f -name '*.apk' | sort | tail -n 1)"
+    if [ -z "$apk_src" ]; then
+        return
+    fi
+    copy_artifact "$apk_src" "$ANDROID_ARTIFACTS_DIR/latest.apk"
+}
 
 build_android_app() {
     if [ ! -d "$ANDROID_DIR" ]; then
@@ -137,25 +231,32 @@ build_android_app() {
     exit 1
 }
 
+echo "PLATFORM:$PLATFORM_NAME"
 echo "SYSROOT:$SYSROOT"
+if [ -n "$TOOLCHAIN_PREFIX" ]; then
+    echo "TOOLCHAIN_PREFIX:$TOOLCHAIN_PREFIX"
+fi
 echo "MODE:$MODE"
 echo "CLEAN_BUILD:$CLEAN_BUILD"
 echo "FORCE_RECONFIGURE:$FORCE_RECONFIGURE"
 echo "BUILD_JOBS:$BUILD_JOBS"
+echo "CMAKE_BUILD_TYPE:$CMAKE_BUILD_TYPE"
+echo "OUTPUT_ROOT:$OUTPUT_ROOT"
 
 if [ "$BUILD_ORB" -eq 1 ]; then
     echo "build ORB-SLAM3"
-    cd "$REPO_ROOT/ORB_SLAM3"
     if [ "$CLEAN_BUILD" -eq 1 ]; then
-        rm -rf build
+        rm -rf "$ORB_BUILD_DIR"
     fi
-    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -d build ]; then
-        cmake -S . -B build \
-            -DSYSROOT="$SYSROOT" \
-            -DCMAKE_TOOLCHAIN_FILE="$REPO_ROOT/toolchain/toolchain-cm5-aarch64.cmake"
+    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -f "$ORB_BUILD_DIR/CMakeCache.txt" ]; then
+        cmake -S "$REPO_ROOT/ORB_SLAM3" -B "$ORB_BUILD_DIR" \
+            "${configure_native_args[@]}" \
+            -DORB_SLAM3_OUTPUT_DIR="$NATIVE_ARTIFACTS_DIR/lib" \
+            -DDBOW2_OUTPUT_DIR="$NATIVE_ARTIFACTS_DIR/lib" \
+            -DG2O_OUTPUT_DIR="$NATIVE_ARTIFACTS_DIR/lib"
     fi
-    cmake --build build -j"$BUILD_JOBS"
-    cd - >/dev/null
+    cmake --build "$ORB_BUILD_DIR" -j"$BUILD_JOBS"
+    NATIVE_RECONFIGURE_REQUIRED=1
 fi
 
 if [ "$BUILD_SMART_DRONE" = "ON" ]; then
@@ -163,11 +264,14 @@ if [ "$BUILD_SMART_DRONE" = "ON" ]; then
         rm -rf "$BUILD_DIR"
     fi
     mkdir -p "$BUILD_DIR"
-    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ "$NATIVE_RECONFIGURE_REQUIRED" -eq 1 ] || [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
         cmake -S "$REPO_ROOT" -B "$BUILD_DIR" \
-            -DSYSROOT="$SYSROOT" \
+            "${configure_native_args[@]}" \
             -DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config \
-            -DBUILD_SMART_DRONE="$BUILD_SMART_DRONE"
+            -DBUILD_SMART_DRONE="$BUILD_SMART_DRONE" \
+            -DORB_LIB_DIR="$NATIVE_ARTIFACTS_DIR/lib" \
+            -DDBOW2_LIB_DIR="$NATIVE_ARTIFACTS_DIR/lib" \
+            -DG2O_LIB_DIR="$NATIVE_ARTIFACTS_DIR/lib"
     fi
 
     if [ "$MODE" = "smart_drone" ]; then
@@ -175,6 +279,7 @@ if [ "$BUILD_SMART_DRONE" = "ON" ]; then
     else
         cmake --build "$BUILD_DIR" -j"$BUILD_JOBS"
     fi
+    sync_native_artifacts
 fi
 
 if [ "$BUILD_TESTS" -eq 1 ]; then
@@ -189,6 +294,10 @@ if [ "$BUILD_TESTS" -eq 1 ]; then
             -DENABLE_UNIT_TESTS=ON
     fi
     cmake --build "$TEST_BUILD_DIR" -j"$BUILD_JOBS"
+    if [ -f "$TEST_BUILD_DIR/tests/smart_drone_unit_tests" ]; then
+        copy_artifact "$TEST_BUILD_DIR/tests/smart_drone_unit_tests" \
+            "$HOST_TEST_ARTIFACTS_DIR/smart_drone_unit_tests"
+    fi
     ctest --test-dir "$TEST_BUILD_DIR" --output-on-failure
 fi
 
@@ -204,10 +313,15 @@ if [ "$BUILD_REPLAY" -eq 1 ]; then
             -DENABLE_OFFLINE_REPLAY=ON
     fi
     cmake --build "$REPLAY_BUILD_DIR" --target smart_drone_offline_replay -j"$BUILD_JOBS"
+    if [ -f "$REPLAY_BUILD_DIR/tests/smart_drone_offline_replay" ]; then
+        copy_artifact "$REPLAY_BUILD_DIR/tests/smart_drone_offline_replay" \
+            "$HOST_REPLAY_ARTIFACTS_DIR/smart_drone_offline_replay"
+    fi
     echo "offline replay tool built:"
-    echo "  $REPLAY_BUILD_DIR/tests/smart_drone_offline_replay"
+    echo "  $HOST_REPLAY_ARTIFACTS_DIR/smart_drone_offline_replay"
 fi
 
 if [ "$BUILD_ANDROID" -eq 1 ]; then
     build_android_app
+    sync_android_artifact
 fi

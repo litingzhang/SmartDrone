@@ -2,11 +2,19 @@
 
 namespace smartdrone::adapters::camera {
 
-LibcameraStereoCamera::LibcameraStereoCamera(LibcameraStereoOV9281_TsPair &impl) : m_impl(impl) {}
+bool LibcameraStereoCamera::Open(const smartdrone::core::application::MainRuntimeAliases &aliases)
+{
+    return m_impl.Open(aliases.width, aliases.height, aliases.fps, aliases.aeDisable, aliases.exposureUs, aliases.gain,
+                       aliases.requestY8, static_cast<int64_t>(aliases.pairMs) * 1000000LL,
+                       static_cast<int64_t>(aliases.keepMs) * 1000000LL, aliases.pairQueue, aliases.r16Norm,
+                       aliases.leftCamIndex, aliases.rightCamIndex);
+}
+
+void LibcameraStereoCamera::Close() { m_impl.Close(); }
 
 bool LibcameraStereoCamera::Start() { return true; }
 
-void LibcameraStereoCamera::Stop() {}
+void LibcameraStereoCamera::Stop() { Close(); }
 
 bool LibcameraStereoCamera::GrabStereo(core::ports::StereoFrame &out, int timeoutMs, bool preferLatest,
                                        uint64_t minTimestampNs)
@@ -64,26 +72,9 @@ core::ports::CameraDiagnostics LibcameraStereoCamera::GetDiagnostics() const
     return out;
 }
 
-int64_t LibcameraStereoCamera::LastPairDtMs() const { return m_impl.LastDtMs(); }
-
-int64_t LibcameraStereoCamera::LastRejectDtUs() const { return m_impl.LastRejectDtUs(); }
-
-uint32_t LibcameraStereoCamera::LastRawSeqL() const { return m_impl.LastRawSeqL(); }
-
-uint32_t LibcameraStereoCamera::LastRawSeqR() const { return m_impl.LastRawSeqR(); }
-
-uint64_t LibcameraStereoCamera::RawCountL() const { return m_impl.RawCountL(); }
-
-uint64_t LibcameraStereoCamera::RawCountR() const { return m_impl.RawCountR(); }
-
-uint64_t LibcameraStereoCamera::DroppedUnpairedL() const { return m_impl.DroppedUnpairedL(); }
-
-uint64_t LibcameraStereoCamera::DroppedUnpairedR() const { return m_impl.DroppedUnpairedR(); }
-
-size_t LibcameraStereoCamera::PendingL() const { return m_impl.PendL(); }
-
-size_t LibcameraStereoCamera::PendingR() const { return m_impl.PendR(); }
-
-int64_t LibcameraStereoCamera::PairTolNs() const { return m_impl.PairTolNs(); }
+core::ports::CameraProviderSemantics LibcameraStereoCamera::Semantics() const
+{
+    return core::ports::CameraProviderSemantics::DualStreamPaired;
+}
 
 } // namespace smartdrone::adapters::camera

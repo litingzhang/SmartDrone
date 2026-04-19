@@ -6,7 +6,6 @@
 #include <thread>
 
 #include "System.h"
-#include "adapters/camera/libcamera_stereo_camera.h"
 #include "adapters/imu/icm42688_imu_provider.h"
 #include "adapters/slam/orbslam3_engine.h"
 #include "adapters/slam/xfeat_frontend_client.h"
@@ -21,6 +20,7 @@
 #include "core/application/state/live_pose_state.h"
 #include "core/application/state/perception_pipeline.h"
 #include "core/application/state/pose_postprocessor.h"
+#include "core/ports/camera_provider.h"
 
 namespace smartdrone::core::application {
 
@@ -59,8 +59,7 @@ class SlamSessionRuntime {
     UdpImageSender m_udp;
     ImuThreadState m_imuState{};
     std::thread m_imuThread;
-    LibcameraStereoOV9281_TsPair m_cam;
-    smartdrone::adapters::camera::LibcameraStereoCamera m_cameraProvider;
+    std::unique_ptr<smartdrone::core::ports::ICameraProvider> m_cameraProvider;
     smartdrone::adapters::imu::Icm42688ImuProvider m_imuProvider;
     FrameTimingTracker m_frameTimingTracker{};
     smartdrone::adapters::telemetry::MavlinkPosePublisher m_posePublisher;

@@ -266,6 +266,16 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.camera.fps = argReader.GetInt("--fps", 60);
     config.camera.leftCamIndex = argReader.GetInt("--left-cam-index", 0);
     config.camera.rightCamIndex = argReader.GetInt("--right-cam-index", 1);
+    config.camera.uvcDeviceIndex = argReader.GetInt("--uvc-device-index", config.camera.leftCamIndex);
+    config.camera.uvcEyeWidth = argReader.GetInt("--uvc-eye-width", config.camera.width);
+    config.camera.uvcEyeHeight = argReader.GetInt("--uvc-eye-height", config.camera.height);
+    config.camera.uvcPackedStereo = true;
+    if (argReader.HasFlag("--no-uvc-packed-stereo")) {
+        config.camera.uvcPackedStereo = false;
+    }
+    if (argReader.HasFlag("--uvc-packed-stereo")) {
+        config.camera.uvcPackedStereo = true;
+    }
     if (argReader.HasFlag("--swap-cams")) {
         std::swap(config.camera.leftCamIndex, config.camera.rightCamIndex);
     }

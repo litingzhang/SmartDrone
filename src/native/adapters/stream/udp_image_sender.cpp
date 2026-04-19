@@ -190,7 +190,8 @@ bool UdpImageSender::Open(const std::string &ip, int port, int jpegQuality, int 
     for (int cam = 0; cam < 2; ++cam) {
         const auto role =
             cam == 0 ? smartdrone::common::ThreadRole::UdpImageCam0 : smartdrone::common::ThreadRole::UdpImageCam1;
-        m_th[cam] = SMARTDRONE_START_THREAD(role, "UdpImageSender", [this, cam] { Loop(cam); });
+        m_th[cam] = smartdrone::common::StartThread(
+            smartdrone::common::MakeThreadLaunchInfo(role, "UdpImageSender"), [this, cam] { Loop(cam); });
     }
     return true;
 }

@@ -6,7 +6,6 @@
 #include <Eigen/Geometry>
 #include <sophus/se3.hpp>
 
-#include "adapters/camera/libcamera_stereo_camera.h"
 #include "adapters/imu/icm42688_imu_provider.h"
 #include "adapters/slam/orbslam3_engine.h"
 #include "adapters/slam/xfeat_frontend_client.h"
@@ -21,6 +20,7 @@
 #include "core/application/state/live_pose_state.h"
 #include "core/application/state/perception_pipeline.h"
 #include "core/application/state/pose_postprocessor.h"
+#include "core/ports/camera_provider.h"
 
 namespace smartdrone::core::application {
 
@@ -35,7 +35,7 @@ class SlamFrameProcessor {
         Px4MavlinkGateway &mav;
         smartdrone::adapters::slam::OrbSlam3Engine &slamEngine;
         smartdrone::adapters::slam::XFeatFrontendClient *xfeatFrontendClient{nullptr};
-        smartdrone::adapters::camera::LibcameraStereoCamera &cameraProvider;
+        smartdrone::core::ports::ICameraProvider &cameraProvider;
         smartdrone::adapters::imu::Icm42688ImuProvider &imuProvider;
         smartdrone::adapters::telemetry::MavlinkPosePublisher &posePublisher;
         UdpImageSender &udpSender;

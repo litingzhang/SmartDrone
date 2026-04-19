@@ -1,5 +1,6 @@
 .clang-format
 build
+output
 temp
 *gradle*
 .cxx

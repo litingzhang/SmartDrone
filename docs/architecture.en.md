@@ -512,7 +512,7 @@ sequenceDiagram
 - Activation scope: this transform is applied only in `SensorMode::Stereo` (without IMU fusion).
 - Usage: raw SLAM pose is `T_w_c1`, then converted to body pose before publish:
   `T_w_b = T_w_c1 * (T_b_c1)^-1`.
-- Default behavior: if neither `T_b_c1` nor `IMU.T_b_c1` exists, pose remains in camera frame and a log hint is printed.
+- Fallback behavior: if neither `T_b_c1` nor `IMU.T_b_c1` exists, pose remains in camera frame and a log hint is printed.
 
 ### 10.5 Full Pose Processing Path (SLAM to external outputs)
 

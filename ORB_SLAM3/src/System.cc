@@ -1363,6 +1363,20 @@ int System::GetTrackingState()
     return mTrackingState;
 }
 
+bool System::CanUseExternalFeatureInjection() const
+{
+    if(!settings_)
+        return true;
+
+    if(settings_->needToResize())
+        return false;
+
+    if((mSensor == STEREO || mSensor == IMU_STEREO) && settings_->needToRectify())
+        return false;
+
+    return true;
+}
+
 TrackedVisualData System::ExtractTrackedVisualData(int leftImageWidth,
                                                    int leftImageHeight,
                                                    int rightImageWidth,

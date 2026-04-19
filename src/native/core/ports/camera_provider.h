@@ -5,7 +5,14 @@
 
 #include <opencv2/core/mat.hpp>
 
+#include "core/application/config/runtime_app_types.h"
+
 namespace smartdrone::core::ports {
+
+enum class CameraProviderSemantics {
+    DualStreamPaired,
+    PackedStereoSingleDevice,
+};
 
 struct ImageFrame {
     int cameraId{-1};
@@ -51,11 +58,14 @@ class ICameraProvider {
   public:
     virtual ~ICameraProvider() = default;
 
+    virtual bool Open(const smartdrone::core::application::MainRuntimeAliases &aliases) = 0;
+    virtual void Close() = 0;
     virtual bool Start() = 0;
     virtual void Stop() = 0;
     virtual bool GrabStereo(StereoFrame &out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs = 0) = 0;
     virtual CameraHealth GetHealth() const = 0;
     virtual CameraDiagnostics GetDiagnostics() const = 0;
+    virtual CameraProviderSemantics Semantics() const = 0;
 };
 
 } // namespace smartdrone::core::ports

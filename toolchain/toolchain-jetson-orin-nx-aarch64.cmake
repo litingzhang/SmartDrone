@@ -1,0 +1,52 @@
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+
+set(_JETSON_SYSROOT "")
+if(DEFINED SYSROOT AND NOT SYSROOT STREQUAL "")
+  set(_JETSON_SYSROOT "${SYSROOT}")
+elseif(DEFINED CMAKE_SYSROOT AND NOT CMAKE_SYSROOT STREQUAL "")
+  set(_JETSON_SYSROOT "${CMAKE_SYSROOT}")
+elseif(DEFINED ENV{SYSROOT} AND NOT "$ENV{SYSROOT}" STREQUAL "")
+  set(_JETSON_SYSROOT "$ENV{SYSROOT}")
+endif()
+
+if(_JETSON_SYSROOT MATCHES "^~")
+  string(REGEX REPLACE "^~" "$ENV{HOME}" _JETSON_SYSROOT "${_JETSON_SYSROOT}")
+endif()
+
+if(_JETSON_SYSROOT STREQUAL "")
+  message(FATAL_ERROR "SYSROOT must be provided when using toolchain-jetson-orin-nx-aarch64.cmake")
+endif()
+
+set(JETSON_TOOLCHAIN_PREFIX "aarch64-linux-gnu" CACHE STRING "Cross compiler prefix for Jetson aarch64 toolchains")
+
+set(CMAKE_C_COMPILER   "${JETSON_TOOLCHAIN_PREFIX}-gcc")
+set(CMAKE_CXX_COMPILER "${JETSON_TOOLCHAIN_PREFIX}-g++")
+
+set(CMAKE_SYSROOT "${_JETSON_SYSROOT}" CACHE PATH "Jetson cross-compilation sysroot" FORCE)
+set(CMAKE_FIND_ROOT_PATH "${_JETSON_SYSROOT}" CACHE PATH "Jetson cross-compilation search root" FORCE)
+
+set(_JETSON_SYSROOT_FLAG "--sysroot=${_JETSON_SYSROOT}")
+set(CMAKE_C_FLAGS_INIT "${_JETSON_SYSROOT_FLAG}")
+set(CMAKE_CXX_FLAGS_INIT "${_JETSON_SYSROOT_FLAG}")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "${_JETSON_SYSROOT_FLAG}")
+set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_JETSON_SYSROOT_FLAG}")
+set(CMAKE_MODULE_LINKER_FLAGS_INIT "${_JETSON_SYSROOT_FLAG}")
+
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+
+set(ENV{PKG_CONFIG_SYSROOT_DIR} "${_JETSON_SYSROOT}")
+set(_pkgconfig_libdir
+    "${_JETSON_SYSROOT}/usr/lib/aarch64-linux-gnu/pkgconfig"
+    "${_JETSON_SYSROOT}/usr/lib/pkgconfig"
+    "${_JETSON_SYSROOT}/usr/share/pkgconfig"
+)
+string(JOIN ":" _pkgconfig_libdir_str ${_pkgconfig_libdir})
+set(ENV{PKG_CONFIG_LIBDIR} "${_pkgconfig_libdir_str}")
+set(ENV{PKG_CONFIG_PATH} "")
+
+list(PREPEND CMAKE_PREFIX_PATH "${_JETSON_SYSROOT}/usr")
+

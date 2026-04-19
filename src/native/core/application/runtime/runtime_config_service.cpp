@@ -18,7 +18,8 @@ RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTun
 
 bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote, std::string *err)
 {
-    if (remote.exposureUs <= 0 || !(remote.gain > 0.0f) || remote.pairMs <= 0 || remote.slamInputFps < 0) {
+    if (remote.exposureUs <= 0 || !(remote.gain > 0.0f) || remote.pairMs <= 0 || remote.slamInputFps < 0 ||
+        remote.uvcDeviceIndex < 0 || remote.uvcEyeWidth <= 0 || remote.uvcEyeHeight <= 0) {
         if (err) {
             *err = "bad runtime config";
         }
@@ -68,6 +69,10 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         const bool udpIpChanged = m_config.app.udp.ip != remote.udpIp;
         const bool udpEnableChanged = m_config.app.udp.enable != remote.udpEnabled;
         const bool aeModeChanged = cam.aeDisable != (!remote.autoExposureEnabled);
+        const bool uvcConfigChanged = cam.uvcDeviceIndex != remote.uvcDeviceIndex ||
+                                      cam.uvcEyeWidth != remote.uvcEyeWidth ||
+                                      cam.uvcEyeHeight != remote.uvcEyeHeight ||
+                                      cam.uvcPackedStereo != remote.uvcPackedStereo;
         const bool orbChanged = m_config.app.runtime.orbNFeatures != remote.orbNFeatures ||
                                 std::abs(m_config.app.runtime.orbScaleFactor - remote.orbScaleFactor) > 1e-6f ||
                                 m_config.app.runtime.orbNLevels != remote.orbNLevels ||
@@ -77,6 +82,10 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         cam.gain = remote.gain;
         cam.aeDisable = !remote.autoExposureEnabled;
         cam.pairMs = remote.pairMs;
+        cam.uvcDeviceIndex = remote.uvcDeviceIndex;
+        cam.uvcEyeWidth = remote.uvcEyeWidth;
+        cam.uvcEyeHeight = remote.uvcEyeHeight;
+        cam.uvcPackedStereo = remote.uvcPackedStereo;
         m_config.app.runtime.slamInputFps = remote.slamInputFps;
         m_config.app.runtime.slamOperationMode = remote.slamOperationMode;
         m_config.app.runtime.featureFrontend = remote.featureFrontend;
@@ -127,7 +136,8 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         effectiveTbcRollDeg = m_config.app.runtime.tbcRollDeg;
         effectiveTbcPitchDeg = m_config.app.runtime.tbcPitchDeg;
         effectiveTbcYawDeg = m_config.app.runtime.tbcYawDeg;
-        restartNeeded = sensorModeChanged || frontendChanged || udpIpChanged || udpEnableChanged || aeModeChanged || orbChanged;
+        restartNeeded = sensorModeChanged || frontendChanged || udpIpChanged || udpEnableChanged || aeModeChanged ||
+                        uvcConfigChanged || orbChanged;
     }
 
     m_tuning.slamInputFps.store(remote.slamInputFps, std::memory_order_relaxed);
@@ -180,6 +190,30 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
                 remote.pairMs = static_cast<int>(*v);
             } else {
                 return {false, "camera.pair_window_ms type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kCameraUvcDeviceIndex) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.uvcDeviceIndex = static_cast<int>(*v);
+            } else {
+                return {false, "camera.uvc_device_index type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kCameraUvcEyeWidth) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.uvcEyeWidth = static_cast<int>(*v);
+            } else {
+                return {false, "camera.uvc_eye_width type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kCameraUvcEyeHeight) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.uvcEyeHeight = static_cast<int>(*v);
+            } else {
+                return {false, "camera.uvc_eye_height type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kCameraUvcPackedStereo) {
+            if (const auto *v = std::get_if<bool>(&value)) {
+                remote.uvcPackedStereo = *v;
+            } else {
+                return {false, "camera.uvc_packed_stereo type mismatch"};
             }
         } else if (key == ConfigRegistry::kSlamInputFps) {
             if (const auto *v = std::get_if<int64_t>(&value)) {
@@ -341,10 +375,12 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
 
     const int cameraFps = currentConfig.app.camera.fps > 0 ? currentConfig.app.camera.fps : 1;
     const int clampedSlamFps = remote.slamInputFps <= 0 ? cameraFps : std::min(cameraFps, remote.slamInputFps);
-    return {true, "runtime cfg updated sensor=" + std::string(ToSensorModeText(remote.sensorMode)) +
-                      " frontend=" + std::string(ToFeatureFrontendText(remote.featureFrontend)) +
-                      " slam_mode=" + std::string(smartdrone::core::domain::ToString(remote.slamOperationMode)) +
-                      " pair_ms=" + std::to_string(remote.pairMs) + " slam_fps=" + std::to_string(clampedSlamFps)};
+    std::string message = "runtime cfg updated sensor=" + std::string(ToSensorModeText(remote.sensorMode)) +
+                          " frontend=" + std::string(ToFeatureFrontendText(remote.featureFrontend)) +
+                          " slam_mode=" + std::string(smartdrone::core::domain::ToString(remote.slamOperationMode)) +
+                          " slam_fps=" + std::to_string(clampedSlamFps) + " pair_ms=" +
+                          std::to_string(remote.pairMs) + " provider_specific";
+    return {true, message};
 }
 
 RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig &currentConfig)
@@ -354,6 +390,10 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.gain = currentConfig.app.camera.gain;
     remote.autoExposureEnabled = !currentConfig.app.camera.aeDisable;
     remote.pairMs = currentConfig.app.camera.pairMs > 0 ? currentConfig.app.camera.pairMs : 1;
+    remote.uvcDeviceIndex = currentConfig.app.camera.uvcDeviceIndex;
+    remote.uvcEyeWidth = currentConfig.app.camera.uvcEyeWidth;
+    remote.uvcEyeHeight = currentConfig.app.camera.uvcEyeHeight;
+    remote.uvcPackedStereo = currentConfig.app.camera.uvcPackedStereo;
     remote.slamInputFps = currentConfig.app.runtime.slamInputFps;
     remote.slamOperationMode = currentConfig.app.runtime.slamOperationMode;
     remote.featureFrontend = currentConfig.app.runtime.featureFrontend;

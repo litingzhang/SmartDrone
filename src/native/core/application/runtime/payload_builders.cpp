@@ -60,6 +60,11 @@ std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig &cfg, smartdrone::co
     oss << "camera.gain=" << cfg.app.camera.gain << "\n";
     oss << "camera.auto_exposure=" << (cfg.app.camera.aeDisable ? "false" : "true") << "\n";
     oss << "camera.pair_window_ms=" << cfg.app.camera.pairMs << "\n";
+    oss << "camera.pair_window_ms_note=provider_specific_for_separate_left_right_pairing\n";
+    oss << "camera.uvc_device_index=" << cfg.app.camera.uvcDeviceIndex << "\n";
+    oss << "camera.uvc_eye_width=" << cfg.app.camera.uvcEyeWidth << "\n";
+    oss << "camera.uvc_eye_height=" << cfg.app.camera.uvcEyeHeight << "\n";
+    oss << "camera.uvc_packed_stereo=" << (cfg.app.camera.uvcPackedStereo ? "true" : "false") << "\n";
     oss << "slam.input_fps=" << cfg.app.runtime.slamInputFps << "\n";
     oss << "slam.feature_frontend=" << ToFeatureFrontendText(cfg.app.runtime.featureFrontend) << "\n";
     oss << "slam.perception_mode=" << ToSensorModeText(cfg.app.sensorMode) << "\n";

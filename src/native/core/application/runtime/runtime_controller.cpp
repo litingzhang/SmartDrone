@@ -175,11 +175,13 @@ CommandResult UnifiedRuntimeController::ExecuteAction(const RuntimeAction &actio
         return {true, msg};
     }
     case RuntimeAction::Type::ForceRestart:
-        SMARTDRONE_START_DETACHED_THREAD(smartdrone::common::ThreadRole::RuntimeForceRestart,
-                                         "UnifiedRuntimeController", []() {
-                                             std::this_thread::sleep_for(std::chrono::milliseconds(150));
-                                             std::raise(SIGKILL);
-                                         });
+        smartdrone::common::StartDetachedThread(
+            smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::RuntimeForceRestart,
+                                                     "UnifiedRuntimeController"),
+            []() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                std::raise(SIGKILL);
+            });
         return {true, "service restart scheduled"};
     case RuntimeAction::Type::ResetMap:
         return {false, "reset map not implemented"};

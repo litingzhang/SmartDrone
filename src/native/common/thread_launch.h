@@ -31,6 +31,11 @@ struct ThreadLaunchInfo {
     int line;
 };
 
+inline ThreadLaunchInfo MakeThreadLaunchInfo(ThreadRole role, const char *owner, const char *file = nullptr, int line = 0)
+{
+    return ThreadLaunchInfo{role, owner, file, line};
+}
+
 void LogThreadLaunch(const ThreadLaunchInfo &info, bool detached);
 
 template <typename Fn> std::thread StartThread(ThreadLaunchInfo info, Fn &&fn)
@@ -48,12 +53,3 @@ template <typename Fn> void StartDetachedThread(ThreadLaunchInfo info, Fn &&fn)
 }
 
 } // namespace smartdrone::common
-
-#define SMARTDRONE_THREAD_INFO(role, owner)                                                                            \
-    ::smartdrone::common::ThreadLaunchInfo { role, owner, __FILE__, __LINE__ }
-
-#define SMARTDRONE_START_THREAD(role, owner, ...)                                                                      \
-    ::smartdrone::common::StartThread(SMARTDRONE_THREAD_INFO(role, owner), __VA_ARGS__)
-
-#define SMARTDRONE_START_DETACHED_THREAD(role, owner, ...)                                                             \
-    ::smartdrone::common::StartDetachedThread(SMARTDRONE_THREAD_INFO(role, owner), __VA_ARGS__)

@@ -21,8 +21,9 @@ std::thread StartImuThread(const MainRuntimeAliases &a, ImuThreadState &s, std::
     ImuScale init{};
     s.accelLsbPerG.store(init.accelLsbPerG);
     s.gyroLsbPerDps.store(init.gyroLsbPerDps);
-    return SMARTDRONE_START_THREAD(
-        smartdrone::common::ThreadRole::Imu, "SensorRuntime", [&a, &s, &stop, &runningFlag]() {
+    return smartdrone::common::StartThread(
+        smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::Imu, "SensorRuntime"),
+        [&a, &s, &stop, &runningFlag]() {
             if (a.rtImu)
                 SetThreadRealtime(a.rtPrio);
             SpiDev spi(a.spiDev);
@@ -77,8 +78,9 @@ std::thread StartImuThread(const MainRuntimeAliases &a, ImuThreadState &s, std::
 std::thread StartCalibImuWriterThread(const MainRuntimeAliases &a, FILE *fImu, std::atomic<bool> &imuOk,
                                       std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
 {
-    return SMARTDRONE_START_THREAD(
-        smartdrone::common::ThreadRole::CalibImuWriter, "SensorRuntime", [&a, fImu, &imuOk, &stop, &runningFlag]() {
+    return smartdrone::common::StartThread(
+        smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::CalibImuWriter, "SensorRuntime"),
+        [&a, fImu, &imuOk, &stop, &runningFlag]() {
             SpiDev spi(a.spiDev);
             if (!spi.Open(a.spiSpeed, a.spiMode, a.spiBits))
                 return;
@@ -112,13 +114,6 @@ std::thread StartCalibImuWriterThread(const MainRuntimeAliases &a, FILE *fImu, s
             }
             std::fflush(fImu);
         });
-}
-
-bool OpenCamera(LibcameraStereoOV9281_TsPair &cam, const MainRuntimeAliases &a)
-{
-    return cam.Open(a.width, a.height, a.fps, a.aeDisable, a.exposureUs, a.gain, a.requestY8,
-                    static_cast<int64_t>(a.pairMs) * 1000000LL, static_cast<int64_t>(a.keepMs) * 1000000LL, a.pairQueue,
-                    a.r16Norm, a.leftCamIndex, a.rightCamIndex);
 }
 
 } // namespace smartdrone::core::application

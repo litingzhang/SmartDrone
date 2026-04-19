@@ -319,8 +319,8 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks &hooks, UnifiedRuntimeCo
                                   BuildCapabilitiesPayloadFn buildCapabilitiesPayload,
                                   BuildConfigPayloadFn buildConfigPayload, PeerToIpStringFn peerToIpString)
 {
-    return SMARTDRONE_START_THREAD(
-        smartdrone::common::ThreadRole::UdpCommand, "UdpCommandThread",
+    return smartdrone::common::StartThread(
+        smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::UdpCommand, "UdpCommandThread"),
         [port, &hooks, &controller, &livePose, &runningFlag,
          buildCapabilitiesPayload = std::move(buildCapabilitiesPayload),
          buildConfigPayload = std::move(buildConfigPayload), peerToIpString = std::move(peerToIpString)]() {

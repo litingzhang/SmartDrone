@@ -193,6 +193,10 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
     a.slamInputFps = ClampSlamInputFps(c.runtime.slamInputFps, c.camera.fps);
     a.leftCamIndex = c.camera.leftCamIndex;
     a.rightCamIndex = c.camera.rightCamIndex;
+    a.uvcDeviceIndex = c.camera.uvcDeviceIndex;
+    a.uvcEyeWidth = c.camera.uvcEyeWidth > 0 ? c.camera.uvcEyeWidth : c.camera.width;
+    a.uvcEyeHeight = c.camera.uvcEyeHeight > 0 ? c.camera.uvcEyeHeight : c.camera.height;
+    a.uvcPackedStereo = c.camera.uvcPackedStereo;
     a.aeDisable = c.camera.aeDisable;
     a.exposureUs = c.camera.exposureUs;
     a.gain = c.camera.gain;
@@ -237,8 +241,12 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
     std::cerr << "cam " << a.width << "x" << a.height << " @" << a.fps
               << " aeDisable=" << (a.aeDisable ? "true" : "false") << " exp_us=" << a.exposureUs << " gain=" << a.gain
               << " pixelFormat=R16\n";
-    std::cerr << "cam_select left_index=" << a.leftCamIndex << " right_index=" << a.rightCamIndex << "\n";
-    std::cerr << "pair_thresh=" << a.pairMs << "ms keep_window=" << a.keepMs << "ms pair_queue=" << a.pairQueue << "\n";
+    std::cerr << "cam_select left_index=" << a.leftCamIndex << " right_index=" << a.rightCamIndex
+              << " uvc_device_index=" << a.uvcDeviceIndex << "\n";
+    std::cerr << "stereo_input eye=" << a.uvcEyeWidth << "x" << a.uvcEyeHeight
+              << " packed_stereo=" << (a.uvcPackedStereo ? "Y" : "N")
+              << " pair_window_ms=" << a.pairMs << " keep_window_ms=" << a.keepMs << " frame_queue=" << a.pairQueue
+              << "\n";
     std::cerr << "slam_input_fps=" << a.slamInputFps << " camera_fps=" << a.fps
               << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
     std::cerr << "slam_mode=" << smartdrone::core::domain::ToString(a.slamOperationMode) << "\n";

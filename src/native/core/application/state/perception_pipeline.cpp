@@ -24,22 +24,27 @@ StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(ports::ICameraPro
 
     if (!camera.GrabStereo(stereo, timeoutMs, m_cfg.preferLatestFrame, minTimestampNs)) {
         const auto diag = camera.GetDiagnostics();
-        const char *likelyCause = "pair_wait_timeout";
+        const bool packedStereo = camera.Semantics() == ports::CameraProviderSemantics::PackedStereoSingleDevice;
+        const char *likelyCause = "stereo_frame_wait_timeout";
         if (!diag.acceptFrames) {
             likelyCause = "camera_not_accepting_frames";
         } else if (!diag.healthy) {
             likelyCause = "camera_unhealthy";
-        } else if (diag.lastFrameAgeMsL >= timeoutMs && diag.lastFrameAgeMsR < timeoutMs) {
+        } else if (packedStereo && diag.lastFrameAgeMsL >= timeoutMs && diag.lastFrameAgeMsR >= timeoutMs) {
+            likelyCause = "packed_stereo_stream_stalled";
+        } else if (packedStereo && diag.pairedQueue > 0) {
+            likelyCause = "eligible_frame_filter";
+        } else if (!packedStereo && diag.lastFrameAgeMsL >= timeoutMs && diag.lastFrameAgeMsR < timeoutMs) {
             likelyCause = "left_stream_stalled";
-        } else if (diag.lastFrameAgeMsR >= timeoutMs && diag.lastFrameAgeMsL < timeoutMs) {
+        } else if (!packedStereo && diag.lastFrameAgeMsR >= timeoutMs && diag.lastFrameAgeMsL < timeoutMs) {
             likelyCause = "right_stream_stalled";
-        } else if (diag.pendingL > 0 && diag.pendingR == 0) {
+        } else if (!packedStereo && diag.pendingL > 0 && diag.pendingR == 0) {
             likelyCause = "waiting_right_frame";
-        } else if (diag.pendingR > 0 && diag.pendingL == 0) {
+        } else if (!packedStereo && diag.pendingR > 0 && diag.pendingL == 0) {
             likelyCause = "waiting_left_frame";
-        } else if (diag.pendingL > 0 && diag.pendingR > 0 && diag.pairedQueue == 0) {
+        } else if (!packedStereo && diag.pendingL > 0 && diag.pendingR > 0 && diag.pairedQueue == 0) {
             likelyCause = "pairing_threshold_or_min_ts";
-        } else if (diag.pairedQueue > 0) {
+        } else if (!packedStereo && diag.pairedQueue > 0) {
             likelyCause = "eligible_pair_filter";
         }
 

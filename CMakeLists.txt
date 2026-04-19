@@ -6,6 +6,19 @@ option(CROSS_AARCH64 "Enable aarch64 cross compile" ON)
 option(BUILD_SMART_DRONE "Build unified stereo runtime application" ON)
 option(ENABLE_UNIT_TESTS "Build unit tests" OFF)
 option(ENABLE_OFFLINE_REPLAY "Build host-side offline replay tool" OFF)
+set(SMART_DRONE_CAMERA_PROVIDER "libcamera_stereo_ov9281" CACHE STRING
+    "Camera provider implementation compiled into the native runtime")
+set(_SMART_DRONE_CAMERA_PROVIDERS "libcamera_stereo_ov9281;uvc_stereo_opencv")
+if(NOT SMART_DRONE_CAMERA_PROVIDER IN_LIST _SMART_DRONE_CAMERA_PROVIDERS)
+  message(FATAL_ERROR
+    "Unsupported SMART_DRONE_CAMERA_PROVIDER='${SMART_DRONE_CAMERA_PROVIDER}'. "
+    "Supported values: ${_SMART_DRONE_CAMERA_PROVIDERS}")
+endif()
+set(SMART_DRONE_USE_LIBCAMERA OFF)
+if(SMART_DRONE_CAMERA_PROVIDER STREQUAL "libcamera_stereo_ov9281")
+  set(SMART_DRONE_USE_LIBCAMERA ON)
+endif()
+set(SMART_DRONE_LIBCAMERA_INCLUDE_DIRS "")
 
 if(NOT BUILD_SMART_DRONE AND NOT ENABLE_UNIT_TESTS AND NOT ENABLE_OFFLINE_REPLAY)
   message(FATAL_ERROR "Enable BUILD_SMART_DRONE, ENABLE_UNIT_TESTS, or ENABLE_OFFLINE_REPLAY")
@@ -55,18 +68,21 @@ list(PREPEND CMAKE_PREFIX_PATH "${SYSROOT}/usr")
 function(configure_common_target target_name)
   target_include_directories(${target_name} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/c_library_v2"
-    ${LIBCAMERA_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
   )
+  if(SMART_DRONE_USE_LIBCAMERA)
+    target_include_directories(${target_name} PRIVATE ${SMART_DRONE_LIBCAMERA_INCLUDE_DIRS})
+    if(LIBCAMERA_CFLAGS_OTHER)
+      target_compile_options(${target_name} PRIVATE ${LIBCAMERA_CFLAGS_OTHER})
+    endif()
+  endif()
 
   target_compile_options(${target_name} PRIVATE -O3 -w)
-  target_link_directories(${target_name} PRIVATE ${LIBCAMERA_LIBRARY_DIRS})
-  target_link_libraries(${target_name} PRIVATE
-    ${LIBCAMERA_LIBRARIES}
-    ${OpenCV_LIBS}
-    pthread
-    gpiod
-  )
+  target_link_libraries(${target_name} PRIVATE ${OpenCV_LIBS} pthread gpiod)
+  if(SMART_DRONE_USE_LIBCAMERA)
+    target_link_directories(${target_name} PRIVATE ${LIBCAMERA_LIBRARY_DIRS})
+    target_link_libraries(${target_name} PRIVATE ${LIBCAMERA_LIBRARIES})
+  endif()
 
   if(ENABLE_ARM_CPU_TUNING AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$" AND NOT ARM_CPU_TUNE STREQUAL "")
     target_compile_options(${target_name} PRIVATE "-mcpu=${ARM_CPU_TUNE}" "-mtune=${ARM_CPU_TUNE}")
@@ -105,9 +121,20 @@ endfunction()
 
 if(BUILD_SMART_DRONE)
   set(ORB_SLAM3_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/ORB_SLAM3" CACHE PATH "ORB_SLAM3 root")
-  set(ORB_LIB_DIR    "${ORB_SLAM3_ROOT}/lib")
-  set(G2O_LIB_DIR    "${ORB_SLAM3_ROOT}/Thirdparty/g2o/lib")
-  set(DBOW2_LIB_DIR  "${ORB_SLAM3_ROOT}/Thirdparty/DBoW2/lib")
+  set(ORB_LIB_DIR "${ORB_LIB_DIR}" CACHE PATH "Directory containing libORB_SLAM3")
+  if(ORB_LIB_DIR STREQUAL "")
+    set(ORB_LIB_DIR "${ORB_SLAM3_ROOT}/lib" CACHE PATH "Directory containing libORB_SLAM3" FORCE)
+  endif()
+
+  set(G2O_LIB_DIR "${G2O_LIB_DIR}" CACHE PATH "Directory containing libg2o")
+  if(G2O_LIB_DIR STREQUAL "")
+    set(G2O_LIB_DIR "${ORB_SLAM3_ROOT}/Thirdparty/g2o/lib" CACHE PATH "Directory containing libg2o" FORCE)
+  endif()
+
+  set(DBOW2_LIB_DIR "${DBOW2_LIB_DIR}" CACHE PATH "Directory containing libDBoW2")
+  if(DBOW2_LIB_DIR STREQUAL "")
+    set(DBOW2_LIB_DIR "${ORB_SLAM3_ROOT}/Thirdparty/DBoW2/lib" CACHE PATH "Directory containing libDBoW2" FORCE)
+  endif()
 endif()
 
 if(ENABLE_OFFLINE_REPLAY)
@@ -119,11 +146,47 @@ if(ENABLE_OFFLINE_REPLAY)
 endif()
 
 if(BUILD_SMART_DRONE)
-  find_package(PkgConfig REQUIRED)
-  pkg_check_modules(LIBCAMERA REQUIRED libcamera)
   find_package(OpenCV REQUIRED)
+  if(SMART_DRONE_USE_LIBCAMERA)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBCAMERA REQUIRED libcamera)
+    set(_SMART_DRONE_LIBCAMERA_CANDIDATES
+      ${LIBCAMERA_INCLUDE_DIRS}
+      ${LIBCAMERA_INCLUDEDIR}
+      "${SYSROOT}/usr/include"
+      "${SYSROOT}/usr/include/libcamera"
+    )
+    foreach(_candidate IN LISTS _SMART_DRONE_LIBCAMERA_CANDIDATES)
+      if(NOT _candidate)
+        continue()
+      endif()
+      if(EXISTS "${_candidate}/libcamera/framebuffer_allocator.h")
+        list(APPEND SMART_DRONE_LIBCAMERA_INCLUDE_DIRS "${_candidate}")
+      elseif(EXISTS "${_candidate}/framebuffer_allocator.h")
+        get_filename_component(_candidate_parent "${_candidate}" DIRECTORY)
+        if(EXISTS "${_candidate_parent}/libcamera/framebuffer_allocator.h")
+          list(APPEND SMART_DRONE_LIBCAMERA_INCLUDE_DIRS "${_candidate_parent}")
+        endif()
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES SMART_DRONE_LIBCAMERA_INCLUDE_DIRS)
+    if(SMART_DRONE_LIBCAMERA_INCLUDE_DIRS STREQUAL "")
+      message(FATAL_ERROR
+        "libcamera was found via pkg-config, but framebuffer_allocator.h was not found. "
+        "Check the sysroot headers under ${SYSROOT}.")
+    endif()
+    message(STATUS "Resolved libcamera include dirs: ${SMART_DRONE_LIBCAMERA_INCLUDE_DIRS}")
+  endif()
 
   add_subdirectory(src/native)
+  target_compile_definitions(smart_drone PRIVATE
+    SMART_DRONE_CAMERA_PROVIDER_NAME="${SMART_DRONE_CAMERA_PROVIDER}"
+  )
+  if(SMART_DRONE_CAMERA_PROVIDER STREQUAL "libcamera_stereo_ov9281")
+    target_compile_definitions(smart_drone PRIVATE SMART_DRONE_CAMERA_PROVIDER_LIBCAMERA_OV9281=1)
+  elseif(SMART_DRONE_CAMERA_PROVIDER STREQUAL "uvc_stereo_opencv")
+    target_compile_definitions(smart_drone PRIVATE SMART_DRONE_CAMERA_PROVIDER_UVC_OPENCV=1)
+  endif()
   configure_common_target(smart_drone)
   configure_orb_target(smart_drone)
 endif()

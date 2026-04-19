@@ -4,13 +4,14 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-  ./scripts/upload.sh [--restart] [--adb-ip <ip> --adb-port <port>] [--apk <path>] [--adb-only]
+  ./scripts/upload.sh [--restart] [--platform <name>] [--adb-ip <ip> --adb-port <port>] [--apk <path>] [--adb-only]
 
 Environment variables:
   TARGET_HOST        SSH host, default: ltz@192.168.0.105
   REMOTE_DIR         Remote deploy directory, default: /home/ltz
   REMOTE_SERVICE     systemd service name, default: smart_drone
   RESTART_SERVICE    1 to restart service after deploy, default: 0
+  DEPLOY_PLATFORM    Artifact platform name under output/artifacts, default: cm5
 EOF
 }
 
@@ -18,11 +19,21 @@ RESTART_SERVICE="${RESTART_SERVICE:-0}"
 ADB_IP="${ADB_IP:-}"
 ADB_PORT="${ADB_PORT:-}"
 ADB_ONLY="${ADB_ONLY:-0}"
+DEPLOY_PLATFORM="${DEPLOY_PLATFORM:-cm5}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --restart)
             RESTART_SERVICE=1
+            ;;
+        --platform)
+            if [ $# -lt 2 ]; then
+                echo "Missing value for --platform" >&2
+                usage
+                exit 1
+            fi
+            DEPLOY_PLATFORM="$2"
+            shift
             ;;
         --adb-ip)
             if [ $# -lt 2 ]; then
@@ -72,16 +83,23 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TARGET_HOST="${TARGET_HOST:-ltz@192.168.0.105}"
 REMOTE_DIR="${REMOTE_DIR:-/home/ltz}"
 REMOTE_SERVICE="${REMOTE_SERVICE:-smart_drone}"
-APK_PATH="${APK_PATH:-$REPO_ROOT/src/android/app/build/outputs/apk/debug/app-debug.apk}"
+ARTIFACT_ROOT="$REPO_ROOT/output/artifacts/$DEPLOY_PLATFORM"
+if [ -z "${APK_PATH:-}" ]; then
+    if [ -f "$REPO_ROOT/output/artifacts/android/latest.apk" ]; then
+        APK_PATH="$REPO_ROOT/output/artifacts/android/latest.apk"
+    else
+        APK_PATH="$REPO_ROOT/src/android/app/build/outputs/apk/debug/app-debug.apk"
+    fi
+fi
 
-SMART_DRONE_BIN="$REPO_ROOT/build/cmake/src/native/smart_drone"
-ORB_SO="$REPO_ROOT/ORB_SLAM3/lib/libORB_SLAM3.so"
-DBOW2_SO="$REPO_ROOT/ORB_SLAM3/Thirdparty/DBoW2/lib/libDBoW2.so"
-G2O_SO="$REPO_ROOT/ORB_SLAM3/Thirdparty/g2o/lib/libg2o.so"
-CALIB_YAML="$REPO_ROOT/config/stereo_inertial.yaml"
-STEREO_YAML="$REPO_ROOT/config/stereo.yaml"
-MONO_YAML="$REPO_ROOT/config/mono_right.yaml"
-MONO_IMU_YAML="$REPO_ROOT/config/mono_inertial_right.yaml"
+SMART_DRONE_BIN="$ARTIFACT_ROOT/bin/smart_drone"
+ORB_SO="$ARTIFACT_ROOT/lib/libORB_SLAM3.so"
+DBOW2_SO="$ARTIFACT_ROOT/lib/libDBoW2.so"
+G2O_SO="$ARTIFACT_ROOT/lib/libg2o.so"
+CALIB_YAML="$ARTIFACT_ROOT/config/stereo_inertial.yaml"
+STEREO_YAML="$ARTIFACT_ROOT/config/stereo.yaml"
+MONO_YAML="$ARTIFACT_ROOT/config/mono_right.yaml"
+MONO_IMU_YAML="$ARTIFACT_ROOT/config/mono_inertial_right.yaml"
 
 require_file() {
     if [ ! -f "$1" ]; then

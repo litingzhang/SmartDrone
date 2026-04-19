@@ -6,9 +6,25 @@ set(SMART_DRONE_MAIN_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/main.cpp"
 )
 
+set(SMART_DRONE_CAMERA_SOURCES)
+if(SMART_DRONE_CAMERA_PROVIDER STREQUAL "libcamera_stereo_ov9281")
+  list(APPEND SMART_DRONE_CAMERA_SOURCES
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/libcamera_ov9281/stereo_ov9281.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/libcamera_stereo_camera.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/camera_provider_factory_libcamera.cpp"
+  )
+elseif(SMART_DRONE_CAMERA_PROVIDER STREQUAL "uvc_stereo_opencv")
+  list(APPEND SMART_DRONE_CAMERA_SOURCES
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/uvc_stereo_camera.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/camera_provider_factory_uvc.cpp"
+  )
+else()
+  message(FATAL_ERROR
+    "Unsupported SMART_DRONE_CAMERA_PROVIDER='${SMART_DRONE_CAMERA_PROVIDER}'. "
+    "Currently supported: libcamera_stereo_ov9281, uvc_stereo_opencv")
+endif()
+
 set(SMART_DRONE_ADAPTER_SOURCES
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/libcamera_ov9281/stereo_ov9281.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/libcamera_stereo_camera.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/command/udp_tlv_command_channel.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688/icm42688_imu.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688_imu_provider.cpp"
@@ -18,6 +34,7 @@ set(SMART_DRONE_ADAPTER_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/mavlink_pose_publisher.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/mavlink_serial_transport.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/px4_mavlink_gateway.cpp"
+  ${SMART_DRONE_CAMERA_SOURCES}
 )
 
 set(SMART_DRONE_COMMON_SOURCES

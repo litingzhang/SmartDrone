@@ -68,8 +68,9 @@ void Px4MavlinkGateway::StartRx()
     StopRx();
     m_havePx4Heartbeat.store(false);
     m_rxRunning.store(true);
-    m_rxThread = SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::MavlinkRx, "Px4MavlinkGateway",
-                                         [this]() { this->RxLoop(); });
+    m_rxThread = smartdrone::common::StartThread(
+        smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::MavlinkRx, "Px4MavlinkGateway"),
+        [this]() { this->RxLoop(); });
 }
 
 void Px4MavlinkGateway::StopRx()
@@ -259,8 +260,10 @@ void Px4MavlinkGateway::StartSetpointStreamHz(double hz)
     m_streamPeriodUs = static_cast<uint64_t>(1e6 / hz);
     StopSetpointStream();
     m_streaming.store(true);
-    m_streamThread =
-        SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::MavlinkSetpointStream, "Px4MavlinkGateway", [this]() {
+    m_streamThread = smartdrone::common::StartThread(
+        smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::MavlinkSetpointStream,
+                                                 "Px4MavlinkGateway"),
+        [this]() {
             while (this->m_streaming.load()) {
                 const uint32_t tMs = MonoTimeMs32();
                 SetpointLocalNED sp;

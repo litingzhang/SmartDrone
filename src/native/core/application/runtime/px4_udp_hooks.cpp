@@ -9,8 +9,9 @@ namespace smartdrone::core::application {
 
 Px4UdpHooks::Px4UdpHooks(Px4MavlinkGateway &mavlink, LivePoseState &livePose) : m_mavlink(mavlink), m_livePose(livePose)
 {
-    m_manualLoop = SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::ManualControl, "Px4UdpHooks",
-                                           [this]() { ManualControlLoop(); });
+    m_manualLoop = smartdrone::common::StartThread(
+        smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::ManualControl, "Px4UdpHooks"),
+        [this]() { ManualControlLoop(); });
 }
 
 Px4UdpHooks::~Px4UdpHooks()

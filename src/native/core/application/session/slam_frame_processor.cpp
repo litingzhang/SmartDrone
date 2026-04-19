@@ -109,12 +109,13 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const bool sendImage = m_ctx.tuning.sendImage.load(std::memory_order_relaxed);
     const bool sendFeature = m_ctx.tuning.sendFeature.load(std::memory_order_relaxed);
     const bool sendMap = m_ctx.tuning.sendMap.load(std::memory_order_relaxed);
-    const int64_t pairDtMs = m_ctx.cameraProvider.LastPairDtMs();
-    const double rejectDtMs = static_cast<double>(m_ctx.cameraProvider.LastRejectDtUs()) / 1000.0;
-    const uint64_t dropUnpairedL = m_ctx.cameraProvider.DroppedUnpairedL();
-    const uint64_t dropUnpairedR = m_ctx.cameraProvider.DroppedUnpairedR();
-    const size_t pendingL = m_ctx.cameraProvider.PendingL();
-    const size_t pendingR = m_ctx.cameraProvider.PendingR();
+    const auto cameraDiag = m_ctx.cameraProvider.GetDiagnostics();
+    const int64_t pairDtMs = cameraDiag.lastPairDtMs;
+    const double rejectDtMs = static_cast<double>(cameraDiag.lastRejectDtUs) / 1000.0;
+    const uint64_t dropUnpairedL = cameraDiag.droppedUnpairedL;
+    const uint64_t dropUnpairedR = cameraDiag.droppedUnpairedR;
+    const size_t pendingL = cameraDiag.pendingL;
+    const size_t pendingR = cameraDiag.pendingR;
     const int64_t captureTimestampNs =
         m_ctx.monoMode ? static_cast<int64_t>(R.timestampNs) : stereoBatch.captureTimestampNs;
     const int64_t logicalFrameTimestampNs =
@@ -386,7 +387,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 DurationMs(postStartTp, postEndTp), DurationMs(livePoseStartTp, livePoseEndTp),
                 DurationMs(publishStartTp, publishEndTp), totalMs);
         }
-        LOGI("%s", dfxLine);
+        Logger::Logf(Logger::INFO, "%s", dfxLine);
     }
 
     return StepResult::Continue;

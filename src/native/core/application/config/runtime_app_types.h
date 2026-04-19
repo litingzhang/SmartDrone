@@ -22,6 +22,10 @@ struct RemoteRuntimeConfig {
     int exposureUs{3000};
     float gain{2.0f};
     int pairMs{2};
+    int uvcDeviceIndex{0};
+    int uvcEyeWidth{640};
+    int uvcEyeHeight{400};
+    bool uvcPackedStereo{true};
     bool autoExposureEnabled{true};
     int slamInputFps{0};
     domain::SlamOperationMode slamOperationMode{domain::SlamOperationMode::Mapping};
@@ -52,8 +56,9 @@ struct MainRuntimeAliases {
     FeatureFrontend featureFrontend{FeatureFrontend::Orb};
     int width{}, height{}, fps{}, slamInputFps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{},
         pairQueue{};
+    int uvcDeviceIndex{}, uvcEyeWidth{}, uvcEyeHeight{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{}, debugRightOnlyFeatures{},
-        slamLowLightEnhance{}, jsonDiagnostics{};
+        slamLowLightEnhance{}, jsonDiagnostics{}, uvcPackedStereo{};
     bool sendImage{true}, sendFeature{true}, sendMap{false};
     float gain{};
     std::string udpIp, spiDev, gpiochip;

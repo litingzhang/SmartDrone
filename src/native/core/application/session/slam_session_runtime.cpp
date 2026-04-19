@@ -192,7 +192,8 @@ SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg, LiveRuntimeTuni
                                 : smartdrone::adapters::slam::OrbInputMode::Stereo),
       m_effectiveSettingsPath(BuildEffectiveSlamSettingsPath(cfg)),
       m_slamSystem(std::make_unique<ORB_SLAM3::System>(cfg.app.vocab, m_effectiveSettingsPath, m_orbSensor, false)),
-      m_slamEngine(std::move(m_slamSystem), m_orbInputMode, m_useImu), m_cameraProvider(m_cam),
+      m_slamEngine(std::move(m_slamSystem), m_orbInputMode, m_useImu),
+      m_cameraProvider(CreateCameraProvider()),
       m_imuProvider(m_imuState.imuBuffer, MakeImuProviderConfig(m_aliases)), m_posePublisher(mav),
       m_perceptionPipeline(PerceptionPipelineConfig{m_aliases.fps, true}),
       m_frameProcessorState(MakeInitialFrameProcessorState(m_aliases))
@@ -257,7 +258,8 @@ bool SlamSessionRuntime::Start()
     if (m_useImu) {
         m_imuThread = StartImuThread(m_aliases, m_imuState, m_stop, m_runningFlag);
     }
-    if (!OpenCamera(m_cam, m_aliases)) {
+    const bool cameraOpened = m_cameraProvider && m_cameraProvider->Open(m_aliases);
+    if (!cameraOpened) {
         m_stop.store(true);
         CleanupAfterStartFailure();
         return false;
@@ -272,7 +274,7 @@ void SlamSessionRuntime::Stop()
 {
     m_mav.SetFrameTimingTracker(nullptr);
     if (m_cameraOpen) {
-        m_cam.Close();
+        m_cameraProvider->Close();
         m_cameraOpen = false;
         std::cerr << "[session] slam camera closed\n";
     }
@@ -314,7 +316,8 @@ SlamFrameProcessor &SlamSessionRuntime::FrameProcessor()
     if (!m_frameProcessorContext) {
         m_frameProcessorContext = std::make_unique<SlamFrameProcessor::Context>(SlamFrameProcessor::Context{
             m_aliases, m_monoMode, m_useImu, m_tuning, m_livePose, m_mav, m_slamEngine, &m_xfeatFrontendClient,
-            m_cameraProvider, m_imuProvider, m_posePublisher, m_udp, m_frameTimingTracker, m_perceptionPipeline, m_posePostprocessor,
+            *m_cameraProvider, m_imuProvider, m_posePublisher, m_udp, m_frameTimingTracker, m_perceptionPipeline,
+            m_posePostprocessor,
             m_autoSlamModeController, m_stereoBodyExtrinsics});
     }
     if (!m_frameProcessor) {
@@ -327,7 +330,7 @@ void SlamSessionRuntime::CleanupAfterStartFailure()
 {
     m_mav.SetFrameTimingTracker(nullptr);
     if (m_cameraOpen) {
-        m_cam.Close();
+        m_cameraProvider->Close();
         m_cameraOpen = false;
     }
     if (m_imuThread.joinable()) {

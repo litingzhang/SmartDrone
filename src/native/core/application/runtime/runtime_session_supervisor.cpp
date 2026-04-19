@@ -18,8 +18,10 @@ RuntimeSessionSupervisor::RuntimeSessionSupervisor(std::atomic<bool> &runningFla
 
 void RuntimeSessionSupervisor::Start()
 {
-    m_worker = SMARTDRONE_START_THREAD(smartdrone::common::ThreadRole::RuntimeWorker, "RuntimeSessionSupervisor",
-                                       [this]() { Loop(); });
+    m_worker = smartdrone::common::StartThread(
+        smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::RuntimeWorker,
+                                                 "RuntimeSessionSupervisor"),
+        [this]() { Loop(); });
 }
 
 void RuntimeSessionSupervisor::Stop()
@@ -142,8 +144,9 @@ void RuntimeSessionSupervisor::Loop()
             }
         }
         if (startSession) {
-            m_session = SMARTDRONE_START_THREAD(
-                smartdrone::common::ThreadRole::RuntimeSession, "RuntimeSessionSupervisor",
+            m_session = smartdrone::common::StartThread(
+                smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::RuntimeSession,
+                                                         "RuntimeSessionSupervisor"),
                 [this, cfg, startMode]() mutable {
                     bool ok = false;
                     if (startMode == ControllerMode::Slam && m_slamSessionRunner) {

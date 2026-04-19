@@ -123,6 +123,11 @@ void RemapKeypointsToSource(std::vector<cv::Point2f> &keypoints, float scaleX, f
     }
 }
 
+bool IsXFeatTrackingStateSafe(int trackingState)
+{
+    return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::OK_KLT;
+}
+
 } // namespace
 
 OrbSlam3Engine::OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, OrbInputMode inputMode, bool useImu)
@@ -199,11 +204,11 @@ bool OrbSlam3Engine::BuildMonoExternalData(const cv::Mat &gray, ORB_SLAM3::Exter
         return false;
     }
     RemapKeypointsToSource(features.keypoints, scaleX, scaleY);
-    m_lastXFeatRawRightCount = static_cast<int>(features.keypoints.size());
+    m_lastXFeatRawLeftCount = static_cast<int>(features.keypoints.size());
 
     outData.keypoints = ToKeyPoints(features.keypoints);
     outData.descriptors = std::move(features.descriptors);
-    m_lastXFeatInjectedRightCount = static_cast<int>(outData.keypoints.size());
+    m_lastXFeatInjectedLeftCount = static_cast<int>(outData.keypoints.size());
     return !outData.keypoints.empty() && !outData.descriptors.empty();
 }
 
@@ -282,8 +287,11 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     const bool monoMode = (m_inputMode != OrbInputMode::Stereo);
     const cv::Mat &monoImage =
         (m_inputMode == OrbInputMode::MonoRight) ? input.stereo.right.gray : input.stereo.left.gray;
-    const bool tryXFeat = m_featureFrontend == FeatureFrontend::XFeat && m_xfeatFrontendClient != nullptr &&
-                          m_xfeatFrontendClient->Running();
+    const int previousTrackingState = m_system->GetTrackingState();
+    const bool tryXFeat =
+        m_featureFrontend == FeatureFrontend::XFeat && m_xfeatFrontendClient != nullptr &&
+        m_xfeatFrontendClient->Running() && m_system->CanUseExternalFeatureInjection() &&
+        IsXFeatTrackingStateSafe(previousTrackingState);
 
     ORB_SLAM3::ExternalMonoFrameData monoExternal;
     ORB_SLAM3::ExternalStereoFrameData stereoExternal;

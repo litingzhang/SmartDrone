@@ -187,6 +187,7 @@ public:
     // You can call this right after TrackMonocular (or stereo or RGBD)
     int GetTrackingState();
     unsigned long GetCurrentMapId();
+    bool CanUseExternalFeatureInjection() const;
     TrackedVisualData ExtractTrackedVisualData(int leftImageWidth,
                                                int leftImageHeight,
                                                int rightImageWidth,
