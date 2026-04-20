@@ -198,6 +198,7 @@ export SYSROOT=/opt/sysroots/cm5
 - `output/artifacts/cm5/bin/smart_drone`
 - `output/artifacts/cm5/lib/`
 - `output/artifacts/cm5/config/`
+- `output/artifacts/cm5/scripts/`
 
 ### 2A.6 为 Jetson Orin NX 构建
 
@@ -221,6 +222,7 @@ export JETSON_SYSROOT=/opt/sysroots/jetson-orin-nx
 - `output/artifacts/jetson-orin-nx/bin/smart_drone`
 - `output/artifacts/jetson-orin-nx/lib/`
 - `output/artifacts/jetson-orin-nx/config/`
+- `output/artifacts/jetson-orin-nx/scripts/`
 
 ### 2A.7 部署到目标机
 
@@ -248,6 +250,7 @@ TARGET_HOST=ltz@192.168.0.105 REMOTE_DIR=/home/ltz \
 - `config/stereo_inertial.yaml`
 - `config/mono_right.yaml`
 - `config/mono_inertial_right.yaml`
+- 当打包后的 worker 脚本存在时，包含 `scripts/xfeat_keypoint_worker.py`
 
 ### 2A.8 目标机初次运行
 
@@ -457,6 +460,7 @@ TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./scripts/upload.sh --restart
 - 需要时会在远端创建 `~/config`
 - 上传 `config/stereo.yaml`、`config/stereo_inertial.yaml`
 - 上传 `config/mono_right.yaml`、`config/mono_inertial_right.yaml`
+- 当 `output/artifacts/<platform>/scripts/xfeat_keypoint_worker.py` 存在时一并上传
 - 远端先写入 `*.new` 再 `mv` 原子替换
 
 上传脚本环境变量：

@@ -23,12 +23,14 @@ class XFeatFrontendClient {
     XFeatFrontendClient(const XFeatFrontendClient &) = delete;
     XFeatFrontendClient &operator=(const XFeatFrontendClient &) = delete;
 
-    bool Start(const std::string &pythonBin, const std::string &workerScript, const std::string &repoPath, int topK,
-               int maxPoints, std::string *err);
+    bool Start(const std::string &pythonBin, const std::string &workerScript, const std::string &repoPath,
+               const std::string &device, int topK, int maxPoints, std::string *err);
     void Stop();
     bool Running() const;
     bool Detect(const cv::Mat &gray, std::vector<cv::Point2f> &outPoints, std::string *err);
     bool DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet &outFeatures, std::string *err);
+    bool DetectAndComputeStereo(const cv::Mat &leftGray, const cv::Mat &rightGray, XFeatFeatureSet &leftFeatures,
+                                XFeatFeatureSet &rightFeatures, std::string *err);
 
   private:
     int m_stdinFd{-1};
@@ -36,6 +38,8 @@ class XFeatFrontendClient {
     pid_t m_pid{-1};
     uint32_t m_requestSeq{0};
 
+    static bool PrepareGrayImage(const cv::Mat &gray, cv::Mat &gray8, std::string *err);
+    bool ReadFeatureSet(XFeatFeatureSet &outFeatures, std::string *err);
     bool WriteExact(const void *data, size_t size, std::string *err);
     bool ReadExact(void *data, size_t size, std::string *err);
 };

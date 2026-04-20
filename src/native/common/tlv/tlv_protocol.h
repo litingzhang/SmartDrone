@@ -55,6 +55,10 @@ constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // v7 additionally stores ORB extractor params as f32le:
 // nFeatures [69..72], scaleFactor [73..76], nLevels [77..80], iniThFAST [81..84], minThFAST [85..88].
 // v8 additionally stores featureFrontend(u8) at byte [89] where 0=orb and 1=xfeat.
+// v9 additionally stores XFeat params as f32le:
+// topK [90..93], maxPoints [94..97].
+// v10 additionally stores XFeat input size limits as f32le:
+// inputMaxWidth [98..101], inputMaxHeight [102..105].
 // legacy v1 (len=40) omitted pairMs and started reservedOrIp at byte 10.
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY = 40;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V2 = 42;
@@ -64,6 +68,8 @@ constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V5 = 61;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V6 = 69;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V7 = 89;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V8 = 90;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V9 = 98;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V10 = 106;
 constexpr uint16_t RUNTIME_CONFIG_PAIR_MS_OFFSET = 10;
 constexpr uint16_t RUNTIME_CONFIG_IP_OFFSET = 12;
 constexpr uint16_t RUNTIME_CONFIG_IP_LEN = 30;
@@ -83,6 +89,10 @@ constexpr uint16_t RUNTIME_CONFIG_ORB_NLEVELS_OFFSET = 77;
 constexpr uint16_t RUNTIME_CONFIG_ORB_INI_TH_FAST_OFFSET = 81;
 constexpr uint16_t RUNTIME_CONFIG_ORB_MIN_TH_FAST_OFFSET = 85;
 constexpr uint16_t RUNTIME_CONFIG_FEATURE_FRONTEND_OFFSET = 89;
+constexpr uint16_t RUNTIME_CONFIG_XFEAT_TOP_K_OFFSET = 90;
+constexpr uint16_t RUNTIME_CONFIG_XFEAT_MAX_POINTS_OFFSET = 94;
+constexpr uint16_t RUNTIME_CONFIG_XFEAT_INPUT_MAX_WIDTH_OFFSET = 98;
+constexpr uint16_t RUNTIME_CONFIG_XFEAT_INPUT_MAX_HEIGHT_OFFSET = 102;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;

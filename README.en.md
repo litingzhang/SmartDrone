@@ -209,6 +209,7 @@ Artifacts are written to:
 - `output/artifacts/cm5/bin/smart_drone`
 - `output/artifacts/cm5/lib/`
 - `output/artifacts/cm5/config/`
+- `output/artifacts/cm5/scripts/`
 
 ### 6. Build For Jetson Orin NX
 
@@ -232,6 +233,7 @@ Artifacts are written to:
 - `output/artifacts/jetson-orin-nx/bin/smart_drone`
 - `output/artifacts/jetson-orin-nx/lib/`
 - `output/artifacts/jetson-orin-nx/config/`
+- `output/artifacts/jetson-orin-nx/scripts/`
 
 ### 7. Deploy To The Device
 
@@ -259,6 +261,7 @@ The uploader expects these files to exist in `output/artifacts/<platform>`:
 - `config/stereo_inertial.yaml`
 - `config/mono_right.yaml`
 - `config/mono_inertial_right.yaml`
+- `scripts/xfeat_keypoint_worker.py` when the packaged worker script is present
 
 ### 8. Initial Run On The Device
 
@@ -624,6 +627,7 @@ Deployment behavior:
 - Create `~/config` on the target when needed
 - Upload `config/stereo.yaml` and `config/stereo_inertial.yaml`
 - Upload `config/mono_right.yaml` and `config/mono_inertial_right.yaml`
+- Upload `scripts/xfeat_keypoint_worker.py` when it exists under `output/artifacts/<platform>/scripts/`
 - Upload to temporary `*.new` files first, then atomically replace the final files with `mv`
 
 Deployment environment variables:

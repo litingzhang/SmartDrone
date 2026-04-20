@@ -12,8 +12,10 @@ import numpy as np
 import torch
 
 
-REQUEST_HEADER = struct.Struct("<IIII")
-RESPONSE_HEADER = struct.Struct("<III")
+REQUEST_HEADER = struct.Struct("<II")
+IMAGE_HEADER = struct.Struct("<III")
+RESPONSE_HEADER = struct.Struct("<II")
+FEATURE_HEADER = struct.Struct("<II")
 READY_MAGIC = b"XFWKRDY1"
 
 
@@ -30,6 +32,26 @@ def _read_exact(stream, size: int) -> bytes | None:
             return None
         chunks.extend(block)
     return bytes(chunks)
+
+
+def _empty_result() -> tuple[torch.Tensor, torch.Tensor]:
+    return (
+        torch.zeros((0, 2), dtype=torch.float32),
+        torch.zeros((0, 64), dtype=torch.float32),
+    )
+
+
+def _normalize_result(result: dict, max_points: int) -> tuple[torch.Tensor, torch.Tensor]:
+    keypoints = result["keypoints"]
+    descriptors = result["descriptors"]
+    if keypoints.ndim != 2 or keypoints.shape[1] != 2:
+        keypoints, descriptors = _empty_result()
+    elif descriptors.ndim != 2:
+        _, descriptors = _empty_result()
+    limit = max(1, max_points)
+    keypoints = keypoints[:limit].detach().to(torch.float32).cpu().contiguous()
+    descriptors = descriptors[:limit].detach().to(torch.float32).cpu().contiguous()
+    return keypoints, descriptors
 
 
 def _load_xfeat_class(repo_path: str):
@@ -51,17 +73,35 @@ def _load_xfeat_class(repo_path: str):
     return module.XFeat
 
 
+def _resolve_device(device_arg: str) -> torch.device:
+    normalized = (device_arg or "auto").strip().lower()
+    if normalized == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if normalized == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("cuda requested but torch.cuda.is_available() is false")
+        return torch.device("cuda")
+    if normalized == "cpu":
+        return torch.device("cpu")
+    raise RuntimeError(f"unsupported xfeat device: {device_arg}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
+    parser.add_argument("--device", default="auto")
     parser.add_argument("--top-k", type=int, default=1024)
     parser.add_argument("--max-points", type=int, default=160)
     args = parser.parse_args()
 
     try:
         xfeat_cls = _load_xfeat_class(args.repo)
+        device = _resolve_device(args.device)
         with contextlib.redirect_stdout(io.StringIO()):
             model = xfeat_cls(top_k=max(1, args.top_k))
+            to_fn = getattr(model, "to", None)
+            if callable(to_fn):
+                to_fn(device)
         sys.stdout.buffer.write(READY_MAGIC)
         sys.stdout.buffer.flush()
     except Exception as exc:
@@ -75,41 +115,55 @@ def main() -> int:
         header_bytes = _read_exact(stdin, REQUEST_HEADER.size)
         if header_bytes is None:
             return 0
-        seq, rows, cols, payload_bytes = REQUEST_HEADER.unpack(header_bytes)
-        if rows == 0 or cols == 0 or payload_bytes != rows * cols:
-            _write_stderr(
-                f"[xfeat_worker] invalid request seq={seq} rows={rows} cols={cols} payload={payload_bytes}"
-            )
+        seq, image_count = REQUEST_HEADER.unpack(header_bytes)
+        if image_count == 0:
+            _write_stderr(f"[xfeat_worker] invalid request seq={seq} image_count={image_count}")
             return 3
 
-        image_bytes = _read_exact(stdin, payload_bytes)
-        if image_bytes is None:
-            return 0
+        images = []
+        for _ in range(image_count):
+            image_header_bytes = _read_exact(stdin, IMAGE_HEADER.size)
+            if image_header_bytes is None:
+                return 0
+            rows, cols, payload_bytes = IMAGE_HEADER.unpack(image_header_bytes)
+            if rows == 0 or cols == 0 or payload_bytes != rows * cols:
+                _write_stderr(
+                    f"[xfeat_worker] invalid image header seq={seq} rows={rows} cols={cols} payload={payload_bytes}"
+                )
+                return 3
+            image_bytes = _read_exact(stdin, payload_bytes)
+            if image_bytes is None:
+                return 0
+            gray = np.frombuffer(image_bytes, dtype=np.uint8).reshape((rows, cols))
+            images.append(gray)
 
         try:
-            gray = np.frombuffer(image_bytes, dtype=np.uint8).reshape((rows, cols))
-            tensor = torch.from_numpy(gray.copy()).unsqueeze(0).unsqueeze(0).float() / 255.0
-            result = model.detectAndCompute(tensor, top_k=max(1, args.top_k))[0]
-            keypoints = result["keypoints"]
-            descriptors = result["descriptors"]
-            if keypoints.ndim != 2 or keypoints.shape[1] != 2:
-                keypoints = torch.zeros((0, 2), dtype=torch.float32)
-            if descriptors.ndim != 2:
-                descriptors = torch.zeros((0, 64), dtype=torch.float32)
-            limit = max(1, args.max_points)
-            keypoints = keypoints[:limit].detach().to(torch.float32).cpu().contiguous()
-            descriptors = descriptors[:limit].detach().to(torch.float32).cpu().contiguous()
-            descriptor_dim = int(descriptors.shape[1]) if descriptors.ndim == 2 and descriptors.shape[0] > 0 else 64
-            response = RESPONSE_HEADER.pack(seq, int(keypoints.shape[0]), descriptor_dim)
+            tensors = []
+            for gray in images:
+                tensor = torch.from_numpy(gray).unsqueeze(0).unsqueeze(0).to(device=device, dtype=torch.float32)
+                tensors.append(tensor)
+            tensor = torch.cat(tensors, dim=0)
+            tensor = tensor / 255.0
+            with torch.inference_mode():
+                results = model.detectAndCompute(tensor, top_k=max(1, args.top_k))
+            normalized_results = [_normalize_result(result, args.max_points) for result in results]
+            response = RESPONSE_HEADER.pack(seq, len(normalized_results))
             stdout.write(response)
-            if keypoints.numel() > 0:
-                stdout.write(keypoints.numpy().tobytes(order="C"))
-                stdout.write(descriptors.numpy().tobytes(order="C"))
+            for keypoints, descriptors in normalized_results:
+                descriptor_dim = (
+                    int(descriptors.shape[1]) if descriptors.ndim == 2 and descriptors.shape[0] > 0 else 64
+                )
+                stdout.write(FEATURE_HEADER.pack(int(keypoints.shape[0]), descriptor_dim))
+                if keypoints.numel() > 0:
+                    stdout.write(keypoints.numpy().tobytes(order="C"))
+                    stdout.write(descriptors.numpy().tobytes(order="C"))
             stdout.flush()
         except Exception as exc:
             _write_stderr(f"[xfeat_worker] inference failed seq={seq}: {exc}")
             try:
-                stdout.write(RESPONSE_HEADER.pack(seq, 0, 64))
+                stdout.write(RESPONSE_HEADER.pack(seq, image_count))
+                for _ in range(image_count):
+                    stdout.write(FEATURE_HEADER.pack(0, 64))
                 stdout.flush()
             except Exception:
                 return 4

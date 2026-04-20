@@ -38,6 +38,10 @@ class ConfigRegistry {
     static constexpr std::string_view kSlamOrbNLevels = "slam.orb_nlevels";
     static constexpr std::string_view kSlamOrbIniThFast = "slam.orb_ini_th_fast";
     static constexpr std::string_view kSlamOrbMinThFast = "slam.orb_min_th_fast";
+    static constexpr std::string_view kSlamXFeatTopK = "slam.xfeat_top_k";
+    static constexpr std::string_view kSlamXFeatMaxPoints = "slam.xfeat_max_points";
+    static constexpr std::string_view kSlamXFeatInputMaxWidth = "slam.xfeat_input_max_width";
+    static constexpr std::string_view kSlamXFeatInputMaxHeight = "slam.xfeat_input_max_height";
 
     static std::vector<domain::ConfigDescriptor> DefaultDescriptors();
 

@@ -91,6 +91,37 @@ TLV 指令经 `TlvCmdRouter` -> `Px4UdpHooks`，主要能力：
 - 按配置发送图像/特征/点云
 - 输出 `slam_dfx` 与时延诊断
 
+### 3.4A XFeat 集成适配
+
+当前 `xfeat` 集成属于叠加在 ORB-SLAM3 现有跟踪主链上的外部前端适配层，不是完整的原生前端替换。
+
+当前实现包含以下 XFeat 专项适配：
+
+- Worker 进程执行：
+  `smart_drone` 通过 `XFeatFrontendClient` 启动独立 Python worker，使用二进制管道协议传输灰度图，并接收关键点与 `CV_32F` 描述子。
+- 运行设备可选：
+  worker 支持 `auto/cpu/cuda` 三种设备选择。`auto` 在 Jetson 类目标上优先选择 CUDA，在 CM5 类目标上回落到 CPU。
+- XFeat 运行时参数化：
+  runtime config 额外暴露 `slam.xfeat_top_k`、`slam.xfeat_max_points`、`slam.xfeat_input_max_width`、`slam.xfeat_input_max_height`。参数更新通过运行时配置链路生效，并触发 SLAM 会话重启，使 worker 与前端限制同步切换到新值。
+- 双目 batch 推理：
+  stereo 模式下左右图会合并成一次 worker 请求与一次模型调用，以降低每帧 IPC 和 Python 调度开销；返回结果仍按左右图分别拆分。
+- 输入尺寸适配：
+  `orbslam3_engine` 在送入 XFeat 前会先对输入图像缩放，以限制嵌入式平台上的前端计算开销。宽高上限为运行时参数；单个维度设为 `0` 表示该维度不再限制；宽高同时为 `0` 表示关闭 XFeat 下采样。
+- 基于矫正图像的 stereo 注入：
+  对于需要 rectification 的双目 pinhole 配置，XFeat 提取发生在与 ORB-SLAM3 跟踪完全一致的 prepared image 上。为此新增了 `System::PrepareStereoImagesForTracking(...)` 和 `System::TrackStereoPreparedWithFeatures(...)`，保证特征坐标与跟踪图像处于同一 rectified 坐标系。
+- 注入前稳定性门禁：
+  只有当 worker 正常运行，且上一帧 ORB-SLAM3 跟踪状态为稳定状态（`OK` 或 `OK_KLT`）时，才启用 XFeat 注入。初始化、恢复和不稳定阶段仍沿用原始 ORB 路径。
+- 原始显示点与注入点分离：
+  运行时会分别保留原始 XFeat 检测点与真正注入 ORB-SLAM3 的特征点。显示与诊断使用 raw XFeat 点，跟踪输入使用 stereo 配对后的子集，避免将显示密度误解为实际跟踪输入密度。
+- 双目预配对约束：
+  外部注入的双目特征必须先完成左右配对。适配层会结合极线约束和视差约束完成 left-right 配对，并以 `matchedStereoPairs=true` 的形式送入 ORB-SLAM3。
+- 浮点描述子匹配兼容：
+  ORB-SLAM3 的 `ORBmatcher::DescriptorDistance(...)` 已扩展为支持 `CV_32F` 描述子，并通过类余弦距离评分实现匹配兼容；这是因为 XFeat 描述子不是 ORB 二值描述子。
+- BoW 兼容边界保持显式：
+  `Frame::ComputeBoW()` 与 `KeyFrame::ComputeBoW()` 仍只对 `CV_8U` 描述子构建 BoW 向量。因此当前 XFeat 路径兼容“跟踪注入”，但并未替换 ORB 词袋前端的全部假设。
+- 显式运行诊断：
+  `slam_dfx` 会输出 `xfeat_used`、`xfeat_raw_left/right`、`xfeat_match_stereo`、`xfeat_injected_left/right` 等字段；`orbslam3_engine` 还会输出 `xfeat_runtime_status=...`，用于区分 worker 可用性、跟踪状态门禁以及 prepared-image 注入是否启用。
+
 ### 3.5 标定会话功能
 
 `RunCalibSession` 负责：
@@ -109,6 +140,7 @@ TLV 指令经 `TlvCmdRouter` -> `Px4UdpHooks`，主要能力：
 - `T_b_c1` 运行时覆盖：开关、平移（tx/ty/tz）与姿态（roll/pitch/yaw）
   纯双目且已加载 YAML `T_b_c1` 时，运行时 `pitch` 解释为“相对基准外参的动态俯仰增量”，用于前视到下视等大角度俯仰。
 - ORB 提取器：`nFeatures`、`scaleFactor`、`nLevels`、`iniThFAST`、`minThFAST`
+- XFeat 提取器：`top_k`、`max_points`、`input_max_width`、`input_max_height`
 - 流媒体：UDP 目标 IP、image/feature/map 开关
 
 `ConfigRegistry` 标注每个配置项的：
@@ -302,7 +334,7 @@ Peer 锁定策略：
 ### 8.4 Design for eXtensibility
 
 - Ports 接口保留设备与算法替换空间
-- TLV 命令字与 payload 版本兼容（runtime config 支持 legacy/v2/v3/v4/v5/v6/v7）
+- TLV 命令字与 payload 版本兼容（runtime config 支持 legacy/v2/v3/v4/v5/v6/v7/v8/v9/v10）
 - Runtime mode 与 slam mode 枚举支持持续扩展
 
 ---
@@ -487,7 +519,7 @@ sequenceDiagram
 - 控制命令：`0x10`~`0x16`
 - 运动命令：`CMD_MOVE=0x20`
 - 运行时命令：`CMD_RUNTIME_MODE=0x30`，`CMD_RUNTIME_CONFIG=0x31`
-- `CMD_RUNTIME_CONFIG` payload 兼容版本：`legacy/v2/v3/v4/v5/v6/v7`
+- `CMD_RUNTIME_CONFIG` payload 兼容版本：`legacy/v2/v3/v4/v5/v6/v7/v8/v9/v10`
 - 查询命令：`CMD_GET_CAPABILITIES=0x33`，`CMD_GET_CONFIG=0x34`
 - 回传命令：`CMD_ACK=0xF0`，`CMD_STATE=0xF1`，`CMD_HEARTBEAT=0xF5`
 

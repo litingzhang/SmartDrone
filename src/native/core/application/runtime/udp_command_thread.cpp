@@ -91,7 +91,9 @@ RouteResult HandleRuntimeModeFrame(const TlvFrame &frame, UnifiedRuntimeControll
 RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer, UnifiedRuntimeController &controller,
                                      const PeerToIpStringFn &peerToIpString)
 {
-    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V8 && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V7 &&
+    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V10 && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V9 &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V8 &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V7 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V6 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V5 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN &&
@@ -122,6 +124,10 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     r.orbNLevels = currentCfg.app.runtime.orbNLevels;
     r.orbIniThFAST = currentCfg.app.runtime.orbIniThFAST;
     r.orbMinThFAST = currentCfg.app.runtime.orbMinThFAST;
+    r.xfeatTopK = currentCfg.app.runtime.xfeatTopK;
+    r.xfeatMaxPoints = currentCfg.app.runtime.xfeatMaxPoints;
+    r.xfeatInputMaxWidth = currentCfg.app.runtime.xfeatInputMaxWidth;
+    r.xfeatInputMaxHeight = currentCfg.app.runtime.xfeatInputMaxHeight;
     if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
         return {ACK_E_BAD_ARGS, "bad runtime cfg args"};
     }
@@ -171,6 +177,16 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V8) {
         r.featureFrontend = ParseRuntimeFeatureFrontend(p[RUNTIME_CONFIG_FEATURE_FRONTEND_OFFSET]);
     }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V9) {
+        r.xfeatTopK = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_XFEAT_TOP_K_OFFSET])));
+        r.xfeatMaxPoints = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_XFEAT_MAX_POINTS_OFFSET])));
+    }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V10) {
+        r.xfeatInputMaxWidth =
+            static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_XFEAT_INPUT_MAX_WIDTH_OFFSET])));
+        r.xfeatInputMaxHeight =
+            static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_XFEAT_INPUT_MAX_HEIGHT_OFFSET])));
+    }
     const char *ipChars = reinterpret_cast<const char *>(&p[ipOffset]);
     size_t ipLen = 0;
     while (ipLen < RUNTIME_CONFIG_IP_LEN && ipChars[ipLen] != '\0') {
@@ -211,6 +227,12 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     update.values[std::string(ConfigRegistry::kSlamOrbNLevels)] = static_cast<int64_t>(r.orbNLevels);
     update.values[std::string(ConfigRegistry::kSlamOrbIniThFast)] = static_cast<int64_t>(r.orbIniThFAST);
     update.values[std::string(ConfigRegistry::kSlamOrbMinThFast)] = static_cast<int64_t>(r.orbMinThFAST);
+    update.values[std::string(ConfigRegistry::kSlamXFeatTopK)] = static_cast<int64_t>(r.xfeatTopK);
+    update.values[std::string(ConfigRegistry::kSlamXFeatMaxPoints)] = static_cast<int64_t>(r.xfeatMaxPoints);
+    update.values[std::string(ConfigRegistry::kSlamXFeatInputMaxWidth)] =
+        static_cast<int64_t>(r.xfeatInputMaxWidth);
+    update.values[std::string(ConfigRegistry::kSlamXFeatInputMaxHeight)] =
+        static_cast<int64_t>(r.xfeatInputMaxHeight);
 
     RuntimeCommandService service(controller);
     const auto result = service.ApplyConfig(update);

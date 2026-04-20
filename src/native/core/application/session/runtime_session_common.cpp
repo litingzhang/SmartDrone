@@ -215,6 +215,8 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
     a.sendFeature = c.udp.sendFeature;
     a.sendMap = c.udp.sendMap;
     a.udpQueue = c.udp.queue;
+    a.xfeatInputMaxWidth = c.runtime.xfeatInputMaxWidth;
+    a.xfeatInputMaxHeight = c.runtime.xfeatInputMaxHeight;
     a.spiDev = c.imu.spiDev;
     a.spiSpeed = c.imu.spiSpeed;
     a.spiMode = c.imu.spiMode;
@@ -252,8 +254,10 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
     std::cerr << "slam_mode=" << smartdrone::core::domain::ToString(a.slamOperationMode) << "\n";
     std::cerr << "feature_frontend=" << ToFeatureFrontendText(a.featureFrontend) << "\n";
     std::cerr << "xfeat python=" << app.runtime.xfeatPython << " repo=" << app.runtime.xfeatRepo
-              << " worker=" << app.runtime.xfeatWorkerScript << " top_k=" << app.runtime.xfeatTopK
-              << " max_points=" << app.runtime.xfeatMaxPoints << "\n";
+              << " worker=" << app.runtime.xfeatWorkerScript << " device=" << app.runtime.xfeatDevice
+              << " top_k=" << app.runtime.xfeatTopK
+              << " max_points=" << app.runtime.xfeatMaxPoints
+              << " input_max=" << app.runtime.xfeatInputMaxWidth << "x" << app.runtime.xfeatInputMaxHeight << "\n";
     std::cerr << "orb nFeatures=" << app.runtime.orbNFeatures << " scaleFactor=" << app.runtime.orbScaleFactor
               << " nLevels=" << app.runtime.orbNLevels << " iniThFAST=" << app.runtime.orbIniThFAST
               << " minThFAST=" << app.runtime.orbMinThFAST << "\n";

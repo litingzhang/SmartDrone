@@ -355,8 +355,11 @@ AppConfig ParseAppConfig(int argc, char **argv)
                 ResolveFirstExistingRuntimePath(workerCandidates, argc > 0 ? argv[0] : nullptr);
         }
     }
-    config.runtime.xfeatTopK = argReader.GetInt("--xfeat-top-k", 256);
-    config.runtime.xfeatMaxPoints = argReader.GetInt("--xfeat-max-points", 160);
+    config.runtime.xfeatDevice = argReader.GetString("--xfeat-device", "auto");
+    config.runtime.xfeatTopK = argReader.GetInt("--xfeat-top-k", 512);
+    config.runtime.xfeatMaxPoints = argReader.GetInt("--xfeat-max-points", 320);
+    config.runtime.xfeatInputMaxWidth = argReader.GetInt("--xfeat-input-max-width", 640);
+    config.runtime.xfeatInputMaxHeight = argReader.GetInt("--xfeat-input-max-height", 400);
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");
     config.runtime.slamLowLightEnhance = argReader.HasFlag("--slam-lowlight-enhance");
     config.runtime.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");

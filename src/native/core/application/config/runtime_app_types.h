@@ -48,6 +48,10 @@ struct RemoteRuntimeConfig {
     int orbNLevels{0};
     int orbIniThFAST{0};
     int orbMinThFAST{0};
+    int xfeatTopK{512};
+    int xfeatMaxPoints{320};
+    int xfeatInputMaxWidth{640};
+    int xfeatInputMaxHeight{400};
 };
 
 struct MainRuntimeAliases {
@@ -62,6 +66,7 @@ struct MainRuntimeAliases {
     bool sendImage{true}, sendFeature{true}, sendMap{false};
     float gain{};
     std::string udpIp, spiDev, gpiochip;
+    int xfeatInputMaxWidth{}, xfeatInputMaxHeight{};
     int udpPort{}, cmdPort{}, udpJpegQ{}, udpPayload{}, udpQueue{}, imuHz{}, accelFsG{}, gyroFsDps{}, rtPrio{};
     uint32_t spiSpeed{};
     uint8_t spiMode{}, spiBits{}, imuStartReg{};

@@ -191,33 +191,6 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     } else {
         slamOutput = m_ctx.slamEngine.Process(slamInput, extractFeatures, updatePointCloud);
     }
-    if (!debugRightOnlyFeatures && extractFeatures && configuredFrontend == FeatureFrontend::XFeat) {
-        if (m_ctx.xfeatFrontendClient != nullptr && m_ctx.xfeatFrontendClient->Running()) {
-            std::string xfeatErr;
-            std::vector<cv::Point2f> xfeatLeft;
-            std::vector<cv::Point2f> xfeatRight;
-            bool leftOk = true;
-            bool rightOk = true;
-            if (!m_ctx.monoMode) {
-                leftOk = m_ctx.xfeatFrontendClient->Detect(L.gray, xfeatLeft, &xfeatErr);
-            }
-            rightOk = m_ctx.xfeatFrontendClient->Detect(R.gray, xfeatRight, &xfeatErr);
-            if (leftOk && rightOk) {
-                if (m_ctx.monoMode) {
-                    slamOutput.rightFeatures = std::move(xfeatRight);
-                    slamOutput.leftFeatures.clear();
-                } else {
-                    slamOutput.leftFeatures = std::move(xfeatLeft);
-                    slamOutput.rightFeatures = std::move(xfeatRight);
-                }
-            } else if ((m_state.frameIndex % kSlamDfxLogEveryNFrames) == 0) {
-                std::cerr << "[slam] warning: xfeat detect failed, falling back to ORB features: " << xfeatErr << "\n";
-            }
-        } else if ((m_state.frameIndex % kSlamDfxLogEveryNFrames) == 0) {
-            std::cerr << "[slam] warning: feature_frontend=xfeat requested but worker is unavailable; using ORB "
-                         "feature overlays\n";
-        }
-    }
     const auto slamEndTp = std::chrono::steady_clock::now();
     const uint64_t slamOutputTimestampNs = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(slamEndTp.time_since_epoch()).count());

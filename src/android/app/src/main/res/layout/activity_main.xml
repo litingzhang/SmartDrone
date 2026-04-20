@@ -854,6 +854,78 @@
                             android:textColor="#667085"
                             android:textSize="10sp" />
 
+                        <TextView
+                            android:id="@+id/tvCfgXFeatTopKValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="XFeat topK: 512"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgXFeatTopK"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="XFeat topK slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgXFeatMaxPointsValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="XFeat maxPoints: 320"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgXFeatMaxPoints"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="XFeat max points slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgXFeatInputMaxWidthValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="XFeat input max width: 640"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgXFeatInputMaxWidth"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="XFeat input max width slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgXFeatInputMaxHeightValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="XFeat input max height: 400"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgXFeatInputMaxHeight"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="XFeat input max height slider" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingBottom="4dp"
+                            android:text="XFeat topK/maxPoints: 1 step (1~4096), input max width/height: 16 px step (0~4096, 0 disables)"
+                            android:textColor="#667085"
+                            android:textSize="10sp" />
+
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"

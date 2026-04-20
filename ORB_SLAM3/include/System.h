@@ -115,6 +115,12 @@ public:
     Sophus::SE3f TrackStereoWithFeatures(const cv::Mat &imLeft, const cv::Mat &imRight,
                                          const ExternalStereoFrameData &features, const double &timestamp,
                                          const vector<IMU::Point>& vImuMeas = vector<IMU::Point>(), string filename="");
+    bool PrepareStereoImagesForTracking(const cv::Mat &imLeft, const cv::Mat &imRight,
+                                        cv::Mat &imLeftPrepared, cv::Mat &imRightPrepared) const;
+    Sophus::SE3f TrackStereoPreparedWithFeatures(const cv::Mat &imLeftPrepared, const cv::Mat &imRightPrepared,
+                                                 const ExternalStereoFrameData &features, const double &timestamp,
+                                                 const vector<IMU::Point>& vImuMeas = vector<IMU::Point>(),
+                                                 string filename="");
 
     // Process the given rgbd frame. Depthmap must be registered to the RGB frame.
     // Input image: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.

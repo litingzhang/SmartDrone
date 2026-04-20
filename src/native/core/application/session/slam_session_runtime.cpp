@@ -215,6 +215,7 @@ bool SlamSessionRuntime::Start()
     m_slamEngine.SetOperationMode(m_frameProcessorState.effectiveSlamMode);
     m_slamEngine.SetFeatureFrontend(m_aliases.featureFrontend);
     m_slamEngine.SetXFeatFrontendClient(&m_xfeatFrontendClient);
+    m_slamEngine.SetXFeatInputSizeLimit(m_cfg.app.runtime.xfeatInputMaxWidth, m_cfg.app.runtime.xfeatInputMaxHeight);
     if (m_frameProcessorState.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
         std::cerr << "[slam] operation_mode=auto effective_mode=mapping\n";
     }
@@ -232,9 +233,11 @@ bool SlamSessionRuntime::Start()
     if (!m_cfg.app.runtime.xfeatRepo.empty() && !m_cfg.app.runtime.xfeatWorkerScript.empty()) {
         std::string xfeatErr;
         if (m_xfeatFrontendClient.Start(m_cfg.app.runtime.xfeatPython, m_cfg.app.runtime.xfeatWorkerScript,
-                                        m_cfg.app.runtime.xfeatRepo, m_cfg.app.runtime.xfeatTopK,
+                                        m_cfg.app.runtime.xfeatRepo, m_cfg.app.runtime.xfeatDevice,
+                                        m_cfg.app.runtime.xfeatTopK,
                                         m_cfg.app.runtime.xfeatMaxPoints, &xfeatErr)) {
             std::cerr << "[slam] xfeat worker ready repo=" << m_cfg.app.runtime.xfeatRepo
+                      << " device=" << m_cfg.app.runtime.xfeatDevice
                       << " top_k=" << m_cfg.app.runtime.xfeatTopK
                       << " max_points=" << m_cfg.app.runtime.xfeatMaxPoints << "\n";
         } else if (m_aliases.featureFrontend == FeatureFrontend::XFeat) {

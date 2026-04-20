@@ -53,6 +53,20 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         }
         return false;
     }
+    if (remote.xfeatTopK < 1 || remote.xfeatTopK > 4096 || remote.xfeatMaxPoints < 1 ||
+        remote.xfeatMaxPoints > 4096 || remote.xfeatMaxPoints > remote.xfeatTopK) {
+        if (err) {
+            *err = "xfeat config out of range";
+        }
+        return false;
+    }
+    if (remote.xfeatInputMaxWidth < 0 || remote.xfeatInputMaxWidth > 4096 || remote.xfeatInputMaxHeight < 0 ||
+        remote.xfeatInputMaxHeight > 4096) {
+        if (err) {
+            *err = "xfeat input size config out of range";
+        }
+        return false;
+    }
 
     bool restartNeeded = false;
     float effectiveTbcTx = remote.tbcTx;
@@ -78,6 +92,10 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
                                 m_config.app.runtime.orbNLevels != remote.orbNLevels ||
                                 m_config.app.runtime.orbIniThFAST != remote.orbIniThFAST ||
                                 m_config.app.runtime.orbMinThFAST != remote.orbMinThFAST;
+        const bool xfeatChanged = m_config.app.runtime.xfeatTopK != remote.xfeatTopK ||
+                                  m_config.app.runtime.xfeatMaxPoints != remote.xfeatMaxPoints ||
+                                  m_config.app.runtime.xfeatInputMaxWidth != remote.xfeatInputMaxWidth ||
+                                  m_config.app.runtime.xfeatInputMaxHeight != remote.xfeatInputMaxHeight;
         cam.exposureUs = remote.exposureUs;
         cam.gain = remote.gain;
         cam.aeDisable = !remote.autoExposureEnabled;
@@ -94,6 +112,10 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         m_config.app.runtime.orbNLevels = remote.orbNLevels;
         m_config.app.runtime.orbIniThFAST = remote.orbIniThFAST;
         m_config.app.runtime.orbMinThFAST = remote.orbMinThFAST;
+        m_config.app.runtime.xfeatTopK = remote.xfeatTopK;
+        m_config.app.runtime.xfeatMaxPoints = remote.xfeatMaxPoints;
+        m_config.app.runtime.xfeatInputMaxWidth = remote.xfeatInputMaxWidth;
+        m_config.app.runtime.xfeatInputMaxHeight = remote.xfeatInputMaxHeight;
         m_config.app.sensorMode = remote.sensorMode;
         m_config.app.settings = ResolveSettingsForSensorMode(remote.sensorMode, m_config.app.settings);
         m_config.app.udp.ip = remote.udpIp;
@@ -137,7 +159,7 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         effectiveTbcPitchDeg = m_config.app.runtime.tbcPitchDeg;
         effectiveTbcYawDeg = m_config.app.runtime.tbcYawDeg;
         restartNeeded = sensorModeChanged || frontendChanged || udpIpChanged || udpEnableChanged || aeModeChanged ||
-                        uvcConfigChanged || orbChanged;
+                        uvcConfigChanged || orbChanged || xfeatChanged;
     }
 
     m_tuning.slamInputFps.store(remote.slamInputFps, std::memory_order_relaxed);
@@ -363,6 +385,38 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
             } else {
                 return {false, "slam.orb_min_th_fast type mismatch"};
             }
+        } else if (key == ConfigRegistry::kSlamXFeatTopK) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.xfeatTopK = static_cast<int>(*v);
+            } else if (const auto *vFloat = std::get_if<double>(&value)) {
+                remote.xfeatTopK = static_cast<int>(*vFloat);
+            } else {
+                return {false, "slam.xfeat_top_k type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamXFeatMaxPoints) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.xfeatMaxPoints = static_cast<int>(*v);
+            } else if (const auto *vFloat = std::get_if<double>(&value)) {
+                remote.xfeatMaxPoints = static_cast<int>(*vFloat);
+            } else {
+                return {false, "slam.xfeat_max_points type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamXFeatInputMaxWidth) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.xfeatInputMaxWidth = static_cast<int>(*v);
+            } else if (const auto *vFloat = std::get_if<double>(&value)) {
+                remote.xfeatInputMaxWidth = static_cast<int>(*vFloat);
+            } else {
+                return {false, "slam.xfeat_input_max_width type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamXFeatInputMaxHeight) {
+            if (const auto *v = std::get_if<int64_t>(&value)) {
+                remote.xfeatInputMaxHeight = static_cast<int>(*v);
+            } else if (const auto *vFloat = std::get_if<double>(&value)) {
+                remote.xfeatInputMaxHeight = static_cast<int>(*vFloat);
+            } else {
+                return {false, "slam.xfeat_input_max_height type mismatch"};
+            }
         } else {
             return {false, "unsupported config key: " + key};
         }
@@ -379,7 +433,11 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
                           " frontend=" + std::string(ToFeatureFrontendText(remote.featureFrontend)) +
                           " slam_mode=" + std::string(smartdrone::core::domain::ToString(remote.slamOperationMode)) +
                           " slam_fps=" + std::to_string(clampedSlamFps) + " pair_ms=" +
-                          std::to_string(remote.pairMs) + " provider_specific";
+                          std::to_string(remote.pairMs) + " provider_specific xfeat_top_k=" +
+                          std::to_string(remote.xfeatTopK) + " xfeat_max_points=" +
+                          std::to_string(remote.xfeatMaxPoints) + " xfeat_input_max=" +
+                          std::to_string(remote.xfeatInputMaxWidth) + "x" +
+                          std::to_string(remote.xfeatInputMaxHeight);
     return {true, message};
 }
 
@@ -415,6 +473,10 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.orbNLevels = currentConfig.app.runtime.orbNLevels;
     remote.orbIniThFAST = currentConfig.app.runtime.orbIniThFAST;
     remote.orbMinThFAST = currentConfig.app.runtime.orbMinThFAST;
+    remote.xfeatTopK = currentConfig.app.runtime.xfeatTopK;
+    remote.xfeatMaxPoints = currentConfig.app.runtime.xfeatMaxPoints;
+    remote.xfeatInputMaxWidth = currentConfig.app.runtime.xfeatInputMaxWidth;
+    remote.xfeatInputMaxHeight = currentConfig.app.runtime.xfeatInputMaxHeight;
     return remote;
 }
 

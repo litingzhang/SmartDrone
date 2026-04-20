@@ -90,6 +90,37 @@ Constraints:
 - image/feature/map streaming based on runtime config
 - periodic and abnormal `slam_dfx` diagnostics
 
+### 3.4A XFeat Integration Adaptations
+
+The current `xfeat` integration is an external frontend adaptation layer on top of the existing ORB-SLAM3 tracking pipeline rather than a full native frontend replacement.
+
+The implementation contains the following XFeat-specific adaptations:
+
+- Worker-process frontend execution:
+  `smart_drone` starts a separate Python worker through `XFeatFrontendClient`, exchanges grayscale frames through a binary pipe protocol, and receives keypoints plus `CV_32F` descriptors.
+- Runtime-selectable execution device:
+  the worker accepts `auto/cpu/cuda` device selection. `auto` resolves to CUDA on Jetson-class targets when available and falls back to CPU on CM5-class targets.
+- Runtime-configurable XFeat tuning:
+  runtime config exposes `slam.xfeat_top_k`, `slam.xfeat_max_points`, `slam.xfeat_input_max_width`, and `slam.xfeat_input_max_height`. Changes are applied through the runtime-config pipeline and restart the SLAM session so that the worker and frontend use the updated limits.
+- Stereo batch inference:
+  left and right images are combined into one worker request and one model invocation in stereo mode. This reduces per-frame IPC and Python dispatch overhead while keeping the output split per image.
+- Input-size adaptation:
+  XFeat input images are downscaled before inference through a dedicated preprocessing step in `orbslam3_engine` in order to cap frontend cost on embedded targets. The width and height limits are runtime-configurable. A value of `0` disables the limit on that dimension. Setting both limits to `0` disables XFeat downscaling.
+- Rectified-image stereo injection:
+  for stereo pinhole configurations that require rectification, XFeat is extracted on the same prepared images used by ORB-SLAM3 tracking. `System::PrepareStereoImagesForTracking(...)` and `System::TrackStereoPreparedWithFeatures(...)` were added so that feature coordinates and tracking images remain in the same rectified coordinate system.
+- Stability gate before injection:
+  XFeat injection is enabled only when the worker is running and the previous ORB-SLAM3 tracking state is stable (`OK` or `OK_KLT`). Initialization, recovery, and unstable phases continue to use the original ORB path.
+- Separate raw-display and injected-feature semantics:
+  the runtime records raw XFeat detections for diagnostics and overlay output, while the features injected into ORB-SLAM3 are the stereo-matched subset. This avoids conflating display density with the effective tracking input.
+- Stereo-specific pair construction:
+  externally injected stereo features are required to be pre-matched. The adaptation layer performs left-right pairing with epipolar and disparity constraints and emits `matchedStereoPairs=true` before entering ORB-SLAM3.
+- Float-descriptor matcher compatibility:
+  ORB-SLAM3 matcher code was extended so that `ORBmatcher::DescriptorDistance(...)` accepts `CV_32F` descriptors through cosine-distance-style scoring. This is required because XFeat descriptors are not ORB binary descriptors.
+- BoW compatibility limits remain explicit:
+  `Frame::ComputeBoW()` and `KeyFrame::ComputeBoW()` still only build BoW vectors for `CV_8U` descriptors. As a result, the XFeat path is compatible with tracking injection, but it does not replace the full ORB vocabulary-based frontend assumptions.
+- Explicit runtime diagnostics:
+  `slam_dfx` reports `xfeat_used`, `xfeat_raw_left/right`, `xfeat_match_stereo`, and `xfeat_injected_left/right`. `orbslam3_engine` also emits `xfeat_runtime_status=...` to distinguish worker availability, tracking-state gating, and prepared-image enablement.
+
 ### 3.5 Calibration Session Features
 
 `RunCalibSession` handles:
@@ -109,6 +140,7 @@ Config domains:
 - SLAM: input FPS/perception mode/operation mode
 - runtime `T_b_c1` override: enable flag, translation (tx/ty/tz), and rotation (roll/pitch/yaw)
 - ORB extractor: `nFeatures`, `scaleFactor`, `nLevels`, `iniThFAST`, `minThFAST`
+- XFeat extractor: `top_k`, `max_points`, `input_max_width`, `input_max_height`
 - stream: UDP IP and image/feature/map flags
 
 `ConfigRegistry` defines reload and restart semantics per key.
@@ -281,7 +313,7 @@ Concurrency properties:
 ### 8.4 Design for Extensibility
 
 - ports keep algorithm and device replacement open
-- TLV runtime-config payload supports version compatibility (`legacy/v2/v3/v4/v5/v6/v7`)
+- TLV runtime-config payload supports version compatibility (`legacy/v2/v3/v4/v5/v6/v7/v8/v9/v10`)
 - mode enums are extensible for future features
 
 ---
@@ -466,7 +498,7 @@ sequenceDiagram
 - control commands: `0x10`~`0x16`
 - movement command: `CMD_MOVE=0x20`
 - runtime commands: `CMD_RUNTIME_MODE=0x30`, `CMD_RUNTIME_CONFIG=0x31`
-- `CMD_RUNTIME_CONFIG` payload compatibility: `legacy/v2/v3/v4/v5/v6/v7`
+- `CMD_RUNTIME_CONFIG` payload compatibility: `legacy/v2/v3/v4/v5/v6/v7/v8/v9/v10`
 - query commands: `CMD_GET_CAPABILITIES=0x33`, `CMD_GET_CONFIG=0x34`
 - response commands: `CMD_ACK=0xF0`, `CMD_STATE=0xF1`, `CMD_HEARTBEAT=0xF5`
 

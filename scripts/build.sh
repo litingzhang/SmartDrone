@@ -172,6 +172,13 @@ sync_native_artifacts() {
             copy_artifact "$REPO_ROOT/config/$cfg" "$config_dir/$cfg"
         fi
     done
+
+    local scripts_dir="$NATIVE_ARTIFACTS_DIR/scripts"
+    mkdir -p "$scripts_dir"
+    if [ -f "$REPO_ROOT/scripts/xfeat_keypoint_worker.py" ]; then
+        copy_artifact "$REPO_ROOT/scripts/xfeat_keypoint_worker.py" \
+            "$scripts_dir/xfeat_keypoint_worker.py"
+    fi
 }
 
 sync_android_artifact() {

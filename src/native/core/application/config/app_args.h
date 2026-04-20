@@ -86,8 +86,11 @@ struct RuntimeConfig {
     std::string xfeatPython{"python3"};
     std::string xfeatRepo;
     std::string xfeatWorkerScript{"scripts/xfeat_keypoint_worker.py"};
-    int xfeatTopK{256};
-    int xfeatMaxPoints{160};
+    std::string xfeatDevice{"auto"};
+    int xfeatTopK{512};
+    int xfeatMaxPoints{320};
+    int xfeatInputMaxWidth{640};
+    int xfeatInputMaxHeight{400};
     bool debugRightOnlyFeatures{false};
     bool slamLowLightEnhance{false};
     bool jsonDiagnostics{false};

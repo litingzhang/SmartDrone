@@ -284,6 +284,38 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
 
 }
 
+bool System::PrepareStereoImagesForTracking(const cv::Mat &imLeft, const cv::Mat &imRight,
+                                            cv::Mat &imLeftPrepared, cv::Mat &imRightPrepared) const
+{
+    if(mSensor!=STEREO && mSensor!=IMU_STEREO)
+    {
+        cerr << "ERROR: you called PrepareStereoImagesForTracking but input sensor was not set to Stereo nor Stereo-Inertial."
+             << endl;
+        return false;
+    }
+
+    imLeftPrepared = imLeft;
+    imRightPrepared = imRight;
+    if(settings_ && settings_->needToRectify()){
+        cv::Mat M1l = settings_->M1l();
+        cv::Mat M2l = settings_->M2l();
+        cv::Mat M1r = settings_->M1r();
+        cv::Mat M2r = settings_->M2r();
+
+        cv::remap(imLeft, imLeftPrepared, M1l, M2l, cv::INTER_LINEAR);
+        cv::remap(imRight, imRightPrepared, M1r, M2r, cv::INTER_LINEAR);
+    }
+    else if(settings_ && settings_->needToResize()){
+        cv::resize(imLeft,imLeftPrepared,settings_->newImSize());
+        cv::resize(imRight,imRightPrepared,settings_->newImSize());
+    }
+    else{
+        imLeftPrepared = imLeft;
+        imRightPrepared = imRight;
+    }
+    return true;
+}
+
 Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp, const vector<IMU::Point>& vImuMeas, string filename)
 {
     if(mSensor!=STEREO && mSensor!=IMU_STEREO)
@@ -292,26 +324,9 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, 
         exit(-1);
     }
 
-    cv::Mat imLeftToFeed = imLeft;
-    cv::Mat imRightToFeed = imRight;
-    if(settings_ && settings_->needToRectify()){
-        cv::Mat M1l = settings_->M1l();
-        cv::Mat M2l = settings_->M2l();
-        cv::Mat M1r = settings_->M1r();
-        cv::Mat M2r = settings_->M2r();
-
-        cv::remap(imLeft, imLeftToFeed, M1l, M2l, cv::INTER_LINEAR);
-        cv::remap(imRight, imRightToFeed, M1r, M2r, cv::INTER_LINEAR);
-    }
-    else if(settings_ && settings_->needToResize()){
-        cv::resize(imLeft,imLeftToFeed,settings_->newImSize());
-        cv::resize(imRight,imRightToFeed,settings_->newImSize());
-    }
-    else{
-        // Reuse the input buffers when no rectification or resize is needed.
-        imLeftToFeed = imLeft;
-        imRightToFeed = imRight;
-    }
+    cv::Mat imLeftToFeed;
+    cv::Mat imRightToFeed;
+    PrepareStereoImagesForTracking(imLeft, imRight, imLeftToFeed, imRightToFeed);
 
     // Check mode change
     {
@@ -439,6 +454,65 @@ Sophus::SE3f System::TrackStereoWithFeatures(const cv::Mat &imLeft, const cv::Ma
             mpTracker->GrabImuData(vImuMeas[i_imu]);
 
     Sophus::SE3f Tcw = mpTracker->GrabImageStereoWithFeatures(imLeftToFeed, imRightToFeed, features, timestamp, filename);
+
+    unique_lock<mutex> lock2(mMutexState);
+    mTrackingState = mpTracker->mState;
+
+    return Tcw;
+}
+
+Sophus::SE3f System::TrackStereoPreparedWithFeatures(const cv::Mat &imLeftPrepared, const cv::Mat &imRightPrepared,
+                                                     const ExternalStereoFrameData &features, const double &timestamp,
+                                                     const vector<IMU::Point>& vImuMeas, string filename)
+{
+    if(mSensor!=STEREO && mSensor!=IMU_STEREO)
+    {
+        cerr << "ERROR: you called TrackStereoPreparedWithFeatures but input sensor was not set to Stereo nor Stereo-Inertial."
+             << endl;
+        exit(-1);
+    }
+
+    {
+        unique_lock<mutex> lock(mMutexMode);
+        if(mbActivateLocalizationMode)
+        {
+            mpLocalMapper->RequestStop();
+            while(!mpLocalMapper->isStopped())
+            {
+                usleep(1000);
+            }
+            mpTracker->InformOnlyTracking(true);
+            mbActivateLocalizationMode = false;
+        }
+        if(mbDeactivateLocalizationMode)
+        {
+            mpTracker->InformOnlyTracking(false);
+            mpLocalMapper->Release();
+            mbDeactivateLocalizationMode = false;
+        }
+    }
+
+    {
+        unique_lock<mutex> lock(mMutexReset);
+        if(mbReset)
+        {
+            mpTracker->Reset();
+            mbReset = false;
+            mbResetActiveMap = false;
+        }
+        else if(mbResetActiveMap)
+        {
+            mpTracker->ResetActiveMap();
+            mbResetActiveMap = false;
+        }
+    }
+
+    if (mSensor == System::IMU_STEREO)
+        for(size_t i_imu = 0; i_imu < vImuMeas.size(); i_imu++)
+            mpTracker->GrabImuData(vImuMeas[i_imu]);
+
+    Sophus::SE3f Tcw =
+        mpTracker->GrabImageStereoWithFeatures(imLeftPrepared, imRightPrepared, features, timestamp, filename);
 
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = mpTracker->mState;
@@ -1369,9 +1443,6 @@ bool System::CanUseExternalFeatureInjection() const
         return true;
 
     if(settings_->needToResize())
-        return false;
-
-    if((mSensor == STEREO || mSensor == IMU_STEREO) && settings_->needToRectify())
         return false;
 
     return true;

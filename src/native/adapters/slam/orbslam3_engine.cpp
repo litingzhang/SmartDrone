@@ -23,9 +23,6 @@ struct StereoMatchPair {
     int distance{std::numeric_limits<int>::max()};
 };
 
-constexpr int kXFeatTargetMaxWidth = 320;
-constexpr int kXFeatTargetMaxHeight = 200;
-
 cv::KeyPoint MakeKeyPoint(const cv::Point2f &pt)
 {
     cv::KeyPoint kp;
@@ -86,7 +83,17 @@ std::vector<StereoMatchPair> MatchStereoPairs(const XFeatFeatureSet &left, const
     return matches;
 }
 
-cv::Mat BuildXFeatInputImage(const cv::Mat &gray, float &scaleX, float &scaleY)
+std::vector<cv::Point2f> ToPointList(const std::vector<cv::KeyPoint> &keypoints)
+{
+    std::vector<cv::Point2f> points;
+    points.reserve(keypoints.size());
+    for (const cv::KeyPoint &kp : keypoints) {
+        points.push_back(kp.pt);
+    }
+    return points;
+}
+
+cv::Mat BuildXFeatInputImage(const cv::Mat &gray, int maxWidth, int maxHeight, float &scaleX, float &scaleY)
 {
     scaleX = 1.0f;
     scaleY = 1.0f;
@@ -96,8 +103,11 @@ cv::Mat BuildXFeatInputImage(const cv::Mat &gray, float &scaleX, float &scaleY)
 
     const int srcWidth = gray.cols;
     const int srcHeight = gray.rows;
-    const float widthScale = static_cast<float>(kXFeatTargetMaxWidth) / static_cast<float>(std::max(1, srcWidth));
-    const float heightScale = static_cast<float>(kXFeatTargetMaxHeight) / static_cast<float>(std::max(1, srcHeight));
+    const float widthScale = maxWidth > 0 ? static_cast<float>(maxWidth) / static_cast<float>(std::max(1, srcWidth))
+                                          : std::numeric_limits<float>::infinity();
+    const float heightScale =
+        maxHeight > 0 ? static_cast<float>(maxHeight) / static_cast<float>(std::max(1, srcHeight))
+                      : std::numeric_limits<float>::infinity();
     const float resizeScale = std::min(1.0f, std::min(widthScale, heightScale));
     if (resizeScale >= 0.999f) {
         return gray;
@@ -126,6 +136,28 @@ void RemapKeypointsToSource(std::vector<cv::Point2f> &keypoints, float scaleX, f
 bool IsXFeatTrackingStateSafe(int trackingState)
 {
     return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::OK_KLT;
+}
+
+std::string DescribeTrackingState(int trackingState)
+{
+    switch (trackingState) {
+    case ORB_SLAM3::Tracking::SYSTEM_NOT_READY:
+        return "system_not_ready";
+    case ORB_SLAM3::Tracking::NO_IMAGES_YET:
+        return "no_images_yet";
+    case ORB_SLAM3::Tracking::NOT_INITIALIZED:
+        return "not_initialized";
+    case ORB_SLAM3::Tracking::OK:
+        return "ok";
+    case ORB_SLAM3::Tracking::RECENTLY_LOST:
+        return "recently_lost";
+    case ORB_SLAM3::Tracking::LOST:
+        return "lost";
+    case ORB_SLAM3::Tracking::OK_KLT:
+        return "ok_klt";
+    default:
+        return "unknown";
+    }
 }
 
 } // namespace
@@ -158,6 +190,12 @@ void OrbSlam3Engine::SetOperationMode(core::domain::SlamOperationMode mode)
 void OrbSlam3Engine::SetFeatureFrontend(FeatureFrontend frontend) { m_featureFrontend = frontend; }
 
 void OrbSlam3Engine::SetXFeatFrontendClient(XFeatFrontendClient *client) { m_xfeatFrontendClient = client; }
+
+void OrbSlam3Engine::SetXFeatInputSizeLimit(int maxWidth, int maxHeight)
+{
+    m_xfeatInputMaxWidth = std::max(0, maxWidth);
+    m_xfeatInputMaxHeight = std::max(0, maxHeight);
+}
 
 void OrbSlam3Engine::Stop()
 {
@@ -199,7 +237,7 @@ bool OrbSlam3Engine::BuildMonoExternalData(const cv::Mat &gray, ORB_SLAM3::Exter
     std::string err;
     float scaleX = 1.0f;
     float scaleY = 1.0f;
-    const cv::Mat xfeatInput = BuildXFeatInputImage(gray, scaleX, scaleY);
+    const cv::Mat xfeatInput = BuildXFeatInputImage(gray, m_xfeatInputMaxWidth, m_xfeatInputMaxHeight, scaleX, scaleY);
     if (!m_xfeatFrontendClient->DetectAndCompute(xfeatInput, features, &err) || features.descriptors.empty()) {
         return false;
     }
@@ -213,7 +251,9 @@ bool OrbSlam3Engine::BuildMonoExternalData(const cv::Mat &gray, ORB_SLAM3::Exter
 }
 
 bool OrbSlam3Engine::BuildStereoExternalData(const cv::Mat &leftGray, const cv::Mat &rightGray,
-                                             ORB_SLAM3::ExternalStereoFrameData &outData) const
+                                             ORB_SLAM3::ExternalStereoFrameData &outData,
+                                             std::vector<cv::Point2f> *leftRawPoints,
+                                             std::vector<cv::Point2f> *rightRawPoints) const
 {
     outData = ORB_SLAM3::ExternalStereoFrameData{};
     m_lastXFeatRawLeftCount = 0;
@@ -233,15 +273,23 @@ bool OrbSlam3Engine::BuildStereoExternalData(const cv::Mat &leftGray, const cv::
     float leftScaleY = 1.0f;
     float rightScaleX = 1.0f;
     float rightScaleY = 1.0f;
-    const cv::Mat leftXFeatInput = BuildXFeatInputImage(leftGray, leftScaleX, leftScaleY);
-    const cv::Mat rightXFeatInput = BuildXFeatInputImage(rightGray, rightScaleX, rightScaleY);
-    if (!m_xfeatFrontendClient->DetectAndCompute(leftXFeatInput, leftFeatures, &err) ||
-        !m_xfeatFrontendClient->DetectAndCompute(rightXFeatInput, rightFeatures, &err) || leftFeatures.descriptors.empty() ||
-        rightFeatures.descriptors.empty()) {
+    const cv::Mat leftXFeatInput =
+        BuildXFeatInputImage(leftGray, m_xfeatInputMaxWidth, m_xfeatInputMaxHeight, leftScaleX, leftScaleY);
+    const cv::Mat rightXFeatInput =
+        BuildXFeatInputImage(rightGray, m_xfeatInputMaxWidth, m_xfeatInputMaxHeight, rightScaleX, rightScaleY);
+    if (!m_xfeatFrontendClient->DetectAndComputeStereo(leftXFeatInput, rightXFeatInput, leftFeatures, rightFeatures,
+                                                       &err) ||
+        leftFeatures.descriptors.empty() || rightFeatures.descriptors.empty()) {
         return false;
     }
     RemapKeypointsToSource(leftFeatures.keypoints, leftScaleX, leftScaleY);
     RemapKeypointsToSource(rightFeatures.keypoints, rightScaleX, rightScaleY);
+    if (leftRawPoints != nullptr) {
+        *leftRawPoints = leftFeatures.keypoints;
+    }
+    if (rightRawPoints != nullptr) {
+        *rightRawPoints = rightFeatures.keypoints;
+    }
     m_lastXFeatRawLeftCount = static_cast<int>(leftFeatures.keypoints.size());
     m_lastXFeatRawRightCount = static_cast<int>(rightFeatures.keypoints.size());
 
@@ -287,17 +335,42 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     const bool monoMode = (m_inputMode != OrbInputMode::Stereo);
     const cv::Mat &monoImage =
         (m_inputMode == OrbInputMode::MonoRight) ? input.stereo.right.gray : input.stereo.left.gray;
+    cv::Mat preparedLeftImage;
+    cv::Mat preparedRightImage;
     const int previousTrackingState = m_system->GetTrackingState();
-    const bool tryXFeat =
-        m_featureFrontend == FeatureFrontend::XFeat && m_xfeatFrontendClient != nullptr &&
-        m_xfeatFrontendClient->Running() && m_system->CanUseExternalFeatureInjection() &&
-        IsXFeatTrackingStateSafe(previousTrackingState);
+    std::string xfeatStatusReason;
+    bool tryXFeat = false;
+    if (m_featureFrontend != FeatureFrontend::XFeat) {
+        xfeatStatusReason = "frontend_not_xfeat";
+    } else if (m_xfeatFrontendClient == nullptr) {
+        xfeatStatusReason = "worker_not_configured";
+    } else if (!m_xfeatFrontendClient->Running()) {
+        xfeatStatusReason = "worker_not_running";
+    } else if (!IsXFeatTrackingStateSafe(previousTrackingState)) {
+        xfeatStatusReason = "tracking_not_ok:" + DescribeTrackingState(previousTrackingState);
+    } else if (monoMode && !m_system->CanUseExternalFeatureInjection()) {
+        xfeatStatusReason = "resize_enabled";
+    } else if (!monoMode &&
+               !m_system->PrepareStereoImagesForTracking(input.stereo.left.gray, input.stereo.right.gray,
+                                                        preparedLeftImage, preparedRightImage)) {
+        xfeatStatusReason = "prepare_tracking_images_failed";
+    } else {
+        tryXFeat = true;
+        xfeatStatusReason = "enabled";
+    }
+    if (m_featureFrontend == FeatureFrontend::XFeat && xfeatStatusReason != m_lastXFeatStatusReason) {
+        std::cerr << "[slam] xfeat_runtime_status=" << xfeatStatusReason << "\n";
+        m_lastXFeatStatusReason = xfeatStatusReason;
+    }
 
     ORB_SLAM3::ExternalMonoFrameData monoExternal;
     ORB_SLAM3::ExternalStereoFrameData stereoExternal;
+    std::vector<cv::Point2f> stereoLeftRawPoints;
+    std::vector<cv::Point2f> stereoRightRawPoints;
     const bool haveMonoExternal = monoMode && tryXFeat && BuildMonoExternalData(monoImage, monoExternal);
-    const bool haveStereoExternal =
-        !monoMode && tryXFeat && BuildStereoExternalData(input.stereo.left.gray, input.stereo.right.gray, stereoExternal);
+    const bool haveStereoExternal = !monoMode && tryXFeat &&
+                                    BuildStereoExternalData(preparedLeftImage, preparedRightImage,
+                                                            stereoExternal, &stereoLeftRawPoints, &stereoRightRawPoints);
     out.usedXFeatFrontend = haveMonoExternal || haveStereoExternal;
     out.xfeatRawLeftCount = m_lastXFeatRawLeftCount;
     out.xfeatRawRightCount = m_lastXFeatRawRightCount;
@@ -311,8 +384,8 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
                                    : m_system->TrackMonocular(monoImage, input.frameTimeSec, input.imu);
         } else {
             tcw = haveStereoExternal
-                      ? m_system->TrackStereoWithFeatures(input.stereo.left.gray, input.stereo.right.gray, stereoExternal,
-                                                          input.frameTimeSec, input.imu)
+                      ? m_system->TrackStereoPreparedWithFeatures(preparedLeftImage, preparedRightImage, stereoExternal,
+                                                                  input.frameTimeSec, input.imu)
                       : m_system->TrackStereo(input.stereo.left.gray, input.stereo.right.gray, input.frameTimeSec,
                                               input.imu);
         }
@@ -322,8 +395,8 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
                                    : m_system->TrackMonocular(monoImage, input.frameTimeSec);
         } else {
             tcw = haveStereoExternal
-                      ? m_system->TrackStereoWithFeatures(input.stereo.left.gray, input.stereo.right.gray, stereoExternal,
-                                                          input.frameTimeSec)
+                      ? m_system->TrackStereoPreparedWithFeatures(preparedLeftImage, preparedRightImage, stereoExternal,
+                                                                  input.frameTimeSec)
                       : m_system->TrackStereo(input.stereo.left.gray, input.stereo.right.gray, input.frameTimeSec);
         }
     }
@@ -345,7 +418,21 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     out.pose.qy = q.y();
     out.pose.qz = q.z();
 
-    if (!extractFeatures && !extractPointCloud) {
+    if (extractFeatures && out.usedXFeatFrontend) {
+        if (monoMode) {
+            if (m_inputMode == OrbInputMode::MonoRight) {
+                out.rightFeatures = ToPointList(monoExternal.keypoints);
+            } else {
+                out.leftFeatures = ToPointList(monoExternal.keypoints);
+            }
+        } else {
+            out.leftFeatures = std::move(stereoLeftRawPoints);
+            out.rightFeatures = std::move(stereoRightRawPoints);
+        }
+    }
+
+    const bool needVisualExtraction = extractPointCloud || (extractFeatures && !out.usedXFeatFrontend);
+    if (!needVisualExtraction) {
         return out;
     }
 
@@ -354,7 +441,7 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     ORB_SLAM3::TrackedVisualData visual =
         m_system->ExtractTrackedVisualData(leftWidth, leftHeight, monoMode ? 0 : input.stereo.right.gray.cols,
                                            monoMode ? 0 : input.stereo.right.gray.rows, extractPointCloud, 120);
-    if (extractFeatures) {
+    if (extractFeatures && !out.usedXFeatFrontend) {
         if (m_inputMode == OrbInputMode::MonoRight) {
             out.rightFeatures = std::move(visual.leftFeatures);
         } else {

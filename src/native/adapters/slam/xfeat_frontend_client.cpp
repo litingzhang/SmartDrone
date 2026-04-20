@@ -25,6 +25,10 @@ constexpr std::array<char, 8> kReadyMagic{'X', 'F', 'W', 'K', 'R', 'D', 'Y', '1'
 
 struct RequestHeader {
     uint32_t seq{0};
+    uint32_t imageCount{0};
+};
+
+struct ImageHeader {
     uint32_t rows{0};
     uint32_t cols{0};
     uint32_t bytes{0};
@@ -32,6 +36,10 @@ struct RequestHeader {
 
 struct ResponseHeader {
     uint32_t seq{0};
+    uint32_t imageCount{0};
+};
+
+struct FeatureHeader {
     uint32_t count{0};
     uint32_t descriptorDim{0};
 };
@@ -64,7 +72,8 @@ bool SetCloseOnExec(int fd, std::string *err)
 XFeatFrontendClient::~XFeatFrontendClient() { Stop(); }
 
 bool XFeatFrontendClient::Start(const std::string &pythonBin, const std::string &workerScript,
-                                const std::string &repoPath, int topK, int maxPoints, std::string *err)
+                                const std::string &repoPath, const std::string &device, int topK, int maxPoints,
+                                std::string *err)
 {
     Stop();
 
@@ -126,6 +135,8 @@ bool XFeatFrontendClient::Start(const std::string &pythonBin, const std::string 
         argv.push_back(const_cast<char *>(workerScript.c_str()));
         argv.push_back(const_cast<char *>("--repo"));
         argv.push_back(const_cast<char *>(repoPath.c_str()));
+        argv.push_back(const_cast<char *>("--device"));
+        argv.push_back(const_cast<char *>(device.c_str()));
         argv.push_back(const_cast<char *>("--top-k"));
         argv.push_back(const_cast<char *>(topKText.c_str()));
         argv.push_back(const_cast<char *>("--max-points"));
@@ -207,29 +218,23 @@ bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet 
     }
 
     cv::Mat gray8;
-    if (gray.type() == CV_8UC1 && gray.isContinuous()) {
-        gray8 = gray;
-    } else {
-        if (gray.channels() == 1) {
-            gray.convertTo(gray8, CV_8UC1);
-        } else {
-            cv::cvtColor(gray, gray8, cv::COLOR_BGR2GRAY);
-        }
-        if (!gray8.isContinuous()) {
-            gray8 = gray8.clone();
-        }
+    if (!PrepareGrayImage(gray, gray8, err)) {
+        return false;
     }
 
-    const uint32_t rows = static_cast<uint32_t>(gray8.rows);
-    const uint32_t cols = static_cast<uint32_t>(gray8.cols);
-    const uint32_t bytes = rows * cols;
     const uint32_t seq = ++m_requestSeq;
-    const RequestHeader header{seq, rows, cols, bytes};
+    const RequestHeader header{seq, 1};
+    const ImageHeader imageHeader{static_cast<uint32_t>(gray8.rows), static_cast<uint32_t>(gray8.cols),
+                                  static_cast<uint32_t>(gray8.rows * gray8.cols)};
     if (!WriteExact(&header, sizeof(header), err)) {
         Stop();
         return false;
     }
-    if (!WriteExact(gray8.data, bytes, err)) {
+    if (!WriteExact(&imageHeader, sizeof(imageHeader), err)) {
+        Stop();
+        return false;
+    }
+    if (!WriteExact(gray8.data, static_cast<size_t>(imageHeader.bytes), err)) {
         Stop();
         return false;
     }
@@ -246,26 +251,136 @@ bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet 
         Stop();
         return false;
     }
+    if (response.imageCount != 1) {
+        if (err != nullptr) {
+            *err = "xfeat worker response image count mismatch";
+        }
+        Stop();
+        return false;
+    }
 
-    const size_t xyCount = static_cast<size_t>(response.count) * 2u;
+    if (!ReadFeatureSet(outFeatures, err)) {
+        Stop();
+        return false;
+    }
+    return true;
+}
+
+bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const cv::Mat &rightGray,
+                                                 XFeatFeatureSet &leftFeatures, XFeatFeatureSet &rightFeatures,
+                                                 std::string *err)
+{
+    leftFeatures.keypoints.clear();
+    leftFeatures.descriptors.release();
+    rightFeatures.keypoints.clear();
+    rightFeatures.descriptors.release();
+    if (!Running()) {
+        if (err != nullptr) {
+            *err = "xfeat worker not running";
+        }
+        return false;
+    }
+    if (leftGray.empty() || rightGray.empty()) {
+        if (err != nullptr) {
+            *err = "xfeat stereo input frame is empty";
+        }
+        return false;
+    }
+
+    cv::Mat leftGray8;
+    cv::Mat rightGray8;
+    if (!PrepareGrayImage(leftGray, leftGray8, err) || !PrepareGrayImage(rightGray, rightGray8, err)) {
+        return false;
+    }
+
+    const uint32_t seq = ++m_requestSeq;
+    const RequestHeader header{seq, 2};
+    const ImageHeader leftHeader{static_cast<uint32_t>(leftGray8.rows), static_cast<uint32_t>(leftGray8.cols),
+                                 static_cast<uint32_t>(leftGray8.rows * leftGray8.cols)};
+    const ImageHeader rightHeader{static_cast<uint32_t>(rightGray8.rows), static_cast<uint32_t>(rightGray8.cols),
+                                  static_cast<uint32_t>(rightGray8.rows * rightGray8.cols)};
+    if (!WriteExact(&header, sizeof(header), err) || !WriteExact(&leftHeader, sizeof(leftHeader), err) ||
+        !WriteExact(leftGray8.data, static_cast<size_t>(leftHeader.bytes), err) ||
+        !WriteExact(&rightHeader, sizeof(rightHeader), err) ||
+        !WriteExact(rightGray8.data, static_cast<size_t>(rightHeader.bytes), err)) {
+        Stop();
+        return false;
+    }
+
+    ResponseHeader response{};
+    if (!ReadExact(&response, sizeof(response), err)) {
+        Stop();
+        return false;
+    }
+    if (response.seq != seq) {
+        if (err != nullptr) {
+            *err = "xfeat worker response sequence mismatch";
+        }
+        Stop();
+        return false;
+    }
+    if (response.imageCount != 2) {
+        if (err != nullptr) {
+            *err = "xfeat worker stereo response image count mismatch";
+        }
+        Stop();
+        return false;
+    }
+    if (!ReadFeatureSet(leftFeatures, err) || !ReadFeatureSet(rightFeatures, err)) {
+        Stop();
+        return false;
+    }
+    return true;
+}
+
+bool XFeatFrontendClient::PrepareGrayImage(const cv::Mat &gray, cv::Mat &gray8, std::string *err)
+{
+    if (gray.type() == CV_8UC1 && gray.isContinuous()) {
+        gray8 = gray;
+        return true;
+    }
+    if (gray.channels() == 1) {
+        gray.convertTo(gray8, CV_8UC1);
+    } else {
+        cv::cvtColor(gray, gray8, cv::COLOR_BGR2GRAY);
+    }
+    if (!gray8.isContinuous()) {
+        gray8 = gray8.clone();
+    }
+    if (gray8.empty()) {
+        if (err != nullptr) {
+            *err = "xfeat gray image preparation failed";
+        }
+        return false;
+    }
+    return true;
+}
+
+bool XFeatFrontendClient::ReadFeatureSet(XFeatFeatureSet &outFeatures, std::string *err)
+{
+    FeatureHeader featureHeader{};
+    if (!ReadExact(&featureHeader, sizeof(featureHeader), err)) {
+        return false;
+    }
+
+    const size_t xyCount = static_cast<size_t>(featureHeader.count) * 2u;
     std::vector<float> xy(xyCount, 0.0f);
     if (!xy.empty() && !ReadExact(xy.data(), xy.size() * sizeof(float), err)) {
-        Stop();
         return false;
     }
-    const size_t descriptorValueCount = static_cast<size_t>(response.count) * static_cast<size_t>(response.descriptorDim);
+    const size_t descriptorValueCount =
+        static_cast<size_t>(featureHeader.count) * static_cast<size_t>(featureHeader.descriptorDim);
     std::vector<float> descriptors(descriptorValueCount, 0.0f);
     if (!descriptors.empty() && !ReadExact(descriptors.data(), descriptors.size() * sizeof(float), err)) {
-        Stop();
         return false;
     }
 
-    outFeatures.keypoints.reserve(response.count);
-    for (uint32_t i = 0; i < response.count; ++i) {
+    outFeatures.keypoints.reserve(featureHeader.count);
+    for (uint32_t i = 0; i < featureHeader.count; ++i) {
         outFeatures.keypoints.emplace_back(xy[static_cast<size_t>(i) * 2u], xy[static_cast<size_t>(i) * 2u + 1u]);
     }
-    if (response.count > 0 && response.descriptorDim > 0) {
-        cv::Mat desc(static_cast<int>(response.count), static_cast<int>(response.descriptorDim), CV_32F);
+    if (featureHeader.count > 0 && featureHeader.descriptorDim > 0) {
+        cv::Mat desc(static_cast<int>(featureHeader.count), static_cast<int>(featureHeader.descriptorDim), CV_32F);
         std::memcpy(desc.data, descriptors.data(), descriptors.size() * sizeof(float));
         outFeatures.descriptors = std::move(desc);
     }
