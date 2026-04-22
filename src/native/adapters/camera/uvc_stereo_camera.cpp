@@ -1,10 +1,16 @@
 #include "adapters/camera/uvc_stereo_camera.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 
+#include <fcntl.h>
+#include <linux/videodev2.h>
 #include <opencv2/imgproc.hpp>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #include "common/time_utils.h"
 
@@ -13,6 +19,104 @@ namespace smartdrone::adapters::camera {
 namespace {
 
 constexpr int kDefaultBackend = cv::CAP_V4L2;
+
+int YuyvFourcc() { return cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V'); }
+
+std::string FourccToString(int fourcc)
+{
+    if (fourcc <= 0) {
+        return "unknown";
+    }
+    std::string text(4, ' ');
+    text[0] = static_cast<char>(fourcc & 0xFF);
+    text[1] = static_cast<char>((fourcc >> 8) & 0xFF);
+    text[2] = static_cast<char>((fourcc >> 16) & 0xFF);
+    text[3] = static_cast<char>((fourcc >> 24) & 0xFF);
+    return text;
+}
+
+struct UvcControlInfo {
+    bool supported{false};
+    int32_t min{0};
+    int32_t max{0};
+    int32_t step{1};
+    int32_t def{0};
+};
+
+bool QueryUvcControl(int fd, uint32_t id, UvcControlInfo &out)
+{
+    v4l2_queryctrl query{};
+    query.id = id;
+    if (::ioctl(fd, VIDIOC_QUERYCTRL, &query) != 0) {
+        return false;
+    }
+    if ((query.flags & V4L2_CTRL_FLAG_DISABLED) != 0) {
+        return false;
+    }
+    out.supported = true;
+    out.min = query.minimum;
+    out.max = query.maximum;
+    out.step = std::max<int32_t>(1, query.step);
+    out.def = query.default_value;
+    if (out.max < out.min) {
+        out.max = out.min;
+    }
+    return true;
+}
+
+bool SetUvcControl(int fd, uint32_t id, int32_t value, const char *name)
+{
+    v4l2_control ctrl{};
+    ctrl.id = id;
+    ctrl.value = value;
+    if (::ioctl(fd, VIDIOC_S_CTRL, &ctrl) != 0) {
+        std::cerr << "[uvc] warning: failed to set " << name << " value=" << value << " errno=" << errno << "\n";
+        return false;
+    }
+    return true;
+}
+
+void ConfigureUvcControls(int deviceIndex, bool aeDisable, int exposureUs, float gain)
+{
+    const std::string devicePath = "/dev/video" + std::to_string(deviceIndex);
+    const int fd = ::open(devicePath.c_str(), O_RDWR);
+    if (fd < 0) {
+        std::cerr << "[uvc] warning: failed to open controls on " << devicePath << " errno=" << errno << "\n";
+        return;
+    }
+
+    UvcControlInfo exposureAuto{};
+    UvcControlInfo exposureAbs{};
+    UvcControlInfo gainInfo{};
+    const bool haveExposureAuto = QueryUvcControl(fd, V4L2_CID_EXPOSURE_AUTO, exposureAuto);
+    const bool haveExposureAbs = QueryUvcControl(fd, V4L2_CID_EXPOSURE_ABSOLUTE, exposureAbs);
+    const bool haveGain = QueryUvcControl(fd, V4L2_CID_GAIN, gainInfo);
+
+    const int32_t autoMode = aeDisable ? static_cast<int32_t>(V4L2_EXPOSURE_MANUAL)
+                                       : static_cast<int32_t>(V4L2_EXPOSURE_APERTURE_PRIORITY);
+    if (haveExposureAuto) {
+        SetUvcControl(fd, V4L2_CID_EXPOSURE_AUTO, autoMode, "exposure_auto");
+    }
+
+    if (aeDisable && haveExposureAbs) {
+        const int requestedExposure100Us = std::max(1, static_cast<int>(std::lround(exposureUs / 100.0)));
+        const int32_t clampedExposure = std::clamp<int32_t>(requestedExposure100Us, exposureAbs.min, exposureAbs.max);
+        SetUvcControl(fd, V4L2_CID_EXPOSURE_ABSOLUTE, clampedExposure, "exposure_absolute");
+        std::cerr << "[uvc] control exposure mode=manual exposure_us=" << exposureUs
+                  << " exposure_absolute=" << clampedExposure << "\n";
+    } else if (!aeDisable) {
+        std::cerr << "[uvc] control exposure mode=auto\n";
+    }
+
+    if (haveGain) {
+        const int requestedGain = std::max(0, static_cast<int>(std::lround(gain)));
+        const int32_t clampedGain = std::clamp<int32_t>(requestedGain, gainInfo.min, gainInfo.max);
+        SetUvcControl(fd, V4L2_CID_GAIN, clampedGain, "gain");
+        std::cerr << "[uvc] control gain=" << clampedGain << "\n";
+    }
+
+    ::close(fd);
+}
 
 } // namespace
 
@@ -36,13 +140,20 @@ bool UvcStereoCamera::Open(const core::application::MainRuntimeAliases &aliases)
         return false;
     }
     m_fps = aliases.fps;
-    m_maxQueue = static_cast<size_t>(std::max(1, aliases.pairQueue));
+    // Packed-stereo UVC is used for live teleoperation/SLAM preview, so keep
+    // only the newest frame to avoid queueing stale images behind slow
+    // processing stages.
+    m_maxQueue = 1;
+    if (aliases.pairQueue > 1) {
+        std::cerr << "[uvc] forcing packed-stereo frame_queue=1 for lowest-latency capture (requested="
+                  << aliases.pairQueue << ")\n";
+    }
     m_sequence = 0;
     m_lastFrameTimestampNs = 0;
     m_lastPairTimestampNs = 0;
 
     const int packedWidth = (m_width > 0) ? (m_width * 2) : 0;
-    if (!OpenDevice(m_deviceIndex, packedWidth, m_height, m_fps)) {
+    if (!OpenDevice(m_deviceIndex, packedWidth, m_height, m_fps, aliases.aeDisable, aliases.exposureUs, aliases.gain)) {
         return false;
     }
 
@@ -208,6 +319,8 @@ void UvcStereoCamera::CaptureLoop()
         cv::Mat packedGray;
         if (packed.channels() == 1) {
             packedGray = packed;
+        } else if (packed.type() == CV_8UC2) {
+            cv::cvtColor(packed, packedGray, cv::COLOR_YUV2GRAY_YUY2);
         } else {
             cv::cvtColor(packed, packedGray, cv::COLOR_BGR2GRAY);
         }
@@ -228,12 +341,15 @@ void UvcStereoCamera::CaptureLoop()
     }
 }
 
-bool UvcStereoCamera::OpenDevice(int deviceIndex, int width, int height, int fps)
+bool UvcStereoCamera::OpenDevice(int deviceIndex, int width, int height, int fps, bool aeDisable, int exposureUs,
+                                 float gain)
 {
     if (!m_cap.open(deviceIndex, kDefaultBackend)) {
         return false;
     }
     m_cap.set(cv::CAP_PROP_BUFFERSIZE, 1.0);
+    const int requestedFourcc = YuyvFourcc();
+    m_cap.set(cv::CAP_PROP_FOURCC, static_cast<double>(requestedFourcc));
     if (width > 0) {
         m_cap.set(cv::CAP_PROP_FRAME_WIDTH, static_cast<double>(width));
     }
@@ -250,6 +366,7 @@ bool UvcStereoCamera::OpenDevice(int deviceIndex, int width, int height, int fps
     const int actualWidth = static_cast<int>(m_cap.get(cv::CAP_PROP_FRAME_WIDTH));
     const int actualHeight = static_cast<int>(m_cap.get(cv::CAP_PROP_FRAME_HEIGHT));
     const double actualFps = m_cap.get(cv::CAP_PROP_FPS);
+    const int actualFourcc = static_cast<int>(m_cap.get(cv::CAP_PROP_FOURCC));
     if (actualWidth != width || actualHeight != height) {
         std::cerr << "[uvc] configured packed frame " << width << "x" << height
                   << " but device negotiated " << actualWidth << "x" << actualHeight << "\n";
@@ -259,11 +376,16 @@ bool UvcStereoCamera::OpenDevice(int deviceIndex, int width, int height, int fps
 
     std::cerr << "[uvc] opened device=" << deviceIndex << " backend=" << kDefaultBackend
               << " packed=" << actualWidth << "x" << actualHeight << " eye=" << (actualWidth / 2) << "x"
-              << actualHeight;
+              << actualHeight << " fourcc=" << FourccToString(actualFourcc);
     if (actualFps > 0.0) {
         std::cerr << " fps=" << actualFps;
     }
     std::cerr << "\n";
+    if (actualFourcc != requestedFourcc) {
+        std::cerr << "[uvc] warning: requested fourcc=YUYV but device negotiated " << FourccToString(actualFourcc)
+                  << "\n";
+    }
+    ConfigureUvcControls(deviceIndex, aeDisable, exposureUs, gain);
     return true;
 }
 

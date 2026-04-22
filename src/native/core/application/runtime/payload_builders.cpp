@@ -3,6 +3,7 @@
 #include <sstream>
 
 #include "core/application/config/capability_catalog.h"
+#include "core/application/session/sensor_runtime_helpers.h"
 
 namespace smartdrone::core::application {
 
@@ -59,8 +60,15 @@ std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig &cfg, smartdrone::co
     oss << "camera.exposure_us=" << cfg.app.camera.exposureUs << "\n";
     oss << "camera.gain=" << cfg.app.camera.gain << "\n";
     oss << "camera.auto_exposure=" << (cfg.app.camera.aeDisable ? "false" : "true") << "\n";
+    oss << "camera.auto_exposure_note="
+        << (CompiledCameraProviderUsesPackedStereo() ? "uvc_camera_firmware_auto_exposure"
+                                                     : "sensor_provider_auto_exposure")
+        << "\n";
     oss << "camera.pair_window_ms=" << cfg.app.camera.pairMs << "\n";
-    oss << "camera.pair_window_ms_note=provider_specific_for_separate_left_right_pairing\n";
+    oss << "camera.pair_window_ms_note="
+        << (CompiledCameraProviderUsesPackedStereo() ? "not_used_for_single_uvc_packed_stereo_frame"
+                                                     : "provider_specific_for_separate_left_right_pairing")
+        << "\n";
     oss << "camera.uvc_device_index=" << cfg.app.camera.uvcDeviceIndex << "\n";
     oss << "camera.uvc_eye_width=" << cfg.app.camera.uvcEyeWidth << "\n";
     oss << "camera.uvc_eye_height=" << cfg.app.camera.uvcEyeHeight << "\n";

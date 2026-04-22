@@ -64,6 +64,22 @@ BUILD_JOBS=8 ./scripts/build.sh all
 
 如果设置 `BUILD_JOBS`，会覆盖默认并行度；默认情况下 `scripts/build.sh` 使用 `$(nproc)`。
 
+## 2B. 工作区定制说明
+
+当前工作区在基础版本之上增加了面向 `Jetson Orin NX + 单路 UVC 拼接双目 + XFeat` 的专项适配，主要包括：
+
+- `uvc_stereo_opencv` 按“单个 UVC 设备输出左右拼接帧”工作，当前约定总图尺寸例如 `1280x480` 表示单目 `640x480`。
+- UVC 路径优先按 `YUYV/YUV2` 采集，运行时会转灰度，并在机端把单帧切成左右目后分别送入 SLAM / XFeat。
+- packed stereo 模式下不再做左右时间戳配对；左右图共享同一次抓帧后的单调时钟时间戳。
+- 为保证实时性，packed-UVC 相机队列被强制压到 `1`，优先保留最新帧，避免因 SLAM/XFeat 变慢导致旧图堆积。
+- XFeat worker 已适配 `auto/cpu/cuda`，Jetson 上可配合 CUDA 版 `torch` 走 GPU，并启用 `fp16/autocast/cudnn.benchmark`。
+- `slam_dfx` 已增加 XFeat 分段耗时与数据量统计，便于看清瓶颈是否在预处理、IPC、worker 推理或双目匹配。
+- UDP 图传目标不再要求长期写死；运行时可根据当前手机连接的 active peer 动态切换图像发送目的地址。
+- `UdpImageSender` 当前图像发送上限已提升到 `30 FPS`，同时手机端 `slam.input_fps` 上限也已经抬高到适合高帧率 UVC 模式的范围。
+- Android 端源码已同步补充 UVC 相关曝光/增益/自动曝光、packed stereo 能力判断、XFeat 能力显示与更高的 `slam fps` 上限。
+
+如仅维护机端而不构建手机端，可优先关注原生运行时与脚本改动；Android 侧修改主要用于与新的 UVC / XFeat 行为保持一致。
+
 ## 2A. 在 CM5 / Jetson Orin NX 上从 0 开始准备
 
 当前仓库的主要使用方式为：
@@ -224,6 +240,20 @@ export JETSON_SYSROOT=/opt/sysroots/jetson-orin-nx
 - `output/artifacts/jetson-orin-nx/config/`
 - `output/artifacts/jetson-orin-nx/scripts/`
 
+当前 `scripts/build.sh` 已针对 Jetson 增加以下归一化能力：
+
+- 支持 `orb` 模式：可单独构建 `ORB_SLAM3` 及其共享库。
+- `--jetson-orin-nx` 会自动探测常见 sysroot 目录、交叉编译前缀和 host libdir，不再要求每次手工填全环境变量。
+- 若设置 `SMART_DRONE_CAMERA_PROVIDER=uvc_stereo_opencv`，构建脚本会将 provider 选择直接透传给 CMake。
+- 打包产物时会一并尝试带上 `ORBvoc.txt`、`scripts/xfeat_keypoint_worker.py` 和本地 `accelerated_features/` 仓库。
+
+Jetson 版本建议采用如下方式在编译服务器上构建：
+
+```bash
+BUILD_JOBS=4 SMART_DRONE_CAMERA_PROVIDER=uvc_stereo_opencv \
+  ./scripts/build.sh smart_drone --jetson-orin-nx --reconfigure
+```
+
 ### 2A.7 部署到目标机
 
 直接用内置上传脚本：
@@ -238,6 +268,19 @@ export JETSON_SYSROOT=/opt/sysroots/jetson-orin-nx
 ```bash
 TARGET_HOST=ltz@192.168.0.105 REMOTE_DIR=/home/ltz \
   ./scripts/upload.sh --platform cm5 --restart
+```
+
+当前 `scripts/upload.sh` 已归一化为同时覆盖 CM5 / Jetson：
+
+- `--jetson-orin-nx` 默认上传到 `nvidia@192.168.0.103:/home/nvidia/SmartDrone_cross`
+- Jetson 默认采用 `artifact-root` 布局，把整个 `output/artifacts/jetson-orin-nx` 原子替换到远端目录
+- 支持 `SSH_PASSWORD=...` 配合 `sshpass`，用于无人值守上传及 `sudo systemctl restart`
+- artifact-root 模式会同时携带 `bin/`、`lib/`、`config/`、`scripts/`，以及打包进来的 `ORBvoc.txt` / `accelerated_features`
+
+Jetson 建议部署命令：
+
+```bash
+SSH_PASSWORD=nvidia ./scripts/upload.sh --jetson-orin-nx --restart
 ```
 
 上传脚本默认要求 `output/artifacts/<platform>` 下存在：
@@ -298,6 +341,14 @@ Provider 语义：
   - `camera.uvc_eye_width`
   - `camera.uvc_eye_height`
   - `camera.uvc_packed_stereo=true`
+
+当前 `uvc_stereo_opencv` 的运行语义补充如下：
+
+- 请求给 UVC 设备的实际宽度为 `2 * camera.uvc_eye_width`
+- 例如总输出 `1280x480` 时，单目输入尺寸实际是 `640x480`
+- 如果设备协商到 `CV_8UC2`，运行时按 `YUYV/YUV2 -> Gray` 进行转换
+- 左右图直接从同一帧切分，不依赖 `camera.pair_window_ms` 做软件配对
+- 为降低排队延迟，packed-UVC 路径会将 frame queue 强制收敛到 `1`
 
 ### 2A.10 当前仍需手工准备的部分
 
@@ -470,6 +521,8 @@ TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./scripts/upload.sh --restart
 - `REMOTE_SERVICE`：默认 `smart_drone`
 - `RESTART_SERVICE`：设为 `1` 时上传后重启 systemd 服务
 - `DEPLOY_PLATFORM`：默认 `cm5`，用于选择 `output/artifacts/<platform>` 下的发布件
+- `UPLOAD_LAYOUT`：`flat` 或 `artifact-root`；Jetson 默认 `artifact-root`
+- `SSH_PASSWORD`：设置后通过 `sshpass` 执行 `ssh/scp`，并可自动喂给 `sudo -S`
 - `ADB_IP` / `ADB_PORT`：如果两者都设置了（或通过 `--adb-ip` / `--adb-port` 传入），脚本会执行 Android `adb connect` 并安装 APK
 
 Android 部署参数：
@@ -480,6 +533,7 @@ Android 部署参数：
 发布平台参数：
 
 - `--platform <name>`：显式选择 `output/artifacts/<name>` 下的发布件，例如 `cm5` 或 `jetson-orin-nx`
+- `--jetson-orin-nx`：等价于 `--platform jetson-orin-nx`，并启用 Jetson 默认目标机与目录
 
 ADB 约束：
 
@@ -680,6 +734,13 @@ python3 scripts/convert_kalibr_to_smartdrone_yaml.py \
 - `slam.orb_nlevels`
 - `slam.orb_ini_th_fast`
 - `slam.orb_min_th_fast`
+
+与当前 UVC/XFeat 适配相关的补充说明：
+
+- `camera.auto_exposure` 在 UVC packed stereo 路径下表示“是否交还给 UVC 相机固件/ISP 自动曝光”，而非 libcamera 的 AE 控制。
+- `camera.pair_window_ms` 在单路 packed-UVC 路径下仅作为兼容字段保留，当前不参与左右目软件配对。
+- 手机端 `slam.input_fps` 上限已提高，以适配 `1280x400@120`、`1280x480@100`、`1600x600@100` 等高帧率模式。
+- 图传开启 `stream.send_image=true` 时，当前单路 UVC 帧会先切成左右目，再分别发送预览与特征点叠加结果。
 
 参数生效方式：
 

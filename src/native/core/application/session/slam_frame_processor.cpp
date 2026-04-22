@@ -318,6 +318,9 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 "\"imu_count\":%zu,\"feat_left\":%zu,\"feat_right\":%zu,\"points\":%zu,"
                 "\"xfeat_used\":%d,\"xfeat_raw_left\":%d,\"xfeat_raw_right\":%d,"
                 "\"xfeat_match_stereo\":%d,\"xfeat_injected_left\":%d,\"xfeat_injected_right\":%d,"
+                "\"xfeat_prepare_ms\":%.3f,\"xfeat_write_ms\":%.3f,\"xfeat_read_ms\":%.3f,"
+                "\"xfeat_worker_ms\":%.3f,\"xfeat_match_ms\":%.3f,\"xfeat_total_ms\":%.3f,"
+                "\"xfeat_image_count\":%u,\"xfeat_payload_bytes\":%u,"
                 "\"pair_dt_ms\":%.3f,\"reject_dt_ms\":%.3f,\"pending_left\":%zu,\"pending_right\":%zu,"
                 "\"drop_left\":%llu,\"drop_right\":%llu,\"rate_drop\":%llu,"
                 "\"img_std_left\":%.2f,\"img_std_right\":%.2f,\"sharp_left\":%.2f,\"sharp_right\":%.2f,"
@@ -329,7 +332,10 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
                 slamOutput.rightFeatures.size(), pointCount, slamOutput.usedXFeatFrontend ? 1 : 0,
                 slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount, slamOutput.xfeatMatchedStereoCount,
-                slamOutput.xfeatInjectedLeftCount, slamOutput.xfeatInjectedRightCount, static_cast<double>(pairDtMs), rejectDtMs, pendingL,
+                slamOutput.xfeatInjectedLeftCount, slamOutput.xfeatInjectedRightCount, slamOutput.xfeatPrepareMs,
+                slamOutput.xfeatWorkerWriteMs, slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs,
+                slamOutput.xfeatStereoMatchMs, slamOutput.xfeatTotalMs, slamOutput.xfeatImageCount,
+                slamOutput.xfeatPayloadBytes, static_cast<double>(pairDtMs), rejectDtMs, pendingL,
                 pendingR, static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
                 monoStepMs, DurationMs(acquireStartTp, acquireEndTp), DurationMs(imuStartTp, imuEndTp),
@@ -342,6 +348,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
                 "imu=%zu feat=%zu/%zu points=%zu "
                 "xfeat=%s raw=%d/%d stereo=%d injected=%d/%d "
+                "xfeat_ms=prep %.3f write %.3f read %.3f worker %.3f match %.3f total %.3f "
+                "xfeat_io=%uimg/%ubytes "
                 "pair_dt=%.3f reject_dt=%.3f pend=%zu/%zu drop=%llu/%llu rate_drop=%llu "
                 "img_std=%.2f/%.2f sharp=%.2f/%.2f "
                 "timing_ms gap=%.3f mono=%.3f acquire=%.3f imu=%.3f slam=%.3f cloud=%.3f udp=%.3f post=%.3f "
@@ -351,7 +359,10 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
                 slamOutput.rightFeatures.size(), pointCount, slamOutput.usedXFeatFrontend ? "on" : "off",
                 slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount, slamOutput.xfeatMatchedStereoCount,
-                slamOutput.xfeatInjectedLeftCount, slamOutput.xfeatInjectedRightCount,
+                slamOutput.xfeatInjectedLeftCount, slamOutput.xfeatInjectedRightCount, slamOutput.xfeatPrepareMs,
+                slamOutput.xfeatWorkerWriteMs, slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs,
+                slamOutput.xfeatStereoMatchMs, slamOutput.xfeatTotalMs, slamOutput.xfeatImageCount,
+                slamOutput.xfeatPayloadBytes,
                 static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
                 static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
@@ -361,6 +372,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 DurationMs(publishStartTp, publishEndTp), totalMs);
         }
         Logger::Logf(Logger::INFO, "%s", dfxLine);
+        std::fprintf(stderr, "%s\n", dfxLine);
     }
 
     return StepResult::Continue;

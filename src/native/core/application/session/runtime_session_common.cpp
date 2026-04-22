@@ -4,6 +4,8 @@
 #include <cmath>
 #include <iostream>
 
+#include "core/application/session/sensor_runtime_helpers.h"
+
 namespace smartdrone::core::application {
 
 int ClampSlamInputFps(int requestedFps, int cameraFps)
@@ -240,15 +242,19 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
 {
     std::cerr << "mode=" << smartdrone::core::domain::ToString(mode) << "\n";
     std::cerr << "sensor_mode=" << ToSensorModeText(a.sensorMode) << "\n";
+    const bool packedStereo = CompiledCameraProviderUsesPackedStereo();
     std::cerr << "cam " << a.width << "x" << a.height << " @" << a.fps
               << " aeDisable=" << (a.aeDisable ? "true" : "false") << " exp_us=" << a.exposureUs << " gain=" << a.gain
-              << " pixelFormat=R16\n";
+              << " pixelFormat=" << (packedStereo ? "YUYV_packed_stereo" : "R16") << "\n";
     std::cerr << "cam_select left_index=" << a.leftCamIndex << " right_index=" << a.rightCamIndex
               << " uvc_device_index=" << a.uvcDeviceIndex << "\n";
     std::cerr << "stereo_input eye=" << a.uvcEyeWidth << "x" << a.uvcEyeHeight
               << " packed_stereo=" << (a.uvcPackedStereo ? "Y" : "N")
               << " pair_window_ms=" << a.pairMs << " keep_window_ms=" << a.keepMs << " frame_queue=" << a.pairQueue
               << "\n";
+    if (packedStereo) {
+        std::cerr << "stereo_input_note=single_uvc_frame_split_left_right_no_timestamp_pairing\n";
+    }
     std::cerr << "slam_input_fps=" << a.slamInputFps << " camera_fps=" << a.fps
               << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
     std::cerr << "slam_mode=" << smartdrone::core::domain::ToString(a.slamOperationMode) << "\n";

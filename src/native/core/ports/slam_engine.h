@@ -42,6 +42,14 @@ struct SlamOutput {
     int xfeatMatchedStereoCount{0};
     int xfeatInjectedLeftCount{0};
     int xfeatInjectedRightCount{0};
+    double xfeatPrepareMs{0.0};
+    double xfeatWorkerWriteMs{0.0};
+    double xfeatWorkerReadMs{0.0};
+    double xfeatWorkerTotalMs{0.0};
+    double xfeatStereoMatchMs{0.0};
+    double xfeatTotalMs{0.0};
+    uint32_t xfeatImageCount{0};
+    uint32_t xfeatPayloadBytes{0};
     std::vector<cv::Point2f> leftFeatures;
     std::vector<cv::Point2f> rightFeatures;
     std::vector<float> pointCloudXyz;

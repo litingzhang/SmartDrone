@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <string>
 #include <thread>
 
 #include <opencv2/core/mat.hpp>
@@ -37,7 +38,7 @@ class UvcStereoCamera final : public core::ports::ICameraProvider {
     };
 
     void CaptureLoop();
-    bool OpenDevice(int deviceIndex, int width, int height, int fps);
+    bool OpenDevice(int deviceIndex, int width, int height, int fps, bool aeDisable, int exposureUs, float gain);
     void PushFrame(core::ports::StereoFrame &&frame, uint64_t captureTimestampNs);
 
     mutable std::mutex m_mutex;
@@ -51,7 +52,7 @@ class UvcStereoCamera final : public core::ports::ICameraProvider {
     int m_width{0};
     int m_height{0};
     int m_fps{0};
-    size_t m_maxQueue{3};
+    size_t m_maxQueue{1};
     uint32_t m_sequence{0};
     uint64_t m_lastFrameTimestampNs{0};
     uint64_t m_lastPairTimestampNs{0};

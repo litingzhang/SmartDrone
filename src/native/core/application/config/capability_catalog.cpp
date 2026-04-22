@@ -12,12 +12,18 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault()
         domain::RuntimeMode::Slam,
         domain::RuntimeMode::Calib,
     };
-    capabilities.perceptionModes = {
-        domain::PerceptionMode::Stereo,
-        domain::PerceptionMode::StereoImu,
-        domain::PerceptionMode::Mono,
-        domain::PerceptionMode::MonoImu,
-    };
+    if (CompiledCameraProviderUsesPackedStereo()) {
+        capabilities.perceptionModes = {
+            domain::PerceptionMode::Stereo,
+        };
+    } else {
+        capabilities.perceptionModes = {
+            domain::PerceptionMode::Stereo,
+            domain::PerceptionMode::StereoImu,
+            domain::PerceptionMode::Mono,
+            domain::PerceptionMode::MonoImu,
+        };
+    }
     capabilities.slamModes = {
         domain::SlamOperationMode::Mapping,
         domain::SlamOperationMode::Localization,
@@ -33,11 +39,12 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault()
         "slam_mode.tracking_only=maps_to_orbslam3_localization_only",
         "slam_mode.auto=runtime_adaptive_switch_between_mapping_and_localization",
         "slam.feature_frontend.orb=full_orbslam3_tracking_path",
-        "slam.feature_frontend.xfeat=configuration_plumbed_but_main_tracking_still_uses_orbslam3_until_native_xfeat_frontend_is_integrated",
+        "slam.feature_frontend.xfeat=packed_stereo_frames_can_be_split_per_eye_for_xfeat_detection_and_optional_orbslam3_external_feature_injection",
     };
     if (CompiledCameraProviderUsesPackedStereo()) {
         capabilities.behaviorNotes.push_back("camera.uvc_stereo_opencv=single_uvc_device_packed_left_right_frame");
         capabilities.behaviorNotes.push_back("camera.uvc_timestamp=software_monotonic_timestamp_taken_immediately_after_grab");
+        capabilities.behaviorNotes.push_back("camera.uvc_pairing=not_required_single_capture_provides_both_eyes");
     }
     capabilities.configKeys = ConfigRegistry::DefaultDescriptors();
     return capabilities;

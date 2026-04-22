@@ -1,6 +1,7 @@
 #include "adapters/slam/orbslam3_engine.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -223,11 +224,20 @@ std::vector<cv::KeyPoint> OrbSlam3Engine::ToKeyPoints(const std::vector<cv::Poin
 bool OrbSlam3Engine::BuildMonoExternalData(const cv::Mat &gray, ORB_SLAM3::ExternalMonoFrameData &outData) const
 {
     outData = ORB_SLAM3::ExternalMonoFrameData{};
+    const auto totalStartTp = std::chrono::steady_clock::now();
     m_lastXFeatRawLeftCount = 0;
     m_lastXFeatRawRightCount = 0;
     m_lastXFeatMatchedStereoCount = 0;
     m_lastXFeatInjectedLeftCount = 0;
     m_lastXFeatInjectedRightCount = 0;
+    m_lastXFeatPrepareMs = 0.0;
+    m_lastXFeatWorkerWriteMs = 0.0;
+    m_lastXFeatWorkerReadMs = 0.0;
+    m_lastXFeatWorkerTotalMs = 0.0;
+    m_lastXFeatStereoMatchMs = 0.0;
+    m_lastXFeatTotalMs = 0.0;
+    m_lastXFeatImageCount = 0;
+    m_lastXFeatPayloadBytes = 0;
     if (m_featureFrontend != FeatureFrontend::XFeat || m_xfeatFrontendClient == nullptr ||
         !m_xfeatFrontendClient->Running()) {
         return false;
@@ -241,12 +251,21 @@ bool OrbSlam3Engine::BuildMonoExternalData(const cv::Mat &gray, ORB_SLAM3::Exter
     if (!m_xfeatFrontendClient->DetectAndCompute(xfeatInput, features, &err) || features.descriptors.empty()) {
         return false;
     }
+    const XFeatFrontendClient::Stats stats = m_xfeatFrontendClient->LastStats();
+    m_lastXFeatPrepareMs = stats.prepareMs;
+    m_lastXFeatWorkerWriteMs = stats.writeMs;
+    m_lastXFeatWorkerReadMs = stats.readMs;
+    m_lastXFeatWorkerTotalMs = stats.totalMs;
+    m_lastXFeatImageCount = stats.imageCount;
+    m_lastXFeatPayloadBytes = stats.payloadBytes;
     RemapKeypointsToSource(features.keypoints, scaleX, scaleY);
     m_lastXFeatRawLeftCount = static_cast<int>(features.keypoints.size());
 
     outData.keypoints = ToKeyPoints(features.keypoints);
     outData.descriptors = std::move(features.descriptors);
     m_lastXFeatInjectedLeftCount = static_cast<int>(outData.keypoints.size());
+    m_lastXFeatTotalMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - totalStartTp).count();
     return !outData.keypoints.empty() && !outData.descriptors.empty();
 }
 
@@ -256,11 +275,20 @@ bool OrbSlam3Engine::BuildStereoExternalData(const cv::Mat &leftGray, const cv::
                                              std::vector<cv::Point2f> *rightRawPoints) const
 {
     outData = ORB_SLAM3::ExternalStereoFrameData{};
+    const auto totalStartTp = std::chrono::steady_clock::now();
     m_lastXFeatRawLeftCount = 0;
     m_lastXFeatRawRightCount = 0;
     m_lastXFeatMatchedStereoCount = 0;
     m_lastXFeatInjectedLeftCount = 0;
     m_lastXFeatInjectedRightCount = 0;
+    m_lastXFeatPrepareMs = 0.0;
+    m_lastXFeatWorkerWriteMs = 0.0;
+    m_lastXFeatWorkerReadMs = 0.0;
+    m_lastXFeatWorkerTotalMs = 0.0;
+    m_lastXFeatStereoMatchMs = 0.0;
+    m_lastXFeatTotalMs = 0.0;
+    m_lastXFeatImageCount = 0;
+    m_lastXFeatPayloadBytes = 0;
     if (m_featureFrontend != FeatureFrontend::XFeat || m_xfeatFrontendClient == nullptr ||
         !m_xfeatFrontendClient->Running()) {
         return false;
@@ -282,6 +310,13 @@ bool OrbSlam3Engine::BuildStereoExternalData(const cv::Mat &leftGray, const cv::
         leftFeatures.descriptors.empty() || rightFeatures.descriptors.empty()) {
         return false;
     }
+    const XFeatFrontendClient::Stats stats = m_xfeatFrontendClient->LastStats();
+    m_lastXFeatPrepareMs = stats.prepareMs;
+    m_lastXFeatWorkerWriteMs = stats.writeMs;
+    m_lastXFeatWorkerReadMs = stats.readMs;
+    m_lastXFeatWorkerTotalMs = stats.totalMs;
+    m_lastXFeatImageCount = stats.imageCount;
+    m_lastXFeatPayloadBytes = stats.payloadBytes;
     RemapKeypointsToSource(leftFeatures.keypoints, leftScaleX, leftScaleY);
     RemapKeypointsToSource(rightFeatures.keypoints, rightScaleX, rightScaleY);
     if (leftRawPoints != nullptr) {
@@ -293,7 +328,10 @@ bool OrbSlam3Engine::BuildStereoExternalData(const cv::Mat &leftGray, const cv::
     m_lastXFeatRawLeftCount = static_cast<int>(leftFeatures.keypoints.size());
     m_lastXFeatRawRightCount = static_cast<int>(rightFeatures.keypoints.size());
 
+    const auto matchStartTp = std::chrono::steady_clock::now();
     const std::vector<StereoMatchPair> matches = MatchStereoPairs(leftFeatures, rightFeatures);
+    m_lastXFeatStereoMatchMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - matchStartTp).count();
     if (matches.empty()) {
         return false;
     }
@@ -313,6 +351,8 @@ bool OrbSlam3Engine::BuildStereoExternalData(const cv::Mat &leftGray, const cv::
     outData.matchedStereoPairs = true;
     m_lastXFeatInjectedLeftCount = static_cast<int>(outData.leftKeypoints.size());
     m_lastXFeatInjectedRightCount = static_cast<int>(outData.rightKeypoints.size());
+    m_lastXFeatTotalMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - totalStartTp).count();
     return true;
 }
 
@@ -330,6 +370,14 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     m_lastXFeatMatchedStereoCount = 0;
     m_lastXFeatInjectedLeftCount = 0;
     m_lastXFeatInjectedRightCount = 0;
+    m_lastXFeatPrepareMs = 0.0;
+    m_lastXFeatWorkerWriteMs = 0.0;
+    m_lastXFeatWorkerReadMs = 0.0;
+    m_lastXFeatWorkerTotalMs = 0.0;
+    m_lastXFeatStereoMatchMs = 0.0;
+    m_lastXFeatTotalMs = 0.0;
+    m_lastXFeatImageCount = 0;
+    m_lastXFeatPayloadBytes = 0;
 
     Sophus::SE3f tcw;
     const bool monoMode = (m_inputMode != OrbInputMode::Stereo);
@@ -367,16 +415,35 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     ORB_SLAM3::ExternalStereoFrameData stereoExternal;
     std::vector<cv::Point2f> stereoLeftRawPoints;
     std::vector<cv::Point2f> stereoRightRawPoints;
+    std::vector<cv::Point2f> stereoStreamLeftPoints;
+    std::vector<cv::Point2f> stereoStreamRightPoints;
     const bool haveMonoExternal = monoMode && tryXFeat && BuildMonoExternalData(monoImage, monoExternal);
     const bool haveStereoExternal = !monoMode && tryXFeat &&
                                     BuildStereoExternalData(preparedLeftImage, preparedRightImage,
                                                             stereoExternal, &stereoLeftRawPoints, &stereoRightRawPoints);
+    bool haveStereoStreamOnlyXFeat = false;
+    if (!monoMode && extractFeatures && m_featureFrontend == FeatureFrontend::XFeat && !haveStereoExternal &&
+        m_xfeatFrontendClient != nullptr && m_xfeatFrontendClient->Running()) {
+        ORB_SLAM3::ExternalStereoFrameData streamOnlyExternal;
+        (void)BuildStereoExternalData(input.stereo.left.gray, input.stereo.right.gray, streamOnlyExternal,
+                                      &stereoStreamLeftPoints, &stereoStreamRightPoints);
+        haveStereoStreamOnlyXFeat = !stereoStreamLeftPoints.empty() || !stereoStreamRightPoints.empty();
+    }
+    const bool haveXFeatFeaturesForOutput = haveMonoExternal || haveStereoExternal || haveStereoStreamOnlyXFeat;
     out.usedXFeatFrontend = haveMonoExternal || haveStereoExternal;
     out.xfeatRawLeftCount = m_lastXFeatRawLeftCount;
     out.xfeatRawRightCount = m_lastXFeatRawRightCount;
     out.xfeatMatchedStereoCount = m_lastXFeatMatchedStereoCount;
     out.xfeatInjectedLeftCount = m_lastXFeatInjectedLeftCount;
     out.xfeatInjectedRightCount = m_lastXFeatInjectedRightCount;
+    out.xfeatPrepareMs = m_lastXFeatPrepareMs;
+    out.xfeatWorkerWriteMs = m_lastXFeatWorkerWriteMs;
+    out.xfeatWorkerReadMs = m_lastXFeatWorkerReadMs;
+    out.xfeatWorkerTotalMs = m_lastXFeatWorkerTotalMs;
+    out.xfeatStereoMatchMs = m_lastXFeatStereoMatchMs;
+    out.xfeatTotalMs = m_lastXFeatTotalMs;
+    out.xfeatImageCount = m_lastXFeatImageCount;
+    out.xfeatPayloadBytes = m_lastXFeatPayloadBytes;
 
     if (m_useImu) {
         if (monoMode) {
@@ -418,20 +485,23 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     out.pose.qy = q.y();
     out.pose.qz = q.z();
 
-    if (extractFeatures && out.usedXFeatFrontend) {
+    if (extractFeatures && haveXFeatFeaturesForOutput) {
         if (monoMode) {
             if (m_inputMode == OrbInputMode::MonoRight) {
                 out.rightFeatures = ToPointList(monoExternal.keypoints);
             } else {
                 out.leftFeatures = ToPointList(monoExternal.keypoints);
             }
-        } else {
+        } else if (haveStereoExternal) {
             out.leftFeatures = std::move(stereoLeftRawPoints);
             out.rightFeatures = std::move(stereoRightRawPoints);
+        } else {
+            out.leftFeatures = std::move(stereoStreamLeftPoints);
+            out.rightFeatures = std::move(stereoStreamRightPoints);
         }
     }
 
-    const bool needVisualExtraction = extractPointCloud || (extractFeatures && !out.usedXFeatFrontend);
+    const bool needVisualExtraction = extractPointCloud || (extractFeatures && !haveXFeatFeaturesForOutput);
     if (!needVisualExtraction) {
         return out;
     }

@@ -52,6 +52,14 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     mutable int m_lastXFeatMatchedStereoCount{0};
     mutable int m_lastXFeatInjectedLeftCount{0};
     mutable int m_lastXFeatInjectedRightCount{0};
+    mutable double m_lastXFeatPrepareMs{0.0};
+    mutable double m_lastXFeatWorkerWriteMs{0.0};
+    mutable double m_lastXFeatWorkerReadMs{0.0};
+    mutable double m_lastXFeatWorkerTotalMs{0.0};
+    mutable double m_lastXFeatStereoMatchMs{0.0};
+    mutable double m_lastXFeatTotalMs{0.0};
+    mutable uint32_t m_lastXFeatImageCount{0};
+    mutable uint32_t m_lastXFeatPayloadBytes{0};
     mutable std::string m_lastXFeatStatusReason;
 };
 

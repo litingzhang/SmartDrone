@@ -90,6 +90,19 @@ Constraints:
 - image/feature/map streaming based on runtime config
 - periodic and abnormal `slam_dfx` diagnostics
 
+The current implementation also introduces several UVC/streaming/real-time policies on top of the baseline SLAM session:
+
+- Single-UVC packed stereo:
+  `uvc_stereo_opencv` is now treated as one UVC device that returns one packed left-right stereo frame. Runtime splits the frame on-device and no longer depends on dual-camera timestamp pairing.
+- Software timestamp strategy:
+  for packed-UVC, the timestamp is taken from the monotonic clock immediately after frame grab completion, and both eye images share that same timestamp.
+- Newest-frame priority:
+  the packed-UVC path forces its internal frame queue to `1`, thereby preferring fresh frames over preserving stale frames behind slow SLAM / XFeat processing.
+- Dynamic preview destination:
+  `SlamSessionRuntime` resolves the UDP image destination from the current active peer stored in `LivePoseState`, thereby avoiding a permanently hard-coded phone IP.
+- Preview rate limiting:
+  `UdpImageSender` now rate-limits image output independently, with a maximum image send rate of `30 FPS`, decoupled from the SLAM input rate.
+
 ### 3.4A XFeat Integration Adaptations
 
 The current `xfeat` integration is an external frontend adaptation layer on top of the existing ORB-SLAM3 tracking pipeline rather than a full native frontend replacement.
@@ -100,6 +113,8 @@ The implementation contains the following XFeat-specific adaptations:
   `smart_drone` starts a separate Python worker through `XFeatFrontendClient`, exchanges grayscale frames through a binary pipe protocol, and receives keypoints plus `CV_32F` descriptors.
 - Runtime-selectable execution device:
   the worker accepts `auto/cpu/cuda` device selection. `auto` resolves to CUDA on Jetson-class targets when available and falls back to CPU on CM5-class targets.
+- Jetson CUDA optimizations:
+  on the CUDA path, the worker enables `torch.float16`, `torch.autocast(...)`, `torch.inference_mode()`, and `cudnn.benchmark` in order to reduce frontend inference cost on Jetson.
 - Runtime-configurable XFeat tuning:
   runtime config exposes `slam.xfeat_top_k`, `slam.xfeat_max_points`, `slam.xfeat_input_max_width`, and `slam.xfeat_input_max_height`. Changes are applied through the runtime-config pipeline and restart the SLAM session so that the worker and frontend use the updated limits.
 - Stereo batch inference:
@@ -120,6 +135,8 @@ The implementation contains the following XFeat-specific adaptations:
   `Frame::ComputeBoW()` and `KeyFrame::ComputeBoW()` still only build BoW vectors for `CV_8U` descriptors. As a result, the XFeat path is compatible with tracking injection, but it does not replace the full ORB vocabulary-based frontend assumptions.
 - Explicit runtime diagnostics:
   `slam_dfx` reports `xfeat_used`, `xfeat_raw_left/right`, `xfeat_match_stereo`, and `xfeat_injected_left/right`. `orbslam3_engine` also emits `xfeat_runtime_status=...` to distinguish worker availability, tracking-state gating, and prepared-image enablement.
+- Stage-level timing and payload diagnostics:
+  `slam_dfx` additionally reports `xfeat_prepare_ms`, `xfeat_write_ms`, `xfeat_read_ms`, `xfeat_worker_ms`, `xfeat_match_ms`, `xfeat_total_ms`, `xfeat_image_count`, and `xfeat_payload_bytes`, enabling direct bottleneck identification.
 
 ### 3.5 Calibration Session Features
 
@@ -143,6 +160,11 @@ Config domains:
 - XFeat extractor: `top_k`, `max_points`, `input_max_width`, `input_max_height`
 - stream: UDP IP and image/feature/map flags
 
+The current implementation adds two provider-specific semantics on top of those keys:
+
+- on packed-UVC, `camera.auto_exposure` means handing control back to the UVC camera firmware / ISP auto-exposure path
+- on packed-UVC, `camera.pair_window_ms` stays in the protocol for compatibility but is not used for left-right pairing
+
 `ConfigRegistry` defines reload and restart semantics per key.
 
 ### 3.7 Capabilities and Config Query
@@ -160,6 +182,13 @@ Android `MainActivity` provides:
 - heartbeat send/monitor and timeout-triggered LAND
 - command/config dispatch and ACK handling
 - state, point-cloud, and video/feature visualization
+
+The current implementation also updates the Android source so that it remains aligned with the packed-UVC/XFeat pipeline:
+
+- only the perception modes that match the compiled provider are exposed in the UI/capability handling path
+- exposure, gain, and auto-exposure ranges were widened to fit the current UVC camera behavior
+- the `slam.input_fps` UI ceiling was raised to `120` for high-rate UVC modes
+- config/capability text now explicitly describes UVC AE semantics and the fact that pair-window is not used for a single packed frame
 
 ---
 
@@ -278,6 +307,12 @@ Concurrency properties:
 - video/preview flow rate controls
 - point-cloud truncation under payload limits
 
+Throughput control in the current implementation is centered on the following behavior:
+
+- camera acquisition and SLAM processing are decoupled so that freshness is preferred over processing every historical frame
+- `slam.input_fps` caps the rate entering SLAM/XFeat
+- `UdpImageSender` separately caps preview output to the phone at `30 FPS`, so phone preview FPS does not have to match SLAM/XFeat FPS
+
 ### 7.2 Latency Instrumentation
 
 - `FrameTimingTracker`: capture/in-slam/out-slam/send timestamps
@@ -309,6 +344,12 @@ Concurrency properties:
 - diagnostics channels: `slam_dfx`, `odom_ts`, ACK logs, timesync logs
 - role-based thread launch logging
 - remote capability and config query endpoints
+
+Additional observability points introduced in the current implementation:
+
+- config payloads now include `camera.auto_exposure_note` and `camera.pair_window_ms_note` to explain packed-UVC-specific semantics
+- startup logs from `runtime_session_common` explicitly print `pixelFormat=YUYV_packed_stereo`, `packed_stereo=Y/N`, and `stereo_input_note=single_uvc_frame_split_left_right_no_timestamp_pairing`
+- `UdpImageSender` logs destination peer changes, which helps debug cases where the phone is connected but still receives no preview
 
 ### 8.4 Design for Extensibility
 
@@ -573,3 +614,4 @@ sequenceDiagram
 - Discovery has been integrated with Android auto-connect behavior.
 - Setpoint behavior is split as designed: OFFBOARD streams setpoints; POSITION mode stops setpoint streaming.
 - Heartbeat timeout LAND is implemented on both companion and Android sides for redundant fail-safe coverage.
+- The current implementation now provides a runnable `Jetson Orin NX + single-UVC packed stereo + XFeat worker + dynamic UDP preview destination` path, but final SLAM and preview quality still depend on stereo mounting, calibration quality, and the phone reconnecting after redeploy.

@@ -75,6 +75,22 @@ BUILD_JOBS=8 ./scripts/build.sh replay
 
 By default `scripts/build.sh` uses `$(nproc)`.
 
+## Workspace Customizations
+
+Relative to the baseline repository, the current workspace includes a set of dedicated adaptations for `Jetson Orin NX + single-UVC packed stereo + XFeat`:
+
+- `uvc_stereo_opencv` is now treated as one UVC device that returns one packed left-right stereo frame. A total frame size such as `1280x480` therefore means `640x480` per eye.
+- The UVC path prefers `YUYV/YUV2` capture, converts it to grayscale, then splits the packed frame into left and right eye images on the device side before sending them into SLAM / XFeat.
+- Packed stereo no longer depends on left-right timestamp pairing. Both eye images share the same software monotonic timestamp taken immediately after the grab completes.
+- To preserve real-time behavior, the packed-UVC queue is forced down to `1`, so the runtime keeps the newest frame instead of accumulating stale frames behind slow SLAM/XFeat processing.
+- The XFeat worker supports `auto/cpu/cuda`. On Jetson, it can run with CUDA-enabled PyTorch and now enables `fp16`, `autocast`, and `cudnn.benchmark`.
+- `slam_dfx` now reports XFeat stage timings and payload counters so that bottlenecks can be separated into preprocessing, IPC write/read, worker inference, and stereo matching.
+- UDP image delivery no longer has to stay pinned to one static IP. The runtime can resolve the current active phone peer dynamically and switch the preview destination accordingly.
+- `UdpImageSender` now caps image streaming at `30 FPS`, while the Android-side `slam.input_fps` limit was raised to better match high-FPS UVC modes.
+- The Android source tree was also updated so that exposure/gain/AE, packed-stereo capability handling, XFeat capability display, and higher SLAM FPS limits remain aligned with the updated UVC behavior.
+
+If only the device/runtime side is being maintained, priority may be given to the native runtime and scripts; the Android-side changes are primarily intended to keep the UI and configuration protocol aligned with the updated UVC/XFeat pipeline.
+
 ## From Scratch On CM5 / Jetson Orin NX
 
 The current repository is structured primarily for:
@@ -235,6 +251,20 @@ Artifacts are written to:
 - `output/artifacts/jetson-orin-nx/config/`
 - `output/artifacts/jetson-orin-nx/scripts/`
 
+The current `scripts/build.sh` also provides the following Jetson-specific workflow normalizations:
+
+- `orb` mode is available to build `ORB_SLAM3` and its shared libraries independently.
+- `--jetson-orin-nx` auto-detects common sysroot locations, cross-toolchain prefixes, and host libdirs instead of requiring all environment variables every time.
+- `SMART_DRONE_CAMERA_PROVIDER=uvc_stereo_opencv` can be passed directly through to CMake from the unified build entry point.
+- Artifact packaging now also attempts to include `ORBvoc.txt`, `scripts/xfeat_keypoint_worker.py`, and the local `accelerated_features/` repository.
+
+Recommended Jetson build command on the build server:
+
+```bash
+BUILD_JOBS=4 SMART_DRONE_CAMERA_PROVIDER=uvc_stereo_opencv \
+  ./scripts/build.sh smart_drone --jetson-orin-nx --reconfigure
+```
+
 ### 7. Deploy To The Device
 
 Use the built-in uploader:
@@ -249,6 +279,19 @@ Or set the target explicitly:
 ```bash
 TARGET_HOST=ltz@192.168.0.105 REMOTE_DIR=/home/ltz \
   ./scripts/upload.sh --platform cm5 --restart
+```
+
+`scripts/upload.sh` is normalized for both CM5 and Jetson:
+
+- `--jetson-orin-nx` defaults to `nvidia@192.168.0.103:/home/nvidia/SmartDrone_cross`
+- Jetson uses `artifact-root` deployment by default, replacing the entire `output/artifacts/jetson-orin-nx` layout atomically on the remote side
+- `SSH_PASSWORD=...` is supported through `sshpass`, including unattended `sudo systemctl restart`
+- artifact-root deployment carries `bin/`, `lib/`, `config/`, `scripts/`, plus packaged `ORBvoc.txt` / `accelerated_features` when present
+
+Recommended Jetson deploy command:
+
+```bash
+SSH_PASSWORD=nvidia ./scripts/upload.sh --jetson-orin-nx --restart
 ```
 
 The uploader expects these files to exist in `output/artifacts/<platform>`:
@@ -309,6 +352,14 @@ Provider semantics:
   - `camera.uvc_eye_width`
   - `camera.uvc_eye_height`
   - `camera.uvc_packed_stereo=true`
+
+Additional runtime semantics for `uvc_stereo_opencv` are as follows:
+
+- the requested UVC capture width is `2 * camera.uvc_eye_width`
+- a total frame size such as `1280x480` therefore means `640x480` per eye
+- if the device negotiates `CV_8UC2`, runtime converts it through `YUYV/YUV2 -> Gray`
+- the two eye images are split from the same frame and do not depend on `camera.pair_window_ms`
+- to minimize queue latency, the packed-UVC frame queue is forced to `1`
 
 ### 10. Items Requiring Manual Preparation
 
@@ -637,6 +688,8 @@ Deployment environment variables:
 - `REMOTE_SERVICE`: default `smart_drone`
 - `RESTART_SERVICE`: if set to `1`, run `sudo systemctl restart smart_drone` after upload
 - `DEPLOY_PLATFORM`: default `cm5`, selects artifacts under `output/artifacts/<platform>`
+- `UPLOAD_LAYOUT`: `flat` or `artifact-root`; Jetson defaults to `artifact-root`
+- `SSH_PASSWORD`: when set, `upload.sh` uses `sshpass` for `ssh/scp` and can feed `sudo -S`
 - `ADB_IP` / `ADB_PORT`: if both are set (or provided with `--adb-ip` / `--adb-port`), run Android `adb connect` and install APK
 
 Android deployment parameters:
@@ -647,6 +700,7 @@ Android deployment parameters:
 Deployment platform parameter:
 
 - `--platform <name>`: explicitly select artifacts under `output/artifacts/<name>`, for example `cm5` or `jetson-orin-nx`
+- `--jetson-orin-nx`: shorthand for `--platform jetson-orin-nx` plus Jetson default host/path
 
 ADB constraints:
 
@@ -663,6 +717,13 @@ ADB constraints:
 - `slam.orb_nlevels`
 - `slam.orb_ini_th_fast`
 - `slam.orb_min_th_fast`
+
+Additional notes related to the current UVC/XFeat adaptation:
+
+- On packed-UVC, `camera.auto_exposure` means handing control back to the UVC camera firmware / ISP auto-exposure path rather than libcamera AE.
+- On packed-UVC, `camera.pair_window_ms` is kept only as a compatibility field and is not used for left-right software pairing.
+- The Android-side `slam.input_fps` ceiling was raised so the UI can target high-rate modes such as `1280x400@120`, `1280x480@100`, or `1600x600@100`.
+- When `stream.send_image=true`, the packed UVC frame is split into left/right eye images first, then preview and feature overlays are sent per eye.
 
 Application semantics:
 

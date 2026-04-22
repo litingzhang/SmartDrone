@@ -14,6 +14,10 @@ class DrdyGpio {
 
   private:
     gpiod_chip *m_chip{nullptr};
+#if SMART_DRONE_GPIOD_V2
     gpiod_line_request *m_request{nullptr};
     gpiod_edge_event_buffer *m_eventBuffer{nullptr};
+#else
+    gpiod_line *m_line{nullptr};
+#endif
 };

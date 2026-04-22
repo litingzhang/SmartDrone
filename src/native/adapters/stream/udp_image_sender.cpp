@@ -7,6 +7,7 @@
 #include <cstring>
 #include <exception>
 #include <iostream>
+#include <utility>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -154,11 +155,13 @@ void Compress16To8Adaptive(const cv::Mat &src16, cv::Mat &dst8, int camIndex, ui
 
 } // namespace
 
-bool UdpImageSender::Open(const std::string &ip, int port, int jpegQuality, int maxPayload, int maxQueue)
+bool UdpImageSender::Open(const std::string &ip, int port, int jpegQuality, int maxPayload, int maxQueue,
+                          DestinationResolver destinationResolver)
 {
     m_jpegQuality = std::max(10, std::min(95, jpegQuality));
     m_maxPayload = std::max(400, maxPayload);
     m_maxQueue = std::max(1, maxQueue);
+    m_port = port;
 
     m_sock = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (m_sock < 0) {
@@ -174,6 +177,11 @@ bool UdpImageSender::Open(const std::string &ip, int port, int jpegQuality, int 
         ::close(m_sock);
         m_sock = -1;
         return false;
+    }
+    {
+        std::lock_guard<std::mutex> lk(m_dstMu);
+        m_destinationResolver = std::move(destinationResolver);
+        m_lastResolvedIp = 0;
     }
     for (int cam = 0; cam < 2; ++cam) {
         std::lock_guard<std::mutex> lk(m_mu[cam]);
@@ -194,6 +202,43 @@ bool UdpImageSender::Open(const std::string &ip, int port, int jpegQuality, int 
             smartdrone::common::MakeThreadLaunchInfo(role, "UdpImageSender"), [this, cam] { Loop(cam); });
     }
     return true;
+}
+
+sockaddr_in UdpImageSender::ResolveDestination() const
+{
+    sockaddr_in dst{};
+    {
+        std::lock_guard<std::mutex> lk(m_dstMu);
+        dst = m_dst;
+    }
+
+    sockaddr_in dynamicDst{};
+    DestinationResolver resolver;
+    {
+        std::lock_guard<std::mutex> lk(m_dstMu);
+        resolver = m_destinationResolver;
+    }
+    if (!resolver || !resolver(dynamicDst)) {
+        return dst;
+    }
+
+    dynamicDst.sin_family = AF_INET;
+    dynamicDst.sin_port = htons(static_cast<uint16_t>(m_port));
+    const uint32_t resolvedIp = dynamicDst.sin_addr.s_addr;
+    uint32_t previousIp = 0;
+    {
+        std::lock_guard<std::mutex> lk(m_dstMu);
+        previousIp = m_lastResolvedIp;
+        m_lastResolvedIp = resolvedIp;
+    }
+    if (resolvedIp != 0 && resolvedIp != previousIp) {
+        char ipBuf[INET_ADDRSTRLEN]{};
+        const char *resolvedText = ::inet_ntop(AF_INET, &dynamicDst.sin_addr, ipBuf, sizeof(ipBuf));
+        if (resolvedText != nullptr) {
+            std::cerr << "[udp] destination peer -> " << resolvedText << ":" << m_port << "\n";
+        }
+    }
+    return dynamicDst;
 }
 
 void UdpImageSender::Close()
@@ -345,9 +390,10 @@ void UdpImageSender::Loop(int camIndex)
                 iov[1].iov_base = jpeg.data() + off;
                 iov[1].iov_len = pay;
 
+                const sockaddr_in dst = ResolveDestination();
                 msghdr msg{};
-                msg.msg_name = &m_dst;
-                msg.msg_namelen = sizeof(m_dst);
+                msg.msg_name = const_cast<sockaddr_in *>(&dst);
+                msg.msg_namelen = sizeof(dst);
                 msg.msg_iov = iov;
                 msg.msg_iovlen = 2;
 
@@ -413,9 +459,10 @@ void UdpImageSender::SendFeaturePacket(Slot &slot, uint32_t frameId, int width, 
     iov[1].iov_base = slot.featureBuf.data();
     iov[1].iov_len = slot.featureBuf.size();
 
+    const sockaddr_in dst = ResolveDestination();
     msghdr msg{};
-    msg.msg_name = &m_dst;
-    msg.msg_namelen = sizeof(m_dst);
+    msg.msg_name = const_cast<sockaddr_in *>(&dst);
+    msg.msg_namelen = sizeof(dst);
     msg.msg_iov = iov;
     msg.msg_iovlen = 2;
     ::sendmsg(m_sock, &msg, 0);

@@ -19,6 +19,11 @@ if(SMART_DRONE_CAMERA_PROVIDER STREQUAL "libcamera_stereo_ov9281")
   set(SMART_DRONE_USE_LIBCAMERA ON)
 endif()
 set(SMART_DRONE_LIBCAMERA_INCLUDE_DIRS "")
+set(SMART_DRONE_GPIOD_V2 OFF)
+set(SMART_DRONE_GPIOD_INCLUDE_DIRS "")
+set(SMART_DRONE_GPIOD_LIBRARY_DIRS "")
+set(SMART_DRONE_GPIOD_LIBRARIES gpiod)
+set(SMART_DRONE_GPIOD_CFLAGS_OTHER "")
 
 if(NOT BUILD_SMART_DRONE AND NOT ENABLE_UNIT_TESTS AND NOT ENABLE_OFFLINE_REPLAY)
   message(FATAL_ERROR "Enable BUILD_SMART_DRONE, ENABLE_UNIT_TESTS, or ENABLE_OFFLINE_REPLAY")
@@ -69,6 +74,7 @@ function(configure_common_target target_name)
   target_include_directories(${target_name} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/c_library_v2"
     ${OpenCV_INCLUDE_DIRS}
+    ${SMART_DRONE_GPIOD_INCLUDE_DIRS}
   )
   if(SMART_DRONE_USE_LIBCAMERA)
     target_include_directories(${target_name} PRIVATE ${SMART_DRONE_LIBCAMERA_INCLUDE_DIRS})
@@ -78,7 +84,21 @@ function(configure_common_target target_name)
   endif()
 
   target_compile_options(${target_name} PRIVATE -O3 -w)
-  target_link_libraries(${target_name} PRIVATE ${OpenCV_LIBS} pthread gpiod)
+  if(SMART_DRONE_GPIOD_CFLAGS_OTHER)
+    target_compile_options(${target_name} PRIVATE ${SMART_DRONE_GPIOD_CFLAGS_OTHER})
+  endif()
+  if(SMART_DRONE_GPIOD_LIBRARY_DIRS)
+    target_link_directories(${target_name} PRIVATE ${SMART_DRONE_GPIOD_LIBRARY_DIRS})
+  endif()
+  if(CROSS_AARCH64 AND NOT SYSROOT STREQUAL "")
+    target_link_options(${target_name} PRIVATE
+      "-Wl,-rpath-link,${SYSROOT}/lib"
+      "-Wl,-rpath-link,${SYSROOT}/usr/lib"
+      "-Wl,-rpath-link,${SYSROOT}/lib/aarch64-linux-gnu"
+      "-Wl,-rpath-link,${SYSROOT}/usr/lib/aarch64-linux-gnu")
+  endif()
+  target_link_libraries(${target_name} PRIVATE ${OpenCV_LIBS} Threads::Threads ${SMART_DRONE_GPIOD_LIBRARIES})
+  target_compile_definitions(${target_name} PRIVATE SMART_DRONE_GPIOD_V2=$<BOOL:${SMART_DRONE_GPIOD_V2}>)
   if(SMART_DRONE_USE_LIBCAMERA)
     target_link_directories(${target_name} PRIVATE ${LIBCAMERA_LIBRARY_DIRS})
     target_link_libraries(${target_name} PRIVATE ${LIBCAMERA_LIBRARIES})
@@ -146,9 +166,18 @@ if(ENABLE_OFFLINE_REPLAY)
 endif()
 
 if(BUILD_SMART_DRONE)
-  find_package(OpenCV REQUIRED)
+  find_package(Threads REQUIRED)
+  find_package(OpenCV REQUIRED COMPONENTS core calib3d features2d imgproc videoio)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GPIOD REQUIRED libgpiod)
+  set(SMART_DRONE_GPIOD_INCLUDE_DIRS ${GPIOD_INCLUDE_DIRS})
+  set(SMART_DRONE_GPIOD_LIBRARY_DIRS ${GPIOD_LIBRARY_DIRS})
+  set(SMART_DRONE_GPIOD_LIBRARIES ${GPIOD_LIBRARIES})
+  set(SMART_DRONE_GPIOD_CFLAGS_OTHER ${GPIOD_CFLAGS_OTHER})
+  if(GPIOD_VERSION VERSION_GREATER_EQUAL "2.0")
+    set(SMART_DRONE_GPIOD_V2 ON)
+  endif()
   if(SMART_DRONE_USE_LIBCAMERA)
-    find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBCAMERA REQUIRED libcamera)
     set(_SMART_DRONE_LIBCAMERA_CANDIDATES
       ${LIBCAMERA_INCLUDE_DIRS}

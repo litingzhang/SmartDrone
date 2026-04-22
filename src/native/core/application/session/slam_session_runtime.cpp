@@ -230,7 +230,8 @@ bool SlamSessionRuntime::Start()
         m_stereoBodyExtrinsics = LoadStereoBodyExtrinsics(m_effectiveSettingsPath);
     }
 
-    if (!m_cfg.app.runtime.xfeatRepo.empty() && !m_cfg.app.runtime.xfeatWorkerScript.empty()) {
+    if (m_aliases.featureFrontend == FeatureFrontend::XFeat && !m_cfg.app.runtime.xfeatRepo.empty() &&
+        !m_cfg.app.runtime.xfeatWorkerScript.empty()) {
         std::string xfeatErr;
         if (m_xfeatFrontendClient.Start(m_cfg.app.runtime.xfeatPython, m_cfg.app.runtime.xfeatWorkerScript,
                                         m_cfg.app.runtime.xfeatRepo, m_cfg.app.runtime.xfeatDevice,
@@ -249,8 +250,16 @@ bool SlamSessionRuntime::Start()
                      "when the worker is available\n";
     }
     if (m_aliases.udpEnable) {
+        auto destinationResolver = [this](sockaddr_in &dst) {
+            LivePoseState::Snapshot snapshot{};
+            if (!m_livePose.ReadSnapshot(snapshot) || !snapshot.hasPeer || !snapshot.peer.valid) {
+                return false;
+            }
+            dst = snapshot.peer.addr;
+            return true;
+        };
         if (!m_udp.Open(m_aliases.udpIp, m_aliases.udpPort, m_aliases.udpJpegQ, m_aliases.udpPayload,
-                        m_aliases.udpQueue)) {
+                        m_aliases.udpQueue, std::move(destinationResolver))) {
             std::cerr << "[session] slam udp open failed\n";
             m_stop.store(true);
             CleanupAfterStartFailure();

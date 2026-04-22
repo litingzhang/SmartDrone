@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstring>
@@ -65,6 +66,12 @@ bool SetCloseOnExec(int fd, std::string *err)
         return false;
     }
     return true;
+}
+
+double DurationMs(const std::chrono::steady_clock::time_point &start,
+                  const std::chrono::steady_clock::time_point &end)
+{
+    return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
 } // namespace
@@ -190,6 +197,8 @@ void XFeatFrontendClient::Stop()
 
 bool XFeatFrontendClient::Running() const { return m_pid > 0 && m_stdinFd >= 0 && m_stdoutFd >= 0; }
 
+XFeatFrontendClient::Stats XFeatFrontendClient::LastStats() const { return m_lastStats; }
+
 bool XFeatFrontendClient::Detect(const cv::Mat &gray, std::vector<cv::Point2f> &outPoints, std::string *err)
 {
     XFeatFeatureSet features;
@@ -204,6 +213,7 @@ bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet 
 {
     outFeatures.keypoints.clear();
     outFeatures.descriptors.release();
+    m_lastStats = Stats{};
     if (!Running()) {
         if (err != nullptr) {
             *err = "xfeat worker not running";
@@ -217,15 +227,19 @@ bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet 
         return false;
     }
 
+    const auto totalStartTp = std::chrono::steady_clock::now();
     cv::Mat gray8;
+    const auto prepareStartTp = totalStartTp;
     if (!PrepareGrayImage(gray, gray8, err)) {
         return false;
     }
+    const auto prepareEndTp = std::chrono::steady_clock::now();
 
     const uint32_t seq = ++m_requestSeq;
     const RequestHeader header{seq, 1};
     const ImageHeader imageHeader{static_cast<uint32_t>(gray8.rows), static_cast<uint32_t>(gray8.cols),
                                   static_cast<uint32_t>(gray8.rows * gray8.cols)};
+    const auto writeStartTp = std::chrono::steady_clock::now();
     if (!WriteExact(&header, sizeof(header), err)) {
         Stop();
         return false;
@@ -238,8 +252,10 @@ bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet 
         Stop();
         return false;
     }
+    const auto writeEndTp = std::chrono::steady_clock::now();
 
     ResponseHeader response{};
+    const auto readStartTp = writeEndTp;
     if (!ReadExact(&response, sizeof(response), err)) {
         Stop();
         return false;
@@ -263,6 +279,13 @@ bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet 
         Stop();
         return false;
     }
+    const auto totalEndTp = std::chrono::steady_clock::now();
+    m_lastStats.prepareMs = DurationMs(prepareStartTp, prepareEndTp);
+    m_lastStats.writeMs = DurationMs(writeStartTp, writeEndTp);
+    m_lastStats.readMs = DurationMs(readStartTp, totalEndTp);
+    m_lastStats.totalMs = DurationMs(totalStartTp, totalEndTp);
+    m_lastStats.imageCount = 1;
+    m_lastStats.payloadBytes = imageHeader.bytes;
     return true;
 }
 
@@ -274,6 +297,7 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
     leftFeatures.descriptors.release();
     rightFeatures.keypoints.clear();
     rightFeatures.descriptors.release();
+    m_lastStats = Stats{};
     if (!Running()) {
         if (err != nullptr) {
             *err = "xfeat worker not running";
@@ -287,11 +311,14 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
         return false;
     }
 
+    const auto totalStartTp = std::chrono::steady_clock::now();
     cv::Mat leftGray8;
     cv::Mat rightGray8;
+    const auto prepareStartTp = totalStartTp;
     if (!PrepareGrayImage(leftGray, leftGray8, err) || !PrepareGrayImage(rightGray, rightGray8, err)) {
         return false;
     }
+    const auto prepareEndTp = std::chrono::steady_clock::now();
 
     const uint32_t seq = ++m_requestSeq;
     const RequestHeader header{seq, 2};
@@ -299,6 +326,7 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
                                  static_cast<uint32_t>(leftGray8.rows * leftGray8.cols)};
     const ImageHeader rightHeader{static_cast<uint32_t>(rightGray8.rows), static_cast<uint32_t>(rightGray8.cols),
                                   static_cast<uint32_t>(rightGray8.rows * rightGray8.cols)};
+    const auto writeStartTp = std::chrono::steady_clock::now();
     if (!WriteExact(&header, sizeof(header), err) || !WriteExact(&leftHeader, sizeof(leftHeader), err) ||
         !WriteExact(leftGray8.data, static_cast<size_t>(leftHeader.bytes), err) ||
         !WriteExact(&rightHeader, sizeof(rightHeader), err) ||
@@ -306,8 +334,10 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
         Stop();
         return false;
     }
+    const auto writeEndTp = std::chrono::steady_clock::now();
 
     ResponseHeader response{};
+    const auto readStartTp = writeEndTp;
     if (!ReadExact(&response, sizeof(response), err)) {
         Stop();
         return false;
@@ -330,6 +360,13 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
         Stop();
         return false;
     }
+    const auto totalEndTp = std::chrono::steady_clock::now();
+    m_lastStats.prepareMs = DurationMs(prepareStartTp, prepareEndTp);
+    m_lastStats.writeMs = DurationMs(writeStartTp, writeEndTp);
+    m_lastStats.readMs = DurationMs(readStartTp, totalEndTp);
+    m_lastStats.totalMs = DurationMs(totalStartTp, totalEndTp);
+    m_lastStats.imageCount = 2;
+    m_lastStats.payloadBytes = leftHeader.bytes + rightHeader.bytes;
     return true;
 }
 

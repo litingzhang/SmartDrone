@@ -91,6 +91,19 @@ TLV 指令经 `TlvCmdRouter` -> `Px4UdpHooks`，主要能力：
 - 按配置发送图像/特征/点云
 - 输出 `slam_dfx` 与时延诊断
 
+当前实现已在 SLAM 会话链路中增加以下 UVC / 图传 / 实时性策略：
+
+- 单路 UVC packed stereo：
+  `uvc_stereo_opencv` 按“单个 UVC 设备输出一张左右拼接图”处理，运行时在机端完成左右切分，不再依赖双路相机时间戳配对。
+- 软件时间戳策略：
+  对 packed-UVC 帧，时间戳取自抓帧完成后的单调时钟，左右目共享同一时间戳，以减小软件配对抖动。
+- 最新帧优先：
+  packed-UVC 路径会将内部 frame queue 压缩到 `1`，以避免慢速 SLAM / XFeat 将相机链路拖入高时延队列。
+- 图传目标动态解析：
+  `SlamSessionRuntime` 通过 `LivePoseState` 中当前 active peer 动态解析 UDP 图像发送目标，避免图传目标长期固定在单一手机 IP。
+- 图传限流：
+  `UdpImageSender` 当前对图像发送采用独立上限控制，最大图像发送帧率为 `30 FPS`，与 SLAM 输入帧率解耦。
+
 ### 3.4A XFeat 集成适配
 
 当前 `xfeat` 集成属于叠加在 ORB-SLAM3 现有跟踪主链上的外部前端适配层，不是完整的原生前端替换。
@@ -101,6 +114,8 @@ TLV 指令经 `TlvCmdRouter` -> `Px4UdpHooks`，主要能力：
   `smart_drone` 通过 `XFeatFrontendClient` 启动独立 Python worker，使用二进制管道协议传输灰度图，并接收关键点与 `CV_32F` 描述子。
 - 运行设备可选：
   worker 支持 `auto/cpu/cuda` 三种设备选择。`auto` 在 Jetson 类目标上优先选择 CUDA，在 CM5 类目标上回落到 CPU。
+- Jetson CUDA 优化：
+  worker 在 CUDA 路径上启用 `torch.float16`、`torch.autocast(...)`、`torch.inference_mode()` 与 `cudnn.benchmark`，用于降低 Jetson 上的前端推理开销。
 - XFeat 运行时参数化：
   runtime config 额外暴露 `slam.xfeat_top_k`、`slam.xfeat_max_points`、`slam.xfeat_input_max_width`、`slam.xfeat_input_max_height`。参数更新通过运行时配置链路生效，并触发 SLAM 会话重启，使 worker 与前端限制同步切换到新值。
 - 双目 batch 推理：
@@ -121,6 +136,8 @@ TLV 指令经 `TlvCmdRouter` -> `Px4UdpHooks`，主要能力：
   `Frame::ComputeBoW()` 与 `KeyFrame::ComputeBoW()` 仍只对 `CV_8U` 描述子构建 BoW 向量。因此当前 XFeat 路径兼容“跟踪注入”，但并未替换 ORB 词袋前端的全部假设。
 - 显式运行诊断：
   `slam_dfx` 会输出 `xfeat_used`、`xfeat_raw_left/right`、`xfeat_match_stereo`、`xfeat_injected_left/right` 等字段；`orbslam3_engine` 还会输出 `xfeat_runtime_status=...`，用于区分 worker 可用性、跟踪状态门禁以及 prepared-image 注入是否启用。
+- 分段耗时与载荷诊断：
+  `slam_dfx` 额外输出 `xfeat_prepare_ms`、`xfeat_write_ms`、`xfeat_read_ms`、`xfeat_worker_ms`、`xfeat_match_ms`、`xfeat_total_ms`、`xfeat_image_count`、`xfeat_payload_bytes`，用于直接定位瓶颈。
 
 ### 3.5 标定会话功能
 
@@ -142,6 +159,11 @@ TLV 指令经 `TlvCmdRouter` -> `Px4UdpHooks`，主要能力：
 - ORB 提取器：`nFeatures`、`scaleFactor`、`nLevels`、`iniThFAST`、`minThFAST`
 - XFeat 提取器：`top_k`、`max_points`、`input_max_width`、`input_max_height`
 - 流媒体：UDP 目标 IP、image/feature/map 开关
+
+当前实现对这些配置项的语义补充了两条 provider-specific 规则：
+
+- 在 packed-UVC 路径下，`camera.auto_exposure` 表示“是否交还给 UVC 相机固件/ISP 自动曝光”。
+- 在 packed-UVC 路径下，`camera.pair_window_ms` 仍保留在协议里，但当前不参与左右目配对，仅用于兼容统一配置面。
 
 `ConfigRegistry` 标注每个配置项的：
 
@@ -168,6 +190,13 @@ Android `MainActivity` 实现：
 - 周期发送 heartbeat，超时本地触发 `LAND`
 - 发送模式/配置/动作 TLV 指令并处理 ACK
 - 接收 `STATE`、`POINT_CLOUD`、视频与特征叠加显示
+
+当前实现对 Android 端源码还补充了以下适配：
+
+- UVC packed stereo 场景下只暴露与当前 provider 匹配的感知模式与配置说明。
+- 曝光、增益、自动曝光范围已调到适配 UVC 相机的区间。
+- `slam.input_fps` UI 上限已提高到 `120`，以匹配高帧率 UVC 方案。
+- 运行时配置/能力文本会显式区分“UVC auto exposure”和“pair window not used for single packed frame”。
 
 ---
 
@@ -298,6 +327,12 @@ Peer 锁定策略：
 - 视频流最大帧率限制（Android 端解码/显示保护）
 - 点云帧长度按协议上限裁剪并记录 truncation
 
+当前实现的吞吐控制重点如下：
+
+- 相机采集与 SLAM 处理解耦，优先保证“最新帧实时性”，而非“所有帧均完成处理”。
+- `slam.input_fps` 控制进入 SLAM/XFeat 的帧率上限。
+- `UdpImageSender` 对手机端预览单独限流，当前最大为 `30 FPS`，因此手机显示帧率与 SLAM/XFeat 帧率并不必然相同。
+
 ### 7.2 时延观测
 
 - `FrameTimingTracker` 打点：采集、入 SLAM、出 SLAM、发送
@@ -330,6 +365,12 @@ Peer 锁定策略：
 - 关键日志：`slam_dfx`、`odom_ts`、`ACK`、`timesync`、`stereo_timeout`
 - 线程启动统一带 role 和 owner
 - 能力查询与配置查询支持远程获取运行状态
+
+当前实现新增的可观测性点包括：
+
+- `camera.auto_exposure_note` 和 `camera.pair_window_ms_note` 会在配置回传里说明 packed-UVC 特殊语义。
+- `runtime_session_common` 启动日志会显式打印 `pixelFormat=YUYV_packed_stereo`、`packed_stereo=Y/N` 与 `stereo_input_note=single_uvc_frame_split_left_right_no_timestamp_pairing`。
+- `UdpImageSender` 会在运行中打印目的 peer 变化，便于排查“手机已连接但未收到图”的动态图传目标问题。
 
 ### 8.4 Design for eXtensibility
 
@@ -595,4 +636,5 @@ sequenceDiagram
 - 链路发现机制已实现，并与 Android 自动连接流程联动。
 - OFFBOARD 与 POSITION 的 setpoint 策略已分离：OFFBOARD 发送，POSITION 不持续发送。
 - 失联 LAND 机制在机端与客户端均已实现，形成冗余保护。
+- 当前实现已补齐 `Jetson Orin NX + 单路 UVC 拼接双目 + XFeat worker + 动态 UDP 图传目标` 的可运行链路，但双目安装、外参标定与手机重新建链仍会直接影响最终 SLAM/预览表现。
 

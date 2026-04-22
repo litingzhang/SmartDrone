@@ -18,7 +18,8 @@ RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTun
 
 bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote, std::string *err)
 {
-    if (remote.exposureUs <= 0 || !(remote.gain > 0.0f) || remote.pairMs <= 0 || remote.slamInputFps < 0 ||
+    if (remote.exposureUs <= 0 || !std::isfinite(remote.gain) || remote.gain < 0.0f || remote.pairMs <= 0 ||
+        remote.slamInputFps < 0 ||
         remote.uvcDeviceIndex < 0 || remote.uvcEyeWidth <= 0 || remote.uvcEyeHeight <= 0) {
         if (err) {
             *err = "bad runtime config";
@@ -80,8 +81,6 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         CameraConfig &cam = m_config.app.camera;
         const bool sensorModeChanged = m_config.app.sensorMode != remote.sensorMode;
         const bool frontendChanged = m_config.app.runtime.featureFrontend != remote.featureFrontend;
-        const bool udpIpChanged = m_config.app.udp.ip != remote.udpIp;
-        const bool udpEnableChanged = m_config.app.udp.enable != remote.udpEnabled;
         const bool aeModeChanged = cam.aeDisable != (!remote.autoExposureEnabled);
         const bool uvcConfigChanged = cam.uvcDeviceIndex != remote.uvcDeviceIndex ||
                                       cam.uvcEyeWidth != remote.uvcEyeWidth ||
@@ -158,8 +157,8 @@ bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote,
         effectiveTbcRollDeg = m_config.app.runtime.tbcRollDeg;
         effectiveTbcPitchDeg = m_config.app.runtime.tbcPitchDeg;
         effectiveTbcYawDeg = m_config.app.runtime.tbcYawDeg;
-        restartNeeded = sensorModeChanged || frontendChanged || udpIpChanged || udpEnableChanged || aeModeChanged ||
-                        uvcConfigChanged || orbChanged || xfeatChanged;
+        restartNeeded =
+            sensorModeChanged || frontendChanged || aeModeChanged || uvcConfigChanged || orbChanged || xfeatChanged;
     }
 
     m_tuning.slamInputFps.store(remote.slamInputFps, std::memory_order_relaxed);

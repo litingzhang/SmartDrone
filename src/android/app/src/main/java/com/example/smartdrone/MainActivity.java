@@ -97,16 +97,16 @@ public class MainActivity extends Activity {
     private static final String PENDING_SENSOR = "sensor";
     private static final String PENDING_CONFIG = "config";
     private static final String PENDING_CLEAN_CALIB = "clean_calib";
-    private static final int EXPOSURE_MIN_US = 500;
-    private static final int EXPOSURE_MAX_US = 20000;
-    private static final int EXPOSURE_STEP_US = 500;
-    private static final int GAIN_MIN = 1;
-    private static final int GAIN_MAX = 32;
+    private static final int EXPOSURE_MIN_US = 100;
+    private static final int EXPOSURE_MAX_US = 30000;
+    private static final int EXPOSURE_STEP_US = 100;
+    private static final int GAIN_MIN = 0;
+    private static final int GAIN_MAX = 255;
     private static final int PAIR_MS_MIN = 1;
     private static final int PAIR_MS_MAX = 20;
     private static final int SLAM_FPS_MIN = 1;
-    private static final int SLAM_FPS_MAX = 60;
-    private static final int SLAM_FPS_DEFAULT = 20;
+    private static final int SLAM_FPS_MAX = 120;
+    private static final int SLAM_FPS_DEFAULT = 100;
     private static final int TBC_TRANSLATION_MIN_MM = -300;
     private static final int TBC_TRANSLATION_MAX_MM = 300;
     private static final int TBC_ROLL_MIN_TENTH_DEG = -100;
@@ -320,6 +320,10 @@ public class MainActivity extends Activity {
     private boolean m_supportsStereoImu = true;
     private boolean m_supportsMono = true;
     private boolean m_supportsMonoImu = true;
+    private boolean m_supportsXFeat = true;
+    private boolean m_isPackedStereoUvc = false;
+    private boolean m_pairWindowRequired = true;
+    private boolean m_cfgUvcPackedStereo = false;
     private String m_lastCapabilitiesText = "";
     private String m_lastConfigText = "";
     private int[] m_availableSensorModes = new int[] {SENSOR_STEREO, SENSOR_STEREO_IMU, SENSOR_MONO, SENSOR_MONO_IMU};
@@ -565,6 +569,24 @@ public class MainActivity extends Activity {
 
     private static int quantizeSlamFps(int slamFps) { return clampInt(slamFps, SLAM_FPS_MIN, SLAM_FPS_MAX); }
 
+    private static boolean containsBehaviorNote(String notes, String keyPrefix)
+    {
+        if (notes == null || notes.trim().isEmpty()) {
+            return false;
+        }
+        String[] items = notes.split(";");
+        for (String item : items) {
+            if (item == null) {
+                continue;
+            }
+            String trimmed = item.trim();
+            if (trimmed.startsWith(keyPrefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static float quantizeTbcTranslationM(float meters)
     {
         int mm = Math.round(meters * 1000.0f);
@@ -792,22 +814,25 @@ public class MainActivity extends Activity {
         m_updatingConfigUi = true;
         try {
             final boolean runtimeActive = isRuntimeActive();
+            final boolean packedStereoUvc = m_isPackedStereoUvc || m_cfgUvcPackedStereo;
             final boolean manualExposureEditable = !runtimeActive && !m_cfgAutoExposure;
             final boolean tbcEditable = m_cfgUseCustomTbc && m_sensorMode == SENSOR_STEREO;
             final boolean orbEditable = !runtimeActive;
             final boolean xfeatEditable = !runtimeActive && m_cfgFeatureFrontend == FEATURE_FRONTEND_XFEAT;
             if (m_tvCfgExposureValue != null) {
-                m_tvCfgExposureValue.setText(
-                    m_cfgAutoExposure ? "Exposure: Auto (ISP)" : String.format(Locale.US, "Exposure: %d us", m_cfgExposureUs));
+                m_tvCfgExposureValue.setText(m_cfgAutoExposure ? "Exposure: Auto (UVC AE)"
+                                                               : String.format(Locale.US, "Exposure: %d us (UVC)",
+                                                                               m_cfgExposureUs));
                 m_tvCfgExposureValue.setAlpha(manualExposureEditable ? 1.0f : 0.45f);
             }
             if (m_tvCfgGainValue != null) {
-                m_tvCfgGainValue.setText(String.format(Locale.US, "Gain: %d", m_cfgGain));
+                m_tvCfgGainValue.setText(String.format(Locale.US, "Gain: %d (UVC)", m_cfgGain));
                 m_tvCfgGainValue.setAlpha(manualExposureEditable ? 1.0f : 0.45f);
             }
             if (m_tvCfgPairMsValue != null) {
-                m_tvCfgPairMsValue.setText(String.format(Locale.US, "Pair Window: %d ms", m_cfgPairMs));
-                m_tvCfgPairMsValue.setAlpha(runtimeActive ? 0.45f : 1.0f);
+                m_tvCfgPairMsValue.setText(packedStereoUvc ? "Pair Window: n/a (packed UVC stereo)"
+                                                           : String.format(Locale.US, "Pair Window: %d ms", m_cfgPairMs));
+                m_tvCfgPairMsValue.setAlpha((runtimeActive || packedStereoUvc) ? 0.45f : 1.0f);
             }
             if (m_tvCfgSlamFpsValue != null) {
                 m_tvCfgSlamFpsValue.setText(String.format(Locale.US, "SLAM FPS: %d", m_cfgSlamFps));
@@ -896,8 +921,9 @@ public class MainActivity extends Activity {
                 if (m_sbCfgPairMs.getProgress() != progress) {
                     m_sbCfgPairMs.setProgress(progress);
                 }
-                m_sbCfgPairMs.setEnabled(!runtimeActive);
-                m_sbCfgPairMs.setAlpha(runtimeActive ? 0.35f : 1.0f);
+                final boolean pairWindowEditable = !runtimeActive && !packedStereoUvc;
+                m_sbCfgPairMs.setEnabled(pairWindowEditable);
+                m_sbCfgPairMs.setAlpha(pairWindowEditable ? 1.0f : 0.35f);
             }
             if (m_sbCfgSlamFps != null) {
                 int progress = m_cfgSlamFps - SLAM_FPS_MIN;
@@ -1029,6 +1055,7 @@ public class MainActivity extends Activity {
                 m_btnAutoExposureToggle.setChecked(m_cfgAutoExposure);
                 m_btnAutoExposureToggle.setEnabled(!runtimeActive);
                 m_btnAutoExposureToggle.setAlpha(runtimeActive ? 0.35f : 1.0f);
+                m_btnAutoExposureToggle.setText("Auto Exposure (UVC)");
             }
             if (m_btnTbcOverrideToggle != null) {
                 m_btnTbcOverrideToggle.setChecked(m_cfgUseCustomTbc);
@@ -1586,16 +1613,34 @@ public class MainActivity extends Activity {
         if (m_spinnerFeatureFrontend == null) {
             return;
         }
-        if (m_spinnerFeatureFrontend.getAdapter() == null) {
-            String[] labels = new String[] {featureFrontendToText(FEATURE_FRONTEND_ORB), featureFrontendToText(FEATURE_FRONTEND_XFEAT)};
+        final int[] supportedFrontends = getSupportedFeatureFrontends();
+        if (m_spinnerFeatureFrontend.getAdapter() == null || m_spinnerFeatureFrontend.getCount() != supportedFrontends.length) {
+            String[] labels = new String[supportedFrontends.length];
+            for (int i = 0; i < supportedFrontends.length; ++i) {
+                labels[i] = featureFrontendToText(supportedFrontends[i]);
+            }
             ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
             adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             m_spinnerFeatureFrontend.setAdapter(adapter);
         }
-        int targetIndex = (m_cfgFeatureFrontend == FEATURE_FRONTEND_XFEAT) ? FEATURE_FRONTEND_XFEAT : FEATURE_FRONTEND_ORB;
+        int targetIndex = 0;
+        for (int i = 0; i < supportedFrontends.length; ++i) {
+            if (supportedFrontends[i] == m_cfgFeatureFrontend) {
+                targetIndex = i;
+                break;
+            }
+        }
         if (m_spinnerFeatureFrontend.getSelectedItemPosition() != targetIndex) {
             m_spinnerFeatureFrontend.setSelection(targetIndex, false);
         }
+    }
+
+    private int[] getSupportedFeatureFrontends()
+    {
+        if (m_supportsXFeat) {
+            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_XFEAT};
+        }
+        return new int[] {FEATURE_FRONTEND_ORB};
     }
 
     private void updateSensorModeSpinner()
@@ -2078,14 +2123,22 @@ public class MainActivity extends Activity {
         }
         m_lastCapabilitiesText = payloadText;
         Map<String, String> values = parseKeyValueText(payloadText);
+        final String cameraProviders = values.get("camera_providers");
+        final String behaviorNotes = values.get("behavior_notes");
         m_supportsCalib = containsTokenList(values.get("runtime_modes"), "calib");
         m_supportsStereoImu = containsTokenList(values.get("perception_modes"), "stereo-imu");
         m_supportsMono = containsTokenList(values.get("perception_modes"), "mono");
         m_supportsMonoImu = containsTokenList(values.get("perception_modes"), "mono-imu");
+        m_supportsXFeat = containsBehaviorNote(behaviorNotes, "slam.feature_frontend.xfeat=");
+        m_isPackedStereoUvc = containsTokenList(cameraProviders, "uvc_stereo_opencv") &&
+                              containsBehaviorNote(behaviorNotes, "camera.uvc_pairing=not_required_single_capture_provides_both_eyes");
+        m_pairWindowRequired = !m_isPackedStereoUvc;
         updateRuntimeButtons();
-        m_tvStatus.setText(String.format(Locale.US, "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s",
+        m_tvStatus.setText(String.format(Locale.US,
+                                         "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s uvc=%s xfeat=%s",
                                          m_supportsCalib ? "yes" : "no", m_supportsStereoImu ? "yes" : "no",
-                                         m_supportsMono ? "yes" : "no", m_supportsMonoImu ? "yes" : "no"));
+                                         m_supportsMono ? "yes" : "no", m_supportsMonoImu ? "yes" : "no",
+                                         m_isPackedStereoUvc ? "packed" : "no", m_supportsXFeat ? "yes" : "no"));
         return true;
     }
 
@@ -2102,6 +2155,8 @@ public class MainActivity extends Activity {
         m_cfgExposureUs = quantizeExposureUs(parseI(values.get("camera.exposure_us"), m_cfgExposureUs));
         m_cfgGain = quantizeGain(parseI(values.get("camera.gain"), m_cfgGain));
         m_cfgPairMs = quantizePairMs(parseI(values.get("camera.pair_window_ms"), m_cfgPairMs));
+        m_cfgUvcPackedStereo = parseBooleanText(values.get("camera.uvc_packed_stereo"), m_cfgUvcPackedStereo);
+        m_pairWindowRequired = !m_cfgUvcPackedStereo;
         m_cfgAutoExposure = parseBooleanText(values.get("camera.auto_exposure"), m_cfgAutoExposure);
         int parsedSlamFps = parseI(values.get("slam.input_fps"), m_cfgSlamFps);
         if (parsedSlamFps <= 0) {
@@ -2110,6 +2165,9 @@ public class MainActivity extends Activity {
         m_cfgSlamFps = quantizeSlamFps(parsedSlamFps);
         m_cfgSlamMode = parseSlamModeText(values.get("slam.operation_mode"), m_cfgSlamMode);
         m_cfgFeatureFrontend = parseFeatureFrontendText(values.get("slam.feature_frontend"), m_cfgFeatureFrontend);
+        if (!m_supportsXFeat && m_cfgFeatureFrontend == FEATURE_FRONTEND_XFEAT) {
+            m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
+        }
         m_cfgUseCustomTbc = parseBooleanText(values.get("slam.tbc_override_enabled"), m_cfgUseCustomTbc);
         m_cfgTbcTx = quantizeTbcTranslationM(parseFloatOrDefault(values.get("slam.tbc_tx_m"), m_cfgTbcTx));
         m_cfgTbcTy = quantizeTbcTranslationM(parseFloatOrDefault(values.get("slam.tbc_ty_m"), m_cfgTbcTy));
@@ -3531,7 +3589,9 @@ public class MainActivity extends Activity {
                     if (m_updatingToggleUi || position < 0) {
                         return;
                     }
-                    final int nextFrontend = position == FEATURE_FRONTEND_XFEAT ? FEATURE_FRONTEND_XFEAT : FEATURE_FRONTEND_ORB;
+                    final int[] supportedFrontends = getSupportedFeatureFrontends();
+                    final int nextFrontend =
+                        position < supportedFrontends.length ? supportedFrontends[position] : FEATURE_FRONTEND_ORB;
                     if (nextFrontend == m_cfgFeatureFrontend) {
                         return;
                     }

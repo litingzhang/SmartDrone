@@ -7,6 +7,7 @@ import io
 import os
 import struct
 import sys
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
@@ -17,6 +18,7 @@ IMAGE_HEADER = struct.Struct("<III")
 RESPONSE_HEADER = struct.Struct("<II")
 FEATURE_HEADER = struct.Struct("<II")
 READY_MAGIC = b"XFWKRDY1"
+_PERF_LOG_INTERVAL = 120
 
 
 def _write_stderr(message: str) -> None:
@@ -24,7 +26,7 @@ def _write_stderr(message: str) -> None:
     sys.stderr.flush()
 
 
-def _read_exact(stream, size: int) -> bytes | None:
+def _read_exact(stream, size: int) -> Optional[bytes]:
     chunks = bytearray()
     while len(chunks) < size:
         block = stream.read(size - len(chunks))
@@ -34,14 +36,14 @@ def _read_exact(stream, size: int) -> bytes | None:
     return bytes(chunks)
 
 
-def _empty_result() -> tuple[torch.Tensor, torch.Tensor]:
+def _empty_result() -> Tuple[torch.Tensor, torch.Tensor]:
     return (
         torch.zeros((0, 2), dtype=torch.float32),
         torch.zeros((0, 64), dtype=torch.float32),
     )
 
 
-def _normalize_result(result: dict, max_points: int) -> tuple[torch.Tensor, torch.Tensor]:
+def _normalize_result(result: dict, max_points: int) -> Tuple[torch.Tensor, torch.Tensor]:
     keypoints = result["keypoints"]
     descriptors = result["descriptors"]
     if keypoints.ndim != 2 or keypoints.shape[1] != 2:
@@ -86,6 +88,18 @@ def _resolve_device(device_arg: str) -> torch.device:
     raise RuntimeError(f"unsupported xfeat device: {device_arg}")
 
 
+def _build_batch(images) -> torch.Tensor:
+    image_count = len(images)
+    rows, cols = images[0].shape
+    if image_count == 1:
+        return torch.from_numpy(images[0]).unsqueeze(0).unsqueeze(0)
+
+    batch = np.empty((image_count, rows, cols), dtype=np.uint8)
+    for index, gray in enumerate(images):
+        batch[index, :, :] = gray
+    return torch.from_numpy(batch).unsqueeze(1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
@@ -97,19 +111,32 @@ def main() -> int:
     try:
         xfeat_cls = _load_xfeat_class(args.repo)
         device = _resolve_device(args.device)
+        use_cuda = device.type == "cuda"
+        infer_dtype = torch.float16 if use_cuda else torch.float32
+        autocast_enabled = use_cuda
+        if use_cuda:
+            torch.backends.cudnn.benchmark = True
         with contextlib.redirect_stdout(io.StringIO()):
             model = xfeat_cls(top_k=max(1, args.top_k))
             to_fn = getattr(model, "to", None)
             if callable(to_fn):
                 to_fn(device)
+            eval_fn = getattr(model, "eval", None)
+            if callable(eval_fn):
+                eval_fn()
         sys.stdout.buffer.write(READY_MAGIC)
         sys.stdout.buffer.flush()
+        _write_stderr(
+            f"[xfeat_worker] ready device={device.type} top_k={max(1, args.top_k)} max_points={max(1, args.max_points)} "
+            f"dtype={infer_dtype}"
+        )
     except Exception as exc:
         _write_stderr(f"[xfeat_worker] startup failed: {exc}")
         return 2
 
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer
+    request_count = 0
 
     while True:
         header_bytes = _read_exact(stdin, REQUEST_HEADER.size)
@@ -138,14 +165,12 @@ def main() -> int:
             images.append(gray)
 
         try:
-            tensors = []
-            for gray in images:
-                tensor = torch.from_numpy(gray).unsqueeze(0).unsqueeze(0).to(device=device, dtype=torch.float32)
-                tensors.append(tensor)
-            tensor = torch.cat(tensors, dim=0)
-            tensor = tensor / 255.0
+            batch_cpu = _build_batch(images)
+            tensor = batch_cpu.to(device=device, dtype=infer_dtype, non_blocking=False)
+            tensor = tensor.div_(255.0)
             with torch.inference_mode():
-                results = model.detectAndCompute(tensor, top_k=max(1, args.top_k))
+                with torch.autocast(device_type=device.type, dtype=infer_dtype, enabled=autocast_enabled):
+                    results = model.detectAndCompute(tensor, top_k=max(1, args.top_k))
             normalized_results = [_normalize_result(result, args.max_points) for result in results]
             response = RESPONSE_HEADER.pack(seq, len(normalized_results))
             stdout.write(response)
@@ -158,6 +183,13 @@ def main() -> int:
                     stdout.write(keypoints.numpy().tobytes(order="C"))
                     stdout.write(descriptors.numpy().tobytes(order="C"))
             stdout.flush()
+            request_count += 1
+            if request_count % _PERF_LOG_INTERVAL == 0:
+                total_points = sum(int(keypoints.shape[0]) for keypoints, _ in normalized_results)
+                _write_stderr(
+                    f"[xfeat_worker] perf req={request_count} batch={len(images)} shape={images[0].shape[1]}x{images[0].shape[0]} "
+                    f"points={total_points}"
+                )
         except Exception as exc:
             _write_stderr(f"[xfeat_worker] inference failed seq={seq}: {exc}")
             try:

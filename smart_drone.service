@@ -5,12 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=user
-WorkingDirectory=~
-ExecStart=~/smart_drone --auto-mode idle
+User=nvidia
+SupplementaryGroups=dialout gpio video i2c
+WorkingDirectory=/home/nvidia/SmartDrone_codex
+Environment=SMART_DRONE_MAVLINK_DEV=/dev/ttyTHS0
+Environment=SMART_DRONE_MAVLINK_BAUD=921600
+Environment=LD_LIBRARY_PATH=/home/nvidia/SmartDrone_codex/output/artifacts/native-jetson/lib
+ExecStart=/home/nvidia/SmartDrone_codex/output/artifacts/native-jetson/bin/smart_drone --auto-mode idle
 Restart=always
 RestartSec=2
-Environment=LD_LIBRARY_PATH=~
 
 [Install]
 WantedBy=multi-user.target

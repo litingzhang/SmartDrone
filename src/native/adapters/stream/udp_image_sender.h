@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -17,8 +18,10 @@
 
 class UdpImageSender {
   public:
+    using DestinationResolver = std::function<bool(sockaddr_in &)>;
+
     static constexpr uint8_t FLAG_FEATURE_POINTS = 0x01;
-    static constexpr double MAX_IMAGE_FPS = 12.0;
+    static constexpr double MAX_IMAGE_FPS = 30.0;
     static constexpr double MIN_FRAME_INTERVAL_SEC = 1.0 / MAX_IMAGE_FPS;
 
     struct Slot {
@@ -35,7 +38,8 @@ class UdpImageSender {
         std::vector<uint8_t> featureBuf;
     };
 
-    bool Open(const std::string &ip, int port, int jpegQuality = 80, int maxPayload = 1200, int maxQueue = 4);
+    bool Open(const std::string &ip, int port, int jpegQuality = 80, int maxPayload = 1200, int maxQueue = 4,
+              DestinationResolver destinationResolver = {});
     void Close();
     void Enqueue(int camIndex, uint64_t frameId, uint32_t seq, double frameTime, const cv::Mat &gray,
                  const std::vector<cv::Point2f> &trackedPoints = {}, bool sendImage = true, bool sendFeature = true);
@@ -60,11 +64,16 @@ class UdpImageSender {
     void Loop(int camIndex);
     void SendFeaturePacket(Slot &slot, uint32_t frameId, int width, int height,
                            const std::vector<cv::Point2f> &trackedPoints);
+    sockaddr_in ResolveDestination() const;
     static bool FillPreview(int camIndex, uint32_t seq, const cv::Mat &gray, cv::Mat &preview);
     static void WriteU16Le(uint8_t *out, size_t offset, uint16_t value);
 
     int m_sock{-1};
     sockaddr_in m_dst{};
+    int m_port{0};
+    DestinationResolver m_destinationResolver{};
+    mutable std::mutex m_dstMu;
+    mutable uint32_t m_lastResolvedIp{0};
 
     int m_jpegQuality{80};
     int m_maxPayload{1200};

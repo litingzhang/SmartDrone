@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <string>
 #include <thread>
 
@@ -33,6 +34,28 @@ using UnifiedConfig = smartdrone::core::application::UnifiedConfig;
 using UnifiedRuntimeController = smartdrone::core::application::UnifiedRuntimeController;
 constexpr int kDiscoveryPort = 15000;
 
+std::string GetEnvOrDefault(const char *name, const char *fallback)
+{
+    const char *value = std::getenv(name);
+    if (!value || value[0] == '\0') {
+        return fallback;
+    }
+    return value;
+}
+
+int GetEnvIntOrDefault(const char *name, int fallback)
+{
+    const char *value = std::getenv(name);
+    if (!value || value[0] == '\0') {
+        return fallback;
+    }
+    try {
+        return std::stoi(value);
+    } catch (...) {
+        return fallback;
+    }
+}
+
 ControllerMode ParseAutoMode(std::string autoModeText)
 {
     std::transform(autoModeText.begin(), autoModeText.end(), autoModeText.begin(),
@@ -55,7 +78,9 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
     const MainRuntimeAliases aliases = smartdrone::core::application::BuildRuntimeAliases(cfg.app);
     smartdrone::core::application::PrintStartupConfig(cfg.app, aliases, ControllerMode::Idle);
 
-    Px4MavlinkGateway mav("/dev/ttyAMA0", 921600);
+    const std::string mavDev = GetEnvOrDefault("SMART_DRONE_MAVLINK_DEV", "/dev/ttyAMA0");
+    const int mavBaud = GetEnvIntOrDefault("SMART_DRONE_MAVLINK_BAUD", 921600);
+    Px4MavlinkGateway mav(mavDev, mavBaud);
     mav.SetJsonDiagnostics(cfg.app.runtime.jsonDiagnostics);
     mav.StartRx();
     LivePoseState livePose;

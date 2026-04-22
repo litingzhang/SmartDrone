@@ -4,10 +4,11 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-  ./scripts/build.sh [smart_drone|android|all|test|replay] [--clean] [--reconfigure] [--jetson-orin-nx]
+  ./scripts/build.sh [smart_drone|orb|android|all|test|replay] [--clean] [--reconfigure] [--jetson-orin-nx]
 
 Modes:
   smart_drone     Build the unified runtime target
+  orb             Build ORB-SLAM3 and its native third-party shared libs
   android         Build the Android app (:app:assembleDebug)
   all             Build ORB-SLAM3 first, then build smart_drone and Android app
   test            Build and run host-side unit tests with GoogleTest
@@ -19,6 +20,39 @@ Options:
   --jetson-orin-nx
                   Cross-build native targets for Jetson Orin NX instead of the default CM5 profile
 EOF
+}
+
+find_first_existing_dir() {
+    local path
+    for path in "$@"; do
+        if [ -n "$path" ] && [ -d "$path" ]; then
+            printf '%s\n' "$path"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_first_executable() {
+    local path
+    for path in "$@"; do
+        if [ -n "$path" ] && [ -x "$path" ]; then
+            printf '%s\n' "$path"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_first_toolchain_prefix() {
+    local prefix
+    for prefix in "$@"; do
+        if [ -n "$prefix" ] && [ -x "${prefix}-g++" ]; then
+            printf '%s\n' "$prefix"
+            return 0
+        fi
+    done
+    return 1
 }
 
 MODE="${1:-smart_drone}"
@@ -36,6 +70,9 @@ NATIVE_RECONFIGURE_REQUIRED=0
 case "$MODE" in
     smart_drone)
         BUILD_SMART_DRONE=ON
+        ;;
+    orb)
+        BUILD_ORB=1
         ;;
     android)
         BUILD_ANDROID=1
@@ -112,7 +149,6 @@ if [ "$JETSON_ORIN_NX" -eq 1 ]; then
     SYSROOT_DEFAULT="$REPO_ROOT/../sysroots/jetson-orin-nx"
     SYSROOT_ENV_NAME="JETSON_SYSROOT"
     TOOLCHAIN_FILE="$REPO_ROOT/toolchain/toolchain-jetson-orin-nx-aarch64.cmake"
-    TOOLCHAIN_PREFIX="${JETSON_TOOLCHAIN_PREFIX:-aarch64-linux-gnu}"
     BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/smart_drone"
     ORB_BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/orbslam3"
 fi
@@ -121,13 +157,35 @@ NATIVE_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/$PLATFORM_NAME"
 
 SYSROOT="${SYSROOT:-$SYSROOT_DEFAULT}"
 if [ "$JETSON_ORIN_NX" -eq 1 ]; then
-    SYSROOT="${JETSON_SYSROOT:-$SYSROOT}"
+    SYSROOT="$(find_first_existing_dir \
+        "${JETSON_SYSROOT:-}" \
+        "$SYSROOT" \
+        "$REPO_ROOT/../sysroots/jetson-orin-nx" \
+        "$HOME/workspace/sysroots/jetson-orin-nx" \
+        "$HOME/sysroots/jetson-orin-nx" || true)"
+    TOOLCHAIN_PREFIX="$(find_first_toolchain_prefix \
+        "${JETSON_TOOLCHAIN_PREFIX:-}" \
+        "$HOME/toolchains/jetson-focal-cross/usr/bin/aarch64-linux-gnu" \
+        "/usr/bin/aarch64-linux-gnu" || true)"
+    JETSON_TOOLCHAIN_HOST_LIBDIR_DEFAULT="$(find_first_existing_dir \
+        "${JETSON_TOOLCHAIN_HOST_LIBDIR:-}" \
+        "$HOME/toolchains/jetson-focal-cross/usr/lib/x86_64-linux-gnu" || true)"
+    if [ -n "$JETSON_TOOLCHAIN_HOST_LIBDIR_DEFAULT" ]; then
+        export LD_LIBRARY_PATH="$JETSON_TOOLCHAIN_HOST_LIBDIR_DEFAULT:${LD_LIBRARY_PATH:-}"
+    fi
+else
+    TOOLCHAIN_PREFIX="${TOOLCHAIN_PREFIX:-}"
 fi
 
 if [ "$BUILD_SMART_DRONE" = "ON" ] || [ "$BUILD_ORB" -eq 1 ]; then
     if [ ! -d "$SYSROOT" ]; then
         echo "Sysroot not found: $SYSROOT" >&2
         echo "Set $SYSROOT_ENV_NAME=/path/to/sysroot and retry." >&2
+        exit 1
+    fi
+    if [ "$JETSON_ORIN_NX" -eq 1 ] && [ -z "$TOOLCHAIN_PREFIX" ]; then
+        echo "Jetson cross compiler prefix not found." >&2
+        echo "Set JETSON_TOOLCHAIN_PREFIX=/path/to/aarch64-linux-gnu and retry." >&2
         exit 1
     fi
 fi
@@ -142,6 +200,9 @@ if [ -n "$TOOLCHAIN_FILE" ]; then
 fi
 if [ -n "$TOOLCHAIN_PREFIX" ]; then
     configure_native_args+=(-DJETSON_TOOLCHAIN_PREFIX="$TOOLCHAIN_PREFIX")
+fi
+if [ -n "${SMART_DRONE_CAMERA_PROVIDER:-}" ]; then
+    configure_native_args+=(-DSMART_DRONE_CAMERA_PROVIDER="$SMART_DRONE_CAMERA_PROVIDER")
 fi
 
 copy_artifact() {
@@ -178,6 +239,18 @@ sync_native_artifacts() {
     if [ -f "$REPO_ROOT/scripts/xfeat_keypoint_worker.py" ]; then
         copy_artifact "$REPO_ROOT/scripts/xfeat_keypoint_worker.py" \
             "$scripts_dir/xfeat_keypoint_worker.py"
+    fi
+
+    if [ -f "$REPO_ROOT/ORBvoc.txt" ]; then
+        copy_artifact "$REPO_ROOT/ORBvoc.txt" "$NATIVE_ARTIFACTS_DIR/ORBvoc.txt"
+    elif [ -f "$REPO_ROOT/ORB_SLAM3/Vocabulary/ORBvoc.txt" ]; then
+        copy_artifact "$REPO_ROOT/ORB_SLAM3/Vocabulary/ORBvoc.txt" \
+            "$NATIVE_ARTIFACTS_DIR/ORBvoc.txt"
+    fi
+
+    if [ -d "$REPO_ROOT/accelerated_features" ]; then
+        rm -rf "$NATIVE_ARTIFACTS_DIR/accelerated_features"
+        cp -a "$REPO_ROOT/accelerated_features" "$NATIVE_ARTIFACTS_DIR/accelerated_features"
     fi
 }
 
@@ -242,6 +315,9 @@ echo "PLATFORM:$PLATFORM_NAME"
 echo "SYSROOT:$SYSROOT"
 if [ -n "$TOOLCHAIN_PREFIX" ]; then
     echo "TOOLCHAIN_PREFIX:$TOOLCHAIN_PREFIX"
+fi
+if [ "$JETSON_ORIN_NX" -eq 1 ] && [ -n "${JETSON_TOOLCHAIN_HOST_LIBDIR_DEFAULT:-}" ]; then
+    echo "TOOLCHAIN_HOST_LIBDIR:$JETSON_TOOLCHAIN_HOST_LIBDIR_DEFAULT"
 fi
 echo "MODE:$MODE"
 echo "CLEAN_BUILD:$CLEAN_BUILD"
