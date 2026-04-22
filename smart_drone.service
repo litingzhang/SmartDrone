@@ -7,11 +7,12 @@ Wants=network-online.target
 Type=simple
 User=nvidia
 SupplementaryGroups=dialout gpio video i2c
-WorkingDirectory=/home/nvidia/SmartDrone_codex
+WorkingDirectory=/home/nvidia
+Environment=HOME=/home/nvidia
 Environment=SMART_DRONE_MAVLINK_DEV=/dev/ttyTHS0
 Environment=SMART_DRONE_MAVLINK_BAUD=921600
-Environment=LD_LIBRARY_PATH=/home/nvidia/SmartDrone_codex/output/artifacts/native-jetson/lib
-ExecStart=/home/nvidia/SmartDrone_codex/output/artifacts/native-jetson/bin/smart_drone --auto-mode idle
+Environment=LD_LIBRARY_PATH=/home/nvidia:/usr/local/cuda-11.4/targets/aarch64-linux/lib:/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu
+ExecStart=/home/nvidia/smart_drone --auto-mode idle --settings /home/nvidia/config/stereo.yaml --vocab /home/nvidia/ORBvoc.txt --uvc-device-index 0 --uvc-eye-width 640 --uvc-eye-height 400 --feature-frontend xfeat --xfeat-device cuda --xfeat-repo /home/nvidia/accelerated_features --xfeat-worker /home/nvidia/scripts/xfeat_keypoint_worker.py --udp --udp-ip 127.0.0.1 --udp-port 5000
 Restart=always
 RestartSec=2
 

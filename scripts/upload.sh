@@ -10,6 +10,10 @@ Environment variables:
   TARGET_HOST        SSH host, default: ltz@192.168.0.105
   REMOTE_DIR         Remote deploy directory, default: /home/ltz
   REMOTE_SERVICE     systemd service name, default: smart_drone
+  SYSTEMD_UNIT_FILE  Optional local systemd unit file to install remotely.
+                     Default: <repo>/smart_drone.service
+  CLEAN_LEGACY_DIRS  1 to remove legacy Jetson project directories after
+                     deployment. Default: 0
   RESTART_SERVICE    1 to restart service after deploy, default: 0
   DEPLOY_PLATFORM    Artifact platform name under output/artifacts, default: cm5
   UPLOAD_LAYOUT      flat or artifact-root. Defaults to artifact-root for
@@ -24,6 +28,7 @@ ADB_PORT="${ADB_PORT:-}"
 ADB_ONLY="${ADB_ONLY:-0}"
 DEPLOY_PLATFORM="${DEPLOY_PLATFORM:-cm5}"
 UPLOAD_LAYOUT="${UPLOAD_LAYOUT:-}"
+CLEAN_LEGACY_DIRS="${CLEAN_LEGACY_DIRS:-0}"
 JETSON_ORIN_NX=0
 
 while [ $# -gt 0 ]; do
@@ -91,16 +96,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [ "$JETSON_ORIN_NX" = "1" ] || [ "$DEPLOY_PLATFORM" = "jetson-orin-nx" ]; then
     TARGET_HOST="${TARGET_HOST:-nvidia@192.168.0.103}"
-    REMOTE_DIR="${REMOTE_DIR:-/home/nvidia/SmartDrone_cross}"
+    REMOTE_DIR="${REMOTE_DIR:-/home/nvidia}"
 else
     TARGET_HOST="${TARGET_HOST:-ltz@192.168.0.105}"
     REMOTE_DIR="${REMOTE_DIR:-/home/ltz}"
 fi
 REMOTE_SERVICE="${REMOTE_SERVICE:-smart_drone}"
+SYSTEMD_UNIT_FILE="${SYSTEMD_UNIT_FILE:-$REPO_ROOT/smart_drone.service}"
 ARTIFACT_ROOT="$REPO_ROOT/output/artifacts/$DEPLOY_PLATFORM"
 if [ -z "$UPLOAD_LAYOUT" ]; then
     if [ "$DEPLOY_PLATFORM" = "jetson-orin-nx" ]; then
-        UPLOAD_LAYOUT="artifact-root"
+        UPLOAD_LAYOUT="flat"
     else
         UPLOAD_LAYOUT="flat"
     fi
@@ -144,6 +150,23 @@ require_file() {
     fi
 }
 
+remote_service_unit_name() {
+    if [[ "$REMOTE_SERVICE" == *.service ]]; then
+        printf '%s\n' "$REMOTE_SERVICE"
+    else
+        printf '%s.service\n' "$REMOTE_SERVICE"
+    fi
+}
+
+run_remote_sudo() {
+    local remote_cmd="$1"
+    if [ -n "$SSH_PASSWORD" ]; then
+        "${SSH_CMD[@]}" "$TARGET_HOST" "printf '%s\n' '$SSH_PASSWORD' | sudo -S bash -lc \"$remote_cmd\""
+    else
+        "${SSH_CMD[@]}" "$TARGET_HOST" "sudo bash -lc \"$remote_cmd\""
+    fi
+}
+
 upload_atomic() {
     local local_path="$1"
     local remote_name="$2"
@@ -156,7 +179,18 @@ upload_atomic() {
 }
 
 ensure_remote_dirs() {
-    "${SSH_CMD[@]}" "$TARGET_HOST" "mkdir -p '$REMOTE_DIR/config' '$REMOTE_DIR/scripts'"
+    "${SSH_CMD[@]}" "$TARGET_HOST" "mkdir -p '$REMOTE_DIR/config' '$REMOTE_DIR/scripts' '$REMOTE_DIR/accelerated_features'"
+}
+
+upload_dir_atomic() {
+    local local_dir="$1"
+    local remote_name="$2"
+    local remote_tmp="$REMOTE_DIR/.${remote_name}.new"
+    local remote_dst="$REMOTE_DIR/$remote_name"
+
+    echo "upload $remote_name/"
+    tar -C "$local_dir" -cf - . | "${SSH_CMD[@]}" "$TARGET_HOST" \
+        "rm -rf '$remote_tmp' && mkdir -p '$remote_tmp' && tar -xf - -C '$remote_tmp' && rm -rf '$remote_dst' && mv '$remote_tmp' '$remote_dst'"
 }
 
 upload_artifact_root() {
@@ -171,6 +205,34 @@ upload_artifact_root() {
     echo "upload artifact-root -> $TARGET_HOST:$REMOTE_DIR"
     tar -C "$ARTIFACT_ROOT" -cf - . | "${SSH_CMD[@]}" "$TARGET_HOST" \
         "rm -rf '$remote_tmp' && mkdir -p '$remote_tmp' && tar -xf - -C '$remote_tmp' && rm -rf '$REMOTE_DIR' && mv '$remote_tmp' '$REMOTE_DIR'"
+}
+
+install_systemd_unit() {
+    local unit_name
+    local remote_tmp
+
+    unit_name="$(remote_service_unit_name)"
+    remote_tmp="/tmp/${unit_name}.new"
+
+    if [ ! -f "$SYSTEMD_UNIT_FILE" ]; then
+        return 0
+    fi
+
+    echo "install systemd unit $unit_name"
+    "${SCP_CMD[@]}" "$SYSTEMD_UNIT_FILE" "$TARGET_HOST:$remote_tmp"
+    run_remote_sudo "mv '$remote_tmp' '/etc/systemd/system/$unit_name' && chmod 0644 '/etc/systemd/system/$unit_name' && systemctl daemon-reload"
+}
+
+cleanup_legacy_dirs() {
+    if [ "$CLEAN_LEGACY_DIRS" != "1" ]; then
+        return 0
+    fi
+    if [ "$DEPLOY_PLATFORM" != "jetson-orin-nx" ]; then
+        return 0
+    fi
+
+    echo "remove legacy Jetson project directories"
+    run_remote_sudo "rm -rf /home/nvidia/SmartDrone_cross /home/nvidia/SmartDrone_codex /home/nvidia/smart_drone.service.codex"
 }
 
 if [ "$ADB_ONLY" != "1" ]; then
@@ -202,15 +264,17 @@ if [ "$ADB_ONLY" != "1" ]; then
         if [ -f "$ORBVOC_FILE" ]; then
             upload_atomic "$ORBVOC_FILE" "ORBvoc.txt"
         fi
+        if [ -d "$ACCELERATED_FEATURES_DIR" ]; then
+            upload_dir_atomic "$ACCELERATED_FEATURES_DIR" "accelerated_features"
+        fi
     fi
+
+    install_systemd_unit
+    cleanup_legacy_dirs
 
     if [ "$RESTART_SERVICE" = "1" ]; then
         echo "restart service $REMOTE_SERVICE"
-        if [ -n "$SSH_PASSWORD" ]; then
-            "${SSH_CMD[@]}" "$TARGET_HOST" "printf '%s\n' '$SSH_PASSWORD' | sudo -S systemctl restart '$REMOTE_SERVICE'"
-        else
-            "${SSH_CMD[@]}" "$TARGET_HOST" "sudo systemctl restart '$REMOTE_SERVICE'"
-        fi
+        run_remote_sudo "systemctl restart '$(remote_service_unit_name)'"
     fi
 fi
 
