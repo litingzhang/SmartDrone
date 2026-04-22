@@ -334,8 +334,12 @@ void UvcStereoCamera::CaptureLoop()
         stereo.right.arriveNs = static_cast<int64_t>(arriveNs);
         stereo.left.sequence = ++m_sequence;
         stereo.right.sequence = m_sequence;
-        stereo.left.gray = packedGray(cv::Rect(0, 0, halfWidth, packedHeight)).clone();
-        stereo.right.gray = packedGray(cv::Rect(halfWidth, 0, halfWidth, packedHeight)).clone();
+        // The current UVC device exposes the physical right-eye image on the
+        // left half of the packed frame and the physical left-eye image on the
+        // right half, so the logical stereo definition is intentionally
+        // reversed here.
+        stereo.left.gray = packedGray(cv::Rect(halfWidth, 0, halfWidth, packedHeight)).clone();
+        stereo.right.gray = packedGray(cv::Rect(0, 0, halfWidth, packedHeight)).clone();
 
         PushFrame(std::move(stereo), captureUs * 1000ULL);
     }
