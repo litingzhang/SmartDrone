@@ -59,8 +59,14 @@ class XFeatFrontendClient {
     Stats m_lastStats{};
     BackendMode m_backendMode{BackendMode::None};
     std::unique_ptr<XFeatNativeExtractor> m_nativeExtractor;
+    XFeatFeatureSet m_prevStereoLeftFeatures;
+    bool m_havePrevStereoLeftFeatures{false};
 
     static bool PrepareGrayImage(const cv::Mat &gray, cv::Mat &gray8, std::string *err);
+    static std::vector<int> ComputeTemporalStableIndices(const XFeatFeatureSet &previous,
+                                                         const XFeatFeatureSet &current);
+    static void ReorderFeaturesByIndices(const XFeatFeatureSet &source, const std::vector<int> &indices,
+                                         XFeatFeatureSet &dest);
     bool ReadFeatureSet(XFeatFeatureSet &outFeatures, std::string *err);
     bool WriteExact(const void *data, size_t size, std::string *err);
     bool ReadExact(void *data, size_t size, std::string *err);
