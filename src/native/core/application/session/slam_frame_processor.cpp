@@ -16,6 +16,7 @@ namespace smartdrone::core::application {
 namespace {
 
 constexpr uint64_t kSlamDfxLogEveryNFrames = 30;
+constexpr int kXFeatStereoWeakMatchThreshold = 24;
 
 uint8_t ComposeResetCounter(uint8_t sessionBase, uint8_t continuityCounter)
 {
@@ -304,19 +305,23 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
 
     ++m_state.frameIndex;
     m_state.lastPublishedFrameNs = logicalFrameTimestampNs;
+    const bool xfeatStereoWeak =
+        slamOutput.usedXFeatFrontend && !m_ctx.monoMode &&
+        slamOutput.xfeatMatchedStereoCount < kXFeatStereoWeakMatchThreshold;
     const double totalMs = DurationMs(frameStartTp, publishEndTp);
     const bool slamDfxPeriodic = (kSlamDfxLogEveryNFrames > 0) && ((m_state.frameIndex % kSlamDfxLogEveryNFrames) == 0);
     const bool slamDfxAbnormal = !poseResult.poseEstimate.valid || state <= 0 || totalMs > 80.0 ||
-                                 slamOutput.leftFeatures.empty() || slamOutput.rightFeatures.empty();
+                                 slamOutput.leftFeatures.empty() || slamOutput.rightFeatures.empty() ||
+                                 xfeatStereoWeak;
     if (slamDfxPeriodic || slamDfxAbnormal) {
-        char dfxLine[768];
+        char dfxLine[896];
         if (m_ctx.aliases.jsonDiagnostics) {
             std::snprintf(
                 dfxLine, sizeof(dfxLine),
                 "{\"tag\":\"slam_dfx\",\"frame\":%llu,\"state\":%d,\"quality\":%d,\"pose_valid\":%d,"
                 "\"reset_counter\":%u,\"reset_map_count\":%u,"
                 "\"imu_count\":%zu,\"feat_left\":%zu,\"feat_right\":%zu,\"points\":%zu,"
-                "\"xfeat_used\":%d,\"xfeat_raw_left\":%d,\"xfeat_raw_right\":%d,"
+                "\"xfeat_used\":%d,\"xfeat_stereo_weak\":%d,\"xfeat_raw_left\":%d,\"xfeat_raw_right\":%d,"
                 "\"xfeat_match_stereo\":%d,\"xfeat_injected_left\":%d,\"xfeat_injected_right\":%d,"
                 "\"xfeat_prepare_ms\":%.3f,\"xfeat_write_ms\":%.3f,\"xfeat_read_ms\":%.3f,"
                 "\"xfeat_worker_ms\":%.3f,\"xfeat_match_ms\":%.3f,\"xfeat_total_ms\":%.3f,"
@@ -331,12 +336,13 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
                 slamOutput.rightFeatures.size(), pointCount, slamOutput.usedXFeatFrontend ? 1 : 0,
-                slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount, slamOutput.xfeatMatchedStereoCount,
-                slamOutput.xfeatInjectedLeftCount, slamOutput.xfeatInjectedRightCount, slamOutput.xfeatPrepareMs,
-                slamOutput.xfeatWorkerWriteMs, slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs,
-                slamOutput.xfeatStereoMatchMs, slamOutput.xfeatTotalMs, slamOutput.xfeatImageCount,
-                slamOutput.xfeatPayloadBytes, static_cast<double>(pairDtMs), rejectDtMs, pendingL,
-                pendingR, static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
+                xfeatStereoWeak ? 1 : 0, slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount,
+                slamOutput.xfeatMatchedStereoCount, slamOutput.xfeatInjectedLeftCount,
+                slamOutput.xfeatInjectedRightCount, slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
+                slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs, slamOutput.xfeatStereoMatchMs,
+                slamOutput.xfeatTotalMs, slamOutput.xfeatImageCount, slamOutput.xfeatPayloadBytes,
+                static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
+                static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
                 monoStepMs, DurationMs(acquireStartTp, acquireEndTp), DurationMs(imuStartTp, imuEndTp),
                 DurationMs(slamStartTp, slamEndTp), DurationMs(cloudStartTp, cloudEndTp), DurationMs(udpStartTp, udpEndTp),
@@ -347,7 +353,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 dfxLine, sizeof(dfxLine),
                 "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
                 "imu=%zu feat=%zu/%zu points=%zu "
-                "xfeat=%s raw=%d/%d stereo=%d injected=%d/%d "
+                "xfeat=%s stereo_warn=%s raw=%d/%d stereo=%d injected=%d/%d "
                 "xfeat_ms=prep %.3f write %.3f read %.3f worker %.3f match %.3f total %.3f "
                 "xfeat_io=%uimg/%ubytes "
                 "pair_dt=%.3f reject_dt=%.3f pend=%zu/%zu drop=%llu/%llu rate_drop=%llu "
@@ -358,11 +364,11 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
                 slamOutput.rightFeatures.size(), pointCount, slamOutput.usedXFeatFrontend ? "on" : "off",
-                slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount, slamOutput.xfeatMatchedStereoCount,
-                slamOutput.xfeatInjectedLeftCount, slamOutput.xfeatInjectedRightCount, slamOutput.xfeatPrepareMs,
-                slamOutput.xfeatWorkerWriteMs, slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs,
-                slamOutput.xfeatStereoMatchMs, slamOutput.xfeatTotalMs, slamOutput.xfeatImageCount,
-                slamOutput.xfeatPayloadBytes,
+                xfeatStereoWeak ? "weak" : "ok", slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount,
+                slamOutput.xfeatMatchedStereoCount, slamOutput.xfeatInjectedLeftCount,
+                slamOutput.xfeatInjectedRightCount, slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
+                slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs, slamOutput.xfeatStereoMatchMs,
+                slamOutput.xfeatTotalMs, slamOutput.xfeatImageCount, slamOutput.xfeatPayloadBytes,
                 static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
                 static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
