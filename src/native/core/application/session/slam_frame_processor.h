@@ -62,6 +62,9 @@ class SlamFrameProcessor {
         uint64_t rateLimitedDrops{0};
         uint8_t sessionResetCounterBase{0};
         uint16_t sessionResetMapCountBase{0};
+        bool lastTrackingUsable{false};
+        int lastTrackingState{ORB_SLAM3::Tracking::NO_IMAGES_YET};
+        FeatureFrontend lastAppliedFeatureFrontend{FeatureFrontend::Orb};
         smartdrone::core::domain::SlamOperationMode requestedSlamMode{
             smartdrone::core::domain::SlamOperationMode::Mapping};
         smartdrone::core::domain::SlamOperationMode effectiveSlamMode{
