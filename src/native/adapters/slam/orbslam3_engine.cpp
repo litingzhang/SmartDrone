@@ -18,10 +18,22 @@ namespace smartdrone::adapters::slam {
 
 namespace {
 
+constexpr float kStereoMaxEpipolarDeltaPx = 1.5f;
+constexpr float kStereoMinDisparityPx = 0.75f;
+constexpr float kStereoMaxDisparityPx = 240.0f;
+constexpr float kStereoRatioTest = 0.92f;
+constexpr float kStereoMinZnccScore = 0.10f;
+constexpr int kStereoPatchRadiusPx = 3;
+constexpr int kStereoGridCols = 8;
+constexpr int kStereoGridRows = 6;
+constexpr int kStereoMaxPairsPerCell = 10;
+
 struct StereoMatchPair {
     int leftIndex{-1};
     int rightIndex{-1};
     int distance{std::numeric_limits<int>::max()};
+    float zncc{-1.0f};
+    float disparity{0.0f};
 };
 
 cv::KeyPoint MakeKeyPoint(const cv::Point2f &pt)
@@ -35,53 +47,192 @@ cv::KeyPoint MakeKeyPoint(const cv::Point2f &pt)
     return kp;
 }
 
-std::vector<StereoMatchPair> MatchStereoPairs(const XFeatFeatureSet &left, const XFeatFeatureSet &right)
+bool ComputePatchZncc(const cv::Mat &leftGray32f, const cv::Point2f &leftPt, const cv::Mat &rightGray32f,
+                      const cv::Point2f &rightPt, float &score)
 {
-    std::vector<StereoMatchPair> matches;
-    if (left.descriptors.empty() || right.descriptors.empty()) {
+    score = -1.0f;
+    if (leftGray32f.empty() || rightGray32f.empty()) {
+        return false;
+    }
+
+    const int patchSize = 2 * kStereoPatchRadiusPx + 1;
+    if (leftPt.x < static_cast<float>(kStereoPatchRadiusPx) ||
+        leftPt.y < static_cast<float>(kStereoPatchRadiusPx) ||
+        rightPt.x < static_cast<float>(kStereoPatchRadiusPx) ||
+        rightPt.y < static_cast<float>(kStereoPatchRadiusPx) ||
+        leftPt.x >= static_cast<float>(leftGray32f.cols - kStereoPatchRadiusPx) ||
+        leftPt.y >= static_cast<float>(leftGray32f.rows - kStereoPatchRadiusPx) ||
+        rightPt.x >= static_cast<float>(rightGray32f.cols - kStereoPatchRadiusPx) ||
+        rightPt.y >= static_cast<float>(rightGray32f.rows - kStereoPatchRadiusPx)) {
+        return false;
+    }
+
+    cv::Mat leftPatch;
+    cv::Mat rightPatch;
+    cv::getRectSubPix(leftGray32f, cv::Size(patchSize, patchSize), leftPt, leftPatch);
+    cv::getRectSubPix(rightGray32f, cv::Size(patchSize, patchSize), rightPt, rightPatch);
+    if (leftPatch.empty() || rightPatch.empty()) {
+        return false;
+    }
+
+    cv::Scalar leftMean;
+    cv::Scalar leftStd;
+    cv::Scalar rightMean;
+    cv::Scalar rightStd;
+    cv::meanStdDev(leftPatch, leftMean, leftStd);
+    cv::meanStdDev(rightPatch, rightMean, rightStd);
+    if (leftStd[0] < 1e-3 || rightStd[0] < 1e-3) {
+        return false;
+    }
+
+    cv::Mat leftNorm = leftPatch - leftMean[0];
+    cv::Mat rightNorm = rightPatch - rightMean[0];
+    const double denom = static_cast<double>(leftNorm.total()) * leftStd[0] * rightStd[0];
+    if (denom <= 1e-9) {
+        return false;
+    }
+    score = static_cast<float>(leftNorm.dot(rightNorm) / denom);
+    return std::isfinite(score);
+}
+
+bool IsBetterRightCandidate(int candidateDist, float candidateZncc, int currentDist, float currentZncc)
+{
+    if (currentDist == std::numeric_limits<int>::max()) {
+        return true;
+    }
+    if (candidateDist != currentDist) {
+        return candidateDist < currentDist;
+    }
+    return candidateZncc > currentZncc;
+}
+
+std::vector<StereoMatchPair> SelectGridBalancedPairs(const std::vector<StereoMatchPair> &matches,
+                                                     const std::vector<cv::Point2f> &leftKeypoints, int imageWidth,
+                                                     int imageHeight)
+{
+    if (matches.empty() || imageWidth <= 0 || imageHeight <= 0) {
         return matches;
     }
 
-    std::vector<int> bestRightForLeft(left.descriptors.rows, -1);
-    std::vector<int> bestLeftForRight(right.descriptors.rows, -1);
-    std::vector<int> bestRightDist(left.descriptors.rows, std::numeric_limits<int>::max());
-    std::vector<int> bestLeftDist(right.descriptors.rows, std::numeric_limits<int>::max());
+    const int cellWidth = std::max(1, (imageWidth + kStereoGridCols - 1) / kStereoGridCols);
+    const int cellHeight = std::max(1, (imageHeight + kStereoGridRows - 1) / kStereoGridRows);
+    std::vector<int> cellCounts(static_cast<size_t>(kStereoGridCols * kStereoGridRows), 0);
+    std::vector<StereoMatchPair> selected;
+    selected.reserve(matches.size());
+
+    for (const StereoMatchPair &match : matches) {
+        const cv::Point2f &pt = leftKeypoints[static_cast<size_t>(match.leftIndex)];
+        const int col = std::clamp(static_cast<int>(pt.x) / cellWidth, 0, kStereoGridCols - 1);
+        const int row = std::clamp(static_cast<int>(pt.y) / cellHeight, 0, kStereoGridRows - 1);
+        const size_t cellIndex = static_cast<size_t>(row * kStereoGridCols + col);
+        if (cellCounts[cellIndex] >= kStereoMaxPairsPerCell) {
+            continue;
+        }
+        ++cellCounts[cellIndex];
+        selected.push_back(match);
+    }
+    return selected;
+}
+
+std::vector<StereoMatchPair> MatchStereoPairs(const XFeatFeatureSet &left, const XFeatFeatureSet &right,
+                                              const cv::Mat &leftGray, const cv::Mat &rightGray)
+{
+    std::vector<StereoMatchPair> matches;
+    if (left.descriptors.empty() || right.descriptors.empty() || left.keypoints.empty() || right.keypoints.empty()) {
+        return matches;
+    }
+
+    cv::Mat leftGray32f;
+    cv::Mat rightGray32f;
+    leftGray.convertTo(leftGray32f, CV_32F);
+    rightGray.convertTo(rightGray32f, CV_32F);
+
+    std::vector<StereoMatchPair> bestForLeft(static_cast<size_t>(left.descriptors.rows));
+    for (StereoMatchPair &pair : bestForLeft) {
+        pair.distance = std::numeric_limits<int>::max();
+    }
+    std::vector<int> secondBestDist(static_cast<size_t>(left.descriptors.rows), std::numeric_limits<int>::max());
+    std::vector<int> bestLeftForRight(static_cast<size_t>(right.descriptors.rows), -1);
+    std::vector<int> bestLeftDist(static_cast<size_t>(right.descriptors.rows), std::numeric_limits<int>::max());
+    std::vector<float> bestLeftZncc(static_cast<size_t>(right.descriptors.rows), -1.0f);
 
     for (int li = 0; li < left.descriptors.rows; ++li) {
         const cv::Point2f &leftPt = left.keypoints[static_cast<size_t>(li)];
+        int bestRi = -1;
+        int bestDist = std::numeric_limits<int>::max();
+        int secondDist = std::numeric_limits<int>::max();
+        float bestZncc = -1.0f;
+        float bestDisparity = 0.0f;
+
         for (int ri = 0; ri < right.descriptors.rows; ++ri) {
             const cv::Point2f &rightPt = right.keypoints[static_cast<size_t>(ri)];
             const float yDelta = std::fabs(leftPt.y - rightPt.y);
             const float disparity = leftPt.x - rightPt.x;
-            if (yDelta > 3.0f || disparity <= 0.5f) {
+            if (yDelta > kStereoMaxEpipolarDeltaPx || disparity < kStereoMinDisparityPx ||
+                disparity > kStereoMaxDisparityPx) {
                 continue;
             }
+
             const int dist =
                 ORB_SLAM3::ORBmatcher::DescriptorDistance(left.descriptors.row(li), right.descriptors.row(ri));
-            if (dist < bestRightDist[li]) {
-                bestRightDist[li] = dist;
-                bestRightForLeft[li] = ri;
+            if (dist < bestDist) {
+                secondDist = bestDist;
+                bestDist = dist;
+                bestRi = ri;
+                bestDisparity = disparity;
+            } else if (dist < secondDist) {
+                secondDist = dist;
             }
-            if (dist < bestLeftDist[ri]) {
-                bestLeftDist[ri] = dist;
-                bestLeftForRight[ri] = li;
-            }
+        }
+
+        if (bestRi < 0) {
+            continue;
+        }
+        if (secondDist != std::numeric_limits<int>::max() &&
+            static_cast<float>(bestDist) >= kStereoRatioTest * static_cast<float>(secondDist)) {
+            continue;
+        }
+
+        float zncc = -1.0f;
+        if (!ComputePatchZncc(leftGray32f, leftPt, rightGray32f, right.keypoints[static_cast<size_t>(bestRi)], zncc) ||
+            zncc < kStereoMinZnccScore) {
+            continue;
+        }
+
+        bestZncc = zncc;
+        bestForLeft[static_cast<size_t>(li)] = StereoMatchPair{li, bestRi, bestDist, bestZncc, bestDisparity};
+        secondBestDist[static_cast<size_t>(li)] = secondDist;
+
+        if (IsBetterRightCandidate(bestDist, bestZncc, bestLeftDist[static_cast<size_t>(bestRi)],
+                                   bestLeftZncc[static_cast<size_t>(bestRi)])) {
+            bestLeftDist[static_cast<size_t>(bestRi)] = bestDist;
+            bestLeftZncc[static_cast<size_t>(bestRi)] = bestZncc;
+            bestLeftForRight[static_cast<size_t>(bestRi)] = li;
         }
     }
 
     matches.reserve(static_cast<size_t>(std::min(left.descriptors.rows, right.descriptors.rows)));
-    for (int li = 0; li < left.descriptors.rows; ++li) {
-        const int ri = bestRightForLeft[li];
-        if (ri < 0 || bestLeftForRight[ri] != li) {
+    for (size_t li = 0; li < bestForLeft.size(); ++li) {
+        const StereoMatchPair &pair = bestForLeft[li];
+        if (pair.rightIndex < 0) {
             continue;
         }
-        matches.push_back(StereoMatchPair{li, ri, bestRightDist[li]});
+        if (bestLeftForRight[static_cast<size_t>(pair.rightIndex)] != pair.leftIndex) {
+            continue;
+        }
+        matches.push_back(pair);
     }
 
     std::sort(matches.begin(), matches.end(), [](const StereoMatchPair &a, const StereoMatchPair &b) {
-        return a.distance < b.distance;
+        if (a.distance != b.distance) {
+            return a.distance < b.distance;
+        }
+        if (a.zncc != b.zncc) {
+            return a.zncc > b.zncc;
+        }
+        return a.disparity < b.disparity;
     });
-    return matches;
+    return SelectGridBalancedPairs(matches, left.keypoints, leftGray.cols, leftGray.rows);
 }
 
 std::vector<cv::Point2f> ToPointList(const std::vector<cv::KeyPoint> &keypoints)
@@ -329,7 +480,7 @@ bool OrbSlam3Engine::BuildStereoExternalData(const cv::Mat &leftGray, const cv::
     m_lastXFeatRawRightCount = static_cast<int>(rightFeatures.keypoints.size());
 
     const auto matchStartTp = std::chrono::steady_clock::now();
-    const std::vector<StereoMatchPair> matches = MatchStereoPairs(leftFeatures, rightFeatures);
+    const std::vector<StereoMatchPair> matches = MatchStereoPairs(leftFeatures, rightFeatures, leftGray, rightGray);
     m_lastXFeatStereoMatchMs =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - matchStartTp).count();
     if (matches.empty()) {
