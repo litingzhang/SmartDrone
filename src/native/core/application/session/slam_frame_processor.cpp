@@ -48,6 +48,17 @@ Sophus::SE3f BuildBodyToCamPitchDelta(float pitchDeg)
     return Sophus::SE3f(Sophus::SO3f(Eigen::Quaternionf(pitchRotation)), Eigen::Vector3f::Zero());
 }
 
+const char *FeatureFrontendName(FeatureFrontend frontend)
+{
+    switch (frontend) {
+    case FeatureFrontend::XFeat:
+        return "xfeat";
+    case FeatureFrontend::Orb:
+    default:
+        return "orb";
+    }
+}
+
 } // namespace
 
 SlamFrameProcessor::SlamFrameProcessor(Context &context, State &state) : m_ctx(context), m_state(state) {}
@@ -80,7 +91,18 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         m_ctx.perceptionPipeline.ClampTargetFps(m_ctx.tuning.slamInputFps.load(std::memory_order_relaxed));
     const FeatureFrontend configuredFrontend =
         static_cast<FeatureFrontend>(m_ctx.tuning.featureFrontend.load(std::memory_order_relaxed));
-    m_ctx.slamEngine.SetFeatureFrontend(configuredFrontend);
+    const bool stereoXFeatRequested = configuredFrontend == FeatureFrontend::XFeat && !m_ctx.monoMode;
+    const FeatureFrontend effectiveFrontend =
+        (stereoXFeatRequested && !m_state.lastTrackingUsable) ? FeatureFrontend::Orb : configuredFrontend;
+    m_ctx.slamEngine.SetFeatureFrontend(effectiveFrontend);
+    if (effectiveFrontend != m_state.lastAppliedFeatureFrontend) {
+        std::cerr << "[slam] effective_feature_frontend=" << FeatureFrontendName(effectiveFrontend)
+                  << " requested=" << FeatureFrontendName(configuredFrontend)
+                  << " stereo_xfeat_gate=" << (stereoXFeatRequested && !m_state.lastTrackingUsable ? "hold_orb" : "direct")
+                  << " prev_tracking_state=" << m_state.lastTrackingState
+                  << " prev_tracking_usable=" << (m_state.lastTrackingUsable ? 1 : 0) << "\n";
+        m_state.lastAppliedFeatureFrontend = effectiveFrontend;
+    }
     if (slamInputFps != m_state.lastLoggedSlamInputFps) {
         std::cerr << "[slam] target_input_fps=" << slamInputFps << " camera_fps=" << m_ctx.aliases.fps
                   << " frame_drop=" << (slamInputFps < m_ctx.aliases.fps ? "enabled" : "disabled") << "\n";
@@ -224,6 +246,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
 
     const int state = debugRightOnlyFeatures ? ORB_SLAM3::Tracking::LOST : slamOutput.trackingState;
     const bool trackingUsable = !debugRightOnlyFeatures && IsTrackingPoseUsable(state);
+    m_state.lastTrackingState = state;
+    m_state.lastTrackingUsable = trackingUsable;
     const unsigned long mapId = debugRightOnlyFeatures ? 0UL : slamOutput.mapId;
     const bool mapIdChanged =
         mapId != PosePostprocessor::ContinuityMapper::kInvalidMapId && mapId != m_state.lastRawMapId;
