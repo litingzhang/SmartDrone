@@ -39,6 +39,7 @@ struct CameraConfig {
     int uvcEyeWidth{640};
     int uvcEyeHeight{400};
     bool uvcPackedStereo{true};
+    bool uvcSwapEyes{false};
     bool aeDisable{false};
     int exposureUs{5000};
     float gain{2.0f};
@@ -87,8 +88,8 @@ struct RuntimeConfig {
     std::string xfeatRepo;
     std::string xfeatWorkerScript{"scripts/xfeat_keypoint_worker.py"};
     std::string xfeatDevice{"auto"};
-    int xfeatTopK{512};
-    int xfeatMaxPoints{320};
+    int xfeatTopK{1024};
+    int xfeatMaxPoints{768};
     int xfeatInputMaxWidth{640};
     int xfeatInputMaxHeight{400};
     bool debugRightOnlyFeatures{false};

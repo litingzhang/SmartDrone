@@ -13,6 +13,8 @@ Assumptions (matches your C++ recorder):
 - imu.csv columns (your C++ fprintf):
   #timestamp [ns],w_x [rad/s],w_y [rad/s],w_z [rad/s],a_x [m/s^2],a_y [m/s^2],a_z [m/s^2]
   i.e. gyro first, accel last.
+- if `imu.csv` is missing or contains no usable samples after trimming, still
+  generate a camera-only bag.
 """
 
 import os, re, csv, sys
@@ -174,12 +176,14 @@ def ensure_dir(p: str):
 def write_bag(cam0_dir: str, cam1_dir: str, imu_csv: str, out_bag: str):
     ensure_dir(cam0_dir)
     ensure_dir(cam1_dir)
-    if not os.path.isfile(imu_csv):
-        raise RuntimeError(f"IMU csv not found: {imu_csv}")
 
     cam0 = load_camera_items(cam0_dir)
     cam1 = load_camera_items(cam1_dir)
-    imu  = read_imu_csv_ns(imu_csv)
+    imu = []
+    if os.path.isfile(imu_csv):
+        imu = read_imu_csv_ns(imu_csv)
+    else:
+        print(f"[warn] IMU csv not found, generating camera-only bag: {imu_csv}")
 
     cam0 = prune_tail_invalid_images(cam0, "cam0")
     cam1 = prune_tail_invalid_images(cam1, "cam1")
@@ -190,12 +194,16 @@ def write_bag(cam0_dir: str, cam1_dir: str, imu_csv: str, out_bag: str):
         raise RuntimeError(f"No images in {cam1_dir}")
 
     last_valid_cam_ns = min(cam0[-1][0], cam1[-1][0])
-    imu = trim_tail_imu_after(last_valid_cam_ns, imu)
-    if not imu:
-        raise RuntimeError(f"No imu samples in {imu_csv} after trimming")
+    if imu:
+        imu = trim_tail_imu_after(last_valid_cam_ns, imu)
+        if not imu:
+            print(f"[warn] No imu samples in {imu_csv} after trimming; generating camera-only bag")
 
     # t0 in ns (use earliest among all)
-    t0_ns = min(cam0[0][0], cam1[0][0], imu[0][0])
+    t0_candidates = [cam0[0][0], cam1[0][0]]
+    if imu:
+        t0_candidates.append(imu[0][0])
+    t0_ns = min(t0_candidates)
 
     bridge = CvBridge()
 

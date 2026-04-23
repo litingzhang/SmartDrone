@@ -7,9 +7,9 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <opencv2/core/mat.hpp>
-#include <opencv2/videoio.hpp>
 
 #include "core/application/session/runtime_session_common.h"
 #include "core/ports/camera_provider.h"
@@ -37,21 +37,32 @@ class UvcStereoCamera final : public core::ports::ICameraProvider {
         uint64_t captureTimestampNs{0};
     };
 
+    struct MappedBuffer {
+        void *start{nullptr};
+        size_t length{0};
+    };
+
     void CaptureLoop();
     bool OpenDevice(int deviceIndex, int width, int height, int fps, bool aeDisable, int exposureUs, float gain);
+    void CloseDevice();
     void PushFrame(core::ports::StereoFrame &&frame, uint64_t captureTimestampNs);
 
     mutable std::mutex m_mutex;
     std::condition_variable m_cv;
-    cv::VideoCapture m_cap;
     std::deque<StereoFrameItem> m_queue;
     std::thread m_thread;
     bool m_open{false};
     bool m_running{false};
+    bool m_streaming{false};
     int m_deviceIndex{0};
     int m_width{0};
     int m_height{0};
     int m_fps{0};
+    bool m_swapEyes{false};
+    int m_fd{-1};
+    uint32_t m_pixelFormat{0};
+    uint32_t m_bytesPerLine{0};
+    std::vector<MappedBuffer> m_buffers;
     size_t m_maxQueue{1};
     uint32_t m_sequence{0};
     uint64_t m_lastFrameTimestampNs{0};

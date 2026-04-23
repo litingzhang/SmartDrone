@@ -26,6 +26,10 @@
 #include "ORBmatcher.h"
 #include "GeometricCamera.h"
 
+#include <atomic>
+#include <cstdlib>
+#include <iostream>
+#include <string>
 #include <thread>
 #include <include/CameraModels/Pinhole.h>
 #include <include/CameraModels/KannalaBrandt8.h>
@@ -39,14 +43,6 @@ namespace ORB_SLAM3
 
 namespace
 {
-
-cv::Mat TrimDescriptorRows(const cv::Mat& descriptors, size_t targetRows)
-{
-    if(descriptors.empty() || targetRows == 0)
-        return cv::Mat();
-    const int rows = std::min<int>(descriptors.rows, static_cast<int>(targetRows));
-    return descriptors.rowRange(0, rows).clone();
-}
 
 inline int PatchL1Distance11x11(const cv::Mat& leftLevel, int leftCenterX, int leftCenterY,
                                 const cv::Mat& rightLevel, int rightCenterX, int rightCenterY)
@@ -103,6 +99,43 @@ inline int PatchL1Distance11x11(const cv::Mat& leftLevel, int leftCenterX, int l
     }
 #endif
     return sad;
+}
+
+cv::Mat TrimDescriptorRows(const cv::Mat& descriptors, size_t targetRows)
+{
+    if(descriptors.empty() || targetRows == 0)
+        return cv::Mat();
+    const int rows = std::min<int>(descriptors.rows, static_cast<int>(targetRows));
+    return descriptors.rowRange(0, rows).clone();
+}
+
+bool StereoMatchDebugEnabled()
+{
+    const char* value = std::getenv("SMART_DRONE_STEREO_MATCH_DEBUG");
+    return value && value[0] != '\0' && std::string(value) != "0";
+}
+
+void LogStereoMatchDebug(int leftCount, int rightCount, int rowLinked, int accepted,
+                         int uniqueMatches, int finalMatches, float median, float threshold)
+{
+    static std::atomic<int> logCount{0};
+    if(!StereoMatchDebugEnabled())
+        return;
+
+    const int index = logCount.fetch_add(1);
+    if(index >= 120)
+        return;
+
+    std::cerr << "[stereo_match_debug] frame=" << index
+              << " left_kp=" << leftCount
+              << " right_kp=" << rightCount
+              << " row_linked=" << rowLinked
+              << " accepted=" << accepted
+              << " unique=" << uniqueMatches
+              << " final=" << finalMatches
+              << " median=" << median
+              << " th=" << threshold
+              << std::endl;
 }
 
 }
@@ -1100,6 +1133,7 @@ void Frame::ComputeStereoMatches()
 
     const int nRows = mpORBextractorLeft->mvImagePyramid[0].rows;
     const int Nr = mvKeysRight.size();
+    int rowLinked = 0;
 
     //Assign keypoints to row table
     vector<vector<size_t> > vRowIndices(nRows,vector<size_t>());
@@ -1117,7 +1151,10 @@ void Frame::ComputeStereoMatches()
         const int minr = std::max(0, static_cast<int>(floor(kpY-r)));
 
         for(int yi=minr;yi<=maxr;yi++)
+        {
             vRowIndices[yi].push_back(iR);
+            ++rowLinked;
+        }
     }
 
     // Set limits for search
@@ -1273,7 +1310,10 @@ void Frame::ComputeStereoMatches()
     }
 
     if(vCandidatesAccepted.empty())
+    {
+        LogStereoMatchDebug(N, Nr, rowLinked, 0, 0, 0, -1.0f, -1.0f);
         return;
+    }
 
     vector<pair<int, int> > vDistIdx;
     vDistIdx.reserve(vCandidatesAccepted.size());
@@ -1290,7 +1330,10 @@ void Frame::ComputeStereoMatches()
     }
 
     if(vDistIdx.empty())
+    {
+        LogStereoMatchDebug(N, Nr, rowLinked, static_cast<int>(vCandidatesAccepted.size()), 0, 0, -1.0f, -1.0f);
         return;
+    }
 
     sort(vDistIdx.begin(),vDistIdx.end());
     const float median = vDistIdx[vDistIdx.size()/2].first;
@@ -1306,6 +1349,15 @@ void Frame::ComputeStereoMatches()
             mvDepth[vDistIdx[i].second]=-1;
         }
     }
+
+    int finalMatches = 0;
+    for(size_t i = 0; i < mvDepth.size(); ++i)
+    {
+        if(mvDepth[i] > 0.0f)
+            ++finalMatches;
+    }
+    LogStereoMatchDebug(N, Nr, rowLinked, static_cast<int>(vDistIdx.size()),
+                        static_cast<int>(vDistIdx.size()), finalMatches, median, thDist);
 }
 
 

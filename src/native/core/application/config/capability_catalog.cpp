@@ -42,8 +42,8 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault()
         "slam.feature_frontend.xfeat=packed_stereo_frames_can_be_split_per_eye_for_xfeat_detection_and_optional_orbslam3_external_feature_injection",
     };
     if (CompiledCameraProviderUsesPackedStereo()) {
-        capabilities.behaviorNotes.push_back("camera.uvc_stereo_opencv=single_uvc_device_packed_left_right_frame");
-        capabilities.behaviorNotes.push_back("camera.uvc_timestamp=software_monotonic_timestamp_taken_immediately_after_grab");
+        capabilities.behaviorNotes.push_back("camera.uvc_stereo_v4l2=single_uvc_device_packed_left_right_frame");
+        capabilities.behaviorNotes.push_back("camera.uvc_timestamp=v4l2_buffer_timestamp_from_vidioc_dqbuf");
         capabilities.behaviorNotes.push_back("camera.uvc_pairing=not_required_single_capture_provides_both_eyes");
     }
     capabilities.configKeys = ConfigRegistry::DefaultDescriptors();

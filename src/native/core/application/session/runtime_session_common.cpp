@@ -199,6 +199,7 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
     a.uvcEyeWidth = c.camera.uvcEyeWidth > 0 ? c.camera.uvcEyeWidth : c.camera.width;
     a.uvcEyeHeight = c.camera.uvcEyeHeight > 0 ? c.camera.uvcEyeHeight : c.camera.height;
     a.uvcPackedStereo = c.camera.uvcPackedStereo;
+    a.uvcSwapEyes = c.camera.uvcSwapEyes;
     a.aeDisable = c.camera.aeDisable;
     a.exposureUs = c.camera.exposureUs;
     a.gain = c.camera.gain;
@@ -250,6 +251,7 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
               << " uvc_device_index=" << a.uvcDeviceIndex << "\n";
     std::cerr << "stereo_input eye=" << a.uvcEyeWidth << "x" << a.uvcEyeHeight
               << " packed_stereo=" << (a.uvcPackedStereo ? "Y" : "N")
+              << " swap_eyes=" << (a.uvcSwapEyes ? "Y" : "N")
               << " pair_window_ms=" << a.pairMs << " keep_window_ms=" << a.keepMs << " frame_queue=" << a.pairQueue
               << "\n";
     if (packedStereo) {

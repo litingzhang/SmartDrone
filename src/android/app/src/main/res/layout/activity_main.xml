@@ -14,7 +14,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:contentDescription="video_left"
-            android:scaleType="centerCrop" />
+            android:scaleType="fitCenter" />
 
         <ImageView
             android:id="@+id/ivVideoRight"
@@ -22,7 +22,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:contentDescription="video_right"
-            android:scaleType="centerCrop" />
+            android:scaleType="fitCenter" />
     </LinearLayout>
 
     <View

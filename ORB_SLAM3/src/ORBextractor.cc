@@ -1168,6 +1168,50 @@ namespace ORB_SLAM3
         return monoIndex;
     }
 
+    bool ORBextractor::ComputeDescriptorsAtKeypoints(InputArray _image, vector<KeyPoint>& _keypoints,
+                                                     OutputArray _descriptors)
+    {
+        if(_image.empty())
+            return false;
+
+        Mat image = _image.getMat();
+        CV_Assert(image.type() == CV_8UC1);
+
+        vector<KeyPoint> validKeypoints;
+        validKeypoints.reserve(_keypoints.size());
+        for(const KeyPoint& kp : _keypoints)
+        {
+            const int x = cvRound(kp.pt.x);
+            const int y = cvRound(kp.pt.y);
+            if(x < EDGE_THRESHOLD || x >= image.cols - EDGE_THRESHOLD ||
+               y < EDGE_THRESHOLD || y >= image.rows - EDGE_THRESHOLD)
+            {
+                continue;
+            }
+
+            KeyPoint orbKp = kp;
+            orbKp.octave = 0;
+            orbKp.size = static_cast<float>(PATCH_SIZE);
+            validKeypoints.push_back(orbKp);
+        }
+
+        _keypoints.swap(validKeypoints);
+        if(_keypoints.empty())
+        {
+            _descriptors.release();
+            return false;
+        }
+
+        Mat workingMat = image.clone();
+        GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);
+        computeOrientation(workingMat, _keypoints, umax);
+
+        _descriptors.create(static_cast<int>(_keypoints.size()), 32, CV_8U);
+        Mat descriptors = _descriptors.getMat();
+        computeDescriptors(workingMat, _keypoints, descriptors, pattern);
+        return !descriptors.empty();
+    }
+
     void ORBextractor::ComputePyramid(cv::Mat image)
     {
         for (int level = 0; level < nlevels; ++level)

@@ -21,7 +21,7 @@ class UdpImageSender {
     using DestinationResolver = std::function<bool(sockaddr_in &)>;
 
     static constexpr uint8_t FLAG_FEATURE_POINTS = 0x01;
-    static constexpr double MAX_IMAGE_FPS = 30.0;
+    static constexpr double MAX_IMAGE_FPS = 15.0;
     static constexpr double MIN_FRAME_INTERVAL_SEC = 1.0 / MAX_IMAGE_FPS;
 
     struct Slot {

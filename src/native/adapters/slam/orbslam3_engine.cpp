@@ -18,6 +18,7 @@ namespace smartdrone::adapters::slam {
 
 namespace {
 
+constexpr int kOrbDescriptorBorder = 19;
 constexpr float kStereoMaxEpipolarDeltaPx = 1.5f;
 constexpr float kStereoMinDisparityPx = 0.75f;
 constexpr float kStereoMaxDisparityPx = 240.0f;
@@ -40,11 +41,52 @@ cv::KeyPoint MakeKeyPoint(const cv::Point2f &pt)
 {
     cv::KeyPoint kp;
     kp.pt = pt;
-    kp.size = 8.0f;
+    kp.size = 31.0f;
     kp.angle = -1.0f;
     kp.octave = 0;
     kp.response = 1.0f;
     return kp;
+}
+
+bool IsPointSafeForOrbDescriptor(const cv::Point2f &pt, const cv::Mat &gray)
+{
+    return pt.x >= static_cast<float>(kOrbDescriptorBorder) &&
+           pt.x < static_cast<float>(gray.cols - kOrbDescriptorBorder) &&
+           pt.y >= static_cast<float>(kOrbDescriptorBorder) &&
+           pt.y < static_cast<float>(gray.rows - kOrbDescriptorBorder);
+}
+
+ORB_SLAM3::ORBextractor *SelectMonoExtractor(ORB_SLAM3::Tracking *tracker)
+{
+    if (tracker == nullptr) {
+        return nullptr;
+    }
+    const bool needInitExtractor =
+        tracker->mState == ORB_SLAM3::Tracking::NOT_INITIALIZED ||
+        tracker->mState == ORB_SLAM3::Tracking::NO_IMAGES_YET;
+    return needInitExtractor ? tracker->GetInitORBExtractor() : tracker->GetLeftORBExtractor();
+}
+
+bool ComputeOrbDescriptorsAtPoints(ORB_SLAM3::ORBextractor *extractor, const cv::Mat &gray,
+                                   const std::vector<cv::Point2f> &points, std::vector<cv::KeyPoint> &keypoints,
+                                   cv::Mat &descriptors)
+{
+    keypoints.clear();
+    descriptors.release();
+    if (extractor == nullptr || gray.empty() || points.empty()) {
+        return false;
+    }
+
+    keypoints.reserve(points.size());
+    for (const cv::Point2f &pt : points) {
+        keypoints.push_back(MakeKeyPoint(pt));
+    }
+
+    if (!extractor->ComputeDescriptorsAtKeypoints(gray, keypoints, descriptors)) {
+        return false;
+    }
+    return !keypoints.empty() && !descriptors.empty() &&
+           descriptors.rows == static_cast<int>(keypoints.size()) && descriptors.type() == CV_8U;
 }
 
 bool ComputePatchZncc(const cv::Mat &leftGray32f, const cv::Point2f &leftPt, const cv::Mat &rightGray32f,
@@ -287,7 +329,17 @@ void RemapKeypointsToSource(std::vector<cv::Point2f> &keypoints, float scaleX, f
 
 bool IsXFeatTrackingStateSafe(int trackingState)
 {
-    return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::OK_KLT;
+    switch (trackingState) {
+    case ORB_SLAM3::Tracking::NO_IMAGES_YET:
+    case ORB_SLAM3::Tracking::NOT_INITIALIZED:
+    case ORB_SLAM3::Tracking::OK:
+    case ORB_SLAM3::Tracking::RECENTLY_LOST:
+    case ORB_SLAM3::Tracking::LOST:
+    case ORB_SLAM3::Tracking::OK_KLT:
+        return true;
+    default:
+        return false;
+    }
 }
 
 std::string DescribeTrackingState(int trackingState)
@@ -411,9 +463,18 @@ bool OrbSlam3Engine::BuildMonoExternalData(const cv::Mat &gray, ORB_SLAM3::Exter
     m_lastXFeatPayloadBytes = stats.payloadBytes;
     RemapKeypointsToSource(features.keypoints, scaleX, scaleY);
     m_lastXFeatRawLeftCount = static_cast<int>(features.keypoints.size());
-
-    outData.keypoints = ToKeyPoints(features.keypoints);
-    outData.descriptors = std::move(features.descriptors);
+    ORB_SLAM3::Tracking *const tracker = m_system != nullptr ? m_system->GetTracker() : nullptr;
+    ORB_SLAM3::ORBextractor *const extractor = SelectMonoExtractor(tracker);
+    std::vector<cv::Point2f> orbPoints;
+    orbPoints.reserve(features.keypoints.size());
+    for (const cv::Point2f &pt : features.keypoints) {
+        if (IsPointSafeForOrbDescriptor(pt, gray)) {
+            orbPoints.push_back(pt);
+        }
+    }
+    if (!ComputeOrbDescriptorsAtPoints(extractor, gray, orbPoints, outData.keypoints, outData.descriptors)) {
+        return false;
+    }
     m_lastXFeatInjectedLeftCount = static_cast<int>(outData.keypoints.size());
     m_lastXFeatTotalMs =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - totalStartTp).count();
@@ -487,17 +548,31 @@ bool OrbSlam3Engine::BuildStereoExternalData(const cv::Mat &leftGray, const cv::
         return false;
     }
     m_lastXFeatMatchedStereoCount = static_cast<int>(matches.size());
-
-    outData.leftKeypoints.reserve(matches.size());
-    outData.rightKeypoints.reserve(matches.size());
-    outData.leftDescriptors = cv::Mat(static_cast<int>(matches.size()), leftFeatures.descriptors.cols, CV_32F);
-    outData.rightDescriptors = cv::Mat(static_cast<int>(matches.size()), rightFeatures.descriptors.cols, CV_32F);
-    for (size_t i = 0; i < matches.size(); ++i) {
-        const StereoMatchPair &match = matches[i];
-        outData.leftKeypoints.push_back(MakeKeyPoint(leftFeatures.keypoints[static_cast<size_t>(match.leftIndex)]));
-        outData.rightKeypoints.push_back(MakeKeyPoint(rightFeatures.keypoints[static_cast<size_t>(match.rightIndex)]));
-        leftFeatures.descriptors.row(match.leftIndex).copyTo(outData.leftDescriptors.row(static_cast<int>(i)));
-        rightFeatures.descriptors.row(match.rightIndex).copyTo(outData.rightDescriptors.row(static_cast<int>(i)));
+    ORB_SLAM3::Tracking *const tracker = m_system != nullptr ? m_system->GetTracker() : nullptr;
+    ORB_SLAM3::ORBextractor *const leftExtractor = tracker != nullptr ? tracker->GetLeftORBExtractor() : nullptr;
+    ORB_SLAM3::ORBextractor *const rightExtractor = tracker != nullptr ? tracker->GetRightORBExtractor() : nullptr;
+    std::vector<cv::Point2f> leftMatchedPoints;
+    std::vector<cv::Point2f> rightMatchedPoints;
+    leftMatchedPoints.reserve(matches.size());
+    rightMatchedPoints.reserve(matches.size());
+    for (const StereoMatchPair &match : matches) {
+        const cv::Point2f &leftPt = leftFeatures.keypoints[static_cast<size_t>(match.leftIndex)];
+        const cv::Point2f &rightPt = rightFeatures.keypoints[static_cast<size_t>(match.rightIndex)];
+        if (!IsPointSafeForOrbDescriptor(leftPt, leftGray) || !IsPointSafeForOrbDescriptor(rightPt, rightGray)) {
+            continue;
+        }
+        leftMatchedPoints.push_back(leftPt);
+        rightMatchedPoints.push_back(rightPt);
+    }
+    if (!ComputeOrbDescriptorsAtPoints(leftExtractor, leftGray, leftMatchedPoints, outData.leftKeypoints,
+                                       outData.leftDescriptors) ||
+        !ComputeOrbDescriptorsAtPoints(rightExtractor, rightGray, rightMatchedPoints, outData.rightKeypoints,
+                                       outData.rightDescriptors)) {
+        return false;
+    }
+    if (outData.leftKeypoints.size() != outData.rightKeypoints.size() ||
+        outData.leftDescriptors.rows != outData.rightDescriptors.rows) {
+        return false;
     }
     outData.matchedStereoPairs = true;
     m_lastXFeatInjectedLeftCount = static_cast<int>(outData.leftKeypoints.size());

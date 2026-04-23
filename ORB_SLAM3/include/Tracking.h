@@ -113,6 +113,9 @@ public:
     void NewDataset();
     int GetNumberDataset();
     int GetMatchesInliers();
+    ORBextractor* GetLeftORBExtractor() const { return mpORBextractorLeft; }
+    ORBextractor* GetRightORBExtractor() const { return mpORBextractorRight; }
+    ORBextractor* GetInitORBExtractor() const { return mpIniORBextractor; }
 
     //DEBUG
     void SaveSubTrajectory(string strNameFile_frames, string strNameFile_kf, string strFolder="");

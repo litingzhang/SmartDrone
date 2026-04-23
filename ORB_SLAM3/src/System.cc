@@ -21,12 +21,18 @@
 #include "System.h"
 #include "Converter.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <thread>
 // #include <pangolin/pangolin.h>
 #include <iomanip>
+#include <sstream>
+#include <string>
+#include <opencv2/imgcodecs.hpp>
 #include <openssl/md5.h>
 #include <boost/serialization/base_object.hpp>
 #include <boost/serialization/string.hpp>
@@ -36,6 +42,10 @@
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/xml_iarchive.hpp>
 #include <boost/archive/xml_oarchive.hpp>
+
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
 namespace ORB_SLAM3
 {
@@ -76,6 +86,53 @@ bool LoadVocabularyWithCache(const std::string& textPath, ORBVocabulary& vocabul
     vocabulary.saveToBinaryFile(binFile);
     cout << "Vocabulary cached to binary file: " << binFile << endl;
     return true;
+}
+
+bool EnvFlagEnabled(const char* name)
+{
+    const char* value = std::getenv(name);
+    return value && value[0] != '\0' && std::string(value) != "0";
+}
+
+void EnsureDirectory(const std::string& path)
+{
+#ifdef _WIN32
+    _mkdir(path.c_str());
+#else
+    mkdir(path.c_str(), 0755);
+#endif
+}
+
+void DumpStereoDebugImages(const cv::Mat& rawLeft, const cv::Mat& rawRight,
+                           const cv::Mat& preparedLeft, const cv::Mat& preparedRight,
+                           bool rectified)
+{
+    static std::atomic<int> dumpCount{0};
+    if(!EnvFlagEnabled("SMART_DRONE_DUMP_STEREO_DEBUG"))
+        return;
+
+    const int index = dumpCount.fetch_add(1);
+    if(index >= 10)
+        return;
+
+    const std::string dir = "/tmp/smartdrone_stereo_debug";
+    EnsureDirectory(dir);
+
+    std::ostringstream prefix;
+    prefix << dir << "/frame_" << std::setw(3) << std::setfill('0') << index;
+
+    cv::imwrite(prefix.str() + "_raw_left.png", rawLeft);
+    cv::imwrite(prefix.str() + "_raw_right.png", rawRight);
+    cv::imwrite(prefix.str() + "_prepared_left.png", preparedLeft);
+    cv::imwrite(prefix.str() + "_prepared_right.png", preparedRight);
+
+    std::cerr << "[stereo_debug] dumped " << prefix.str()
+              << " rectified=" << (rectified ? 1 : 0)
+              << " raw=" << rawLeft.cols << "x" << rawLeft.rows
+              << "/" << rawRight.cols << "x" << rawRight.rows
+              << " prepared=" << preparedLeft.cols << "x" << preparedLeft.rows
+              << "/" << preparedRight.cols << "x" << preparedRight.rows
+              << std::endl;
 }
 }
 
@@ -296,7 +353,8 @@ bool System::PrepareStereoImagesForTracking(const cv::Mat &imLeft, const cv::Mat
 
     imLeftPrepared = imLeft;
     imRightPrepared = imRight;
-    if(settings_ && settings_->needToRectify()){
+    const bool rectified = settings_ && settings_->needToRectify();
+    if(rectified){
         cv::Mat M1l = settings_->M1l();
         cv::Mat M2l = settings_->M2l();
         cv::Mat M1r = settings_->M1r();
@@ -313,6 +371,7 @@ bool System::PrepareStereoImagesForTracking(const cv::Mat &imLeft, const cv::Mat
         imLeftPrepared = imLeft;
         imRightPrepared = imRight;
     }
+    DumpStereoDebugImages(imLeft, imRight, imLeftPrepared, imRightPrepared, rectified);
     return true;
 }
 

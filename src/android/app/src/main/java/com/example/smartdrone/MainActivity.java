@@ -571,8 +571,13 @@ public class MainActivity extends Activity {
 
     private static boolean containsBehaviorNote(String notes, String keyPrefix)
     {
+        return behaviorNoteValue(notes, keyPrefix) != null;
+    }
+
+    private static String behaviorNoteValue(String notes, String keyPrefix)
+    {
         if (notes == null || notes.trim().isEmpty()) {
-            return false;
+            return null;
         }
         String[] items = notes.split(";");
         for (String item : items) {
@@ -581,10 +586,10 @@ public class MainActivity extends Activity {
             }
             String trimmed = item.trim();
             if (trimmed.startsWith(keyPrefix)) {
-                return true;
+                return trimmed.substring(keyPrefix.length()).trim();
             }
         }
-        return false;
+        return null;
     }
 
     private static float quantizeTbcTranslationM(float meters)
@@ -1586,7 +1591,7 @@ public class MainActivity extends Activity {
             m_spinnerSensorMode.setAlpha(enabled ? 1.0f : 0.35f);
         }
         if (m_spinnerFeatureFrontend != null) {
-            boolean enabled = !runtimeActive && !sensorPending;
+            boolean enabled = !sensorPending && getSupportedFeatureFrontends().length > 1;
             m_spinnerFeatureFrontend.setEnabled(enabled);
             m_spinnerFeatureFrontend.setAlpha(enabled ? 1.0f : 0.35f);
         }
@@ -2129,7 +2134,8 @@ public class MainActivity extends Activity {
         m_supportsStereoImu = containsTokenList(values.get("perception_modes"), "stereo-imu");
         m_supportsMono = containsTokenList(values.get("perception_modes"), "mono");
         m_supportsMonoImu = containsTokenList(values.get("perception_modes"), "mono-imu");
-        m_supportsXFeat = containsBehaviorNote(behaviorNotes, "slam.feature_frontend.xfeat=");
+        final String xfeatCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.xfeat=");
+        m_supportsXFeat = xfeatCapability != null && !"disabled_at_build_time".equalsIgnoreCase(xfeatCapability);
         m_isPackedStereoUvc = containsTokenList(cameraProviders, "uvc_stereo_opencv") &&
                               containsBehaviorNote(behaviorNotes, "camera.uvc_pairing=not_required_single_capture_provides_both_eyes");
         m_pairWindowRequired = !m_isPackedStereoUvc;
@@ -2576,8 +2582,13 @@ public class MainActivity extends Activity {
         }
         Bitmap output = displayFrame.bitmap;
         FeatureFrame featureFrame = m_featureFrames[camIndex];
-        if (m_sendFeature && m_showFeaturePoints && featureFrame.xs != null &&
-            Math.abs(featureFrame.frameTimeSec - displayFrame.frameTimeSec) <= FRAME_MATCH_TOLERANCE_SEC) {
+        final boolean frameIdMatches = featureFrame.frameId >= 0 && displayFrame.frameId >= 0 &&
+                                       featureFrame.frameId == displayFrame.frameId;
+        final boolean legacyTimeMatches = !frameIdMatches &&
+                                          featureFrame.frameId < 0 && displayFrame.frameId < 0 &&
+                                          Math.abs(featureFrame.frameTimeSec - displayFrame.frameTimeSec) <=
+                                              FRAME_MATCH_TOLERANCE_SEC;
+        if (m_sendFeature && m_showFeaturePoints && featureFrame.xs != null && (frameIdMatches || legacyTimeMatches)) {
             output = overlayFeaturePoints(displayFrame.bitmap, featureFrame);
             if (displayFrame.overlayFrameId != featureFrame.frameId) {
                 displayFrame.overlayFrameId = featureFrame.frameId;

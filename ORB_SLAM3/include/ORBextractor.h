@@ -23,7 +23,6 @@
 #include <list>
 #include <opencv2/opencv.hpp>
 
-
 namespace ORB_SLAM3
 {
 
@@ -57,6 +56,8 @@ public:
     int operator()( cv::InputArray _image, cv::InputArray _mask,
                     std::vector<cv::KeyPoint>& _keypoints,
                     cv::OutputArray _descriptors, std::vector<int> &vLappingArea);
+    bool ComputeDescriptorsAtKeypoints(cv::InputArray _image, std::vector<cv::KeyPoint>& _keypoints,
+                                       cv::OutputArray _descriptors);
 
     int inline GetLevels(){
         return nlevels;}
@@ -111,4 +112,3 @@ protected:
 } //namespace ORB_SLAM
 
 #endif
-

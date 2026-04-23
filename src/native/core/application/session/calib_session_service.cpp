@@ -1,5 +1,6 @@
 #include "core/application/session/calib_session_service.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -20,6 +21,18 @@
 #include "core/ports/camera_provider.h"
 
 namespace smartdrone::core::application {
+
+namespace {
+
+constexpr int kRecommendedMaxCalibSaveFps = 30;
+
+int ClampCalibSaveFps(int requestedFps, int cameraFps)
+{
+    const int baseFps = ClampSlamInputFps(requestedFps, cameraFps);
+    return std::clamp(baseFps, 1, std::max(1, std::min(cameraFps, kRecommendedMaxCalibSaveFps)));
+}
+
+} // namespace
 
 cv::Mat EnsureGray8ForCalib(const cv::Mat &src, bool &convertedOut)
 {
@@ -138,6 +151,12 @@ bool RunCalibSession(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePose
     std::vector<fs::path> savedImagePaths;
     int64_t lastPairNs = 0;
     const int64_t maxSaveDtNs = static_cast<int64_t>(std::max(a.pairMs, 1)) * 1000000LL;
+    const int calibSaveFps = ClampCalibSaveFps(a.slamInputFps, a.fps);
+    const int64_t calibSaveStepNs = 1000000000LL / std::max(1, calibSaveFps);
+    int64_t nextEligibleSaveNs = 0;
+    int droppedByPacing = 0;
+    std::cerr << "[calib] target_save_fps=" << calibSaveFps << " configured_camera_fps=" << a.fps
+              << " requested_slam_fps=" << a.slamInputFps << "\n";
     bool sessionOk = true;
     while (runningFlag.load() && !stop.load()) {
         if (cfg.calib.maxFrames > 0 && saved >= cfg.calib.maxFrames)
@@ -168,9 +187,19 @@ bool RunCalibSession(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePose
             }
         }
         int64_t pairNs = static_cast<int64_t>((L.timestampNs + R.timestampNs) / 2);
+        if (nextEligibleSaveNs != 0 && pairNs < nextEligibleSaveNs) {
+            ++droppedByPacing;
+            if ((droppedByPacing % 30) == 1) {
+                std::cerr << "[calib-pace] dropped=" << droppedByPacing << " pair_ts_ns=" << pairNs
+                          << " next_save_ts_ns=" << nextEligibleSaveNs << " target_save_fps=" << calibSaveFps
+                          << "\n";
+            }
+            continue;
+        }
         if (lastPairNs != 0 && pairNs <= lastPairNs)
             pairNs = lastPairNs + 1;
         lastPairNs = pairNs;
+        nextEligibleSaveNs = pairNs + calibSaveStepNs;
         const std::string name = TsToName(pairNs);
         const fs::path fnL = cam0Dir / name;
         const fs::path fnR = cam1Dir / name;

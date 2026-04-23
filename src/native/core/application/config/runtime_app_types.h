@@ -62,7 +62,7 @@ struct MainRuntimeAliases {
         pairQueue{};
     int uvcDeviceIndex{}, uvcEyeWidth{}, uvcEyeHeight{};
     bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{}, rtImu{}, debugRightOnlyFeatures{},
-        slamLowLightEnhance{}, jsonDiagnostics{}, uvcPackedStereo{};
+        slamLowLightEnhance{}, jsonDiagnostics{}, uvcPackedStereo{}, uvcSwapEyes{};
     bool sendImage{true}, sendFeature{true}, sendMap{false};
     float gain{};
     std::string udpIp, spiDev, gpiochip;

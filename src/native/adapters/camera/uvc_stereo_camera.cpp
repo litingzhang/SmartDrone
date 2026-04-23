@@ -4,12 +4,20 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <iostream>
+#include <limits>
+#include <string>
 
 #include <fcntl.h>
 #include <linux/videodev2.h>
 #include <opencv2/imgproc.hpp>
+#include <poll.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "common/time_utils.h"
@@ -18,21 +26,44 @@ namespace smartdrone::adapters::camera {
 
 namespace {
 
-constexpr int kDefaultBackend = cv::CAP_V4L2;
+constexpr size_t kDefaultBufferCount = 4;
+constexpr int kCapturePollTimeoutMs = 250;
 
-int YuyvFourcc() { return cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V'); }
+uint32_t YuyvFourcc() { return v4l2_fourcc('Y', 'U', 'Y', 'V'); }
 
-std::string FourccToString(int fourcc)
+std::string FourccToString(uint32_t fourcc)
 {
-    if (fourcc <= 0) {
+    if (fourcc == 0) {
         return "unknown";
     }
     std::string text(4, ' ');
-    text[0] = static_cast<char>(fourcc & 0xFF);
-    text[1] = static_cast<char>((fourcc >> 8) & 0xFF);
-    text[2] = static_cast<char>((fourcc >> 16) & 0xFF);
-    text[3] = static_cast<char>((fourcc >> 24) & 0xFF);
+    text[0] = static_cast<char>(fourcc & 0xFFu);
+    text[1] = static_cast<char>((fourcc >> 8) & 0xFFu);
+    text[2] = static_cast<char>((fourcc >> 16) & 0xFFu);
+    text[3] = static_cast<char>((fourcc >> 24) & 0xFFu);
     return text;
+}
+
+uint64_t TimevalToNs(const timeval &tv)
+{
+    if (tv.tv_sec < 0 || tv.tv_usec < 0) {
+        return 0;
+    }
+    const uint64_t secNs = static_cast<uint64_t>(tv.tv_sec) * 1000000000ULL;
+    const uint64_t usecNs = static_cast<uint64_t>(tv.tv_usec) * 1000ULL;
+    return secNs + usecNs;
+}
+
+const char *TimestampFlagToString(uint32_t flags)
+{
+    switch (flags & V4L2_BUF_FLAG_TIMESTAMP_MASK) {
+    case V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC:
+        return "monotonic";
+    case V4L2_BUF_FLAG_TIMESTAMP_COPY:
+        return "copy";
+    default:
+        return "unknown";
+    }
 }
 
 struct UvcControlInfo {
@@ -76,15 +107,8 @@ bool SetUvcControl(int fd, uint32_t id, int32_t value, const char *name)
     return true;
 }
 
-void ConfigureUvcControls(int deviceIndex, bool aeDisable, int exposureUs, float gain)
+void ConfigureUvcControls(int fd, int deviceIndex, bool aeDisable, int exposureUs, float gain)
 {
-    const std::string devicePath = "/dev/video" + std::to_string(deviceIndex);
-    const int fd = ::open(devicePath.c_str(), O_RDWR);
-    if (fd < 0) {
-        std::cerr << "[uvc] warning: failed to open controls on " << devicePath << " errno=" << errno << "\n";
-        return;
-    }
-
     UvcControlInfo exposureAuto{};
     UvcControlInfo exposureAbs{};
     UvcControlInfo gainInfo{};
@@ -102,20 +126,30 @@ void ConfigureUvcControls(int deviceIndex, bool aeDisable, int exposureUs, float
         const int requestedExposure100Us = std::max(1, static_cast<int>(std::lround(exposureUs / 100.0)));
         const int32_t clampedExposure = std::clamp<int32_t>(requestedExposure100Us, exposureAbs.min, exposureAbs.max);
         SetUvcControl(fd, V4L2_CID_EXPOSURE_ABSOLUTE, clampedExposure, "exposure_absolute");
-        std::cerr << "[uvc] control exposure mode=manual exposure_us=" << exposureUs
+        std::cerr << "[uvc] control device=" << deviceIndex << " exposure mode=manual exposure_us=" << exposureUs
                   << " exposure_absolute=" << clampedExposure << "\n";
     } else if (!aeDisable) {
-        std::cerr << "[uvc] control exposure mode=auto\n";
+        std::cerr << "[uvc] control device=" << deviceIndex << " exposure mode=auto\n";
     }
 
     if (haveGain) {
         const int requestedGain = std::max(0, static_cast<int>(std::lround(gain)));
         const int32_t clampedGain = std::clamp<int32_t>(requestedGain, gainInfo.min, gainInfo.max);
         SetUvcControl(fd, V4L2_CID_GAIN, clampedGain, "gain");
-        std::cerr << "[uvc] control gain=" << clampedGain << "\n";
+        std::cerr << "[uvc] control device=" << deviceIndex << " gain=" << clampedGain << "\n";
     }
+}
 
-    ::close(fd);
+bool IoctlRetry(int fd, unsigned long request, void *arg)
+{
+    while (true) {
+        if (::ioctl(fd, request, arg) == 0) {
+            return true;
+        }
+        if (errno != EINTR) {
+            return false;
+        }
+    }
 }
 
 } // namespace
@@ -134,15 +168,14 @@ bool UvcStereoCamera::Open(const core::application::MainRuntimeAliases &aliases)
     m_deviceIndex = aliases.uvcDeviceIndex;
     m_width = aliases.uvcEyeWidth;
     m_height = aliases.uvcEyeHeight;
+    m_swapEyes = aliases.uvcSwapEyes;
     if (m_deviceIndex < 0 || m_width <= 0 || m_height <= 0) {
         std::cerr << "[uvc] invalid configuration: device_index=" << m_deviceIndex << " eye=" << m_width << "x"
                   << m_height << "\n";
         return false;
     }
+
     m_fps = aliases.fps;
-    // Packed-stereo UVC is used for live teleoperation/SLAM preview, so keep
-    // only the newest frame to avoid queueing stale images behind slow
-    // processing stages.
     m_maxQueue = 1;
     if (aliases.pairQueue > 1) {
         std::cerr << "[uvc] forcing packed-stereo frame_queue=1 for lowest-latency capture (requested="
@@ -154,6 +187,7 @@ bool UvcStereoCamera::Open(const core::application::MainRuntimeAliases &aliases)
 
     const int packedWidth = (m_width > 0) ? (m_width * 2) : 0;
     if (!OpenDevice(m_deviceIndex, packedWidth, m_height, m_fps, aliases.aeDisable, aliases.exposureUs, aliases.gain)) {
+        CloseDevice();
         return false;
     }
 
@@ -185,9 +219,7 @@ void UvcStereoCamera::Close()
         m_thread.join();
     }
 
-    if (m_cap.isOpened()) {
-        m_cap.release();
-    }
+    CloseDevice();
 
     std::lock_guard<std::mutex> lock(m_mutex);
     m_queue.clear();
@@ -277,120 +309,408 @@ void UvcStereoCamera::CaptureLoop()
             }
         }
 
-        if (!m_cap.grab()) {
+        int fd = -1;
+        {
             std::lock_guard<std::mutex> lock(m_mutex);
-            m_diag.healthy = false;
-            m_diag.acceptFrames = false;
-            ++m_diag.droppedPairs;
+            fd = m_fd;
+        }
+        if (fd < 0) {
+            break;
+        }
+
+        pollfd pfd{};
+        pfd.fd = fd;
+        pfd.events = POLLIN;
+        const int pollRc = ::poll(&pfd, 1, kCapturePollTimeoutMs);
+        if (pollRc < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_running) {
+                m_diag.healthy = false;
+                m_diag.acceptFrames = false;
+                ++m_diag.droppedPairs;
+            }
+            break;
+        }
+        if (pollRc == 0) {
+            continue;
+        }
+        if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_running) {
+                m_diag.healthy = false;
+                m_diag.acceptFrames = false;
+                ++m_diag.droppedPairs;
+            }
+            break;
+        }
+        if ((pfd.revents & POLLIN) == 0) {
             continue;
         }
 
-        const uint64_t captureUs = MonoTimeUs();
-        cv::Mat packed;
-        if (!m_cap.retrieve(packed) || packed.empty()) {
+        v4l2_buffer buffer{};
+        buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buffer.memory = V4L2_MEMORY_MMAP;
+        if (!IoctlRetry(fd, VIDIOC_DQBUF, &buffer)) {
+            const int savedErrno = errno;
+            if (savedErrno == EAGAIN) {
+                continue;
+            }
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_running && savedErrno != EPIPE && savedErrno != ENODEV && savedErrno != EBADF) {
+                m_diag.healthy = false;
+                m_diag.acceptFrames = false;
+                ++m_diag.droppedPairs;
+            }
+            break;
+        }
+
+        if (buffer.index >= m_buffers.size()) {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_diag.healthy = false;
             m_diag.acceptFrames = false;
             ++m_diag.droppedPairs;
-            continue;
+            break;
         }
+
+        const uint64_t captureTimestampNs = TimevalToNs(buffer.timestamp);
         const uint64_t arriveNs = MonoTimeUs() * 1000ULL;
+        const MappedBuffer mapped = m_buffers[buffer.index];
+        const size_t usedBytes = (buffer.bytesused > 0 && buffer.bytesused <= mapped.length)
+                                     ? static_cast<size_t>(buffer.bytesused)
+                                     : mapped.length;
 
-        const int packedWidth = packed.cols;
-        const int packedHeight = packed.rows;
-        if (packedWidth < 2 || (packedWidth % 2) != 0 || packedHeight <= 0) {
+        cv::Mat packed;
+        const int packedWidth = m_width * 2;
+        const int packedHeight = m_height;
+        if (m_pixelFormat == V4L2_PIX_FMT_YUYV) {
+            const size_t rowBytes = static_cast<size_t>(packedWidth) * 2U;
+            if (usedBytes < rowBytes * static_cast<size_t>(packedHeight)) {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_diag.healthy = false;
+                m_diag.acceptFrames = false;
+                ++m_diag.droppedPairs;
+                if (IoctlRetry(fd, VIDIOC_QBUF, &buffer)) {
+                    continue;
+                }
+                break;
+            }
+            const size_t step = std::max<size_t>(rowBytes, static_cast<size_t>(m_bytesPerLine));
+            cv::Mat packedYuyv(packedHeight, packedWidth, CV_8UC2, mapped.start, step);
+            cv::cvtColor(packedYuyv, packed, cv::COLOR_YUV2GRAY_YUY2);
+        } else if (m_pixelFormat == V4L2_PIX_FMT_GREY) {
+            const size_t rowBytes = static_cast<size_t>(packedWidth);
+            if (usedBytes < rowBytes * static_cast<size_t>(packedHeight)) {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_diag.healthy = false;
+                m_diag.acceptFrames = false;
+                ++m_diag.droppedPairs;
+                if (IoctlRetry(fd, VIDIOC_QBUF, &buffer)) {
+                    continue;
+                }
+                break;
+            }
+            const size_t step = std::max<size_t>(rowBytes, static_cast<size_t>(m_bytesPerLine));
+            cv::Mat packedGray(packedHeight, packedWidth, CV_8UC1, mapped.start, step);
+            packed = packedGray.clone();
+        } else if (m_pixelFormat == V4L2_PIX_FMT_BGR24) {
+            const size_t rowBytes = static_cast<size_t>(packedWidth) * 3U;
+            if (usedBytes < rowBytes * static_cast<size_t>(packedHeight)) {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_diag.healthy = false;
+                m_diag.acceptFrames = false;
+                ++m_diag.droppedPairs;
+                if (IoctlRetry(fd, VIDIOC_QBUF, &buffer)) {
+                    continue;
+                }
+                break;
+            }
+            const size_t step = std::max<size_t>(rowBytes, static_cast<size_t>(m_bytesPerLine));
+            cv::Mat packedBgr(packedHeight, packedWidth, CV_8UC3, mapped.start, step);
+            cv::cvtColor(packedBgr, packed, cv::COLOR_BGR2GRAY);
+        } else if (m_pixelFormat == V4L2_PIX_FMT_RGB24) {
+            const size_t rowBytes = static_cast<size_t>(packedWidth) * 3U;
+            if (usedBytes < rowBytes * static_cast<size_t>(packedHeight)) {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_diag.healthy = false;
+                m_diag.acceptFrames = false;
+                ++m_diag.droppedPairs;
+                if (IoctlRetry(fd, VIDIOC_QBUF, &buffer)) {
+                    continue;
+                }
+                break;
+            }
+            const size_t step = std::max<size_t>(rowBytes, static_cast<size_t>(m_bytesPerLine));
+            cv::Mat packedRgb(packedHeight, packedWidth, CV_8UC3, mapped.start, step);
+            cv::cvtColor(packedRgb, packed, cv::COLOR_RGB2GRAY);
+        } else {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_diag.healthy = false;
             m_diag.acceptFrames = false;
             ++m_diag.droppedPairs;
-            continue;
+            std::cerr << "[uvc] unsupported pixel format for packed stereo: " << FourccToString(m_pixelFormat) << "\n";
+            if (IoctlRetry(fd, VIDIOC_QBUF, &buffer)) {
+                continue;
+            }
+            break;
         }
-        if (packedWidth != (m_width * 2) || packedHeight != m_height) {
+
+        if (!IoctlRetry(fd, VIDIOC_QBUF, &buffer)) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_running) {
+                m_diag.healthy = false;
+                m_diag.acceptFrames = false;
+                ++m_diag.droppedPairs;
+            }
+            break;
+        }
+
+        if (packed.empty() || packed.cols != packedWidth || packed.rows != packedHeight) {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_diag.healthy = false;
             m_diag.acceptFrames = false;
             ++m_diag.droppedPairs;
-            std::cerr << "[uvc] packed frame dimension mismatch expected=" << (m_width * 2) << "x" << m_height
-                      << " actual=" << packedWidth << "x" << packedHeight << "\n";
             continue;
         }
 
         const int halfWidth = packedWidth / 2;
-        cv::Mat packedGray;
-        if (packed.channels() == 1) {
-            packedGray = packed;
-        } else if (packed.type() == CV_8UC2) {
-            cv::cvtColor(packed, packedGray, cv::COLOR_YUV2GRAY_YUY2);
-        } else {
-            cv::cvtColor(packed, packedGray, cv::COLOR_BGR2GRAY);
-        }
-
         core::ports::StereoFrame stereo{};
         stereo.left.cameraId = 0;
         stereo.right.cameraId = 1;
-        stereo.left.timestampNs = captureUs * 1000ULL;
-        stereo.right.timestampNs = captureUs * 1000ULL;
+        stereo.left.timestampNs = captureTimestampNs;
+        stereo.right.timestampNs = captureTimestampNs;
         stereo.left.arriveNs = static_cast<int64_t>(arriveNs);
         stereo.right.arriveNs = static_cast<int64_t>(arriveNs);
         stereo.left.sequence = ++m_sequence;
         stereo.right.sequence = m_sequence;
-        // The current UVC device exposes the physical right-eye image on the
-        // left half of the packed frame and the physical left-eye image on the
-        // right half, so the logical stereo definition is intentionally
-        // reversed here.
-        stereo.left.gray = packedGray(cv::Rect(halfWidth, 0, halfWidth, packedHeight)).clone();
-        stereo.right.gray = packedGray(cv::Rect(0, 0, halfWidth, packedHeight)).clone();
+        if (m_swapEyes) {
+            stereo.left.gray = packed(cv::Rect(halfWidth, 0, halfWidth, packedHeight)).clone();
+            stereo.right.gray = packed(cv::Rect(0, 0, halfWidth, packedHeight)).clone();
+        } else {
+            stereo.left.gray = packed(cv::Rect(0, 0, halfWidth, packedHeight)).clone();
+            stereo.right.gray = packed(cv::Rect(halfWidth, 0, halfWidth, packedHeight)).clone();
+        }
 
-        PushFrame(std::move(stereo), captureUs * 1000ULL);
+        PushFrame(std::move(stereo), captureTimestampNs);
     }
 }
 
 bool UvcStereoCamera::OpenDevice(int deviceIndex, int width, int height, int fps, bool aeDisable, int exposureUs,
                                  float gain)
 {
-    if (!m_cap.open(deviceIndex, kDefaultBackend)) {
-        return false;
-    }
-    m_cap.set(cv::CAP_PROP_BUFFERSIZE, 1.0);
-    const int requestedFourcc = YuyvFourcc();
-    m_cap.set(cv::CAP_PROP_FOURCC, static_cast<double>(requestedFourcc));
-    if (width > 0) {
-        m_cap.set(cv::CAP_PROP_FRAME_WIDTH, static_cast<double>(width));
-    }
-    if (height > 0) {
-        m_cap.set(cv::CAP_PROP_FRAME_HEIGHT, static_cast<double>(height));
-    }
-    if (fps > 0) {
-        m_cap.set(cv::CAP_PROP_FPS, static_cast<double>(fps));
-    }
-    if (!m_cap.isOpened()) {
+    const std::string devicePath = "/dev/video" + std::to_string(deviceIndex);
+    const int fd = ::open(devicePath.c_str(), O_RDWR | O_NONBLOCK);
+    if (fd < 0) {
+        std::cerr << "[uvc] failed to open " << devicePath << " errno=" << errno << "\n";
         return false;
     }
 
-    const int actualWidth = static_cast<int>(m_cap.get(cv::CAP_PROP_FRAME_WIDTH));
-    const int actualHeight = static_cast<int>(m_cap.get(cv::CAP_PROP_FRAME_HEIGHT));
-    const double actualFps = m_cap.get(cv::CAP_PROP_FPS);
-    const int actualFourcc = static_cast<int>(m_cap.get(cv::CAP_PROP_FOURCC));
+    v4l2_capability caps{};
+    if (!IoctlRetry(fd, VIDIOC_QUERYCAP, &caps)) {
+        std::cerr << "[uvc] VIDIOC_QUERYCAP failed on " << devicePath << " errno=" << errno << "\n";
+        ::close(fd);
+        return false;
+    }
+    if ((caps.capabilities & V4L2_CAP_VIDEO_CAPTURE) == 0U || (caps.capabilities & V4L2_CAP_STREAMING) == 0U) {
+        std::cerr << "[uvc] device does not support capture+streaming: " << devicePath << "\n";
+        ::close(fd);
+        return false;
+    }
+
+    v4l2_format format{};
+    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    format.fmt.pix.width = static_cast<uint32_t>(std::max(0, width));
+    format.fmt.pix.height = static_cast<uint32_t>(std::max(0, height));
+    format.fmt.pix.pixelformat = YuyvFourcc();
+    format.fmt.pix.field = V4L2_FIELD_NONE;
+    format.fmt.pix.bytesperline = 0;
+    format.fmt.pix.sizeimage = 0;
+    if (!IoctlRetry(fd, VIDIOC_S_FMT, &format)) {
+        std::cerr << "[uvc] VIDIOC_S_FMT failed on " << devicePath << " errno=" << errno << "\n";
+        ::close(fd);
+        return false;
+    }
+
+    const int actualWidth = static_cast<int>(format.fmt.pix.width);
+    const int actualHeight = static_cast<int>(format.fmt.pix.height);
     if (actualWidth != width || actualHeight != height) {
         std::cerr << "[uvc] configured packed frame " << width << "x" << height
                   << " but device negotiated " << actualWidth << "x" << actualHeight << "\n";
-        m_cap.release();
+        ::close(fd);
         return false;
     }
 
-    std::cerr << "[uvc] opened device=" << deviceIndex << " backend=" << kDefaultBackend
-              << " packed=" << actualWidth << "x" << actualHeight << " eye=" << (actualWidth / 2) << "x"
-              << actualHeight << " fourcc=" << FourccToString(actualFourcc);
+    v4l2_streamparm streamParm{};
+    streamParm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (fps > 0 && IoctlRetry(fd, VIDIOC_G_PARM, &streamParm)) {
+        if ((streamParm.parm.capture.capability & V4L2_CAP_TIMEPERFRAME) != 0U) {
+            streamParm.parm.capture.timeperframe.numerator = 1;
+            streamParm.parm.capture.timeperframe.denominator = static_cast<uint32_t>(fps);
+            if (!IoctlRetry(fd, VIDIOC_S_PARM, &streamParm)) {
+                std::cerr << "[uvc] warning: VIDIOC_S_PARM failed on " << devicePath << " errno=" << errno << "\n";
+            }
+        }
+    }
+
+    v4l2_requestbuffers request{};
+    request.count = static_cast<uint32_t>(kDefaultBufferCount);
+    request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    request.memory = V4L2_MEMORY_MMAP;
+    if (!IoctlRetry(fd, VIDIOC_REQBUFS, &request)) {
+        std::cerr << "[uvc] VIDIOC_REQBUFS failed on " << devicePath << " errno=" << errno << "\n";
+        ::close(fd);
+        return false;
+    }
+    if (request.count == 0) {
+        std::cerr << "[uvc] VIDIOC_REQBUFS returned zero buffers on " << devicePath << "\n";
+        ::close(fd);
+        return false;
+    }
+
+    std::vector<MappedBuffer> buffers;
+    buffers.reserve(request.count);
+    bool setupOk = true;
+    for (uint32_t i = 0; i < request.count; ++i) {
+        v4l2_buffer buffer{};
+        buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buffer.memory = V4L2_MEMORY_MMAP;
+        buffer.index = i;
+        if (!IoctlRetry(fd, VIDIOC_QUERYBUF, &buffer)) {
+            std::cerr << "[uvc] VIDIOC_QUERYBUF failed index=" << i << " errno=" << errno << "\n";
+            setupOk = false;
+            break;
+        }
+
+        void *start = ::mmap(nullptr, buffer.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, buffer.m.offset);
+        if (start == MAP_FAILED) {
+            std::cerr << "[uvc] mmap failed index=" << i << " errno=" << errno << "\n";
+            setupOk = false;
+            break;
+        }
+
+        buffers.push_back({start, static_cast<size_t>(buffer.length)});
+    }
+
+    if (!setupOk) {
+        for (const auto &mapped : buffers) {
+            if (mapped.start != nullptr && mapped.start != MAP_FAILED) {
+                ::munmap(mapped.start, mapped.length);
+            }
+        }
+        ::close(fd);
+        return false;
+    }
+
+    for (uint32_t i = 0; i < request.count; ++i) {
+        v4l2_buffer buffer{};
+        buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buffer.memory = V4L2_MEMORY_MMAP;
+        buffer.index = i;
+        if (!IoctlRetry(fd, VIDIOC_QBUF, &buffer)) {
+            std::cerr << "[uvc] VIDIOC_QBUF failed index=" << i << " errno=" << errno << "\n";
+            for (const auto &mapped : buffers) {
+                if (mapped.start != nullptr && mapped.start != MAP_FAILED) {
+                    ::munmap(mapped.start, mapped.length);
+                }
+            }
+            ::close(fd);
+            return false;
+        }
+    }
+
+    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (!IoctlRetry(fd, VIDIOC_STREAMON, &type)) {
+        std::cerr << "[uvc] VIDIOC_STREAMON failed on " << devicePath << " errno=" << errno << "\n";
+        for (const auto &mapped : buffers) {
+            if (mapped.start != nullptr && mapped.start != MAP_FAILED) {
+                ::munmap(mapped.start, mapped.length);
+            }
+        }
+        ::close(fd);
+        return false;
+    }
+
+    ConfigureUvcControls(fd, deviceIndex, aeDisable, exposureUs, gain);
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_fd = fd;
+        m_streaming = true;
+        m_pixelFormat = format.fmt.pix.pixelformat;
+        m_bytesPerLine = format.fmt.pix.bytesperline;
+        m_buffers = std::move(buffers);
+    }
+
+    double actualFps = 0.0;
+    v4l2_streamparm actualParm{};
+    actualParm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (IoctlRetry(fd, VIDIOC_G_PARM, &actualParm)) {
+        const auto &tpf = actualParm.parm.capture.timeperframe;
+        if (tpf.numerator != 0) {
+            actualFps = static_cast<double>(tpf.denominator) / static_cast<double>(tpf.numerator);
+        }
+    }
+
+    std::cerr << "[uvc] opened device=" << deviceIndex << " driver=" << reinterpret_cast<const char *>(caps.driver)
+              << " card=" << reinterpret_cast<const char *>(caps.card) << " packed=" << actualWidth << "x"
+              << actualHeight << " eye=" << (actualWidth / 2) << "x" << actualHeight
+              << " fourcc=" << FourccToString(format.fmt.pix.pixelformat)
+              << " bytesperline=" << format.fmt.pix.bytesperline << " buffers=" << request.count;
     if (actualFps > 0.0) {
         std::cerr << " fps=" << actualFps;
     }
     std::cerr << "\n";
-    if (actualFourcc != requestedFourcc) {
-        std::cerr << "[uvc] warning: requested fourcc=YUYV but device negotiated " << FourccToString(actualFourcc)
-                  << "\n";
+
+    v4l2_buffer firstProbe{};
+    firstProbe.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    firstProbe.memory = V4L2_MEMORY_MMAP;
+    firstProbe.index = 0;
+    if (IoctlRetry(fd, VIDIOC_QUERYBUF, &firstProbe)) {
+        std::cerr << "[uvc] buffer timestamps=" << TimestampFlagToString(firstProbe.flags) << "\n";
     }
-    ConfigureUvcControls(deviceIndex, aeDisable, exposureUs, gain);
+
+    if (format.fmt.pix.pixelformat != YuyvFourcc()) {
+        std::cerr << "[uvc] warning: requested fourcc=YUYV but device negotiated "
+                  << FourccToString(format.fmt.pix.pixelformat) << "\n";
+    }
+
     return true;
+}
+
+void UvcStereoCamera::CloseDevice()
+{
+    int fd = -1;
+    bool streaming = false;
+    std::vector<MappedBuffer> buffers;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        fd = m_fd;
+        streaming = m_streaming;
+        m_fd = -1;
+        m_streaming = false;
+        m_pixelFormat = 0;
+        m_bytesPerLine = 0;
+        buffers.swap(m_buffers);
+    }
+
+    if (fd >= 0 && streaming) {
+        v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        if (::ioctl(fd, VIDIOC_STREAMOFF, &type) != 0 && errno != EINVAL && errno != ENODEV && errno != EBADF) {
+            std::cerr << "[uvc] warning: VIDIOC_STREAMOFF failed errno=" << errno << "\n";
+        }
+    }
+
+    for (const auto &buffer : buffers) {
+        if (buffer.start != nullptr && buffer.start != MAP_FAILED) {
+            ::munmap(buffer.start, buffer.length);
+        }
+    }
+
+    if (fd >= 0) {
+        ::close(fd);
+    }
 }
 
 void UvcStereoCamera::PushFrame(core::ports::StereoFrame &&frame, uint64_t captureTimestampNs)

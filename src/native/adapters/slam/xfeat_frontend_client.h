@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -9,6 +10,8 @@
 #include <opencv2/core.hpp>
 
 namespace smartdrone::adapters::slam {
+
+class XFeatNativeExtractor;
 
 struct XFeatFeatureSet {
     std::vector<cv::Point2f> keypoints;
@@ -26,7 +29,7 @@ class XFeatFrontendClient {
         uint32_t payloadBytes{0};
     };
 
-    XFeatFrontendClient() = default;
+    XFeatFrontendClient();
     ~XFeatFrontendClient();
 
     XFeatFrontendClient(const XFeatFrontendClient &) = delete;
@@ -43,11 +46,19 @@ class XFeatFrontendClient {
     Stats LastStats() const;
 
   private:
+    enum class BackendMode : uint8_t {
+        None = 0,
+        Worker,
+        Native,
+    };
+
     int m_stdinFd{-1};
     int m_stdoutFd{-1};
     pid_t m_pid{-1};
     uint32_t m_requestSeq{0};
     Stats m_lastStats{};
+    BackendMode m_backendMode{BackendMode::None};
+    std::unique_ptr<XFeatNativeExtractor> m_nativeExtractor;
 
     static bool PrepareGrayImage(const cv::Mat &gray, cv::Mat &gray8, std::string *err);
     bool ReadFeatureSet(XFeatFeatureSet &outFeatures, std::string *err);

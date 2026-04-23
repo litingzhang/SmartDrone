@@ -276,6 +276,7 @@ AppConfig ParseAppConfig(int argc, char **argv)
     if (argReader.HasFlag("--uvc-packed-stereo")) {
         config.camera.uvcPackedStereo = true;
     }
+    config.camera.uvcSwapEyes = argReader.HasFlag("--uvc-swap-eyes");
     if (argReader.HasFlag("--swap-cams")) {
         std::swap(config.camera.leftCamIndex, config.camera.rightCamIndex);
     }
@@ -356,8 +357,8 @@ AppConfig ParseAppConfig(int argc, char **argv)
         }
     }
     config.runtime.xfeatDevice = argReader.GetString("--xfeat-device", "auto");
-    config.runtime.xfeatTopK = argReader.GetInt("--xfeat-top-k", 512);
-    config.runtime.xfeatMaxPoints = argReader.GetInt("--xfeat-max-points", 320);
+    config.runtime.xfeatTopK = argReader.GetInt("--xfeat-top-k", 1024);
+    config.runtime.xfeatMaxPoints = argReader.GetInt("--xfeat-max-points", 768);
     config.runtime.xfeatInputMaxWidth = argReader.GetInt("--xfeat-input-max-width", 640);
     config.runtime.xfeatInputMaxHeight = argReader.GetInt("--xfeat-input-max-height", 400);
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");

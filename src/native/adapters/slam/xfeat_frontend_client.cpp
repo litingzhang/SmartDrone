@@ -1,4 +1,5 @@
 #include "adapters/slam/xfeat_frontend_client.h"
+#include "adapters/slam/xfeat_native_extractor.h"
 
 #include <algorithm>
 #include <array>
@@ -74,7 +75,18 @@ double DurationMs(const std::chrono::steady_clock::time_point &start,
     return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
+bool WantsNativeBackend()
+{
+    const char *backend = std::getenv("SMART_DRONE_XFEAT_BACKEND");
+    if (backend == nullptr) {
+        return false;
+    }
+    return std::string(backend) == "native";
+}
+
 } // namespace
+
+XFeatFrontendClient::XFeatFrontendClient() = default;
 
 XFeatFrontendClient::~XFeatFrontendClient() { Stop(); }
 
@@ -83,6 +95,20 @@ bool XFeatFrontendClient::Start(const std::string &pythonBin, const std::string 
                                 std::string *err)
 {
     Stop();
+    m_lastStats = Stats{};
+
+    if (WantsNativeBackend()) {
+        if (!m_nativeExtractor) {
+            m_nativeExtractor = std::make_unique<XFeatNativeExtractor>();
+        }
+        if (!m_nativeExtractor->Start(repoPath, device, topK, maxPoints, err)) {
+            m_nativeExtractor.reset();
+            m_backendMode = BackendMode::None;
+            return false;
+        }
+        m_backendMode = BackendMode::Native;
+        return true;
+    }
 
     int stdinPipe[2]{-1, -1};
     int stdoutPipe[2]{-1, -1};
@@ -173,11 +199,16 @@ bool XFeatFrontendClient::Start(const std::string &pythonBin, const std::string 
         Stop();
         return false;
     }
+    m_backendMode = BackendMode::Worker;
     return true;
 }
 
 void XFeatFrontendClient::Stop()
 {
+    if (m_backendMode == BackendMode::Native && m_nativeExtractor) {
+        m_nativeExtractor->Stop();
+        m_nativeExtractor.reset();
+    }
     if (m_stdinFd >= 0) {
         close(m_stdinFd);
         m_stdinFd = -1;
@@ -193,14 +224,33 @@ void XFeatFrontendClient::Stop()
         m_pid = -1;
     }
     m_requestSeq = 0;
+    m_backendMode = BackendMode::None;
 }
 
-bool XFeatFrontendClient::Running() const { return m_pid > 0 && m_stdinFd >= 0 && m_stdoutFd >= 0; }
+bool XFeatFrontendClient::Running() const
+{
+    if (m_backendMode == BackendMode::Native) {
+        return m_nativeExtractor && m_nativeExtractor->Running();
+    }
+    return m_backendMode == BackendMode::Worker && m_pid > 0 && m_stdinFd >= 0 && m_stdoutFd >= 0;
+}
 
 XFeatFrontendClient::Stats XFeatFrontendClient::LastStats() const { return m_lastStats; }
 
 bool XFeatFrontendClient::Detect(const cv::Mat &gray, std::vector<cv::Point2f> &outPoints, std::string *err)
 {
+    if (m_backendMode == BackendMode::Native) {
+        const bool ok = m_nativeExtractor && m_nativeExtractor->Detect(gray, outPoints, err);
+        if (m_nativeExtractor) {
+            const XFeatNativeExtractor::Stats nativeStats = m_nativeExtractor->LastStats();
+            m_lastStats.prepareMs = nativeStats.prepareMs;
+            m_lastStats.readMs = nativeStats.inferMs;
+            m_lastStats.totalMs = nativeStats.totalMs;
+            m_lastStats.imageCount = nativeStats.imageCount;
+            m_lastStats.payloadBytes = nativeStats.payloadBytes;
+        }
+        return ok;
+    }
     XFeatFeatureSet features;
     if (!DetectAndCompute(gray, features, err)) {
         return false;
@@ -211,6 +261,19 @@ bool XFeatFrontendClient::Detect(const cv::Mat &gray, std::vector<cv::Point2f> &
 
 bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet &outFeatures, std::string *err)
 {
+    if (m_backendMode == BackendMode::Native) {
+        m_lastStats = Stats{};
+        const bool ok = m_nativeExtractor && m_nativeExtractor->DetectAndCompute(gray, outFeatures, err);
+        if (m_nativeExtractor) {
+            const XFeatNativeExtractor::Stats nativeStats = m_nativeExtractor->LastStats();
+            m_lastStats.prepareMs = nativeStats.prepareMs;
+            m_lastStats.readMs = nativeStats.inferMs;
+            m_lastStats.totalMs = nativeStats.totalMs;
+            m_lastStats.imageCount = nativeStats.imageCount;
+            m_lastStats.payloadBytes = nativeStats.payloadBytes;
+        }
+        return ok;
+    }
     outFeatures.keypoints.clear();
     outFeatures.descriptors.release();
     m_lastStats = Stats{};
@@ -293,6 +356,20 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
                                                  XFeatFeatureSet &leftFeatures, XFeatFeatureSet &rightFeatures,
                                                  std::string *err)
 {
+    if (m_backendMode == BackendMode::Native) {
+        m_lastStats = Stats{};
+        const bool ok = m_nativeExtractor &&
+                        m_nativeExtractor->DetectAndComputeStereo(leftGray, rightGray, leftFeatures, rightFeatures, err);
+        if (m_nativeExtractor) {
+            const XFeatNativeExtractor::Stats nativeStats = m_nativeExtractor->LastStats();
+            m_lastStats.prepareMs = nativeStats.prepareMs;
+            m_lastStats.readMs = nativeStats.inferMs;
+            m_lastStats.totalMs = nativeStats.totalMs;
+            m_lastStats.imageCount = nativeStats.imageCount;
+            m_lastStats.payloadBytes = nativeStats.payloadBytes;
+        }
+        return ok;
+    }
     leftFeatures.keypoints.clear();
     leftFeatures.descriptors.release();
     rightFeatures.keypoints.clear();

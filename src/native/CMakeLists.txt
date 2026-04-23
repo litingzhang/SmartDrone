@@ -30,12 +30,19 @@ set(SMART_DRONE_ADAPTER_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688_imu_provider.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orbslam3_engine.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/xfeat_frontend_client.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/xfeat_native_extractor.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/stream/udp_image_sender.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/mavlink_pose_publisher.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/mavlink_serial_transport.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/px4_mavlink_gateway.cpp"
   ${SMART_DRONE_CAMERA_SOURCES}
 )
+
+if(SMART_DRONE_ENABLE_XFEAT_NATIVE)
+  list(APPEND SMART_DRONE_ADAPTER_SOURCES
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/xfeat_native_model.cpp"
+  )
+endif()
 
 set(SMART_DRONE_COMMON_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/common/discovery/udp_discovery_beacon.cpp"
