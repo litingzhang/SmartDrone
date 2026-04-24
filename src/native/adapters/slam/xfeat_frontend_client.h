@@ -60,11 +60,12 @@ class XFeatFrontendClient {
     BackendMode m_backendMode{BackendMode::None};
     std::unique_ptr<XFeatNativeExtractor> m_nativeExtractor;
     XFeatFeatureSet m_prevStereoLeftFeatures;
+    cv::Mat m_prevStereoLeftGray;
     bool m_havePrevStereoLeftFeatures{false};
 
     static bool PrepareGrayImage(const cv::Mat &gray, cv::Mat &gray8, std::string *err);
-    static std::vector<int> ComputeTemporalStableIndices(const XFeatFeatureSet &previous,
-                                                         const XFeatFeatureSet &current);
+    static std::vector<int> ComputeTemporalStableIndices(const XFeatFeatureSet &previous, const cv::Mat &previousGray,
+                                                         const XFeatFeatureSet &current, const cv::Mat &currentGray);
     static void ReorderFeaturesByIndices(const XFeatFeatureSet &source, const std::vector<int> &indices,
                                          XFeatFeatureSet &dest);
     bool ReadFeatureSet(XFeatFeatureSet &outFeatures, std::string *err);

@@ -3,6 +3,7 @@
 
 #include <opencv2/core/types.hpp>
 
+#include <cstddef>
 #include <vector>
 
 namespace ORB_SLAM3
@@ -10,6 +11,9 @@ namespace ORB_SLAM3
 
 struct TrackedVisualData
 {
+    int matchesInliers{0};
+    size_t trackedMapPointCount{0};
+    size_t localMapPointCount{0};
     std::vector<float> pointCloudXyz;
     std::vector<cv::Point2f> leftFeatures;
     std::vector<cv::Point2f> rightFeatures;

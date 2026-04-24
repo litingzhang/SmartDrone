@@ -142,6 +142,7 @@ CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
 NATIVE_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/$PLATFORM_NAME"
 HOST_TEST_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host/unit-test"
 HOST_REPLAY_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host/offline-replay"
+REPLAY_ARTIFACTS_DIR="$HOST_REPLAY_ARTIFACTS_DIR"
 ANDROID_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/android"
 
 if [ "$JETSON_ORIN_NX" -eq 1 ]; then
@@ -151,9 +152,13 @@ if [ "$JETSON_ORIN_NX" -eq 1 ]; then
     TOOLCHAIN_FILE="$REPO_ROOT/toolchain/toolchain-jetson-orin-nx-aarch64.cmake"
     BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/smart_drone"
     ORB_BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/orbslam3"
+    REPLAY_BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/offline-replay"
 fi
 
 NATIVE_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/$PLATFORM_NAME"
+if [ "$JETSON_ORIN_NX" -eq 1 ]; then
+    REPLAY_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/$PLATFORM_NAME/offline-replay"
+fi
 
 SYSROOT="${SYSROOT:-$SYSROOT_DEFAULT}"
 if [ "$JETSON_ORIN_NX" -eq 1 ]; then
@@ -184,6 +189,19 @@ if [ "$BUILD_SMART_DRONE" = "ON" ] || [ "$BUILD_ORB" -eq 1 ]; then
         exit 1
     fi
     if [ "$JETSON_ORIN_NX" -eq 1 ] && [ -z "$TOOLCHAIN_PREFIX" ]; then
+        echo "Jetson cross compiler prefix not found." >&2
+        echo "Set JETSON_TOOLCHAIN_PREFIX=/path/to/aarch64-linux-gnu and retry." >&2
+        exit 1
+    fi
+fi
+
+if [ "$BUILD_REPLAY" -eq 1 ] && [ "$JETSON_ORIN_NX" -eq 1 ]; then
+    if [ ! -d "$SYSROOT" ]; then
+        echo "Sysroot not found: $SYSROOT" >&2
+        echo "Set $SYSROOT_ENV_NAME=/path/to/sysroot and retry." >&2
+        exit 1
+    fi
+    if [ -z "$TOOLCHAIN_PREFIX" ]; then
         echo "Jetson cross compiler prefix not found." >&2
         echo "Set JETSON_TOOLCHAIN_PREFIX=/path/to/aarch64-linux-gnu and retry." >&2
         exit 1
@@ -240,7 +258,6 @@ sync_native_artifacts() {
         copy_artifact "$REPO_ROOT/scripts/xfeat_keypoint_worker.py" \
             "$scripts_dir/xfeat_keypoint_worker.py"
     fi
-
     if [ -f "$REPO_ROOT/ORBvoc.txt" ]; then
         copy_artifact "$REPO_ROOT/ORBvoc.txt" "$NATIVE_ARTIFACTS_DIR/ORBvoc.txt"
     elif [ -f "$REPO_ROOT/ORB_SLAM3/Vocabulary/ORBvoc.txt" ]; then
@@ -390,18 +407,27 @@ if [ "$BUILD_REPLAY" -eq 1 ]; then
     fi
     mkdir -p "$REPLAY_BUILD_DIR"
     if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -f "$REPLAY_BUILD_DIR/CMakeCache.txt" ]; then
-        cmake -S "$REPO_ROOT" -B "$REPLAY_BUILD_DIR" \
-            -DCROSS_AARCH64=OFF \
-            -DBUILD_SMART_DRONE=OFF \
+        replay_configure_args=(
+            -DBUILD_SMART_DRONE=OFF
             -DENABLE_OFFLINE_REPLAY=ON
+        )
+        if [ "$JETSON_ORIN_NX" -eq 1 ]; then
+            replay_configure_args+=(
+                "${configure_native_args[@]}"
+                -DCROSS_AARCH64=ON
+            )
+        else
+            replay_configure_args+=(-DCROSS_AARCH64=OFF)
+        fi
+        cmake -S "$REPO_ROOT" -B "$REPLAY_BUILD_DIR" "${replay_configure_args[@]}"
     fi
     cmake --build "$REPLAY_BUILD_DIR" --target smart_drone_offline_replay -j"$BUILD_JOBS"
     if [ -f "$REPLAY_BUILD_DIR/tests/smart_drone_offline_replay" ]; then
         copy_artifact "$REPLAY_BUILD_DIR/tests/smart_drone_offline_replay" \
-            "$HOST_REPLAY_ARTIFACTS_DIR/smart_drone_offline_replay"
+            "$REPLAY_ARTIFACTS_DIR/smart_drone_offline_replay"
     fi
     echo "offline replay tool built:"
-    echo "  $HOST_REPLAY_ARTIFACTS_DIR/smart_drone_offline_replay"
+    echo "  $REPLAY_ARTIFACTS_DIR/smart_drone_offline_replay"
 fi
 
 if [ "$BUILD_ANDROID" -eq 1 ]; then

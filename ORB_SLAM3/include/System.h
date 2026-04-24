@@ -191,6 +191,9 @@ public:
     Tracking* GetTracker() const { return mpTracker; }
     unsigned long GetCurrentMapId();
     bool CanUseExternalFeatureInjection() const;
+    int GetMatchesInliers() const;
+    size_t GetTrackedMapPointCount() const;
+    size_t GetLocalMapPointCount() const;
     TrackedVisualData ExtractTrackedVisualData(int leftImageWidth,
                                                int leftImageHeight,
                                                int rightImageWidth,

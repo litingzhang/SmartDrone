@@ -1507,6 +1507,21 @@ bool System::CanUseExternalFeatureInjection() const
     return true;
 }
 
+int System::GetMatchesInliers() const
+{
+    return mpTracker ? mpTracker->GetMatchesInliers() : 0;
+}
+
+size_t System::GetTrackedMapPointCount() const
+{
+    return mpTracker ? mpTracker->GetTrackedMapPointCount() : 0;
+}
+
+size_t System::GetLocalMapPointCount() const
+{
+    return mpTracker ? mpTracker->GetLocalMapPointCount() : 0;
+}
+
 TrackedVisualData System::ExtractTrackedVisualData(int leftImageWidth,
                                                    int leftImageHeight,
                                                    int rightImageWidth,

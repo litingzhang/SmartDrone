@@ -70,6 +70,8 @@ public class MainActivity extends Activity {
     private static final int SENSOR_MONO_IMU = 3;
     private static final int FEATURE_FRONTEND_ORB = 0;
     private static final int FEATURE_FRONTEND_XFEAT = 1;
+    private static final int FEATURE_FRONTEND_DROID_LIGHT = 2;
+    private static final int FEATURE_FRONTEND_LK = 3;
     private static final int SLAM_MODE_MAPPING = 0;
     private static final int SLAM_MODE_LOCALIZATION = 1;
     private static final int SLAM_MODE_AUTO = 4;
@@ -321,6 +323,8 @@ public class MainActivity extends Activity {
     private boolean m_supportsMono = true;
     private boolean m_supportsMonoImu = true;
     private boolean m_supportsXFeat = true;
+    private boolean m_supportsDroidLight = false;
+    private boolean m_supportsLK = true;
     private boolean m_isPackedStereoUvc = false;
     private boolean m_pairWindowRequired = true;
     private boolean m_cfgUvcPackedStereo = false;
@@ -1643,7 +1647,13 @@ public class MainActivity extends Activity {
     private int[] getSupportedFeatureFrontends()
     {
         if (m_supportsXFeat) {
+            if (m_supportsLK) {
+                return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_XFEAT, FEATURE_FRONTEND_LK};
+            }
             return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_XFEAT};
+        }
+        if (m_supportsLK) {
+            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK};
         }
         return new int[] {FEATURE_FRONTEND_ORB};
     }
@@ -1995,6 +2005,14 @@ public class MainActivity extends Activity {
             return defaultValue;
         }
         String normalized = value.trim().toLowerCase(Locale.US);
+        if ("droid".equals(normalized) || "droid-light".equals(normalized) || "droid_light".equals(normalized) ||
+            "droidlight".equals(normalized)) {
+            return FEATURE_FRONTEND_DROID_LIGHT;
+        }
+        if ("lk".equals(normalized) || "klt".equals(normalized) || "stereo-lk".equals(normalized) ||
+            "stereo_lk".equals(normalized) || "optical-flow".equals(normalized) || "optical_flow".equals(normalized)) {
+            return FEATURE_FRONTEND_LK;
+        }
         if ("xfeat".equals(normalized) || "x-feat".equals(normalized)) {
             return FEATURE_FRONTEND_XFEAT;
         }
@@ -2136,15 +2154,20 @@ public class MainActivity extends Activity {
         m_supportsMonoImu = containsTokenList(values.get("perception_modes"), "mono-imu");
         final String xfeatCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.xfeat=");
         m_supportsXFeat = xfeatCapability != null && !"disabled_at_build_time".equalsIgnoreCase(xfeatCapability);
+        final String droidLightCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.droid_light=");
+        m_supportsDroidLight = droidLightCapability != null && !"disabled_at_build_time".equalsIgnoreCase(droidLightCapability);
+        final String lkCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.lk=");
+        m_supportsLK = lkCapability != null && !"disabled_at_build_time".equalsIgnoreCase(lkCapability);
         m_isPackedStereoUvc = containsTokenList(cameraProviders, "uvc_stereo_opencv") &&
                               containsBehaviorNote(behaviorNotes, "camera.uvc_pairing=not_required_single_capture_provides_both_eyes");
         m_pairWindowRequired = !m_isPackedStereoUvc;
         updateRuntimeButtons();
         m_tvStatus.setText(String.format(Locale.US,
-                                         "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s uvc=%s xfeat=%s",
+                                         "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s uvc=%s xfeat=%s lk=%s",
                                          m_supportsCalib ? "yes" : "no", m_supportsStereoImu ? "yes" : "no",
                                          m_supportsMono ? "yes" : "no", m_supportsMonoImu ? "yes" : "no",
-                                         m_isPackedStereoUvc ? "packed" : "no", m_supportsXFeat ? "yes" : "no"));
+                                         m_isPackedStereoUvc ? "packed" : "no", m_supportsXFeat ? "yes" : "no",
+                                         m_supportsLK ? "yes" : "no"));
         return true;
     }
 
@@ -2172,6 +2195,12 @@ public class MainActivity extends Activity {
         m_cfgSlamMode = parseSlamModeText(values.get("slam.operation_mode"), m_cfgSlamMode);
         m_cfgFeatureFrontend = parseFeatureFrontendText(values.get("slam.feature_frontend"), m_cfgFeatureFrontend);
         if (!m_supportsXFeat && m_cfgFeatureFrontend == FEATURE_FRONTEND_XFEAT) {
+            m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
+        }
+        if (!m_supportsDroidLight && m_cfgFeatureFrontend == FEATURE_FRONTEND_DROID_LIGHT) {
+            m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
+        }
+        if (!m_supportsLK && m_cfgFeatureFrontend == FEATURE_FRONTEND_LK) {
             m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
         }
         m_cfgUseCustomTbc = parseBooleanText(values.get("slam.tbc_override_enabled"), m_cfgUseCustomTbc);
@@ -2283,6 +2312,10 @@ public class MainActivity extends Activity {
     private String featureFrontendToText(int featureFrontend)
     {
         switch (featureFrontend) {
+        case FEATURE_FRONTEND_LK:
+            return "LK";
+        case FEATURE_FRONTEND_DROID_LIGHT:
+            return "DROID-Light";
         case FEATURE_FRONTEND_XFEAT:
             return "XFeat";
         case FEATURE_FRONTEND_ORB:

@@ -30,8 +30,8 @@ if(NOT BUILD_SMART_DRONE AND NOT ENABLE_UNIT_TESTS AND NOT ENABLE_OFFLINE_REPLAY
   message(FATAL_ERROR "Enable BUILD_SMART_DRONE, ENABLE_UNIT_TESTS, or ENABLE_OFFLINE_REPLAY")
 endif()
 
-if((ENABLE_UNIT_TESTS OR ENABLE_OFFLINE_REPLAY) AND CROSS_AARCH64)
-  message(STATUS "Host-side tooling enabled, forcing CROSS_AARCH64=OFF")
+if(ENABLE_UNIT_TESTS AND CROSS_AARCH64)
+  message(STATUS "Unit tests are host-side only, forcing CROSS_AARCH64=OFF")
   set(CROSS_AARCH64 OFF CACHE BOOL "Enable aarch64 cross compile" FORCE)
 endif()
 
@@ -182,7 +182,7 @@ endif()
 
 if(BUILD_SMART_DRONE)
   find_package(Threads REQUIRED)
-  find_package(OpenCV REQUIRED COMPONENTS core calib3d features2d imgproc videoio)
+  find_package(OpenCV REQUIRED COMPONENTS core calib3d features2d imgproc video videoio)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(GPIOD REQUIRED libgpiod)
   set(SMART_DRONE_GPIOD_INCLUDE_DIRS ${GPIOD_INCLUDE_DIRS})

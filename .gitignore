@@ -11,3 +11,5 @@ __pycache__
 *.log
 *.zip
 *.tar.gz
+.codex/
+third_party_downloads/

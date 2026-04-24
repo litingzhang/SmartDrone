@@ -54,7 +54,7 @@ constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // v6 additionally stores rollDeg/yawDeg as f32le at [61..68].
 // v7 additionally stores ORB extractor params as f32le:
 // nFeatures [69..72], scaleFactor [73..76], nLevels [77..80], iniThFAST [81..84], minThFAST [85..88].
-// v8 additionally stores featureFrontend(u8) at byte [89] where 0=orb and 1=xfeat.
+// v8 additionally stores featureFrontend(u8) at byte [89] where 0=orb, 1=xfeat, 2=droid_light, 3=lk.
 // v9 additionally stores XFeat params as f32le:
 // topK [90..93], maxPoints [94..97].
 // v10 additionally stores XFeat input size limits as f32le:
@@ -130,6 +130,8 @@ enum RuntimeSlamMode : uint8_t {
 enum RuntimeFeatureFrontend : uint8_t {
     RUNTIME_FEATURE_FRONTEND_ORB = 0,
     RUNTIME_FEATURE_FRONTEND_XFEAT = 1,
+    RUNTIME_FEATURE_FRONTEND_DROID_LIGHT = 2,
+    RUNTIME_FEATURE_FRONTEND_LK = 3,
 };
 
 enum FrameType : uint8_t {

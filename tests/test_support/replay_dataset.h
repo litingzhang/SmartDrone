@@ -36,7 +36,7 @@ class ReplayDataset {
     const std::vector<ReplayImageSample> &LeftFrames() const { return m_leftFrames; }
     const std::vector<ReplayImageSample> &RightFrames() const { return m_rightFrames; }
     const std::vector<ReplayImuSample> &ImuSamples() const { return m_imuSamples; }
-    bool Empty() const { return m_leftFrames.empty() || m_rightFrames.empty() || m_imuSamples.empty(); }
+    bool Empty() const { return m_leftFrames.empty() || m_rightFrames.empty(); }
 
   private:
     std::vector<ReplayImageSample> m_leftFrames;
@@ -48,12 +48,15 @@ class ReplayCameraProvider final : public smartdrone::core::ports::ICameraProvid
   public:
     explicit ReplayCameraProvider(const ReplayDataset &dataset);
 
+    bool Open(const smartdrone::core::application::MainRuntimeAliases &aliases) override;
+    void Close() override;
     bool Start() override;
     void Stop() override;
     bool GrabStereo(smartdrone::core::ports::StereoFrame &out, int timeoutMs, bool preferLatest,
                     uint64_t minTimestampNs) override;
     smartdrone::core::ports::CameraHealth GetHealth() const override;
     smartdrone::core::ports::CameraDiagnostics GetDiagnostics() const override;
+    smartdrone::core::ports::CameraProviderSemantics Semantics() const override;
 
   private:
     const ReplayDataset &m_dataset;

@@ -3,6 +3,10 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
+
+#include <opencv2/calib3d.hpp>
+#include <opencv2/core.hpp>
 
 #include "System.h"
 #include "adapters/slam/xfeat_frontend_client.h"
@@ -20,7 +24,8 @@ enum class OrbInputMode : uint8_t {
 
 class OrbSlam3Engine final : public core::ports::ISlamEngine {
   public:
-    OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, OrbInputMode inputMode, bool useImu);
+    OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, OrbInputMode inputMode, bool useImu,
+                   std::string settingsPath = {});
 
     bool Start() override;
     void SetOperationMode(core::domain::SlamOperationMode mode);
@@ -38,6 +43,10 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
                                  ORB_SLAM3::ExternalStereoFrameData &outData,
                                  std::vector<cv::Point2f> *leftRawPoints = nullptr,
                                  std::vector<cv::Point2f> *rightRawPoints = nullptr) const;
+    void StabilizeOutputPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec, int trackingState);
+    bool LoadLkCalibration(const std::string &settingsPath);
+    void EnsureLkRectifier(const cv::Size &inputSize);
+    core::ports::SlamOutput ProcessLkStereoVo(const core::ports::SlamInputBatch &input, bool extractFeatures);
 
     std::unique_ptr<ORB_SLAM3::System> m_system;
     OrbInputMode m_inputMode{OrbInputMode::Stereo};
@@ -61,6 +70,42 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     mutable uint32_t m_lastXFeatImageCount{0};
     mutable uint32_t m_lastXFeatPayloadBytes{0};
     mutable std::string m_lastXFeatStatusReason;
+    mutable cv::Mat m_prevStereoLeftGray;
+    mutable cv::Mat m_prevStereoRightGray;
+    mutable std::vector<cv::Point2f> m_prevInjectedStereoLeftPoints;
+    mutable std::vector<cv::Point2f> m_prevInjectedStereoRightPoints;
+    mutable ORB_SLAM3::ExternalStereoFrameData m_prevInjectedStereoExternal;
+    mutable bool m_havePrevInjectedStereoExternal{false};
+    core::ports::PoseEstimate m_lastStablePose{};
+    bool m_haveLastStablePose{false};
+    double m_lastStableTimestampSec{0.0};
+    float m_stableVelX{0.0f};
+    float m_stableVelY{0.0f};
+    float m_stableVelZ{0.0f};
+
+    std::string m_settingsPath;
+    bool m_lkCalibrationLoaded{false};
+    cv::Mat m_lkK1;
+    cv::Mat m_lkD1;
+    cv::Mat m_lkK2;
+    cv::Mat m_lkD2;
+    cv::Mat m_lkTc1c2;
+    float m_lkFx{0.0f};
+    float m_lkFy{0.0f};
+    float m_lkCx{0.0f};
+    float m_lkCy{0.0f};
+    float m_lkBaseline{0.0f};
+    mutable cv::Size m_lkRectifierSize{};
+    mutable cv::Mat m_lkMap1x;
+    mutable cv::Mat m_lkMap1y;
+    mutable cv::Mat m_lkMap2x;
+    mutable cv::Mat m_lkMap2y;
+    mutable cv::Ptr<cv::StereoSGBM> m_lkSgbm;
+    mutable cv::Mat m_lkPrevLeft;
+    mutable cv::Mat m_lkPrevRight;
+    mutable Sophus::SE3f m_lkTwc{Sophus::SE3f()};
+    mutable bool m_lkHavePrev{false};
+    mutable uint32_t m_lkFrameCount{0};
 };
 
 } // namespace smartdrone::adapters::slam

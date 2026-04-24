@@ -45,7 +45,7 @@ void LivePoseState::SetVehicleFlightState(bool armedIn, uint8_t px4MainModeIn, u
 }
 
 void LivePoseState::UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCounterIn, uint16_t resetMapCountIn,
-                               const Px4MavlinkGateway::Pose &p, OdomQualityMode quality)
+                               const Px4MavlinkGateway::Pose &p, OdomQualityMode quality, bool poseValidIn)
 {
     std::lock_guard<std::mutex> lock(mu);
     runtimeMode = mode;
@@ -60,7 +60,7 @@ void LivePoseState::UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCou
     qx = p.qx;
     qy = p.qy;
     qz = p.qz;
-    poseValid = true;
+    poseValid = poseValidIn;
     dirty = true;
 }
 

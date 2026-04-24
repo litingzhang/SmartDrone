@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <iostream>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Geometry>
@@ -17,6 +19,92 @@ namespace {
 
 constexpr uint64_t kSlamDfxLogEveryNFrames = 30;
 constexpr int kXFeatStereoWeakMatchThreshold = 24;
+constexpr double kAdaptiveTimingEmaAlpha = 0.18;
+constexpr double kAdaptiveInputFpsHeadroom = 1.25;
+constexpr double kAdaptiveInputExtraOverheadMs = 12.0;
+constexpr int kAdaptiveMinInputFps = 10;
+
+double UpdateEma(double current, double sample)
+{
+    if (!(sample > 0.0)) {
+        return current;
+    }
+    if (!(current > 0.0)) {
+        return sample;
+    }
+    return (1.0 - kAdaptiveTimingEmaAlpha) * current + kAdaptiveTimingEmaAlpha * sample;
+}
+
+int ComputeAdaptiveSlamInputFps(int configuredFps, int cameraFps, double smoothedSlamMs)
+{
+    const int cappedConfiguredFps = std::clamp(configuredFps, 1, std::max(1, cameraFps));
+    if (!(smoothedSlamMs > 0.0)) {
+        return cappedConfiguredFps;
+    }
+
+    const double guardedFrameBudgetMs =
+        std::max((smoothedSlamMs + kAdaptiveInputExtraOverheadMs) * kAdaptiveInputFpsHeadroom, 1.0);
+    const int throughputAlignedFps = static_cast<int>(std::floor(1000.0 / guardedFrameBudgetMs));
+    return std::clamp(throughputAlignedFps, kAdaptiveMinInputFps, cappedConfiguredFps);
+}
+
+int ComputeXFeatLoadSheddingLevel(int currentLevel, bool xfeatEnabled, bool lastTrackingUsable, double smoothedSlamMs,
+                                  double smoothedTotalMs)
+{
+    if (!xfeatEnabled) {
+        return 0;
+    }
+
+    if (currentLevel >= 2) {
+        if (lastTrackingUsable && smoothedTotalMs < 125.0 && smoothedSlamMs < 120.0) {
+            return 1;
+        }
+        return 2;
+    }
+
+    if (currentLevel == 1) {
+        if (!lastTrackingUsable || smoothedTotalMs > 155.0 || smoothedSlamMs > 150.0) {
+            return 2;
+        }
+        if (lastTrackingUsable && smoothedTotalMs < 105.0 && smoothedSlamMs < 100.0) {
+            return 0;
+        }
+        return 1;
+    }
+
+    if (!lastTrackingUsable || smoothedTotalMs > 125.0 || smoothedSlamMs > 120.0) {
+        return 1;
+    }
+    return 0;
+}
+
+std::pair<int, int> ComputeXFeatInputBudget(int baseWidth, int baseHeight, int loadSheddingLevel)
+{
+    const int safeBaseWidth = std::max(1, baseWidth);
+    const int safeBaseHeight = std::max(1, baseHeight);
+    float scale = 1.0f;
+    if (loadSheddingLevel >= 2) {
+        scale = 0.75f;
+    } else if (loadSheddingLevel == 1) {
+        scale = 0.85f;
+    }
+
+    const int width = std::max(320, static_cast<int>(std::lround(static_cast<double>(safeBaseWidth) * scale)));
+    const int height = std::max(240, static_cast<int>(std::lround(static_cast<double>(safeBaseHeight) * scale)));
+    return {std::min(width, safeBaseWidth), std::min(height, safeBaseHeight)};
+}
+
+const char *DescribeXFeatLoadSheddingLevel(int loadSheddingLevel)
+{
+    switch (loadSheddingLevel) {
+    case 2:
+        return "aggressive";
+    case 1:
+        return "moderate";
+    default:
+        return "nominal";
+    }
+}
 
 uint8_t ComposeResetCounter(uint8_t sessionBase, uint8_t continuityCounter)
 {
@@ -51,6 +139,10 @@ Sophus::SE3f BuildBodyToCamPitchDelta(float pitchDeg)
 const char *FeatureFrontendName(FeatureFrontend frontend)
 {
     switch (frontend) {
+    case FeatureFrontend::LK:
+        return "lk";
+    case FeatureFrontend::DroidLight:
+        return "droid_light";
     case FeatureFrontend::XFeat:
         return "xfeat";
     case FeatureFrontend::Orb:
@@ -87,32 +179,55 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         m_ctx.livePose.SetSlamMode(ToRuntimeSlamModeValue(m_state.effectiveSlamMode));
     }
 
-    const int slamInputFps =
+    const int configuredSlamInputFps =
         m_ctx.perceptionPipeline.ClampTargetFps(m_ctx.tuning.slamInputFps.load(std::memory_order_relaxed));
     const FeatureFrontend configuredFrontend =
         static_cast<FeatureFrontend>(m_ctx.tuning.featureFrontend.load(std::memory_order_relaxed));
-    const bool stereoXFeatRequested = configuredFrontend == FeatureFrontend::XFeat && !m_ctx.monoMode;
-    const FeatureFrontend effectiveFrontend =
-        (stereoXFeatRequested && !m_state.lastTrackingUsable) ? FeatureFrontend::Orb : configuredFrontend;
+    const FeatureFrontend effectiveFrontend = configuredFrontend;
+    const int effectiveSlamInputFps =
+        ComputeAdaptiveSlamInputFps(configuredSlamInputFps, m_ctx.aliases.fps, m_state.smoothedSlamMs);
+    m_state.adaptiveSlamInputFps = effectiveSlamInputFps;
+    const int xfeatLoadSheddingLevel =
+        ComputeXFeatLoadSheddingLevel(m_state.xfeatLoadSheddingLevel, effectiveFrontend == FeatureFrontend::XFeat,
+                                      m_state.lastTrackingUsable, m_state.smoothedSlamMs, m_state.smoothedTotalMs);
+    m_state.xfeatLoadSheddingLevel = xfeatLoadSheddingLevel;
+    const auto [xfeatBudgetWidth, xfeatBudgetHeight] =
+        ComputeXFeatInputBudget(m_ctx.aliases.xfeatInputMaxWidth, m_ctx.aliases.xfeatInputMaxHeight,
+                                xfeatLoadSheddingLevel);
+    m_ctx.slamEngine.SetXFeatInputSizeLimit(xfeatBudgetWidth, xfeatBudgetHeight);
     m_ctx.slamEngine.SetFeatureFrontend(effectiveFrontend);
     if (effectiveFrontend != m_state.lastAppliedFeatureFrontend) {
         std::cerr << "[slam] effective_feature_frontend=" << FeatureFrontendName(effectiveFrontend)
                   << " requested=" << FeatureFrontendName(configuredFrontend)
-                  << " stereo_xfeat_gate=" << (stereoXFeatRequested && !m_state.lastTrackingUsable ? "hold_orb" : "direct")
+                  << " stereo_xfeat_gate=mode_selected"
                   << " prev_tracking_state=" << m_state.lastTrackingState
                   << " prev_tracking_usable=" << (m_state.lastTrackingUsable ? 1 : 0) << "\n";
         m_state.lastAppliedFeatureFrontend = effectiveFrontend;
     }
-    if (slamInputFps != m_state.lastLoggedSlamInputFps) {
-        std::cerr << "[slam] target_input_fps=" << slamInputFps << " camera_fps=" << m_ctx.aliases.fps
-                  << " frame_drop=" << (slamInputFps < m_ctx.aliases.fps ? "enabled" : "disabled") << "\n";
-        m_state.lastLoggedSlamInputFps = slamInputFps;
+    if (configuredSlamInputFps != m_state.lastLoggedConfiguredSlamInputFps ||
+        effectiveSlamInputFps != m_state.lastLoggedEffectiveSlamInputFps) {
+        std::cerr << "[slam] configured_input_fps=" << configuredSlamInputFps
+                  << " effective_input_fps=" << effectiveSlamInputFps << " camera_fps=" << m_ctx.aliases.fps
+                  << " frame_drop=" << (effectiveSlamInputFps < m_ctx.aliases.fps ? "enabled" : "disabled")
+                  << " smoothed_slam_ms=" << m_state.smoothedSlamMs
+                  << " smoothed_total_ms=" << m_state.smoothedTotalMs << "\n";
+        m_state.lastLoggedConfiguredSlamInputFps = configuredSlamInputFps;
+        m_state.lastLoggedEffectiveSlamInputFps = effectiveSlamInputFps;
+    }
+    if (effectiveFrontend == FeatureFrontend::XFeat &&
+        xfeatLoadSheddingLevel != m_state.lastLoggedXFeatLoadSheddingLevel) {
+        std::cerr << "[slam] xfeat_load_profile=" << DescribeXFeatLoadSheddingLevel(xfeatLoadSheddingLevel)
+                  << " input_max=" << xfeatBudgetWidth << "x" << xfeatBudgetHeight
+                  << " tracking_usable=" << (m_state.lastTrackingUsable ? 1 : 0)
+                  << " smoothed_slam_ms=" << m_state.smoothedSlamMs
+                  << " smoothed_total_ms=" << m_state.smoothedTotalMs << "\n";
+        m_state.lastLoggedXFeatLoadSheddingLevel = xfeatLoadSheddingLevel;
     }
 
     const auto acquireStartTp = std::chrono::steady_clock::now();
     StereoBatch stereoBatch{};
     const StereoAcquireStatus acquireStatus = m_ctx.perceptionPipeline.AcquireNextStereoBatch(
-        m_ctx.cameraProvider, slamInputFps, 1000, stereoBatch, &m_ctx.frameTimingTracker);
+        m_ctx.cameraProvider, effectiveSlamInputFps, 1000, stereoBatch, &m_ctx.frameTimingTracker);
     const auto acquireEndTp = std::chrono::steady_clock::now();
     if (acquireStatus == StereoAcquireStatus::Timeout) {
         return StepResult::Continue;
@@ -147,15 +262,17 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const double frameGapMs = (m_state.lastPublishedFrameNs != 0)
                                   ? static_cast<double>(logicalFrameTimestampNs - m_state.lastPublishedFrameNs) * 1e-6
                                   : 0.0;
-    if (frameGapMs > 0.0 && slamInputFps > 0) {
-        const double expectedFrameGapMs = 1000.0 / static_cast<double>(slamInputFps);
+    if (frameGapMs > 0.0 && effectiveSlamInputFps > 0) {
+        const double expectedFrameGapMs = 1000.0 / static_cast<double>(effectiveSlamInputFps);
         if (frameGapMs > expectedFrameGapMs) {
             constexpr int64_t kGapWarnMinIntervalNs = 1000000000LL; // 1s
             if (m_state.lastFrameGapWarnLogNs == 0 ||
                 (logicalFrameTimestampNs - m_state.lastFrameGapWarnLogNs) >= kGapWarnMinIntervalNs) {
                 std::cerr << "[slam_gap_warn] frame_gap_ms=" << frameGapMs
-                          << " expected_gap_ms=" << expectedFrameGapMs << " target_input_fps=" << slamInputFps
-                          << " camera_fps=" << m_ctx.aliases.fps << " frame=" << stereoBatch.frameId << "\n";
+                          << " expected_gap_ms=" << expectedFrameGapMs
+                          << " target_input_fps=" << effectiveSlamInputFps
+                          << " configured_input_fps=" << configuredSlamInputFps << " camera_fps=" << m_ctx.aliases.fps
+                          << " frame=" << stereoBatch.frameId << "\n";
                 m_state.lastFrameGapWarnLogNs = logicalFrameTimestampNs;
             }
         }
@@ -298,12 +415,15 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const auto postEndTp = std::chrono::steady_clock::now();
 
     const auto livePoseStartTp = std::chrono::steady_clock::now();
+    const bool livePoseValid = slamOutput.poseValid && poseResult.poseEstimate.valid && trackingUsable &&
+                               poseResult.quality != smartdrone::core::ports::PoseQuality::Lost;
     m_ctx.livePose.UpdatePose(RUNTIME_MODE_SLAM, static_cast<uint8_t>(state), effectiveResetCounter,
                               effectiveResetMapCount, poseResult.alignedPose,
                               poseResult.quality == smartdrone::core::ports::PoseQuality::Good ? OdomQualityMode::GOOD
                               : poseResult.quality == smartdrone::core::ports::PoseQuality::Weak
                                   ? OdomQualityMode::WEAK
-                                  : OdomQualityMode::LOST);
+                                  : OdomQualityMode::LOST,
+                              livePoseValid);
     const auto livePoseEndTp = std::chrono::steady_clock::now();
 
     const auto publishStartTp = std::chrono::steady_clock::now();
@@ -338,13 +458,14 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                                  slamOutput.leftFeatures.empty() || slamOutput.rightFeatures.empty() ||
                                  xfeatStereoWeak;
     if (slamDfxPeriodic || slamDfxAbnormal) {
-        char dfxLine[896];
+        char dfxLine[1152];
         if (m_ctx.aliases.jsonDiagnostics) {
             std::snprintf(
                 dfxLine, sizeof(dfxLine),
                 "{\"tag\":\"slam_dfx\",\"frame\":%llu,\"state\":%d,\"quality\":%d,\"pose_valid\":%d,"
                 "\"reset_counter\":%u,\"reset_map_count\":%u,"
                 "\"imu_count\":%zu,\"feat_left\":%zu,\"feat_right\":%zu,\"points\":%zu,"
+                "\"track_points\":%u,\"local_points\":%u,\"inliers\":%d,"
                 "\"xfeat_used\":%d,\"xfeat_stereo_weak\":%d,\"xfeat_raw_left\":%d,\"xfeat_raw_right\":%d,"
                 "\"xfeat_match_stereo\":%d,\"xfeat_injected_left\":%d,\"xfeat_injected_right\":%d,"
                 "\"xfeat_prepare_ms\":%.3f,\"xfeat_write_ms\":%.3f,\"xfeat_read_ms\":%.3f,"
@@ -359,7 +480,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 static_cast<unsigned long long>(slamOutput.frameId), state, static_cast<int>(poseResult.quality),
                 poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
-                slamOutput.rightFeatures.size(), pointCount, slamOutput.usedXFeatFrontend ? 1 : 0,
+                slamOutput.rightFeatures.size(), pointCount, slamOutput.trackedMapPointCount,
+                slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedXFeatFrontend ? 1 : 0,
                 xfeatStereoWeak ? 1 : 0, slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount,
                 slamOutput.xfeatMatchedStereoCount, slamOutput.xfeatInjectedLeftCount,
                 slamOutput.xfeatInjectedRightCount, slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
@@ -376,7 +498,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
             std::snprintf(
                 dfxLine, sizeof(dfxLine),
                 "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
-                "imu=%zu feat=%zu/%zu points=%zu "
+                "imu=%zu feat=%zu/%zu points=%zu track=%u local=%u inliers=%d "
                 "xfeat=%s stereo_warn=%s raw=%d/%d stereo=%d injected=%d/%d "
                 "xfeat_ms=prep %.3f write %.3f read %.3f worker %.3f match %.3f total %.3f "
                 "xfeat_io=%uimg/%ubytes "
@@ -387,7 +509,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 static_cast<unsigned long long>(slamOutput.frameId), state, static_cast<int>(poseResult.quality),
                 poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
-                slamOutput.rightFeatures.size(), pointCount, slamOutput.usedXFeatFrontend ? "on" : "off",
+                slamOutput.rightFeatures.size(), pointCount, slamOutput.trackedMapPointCount,
+                slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedXFeatFrontend ? "on" : "off",
                 xfeatStereoWeak ? "weak" : "ok", slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount,
                 slamOutput.xfeatMatchedStereoCount, slamOutput.xfeatInjectedLeftCount,
                 slamOutput.xfeatInjectedRightCount, slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
@@ -404,6 +527,10 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         Logger::Logf(Logger::INFO, "%s", dfxLine);
         std::fprintf(stderr, "%s\n", dfxLine);
     }
+
+    m_state.smoothedAcquireMs = UpdateEma(m_state.smoothedAcquireMs, DurationMs(acquireStartTp, acquireEndTp));
+    m_state.smoothedSlamMs = UpdateEma(m_state.smoothedSlamMs, DurationMs(slamStartTp, slamEndTp));
+    m_state.smoothedTotalMs = UpdateEma(m_state.smoothedTotalMs, totalMs);
 
     return StepResult::Continue;
 }

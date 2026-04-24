@@ -126,6 +126,18 @@ ReplayDataset ReplayDataset::Load(const std::filesystem::path &rootDir, size_t m
 
 ReplayCameraProvider::ReplayCameraProvider(const ReplayDataset &dataset) : m_dataset(dataset) {}
 
+bool ReplayCameraProvider::Open(const smartdrone::core::application::MainRuntimeAliases &)
+{
+    m_nextIndex = 0;
+    return true;
+}
+
+void ReplayCameraProvider::Close()
+{
+    m_started = false;
+    m_nextIndex = 0;
+}
+
 bool ReplayCameraProvider::Start()
 {
     m_started = true;
@@ -181,6 +193,11 @@ smartdrone::core::ports::CameraDiagnostics ReplayCameraProvider::GetDiagnostics(
     diagnostics.healthy = true;
     diagnostics.acceptFrames = m_started;
     return diagnostics;
+}
+
+smartdrone::core::ports::CameraProviderSemantics ReplayCameraProvider::Semantics() const
+{
+    return smartdrone::core::ports::CameraProviderSemantics::DualStreamPaired;
 }
 
 ReplayImuProvider::ReplayImuProvider(const ReplayDataset &dataset) : m_dataset(dataset) {}

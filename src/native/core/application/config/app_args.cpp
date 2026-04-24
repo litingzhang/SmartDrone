@@ -83,12 +83,24 @@ FeatureFrontend ParseFeatureFrontendText(const std::string &text)
     if (normalized == "xfeat" || normalized == "x-feat") {
         return FeatureFrontend::XFeat;
     }
+    if (normalized == "droid" || normalized == "droid-light" || normalized == "droid_light" ||
+        normalized == "droidlight") {
+        return FeatureFrontend::DroidLight;
+    }
+    if (normalized == "lk" || normalized == "klt" || normalized == "stereo-lk" || normalized == "stereo_lk" ||
+        normalized == "optical-flow" || normalized == "optical_flow") {
+        return FeatureFrontend::LK;
+    }
     return FeatureFrontend::Orb;
 }
 
 const char *ToFeatureFrontendText(FeatureFrontend frontend)
 {
     switch (frontend) {
+    case FeatureFrontend::LK:
+        return "lk";
+    case FeatureFrontend::DroidLight:
+        return "droid_light";
     case FeatureFrontend::XFeat:
         return "xfeat";
     case FeatureFrontend::Orb:
@@ -321,7 +333,7 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 0);
     config.runtime.slamOperationMode = ParseSlamOperationModeText(argReader.GetString("--slam-mode", "mapping"));
     config.runtime.featureFrontend = ParseFeatureFrontendText(argReader.GetString("--feature-frontend", "orb"));
-    config.runtime.xfeatPython = argReader.GetString("--xfeat-python", "python3");
+    config.runtime.xfeatPython = argReader.GetString("--xfeat-python", "/usr/bin/python3");
     {
         const char *home = std::getenv("HOME");
         const std::string explicitRepo = argReader.GetString("--xfeat-repo", "");

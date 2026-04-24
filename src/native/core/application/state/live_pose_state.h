@@ -37,7 +37,7 @@ struct LivePoseState {
     void SetSlamMode(uint8_t mode);
     void SetVehicleFlightState(bool armedIn, uint8_t px4MainModeIn, uint8_t px4SubModeIn);
     void UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCounterIn, uint16_t resetMapCountIn,
-                    const Px4MavlinkGateway::Pose &p, OdomQualityMode quality);
+                    const Px4MavlinkGateway::Pose &p, OdomQualityMode quality, bool poseValidIn);
     void UpdatePointCloud(std::vector<float> xyz);
     bool ConsumeSnapshot(Snapshot &out);
     bool ReadSnapshot(Snapshot &out) const;

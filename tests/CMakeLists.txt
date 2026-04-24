@@ -59,6 +59,8 @@ if(ENABLE_OFFLINE_REPLAY)
     test_support/replay_dataset.cpp
     test_support/replay_slam_runner.cpp
     ../src/native/adapters/slam/orbslam3_engine.cpp
+    ../src/native/adapters/slam/xfeat_frontend_client.cpp
+    ../src/native/adapters/slam/xfeat_native_extractor.cpp
     ../src/native/core/application/config/app_args.cpp
     ../src/native/core/application/state/frame_timing_tracker.cpp
     ../src/native/core/application/state/perception_pipeline.cpp

@@ -48,11 +48,11 @@ T_b_c1:
          0.0, 1.0, 0.0, 0.0,
          0.0, 0.0, 0.0, 1.0]
 
-ORBextractor.nFeatures: 1300
+ORBextractor.nFeatures: 2500
 ORBextractor.scaleFactor: 1.2
 ORBextractor.nLevels: 8
-ORBextractor.iniThFAST: 16
-ORBextractor.minThFAST: 6
+ORBextractor.iniThFAST: 8
+ORBextractor.minThFAST: 3
 
 Viewer.KeyFrameSize: 0.05
 Viewer.KeyFrameLineWidth: 1.0

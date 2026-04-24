@@ -7,6 +7,7 @@
 
 #include "System.h"
 #include "adapters/slam/orbslam3_engine.h"
+#include "adapters/slam/xfeat_frontend_client.h"
 #include "core/application/config/app_args.h"
 #include "core/domain/runtime_mode.h"
 #include "test_support/replay_dataset.h"
@@ -23,7 +24,16 @@ struct OfflineReplayOptions {
     std::string vocab{"ORB_SLAM3/Vocabulary/ORBvoc.txt"};
     std::string settings{"config/stereo.yaml"};
     SensorMode sensorMode{SensorMode::StereoImu};
+    FeatureFrontend featureFrontend{FeatureFrontend::XFeat};
     smartdrone::core::domain::SlamOperationMode slamMode{smartdrone::core::domain::SlamOperationMode::Mapping};
+    std::string xfeatPython{"/usr/bin/python3"};
+    std::string xfeatRepo{"accelerated_features"};
+    std::string xfeatWorkerScript{"scripts/xfeat_keypoint_worker.py"};
+    std::string xfeatDevice{"auto"};
+    int xfeatTopK{1024};
+    int xfeatMaxPoints{768};
+    int xfeatInputMaxWidth{640};
+    int xfeatInputMaxHeight{400};
     int cameraFps{60};
     int slamInputFps{20};
     int timeoutMs{1000};
@@ -41,6 +51,15 @@ const char *UsageText()
         "  --settings <file>     ORB settings YAML path\n"
         "  --sensor-mode <mode>  stereo|stereo-imu|mono|mono-imu\n"
         "  --stereo-only         Shortcut for --sensor-mode stereo\n"
+        "  --feature-frontend <mode> orb|xfeat, default xfeat\n"
+        "  --xfeat-python <bin>  Python executable for XFeat worker, default python3\n"
+        "  --xfeat-repo <dir>    XFeat repo root, default accelerated_features\n"
+        "  --xfeat-worker <file> XFeat worker script path, default scripts/xfeat_keypoint_worker.py\n"
+        "  --xfeat-device <dev>  XFeat device auto|cpu|cuda, default auto\n"
+        "  --xfeat-top-k <n>     XFeat top-k candidate count, default 1024\n"
+        "  --xfeat-max-points <n> XFeat injected point budget, default 768\n"
+        "  --xfeat-input-max-width <n>  XFeat input width limit, default 640\n"
+        "  --xfeat-input-max-height <n> XFeat input height limit, default 400\n"
         "  --slam-mode <mode>    mapping|localization|relocalization|tracking-only|auto\n"
         "  --fps <n>             Camera FPS for replay pacing, default 60\n"
         "  --slam-fps <n>        SLAM input FPS, default 20\n"
@@ -103,11 +122,23 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     if (HasFlag(argc, argv, "--stereo-only")) {
         opts.sensorMode = SensorMode::Stereo;
     }
+    opts.featureFrontend = ParseFeatureFrontendText(GetOptionValue(argc, argv, "--feature-frontend", "xfeat"));
     opts.slamMode = ParseSlamOperationModeText(GetOptionValue(argc, argv, "--slam-mode", "mapping"));
     opts.cameraFps = GetOptionInt(argc, argv, "--fps", opts.cameraFps);
     opts.slamInputFps = GetOptionInt(argc, argv, "--slam-fps", opts.slamInputFps);
     opts.timeoutMs = GetOptionInt(argc, argv, "--timeout-ms", opts.timeoutMs);
     opts.maxFrames = GetOptionSize(argc, argv, "--max-frames", opts.maxFrames);
+    opts.xfeatPython =
+        ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-python", opts.xfeatPython), argc > 0 ? argv[0] : nullptr);
+    opts.xfeatRepo =
+        ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-repo", opts.xfeatRepo), argc > 0 ? argv[0] : nullptr);
+    opts.xfeatWorkerScript = ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-worker", opts.xfeatWorkerScript),
+                                                argc > 0 ? argv[0] : nullptr);
+    opts.xfeatDevice = GetOptionValue(argc, argv, "--xfeat-device", opts.xfeatDevice);
+    opts.xfeatTopK = GetOptionInt(argc, argv, "--xfeat-top-k", opts.xfeatTopK);
+    opts.xfeatMaxPoints = GetOptionInt(argc, argv, "--xfeat-max-points", opts.xfeatMaxPoints);
+    opts.xfeatInputMaxWidth = GetOptionInt(argc, argv, "--xfeat-input-max-width", opts.xfeatInputMaxWidth);
+    opts.xfeatInputMaxHeight = GetOptionInt(argc, argv, "--xfeat-input-max-height", opts.xfeatInputMaxHeight);
     opts.vocab = ResolveRuntimePath(GetOptionValue(argc, argv, "--vocab", opts.vocab), argc > 0 ? argv[0] : nullptr);
     opts.settings =
         ResolveRuntimePath(GetOptionValue(argc, argv, "--settings", DefaultSettingsForSensorMode(opts.sensorMode)),
@@ -153,6 +184,19 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     smartdrone::adapters::slam::OrbSlam3Engine slamEngine(std::move(orbSystem), ResolveOrbInputMode(opts.sensorMode),
                                                           UseImu(opts.sensorMode));
     slamEngine.SetOperationMode(opts.slamMode);
+    slamEngine.SetFeatureFrontend(opts.featureFrontend);
+    slamEngine.SetXFeatInputSizeLimit(opts.xfeatInputMaxWidth, opts.xfeatInputMaxHeight);
+    smartdrone::adapters::slam::XFeatFrontendClient xfeatFrontendClient;
+    std::string xfeatErr;
+    if (opts.featureFrontend == FeatureFrontend::XFeat) {
+        slamEngine.SetXFeatFrontendClient(&xfeatFrontendClient);
+        if (!xfeatFrontendClient.Start(opts.xfeatPython, opts.xfeatWorkerScript, opts.xfeatRepo, opts.xfeatDevice,
+                                       opts.xfeatTopK, opts.xfeatMaxPoints, &xfeatErr)) {
+            std::cerr << "warning: xfeat frontend start failed, falling back to orb-only replay: " << xfeatErr << "\n";
+            slamEngine.SetFeatureFrontend(FeatureFrontend::Orb);
+            slamEngine.SetXFeatFrontendClient(nullptr);
+        }
+    }
 
     smartdrone::tests::ReplaySlamRunner runner(camera, imu, slamEngine,
                                                {.cameraFps = opts.cameraFps,
@@ -176,7 +220,9 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         return 1;
     }
 
-    csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples\n";
+    csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
+           "xfeat_used,xfeat_raw_left,xfeat_raw_right,xfeat_stereo,xfeat_injected_left,xfeat_injected_right,"
+           "xfeat_worker_ms,xfeat_match_ms,xfeat_total_ms,inliers,tracked_map,local_map\n";
     size_t poseValidCount = 0;
     size_t trackingOkCount = 0;
     size_t trackingLostCount = 0;
@@ -200,7 +246,12 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         csv << sample.frameId << ',' << sample.captureTimestampNs << ',' << sample.trackingState << ','
             << sample.mapId << ',' << (sample.poseValid ? 1 : 0) << ',' << sample.pose.x << ',' << sample.pose.y
             << ',' << sample.pose.z << ',' << sample.pose.qw << ',' << sample.pose.qx << ',' << sample.pose.qy
-            << ',' << sample.pose.qz << ',' << sample.imuSampleCount << '\n';
+            << ',' << sample.pose.qz << ',' << sample.imuSampleCount << ',' << (sample.usedXFeatFrontend ? 1 : 0)
+            << ',' << sample.xfeatRawLeftCount << ',' << sample.xfeatRawRightCount << ','
+            << sample.xfeatMatchedStereoCount << ',' << sample.xfeatInjectedLeftCount << ','
+            << sample.xfeatInjectedRightCount << ',' << sample.xfeatWorkerTotalMs << ',' << sample.xfeatStereoMatchMs
+            << ',' << sample.xfeatTotalMs << ',' << sample.matchesInliers << ',' << sample.trackedMapPointCount << ','
+            << sample.localMapPointCount << '\n';
     }
 
     std::cout << "offline replay complete\n";
@@ -238,6 +289,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     }
 
     csv.flush();
+    xfeatFrontendClient.Stop();
     std::cout.flush();
     std::_Exit(0);
 }

@@ -48,7 +48,8 @@ class SlamFrameProcessor {
 
     struct State {
         int64_t lastFrameNs{0};
-        int lastLoggedSlamInputFps{-1};
+        int lastLoggedConfiguredSlamInputFps{-1};
+        int lastLoggedEffectiveSlamInputFps{-1};
         uint64_t imuWarmupSamples{0};
         int64_t lastPointCloudUpdateNs{0};
         Sophus::SE3f stereoReferencePose{Sophus::SE3f()};
@@ -60,6 +61,12 @@ class SlamFrameProcessor {
         int64_t lastPublishedFrameNs{0};
         int64_t lastFrameGapWarnLogNs{0};
         uint64_t rateLimitedDrops{0};
+        double smoothedAcquireMs{0.0};
+        double smoothedSlamMs{0.0};
+        double smoothedTotalMs{0.0};
+        int adaptiveSlamInputFps{0};
+        int xfeatLoadSheddingLevel{0};
+        int lastLoggedXFeatLoadSheddingLevel{-1};
         uint8_t sessionResetCounterBase{0};
         uint16_t sessionResetMapCountBase{0};
         bool lastTrackingUsable{false};

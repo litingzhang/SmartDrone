@@ -46,6 +46,9 @@ TrackedVisualData Tracking::ExtractTrackedVisualData(int leftImageWidth,
                                                      size_t maxPointCloudPoints) const
 {
     TrackedVisualData out;
+    out.trackedMapPointCount = GetTrackedMapPointCount();
+    out.localMapPointCount = GetLocalMapPointCount();
+    out.matchesInliers = mnMatchesInliers;
     const size_t leftCount = std::min(mCurrentFrame.mvpMapPoints.size(), mCurrentFrame.mvKeysUn.size());
     const size_t rightCount = std::min(leftCount, mCurrentFrame.mvuRight.size());
     out.leftFeatures.reserve(leftCount);
@@ -109,6 +112,57 @@ int CountTrackedMapPoints(const Frame& frame)
             ++tracked;
     }
     return tracked;
+}
+
+constexpr int kExternalStereoStabilizingFrameWindow = 240;
+constexpr unsigned long kExternalStereoBootstrapKeyframeLimit = 12;
+constexpr unsigned long kExternalStereoStabilizingKeyframeLimit = 40;
+constexpr unsigned long kPureStereoBootstrapKeyframeLimit = 6;
+constexpr unsigned long kPureStereoStabilizingKeyframeLimit = 24;
+
+bool IsExternalStereoStabilizing(const Frame& frame, Atlas* pAtlas, int initFrameId)
+{
+    if(!pAtlas || !frame.mbExternalStereoInjected || initFrameId < 0 || frame.mnId < initFrameId)
+        return false;
+
+    const int framesSinceInit = frame.mnId - initFrameId;
+    const unsigned long keyFramesInMap = pAtlas->KeyFramesInMap();
+    return framesSinceInit <= kExternalStereoStabilizingFrameWindow &&
+           keyFramesInMap <= kExternalStereoStabilizingKeyframeLimit;
+}
+
+bool IsExternalStereoBootstrap(const Frame& frame, Atlas* pAtlas, int initFrameId)
+{
+    return IsExternalStereoStabilizing(frame, pAtlas, initFrameId) &&
+           pAtlas->KeyFramesInMap() <= kExternalStereoBootstrapKeyframeLimit;
+}
+
+bool IsExternalStereoRecoveryHopeless(const Frame& frame, Atlas* pAtlas, int initFrameId, int matchesInliers)
+{
+    if(!frame.mbExternalStereoInjected || !pAtlas)
+        return false;
+
+    const bool externalStereoStabilizing = IsExternalStereoStabilizing(frame, pAtlas, initFrameId);
+    if(!externalStereoStabilizing)
+        return false;
+
+    const int trackedMapPoints = CountTrackedMapPoints(frame);
+    return pAtlas->KeyFramesInMap() > 1 && matchesInliers <= 2 && trackedMapPoints <= 2;
+}
+
+bool IsPureStereoStabilizing(int sensor, Atlas* pAtlas)
+{
+    if(sensor != System::STEREO || !pAtlas)
+        return false;
+
+    const unsigned long keyFramesInMap = pAtlas->KeyFramesInMap();
+    return keyFramesInMap > 0 && keyFramesInMap <= kPureStereoStabilizingKeyframeLimit;
+}
+
+bool IsPureStereoBootstrap(int sensor, Atlas* pAtlas)
+{
+    return IsPureStereoStabilizing(sensor, pAtlas) &&
+           pAtlas->KeyFramesInMap() <= kPureStereoBootstrapKeyframeLimit;
 }
 
 }
@@ -2128,6 +2182,11 @@ void Tracking::Track()
                     {
                         mState = LOST;
                     }
+                    else if(mCurrentFrame.mbExternalStereoInjected && pCurrentMap->KeyFramesInMap()>1)
+                    {
+                        mState = RECENTLY_LOST;
+                        mTimeStampLost = mCurrentFrame.mTimeStamp;
+                    }
                     else if(pCurrentMap->KeyFramesInMap()>10)
                     {
                         // cout << "KF in map: " << pCurrentMap->KeyFramesInMap() << endl;
@@ -2146,6 +2205,8 @@ void Tracking::Track()
                 if (mState == RECENTLY_LOST)
                 {
                     Verbose::PrintMess("Lost for a short time", Verbose::VERBOSITY_NORMAL);
+                    const bool externalStereoStabilizing =
+                        IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
 
                     bOK = true;
                     if((mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD))
@@ -2164,8 +2225,19 @@ void Tracking::Track()
                     }
                     else
                     {
-                        // Relocalization
-                        bOK = Relocalization();
+                        if(externalStereoStabilizing)
+                        {
+                            CheckReplacedInLastFrame();
+                            if(mbVelocity)
+                                bOK = TrackWithMotionModel();
+                            if(!bOK)
+                                bOK = TrackReferenceKeyFrame();
+                        }
+                        else
+                        {
+                            // Relocalization
+                            bOK = Relocalization();
+                        }
                         //std::cout << "mCurrentFrame.mTimeStamp:" << to_string(mCurrentFrame.mTimeStamp) << std::endl;
                         //std::cout << "mTimeStampLost:" << to_string(mTimeStampLost) << std::endl;
                         if(mCurrentFrame.mTimeStamp-mTimeStampLost>3.0f && !bOK)
@@ -2305,7 +2377,9 @@ void Tracking::Track()
         }
 
         if(bOK)
+        {
             mState = OK;
+        }
         else if (mState == OK)
         {
             if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
@@ -2323,6 +2397,13 @@ void Tracking::Track()
                 mState=RECENTLY_LOST; // visual to lost
 
             mTimeStampLost = mCurrentFrame.mTimeStamp;
+        }
+        else if(!bOK && mState == RECENTLY_LOST)
+        {
+            if(IsExternalStereoRecoveryHopeless(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId, mnMatchesInliers))
+            {
+                mState = LOST;
+            }
         }
 
         // Save frame if recent relocalization, since they are used for IMU reset (as we are making copy, it shluld be once mCurrFrame is completely modified)
@@ -2432,6 +2513,19 @@ void Tracking::Track()
         // Reset if the camera get lost soon after initialization
         if(mState==LOST)
         {
+            const bool externalStereoStabilizing =
+                IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+            const bool externalStereoRecoveryHopeless =
+                IsExternalStereoRecoveryHopeless(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId, mnMatchesInliers);
+            if(externalStereoStabilizing && !externalStereoRecoveryHopeless)
+            {
+                mState = RECENTLY_LOST;
+                mTimeStampLost = mCurrentFrame.mTimeStamp;
+            }
+        }
+
+        if(mState==LOST)
+        {
             if(pCurrentMap->KeyFramesInMap()<=10)
             {
                 mpSystem->ResetActiveMap();
@@ -2496,7 +2590,24 @@ void Tracking::Track()
 
 void Tracking::StereoInitialization()
 {
-    if(mCurrentFrame.N>500)
+    const bool externalStereoInjected = mCurrentFrame.mbExternalStereoInjected;
+    constexpr int kStereoInitMinFeatures = 56;
+    constexpr int kStereoInitMinClosePoints = 40;
+    constexpr float kStereoInitMinCloseRatio = 0.65f;
+
+    const int stereoFeatureCount = (mCurrentFrame.Nleft == -1) ? mCurrentFrame.N : mCurrentFrame.Nleft;
+    const int stereoClosePointCount = mCurrentFrame.mnCloseMPs;
+    const bool stereoInitGeometryHealthy =
+        stereoFeatureCount > 0 &&
+        static_cast<float>(stereoClosePointCount) >=
+            (kStereoInitMinCloseRatio * static_cast<float>(stereoFeatureCount));
+    const bool stereoInitReady = externalStereoInjected
+                                     ? (stereoFeatureCount >= kStereoInitMinFeatures &&
+                                        stereoClosePointCount >= kStereoInitMinClosePoints &&
+                                        stereoInitGeometryHealthy)
+                                     : (mCurrentFrame.N > 500);
+
+    if(stereoInitReady)
     {
         if (mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
         {
@@ -2603,6 +2714,20 @@ void Tracking::StereoInitialization()
         // mpMapDrawer->SetCurrentCameraPose(mCurrentFrame.GetPose());
 
         mState=OK;
+        if(externalStereoInjected)
+            mnExternalStereoInitFrameId = mCurrentFrame.mnId;
+    }
+    else if(externalStereoInjected)
+    {
+        Verbose::PrintMess("Stereo init waiting: features=" + to_string(stereoFeatureCount) +
+                               " close=" + to_string(stereoClosePointCount) +
+                               " thresholds=" + to_string(kStereoInitMinFeatures) + "/" +
+                               to_string(kStereoInitMinClosePoints) +
+                               " ratio=" + to_string(stereoFeatureCount > 0
+                                                         ? static_cast<float>(stereoClosePointCount) /
+                                                               static_cast<float>(stereoFeatureCount)
+                                                         : 0.0f),
+                           Verbose::VERBOSITY_QUIET);
     }
 }
 
@@ -2881,6 +3006,19 @@ void Tracking::CheckReplacedInLastFrame()
 
 bool Tracking::TrackReferenceKeyFrame()
 {
+    const bool externalStereoBootstrap =
+        IsExternalStereoBootstrap(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+    const bool externalStereoStabilizing =
+        IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+    const bool pureStereoBootstrap = IsPureStereoBootstrap(mSensor, mpAtlas);
+    const bool pureStereoStabilizing = IsPureStereoStabilizing(mSensor, mpAtlas);
+    const bool stereoBootstrap = externalStereoBootstrap || pureStereoBootstrap;
+    const bool stereoStabilizing = externalStereoStabilizing || pureStereoStabilizing;
+    const bool externalStereoRefProjectionRescue = stereoStabilizing;
+    const int minRefKfMatches = stereoBootstrap ? 4 : (stereoStabilizing ? 8 : 15);
+    const int minRefKfTrackedMapMatches = stereoBootstrap ? 2 : (stereoStabilizing ? 5 : 10);
+    const float refProjectionSearchTh = stereoBootstrap ? 12.0f : (stereoStabilizing ? 8.0f : 5.0f);
+
     // Compute Bag of Words vector
     mCurrentFrame.ComputeBoW();
 
@@ -2889,11 +3027,103 @@ bool Tracking::TrackReferenceKeyFrame()
     ORBmatcher matcher(0.7,true);
     vector<MapPoint*> vpMapPointMatches;
 
+    auto optimizeReferenceMatches = [&]() -> int
+    {
+        Optimizer::PoseOptimization(&mCurrentFrame);
+
+        int nmatchesMap = 0;
+        for(int i = 0; i < mCurrentFrame.N; i++)
+        {
+            if(mCurrentFrame.mvpMapPoints[i])
+            {
+                if(mCurrentFrame.mvbOutlier[i])
+                {
+                    MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
+
+                    mCurrentFrame.mvpMapPoints[i] = static_cast<MapPoint*>(NULL);
+                    mCurrentFrame.mvbOutlier[i] = false;
+                    if(i < mCurrentFrame.Nleft)
+                    {
+                        pMP->mbTrackInView = false;
+                    }
+                    else
+                    {
+                        pMP->mbTrackInViewR = false;
+                    }
+                    pMP->mbTrackInView = false;
+                    pMP->mnLastFrameSeen = mCurrentFrame.mnId;
+                }
+                else if(mCurrentFrame.mvpMapPoints[i]->Observations() > 0)
+                {
+                    nmatchesMap++;
+                }
+            }
+        }
+
+        return nmatchesMap;
+    };
+
+    auto tryReferenceProjectionRescue = [&](const Sophus::SE3f& seedPose, bool keepExistingMatches) -> bool
+    {
+        mCurrentFrame.SetPose(seedPose);
+
+        std::set<MapPoint*> alreadyFound;
+        if(!keepExistingMatches)
+        {
+            fill(mCurrentFrame.mvpMapPoints.begin(),
+                 mCurrentFrame.mvpMapPoints.end(),
+                 static_cast<MapPoint*>(NULL));
+            fill(mCurrentFrame.mvbOutlier.begin(), mCurrentFrame.mvbOutlier.end(), false);
+        }
+        else
+        {
+            for(int i = 0; i < mCurrentFrame.N; ++i)
+            {
+                if(mCurrentFrame.mvpMapPoints[i] && !mCurrentFrame.mvbOutlier[i])
+                {
+                    alreadyFound.insert(mCurrentFrame.mvpMapPoints[i]);
+                }
+            }
+        }
+
+        const int projectedMatches = matcher.SearchByProjection(
+            mCurrentFrame,
+            mpReferenceKF,
+            alreadyFound,
+            refProjectionSearchTh,
+            ORBmatcher::TH_HIGH);
+        const int rescuedTracked = CountTrackedMapPoints(mCurrentFrame);
+
+        if(rescuedTracked < minRefKfMatches)
+        {
+            cout << "TRACK_REF_KF: Projection rescue only found "
+                 << rescuedTracked << " matches after adding "
+                 << projectedMatches << " projected matches!!\n";
+            return false;
+        }
+
+        const int rescuedMapMatches = optimizeReferenceMatches();
+        if(rescuedMapMatches < minRefKfTrackedMapMatches)
+        {
+            cout << "TRACK_REF_KF: Projection rescue only kept "
+                 << rescuedMapMatches << " tracked map matches after PO!!\n";
+            return false;
+        }
+
+        cout << "TRACK_REF_KF: Projection rescue succeeded with "
+             << rescuedMapMatches << " tracked map matches after PO!!\n";
+        return true;
+    };
+
     int nmatches = matcher.SearchByBoW(mpReferenceKF,mCurrentFrame,vpMapPointMatches);
 
-    if(nmatches<15)
+    if(nmatches < minRefKfMatches)
     {
-        cout << "TRACK_REF_KF: Less than 15 matches!!\n";
+        if(externalStereoRefProjectionRescue && tryReferenceProjectionRescue(mLastFrame.GetPose(), false))
+        {
+            return true;
+        }
+        cout << "TRACK_REF_KF: Less than " << minRefKfMatches << " matches!!\n";
         return false;
     }
 
@@ -2901,43 +3131,23 @@ bool Tracking::TrackReferenceKeyFrame()
     mCurrentFrame.SetPose(mLastFrame.GetPose());
 
     //mCurrentFrame.PrintPointDistribution();
-
-
-    // cout << " TrackReferenceKeyFrame mLastFrame.mTcw:  " << mLastFrame.mTcw << endl;
-    Optimizer::PoseOptimization(&mCurrentFrame);
-
-    // Discard outliers
-    int nmatchesMap = 0;
-    for(int i =0; i<mCurrentFrame.N; i++)
-    {
-        //if(i >= mCurrentFrame.Nleft) break;
-        if(mCurrentFrame.mvpMapPoints[i])
-        {
-            if(mCurrentFrame.mvbOutlier[i])
-            {
-                MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
-
-                mCurrentFrame.mvpMapPoints[i]=static_cast<MapPoint*>(NULL);
-                mCurrentFrame.mvbOutlier[i]=false;
-                if(i < mCurrentFrame.Nleft){
-                    pMP->mbTrackInView = false;
-                }
-                else{
-                    pMP->mbTrackInViewR = false;
-                }
-                pMP->mbTrackInView = false;
-                pMP->mnLastFrameSeen = mCurrentFrame.mnId;
-                nmatches--;
-            }
-            else if(mCurrentFrame.mvpMapPoints[i]->Observations()>0)
-                nmatchesMap++;
-        }
-    }
+    const int nmatchesMap = optimizeReferenceMatches();
 
     if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
         return true;
     else
-        return nmatchesMap>=10;
+    {
+        if(nmatchesMap < minRefKfTrackedMapMatches)
+        {
+            if(externalStereoRefProjectionRescue && tryReferenceProjectionRescue(mCurrentFrame.GetPose(), true))
+            {
+                return true;
+            }
+            cout << "TRACK_REF_KF: Less than " << minRefKfTrackedMapMatches << " tracked map matches after PO!!\n";
+            return false;
+        }
+        return true;
+    }
 }
 
 void Tracking::UpdateLastFrame()
@@ -3016,6 +3226,10 @@ void Tracking::UpdateLastFrame()
 bool Tracking::TrackWithMotionModel()
 {
     ORBmatcher matcher(0.9,true);
+    const bool externalStereoBootstrap =
+        IsExternalStereoBootstrap(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+    const bool externalStereoStabilizing =
+        IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
 
     // Update last frame pose according to its reference keyframe
     // Create "visual odometry" points if in Localization Mode
@@ -3046,19 +3260,22 @@ bool Tracking::TrackWithMotionModel()
         th=15;
 
     int nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR);
+    const int minMotionModelProjectionMatches = externalStereoBootstrap ? 5 : (externalStereoStabilizing ? 8 : 20);
+    const int minMotionModelTrackedMapMatches = externalStereoBootstrap ? 2 : (externalStereoStabilizing ? 4 : 10);
 
     // If few matches, uses a wider window search
-    if(nmatches<20)
+    if(nmatches < minMotionModelProjectionMatches)
     {
         Verbose::PrintMess("Not enough matches, wider window search!!", Verbose::VERBOSITY_NORMAL);
         fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
 
-        nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,2*th,mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR);
+        const int widenedTh = externalStereoStabilizing ? 3 * th : 2 * th;
+        nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,widenedTh,mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR);
         Verbose::PrintMess("Matches with wider search: " + to_string(nmatches), Verbose::VERBOSITY_NORMAL);
 
     }
 
-    if(nmatches<20)
+    if(nmatches < minMotionModelProjectionMatches)
     {
         Verbose::PrintMess("Not enough matches!!", Verbose::VERBOSITY_NORMAL);
         if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
@@ -3105,7 +3322,14 @@ bool Tracking::TrackWithMotionModel()
     if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
         return true;
     else
-        return nmatchesMap>=10;
+    {
+        if(nmatchesMap < minMotionModelTrackedMapMatches)
+        {
+            cout << "TRACK_MM: Less than " << minMotionModelTrackedMapMatches << " tracked map matches after PO!!\n";
+            return false;
+        }
+        return true;
+    }
 }
 
 bool Tracking::TrackLocalMap()
@@ -3188,11 +3412,34 @@ bool Tracking::TrackLocalMap()
 
     // Decide if the tracking was succesful
     // More restrictive if there was a relocalization recently
+    const bool externalStereoBootstrap =
+        IsExternalStereoBootstrap(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+    const bool externalStereoStabilizing =
+        IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+    const bool pureStereoBootstrap = IsPureStereoBootstrap(mSensor, mpAtlas);
+    const bool pureStereoStabilizing = IsPureStereoStabilizing(mSensor, mpAtlas);
+    const bool stereoBootstrap = externalStereoBootstrap || pureStereoBootstrap;
+    const bool stereoStabilizing = externalStereoStabilizing || pureStereoStabilizing;
+    const int trackedMapPoints = CountTrackedMapPoints(mCurrentFrame);
+    const int effectiveLocalMapMatches =
+        stereoStabilizing ? std::max(trackedMapPoints, mnMatchesInliers) : mnMatchesInliers;
+    const int bootstrapClosePoints = mCurrentFrame.mnCloseMPs;
+    const bool bootstrapVisualOdometryHealthy =
+        stereoBootstrap && (trackedMapPoints >= 2 || bootstrapClosePoints >= 24);
+    const bool stabilizingVisualOdometryHealthy =
+        stereoStabilizing && (trackedMapPoints >= 4 || bootstrapClosePoints >= 32);
+    const int minRecentRelocInliers = stereoBootstrap ? 4 : (stereoStabilizing ? 8 : 50);
+    const int minStereoLocalMapInliers = stereoBootstrap ? 4 : (stereoStabilizing ? 8 : 30);
+    const int minRecentlyLostInliers = stereoBootstrap ? 3 : (stereoStabilizing ? 6 : 10);
+
     mpLocalMapper->mnMatchesInliers=mnMatchesInliers;
-    if(mCurrentFrame.mnId<mnLastRelocFrameId+mMaxFrames && mnMatchesInliers<50)
+    if(mCurrentFrame.mnId<mnLastRelocFrameId+mMaxFrames && effectiveLocalMapMatches < minRecentRelocInliers)
         return false;
 
-    if((mnMatchesInliers>10)&&(mState==RECENTLY_LOST))
+    if((effectiveLocalMapMatches >= minRecentlyLostInliers) && (mState==RECENTLY_LOST))
+        return true;
+
+    if(bootstrapVisualOdometryHealthy || stabilizingVisualOdometryHealthy)
         return true;
 
 
@@ -3216,7 +3463,7 @@ bool Tracking::TrackLocalMap()
     }
     else
     {
-        if(mnMatchesInliers<30)
+        if(effectiveLocalMapMatches < minStereoLocalMapInliers)
             return false;
         else
             return true;
@@ -3248,6 +3495,11 @@ bool Tracking::NeedNewKeyFrame()
     }
 
     const int nKFs = mpAtlas->KeyFramesInMap();
+    const bool externalStereoStabilizing =
+        IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+    const bool externalStereoBootstrap =
+        IsExternalStereoBootstrap(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+    const int trackedCurrent = CountTrackedMapPoints(mCurrentFrame);
 
     // Do not insert keyframes if not enough frames have passed from last relocalisation
     if(mCurrentFrame.mnId<mnLastRelocFrameId+mMaxFrames && nKFs>mMaxFrames)
@@ -3287,6 +3539,14 @@ bool Tracking::NeedNewKeyFrame()
 
     bool bNeedToInsertClose;
     bNeedToInsertClose = (nTrackedClose<100) && (nNonTrackedClose>70);
+    if(externalStereoBootstrap)
+    {
+        bNeedToInsertClose = bNeedToInsertClose || (nTrackedClose < 40 && nNonTrackedClose > 20);
+    }
+    if(externalStereoStabilizing)
+    {
+        bNeedToInsertClose = bNeedToInsertClose || (nTrackedClose < 80 && nNonTrackedClose > 40);
+    }
 
     // Thresholds
     float thRefRatio = 0.75f;
@@ -3322,6 +3582,15 @@ bool Tracking::NeedNewKeyFrame()
     const bool c1c = mSensor!=System::MONOCULAR && mSensor!=System::IMU_MONOCULAR && mSensor!=System::IMU_STEREO && mSensor!=System::IMU_RGBD && (mnMatchesInliers<nRefMatches*0.25 || bNeedToInsertClose) ;
     // Condition 2: Few tracked points compared to reference keyframe. Lots of visual odometry compared to map matches.
     const bool c2 = (((mnMatchesInliers<nRefMatches*thRefRatio || bNeedToInsertClose)) && mnMatchesInliers>15);
+    const bool externalStereoGrowMap =
+        externalStereoStabilizing &&
+        mCurrentFrame.mnId >= mnLastKeyFrameId + 1 &&
+        std::max(mnMatchesInliers, trackedCurrent) >= 6 &&
+        (nTrackedClose >= 20 || nNonTrackedClose >= 20 || mCurrentFrame.mnCloseMPs >= 24);
+    const bool externalStereoBootstrapGrowMap =
+        externalStereoBootstrap &&
+        mCurrentFrame.mnId >= mnLastKeyFrameId + 1 &&
+        (nTrackedClose >= 12 || nNonTrackedClose >= 12 || mCurrentFrame.mnCloseMPs >= 16);
 
     //std::cout << "NeedNewKF: c1a=" << c1a << "; c1b=" << c1b << "; c1c=" << c1c << "; c2=" << c2 << std::endl;
     // Temporal condition for Inertial cases
@@ -3346,7 +3615,7 @@ bool Tracking::NeedNewKeyFrame()
     else
         c4=false;
 
-    if(((c1a||c1b||c1c) && c2)||c3 ||c4)
+    if((((c1a||c1b||c1c) && c2)||c3 ||c4) || externalStereoGrowMap || externalStereoBootstrapGrowMap)
     {
         // If the mapping accepts keyframes, insert keyframe.
         // Otherwise send a signal to interrupt BA
@@ -3414,8 +3683,15 @@ void Tracking::CreateNewKeyFrame()
         // We create all those MapPoints whose depth < mThDepth.
         // If there are less than 100 close points we create the 100 closest.
         int maxPoint = 100;
-        if(mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
+        if((mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) &&
+           !IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId))
+        {
             maxPoint = 100;
+        }
+        if(IsExternalStereoBootstrap(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId))
+            maxPoint = 240;
+        if(IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId))
+            maxPoint = 180;
 
         vector<pair<float,int> > vDepthIdx;
         int N = (mCurrentFrame.Nleft != -1) ? mCurrentFrame.Nleft : mCurrentFrame.N;
@@ -3550,6 +3826,10 @@ void Tracking::SearchLocalPoints()
     {
         ORBmatcher matcher(0.8);
         int th = 1;
+        const bool externalStereoBootstrap =
+            IsExternalStereoBootstrap(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+        const bool externalStereoStabilizing =
+            IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
         if(mSensor==System::RGBD || mSensor==System::IMU_RGBD)
             th=3;
         if(mpAtlas->isImuInitialized())
@@ -3570,6 +3850,10 @@ void Tracking::SearchLocalPoints()
 
         if(mState==LOST || mState==RECENTLY_LOST) // Lost for less than 1 second
             th=15; // 15
+        else if(externalStereoStabilizing)
+            th = std::max(th, 7);
+        else if(externalStereoBootstrap)
+            th = std::max(th, 5);
 
         matcher.SearchByProjection(mCurrentFrame, mvpLocalMapPoints, th, mpLocalMapper->mbFarPoints, mpLocalMapper->mThFarPoints);
     }
@@ -4205,6 +4489,22 @@ int Tracking::GetNumberDataset()
 int Tracking::GetMatchesInliers()
 {
     return mnMatchesInliers;
+}
+
+size_t Tracking::GetTrackedMapPointCount() const
+{
+    return static_cast<size_t>(CountTrackedMapPoints(mCurrentFrame));
+}
+
+size_t Tracking::GetLocalMapPointCount() const
+{
+    size_t count = 0;
+    for(MapPoint* pMP : mvpLocalMapPoints)
+    {
+        if(pMP && !pMP->isBad())
+            ++count;
+    }
+    return count;
 }
 
 void Tracking::SaveSubTrajectory(string strNameFile_frames, string strNameFile_kf, string strFolder)

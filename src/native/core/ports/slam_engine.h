@@ -50,6 +50,9 @@ struct SlamOutput {
     double xfeatTotalMs{0.0};
     uint32_t xfeatImageCount{0};
     uint32_t xfeatPayloadBytes{0};
+    int matchesInliers{0};
+    uint32_t trackedMapPointCount{0};
+    uint32_t localMapPointCount{0};
     std::vector<cv::Point2f> leftFeatures;
     std::vector<cv::Point2f> rightFeatures;
     std::vector<float> pointCloudXyz;

@@ -179,6 +179,7 @@ Frame::Frame(const Frame &frame)
      mTlr(frame.mTlr), mRlr(frame.mRlr), mtlr(frame.mtlr), mTrl(frame.mTrl),
      mTcw(frame.mTcw), mbHasPose(false), mbHasVelocity(false)
 {
+    mbExternalStereoInjected = frame.mbExternalStereoInjected;
     mpMutexImu = std::make_shared<std::mutex>();
     for(int i=0;i<FRAME_GRID_COLS;i++)
         for(int j=0; j<FRAME_GRID_ROWS; j++){
@@ -500,6 +501,7 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
      mbImuPreintegrated(false), mpCamera(pCamera), mpCamera2(nullptr), mbHasPose(false), mbHasVelocity(false)
 {
     mnId = nNextId++;
+    mbExternalStereoInjected = true;
 
     mnScaleLevels = mpORBextractorLeft->GetLevels();
     mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
@@ -538,14 +540,6 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     mvbOutlier = vector<bool>(N,false);
     mmProjectPoints.clear();
     mmMatchedInImage.clear();
-
-    Nleft = -1;
-    Nright = -1;
-    mvLeftToRightMatch = vector<int>(0);
-    mvRightToLeftMatch = vector<int>(0);
-    mvStereo3Dpoints = vector<Eigen::Vector3f>(0);
-    monoLeft = -1;
-    monoRight = -1;
 
     AssignFeaturesToGrid();
 
@@ -649,10 +643,17 @@ void Frame::LoadExternalStereoFeatures(const ExternalStereoFrameData &external)
     if(mDescriptorsRight.rows < static_cast<int>(mvKeysRight.size()))
         mvKeysRight.resize(static_cast<size_t>(mDescriptorsRight.rows));
 
-    N = mvKeys.size();
-    mvuRight = vector<float>(N, -1.0f);
-    mvDepth = vector<float>(N, -1.0f);
+    N = static_cast<int>(mvKeys.size());
+    mvuRight = vector<float>(static_cast<size_t>(N), -1.0f);
+    mvDepth = vector<float>(static_cast<size_t>(N), -1.0f);
     mnCloseMPs = 0;
+    Nleft = -1;
+    Nright = -1;
+    monoLeft = -1;
+    monoRight = -1;
+    mvLeftToRightMatch = vector<int>(0);
+    mvRightToLeftMatch = vector<int>(0);
+    mvStereo3Dpoints = vector<Eigen::Vector3f>(0);
 
     if(!external.matchedStereoPairs)
         return;

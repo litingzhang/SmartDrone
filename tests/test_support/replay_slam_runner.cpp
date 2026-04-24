@@ -61,9 +61,27 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
         m_lastFrameNs = batch.captureTimestampNs;
 
         const auto output = m_slamEngine.Process(input, m_cfg.extractFeatures, m_cfg.extractPointCloud);
-        outputs.push_back(
-            {output.frameId, output.captureTimestampNs, output.trackingState, output.mapId, output.poseValid,
-             output.pose, imuWindow.size()});
+        ReplayPoseSample sample{};
+        sample.frameId = output.frameId;
+        sample.captureTimestampNs = output.captureTimestampNs;
+        sample.trackingState = output.trackingState;
+        sample.mapId = output.mapId;
+        sample.poseValid = output.poseValid;
+        sample.pose = output.pose;
+        sample.imuSampleCount = imuWindow.size();
+        sample.usedXFeatFrontend = output.usedXFeatFrontend;
+        sample.xfeatRawLeftCount = output.xfeatRawLeftCount;
+        sample.xfeatRawRightCount = output.xfeatRawRightCount;
+        sample.xfeatMatchedStereoCount = output.xfeatMatchedStereoCount;
+        sample.xfeatInjectedLeftCount = output.xfeatInjectedLeftCount;
+        sample.xfeatInjectedRightCount = output.xfeatInjectedRightCount;
+        sample.xfeatWorkerTotalMs = output.xfeatWorkerTotalMs;
+        sample.xfeatStereoMatchMs = output.xfeatStereoMatchMs;
+        sample.xfeatTotalMs = output.xfeatTotalMs;
+        sample.matchesInliers = output.matchesInliers;
+        sample.trackedMapPointCount = output.trackedMapPointCount;
+        sample.localMapPointCount = output.localMapPointCount;
+        outputs.push_back(sample);
     }
 
     if (m_cfg.shutdownEngineOnFinish) {

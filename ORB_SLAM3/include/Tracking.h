@@ -113,6 +113,8 @@ public:
     void NewDataset();
     int GetNumberDataset();
     int GetMatchesInliers();
+    size_t GetTrackedMapPointCount() const;
+    size_t GetLocalMapPointCount() const;
     ORBextractor* GetLeftORBExtractor() const { return mpORBextractorLeft; }
     ORBextractor* GetRightORBExtractor() const { return mpORBextractorRight; }
     ORBextractor* GetInitORBExtractor() const { return mpIniORBextractor; }
@@ -185,6 +187,7 @@ public:
     double t0vis; // time-stamp of first inserted keyframe
     double t0IMU; // time-stamp of IMU initialization
     bool mFastInit = false;
+    int mnExternalStereoInitFrameId = -1;
 
 
     vector<MapPoint*> GetLocalMapMPS();

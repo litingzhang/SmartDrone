@@ -192,7 +192,7 @@ SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg, LiveRuntimeTuni
                                 : smartdrone::adapters::slam::OrbInputMode::Stereo),
       m_effectiveSettingsPath(BuildEffectiveSlamSettingsPath(cfg)),
       m_slamSystem(std::make_unique<ORB_SLAM3::System>(cfg.app.vocab, m_effectiveSettingsPath, m_orbSensor, false)),
-      m_slamEngine(std::move(m_slamSystem), m_orbInputMode, m_useImu),
+      m_slamEngine(std::move(m_slamSystem), m_orbInputMode, m_useImu, m_effectiveSettingsPath),
       m_cameraProvider(CreateCameraProvider()),
       m_imuProvider(m_imuState.imuBuffer, MakeImuProviderConfig(m_aliases)), m_posePublisher(mav),
       m_perceptionPipeline(PerceptionPipelineConfig{m_aliases.fps, true}),

@@ -38,6 +38,10 @@ SensorMode ParseRuntimeSensorMode(uint8_t value)
 FeatureFrontend ParseRuntimeFeatureFrontend(uint8_t value)
 {
     switch (value) {
+    case RUNTIME_FEATURE_FRONTEND_LK:
+        return FeatureFrontend::LK;
+    case RUNTIME_FEATURE_FRONTEND_DROID_LIGHT:
+        return FeatureFrontend::DroidLight;
     case RUNTIME_FEATURE_FRONTEND_XFEAT:
         return FeatureFrontend::XFeat;
     case RUNTIME_FEATURE_FRONTEND_ORB:

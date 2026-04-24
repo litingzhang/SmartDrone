@@ -18,6 +18,8 @@ enum class SensorMode {
 enum class FeatureFrontend {
     Orb,
     XFeat,
+    DroidLight,
+    LK,
 };
 
 const char *DefaultSettingsForSensorMode(SensorMode mode);
@@ -84,7 +86,7 @@ struct RuntimeConfig {
     int slamInputFps{0};
     smartdrone::core::domain::SlamOperationMode slamOperationMode{smartdrone::core::domain::SlamOperationMode::Mapping};
     FeatureFrontend featureFrontend{FeatureFrontend::Orb};
-    std::string xfeatPython{"python3"};
+    std::string xfeatPython{"/usr/bin/python3"};
     std::string xfeatRepo;
     std::string xfeatWorkerScript{"scripts/xfeat_keypoint_worker.py"};
     std::string xfeatDevice{"auto"};

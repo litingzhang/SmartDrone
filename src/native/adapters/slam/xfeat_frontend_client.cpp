@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include <opencv2/imgproc.hpp>
+#include <opencv2/video/tracking.hpp>
 
 namespace smartdrone::adapters::slam {
 
@@ -28,8 +29,13 @@ namespace {
 constexpr std::array<char, 8> kReadyMagic{'X', 'F', 'W', 'K', 'R', 'D', 'Y', '1'};
 constexpr float kTemporalMinSimilarity = 0.80f;
 constexpr float kTemporalMinMargin = 0.02f;
+constexpr float kTemporalFlowMinSimilarity = 0.72f;
+constexpr float kTemporalFlowSearchRadiusPx = 10.0f;
+constexpr float kTemporalFlowForwardBackwardMaxErrorPx = 1.5f;
 constexpr size_t kTemporalMinStableCount = 64;
 constexpr size_t kTemporalExtraBudget = 160;
+constexpr int kTemporalFlowWindowPx = 21;
+constexpr int kTemporalFlowMaxLevel = 3;
 
 struct RequestHeader {
     uint32_t seq{0};
@@ -101,6 +107,47 @@ bool HasCompatibleDescriptors(const XFeatFeatureSet &a, const XFeatFeatureSet &b
 float DescriptorSimilarity(const cv::Mat &lhs, const cv::Mat &rhs)
 {
     return lhs.dot(rhs);
+}
+
+bool TrackPointsWithForwardBackward(const cv::Mat &prevGray, const cv::Mat &currGray,
+                                    const std::vector<cv::Point2f> &prevPts, std::vector<cv::Point2f> &currPts,
+                                    std::vector<uchar> &status)
+{
+    currPts.clear();
+    status.clear();
+    if (prevGray.empty() || currGray.empty() || prevPts.empty()) {
+        return false;
+    }
+    if (prevGray.size() != currGray.size()) {
+        return false;
+    }
+
+    std::vector<float> errors;
+    cv::calcOpticalFlowPyrLK(prevGray, currGray, prevPts, currPts, status, errors,
+                             cv::Size(kTemporalFlowWindowPx, kTemporalFlowWindowPx), kTemporalFlowMaxLevel);
+    if (currPts.empty() || status.empty()) {
+        return false;
+    }
+
+    std::vector<cv::Point2f> backwardPts;
+    std::vector<uchar> backwardStatus;
+    std::vector<float> backwardErrors;
+    cv::calcOpticalFlowPyrLK(currGray, prevGray, currPts, backwardPts, backwardStatus, backwardErrors,
+                             cv::Size(kTemporalFlowWindowPx, kTemporalFlowWindowPx), kTemporalFlowMaxLevel);
+
+    const float maxErrorSq = kTemporalFlowForwardBackwardMaxErrorPx * kTemporalFlowForwardBackwardMaxErrorPx;
+    for (size_t i = 0; i < status.size(); ++i) {
+        if (!status[i] || i >= backwardStatus.size() || !backwardStatus[i] || i >= backwardPts.size()) {
+            status[i] = 0;
+            continue;
+        }
+
+        const cv::Point2f delta = backwardPts[i] - prevPts[i];
+        if ((delta.x * delta.x + delta.y * delta.y) > maxErrorSq) {
+            status[i] = 0;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -207,6 +254,7 @@ bool XFeatFrontendClient::Start(const std::string &pythonBin, const std::string 
     m_pid = pid;
     m_requestSeq = 0;
     m_prevStereoLeftFeatures = XFeatFeatureSet{};
+    m_prevStereoLeftGray.release();
     m_havePrevStereoLeftFeatures = false;
     std::array<char, kReadyMagic.size()> ready{};
     if (!ReadExact(ready.data(), ready.size(), err)) {
@@ -247,6 +295,7 @@ void XFeatFrontendClient::Stop()
     m_requestSeq = 0;
     m_backendMode = BackendMode::None;
     m_prevStereoLeftFeatures = XFeatFeatureSet{};
+    m_prevStereoLeftGray.release();
     m_havePrevStereoLeftFeatures = false;
 }
 
@@ -376,7 +425,9 @@ bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet 
 }
 
 std::vector<int> XFeatFrontendClient::ComputeTemporalStableIndices(const XFeatFeatureSet &previous,
-                                                                   const XFeatFeatureSet &current)
+                                                                   const cv::Mat &previousGray,
+                                                                   const XFeatFeatureSet &current,
+                                                                   const cv::Mat &currentGray)
 {
     std::vector<int> stableIndices;
     if (!HasCompatibleDescriptors(previous, current)) {
@@ -388,12 +439,29 @@ std::vector<int> XFeatFrontendClient::ComputeTemporalStableIndices(const XFeatFe
     std::vector<float> secondCurrentScore(static_cast<size_t>(previous.descriptors.rows), -1.0f);
     std::vector<int> bestPreviousForCurrent(static_cast<size_t>(current.descriptors.rows), -1);
     std::vector<float> bestPreviousScore(static_cast<size_t>(current.descriptors.rows), -1.0f);
+    std::vector<cv::Point2f> trackedPoints;
+    std::vector<uchar> trackedStatus;
+    const bool haveOpticalFlow =
+        !previousGray.empty() && !currentGray.empty() &&
+        TrackPointsWithForwardBackward(previousGray, currentGray, previous.keypoints, trackedPoints, trackedStatus);
+    const float flowSearchRadiusSq = kTemporalFlowSearchRadiusPx * kTemporalFlowSearchRadiusPx;
 
     for (int pi = 0; pi < previous.descriptors.rows; ++pi) {
         float bestScore = -1.0f;
         float secondScore = -1.0f;
         int bestIndex = -1;
+        const bool haveTrackedPoint =
+            haveOpticalFlow && static_cast<size_t>(pi) < trackedStatus.size() && trackedStatus[static_cast<size_t>(pi)] &&
+            static_cast<size_t>(pi) < trackedPoints.size();
+        const cv::Point2f trackedPoint =
+            haveTrackedPoint ? trackedPoints[static_cast<size_t>(pi)] : previous.keypoints[static_cast<size_t>(pi)];
         for (int ci = 0; ci < current.descriptors.rows; ++ci) {
+            if (haveTrackedPoint) {
+                const cv::Point2f delta = current.keypoints[static_cast<size_t>(ci)] - trackedPoint;
+                if ((delta.x * delta.x + delta.y * delta.y) > flowSearchRadiusSq) {
+                    continue;
+                }
+            }
             const float similarity = DescriptorSimilarity(previous.descriptors.row(pi), current.descriptors.row(ci));
             if (!std::isfinite(similarity)) {
                 continue;
@@ -406,7 +474,8 @@ std::vector<int> XFeatFrontendClient::ComputeTemporalStableIndices(const XFeatFe
                 secondScore = similarity;
             }
         }
-        if (bestIndex < 0 || bestScore < kTemporalMinSimilarity) {
+        const float minSimilarity = haveTrackedPoint ? kTemporalFlowMinSimilarity : kTemporalMinSimilarity;
+        if (bestIndex < 0 || bestScore < minSimilarity) {
             continue;
         }
         if (secondScore > -0.5f && (bestScore - secondScore) < kTemporalMinMargin) {
@@ -474,6 +543,11 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
                                                  XFeatFeatureSet &leftFeatures, XFeatFeatureSet &rightFeatures,
                                                  std::string *err)
 {
+    cv::Mat leftGray8;
+    if (!PrepareGrayImage(leftGray, leftGray8, err)) {
+        return false;
+    }
+
     if (m_backendMode == BackendMode::Native) {
         m_lastStats = Stats{};
         const bool ok = m_nativeExtractor &&
@@ -489,7 +563,8 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
         if (ok) {
             const XFeatFeatureSet rawLeft = leftFeatures;
             const std::vector<int> stableIndices =
-                m_havePrevStereoLeftFeatures ? ComputeTemporalStableIndices(m_prevStereoLeftFeatures, rawLeft)
+                m_havePrevStereoLeftFeatures
+                    ? ComputeTemporalStableIndices(m_prevStereoLeftFeatures, m_prevStereoLeftGray, rawLeft, leftGray8)
                                              : std::vector<int>{};
             if (stableIndices.size() >= kTemporalMinStableCount) {
                 std::vector<int> selected = stableIndices;
@@ -509,6 +584,7 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
                 }
             }
             m_prevStereoLeftFeatures = rawLeft;
+            m_prevStereoLeftGray = leftGray8.clone();
             m_havePrevStereoLeftFeatures = true;
         }
         return ok;
@@ -532,10 +608,9 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
     }
 
     const auto totalStartTp = std::chrono::steady_clock::now();
-    cv::Mat leftGray8;
     cv::Mat rightGray8;
     const auto prepareStartTp = totalStartTp;
-    if (!PrepareGrayImage(leftGray, leftGray8, err) || !PrepareGrayImage(rightGray, rightGray8, err)) {
+    if (!PrepareGrayImage(rightGray, rightGray8, err)) {
         return false;
     }
     const auto prepareEndTp = std::chrono::steady_clock::now();
@@ -583,7 +658,8 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
 
     const XFeatFeatureSet rawLeft = leftFeatures;
     const std::vector<int> stableIndices =
-        m_havePrevStereoLeftFeatures ? ComputeTemporalStableIndices(m_prevStereoLeftFeatures, rawLeft)
+        m_havePrevStereoLeftFeatures
+            ? ComputeTemporalStableIndices(m_prevStereoLeftFeatures, m_prevStereoLeftGray, rawLeft, leftGray8)
                                      : std::vector<int>{};
     if (stableIndices.size() >= kTemporalMinStableCount) {
         std::vector<int> selected = stableIndices;
@@ -603,6 +679,7 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
         }
     }
     m_prevStereoLeftFeatures = rawLeft;
+    m_prevStereoLeftGray = leftGray8.clone();
     m_havePrevStereoLeftFeatures = true;
 
     const auto totalEndTp = std::chrono::steady_clock::now();

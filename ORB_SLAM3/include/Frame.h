@@ -322,6 +322,8 @@ public:
     double mTimeStereoMatch;
 #endif
 
+    bool mbExternalStereoInjected{false};
+
 private:
     void LoadExternalStereoFeatures(const ExternalStereoFrameData &external);
     void LoadExternalMonoFeatures(const ExternalMonoFrameData &external);

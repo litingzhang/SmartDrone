@@ -31,6 +31,18 @@ struct ReplayPoseSample {
     bool poseValid{false};
     smartdrone::core::ports::PoseEstimate pose{};
     size_t imuSampleCount{0};
+    bool usedXFeatFrontend{false};
+    int xfeatRawLeftCount{0};
+    int xfeatRawRightCount{0};
+    int xfeatMatchedStereoCount{0};
+    int xfeatInjectedLeftCount{0};
+    int xfeatInjectedRightCount{0};
+    double xfeatWorkerTotalMs{0.0};
+    double xfeatStereoMatchMs{0.0};
+    double xfeatTotalMs{0.0};
+    int matchesInliers{0};
+    uint32_t trackedMapPointCount{0};
+    uint32_t localMapPointCount{0};
 };
 
 class ReplaySlamRunner {
