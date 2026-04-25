@@ -27,7 +27,7 @@ struct RemoteRuntimeConfig {
     int uvcEyeHeight{400};
     bool uvcPackedStereo{true};
     bool autoExposureEnabled{true};
-    int slamInputFps{0};
+    int slamInputFps{30};
     domain::SlamOperationMode slamOperationMode{domain::SlamOperationMode::Mapping};
     FeatureFrontend featureFrontend{FeatureFrontend::Orb};
     std::string udpIp;
@@ -74,7 +74,7 @@ struct MainRuntimeAliases {
 };
 
 struct LiveRuntimeTuning {
-    std::atomic<int> slamInputFps{0};
+    std::atomic<int> slamInputFps{30};
     std::atomic<uint8_t> slamOperationMode{static_cast<uint8_t>(domain::SlamOperationMode::Mapping)};
     std::atomic<uint8_t> featureFrontend{static_cast<uint8_t>(FeatureFrontend::Orb)};
     std::atomic<bool> sendImage{true};

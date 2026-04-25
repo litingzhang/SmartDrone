@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
+#include <future>
 #include <memory>
 #include <string>
 #include <vector>
@@ -20,6 +22,27 @@ enum class OrbInputMode : uint8_t {
     Stereo,
     MonoLeft,
     MonoRight,
+};
+
+struct LkStereoTrack {
+    cv::Point2f left;
+    cv::Point2f right;
+    float quality{0.0f};
+    uint32_t age{0};
+};
+
+struct LkFrameSnapshot {
+    uint64_t frameId{0};
+    cv::Mat left;
+    cv::Mat right;
+};
+
+struct LkXFeatSeedResult {
+    uint64_t frameId{0};
+    std::vector<LkStereoTrack> seeds;
+    XFeatFrontendClient::Stats stats{};
+    double matchMs{0.0};
+    double totalMs{0.0};
 };
 
 class OrbSlam3Engine final : public core::ports::ISlamEngine {
@@ -100,9 +123,12 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     mutable cv::Mat m_lkMap1y;
     mutable cv::Mat m_lkMap2x;
     mutable cv::Mat m_lkMap2y;
-    mutable cv::Ptr<cv::StereoSGBM> m_lkSgbm;
     mutable cv::Mat m_lkPrevLeft;
     mutable cv::Mat m_lkPrevRight;
+    mutable std::vector<LkStereoTrack> m_lkTracks;
+    mutable std::deque<LkFrameSnapshot> m_lkFrameHistory;
+    mutable std::future<LkXFeatSeedResult> m_lkXFeatFuture;
+    mutable uint64_t m_lkXFeatPendingFrameId{0};
     mutable Sophus::SE3f m_lkTwc{Sophus::SE3f()};
     mutable bool m_lkHavePrev{false};
     mutable uint32_t m_lkFrameCount{0};

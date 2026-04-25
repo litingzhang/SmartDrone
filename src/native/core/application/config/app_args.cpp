@@ -330,7 +330,7 @@ AppConfig ParseAppConfig(int argc, char **argv)
 
     config.runtime.offRejectNs = argReader.GetInt64("--off-reject-ns", 10'000'000);
     config.runtime.allowEmptyImu = argReader.HasFlag("--allow-empty-imu");
-    config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 0);
+    config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 30);
     config.runtime.slamOperationMode = ParseSlamOperationModeText(argReader.GetString("--slam-mode", "mapping"));
     config.runtime.featureFrontend = ParseFeatureFrontendText(argReader.GetString("--feature-frontend", "orb"));
     config.runtime.xfeatPython = argReader.GetString("--xfeat-python", "/usr/bin/python3");

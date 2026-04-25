@@ -108,7 +108,7 @@ public class MainActivity extends Activity {
     private static final int PAIR_MS_MAX = 20;
     private static final int SLAM_FPS_MIN = 1;
     private static final int SLAM_FPS_MAX = 120;
-    private static final int SLAM_FPS_DEFAULT = 100;
+    private static final int SLAM_FPS_DEFAULT = 30;
     private static final int TBC_TRANSLATION_MIN_MM = -300;
     private static final int TBC_TRANSLATION_MAX_MM = 300;
     private static final int TBC_ROLL_MIN_TENTH_DEG = -100;
@@ -332,6 +332,7 @@ public class MainActivity extends Activity {
     private String m_lastConfigText = "";
     private int[] m_availableSensorModes = new int[] {SENSOR_STEREO, SENSOR_STEREO_IMU, SENSOR_MONO, SENSOR_MONO_IMU};
     private final Paint m_featurePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint m_lkGridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Map<Long, PendingAckAction> m_pendingAckActions = new HashMap<>();
     private final Set<String> m_pendingUiKeys = new HashSet<>();
     private static final class VideoAssembly {
@@ -2645,12 +2646,32 @@ public class MainActivity extends Activity {
         Canvas canvas = new Canvas(mutable);
         float scaleX = (featureFrame.width > 0) ? ((float)mutable.getWidth() / (float)featureFrame.width) : 1.0f;
         float scaleY = (featureFrame.height > 0) ? ((float)mutable.getHeight() / (float)featureFrame.height) : 1.0f;
+        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK) {
+            drawLkGrid(canvas, mutable.getWidth(), mutable.getHeight());
+        }
         for (int i = 0; i < featureFrame.count; ++i) {
             float x = featureFrame.xs[i] * scaleX;
             float y = featureFrame.ys[i] * scaleY;
             canvas.drawCircle(x, y, 5.0f, m_featurePaint);
         }
         return mutable;
+    }
+
+    private void drawLkGrid(Canvas canvas, int width, int height)
+    {
+        if (canvas == null || width <= 0 || height <= 0) {
+            return;
+        }
+        final int cols = 8;
+        final int rows = 6;
+        for (int col = 1; col < cols; ++col) {
+            float x = width * (col / (float)cols);
+            canvas.drawLine(x, 0.0f, x, height, m_lkGridPaint);
+        }
+        for (int row = 1; row < rows; ++row) {
+            float y = height * (row / (float)rows);
+            canvas.drawLine(0.0f, y, width, y, m_lkGridPaint);
+        }
     }
 
     private static boolean isTlvPacket(byte[] rx)
@@ -2900,6 +2921,9 @@ public class MainActivity extends Activity {
         m_featurePaint.setColor(Color.GREEN);
         m_featurePaint.setStyle(Paint.Style.STROKE);
         m_featurePaint.setStrokeWidth(2.0f);
+        m_lkGridPaint.setColor(Color.argb(150, 255, 255, 0));
+        m_lkGridPaint.setStyle(Paint.Style.STROKE);
+        m_lkGridPaint.setStrokeWidth(1.5f);
 
         m_btnCleanCalib = findViewById(R.id.btnCleanCalib);
 

@@ -83,7 +83,7 @@ struct ImuRuntimeConfig {
 struct RuntimeConfig {
     int64_t offRejectNs{10'000'000};
     bool allowEmptyImu{false};
-    int slamInputFps{0};
+    int slamInputFps{30};
     smartdrone::core::domain::SlamOperationMode slamOperationMode{smartdrone::core::domain::SlamOperationMode::Mapping};
     FeatureFrontend featureFrontend{FeatureFrontend::Orb};
     std::string xfeatPython{"/usr/bin/python3"};

@@ -230,7 +230,9 @@ bool SlamSessionRuntime::Start()
         m_stereoBodyExtrinsics = LoadStereoBodyExtrinsics(m_effectiveSettingsPath);
     }
 
-    if (m_aliases.featureFrontend == FeatureFrontend::XFeat && !m_cfg.app.runtime.xfeatRepo.empty() &&
+    const bool needsXFeatWorker =
+        m_aliases.featureFrontend == FeatureFrontend::XFeat || m_aliases.featureFrontend == FeatureFrontend::LK;
+    if (needsXFeatWorker && !m_cfg.app.runtime.xfeatRepo.empty() &&
         !m_cfg.app.runtime.xfeatWorkerScript.empty()) {
         std::string xfeatErr;
         if (m_xfeatFrontendClient.Start(m_cfg.app.runtime.xfeatPython, m_cfg.app.runtime.xfeatWorkerScript,
@@ -241,13 +243,17 @@ bool SlamSessionRuntime::Start()
                       << " device=" << m_cfg.app.runtime.xfeatDevice
                       << " top_k=" << m_cfg.app.runtime.xfeatTopK
                       << " max_points=" << m_cfg.app.runtime.xfeatMaxPoints << "\n";
-        } else if (m_aliases.featureFrontend == FeatureFrontend::XFeat) {
+        } else if (needsXFeatWorker) {
             std::cerr << "[slam] warning: xfeat worker start failed: " << xfeatErr << "\n";
         }
     }
     if (m_aliases.featureFrontend == FeatureFrontend::XFeat) {
         std::cerr << "[slam] feature_frontend=xfeat selected; experimental external XFeat feature injection is enabled "
                      "when the worker is available\n";
+    }
+    if (m_aliases.featureFrontend == FeatureFrontend::LK) {
+        std::cerr << "[slam] feature_frontend=lk selected; async XFeat stereo seeds run at input-frame cadence "
+                     "while LK pulls candidates on demand into the current 48-cell grid\n";
     }
     if (m_aliases.udpEnable) {
         auto destinationResolver = [this](sockaddr_in &dst) {

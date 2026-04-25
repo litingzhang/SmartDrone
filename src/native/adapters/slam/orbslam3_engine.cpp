@@ -1,6 +1,7 @@
 #include "adapters/slam/orbslam3_engine.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -63,6 +64,16 @@ constexpr float kLkMaxFlowPx = 96.0f;
 constexpr float kLkMaxStepMeters = 0.35f;
 constexpr int kLkMinPnPPoints = 12;
 constexpr int kLkMinPnPInliers = 10;
+constexpr int kLkGridCols = 8;
+constexpr int kLkGridRows = 6;
+constexpr int kLkGridCellCount = kLkGridCols * kLkGridRows;
+constexpr int kLkTargetTracksPerCell = 8;
+constexpr int kLkMinTracksPerCell = 4;
+constexpr size_t kLkMaxTracks = 384;
+constexpr uint64_t kLkAsyncMaxSeedTrackFrames = 8;
+constexpr size_t kLkFrameHistoryMaxSize = 64;
+constexpr float kLkMinSeedDistancePx = 5.0f;
+constexpr float kLkMinCandidateQuality = 0.18f;
 
 struct StereoMatchPair {
     int leftIndex{-1};
@@ -70,6 +81,7 @@ struct StereoMatchPair {
     float descriptorScore{-std::numeric_limits<float>::infinity()};
     float zncc{-1.0f};
     float disparity{0.0f};
+    float quality{0.0f};
 };
 
 struct TemporalStereoPair {
@@ -278,6 +290,20 @@ bool IsStereoPairGeometricallyValid(const cv::Point2f &leftPt, const cv::Point2f
     const float disparity = leftPt.x - rightPt.x;
     return yDelta <= kStereoMaxEpipolarDeltaPx && disparity >= kStereoMinDisparityPx &&
            disparity <= kStereoMaxDisparityPx;
+}
+
+float ComputeStereoCandidateQuality(float descriptorScore, float zncc, float epipolarErrorPx, float disparity)
+{
+    const float descriptorTerm = std::clamp((descriptorScore - kStereoMinDescriptorSimilarity) /
+                                                std::max(1e-3f, 1.0f - kStereoMinDescriptorSimilarity),
+                                            0.0f, 1.0f);
+    const float znccTerm = std::clamp((zncc + 1.0f) * 0.5f, 0.0f, 1.0f);
+    const float epipolarPenalty = std::clamp(epipolarErrorPx / std::max(1e-3f, kStereoMaxEpipolarDeltaPx), 0.0f, 1.0f);
+    const float disparityPenalty =
+        (disparity < 2.0f || disparity > kStereoMaxDisparityPx * 0.85f) ? 0.25f : 0.0f;
+    return std::clamp(0.50f * descriptorTerm + 0.35f * znccTerm + 0.15f * (1.0f - epipolarPenalty) -
+                          disparityPenalty,
+                      0.0f, 1.0f);
 }
 
 bool TrackPointsWithForwardBackward(const cv::Mat &prevGray, const cv::Mat &currGray,
@@ -677,7 +703,12 @@ std::vector<StereoMatchPair> MatchStereoPairs(const XFeatFeatureSet &left, const
         }
 
         bestZncc = zncc;
-        bestForLeft[static_cast<size_t>(li)] = StereoMatchPair{li, bestRi, bestScore, bestZncc, bestDisparity};
+        const float epipolarError = std::fabs(leftPt.y - right.keypoints[static_cast<size_t>(bestRi)].y);
+        const float quality = ComputeStereoCandidateQuality(bestScore, bestZncc, epipolarError, bestDisparity);
+        if (quality < kLkMinCandidateQuality) {
+            continue;
+        }
+        bestForLeft[static_cast<size_t>(li)] = StereoMatchPair{li, bestRi, bestScore, bestZncc, bestDisparity, quality};
 
         if (IsBetterRightCandidate(bestScore, bestZncc, bestLeftScore[static_cast<size_t>(bestRi)],
                                    bestLeftZncc[static_cast<size_t>(bestRi)])) {
@@ -705,6 +736,9 @@ std::vector<StereoMatchPair> MatchStereoPairs(const XFeatFeatureSet &left, const
         }
         if (a.zncc != b.zncc) {
             return a.zncc > b.zncc;
+        }
+        if (a.quality != b.quality) {
+            return a.quality > b.quality;
         }
         return a.disparity < b.disparity;
     });
@@ -758,6 +792,266 @@ void RemapKeypointsToSource(std::vector<cv::Point2f> &keypoints, float scaleX, f
     for (cv::Point2f &pt : keypoints) {
         pt.x *= scaleX;
         pt.y *= scaleY;
+    }
+}
+
+int LkGridCellForPoint(const cv::Point2f &pt, const cv::Size &size)
+{
+    if (size.width <= 0 || size.height <= 0 || pt.x < 0.0f || pt.y < 0.0f ||
+        pt.x >= static_cast<float>(size.width) || pt.y >= static_cast<float>(size.height)) {
+        return -1;
+    }
+    const int cellWidth = std::max(1, (size.width + kLkGridCols - 1) / kLkGridCols);
+    const int cellHeight = std::max(1, (size.height + kLkGridRows - 1) / kLkGridRows);
+    const int col = std::clamp(static_cast<int>(pt.x) / cellWidth, 0, kLkGridCols - 1);
+    const int row = std::clamp(static_cast<int>(pt.y) / cellHeight, 0, kLkGridRows - 1);
+    return row * kLkGridCols + col;
+}
+
+std::array<int, kLkGridCellCount> CountLkTracksByCell(const std::vector<LkStereoTrack> &tracks, const cv::Size &size)
+{
+    std::array<int, kLkGridCellCount> counts{};
+    for (const LkStereoTrack &track : tracks) {
+        const int cell = LkGridCellForPoint(track.left, size);
+        if (cell >= 0) {
+            ++counts[static_cast<size_t>(cell)];
+        }
+    }
+    return counts;
+}
+
+std::vector<LkStereoTrack> SelectLkTracksGridBalanced(const std::vector<LkStereoTrack> &tracks, const cv::Size &size)
+{
+    if (tracks.empty() || size.area() <= 0) {
+        return tracks;
+    }
+
+    std::vector<LkStereoTrack> ranked = tracks;
+    std::sort(ranked.begin(), ranked.end(), [](const LkStereoTrack &lhs, const LkStereoTrack &rhs) {
+        if (lhs.quality != rhs.quality) {
+            return lhs.quality > rhs.quality;
+        }
+        return lhs.age < rhs.age;
+    });
+
+    std::array<int, kLkGridCellCount> counts{};
+    std::vector<LkStereoTrack> selected;
+    selected.reserve(std::min(kLkMaxTracks, ranked.size()));
+    for (const LkStereoTrack &track : ranked) {
+        if (selected.size() >= kLkMaxTracks) {
+            break;
+        }
+        const int cell = LkGridCellForPoint(track.left, size);
+        if (cell < 0) {
+            continue;
+        }
+        int &cellCount = counts[static_cast<size_t>(cell)];
+        if (cellCount >= kLkTargetTracksPerCell) {
+            continue;
+        }
+        selected.push_back(track);
+        ++cellCount;
+    }
+    return selected;
+}
+
+bool LkTrackNearExisting(const cv::Point2f &left, const cv::Point2f &right, const std::vector<LkStereoTrack> &tracks)
+{
+    const float minDistSq = kLkMinSeedDistancePx * kLkMinSeedDistancePx;
+    for (const LkStereoTrack &track : tracks) {
+        const cv::Point2f leftDelta = track.left - left;
+        const cv::Point2f rightDelta = track.right - right;
+        if ((leftDelta.x * leftDelta.x + leftDelta.y * leftDelta.y) <= minDistSq &&
+            (rightDelta.x * rightDelta.x + rightDelta.y * rightDelta.y) <= minDistSq) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<LkStereoTrack> BuildLkXFeatStereoSeeds(XFeatFrontendClient *client, const cv::Mat &leftGray,
+                                                   const cv::Mat &rightGray, int maxWidth, int maxHeight,
+                                                   XFeatFrontendClient::Stats *stats, double *matchMs)
+{
+    std::vector<LkStereoTrack> seeds;
+    if (client == nullptr || !client->Running() || leftGray.empty() || rightGray.empty()) {
+        return seeds;
+    }
+
+    float leftScaleX = 1.0f;
+    float leftScaleY = 1.0f;
+    float rightScaleX = 1.0f;
+    float rightScaleY = 1.0f;
+    const cv::Mat leftInput = BuildXFeatInputImage(leftGray, maxWidth, maxHeight, leftScaleX, leftScaleY);
+    const cv::Mat rightInput = BuildXFeatInputImage(rightGray, maxWidth, maxHeight, rightScaleX, rightScaleY);
+    XFeatFeatureSet leftFeatures;
+    XFeatFeatureSet rightFeatures;
+    std::string err;
+    if (!client->DetectAndComputeStereo(leftInput, rightInput, leftFeatures, rightFeatures, &err)) {
+        return seeds;
+    }
+    if (stats != nullptr) {
+        *stats = client->LastStats();
+    }
+    RemapKeypointsToSource(leftFeatures.keypoints, leftScaleX, leftScaleY);
+    RemapKeypointsToSource(rightFeatures.keypoints, rightScaleX, rightScaleY);
+
+    const auto matchStartTp = std::chrono::steady_clock::now();
+    const std::vector<StereoMatchPair> rawMatches = MatchStereoPairs(leftFeatures, rightFeatures, leftGray, rightGray);
+    const std::vector<StereoMatchPair> matches = FilterStereoPairsByDisparityConsistency(rawMatches);
+    if (matchMs != nullptr) {
+        *matchMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - matchStartTp).count();
+    }
+    seeds.reserve(matches.size());
+    for (const StereoMatchPair &match : matches) {
+        if (match.leftIndex < 0 || match.rightIndex < 0 ||
+            static_cast<size_t>(match.leftIndex) >= leftFeatures.keypoints.size() ||
+            static_cast<size_t>(match.rightIndex) >= rightFeatures.keypoints.size()) {
+            continue;
+        }
+        seeds.push_back(LkStereoTrack{leftFeatures.keypoints[static_cast<size_t>(match.leftIndex)],
+                                      rightFeatures.keypoints[static_cast<size_t>(match.rightIndex)], match.quality,
+                                      0});
+    }
+    std::sort(seeds.begin(), seeds.end(), [](const LkStereoTrack &lhs, const LkStereoTrack &rhs) {
+        return lhs.quality > rhs.quality;
+    });
+    return seeds;
+}
+
+LkXFeatSeedResult BuildLkXFeatStereoSeedResult(uint64_t frameId, XFeatFrontendClient *client, const cv::Mat &leftGray,
+                                               const cv::Mat &rightGray, int maxWidth, int maxHeight)
+{
+    LkXFeatSeedResult result{};
+    result.frameId = frameId;
+    const auto startTp = std::chrono::steady_clock::now();
+    result.seeds = BuildLkXFeatStereoSeeds(client, leftGray, rightGray, maxWidth, maxHeight, &result.stats,
+                                           &result.matchMs);
+    result.totalMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - startTp).count();
+    return result;
+}
+
+void PushLkFrameSnapshot(std::deque<LkFrameSnapshot> &history, uint64_t frameId, const cv::Mat &left,
+                         const cv::Mat &right)
+{
+    if (left.empty() || right.empty()) {
+        return;
+    }
+    if (!history.empty() && history.back().frameId == frameId) {
+        history.back().left = left.clone();
+        history.back().right = right.clone();
+        return;
+    }
+    history.push_back(LkFrameSnapshot{frameId, left.clone(), right.clone()});
+    while (history.size() > kLkFrameHistoryMaxSize) {
+        history.pop_front();
+    }
+}
+
+std::vector<LkStereoTrack> TrackLkSeedsToFrame(const LkXFeatSeedResult &result,
+                                               const std::deque<LkFrameSnapshot> &history, uint64_t currentFrameId)
+{
+    if (result.seeds.empty() || history.empty()) {
+        return {};
+    }
+
+    size_t startIndex = history.size();
+    size_t endIndex = history.size();
+    for (size_t i = 0; i < history.size(); ++i) {
+        if (history[i].frameId == result.frameId) {
+            startIndex = i;
+        }
+        if (history[i].frameId == currentFrameId) {
+            endIndex = i;
+        }
+    }
+    if (startIndex >= history.size() || endIndex >= history.size() || startIndex > endIndex) {
+        return {};
+    }
+    if (startIndex == endIndex) {
+        return result.seeds;
+    }
+
+    std::vector<LkStereoTrack> tracks = result.seeds;
+    for (size_t frameIndex = startIndex + 1; frameIndex <= endIndex && !tracks.empty(); ++frameIndex) {
+        const LkFrameSnapshot &prev = history[frameIndex - 1];
+        const LkFrameSnapshot &curr = history[frameIndex];
+        std::vector<cv::Point2f> prevLeft;
+        std::vector<cv::Point2f> prevRight;
+        prevLeft.reserve(tracks.size());
+        prevRight.reserve(tracks.size());
+        for (const LkStereoTrack &track : tracks) {
+            prevLeft.push_back(track.left);
+            prevRight.push_back(track.right);
+        }
+
+        std::vector<cv::Point2f> currLeft;
+        std::vector<cv::Point2f> currRight;
+        std::vector<uchar> leftStatus;
+        std::vector<uchar> rightStatus;
+        if (!TrackPointsWithForwardBackward(prev.left, curr.left, prevLeft, currLeft, leftStatus) ||
+            !TrackPointsWithForwardBackward(prev.right, curr.right, prevRight, currRight, rightStatus)) {
+            return {};
+        }
+
+        cv::Mat currLeft32f;
+        cv::Mat currRight32f;
+        curr.left.convertTo(currLeft32f, CV_32F);
+        curr.right.convertTo(currRight32f, CV_32F);
+
+        std::vector<LkStereoTrack> nextTracks;
+        nextTracks.reserve(tracks.size());
+        for (size_t i = 0; i < tracks.size() && i < currLeft.size() && i < currRight.size(); ++i) {
+            if (i >= leftStatus.size() || i >= rightStatus.size() || !leftStatus[i] || !rightStatus[i]) {
+                continue;
+            }
+            const cv::Point2f &left = currLeft[i];
+            const cv::Point2f &right = currRight[i];
+            if (!IsStereoPairGeometricallyValid(left, right)) {
+                continue;
+            }
+            float zncc = -1.0f;
+            if (!ComputePatchZncc(currLeft32f, left, currRight32f, right, zncc) ||
+                zncc < kTemporalStereoMinZnccScore) {
+                continue;
+            }
+            const float quality =
+                std::clamp(tracks[i].quality * 0.90f + std::clamp((zncc + 1.0f) * 0.5f, 0.0f, 1.0f) * 0.10f,
+                           0.0f, 1.0f);
+            nextTracks.push_back(LkStereoTrack{left, right, quality, tracks[i].age + 1});
+        }
+        tracks = SelectLkTracksGridBalanced(nextTracks, curr.left.size());
+    }
+    return tracks;
+}
+
+void AppendLkSeedsForDegradedCells(const std::vector<LkStereoTrack> &seeds, const cv::Size &size,
+                                   std::vector<LkStereoTrack> &tracks)
+{
+    if (seeds.empty() || size.area() <= 0) {
+        return;
+    }
+    auto counts = CountLkTracksByCell(tracks, size);
+    for (const LkStereoTrack &seed : seeds) {
+        if (tracks.size() >= kLkMaxTracks) {
+            return;
+        }
+        const int cell = LkGridCellForPoint(seed.left, size);
+        if (cell < 0) {
+            continue;
+        }
+        int &cellCount = counts[static_cast<size_t>(cell)];
+        if (cellCount >= kLkTargetTracksPerCell) {
+            continue;
+        }
+        if (cellCount >= kLkMinTracksPerCell && tracks.size() > kLkGridCellCount * kLkMinTracksPerCell) {
+            continue;
+        }
+        if (LkTrackNearExisting(seed.left, seed.right, tracks)) {
+            continue;
+        }
+        tracks.push_back(seed);
+        ++cellCount;
     }
 }
 
@@ -894,6 +1188,10 @@ OrbSlam3Engine::OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, OrbInp
 
 bool OrbSlam3Engine::Start()
 {
+    if (m_lkXFeatFuture.valid()) {
+        m_lkXFeatFuture.wait();
+        m_lkXFeatFuture = std::future<LkXFeatSeedResult>{};
+    }
     m_prevStereoLeftGray.release();
     m_prevStereoRightGray.release();
     m_prevInjectedStereoLeftPoints.clear();
@@ -903,6 +1201,9 @@ bool OrbSlam3Engine::Start()
     m_lastStablePose = core::ports::PoseEstimate{};
     m_haveLastStablePose = false;
     m_lastStableTimestampSec = 0.0;
+    m_lkTracks.clear();
+    m_lkFrameHistory.clear();
+    m_lkXFeatPendingFrameId = 0;
     m_stableVelX = 0.0f;
     m_stableVelY = 0.0f;
     m_stableVelZ = 0.0f;
@@ -935,6 +1236,10 @@ void OrbSlam3Engine::SetOperationMode(core::domain::SlamOperationMode mode)
 void OrbSlam3Engine::SetFeatureFrontend(FeatureFrontend frontend)
 {
     if (m_featureFrontend != frontend) {
+        if (m_lkXFeatFuture.valid()) {
+            m_lkXFeatFuture.wait();
+            m_lkXFeatFuture = std::future<LkXFeatSeedResult>{};
+        }
         m_prevStereoLeftGray.release();
         m_prevStereoRightGray.release();
         m_prevInjectedStereoLeftPoints.clear();
@@ -943,6 +1248,9 @@ void OrbSlam3Engine::SetFeatureFrontend(FeatureFrontend frontend)
         m_havePrevInjectedStereoExternal = false;
         m_lkPrevLeft.release();
         m_lkPrevRight.release();
+        m_lkTracks.clear();
+        m_lkFrameHistory.clear();
+        m_lkXFeatPendingFrameId = 0;
         m_lkTwc = Sophus::SE3f();
         m_lkHavePrev = false;
         m_lkFrameCount = 0;
@@ -1052,6 +1360,19 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
     out.poseValid = true;
     out.pose.valid = true;
     out.usedXFeatFrontend = false;
+    m_lastXFeatRawLeftCount = 0;
+    m_lastXFeatRawRightCount = 0;
+    m_lastXFeatMatchedStereoCount = 0;
+    m_lastXFeatInjectedLeftCount = 0;
+    m_lastXFeatInjectedRightCount = 0;
+    m_lastXFeatPrepareMs = 0.0;
+    m_lastXFeatWorkerWriteMs = 0.0;
+    m_lastXFeatWorkerReadMs = 0.0;
+    m_lastXFeatWorkerTotalMs = 0.0;
+    m_lastXFeatStereoMatchMs = 0.0;
+    m_lastXFeatTotalMs = 0.0;
+    m_lastXFeatImageCount = 0;
+    m_lastXFeatPayloadBytes = 0;
 
     cv::Mat leftGray = EnsureGray8(input.stereo.left.gray);
     cv::Mat rightGray = EnsureGray8(input.stereo.right.gray);
@@ -1069,60 +1390,148 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
         cv::remap(leftGray, leftRect, m_lkMap1x, m_lkMap1y, cv::INTER_LINEAR);
         cv::remap(rightGray, rightRect, m_lkMap2x, m_lkMap2y, cv::INTER_LINEAR);
     }
+    PushLkFrameSnapshot(m_lkFrameHistory, input.frameId, leftRect, rightRect);
+
+    auto consumeReadyXFeatSeeds = [&]() {
+        if (!m_lkXFeatFuture.valid() ||
+            m_lkXFeatFuture.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+            return false;
+        }
+        LkXFeatSeedResult result = m_lkXFeatFuture.get();
+        m_lkXFeatPendingFrameId = 0;
+        m_lastXFeatPrepareMs = result.stats.prepareMs;
+        m_lastXFeatWorkerWriteMs = result.stats.writeMs;
+        m_lastXFeatWorkerReadMs = result.stats.readMs;
+        m_lastXFeatWorkerTotalMs = result.stats.totalMs;
+        m_lastXFeatStereoMatchMs = result.matchMs;
+        m_lastXFeatImageCount = result.stats.imageCount;
+        m_lastXFeatPayloadBytes = result.stats.payloadBytes;
+        m_lastXFeatRawLeftCount = static_cast<int>(result.seeds.size());
+        m_lastXFeatRawRightCount = static_cast<int>(result.seeds.size());
+        m_lastXFeatMatchedStereoCount = static_cast<int>(result.seeds.size());
+        if (result.seeds.empty()) {
+            return false;
+        }
+        if (m_lkTracks.empty() && input.frameId > result.frameId + kLkAsyncMaxSeedTrackFrames) {
+            std::cerr << "[lk_vo] discard stale async xfeat seeds source_frame=" << result.frameId
+                      << " current_frame=" << input.frameId << " seeds=" << result.seeds.size() << "\n";
+            return false;
+        }
+
+        std::vector<LkStereoTrack> seeds = TrackLkSeedsToFrame(result, m_lkFrameHistory, input.frameId);
+        if (seeds.empty()) {
+            return false;
+        }
+        const size_t before = m_lkTracks.size();
+        AppendLkSeedsForDegradedCells(seeds, leftRect.size(), m_lkTracks);
+        m_lastXFeatInjectedLeftCount = static_cast<int>(m_lkTracks.size() - before);
+        m_lastXFeatInjectedRightCount = m_lastXFeatInjectedLeftCount;
+        m_lastXFeatTotalMs = result.totalMs;
+        out.usedXFeatFrontend = m_lastXFeatInjectedLeftCount > 0;
+        return m_lastXFeatInjectedLeftCount > 0;
+    };
+
+    auto maybeLaunchXFeat = [&]() {
+        if (m_lkXFeatFuture.valid() || m_xfeatFrontendClient == nullptr || !m_xfeatFrontendClient->Running()) {
+            return false;
+        }
+        XFeatFrontendClient *client = m_xfeatFrontendClient;
+        const cv::Mat asyncLeft = leftRect.clone();
+        const cv::Mat asyncRight = rightRect.clone();
+        const int maxWidth = m_xfeatInputMaxWidth;
+        const int maxHeight = m_xfeatInputMaxHeight;
+        const uint64_t frameId = input.frameId;
+        m_lkXFeatPendingFrameId = frameId;
+        m_lkXFeatFuture = std::async(std::launch::async, [client, frameId, asyncLeft, asyncRight, maxWidth, maxHeight]() {
+            return BuildLkXFeatStereoSeedResult(frameId, client, asyncLeft, asyncRight, maxWidth, maxHeight);
+        });
+        return true;
+    };
+    consumeReadyXFeatSeeds();
 
     if (!m_lkHavePrev) {
+        maybeLaunchXFeat();
+        m_lkTracks = SelectLkTracksGridBalanced(m_lkTracks, leftRect.size());
         m_lkPrevLeft = leftRect.clone();
         m_lkPrevRight = rightRect.clone();
         m_lkTwc = Sophus::SE3f();
         m_lkHavePrev = true;
         m_lkFrameCount = 1;
-    } else {
-        if (!m_lkSgbm) {
-            const int numDisparities = std::max(16, ((leftRect.cols / 8 + 15) / 16) * 16);
-            m_lkSgbm = cv::StereoSGBM::create(0, numDisparities, 5, 8 * 5 * 5, 32 * 5 * 5, 1, 31, 8, 60, 2,
-                                                 cv::StereoSGBM::MODE_SGBM_3WAY);
+        if (extractFeatures) {
+            out.leftFeatures.reserve(m_lkTracks.size());
+            out.rightFeatures.reserve(m_lkTracks.size());
+            for (const LkStereoTrack &track : m_lkTracks) {
+                out.leftFeatures.push_back(track.left);
+                out.rightFeatures.push_back(track.right);
+            }
         }
-        cv::Mat disp16;
-        m_lkSgbm->compute(m_lkPrevLeft, m_lkPrevRight, disp16);
-        cv::Mat disp;
-        disp16.convertTo(disp, CV_32F, 1.0 / 16.0);
-
+    } else {
+        m_lkTracks = SelectLkTracksGridBalanced(m_lkTracks, m_lkPrevLeft.size());
         std::vector<cv::Point2f> pts0;
-        cv::goodFeaturesToTrack(m_lkPrevLeft, pts0, 900, 0.01, 8.0, cv::Mat(), 7, false, 0.04);
-        std::vector<cv::Point2f> pts1;
-        std::vector<uint8_t> status;
-        std::vector<float> err;
+        pts0.reserve(m_lkTracks.size());
+        for (const LkStereoTrack &track : m_lkTracks) {
+            pts0.push_back(track.left);
+        }
+        std::vector<cv::Point2f> leftPts1;
+        std::vector<cv::Point2f> rightPts1;
+        std::vector<uchar> status;
+        std::vector<uchar> rightStatus;
         if (!pts0.empty()) {
-            cv::calcOpticalFlowPyrLK(m_lkPrevLeft, leftRect, pts0, pts1, status, err, cv::Size(21, 21), 3);
+            std::vector<cv::Point2f> rightPts0;
+            rightPts0.reserve(m_lkTracks.size());
+            for (const LkStereoTrack &track : m_lkTracks) {
+                rightPts0.push_back(track.right);
+            }
+            (void)TrackPointsWithForwardBackward(m_lkPrevLeft, leftRect, pts0, leftPts1, status);
+            (void)TrackPointsWithForwardBackward(m_lkPrevRight, rightRect, rightPts0, rightPts1, rightStatus);
         }
 
         std::vector<cv::Point3f> objectPoints;
         std::vector<cv::Point2f> imagePoints;
         objectPoints.reserve(pts0.size());
         imagePoints.reserve(pts0.size());
-        for (size_t i = 0; i < pts0.size() && i < pts1.size(); ++i) {
-            if (!status[i]) {
+        std::vector<LkStereoTrack> trackedTracks;
+        trackedTracks.reserve(m_lkTracks.size());
+        cv::Mat leftRect32f;
+        cv::Mat rightRect32f;
+        leftRect.convertTo(leftRect32f, CV_32F);
+        rightRect.convertTo(rightRect32f, CV_32F);
+        for (size_t i = 0; i < m_lkTracks.size() && i < leftPts1.size() && i < rightPts1.size(); ++i) {
+            if (i >= status.size() || i >= rightStatus.size() || !status[i] || !rightStatus[i]) {
                 continue;
             }
-            const cv::Point2f &p0 = pts0[i];
-            const cv::Point2f &p1 = pts1[i];
-            if (p0.x < 1.0f || p0.y < 1.0f || p0.x >= disp.cols - 1 || p0.y >= disp.rows - 1 ||
-                p1.x < 1.0f || p1.y < 1.0f || p1.x >= leftRect.cols - 1 || p1.y >= leftRect.rows - 1) {
+            const LkStereoTrack &prevTrack = m_lkTracks[i];
+            const cv::Point2f &p0 = prevTrack.left;
+            const cv::Point2f &prevRight = prevTrack.right;
+            const cv::Point2f &p1 = leftPts1[i];
+            const cv::Point2f &right1 = rightPts1[i];
+            if (p0.x < 1.0f || p0.y < 1.0f || p0.x >= m_lkPrevLeft.cols - 1 || p0.y >= m_lkPrevLeft.rows - 1 ||
+                p1.x < 1.0f || p1.y < 1.0f || p1.x >= leftRect.cols - 1 || p1.y >= leftRect.rows - 1 ||
+                right1.x < 1.0f || right1.y < 1.0f || right1.x >= rightRect.cols - 1 ||
+                right1.y >= rightRect.rows - 1) {
                 continue;
             }
             if (cv::norm(p1 - p0) > kLkMaxFlowPx) {
                 continue;
             }
-            const float d = disp.at<float>(static_cast<int>(std::lround(p0.y)), static_cast<int>(std::lround(p0.x)));
-            if (!(d > 0.5f)) {
+            if (!IsStereoPairGeometricallyValid(p1, right1)) {
                 continue;
             }
+            float zncc = -1.0f;
+            if (!ComputePatchZncc(leftRect32f, p1, rightRect32f, right1, zncc) || zncc < kTemporalStereoMinZnccScore) {
+                continue;
+            }
+            const float d = p0.x - prevRight.x;
             const float z = m_lkFx * m_lkBaseline / d;
             if (!(z > 0.05f) || z > kLkMaxDepthMeters || !std::isfinite(z)) {
                 continue;
             }
             objectPoints.emplace_back((p0.x - m_lkCx) * z / m_lkFx, (p0.y - m_lkCy) * z / m_lkFy, z);
             imagePoints.push_back(p1);
+            const float trackedQuality =
+                std::clamp(prevTrack.quality * 0.92f + std::clamp((zncc + 1.0f) * 0.5f, 0.0f, 1.0f) * 0.08f,
+                           0.0f, 1.0f);
+            trackedTracks.push_back(LkStereoTrack{p1, right1, trackedQuality, prevTrack.age + 1});
         }
 
         int inlierCount = 0;
@@ -1133,6 +1542,17 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
                                                0.995, inliers, cv::SOLVEPNP_EPNP);
             inlierCount = inliers.rows;
             if (ok && inlierCount >= kLkMinPnPInliers) {
+                std::vector<LkStereoTrack> inlierTracks;
+                inlierTracks.reserve(static_cast<size_t>(inlierCount));
+                for (int row = 0; row < inliers.rows; ++row) {
+                    const int idx = inliers.at<int>(row, 0);
+                    if (idx >= 0 && static_cast<size_t>(idx) < trackedTracks.size()) {
+                        inlierTracks.push_back(trackedTracks[static_cast<size_t>(idx)]);
+                    }
+                }
+                if (!inlierTracks.empty()) {
+                    trackedTracks = std::move(inlierTracks);
+                }
                 cv::Mat Rcv;
                 cv::Rodrigues(rvec, Rcv);
                 Eigen::Matrix3f R = Eigen::Matrix3f::Identity();
@@ -1153,8 +1573,17 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
         out.matchesInliers = inlierCount;
         out.trackedMapPointCount = static_cast<uint32_t>(inlierCount);
         out.localMapPointCount = static_cast<uint32_t>(objectPoints.size());
+        m_lkTracks = SelectLkTracksGridBalanced(trackedTracks, leftRect.size());
+        consumeReadyXFeatSeeds();
+        maybeLaunchXFeat();
+        m_lkTracks = SelectLkTracksGridBalanced(m_lkTracks, leftRect.size());
         if (extractFeatures) {
-            out.leftFeatures = std::move(pts1);
+            out.leftFeatures.reserve(m_lkTracks.size());
+            out.rightFeatures.reserve(m_lkTracks.size());
+            for (const LkStereoTrack &track : m_lkTracks) {
+                out.leftFeatures.push_back(track.left);
+                out.rightFeatures.push_back(track.right);
+            }
         }
         m_lkPrevLeft = leftRect.clone();
         m_lkPrevRight = rightRect.clone();
@@ -1162,6 +1591,20 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
     }
 
     const Eigen::Vector3f t = m_lkTwc.translation();
+    out.usedXFeatFrontend = out.usedXFeatFrontend || m_lastXFeatInjectedLeftCount > 0;
+    out.xfeatRawLeftCount = m_lastXFeatRawLeftCount;
+    out.xfeatRawRightCount = m_lastXFeatRawRightCount;
+    out.xfeatMatchedStereoCount = m_lastXFeatMatchedStereoCount;
+    out.xfeatInjectedLeftCount = m_lastXFeatInjectedLeftCount;
+    out.xfeatInjectedRightCount = m_lastXFeatInjectedRightCount;
+    out.xfeatPrepareMs = m_lastXFeatPrepareMs;
+    out.xfeatWorkerWriteMs = m_lastXFeatWorkerWriteMs;
+    out.xfeatWorkerReadMs = m_lastXFeatWorkerReadMs;
+    out.xfeatWorkerTotalMs = m_lastXFeatWorkerTotalMs;
+    out.xfeatStereoMatchMs = m_lastXFeatStereoMatchMs;
+    out.xfeatTotalMs = m_lastXFeatTotalMs;
+    out.xfeatImageCount = m_lastXFeatImageCount;
+    out.xfeatPayloadBytes = m_lastXFeatPayloadBytes;
     const Eigen::Quaternionf q(m_lkTwc.so3().unit_quaternion());
     out.pose.x = t.x();
     out.pose.y = t.y();
@@ -1175,6 +1618,10 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
 
 void OrbSlam3Engine::Stop()
 {
+    if (m_lkXFeatFuture.valid()) {
+        m_lkXFeatFuture.wait();
+        m_lkXFeatFuture = std::future<LkXFeatSeedResult>{};
+    }
     m_prevStereoLeftGray.release();
     m_prevStereoRightGray.release();
     m_prevInjectedStereoLeftPoints.clear();
@@ -1184,6 +1631,9 @@ void OrbSlam3Engine::Stop()
     m_lastStablePose = core::ports::PoseEstimate{};
     m_haveLastStablePose = false;
     m_lastStableTimestampSec = 0.0;
+    m_lkTracks.clear();
+    m_lkFrameHistory.clear();
+    m_lkXFeatPendingFrameId = 0;
     m_stableVelX = 0.0f;
     m_stableVelY = 0.0f;
     m_stableVelZ = 0.0f;
