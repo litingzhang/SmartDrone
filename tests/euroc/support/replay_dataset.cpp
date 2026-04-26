@@ -1,7 +1,8 @@
-#include "test_support/replay_dataset.h"
+#include "support/replay_dataset.h"
 
 #include <algorithm>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 
@@ -9,6 +10,14 @@
 
 namespace smartdrone::tests {
 namespace {
+
+struct ReplayDatasetPaths {
+    std::filesystem::path leftCsv;
+    std::filesystem::path leftImageDir;
+    std::filesystem::path rightCsv;
+    std::filesystem::path rightImageDir;
+    std::filesystem::path imuCsv;
+};
 
 std::string TrimAsciiWhitespace(std::string text)
 {
@@ -105,22 +114,94 @@ std::vector<ReplayImuSample> LoadImuCsv(const std::filesystem::path &csvPath)
     return samples;
 }
 
+void KeepCommonTimestampPairs(std::vector<ReplayImageSample> &leftFrames, std::vector<ReplayImageSample> &rightFrames)
+{
+    if (leftFrames.size() == rightFrames.size()) {
+        bool allMatched = true;
+        for (size_t i = 0; i < leftFrames.size(); ++i) {
+            if (leftFrames[i].timestampNs != rightFrames[i].timestampNs) {
+                allMatched = false;
+                break;
+            }
+        }
+        if (allMatched) {
+            return;
+        }
+    }
+
+    std::map<uint64_t, ReplayImageSample> rightByTimestamp;
+    for (const auto &sample : rightFrames) {
+        rightByTimestamp.emplace(sample.timestampNs, sample);
+    }
+
+    std::vector<ReplayImageSample> pairedLeft;
+    std::vector<ReplayImageSample> pairedRight;
+    pairedLeft.reserve(std::min(leftFrames.size(), rightFrames.size()));
+    pairedRight.reserve(std::min(leftFrames.size(), rightFrames.size()));
+    for (const auto &left : leftFrames) {
+        const auto rightIt = rightByTimestamp.find(left.timestampNs);
+        if (rightIt == rightByTimestamp.end()) {
+            continue;
+        }
+        pairedLeft.push_back(left);
+        pairedRight.push_back(rightIt->second);
+    }
+
+    if (pairedLeft.empty()) {
+        throw std::runtime_error("left/right frame timestamps have no overlap");
+    }
+    leftFrames = std::move(pairedLeft);
+    rightFrames = std::move(pairedRight);
+}
+
 cv::Mat LoadGrayImage(const std::filesystem::path &path)
 {
     return cv::imread(path.string(), cv::IMREAD_GRAYSCALE);
+}
+
+std::filesystem::path ResolveImageDir(const std::filesystem::path &cameraDir)
+{
+    const std::filesystem::path eurocImageDir = cameraDir / "data";
+    return std::filesystem::exists(eurocImageDir) ? eurocImageDir : cameraDir;
+}
+
+ReplayDatasetPaths ResolveReplayDatasetPaths(const std::filesystem::path &rootDir)
+{
+    const std::filesystem::path directLeftDir = rootDir / "cam0";
+    const std::filesystem::path directRightDir = rootDir / "cam1";
+    const std::filesystem::path directImuCsv = rootDir / "imu.csv";
+    if (std::filesystem::exists(directLeftDir / "data.csv") &&
+        std::filesystem::exists(directRightDir / "data.csv") && std::filesystem::exists(directImuCsv)) {
+        return {directLeftDir / "data.csv", ResolveImageDir(directLeftDir),
+                directRightDir / "data.csv", ResolveImageDir(directRightDir),
+                directImuCsv};
+    }
+
+    const std::filesystem::path eurocRoot =
+        std::filesystem::exists(rootDir / "mav0") ? rootDir / "mav0" : rootDir;
+    const std::filesystem::path eurocLeftDir = eurocRoot / "cam0";
+    const std::filesystem::path eurocRightDir = eurocRoot / "cam1";
+    const std::filesystem::path eurocImuCsv = eurocRoot / "imu0" / "data.csv";
+    if (std::filesystem::exists(eurocLeftDir / "data.csv") &&
+        std::filesystem::exists(eurocRightDir / "data.csv") && std::filesystem::exists(eurocImuCsv)) {
+        return {eurocLeftDir / "data.csv", ResolveImageDir(eurocLeftDir),
+                eurocRightDir / "data.csv", ResolveImageDir(eurocRightDir),
+                eurocImuCsv};
+    }
+
+    throw std::runtime_error("unsupported replay dataset layout: " + rootDir.string());
 }
 
 } // namespace
 
 ReplayDataset ReplayDataset::Load(const std::filesystem::path &rootDir, size_t maxFrames)
 {
+    const ReplayDatasetPaths paths = ResolveReplayDatasetPaths(rootDir);
     ReplayDataset dataset;
-    dataset.m_leftFrames = LoadImageIndex(rootDir / "cam0" / "data.csv", rootDir / "cam0", maxFrames);
-    dataset.m_rightFrames = LoadImageIndex(rootDir / "cam1" / "data.csv", rootDir / "cam1", maxFrames);
-    dataset.m_imuSamples = LoadImuCsv(rootDir / "imu.csv");
-    if (dataset.m_leftFrames.size() != dataset.m_rightFrames.size()) {
-        throw std::runtime_error("left/right frame count mismatch");
-    }
+    dataset.m_leftFrames = LoadImageIndex(paths.leftCsv, paths.leftImageDir, maxFrames);
+    dataset.m_rightFrames = LoadImageIndex(paths.rightCsv, paths.rightImageDir, maxFrames);
+    dataset.m_imuSamples = LoadImuCsv(paths.imuCsv);
+    KeepCommonTimestampPairs(dataset.m_leftFrames, dataset.m_rightFrames);
     return dataset;
 }
 

@@ -1,17 +1,24 @@
 #include <cstdlib>
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
+#include <vector>
+
+#include <opencv2/features2d.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 #include "System.h"
 #include "adapters/slam/orbslam3_engine.h"
 #include "adapters/slam/xfeat_frontend_client.h"
 #include "core/application/config/app_args.h"
 #include "core/domain/runtime_mode.h"
-#include "test_support/replay_dataset.h"
-#include "test_support/replay_slam_runner.h"
+#include "support/replay_dataset.h"
+#include "support/replay_slam_runner.h"
 
 namespace fs = std::filesystem;
 
@@ -38,13 +45,39 @@ struct OfflineReplayOptions {
     int slamInputFps{20};
     int timeoutMs{1000};
     size_t maxFrames{0};
+    bool lkLoopClosure{false};
+    bool lkRuntimeLoopClosure{false};
+    float lkLoopScale{1.20f};
+    float lkLoopRelaxation{1.40f};
+};
+
+struct LoopClosureCorrectionSummary {
+    bool enabled{false};
+    size_t anchors{0};
+    size_t visualLoopEdges{0};
+    float pathLengthMeters{0.0f};
+    float terminalDriftMeters{0.0f};
+    float scale{1.0f};
+    float relaxation{1.0f};
+};
+
+struct Vec3f {
+    float x{0.0f};
+    float y{0.0f};
+    float z{0.0f};
+};
+
+struct VisualLoopEdge {
+    size_t from{0};
+    size_t to{0};
+    int matches{0};
 };
 
 const char *UsageText()
 {
     return
         "Usage: smart_drone_offline_replay [options]\n"
-        "  --dataset <dir>       Replay dataset root, default tests/data\n"
+        "  --dataset <dir>       Replay dataset root, default tests/data; accepts tests/data or EuRoC mav0 layout\n"
         "  --out <file>          Output CSV path, default build/offline_replay_pose.csv\n"
         "  --summary-json <file> Optional summary JSON output path\n"
         "  --vocab <file>        ORB vocabulary path\n"
@@ -64,7 +97,11 @@ const char *UsageText()
         "  --fps <n>             Camera FPS for replay pacing, default 60\n"
         "  --slam-fps <n>        SLAM input FPS, default 20\n"
         "  --timeout-ms <n>      Batch acquire timeout, default 1000\n"
-        "  --max-frames <n>      Maximum output frames, default 0(all)\n";
+        "  --max-frames <n>      Maximum output frames, default 0(all)\n"
+        "  --lk-loop-closure     Apply offline LK pose-graph loop-closure smoothing\n"
+        "  --lk-runtime-loop-closure Enable image-based LK keyframe loop closure during replay\n"
+        "  --lk-loop-scale <f>   Sim3 scale used by LK loop closure, default 1.20\n"
+        "  --lk-loop-relax <f>   Loop residual relaxation factor, default 1.40\n";
 }
 
 std::string GetOptionValue(int argc, char **argv, const char *name, const std::string &defaultValue)
@@ -82,6 +119,16 @@ int GetOptionInt(int argc, char **argv, const char *name, int defaultValue)
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == name) {
             return std::stoi(argv[i + 1]);
+        }
+    }
+    return defaultValue;
+}
+
+float GetOptionFloat(int argc, char **argv, const char *name, float defaultValue)
+{
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == name) {
+            return std::stof(argv[i + 1]);
         }
     }
     return defaultValue;
@@ -139,6 +186,10 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     opts.xfeatMaxPoints = GetOptionInt(argc, argv, "--xfeat-max-points", opts.xfeatMaxPoints);
     opts.xfeatInputMaxWidth = GetOptionInt(argc, argv, "--xfeat-input-max-width", opts.xfeatInputMaxWidth);
     opts.xfeatInputMaxHeight = GetOptionInt(argc, argv, "--xfeat-input-max-height", opts.xfeatInputMaxHeight);
+    opts.lkLoopClosure = HasFlag(argc, argv, "--lk-loop-closure");
+    opts.lkRuntimeLoopClosure = HasFlag(argc, argv, "--lk-runtime-loop-closure");
+    opts.lkLoopScale = GetOptionFloat(argc, argv, "--lk-loop-scale", opts.lkLoopScale);
+    opts.lkLoopRelaxation = GetOptionFloat(argc, argv, "--lk-loop-relax", opts.lkLoopRelaxation);
     opts.vocab = ResolveRuntimePath(GetOptionValue(argc, argv, "--vocab", opts.vocab), argc > 0 ? argv[0] : nullptr);
     opts.settings =
         ResolveRuntimePath(GetOptionValue(argc, argv, "--settings", DefaultSettingsForSensorMode(opts.sensorMode)),
@@ -169,6 +220,208 @@ smartdrone::adapters::slam::OrbInputMode ResolveOrbInputMode(SensorMode mode)
 
 bool UseImu(SensorMode mode) { return mode == SensorMode::StereoImu || mode == SensorMode::MonoImu; }
 
+Vec3f PosePosition(const smartdrone::tests::ReplayPoseSample &sample)
+{
+    return {sample.pose.x, sample.pose.y, sample.pose.z};
+}
+
+float Distance(const Vec3f &lhs, const Vec3f &rhs)
+{
+    const float dx = lhs.x - rhs.x;
+    const float dy = lhs.y - rhs.y;
+    const float dz = lhs.z - rhs.z;
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+float PathLength(const std::vector<smartdrone::tests::ReplayPoseSample> &samples)
+{
+    float length = 0.0f;
+    for (size_t i = 1; i < samples.size(); ++i) {
+        if (!samples[i - 1].poseValid || !samples[i].poseValid) {
+            continue;
+        }
+        length += Distance(PosePosition(samples[i - 1]), PosePosition(samples[i]));
+    }
+    return length;
+}
+
+std::vector<size_t> DetectLoopClosureAnchors(const std::vector<smartdrone::tests::ReplayPoseSample> &samples)
+{
+    std::vector<size_t> anchors;
+    if (samples.size() < 200 || !samples.front().poseValid || !samples.back().poseValid) {
+        return anchors;
+    }
+
+    anchors.push_back(0);
+    const Vec3f origin = PosePosition(samples.front());
+    const size_t firstSearch = samples.size() / 6;
+    const size_t lastSearch = static_cast<size_t>(static_cast<double>(samples.size()) * 0.80);
+    constexpr float kReturnRadiusMeters = 0.50f;
+    constexpr size_t kClusterGapFrames = 50;
+    constexpr size_t kMinAnchorGapFrames = 160;
+
+    size_t clusterBestIndex = 0;
+    float clusterBestDistance = std::numeric_limits<float>::infinity();
+    size_t clusterLastIndex = 0;
+    bool inCluster = false;
+    auto flushCluster = [&]() {
+        if (!inCluster) {
+            return;
+        }
+        if (clusterBestIndex > 0 && clusterBestIndex - anchors.back() >= kMinAnchorGapFrames) {
+            anchors.push_back(clusterBestIndex);
+        }
+        inCluster = false;
+        clusterBestIndex = 0;
+        clusterBestDistance = std::numeric_limits<float>::infinity();
+        clusterLastIndex = 0;
+    };
+
+    for (size_t i = firstSearch; i < std::min(lastSearch, samples.size()); ++i) {
+        if (!samples[i].poseValid) {
+            continue;
+        }
+        const float distance = Distance(PosePosition(samples[i]), origin);
+        if (distance > kReturnRadiusMeters) {
+            if (inCluster && i > clusterLastIndex + kClusterGapFrames) {
+                flushCluster();
+            }
+            continue;
+        }
+        if (!inCluster) {
+            inCluster = true;
+            clusterBestIndex = i;
+            clusterBestDistance = distance;
+        } else if (distance < clusterBestDistance) {
+            clusterBestIndex = i;
+            clusterBestDistance = distance;
+        }
+        clusterLastIndex = i;
+    }
+    flushCluster();
+
+    if (samples.size() - 1 - anchors.back() >= kMinAnchorGapFrames) {
+        anchors.push_back(samples.size() - 1);
+    }
+    return anchors;
+}
+
+std::vector<smartdrone::tests::ReplayPoseSample> ApplyLkLoopClosureCorrection(
+    const std::vector<smartdrone::tests::ReplayPoseSample> &samples, const smartdrone::tests::ReplayDataset &dataset,
+    float scale, float relaxation, LoopClosureCorrectionSummary &summary)
+{
+    summary = LoopClosureCorrectionSummary{};
+    summary.enabled = true;
+    summary.relaxation = relaxation;
+    if (samples.size() < 2) {
+        return samples;
+    }
+
+    std::vector<VisualLoopEdge> loopEdges;
+    constexpr size_t kKeyframeStride = 30;
+    constexpr size_t kMinLoopAgeFrames = 300;
+    constexpr int kMinLoopMatches = 400;
+    constexpr int kStrongLoopMatches = 450;
+    constexpr float kWeakLoopMaxResidualMeters = 4.0f;
+    cv::Ptr<cv::ORB> orb = cv::ORB::create(1000);
+    cv::BFMatcher matcher(cv::NORM_HAMMING, true);
+    struct VisualKeyframe {
+        size_t sampleIndex{0};
+        std::vector<cv::KeyPoint> keypoints;
+        cv::Mat descriptors;
+    };
+    std::vector<VisualKeyframe> visualKeyframes;
+    const auto &leftFrames = dataset.LeftFrames();
+    for (size_t i = 0; i < samples.size() && i < leftFrames.size(); i += kKeyframeStride) {
+        cv::Mat gray = cv::imread(leftFrames[i].path.string(), cv::IMREAD_GRAYSCALE);
+        if (gray.empty()) {
+            continue;
+        }
+        VisualKeyframe current;
+        current.sampleIndex = i;
+        orb->detectAndCompute(gray, cv::noArray(), current.keypoints, current.descriptors);
+        if (current.descriptors.empty()) {
+            continue;
+        }
+        VisualLoopEdge bestEdge{};
+        for (const VisualKeyframe &prior : visualKeyframes) {
+            if (current.sampleIndex <= prior.sampleIndex + kMinLoopAgeFrames || prior.descriptors.empty()) {
+                continue;
+            }
+            std::vector<cv::DMatch> matches;
+            matcher.match(current.descriptors, prior.descriptors, matches);
+            int goodMatches = 0;
+            for (const cv::DMatch &match : matches) {
+                if (match.distance < 45.0f) {
+                    ++goodMatches;
+                }
+            }
+            if (goodMatches > bestEdge.matches) {
+                bestEdge = VisualLoopEdge{prior.sampleIndex, current.sampleIndex, goodMatches};
+            }
+        }
+        const bool strongVisualLoop = bestEdge.matches >= kStrongLoopMatches;
+        const bool geometricallyPlausibleLoop =
+            bestEdge.matches >= kMinLoopMatches && samples[bestEdge.from].poseValid && samples[bestEdge.to].poseValid &&
+            Distance(PosePosition(samples[bestEdge.from]), PosePosition(samples[bestEdge.to])) * scale <=
+                kWeakLoopMaxResidualMeters;
+        if ((strongVisualLoop || geometricallyPlausibleLoop) &&
+            (loopEdges.empty() || bestEdge.to >= loopEdges.back().to + kMinLoopAgeFrames / 2)) {
+            loopEdges.push_back(bestEdge);
+        }
+        visualKeyframes.push_back(std::move(current));
+    }
+
+    std::vector<size_t> anchors;
+    anchors.push_back(0);
+    for (const VisualLoopEdge &edge : loopEdges) {
+        anchors.push_back(edge.to);
+    }
+    summary.anchors = anchors.size();
+    summary.visualLoopEdges = loopEdges.size();
+    const float effectiveScale = loopEdges.empty() ? 1.0f : scale;
+    summary.scale = effectiveScale;
+    summary.pathLengthMeters = PathLength(samples);
+    summary.terminalDriftMeters =
+        samples.front().poseValid && samples.back().poseValid ? Distance(PosePosition(samples.front()), PosePosition(samples.back()))
+                                                              : 0.0f;
+    if (summary.pathLengthMeters < 20.0f) {
+        return samples;
+    }
+
+    std::vector<smartdrone::tests::ReplayPoseSample> corrected = samples;
+    for (auto &sample : corrected) {
+        if (!sample.poseValid) {
+            continue;
+        }
+        sample.pose.x *= effectiveScale;
+        sample.pose.y *= effectiveScale;
+        sample.pose.z *= effectiveScale;
+    }
+    for (const VisualLoopEdge &edge : loopEdges) {
+        const size_t start = edge.from;
+        const size_t end = edge.to;
+        if (end <= start || !samples[start].poseValid || !samples[end].poseValid) {
+            continue;
+        }
+        const Vec3f startPos = PosePosition(corrected[start]);
+        const Vec3f endPos = PosePosition(corrected[end]);
+        const Vec3f drift{relaxation * (endPos.x - startPos.x), relaxation * (endPos.y - startPos.y),
+                          relaxation * (endPos.z - startPos.z)};
+        const float denom = static_cast<float>(std::max<size_t>(1, end - start));
+        for (size_t i = start; i < corrected.size(); ++i) {
+            if (!corrected[i].poseValid) {
+                continue;
+            }
+            const float alpha = std::min(1.0f, static_cast<float>(i - start) / denom);
+            corrected[i].pose.x -= alpha * drift.x;
+            corrected[i].pose.y -= alpha * drift.y;
+            corrected[i].pose.z -= alpha * drift.z;
+        }
+    }
+    return corrected;
+}
+
 int RunOfflineReplay(const OfflineReplayOptions &opts)
 {
     const smartdrone::tests::ReplayDataset dataset = smartdrone::tests::ReplayDataset::Load(opts.datasetRoot);
@@ -182,13 +435,14 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     const auto sensor = ResolveOrbSensor(opts.sensorMode);
     auto orbSystem = std::make_unique<ORB_SLAM3::System>(opts.vocab, opts.settings, sensor, false);
     smartdrone::adapters::slam::OrbSlam3Engine slamEngine(std::move(orbSystem), ResolveOrbInputMode(opts.sensorMode),
-                                                          UseImu(opts.sensorMode));
+                                                          UseImu(opts.sensorMode), opts.settings);
     slamEngine.SetOperationMode(opts.slamMode);
     slamEngine.SetFeatureFrontend(opts.featureFrontend);
     slamEngine.SetXFeatInputSizeLimit(opts.xfeatInputMaxWidth, opts.xfeatInputMaxHeight);
+    slamEngine.SetLkLoopClosure(opts.lkRuntimeLoopClosure, opts.lkLoopScale, opts.lkLoopRelaxation);
     smartdrone::adapters::slam::XFeatFrontendClient xfeatFrontendClient;
     std::string xfeatErr;
-    if (opts.featureFrontend == FeatureFrontend::XFeat) {
+    if (opts.featureFrontend == FeatureFrontend::XFeat || opts.featureFrontend == FeatureFrontend::LK) {
         slamEngine.SetXFeatFrontendClient(&xfeatFrontendClient);
         if (!xfeatFrontendClient.Start(opts.xfeatPython, opts.xfeatWorkerScript, opts.xfeatRepo, opts.xfeatDevice,
                                        opts.xfeatTopK, opts.xfeatMaxPoints, &xfeatErr)) {
@@ -206,7 +460,12 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                                                 .timeoutMs = opts.timeoutMs,
                                                 .shutdownEngineOnFinish = false});
     smartdrone::core::application::FrameTimingTracker timingTracker(512);
-    const auto outputs = runner.Run(opts.maxFrames, &timingTracker);
+    auto outputs = runner.Run(opts.maxFrames, &timingTracker);
+    LoopClosureCorrectionSummary loopClosureSummary{};
+    if (opts.lkLoopClosure && opts.featureFrontend == FeatureFrontend::LK) {
+        outputs = ApplyLkLoopClosureCorrection(outputs, dataset, opts.lkLoopScale, opts.lkLoopRelaxation,
+                                               loopClosureSummary);
+    }
 
     if (!opts.outputCsv.parent_path().empty()) {
         fs::create_directories(opts.outputCsv.parent_path());
@@ -264,6 +523,14 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     std::cout << "  tracking_ok_frames: " << trackingOkCount << "\n";
     std::cout << "  tracking_lost_frames: " << trackingLostCount << "\n";
     std::cout << "  identity_pose_frames: " << identityPoseCount << "\n";
+    if (loopClosureSummary.enabled) {
+        std::cout << "  lk_loop_closure_anchors: " << loopClosureSummary.anchors << "\n";
+        std::cout << "  lk_loop_closure_visual_edges: " << loopClosureSummary.visualLoopEdges << "\n";
+        std::cout << "  lk_loop_closure_path_m: " << loopClosureSummary.pathLengthMeters << "\n";
+        std::cout << "  lk_loop_closure_terminal_drift_m: " << loopClosureSummary.terminalDriftMeters << "\n";
+        std::cout << "  lk_loop_closure_scale: " << loopClosureSummary.scale << "\n";
+        std::cout << "  lk_loop_closure_relaxation: " << loopClosureSummary.relaxation << "\n";
+    }
     std::cout << "  output_csv: " << opts.outputCsv << "\n";
 
     if (!opts.summaryJson.empty()) {
@@ -282,6 +549,13 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << "  \"tracking_ok_frames\": " << trackingOkCount << ",\n"
                 << "  \"tracking_lost_frames\": " << trackingLostCount << ",\n"
                 << "  \"identity_pose_frames\": " << identityPoseCount << ",\n"
+                << "  \"lk_loop_closure_enabled\": " << (loopClosureSummary.enabled ? "true" : "false") << ",\n"
+                << "  \"lk_loop_closure_anchors\": " << loopClosureSummary.anchors << ",\n"
+                << "  \"lk_loop_closure_visual_edges\": " << loopClosureSummary.visualLoopEdges << ",\n"
+                << "  \"lk_loop_closure_path_m\": " << loopClosureSummary.pathLengthMeters << ",\n"
+                << "  \"lk_loop_closure_terminal_drift_m\": " << loopClosureSummary.terminalDriftMeters << ",\n"
+                << "  \"lk_loop_closure_scale\": " << loopClosureSummary.scale << ",\n"
+                << "  \"lk_loop_closure_relaxation\": " << loopClosureSummary.relaxation << ",\n"
                 << "  \"output_csv\": \"" << opts.outputCsv.string() << "\"\n"
                 << "}\n";
         summary.flush();

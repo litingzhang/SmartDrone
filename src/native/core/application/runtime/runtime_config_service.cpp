@@ -16,8 +16,11 @@ RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTun
 {
 }
 
-bool RuntimeConfigService::UpdateRemoteConfig(const RemoteRuntimeConfig &remote, std::string *err)
+bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::string *err)
 {
+    if (remote.featureFrontend == FeatureFrontend::XFeat) {
+        remote.featureFrontend = FeatureFrontend::Orb;
+    }
     if (remote.exposureUs <= 0 || !std::isfinite(remote.gain) || remote.gain < 0.0f || remote.pairMs <= 0 ||
         remote.slamInputFps < 0 ||
         remote.uvcDeviceIndex < 0 || remote.uvcEyeWidth <= 0 || remote.uvcEyeHeight <= 0) {
@@ -453,7 +456,9 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.uvcPackedStereo = currentConfig.app.camera.uvcPackedStereo;
     remote.slamInputFps = currentConfig.app.runtime.slamInputFps;
     remote.slamOperationMode = currentConfig.app.runtime.slamOperationMode;
-    remote.featureFrontend = currentConfig.app.runtime.featureFrontend;
+    remote.featureFrontend = currentConfig.app.runtime.featureFrontend == FeatureFrontend::XFeat
+                                 ? FeatureFrontend::Orb
+                                 : currentConfig.app.runtime.featureFrontend;
     remote.sensorMode = currentConfig.app.sensorMode;
     remote.udpIp = currentConfig.app.udp.ip;
     remote.udpEnabled = currentConfig.app.udp.enable;

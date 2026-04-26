@@ -220,6 +220,10 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
     a.udpQueue = c.udp.queue;
     a.xfeatInputMaxWidth = c.runtime.xfeatInputMaxWidth;
     a.xfeatInputMaxHeight = c.runtime.xfeatInputMaxHeight;
+    a.lkXFeatSeeding = c.runtime.lkXFeatSeeding;
+    a.lkLoopClosure = c.runtime.lkLoopClosure;
+    a.lkLoopScale = c.runtime.lkLoopScale;
+    a.lkLoopRelaxation = c.runtime.lkLoopRelaxation;
     a.spiDev = c.imu.spiDev;
     a.spiSpeed = c.imu.spiSpeed;
     a.spiMode = c.imu.spiMode;
@@ -269,6 +273,9 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
     std::cerr << "orb nFeatures=" << app.runtime.orbNFeatures << " scaleFactor=" << app.runtime.orbScaleFactor
               << " nLevels=" << app.runtime.orbNLevels << " iniThFAST=" << app.runtime.orbIniThFAST
               << " minThFAST=" << app.runtime.orbMinThFAST << "\n";
+    std::cerr << "lk xfeat_seeding=" << (app.runtime.lkXFeatSeeding ? "Y" : "N")
+              << " loop_closure=" << (app.runtime.lkLoopClosure ? "Y" : "N")
+              << " scale=" << app.runtime.lkLoopScale << " relax=" << app.runtime.lkLoopRelaxation << "\n";
     std::cerr << "debug right_only_features=" << (a.debugRightOnlyFeatures ? "Y" : "N") << "\n";
     std::cerr << "slam lowlight_enhance=" << (a.slamLowLightEnhance ? "Y" : "N") << "\n";
     std::cerr << "diagnostics json=" << (a.jsonDiagnostics ? "Y" : "N") << "\n";

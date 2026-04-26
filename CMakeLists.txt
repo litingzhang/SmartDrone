@@ -6,7 +6,6 @@ option(CROSS_AARCH64 "Enable aarch64 cross compile" ON)
 option(BUILD_SMART_DRONE "Build unified stereo runtime application" ON)
 option(ENABLE_UNIT_TESTS "Build unit tests" OFF)
 option(ENABLE_OFFLINE_REPLAY "Build host-side offline replay tool" OFF)
-option(SMART_DRONE_ENABLE_XFEAT_NATIVE "Build native libtorch-based XFeat backend" OFF)
 set(SMART_DRONE_CAMERA_PROVIDER "libcamera_stereo_ov9281" CACHE STRING
     "Camera provider implementation compiled into the native runtime")
 set(_SMART_DRONE_CAMERA_PROVIDERS "libcamera_stereo_ov9281;uvc_stereo_opencv")
@@ -141,16 +140,99 @@ function(configure_orb_target target_name)
 endfunction()
 
 function(configure_xfeat_native_target target_name)
-  if(NOT SMART_DRONE_ENABLE_XFEAT_NATIVE)
-    return()
+  set(_SMART_DRONE_JETSON_DEP_DIRS
+    "${SYSROOT}/usr/local/cuda/targets/aarch64-linux/lib"
+    "${SYSROOT}/usr/local/cuda/lib64"
+    "${SYSROOT}/usr/local/cuda-11.4/targets/aarch64-linux/lib"
+    "${SYSROOT}/usr/local/cuda-11.4/lib64"
+    "${SYSROOT}/usr/lib/aarch64-linux-gnu"
+    "${SYSROOT}/usr/lib/aarch64-linux-gnu/tegra"
+    "${SYSROOT}/lib/aarch64-linux-gnu"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/jetson_runtime_libs/lib"
+  )
+  if(DEFINED ENV{SMART_DRONE_JETSON_LIB_DIR})
+    list(PREPEND _SMART_DRONE_JETSON_DEP_DIRS "$ENV{SMART_DRONE_JETSON_LIB_DIR}")
   endif()
-  find_package(Torch REQUIRED)
-  target_link_libraries(${target_name} PRIVATE ${TORCH_LIBRARIES})
-  target_compile_definitions(${target_name} PRIVATE SMART_DRONE_XFEAT_NATIVE_AVAILABLE=1)
-  target_include_directories(${target_name} PRIVATE ${TORCH_INCLUDE_DIRS})
-  if(TORCH_CXX_FLAGS)
-    separate_arguments(_SMART_DRONE_TORCH_CXX_FLAGS UNIX_COMMAND "${TORCH_CXX_FLAGS}")
-    target_compile_options(${target_name} PRIVATE ${_SMART_DRONE_TORCH_CXX_FLAGS})
+  set(_SMART_DRONE_CUDA_DEP_LIBS)
+  set(_SMART_DRONE_CUDA_DEP_LINK_DIRS)
+  set(_SMART_DRONE_MISSING_CUDA_DEPS)
+  foreach(_dep_name IN ITEMS
+    libcudart.so.11.0
+    libcudnn.so.8)
+    set(_dep_path "")
+    foreach(_dep_dir IN LISTS _SMART_DRONE_JETSON_DEP_DIRS)
+      if(NOT _dep_path AND EXISTS "${_dep_dir}/${_dep_name}")
+        set(_dep_path "${_dep_dir}/${_dep_name}")
+      endif()
+    endforeach()
+    if(_dep_path)
+      list(APPEND _SMART_DRONE_CUDA_DEP_LIBS "${_dep_path}")
+      get_filename_component(_dep_link_dir "${_dep_path}" DIRECTORY)
+      list(APPEND _SMART_DRONE_CUDA_DEP_LINK_DIRS "${_dep_link_dir}")
+    else()
+      list(APPEND _SMART_DRONE_MISSING_CUDA_DEPS "${_dep_name}")
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _SMART_DRONE_CUDA_DEP_LINK_DIRS)
+  foreach(_dep_link_dir IN LISTS _SMART_DRONE_CUDA_DEP_LINK_DIRS)
+    target_link_options(${target_name} PRIVATE "-Wl,-rpath-link,${_dep_link_dir}")
+  endforeach()
+  message(STATUS "Resolved Jetson CUDA dependency dirs: ${_SMART_DRONE_CUDA_DEP_LINK_DIRS}")
+
+  set(_SMART_DRONE_TENSORRT_INCLUDE_DIRS
+    "${SYSROOT}/usr/include"
+    "${SYSROOT}/usr/include/aarch64-linux-gnu"
+  )
+  set(_SMART_DRONE_TENSORRT_LIB_DIRS
+    "${SYSROOT}/usr/lib/aarch64-linux-gnu"
+    "${SYSROOT}/usr/lib/aarch64-linux-gnu/tegra"
+    "${SYSROOT}/usr/local/cuda/targets/aarch64-linux/lib"
+    "${SYSROOT}/usr/local/cuda-11.4/targets/aarch64-linux/lib"
+    "${SYSROOT}/usr/local/tensorrt/lib"
+  )
+  set(_SMART_DRONE_TENSORRT_INCLUDE "")
+  foreach(_trt_include_dir IN LISTS _SMART_DRONE_TENSORRT_INCLUDE_DIRS)
+    if(NOT _SMART_DRONE_TENSORRT_INCLUDE AND EXISTS "${_trt_include_dir}/NvInfer.h")
+      set(_SMART_DRONE_TENSORRT_INCLUDE "${_trt_include_dir}")
+    endif()
+  endforeach()
+  set(_SMART_DRONE_TENSORRT_LIBS)
+  foreach(_trt_lib_name IN ITEMS nvinfer nvinfer_plugin nvdla_compiler cudla)
+    set(_trt_lib_path "")
+    foreach(_trt_lib_dir IN LISTS _SMART_DRONE_TENSORRT_LIB_DIRS)
+      if(NOT _trt_lib_path)
+        file(GLOB _trt_lib_candidates "${_trt_lib_dir}/lib${_trt_lib_name}.so*")
+        if(_trt_lib_candidates)
+          list(SORT _trt_lib_candidates)
+          list(REVERSE _trt_lib_candidates)
+          list(GET _trt_lib_candidates 0 _trt_first_candidate)
+          set(_trt_lib_path "${_trt_first_candidate}")
+        endif()
+      endif()
+    endforeach()
+    if(_trt_lib_path)
+      list(APPEND _SMART_DRONE_TENSORRT_LIBS "${_trt_lib_path}")
+    endif()
+  endforeach()
+  if(_SMART_DRONE_TENSORRT_INCLUDE AND _SMART_DRONE_TENSORRT_LIBS)
+    if(_SMART_DRONE_MISSING_CUDA_DEPS)
+      message(FATAL_ERROR
+        "Missing Jetson runtime libraries required by TensorRT XFeat: ${_SMART_DRONE_MISSING_CUDA_DEPS}. "
+        "Sync CUDA/cuDNN into the sysroot or set SMART_DRONE_JETSON_LIB_DIR.")
+    endif()
+    message(STATUS "Resolved TensorRT include: ${_SMART_DRONE_TENSORRT_INCLUDE}")
+    message(STATUS "Resolved TensorRT libs: ${_SMART_DRONE_TENSORRT_LIBS}")
+    target_include_directories(${target_name} PRIVATE
+      "${_SMART_DRONE_TENSORRT_INCLUDE}"
+      "${SYSROOT}/usr/local/cuda/targets/aarch64-linux/include"
+      "${SYSROOT}/usr/local/cuda-11.4/targets/aarch64-linux/include"
+    )
+    target_link_libraries(${target_name} PRIVATE ${_SMART_DRONE_TENSORRT_LIBS})
+    target_link_libraries(${target_name} PRIVATE ${_SMART_DRONE_CUDA_DEP_LIBS})
+    target_compile_definitions(${target_name} PRIVATE SMART_DRONE_XFEAT_TENSORRT_AVAILABLE=1)
+    target_compile_definitions(${target_name} PRIVATE SMART_DRONE_XFEAT_NATIVE_AVAILABLE=1)
+  else()
+    message(STATUS "TensorRT headers/libs not found in sysroot; XFeat TensorRT backend disabled")
   endif()
 endfunction()
 

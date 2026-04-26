@@ -23,6 +23,7 @@ constexpr double kAdaptiveTimingEmaAlpha = 0.18;
 constexpr double kAdaptiveInputFpsHeadroom = 1.25;
 constexpr double kAdaptiveInputExtraOverheadMs = 12.0;
 constexpr int kAdaptiveMinInputFps = 10;
+constexpr uint64_t kPoseAxisLogEveryNFrames = 30;
 
 double UpdateEma(double current, double sample)
 {
@@ -183,7 +184,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         m_ctx.perceptionPipeline.ClampTargetFps(m_ctx.tuning.slamInputFps.load(std::memory_order_relaxed));
     const FeatureFrontend configuredFrontend =
         static_cast<FeatureFrontend>(m_ctx.tuning.featureFrontend.load(std::memory_order_relaxed));
-    const FeatureFrontend effectiveFrontend = configuredFrontend;
+    const FeatureFrontend effectiveFrontend =
+        configuredFrontend == FeatureFrontend::XFeat ? FeatureFrontend::Orb : configuredFrontend;
     const int effectiveSlamInputFps =
         ComputeAdaptiveSlamInputFps(configuredSlamInputFps, m_ctx.aliases.fps, m_state.smoothedSlamMs);
     m_state.adaptiveSlamInputFps = effectiveSlamInputFps;
@@ -370,9 +372,6 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         mapId != PosePostprocessor::ContinuityMapper::kInvalidMapId && mapId != m_state.lastRawMapId;
     if (mapIdChanged) {
         m_state.lastRawMapId = mapId;
-        if (!m_ctx.useImu) {
-            m_state.stereoReferencePoseSet = false;
-        }
     }
 
     Sophus::SE3f twcRaw = m_state.haveLastValidTwcRaw ? m_state.lastValidTwcRaw : Sophus::SE3f();
@@ -408,6 +407,20 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const auto poseResult = m_ctx.posePostprocessor.ProcessPose(
         twcRaw, m_ctx.useImu, trackingUsable, state, mapId, useStereoBodyExtrinsics, stereoBodyExtrinsics,
         m_state.stereoReferencePoseSet, m_state.stereoReferencePose, captureTimestampNs, m_ctx.mav);
+    if (!m_ctx.useImu && !m_ctx.monoMode && slamOutput.poseValid &&
+        (slamOutput.frameId % kPoseAxisLogEveryNFrames) == 0) {
+        const Eigen::Vector3f camT = twcRaw.translation();
+        const auto &dbg = poseResult.debug;
+        const Eigen::Vector3f frdT(poseResult.poseEstimate.x, poseResult.poseEstimate.y, poseResult.poseEstimate.z);
+        std::cerr << "[pose_axis] frame=" << slamOutput.frameId << " cam_t=" << camT.x() << "," << camT.y() << ","
+                  << camT.z() << " body_t=" << dbg.bodyX << "," << dbg.bodyY << "," << dbg.bodyZ
+                  << " local_t=" << dbg.localX << "," << dbg.localY << "," << dbg.localZ << " frd_t=" << frdT.x()
+                  << "," << frdT.y() << "," << frdT.z() << " tbc=" << (dbg.stereoExtrinsicsApplied ? 1 : 0)
+                  << " ref=" << (dbg.referenceApplied ? 1 : 0)
+                  << " tracking=" << (trackingUsable ? 1 : 0)
+                  << " q=" << poseResult.poseEstimate.qw << "," << poseResult.poseEstimate.qx << ","
+                  << poseResult.poseEstimate.qy << "," << poseResult.poseEstimate.qz << "\n";
+    }
     const uint8_t effectiveResetCounter =
         ComposeResetCounter(m_state.sessionResetCounterBase, poseResult.resetCounter);
     const uint16_t effectiveResetMapCount =
@@ -458,7 +471,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                                  slamOutput.leftFeatures.empty() || slamOutput.rightFeatures.empty() ||
                                  xfeatStereoWeak;
     if (slamDfxPeriodic || slamDfxAbnormal) {
-        char dfxLine[1152];
+        char dfxLine[1408];
         if (m_ctx.aliases.jsonDiagnostics) {
             std::snprintf(
                 dfxLine, sizeof(dfxLine),
@@ -468,6 +481,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 "\"track_points\":%u,\"local_points\":%u,\"inliers\":%d,"
                 "\"xfeat_used\":%d,\"xfeat_stereo_weak\":%d,\"xfeat_raw_left\":%d,\"xfeat_raw_right\":%d,"
                 "\"xfeat_match_stereo\":%d,\"xfeat_injected_left\":%d,\"xfeat_injected_right\":%d,"
+                "\"xfeat_seed_source_frame\":%llu,\"xfeat_seed_current_frame\":%llu,"
+                "\"xfeat_seed_age_frames\":%u,\"xfeat_seed_forwarded\":%d,"
                 "\"xfeat_prepare_ms\":%.3f,\"xfeat_write_ms\":%.3f,\"xfeat_read_ms\":%.3f,"
                 "\"xfeat_worker_ms\":%.3f,\"xfeat_match_ms\":%.3f,\"xfeat_total_ms\":%.3f,"
                 "\"xfeat_image_count\":%u,\"xfeat_payload_bytes\":%u,"
@@ -484,7 +499,11 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedXFeatFrontend ? 1 : 0,
                 xfeatStereoWeak ? 1 : 0, slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount,
                 slamOutput.xfeatMatchedStereoCount, slamOutput.xfeatInjectedLeftCount,
-                slamOutput.xfeatInjectedRightCount, slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
+                slamOutput.xfeatInjectedRightCount,
+                static_cast<unsigned long long>(slamOutput.xfeatSeedSourceFrameId),
+                static_cast<unsigned long long>(slamOutput.xfeatSeedCurrentFrameId),
+                slamOutput.xfeatSeedAgeFrames, slamOutput.xfeatSeedForwardedCount,
+                slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
                 slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs, slamOutput.xfeatStereoMatchMs,
                 slamOutput.xfeatTotalMs, slamOutput.xfeatImageCount, slamOutput.xfeatPayloadBytes,
                 static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
@@ -500,6 +519,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
                 "imu=%zu feat=%zu/%zu points=%zu track=%u local=%u inliers=%d "
                 "xfeat=%s stereo_warn=%s raw=%d/%d stereo=%d injected=%d/%d "
+                "seed=%llu->%llu age=%u fwd=%d "
                 "xfeat_ms=prep %.3f write %.3f read %.3f worker %.3f match %.3f total %.3f "
                 "xfeat_io=%uimg/%ubytes "
                 "pair_dt=%.3f reject_dt=%.3f pend=%zu/%zu drop=%llu/%llu rate_drop=%llu "
@@ -513,7 +533,11 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedXFeatFrontend ? "on" : "off",
                 xfeatStereoWeak ? "weak" : "ok", slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount,
                 slamOutput.xfeatMatchedStereoCount, slamOutput.xfeatInjectedLeftCount,
-                slamOutput.xfeatInjectedRightCount, slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
+                slamOutput.xfeatInjectedRightCount,
+                static_cast<unsigned long long>(slamOutput.xfeatSeedSourceFrameId),
+                static_cast<unsigned long long>(slamOutput.xfeatSeedCurrentFrameId),
+                slamOutput.xfeatSeedAgeFrames, slamOutput.xfeatSeedForwardedCount,
+                slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
                 slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs, slamOutput.xfeatStereoMatchMs,
                 slamOutput.xfeatTotalMs, slamOutput.xfeatImageCount, slamOutput.xfeatPayloadBytes,
                 static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,

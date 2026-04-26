@@ -216,6 +216,8 @@ bool SlamSessionRuntime::Start()
     m_slamEngine.SetFeatureFrontend(m_aliases.featureFrontend);
     m_slamEngine.SetXFeatFrontendClient(&m_xfeatFrontendClient);
     m_slamEngine.SetXFeatInputSizeLimit(m_cfg.app.runtime.xfeatInputMaxWidth, m_cfg.app.runtime.xfeatInputMaxHeight);
+    m_slamEngine.SetLkLoopClosure(m_cfg.app.runtime.lkLoopClosure, m_cfg.app.runtime.lkLoopScale,
+                                  m_cfg.app.runtime.lkLoopRelaxation);
     if (m_frameProcessorState.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
         std::cerr << "[slam] operation_mode=auto effective_mode=mapping\n";
     }
@@ -230,8 +232,7 @@ bool SlamSessionRuntime::Start()
         m_stereoBodyExtrinsics = LoadStereoBodyExtrinsics(m_effectiveSettingsPath);
     }
 
-    const bool needsXFeatWorker =
-        m_aliases.featureFrontend == FeatureFrontend::XFeat || m_aliases.featureFrontend == FeatureFrontend::LK;
+    const bool needsXFeatWorker = m_aliases.featureFrontend == FeatureFrontend::LK && m_aliases.lkXFeatSeeding;
     if (needsXFeatWorker && !m_cfg.app.runtime.xfeatRepo.empty() &&
         !m_cfg.app.runtime.xfeatWorkerScript.empty()) {
         std::string xfeatErr;
@@ -247,13 +248,10 @@ bool SlamSessionRuntime::Start()
             std::cerr << "[slam] warning: xfeat worker start failed: " << xfeatErr << "\n";
         }
     }
-    if (m_aliases.featureFrontend == FeatureFrontend::XFeat) {
-        std::cerr << "[slam] feature_frontend=xfeat selected; experimental external XFeat feature injection is enabled "
-                     "when the worker is available\n";
-    }
     if (m_aliases.featureFrontend == FeatureFrontend::LK) {
-        std::cerr << "[slam] feature_frontend=lk selected; async XFeat stereo seeds run at input-frame cadence "
-                     "while LK pulls candidates on demand into the current 48-cell grid\n";
+        std::cerr << "[slam] feature_frontend=lk selected; xfeat_seeding="
+                  << (m_aliases.lkXFeatSeeding ? "enabled" : "disabled")
+                  << " lk_grid=48\n";
     }
     if (m_aliases.udpEnable) {
         auto destinationResolver = [this](sockaddr_in &dst) {

@@ -16,7 +16,7 @@ class RuntimeConfigService {
     RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTuning &tuning, std::mutex &configMutex,
                          RestartFn requestRestart);
 
-    bool UpdateRemoteConfig(const RemoteRuntimeConfig &remote, std::string *err);
+    bool UpdateRemoteConfig(RemoteRuntimeConfig remote, std::string *err);
     CommandResult ApplyConfig(const ConfigUpdate &update, const UnifiedConfig &currentConfig);
 
   private:

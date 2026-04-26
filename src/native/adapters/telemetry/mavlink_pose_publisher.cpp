@@ -31,7 +31,7 @@ void MavlinkPosePublisher::PublishPose(uint64_t frameId, const core::ports::Pose
         odomQuality = OdomQualityMode::LOST;
     }
 
-    m_serial.SendOdometry(frameId, mavPose, mavVelocity, MAV_FRAME_LOCAL_NED, MAV_FRAME_BODY_FRD, resetCounter,
+    m_serial.SendOdometry(frameId, mavPose, mavVelocity, MAV_FRAME_LOCAL_FRD, MAV_FRAME_BODY_FRD, resetCounter,
                           odomQuality);
 }
 

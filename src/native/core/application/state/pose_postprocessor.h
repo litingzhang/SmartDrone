@@ -15,12 +15,27 @@ class PosePostprocessor {
     using PoseQuality = smartdrone::core::ports::PoseQuality;
 
     struct Result {
+        struct DebugPose {
+            float cameraX{0.0f};
+            float cameraY{0.0f};
+            float cameraZ{0.0f};
+            float bodyX{0.0f};
+            float bodyY{0.0f};
+            float bodyZ{0.0f};
+            float localX{0.0f};
+            float localY{0.0f};
+            float localZ{0.0f};
+            bool stereoExtrinsicsApplied{false};
+            bool referenceApplied{false};
+        };
+
         Px4MavlinkGateway::Pose alignedPose{};
         smartdrone::core::ports::PoseEstimate poseEstimate{};
         smartdrone::core::ports::VelocityEstimate velocityEstimate{};
         PoseQuality quality{PoseQuality::Lost};
         uint8_t resetCounter{0};
         uint16_t resetMapCount{0};
+        DebugPose debug{};
     };
 
     struct ContinuityMapper {

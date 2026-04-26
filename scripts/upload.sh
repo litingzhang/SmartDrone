@@ -187,10 +187,21 @@ upload_dir_atomic() {
     local remote_name="$2"
     local remote_tmp="$REMOTE_DIR/.${remote_name}.new"
     local remote_dst="$REMOTE_DIR/$remote_name"
+    local preserve_xfeat_weights=""
 
     echo "upload $remote_name/"
+    if [ "$remote_name" = "accelerated_features" ]; then
+        preserve_xfeat_weights="
+            mkdir -p '$remote_tmp/weights'
+            for weight_file in xfeat.onnx xfeat_trt_fp16.engine xfeat_trt_fp32.engine xfeat.engine; do
+                if [ -f '$remote_dst/weights/'\"\$weight_file\" ] && [ ! -f '$remote_tmp/weights/'\"\$weight_file\" ]; then
+                    cp -f '$remote_dst/weights/'\"\$weight_file\" '$remote_tmp/weights/'\"\$weight_file\"
+                fi
+            done
+        "
+    fi
     tar -C "$local_dir" -cf - . | "${SSH_CMD[@]}" "$TARGET_HOST" \
-        "rm -rf '$remote_tmp' && mkdir -p '$remote_tmp' && tar -xf - -C '$remote_tmp' && rm -rf '$remote_dst' && mv '$remote_tmp' '$remote_dst'"
+        "rm -rf '$remote_tmp' && mkdir -p '$remote_tmp' && tar -xf - -C '$remote_tmp' && $preserve_xfeat_weights rm -rf '$remote_dst' && mv '$remote_tmp' '$remote_dst'"
 }
 
 upload_artifact_root() {

@@ -553,6 +553,17 @@ The baseline runs the replay tool with `--stereo-only --summary-json ...` and th
 
 This provides a regression check for the current local stereo replay dataset without depending on IMU initialization quality.
 
+EuRoC MAV sequences can be used for trajectory regression as well. Point `SMART_DRONE_EUROC_DATASET` at a sequence root or its `mav0` directory, for example `MH_01_easy`:
+
+```bash
+cd output/build/host/offline-replay
+SMART_DRONE_EUROC_DATASET=/data/EuRoC/MH_01_easy \
+SMART_DRONE_EUROC_MAX_FRAMES=600 \
+ctest -R OfflineReplayEurocRegression -V
+```
+
+The test runs stereo-only offline replay and evaluates the output against `mav0/state_groundtruth_estimate0/data.csv` using SE(3)-aligned ATE/RPE. Defaults are `ATE RMSE <= 2.5m` and `RPE translation RMSE <= 1.0m`; override them with `SMART_DRONE_EUROC_MAX_ATE_RMSE` and `SMART_DRONE_EUROC_MAX_RPE_RMSE`. If `SMART_DRONE_EUROC_DATASET` is not set, the test is skipped.
+
 ## Calibration
 
 ### 1. Start a Kalibr Environment

@@ -80,9 +80,6 @@ FeatureFrontend ParseFeatureFrontendText(const std::string &text)
     std::string normalized = text;
     std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (normalized == "xfeat" || normalized == "x-feat") {
-        return FeatureFrontend::XFeat;
-    }
     if (normalized == "droid" || normalized == "droid-light" || normalized == "droid_light" ||
         normalized == "droidlight") {
         return FeatureFrontend::DroidLight;
@@ -101,8 +98,6 @@ const char *ToFeatureFrontendText(FeatureFrontend frontend)
         return "lk";
     case FeatureFrontend::DroidLight:
         return "droid_light";
-    case FeatureFrontend::XFeat:
-        return "xfeat";
     case FeatureFrontend::Orb:
     default:
         return "orb";
@@ -373,6 +368,10 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.xfeatMaxPoints = argReader.GetInt("--xfeat-max-points", 768);
     config.runtime.xfeatInputMaxWidth = argReader.GetInt("--xfeat-input-max-width", 640);
     config.runtime.xfeatInputMaxHeight = argReader.GetInt("--xfeat-input-max-height", 400);
+    config.runtime.lkXFeatSeeding = argReader.HasFlag("--lk-xfeat-seeding");
+    config.runtime.lkLoopClosure = argReader.HasFlag("--lk-loop-closure");
+    config.runtime.lkLoopScale = argReader.GetFloat("--lk-loop-scale", 1.20f);
+    config.runtime.lkLoopRelaxation = argReader.GetFloat("--lk-loop-relax", 1.40f);
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");
     config.runtime.slamLowLightEnhance = argReader.HasFlag("--slam-lowlight-enhance");
     config.runtime.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");

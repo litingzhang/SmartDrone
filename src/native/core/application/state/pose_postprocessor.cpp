@@ -195,16 +195,36 @@ PosePostprocessor::Result PosePostprocessor::ProcessPose(const Sophus::SE3f &twc
                                                          Px4MavlinkGateway &mavlink)
 {
     Sophus::SE3f twc = twcRaw;
+    Result out{};
+    out.debug.cameraX = twcRaw.translation().x();
+    out.debug.cameraY = twcRaw.translation().y();
+    out.debug.cameraZ = twcRaw.translation().z();
+
     if (!useImu && stereoExtrinsicsLoaded) {
+        // Pure stereo/LK estimates the left optical camera pose. Convert it to body FRD using T_b_c1
+        // before the startup reference is applied, so published local motion is +X forward, +Y right, +Z down.
         twc = twc * stereoBodyExtrinsics.inverse();
+        out.debug.stereoExtrinsicsApplied = true;
     }
+    out.debug.bodyX = twc.translation().x();
+    out.debug.bodyY = twc.translation().y();
+    out.debug.bodyZ = twc.translation().z();
+
+    twc = m_continuity.MapPose(mapId, trackingUsable, twc);
+    out.resetCounter = m_continuity.GetResetCounter();
+    out.resetMapCount = m_continuity.GetResetMapCount();
+
     if (!useImu && trackingUsable) {
         if (!stereoReferencePoseSet) {
             stereoReferencePose = twc;
             stereoReferencePoseSet = true;
         }
         twc = stereoReferencePose.inverse() * twc;
+        out.debug.referenceApplied = true;
     }
+    out.debug.localX = twc.translation().x();
+    out.debug.localY = twc.translation().y();
+    out.debug.localZ = twc.translation().z();
 
     const Eigen::Vector3f t = twc.translation();
     const Eigen::Quaternionf q(twc.so3().unit_quaternion());
@@ -222,9 +242,8 @@ PosePostprocessor::Result PosePostprocessor::ProcessPose(const Sophus::SE3f &twc
     Px4MavlinkGateway::Pose pRaw = useImu ? Px4MavlinkGateway::EnuToNed(pSlam) : pSlam;
     PoseQuality quality = PoseQuality::Lost;
     const Px4MavlinkGateway::Pose aligned = m_aligner.AlignPose(pRaw, trackingUsable, mavlink, quality);
-    const auto velocity = m_velocity.Update(aligned, frameNs, quality, 0);
+    const auto velocity = m_velocity.Update(aligned, frameNs, quality, out.resetMapCount);
 
-    Result out{};
     out.alignedPose = aligned;
     out.poseEstimate.valid = true;
     out.poseEstimate.x = aligned.x;
@@ -236,8 +255,6 @@ PosePostprocessor::Result PosePostprocessor::ProcessPose(const Sophus::SE3f &twc
     out.poseEstimate.qz = aligned.qz;
     out.velocityEstimate = velocity;
     out.quality = quality;
-    out.resetCounter = 0;
-    out.resetMapCount = 0;
     return out;
 }
 

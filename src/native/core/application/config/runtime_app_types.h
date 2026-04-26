@@ -52,6 +52,10 @@ struct RemoteRuntimeConfig {
     int xfeatMaxPoints{320};
     int xfeatInputMaxWidth{640};
     int xfeatInputMaxHeight{400};
+    bool lkXFeatSeeding{false};
+    bool lkLoopClosure{false};
+    float lkLoopScale{1.20f};
+    float lkLoopRelaxation{1.40f};
 };
 
 struct MainRuntimeAliases {
@@ -67,6 +71,9 @@ struct MainRuntimeAliases {
     float gain{};
     std::string udpIp, spiDev, gpiochip;
     int xfeatInputMaxWidth{}, xfeatInputMaxHeight{};
+    bool lkXFeatSeeding{};
+    bool lkLoopClosure{};
+    float lkLoopScale{1.20f}, lkLoopRelaxation{1.40f};
     int udpPort{}, cmdPort{}, udpJpegQ{}, udpPayload{}, udpQueue{}, imuHz{}, accelFsG{}, gyroFsDps{}, rtPrio{};
     uint32_t spiSpeed{};
     uint8_t spiMode{}, spiBits{}, imuStartReg{};

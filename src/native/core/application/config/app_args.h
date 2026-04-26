@@ -94,6 +94,10 @@ struct RuntimeConfig {
     int xfeatMaxPoints{768};
     int xfeatInputMaxWidth{640};
     int xfeatInputMaxHeight{400};
+    bool lkXFeatSeeding{false};
+    bool lkLoopClosure{false};
+    float lkLoopScale{1.20f};
+    float lkLoopRelaxation{1.40f};
     bool debugRightOnlyFeatures{false};
     bool slamLowLightEnhance{false};
     bool jsonDiagnostics{false};

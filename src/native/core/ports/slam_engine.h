@@ -42,6 +42,10 @@ struct SlamOutput {
     int xfeatMatchedStereoCount{0};
     int xfeatInjectedLeftCount{0};
     int xfeatInjectedRightCount{0};
+    uint64_t xfeatSeedSourceFrameId{0};
+    uint64_t xfeatSeedCurrentFrameId{0};
+    uint32_t xfeatSeedAgeFrames{0};
+    int xfeatSeedForwardedCount{0};
     double xfeatPrepareMs{0.0};
     double xfeatWorkerWriteMs{0.0};
     double xfeatWorkerReadMs{0.0};

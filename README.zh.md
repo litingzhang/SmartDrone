@@ -612,6 +612,17 @@ ctest -R OfflineReplayStereoOnly -V
 
 这项检查用于在不过度依赖 IMU 初始化质量的前提下验证当前本地双目回放数据集是否发生回归。
 
+也可以用 EuRoC MAV 序列做轨迹回归。`SMART_DRONE_EUROC_DATASET` 指向序列目录或其中的 `mav0` 目录，例如 `MH_01_easy`：
+
+```bash
+cd output/build/host/offline-replay
+SMART_DRONE_EUROC_DATASET=/data/EuRoC/MH_01_easy \
+SMART_DRONE_EUROC_MAX_FRAMES=600 \
+ctest -R OfflineReplayEurocRegression -V
+```
+
+该用例会运行纯双目 offline replay，然后用 `mav0/state_groundtruth_estimate0/data.csv` 计算 SE(3) 对齐后的 ATE/RPE。默认阈值为 `ATE RMSE <= 2.5m`、`RPE translation RMSE <= 1.0m`，可通过 `SMART_DRONE_EUROC_MAX_ATE_RMSE` 和 `SMART_DRONE_EUROC_MAX_RPE_RMSE` 覆盖。未设置 `SMART_DRONE_EUROC_DATASET` 时测试自动跳过。
+
 ## 9. 标定流程
 
 ### 9.1 启动 Kalibr 环境

@@ -14,6 +14,9 @@ class XFeatNativeExtractor {
   public:
     struct Stats {
         double prepareMs{0.0};
+        double inputMs{0.0};
+        double forwardMs{0.0};
+        double postMs{0.0};
         double inferMs{0.0};
         double totalMs{0.0};
         uint32_t imageCount{0};

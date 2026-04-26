@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <deque>
-#include <future>
 #include <memory>
 #include <string>
 #include <vector>
@@ -37,6 +36,13 @@ struct LkFrameSnapshot {
     cv::Mat right;
 };
 
+struct LkLoopKeyframe {
+    uint64_t frameId{0};
+    Sophus::SE3f rawTwc{Sophus::SE3f()};
+    Sophus::SE3f correctedTwc{Sophus::SE3f()};
+    cv::Mat descriptor;
+};
+
 struct LkXFeatSeedResult {
     uint64_t frameId{0};
     std::vector<LkStereoTrack> seeds;
@@ -55,21 +61,17 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     void SetFeatureFrontend(FeatureFrontend frontend);
     void SetXFeatFrontendClient(XFeatFrontendClient *client);
     void SetXFeatInputSizeLimit(int maxWidth, int maxHeight);
+    void SetLkLoopClosure(bool enabled, float scale = 1.20f, float relaxation = 1.40f);
     void Stop() override;
     core::ports::SlamOutput Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
                                     bool extractPointCloud) override;
 
   private:
-    static std::vector<cv::KeyPoint> ToKeyPoints(const std::vector<cv::Point2f> &points);
-    bool BuildMonoExternalData(const cv::Mat &gray, ORB_SLAM3::ExternalMonoFrameData &outData) const;
-    bool BuildStereoExternalData(const cv::Mat &leftGray, const cv::Mat &rightGray,
-                                 ORB_SLAM3::ExternalStereoFrameData &outData,
-                                 std::vector<cv::Point2f> *leftRawPoints = nullptr,
-                                 std::vector<cv::Point2f> *rightRawPoints = nullptr) const;
     void StabilizeOutputPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec, int trackingState);
     bool LoadLkCalibration(const std::string &settingsPath);
     void EnsureLkRectifier(const cv::Size &inputSize);
     core::ports::SlamOutput ProcessLkStereoVo(const core::ports::SlamInputBatch &input, bool extractFeatures);
+    Sophus::SE3f ApplyLkLoopClosure(const cv::Mat &leftRect, uint64_t frameId, const Sophus::SE3f &rawTwc);
 
     std::unique_ptr<ORB_SLAM3::System> m_system;
     OrbInputMode m_inputMode{OrbInputMode::Stereo};
@@ -84,6 +86,10 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     mutable int m_lastXFeatMatchedStereoCount{0};
     mutable int m_lastXFeatInjectedLeftCount{0};
     mutable int m_lastXFeatInjectedRightCount{0};
+    mutable uint64_t m_lastXFeatSeedSourceFrameId{0};
+    mutable uint64_t m_lastXFeatSeedCurrentFrameId{0};
+    mutable uint32_t m_lastXFeatSeedAgeFrames{0};
+    mutable int m_lastXFeatSeedForwardedCount{0};
     mutable double m_lastXFeatPrepareMs{0.0};
     mutable double m_lastXFeatWorkerWriteMs{0.0};
     mutable double m_lastXFeatWorkerReadMs{0.0};
@@ -93,12 +99,6 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     mutable uint32_t m_lastXFeatImageCount{0};
     mutable uint32_t m_lastXFeatPayloadBytes{0};
     mutable std::string m_lastXFeatStatusReason;
-    mutable cv::Mat m_prevStereoLeftGray;
-    mutable cv::Mat m_prevStereoRightGray;
-    mutable std::vector<cv::Point2f> m_prevInjectedStereoLeftPoints;
-    mutable std::vector<cv::Point2f> m_prevInjectedStereoRightPoints;
-    mutable ORB_SLAM3::ExternalStereoFrameData m_prevInjectedStereoExternal;
-    mutable bool m_havePrevInjectedStereoExternal{false};
     core::ports::PoseEstimate m_lastStablePose{};
     bool m_haveLastStablePose{false};
     double m_lastStableTimestampSec{0.0};
@@ -127,11 +127,16 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     mutable cv::Mat m_lkPrevRight;
     mutable std::vector<LkStereoTrack> m_lkTracks;
     mutable std::deque<LkFrameSnapshot> m_lkFrameHistory;
-    mutable std::future<LkXFeatSeedResult> m_lkXFeatFuture;
-    mutable uint64_t m_lkXFeatPendingFrameId{0};
+    mutable uint64_t m_lkLastXFeatSeedFrameId{0};
     mutable Sophus::SE3f m_lkTwc{Sophus::SE3f()};
     mutable bool m_lkHavePrev{false};
     mutable uint32_t m_lkFrameCount{0};
+    bool m_lkLoopClosureEnabled{false};
+    float m_lkLoopScale{1.20f};
+    float m_lkLoopRelaxation{1.40f};
+    mutable std::deque<LkLoopKeyframe> m_lkLoopKeyframes;
+    mutable Sophus::SE3f m_lkLoopCorrection{Sophus::SE3f()};
+    mutable uint64_t m_lkLastLoopClosureFrameId{0};
 };
 
 } // namespace smartdrone::adapters::slam

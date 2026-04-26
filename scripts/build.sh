@@ -5,6 +5,7 @@ usage() {
     cat <<'EOF'
 Usage:
   ./scripts/build.sh [smart_drone|orb|android|all|test|replay] [--clean] [--reconfigure] [--jetson-orin-nx]
+                   [--jobs N] [--camera-provider NAME]
 
 Modes:
   smart_drone     Build the unified runtime target
@@ -19,6 +20,9 @@ Options:
   --reconfigure   Re-run CMake configure for native builds even if build dir already exists
   --jetson-orin-nx
                   Cross-build native targets for Jetson Orin NX instead of the default CM5 profile
+  --jobs N        Build parallelism; defaults to BUILD_JOBS or nproc
+  --camera-provider NAME
+                  Native camera provider, e.g. libcamera_stereo_ov9281 or uvc_stereo_opencv
 EOF
 }
 
@@ -66,6 +70,8 @@ CLEAN_BUILD=0
 FORCE_RECONFIGURE=0
 JETSON_ORIN_NX=0
 NATIVE_RECONFIGURE_REQUIRED=0
+BUILD_JOBS_OVERRIDE=""
+CAMERA_PROVIDER_OVERRIDE=""
 
 case "$MODE" in
     smart_drone)
@@ -109,6 +115,30 @@ while [ "$#" -gt 0 ]; do
         --jetson-orin-nx)
             JETSON_ORIN_NX=1
             ;;
+        --jobs)
+            if [ "$#" -lt 2 ]; then
+                echo "--jobs requires a value" >&2
+                usage
+                exit 1
+            fi
+            BUILD_JOBS_OVERRIDE="$2"
+            shift
+            ;;
+        --jobs=*)
+            BUILD_JOBS_OVERRIDE="${1#--jobs=}"
+            ;;
+        --camera-provider)
+            if [ "$#" -lt 2 ]; then
+                echo "--camera-provider requires a value" >&2
+                usage
+                exit 1
+            fi
+            CAMERA_PROVIDER_OVERRIDE="$2"
+            shift
+            ;;
+        --camera-provider=*)
+            CAMERA_PROVIDER_OVERRIDE="${1#--camera-provider=}"
+            ;;
         -h|--help)
             usage
             exit 0
@@ -131,7 +161,8 @@ REPLAY_BUILD_DIR="$OUTPUT_ROOT/build/host/offline-replay"
 ANDROID_DIR="$REPO_ROOT/src/android"
 ANDROID_APP_DIR="$ANDROID_DIR/app"
 ANDROID_GRADLE_TASK="${ANDROID_GRADLE_TASK:-assembleDebug}"
-BUILD_JOBS="${BUILD_JOBS:-$(nproc)}"
+BUILD_JOBS="${BUILD_JOBS_OVERRIDE:-${BUILD_JOBS:-$(nproc)}}"
+SMART_DRONE_CAMERA_PROVIDER="${CAMERA_PROVIDER_OVERRIDE:-${SMART_DRONE_CAMERA_PROVIDER:-}}"
 PLATFORM_NAME="cm5"
 SYSROOT_DEFAULT="$REPO_ROOT/../sysroots/cm5"
 SYSROOT_ENV_NAME="SYSROOT"

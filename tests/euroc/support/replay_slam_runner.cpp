@@ -1,4 +1,4 @@
-#include "test_support/replay_slam_runner.h"
+#include "support/replay_slam_runner.h"
 
 namespace smartdrone::tests {
 

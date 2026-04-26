@@ -2,7 +2,6 @@
 #include "adapters/slam/xfeat_native_extractor.h"
 
 #include <algorithm>
-#include <array>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -14,7 +13,6 @@
 #include <utility>
 #include <vector>
 
-#include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -26,7 +24,6 @@ namespace smartdrone::adapters::slam {
 
 namespace {
 
-constexpr std::array<char, 8> kReadyMagic{'X', 'F', 'W', 'K', 'R', 'D', 'Y', '1'};
 constexpr float kTemporalMinSimilarity = 0.80f;
 constexpr float kTemporalMinMargin = 0.02f;
 constexpr float kTemporalFlowMinSimilarity = 0.72f;
@@ -36,6 +33,8 @@ constexpr size_t kTemporalMinStableCount = 64;
 constexpr size_t kTemporalExtraBudget = 160;
 constexpr int kTemporalFlowWindowPx = 21;
 constexpr int kTemporalFlowMaxLevel = 3;
+constexpr char kWorkerReadyMagic[] = "XFWKRDY1";
+constexpr size_t kWorkerReadyMagicLen = 8;
 
 struct RequestHeader {
     uint32_t seq{0};
@@ -63,37 +62,10 @@ std::string ErrnoMessage(const char *prefix)
     return std::string(prefix) + ": " + std::strerror(errno);
 }
 
-bool SetCloseOnExec(int fd, std::string *err)
-{
-    const int flags = fcntl(fd, F_GETFD);
-    if (flags < 0) {
-        if (err != nullptr) {
-            *err = ErrnoMessage("fcntl(F_GETFD) failed");
-        }
-        return false;
-    }
-    if (fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0) {
-        if (err != nullptr) {
-            *err = ErrnoMessage("fcntl(F_SETFD) failed");
-        }
-        return false;
-    }
-    return true;
-}
-
 double DurationMs(const std::chrono::steady_clock::time_point &start,
                   const std::chrono::steady_clock::time_point &end)
 {
     return std::chrono::duration<double, std::milli>(end - start).count();
-}
-
-bool WantsNativeBackend()
-{
-    const char *backend = std::getenv("SMART_DRONE_XFEAT_BACKEND");
-    if (backend == nullptr) {
-        return false;
-    }
-    return std::string(backend) == "native";
 }
 
 bool HasCompatibleDescriptors(const XFeatFeatureSet &a, const XFeatFeatureSet &b)
@@ -163,112 +135,81 @@ bool XFeatFrontendClient::Start(const std::string &pythonBin, const std::string 
     Stop();
     m_lastStats = Stats{};
 
-    if (WantsNativeBackend()) {
-        if (!m_nativeExtractor) {
-            m_nativeExtractor = std::make_unique<XFeatNativeExtractor>();
-        }
-        if (!m_nativeExtractor->Start(repoPath, device, topK, maxPoints, err)) {
-            m_nativeExtractor.reset();
-            m_backendMode = BackendMode::None;
-            return false;
-        }
+    if (!m_nativeExtractor) {
+        m_nativeExtractor = std::make_unique<XFeatNativeExtractor>();
+    }
+    std::string nativeErr;
+    if (m_nativeExtractor->Start(repoPath, device, topK, maxPoints, &nativeErr)) {
         m_backendMode = BackendMode::Native;
         return true;
     }
+    m_nativeExtractor.reset();
 
     int stdinPipe[2]{-1, -1};
     int stdoutPipe[2]{-1, -1};
     if (pipe(stdinPipe) != 0) {
         if (err != nullptr) {
-            *err = ErrnoMessage("pipe(stdin) failed");
+            *err = nativeErr + "; " + ErrnoMessage("xfeat worker stdin pipe failed");
         }
         return false;
     }
     if (pipe(stdoutPipe) != 0) {
-        if (err != nullptr) {
-            *err = ErrnoMessage("pipe(stdout) failed");
-        }
         close(stdinPipe[0]);
         close(stdinPipe[1]);
-        return false;
-    }
-
-    std::string pipeErr;
-    if (!SetCloseOnExec(stdinPipe[1], &pipeErr) || !SetCloseOnExec(stdoutPipe[0], &pipeErr)) {
         if (err != nullptr) {
-            *err = pipeErr;
+            *err = nativeErr + "; " + ErrnoMessage("xfeat worker stdout pipe failed");
         }
-        close(stdinPipe[0]);
-        close(stdinPipe[1]);
-        close(stdoutPipe[0]);
-        close(stdoutPipe[1]);
         return false;
     }
 
     const pid_t pid = fork();
     if (pid < 0) {
-        if (err != nullptr) {
-            *err = ErrnoMessage("fork failed");
-        }
         close(stdinPipe[0]);
         close(stdinPipe[1]);
         close(stdoutPipe[0]);
         close(stdoutPipe[1]);
+        if (err != nullptr) {
+            *err = nativeErr + "; " + ErrnoMessage("xfeat worker fork failed");
+        }
         return false;
     }
 
     if (pid == 0) {
         dup2(stdinPipe[0], STDIN_FILENO);
         dup2(stdoutPipe[1], STDOUT_FILENO);
-
         close(stdinPipe[0]);
         close(stdinPipe[1]);
         close(stdoutPipe[0]);
         close(stdoutPipe[1]);
-
-        const std::string topKText = std::to_string(std::max(1, topK));
-        const std::string maxPointsText = std::to_string(std::max(1, maxPoints));
-
-        std::vector<char *> argv;
-        argv.push_back(const_cast<char *>(pythonBin.c_str()));
-        argv.push_back(const_cast<char *>(workerScript.c_str()));
-        argv.push_back(const_cast<char *>("--repo"));
-        argv.push_back(const_cast<char *>(repoPath.c_str()));
-        argv.push_back(const_cast<char *>("--device"));
-        argv.push_back(const_cast<char *>(device.c_str()));
-        argv.push_back(const_cast<char *>("--top-k"));
-        argv.push_back(const_cast<char *>(topKText.c_str()));
-        argv.push_back(const_cast<char *>("--max-points"));
-        argv.push_back(const_cast<char *>(maxPointsText.c_str()));
-        argv.push_back(nullptr);
-
-        execvp(pythonBin.c_str(), argv.data());
+        execl(pythonBin.c_str(), pythonBin.c_str(), workerScript.c_str(),
+              "--repo", repoPath.c_str(),
+              "--device", device.c_str(),
+              "--top-k", std::to_string(std::max(1, topK)).c_str(),
+              "--max-points", std::to_string(std::max(1, maxPoints)).c_str(),
+              static_cast<char *>(nullptr));
         _exit(127);
     }
 
     close(stdinPipe[0]);
     close(stdoutPipe[1]);
-
     m_stdinFd = stdinPipe[1];
     m_stdoutFd = stdoutPipe[0];
     m_pid = pid;
-    m_requestSeq = 0;
-    m_prevStereoLeftFeatures = XFeatFeatureSet{};
-    m_prevStereoLeftGray.release();
-    m_havePrevStereoLeftFeatures = false;
-    std::array<char, kReadyMagic.size()> ready{};
-    if (!ReadExact(ready.data(), ready.size(), err)) {
-        Stop();
-        return false;
-    }
-    if (ready != kReadyMagic) {
-        if (err != nullptr) {
-            *err = "xfeat worker handshake mismatch";
-        }
-        Stop();
-        return false;
-    }
     m_backendMode = BackendMode::Worker;
+
+    char ready[kWorkerReadyMagicLen]{};
+    if (!ReadExact(ready, sizeof(ready), err) || std::memcmp(ready, kWorkerReadyMagic, kWorkerReadyMagicLen) != 0) {
+        const std::string workerErr = err != nullptr ? *err : "worker did not report ready";
+        Stop();
+        if (err != nullptr) {
+            *err = nativeErr + "; xfeat worker startup failed: " + workerErr;
+        }
+        return false;
+    }
+
+    if (!m_nativeExtractor) {
+        m_nativeExtractor.reset();
+    }
     return true;
 }
 
@@ -316,7 +257,8 @@ bool XFeatFrontendClient::Detect(const cv::Mat &gray, std::vector<cv::Point2f> &
         if (m_nativeExtractor) {
             const XFeatNativeExtractor::Stats nativeStats = m_nativeExtractor->LastStats();
             m_lastStats.prepareMs = nativeStats.prepareMs;
-            m_lastStats.readMs = nativeStats.inferMs;
+            m_lastStats.writeMs = nativeStats.inputMs;
+            m_lastStats.readMs = nativeStats.forwardMs;
             m_lastStats.totalMs = nativeStats.totalMs;
             m_lastStats.imageCount = nativeStats.imageCount;
             m_lastStats.payloadBytes = nativeStats.payloadBytes;
@@ -339,7 +281,8 @@ bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet 
         if (m_nativeExtractor) {
             const XFeatNativeExtractor::Stats nativeStats = m_nativeExtractor->LastStats();
             m_lastStats.prepareMs = nativeStats.prepareMs;
-            m_lastStats.readMs = nativeStats.inferMs;
+            m_lastStats.writeMs = nativeStats.inputMs;
+            m_lastStats.readMs = nativeStats.forwardMs;
             m_lastStats.totalMs = nativeStats.totalMs;
             m_lastStats.imageCount = nativeStats.imageCount;
             m_lastStats.payloadBytes = nativeStats.payloadBytes;
@@ -555,7 +498,8 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
         if (m_nativeExtractor) {
             const XFeatNativeExtractor::Stats nativeStats = m_nativeExtractor->LastStats();
             m_lastStats.prepareMs = nativeStats.prepareMs;
-            m_lastStats.readMs = nativeStats.inferMs;
+            m_lastStats.writeMs = nativeStats.inputMs;
+            m_lastStats.readMs = nativeStats.forwardMs;
             m_lastStats.totalMs = nativeStats.totalMs;
             m_lastStats.imageCount = nativeStats.imageCount;
             m_lastStats.payloadBytes = nativeStats.payloadBytes;

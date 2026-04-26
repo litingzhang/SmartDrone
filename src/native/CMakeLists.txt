@@ -38,12 +38,6 @@ set(SMART_DRONE_ADAPTER_SOURCES
   ${SMART_DRONE_CAMERA_SOURCES}
 )
 
-if(SMART_DRONE_ENABLE_XFEAT_NATIVE)
-  list(APPEND SMART_DRONE_ADAPTER_SOURCES
-    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/xfeat_native_model.cpp"
-  )
-endif()
-
 set(SMART_DRONE_COMMON_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/common/discovery/udp_discovery_beacon.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/common/runtime_state.cpp"

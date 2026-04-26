@@ -828,7 +828,7 @@ public class MainActivity extends Activity {
             final boolean manualExposureEditable = !runtimeActive && !m_cfgAutoExposure;
             final boolean tbcEditable = m_cfgUseCustomTbc && m_sensorMode == SENSOR_STEREO;
             final boolean orbEditable = !runtimeActive;
-            final boolean xfeatEditable = !runtimeActive && m_cfgFeatureFrontend == FEATURE_FRONTEND_XFEAT;
+            final boolean xfeatEditable = !runtimeActive && m_cfgFeatureFrontend == FEATURE_FRONTEND_LK;
             if (m_tvCfgExposureValue != null) {
                 m_tvCfgExposureValue.setText(m_cfgAutoExposure ? "Exposure: Auto (UVC AE)"
                                                                : String.format(Locale.US, "Exposure: %d us (UVC)",
@@ -1647,12 +1647,6 @@ public class MainActivity extends Activity {
 
     private int[] getSupportedFeatureFrontends()
     {
-        if (m_supportsXFeat) {
-            if (m_supportsLK) {
-                return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_XFEAT, FEATURE_FRONTEND_LK};
-            }
-            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_XFEAT};
-        }
         if (m_supportsLK) {
             return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK};
         }
@@ -2014,9 +2008,6 @@ public class MainActivity extends Activity {
             "stereo_lk".equals(normalized) || "optical-flow".equals(normalized) || "optical_flow".equals(normalized)) {
             return FEATURE_FRONTEND_LK;
         }
-        if ("xfeat".equals(normalized) || "x-feat".equals(normalized)) {
-            return FEATURE_FRONTEND_XFEAT;
-        }
         if ("orb".equals(normalized)) {
             return FEATURE_FRONTEND_ORB;
         }
@@ -2153,8 +2144,7 @@ public class MainActivity extends Activity {
         m_supportsStereoImu = containsTokenList(values.get("perception_modes"), "stereo-imu");
         m_supportsMono = containsTokenList(values.get("perception_modes"), "mono");
         m_supportsMonoImu = containsTokenList(values.get("perception_modes"), "mono-imu");
-        final String xfeatCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.xfeat=");
-        m_supportsXFeat = xfeatCapability != null && !"disabled_at_build_time".equalsIgnoreCase(xfeatCapability);
+        m_supportsXFeat = false;
         final String droidLightCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.droid_light=");
         m_supportsDroidLight = droidLightCapability != null && !"disabled_at_build_time".equalsIgnoreCase(droidLightCapability);
         final String lkCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.lk=");
@@ -2164,11 +2154,10 @@ public class MainActivity extends Activity {
         m_pairWindowRequired = !m_isPackedStereoUvc;
         updateRuntimeButtons();
         m_tvStatus.setText(String.format(Locale.US,
-                                         "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s uvc=%s xfeat=%s lk=%s",
+                                         "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s uvc=%s lk=%s",
                                          m_supportsCalib ? "yes" : "no", m_supportsStereoImu ? "yes" : "no",
                                          m_supportsMono ? "yes" : "no", m_supportsMonoImu ? "yes" : "no",
-                                         m_isPackedStereoUvc ? "packed" : "no", m_supportsXFeat ? "yes" : "no",
-                                         m_supportsLK ? "yes" : "no"));
+                                         m_isPackedStereoUvc ? "packed" : "no", m_supportsLK ? "yes" : "no"));
         return true;
     }
 
@@ -2195,7 +2184,7 @@ public class MainActivity extends Activity {
         m_cfgSlamFps = quantizeSlamFps(parsedSlamFps);
         m_cfgSlamMode = parseSlamModeText(values.get("slam.operation_mode"), m_cfgSlamMode);
         m_cfgFeatureFrontend = parseFeatureFrontendText(values.get("slam.feature_frontend"), m_cfgFeatureFrontend);
-        if (!m_supportsXFeat && m_cfgFeatureFrontend == FEATURE_FRONTEND_XFEAT) {
+        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_XFEAT) {
             m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
         }
         if (!m_supportsDroidLight && m_cfgFeatureFrontend == FEATURE_FRONTEND_DROID_LIGHT) {
@@ -2317,8 +2306,6 @@ public class MainActivity extends Activity {
             return "LK";
         case FEATURE_FRONTEND_DROID_LIGHT:
             return "DROID-Light";
-        case FEATURE_FRONTEND_XFEAT:
-            return "XFeat";
         case FEATURE_FRONTEND_ORB:
         default:
             return "ORB";
