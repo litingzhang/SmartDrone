@@ -16,10 +16,11 @@ enum class SensorMode {
 };
 
 enum class FeatureFrontend {
-    Orb,
-    XFeat,
-    DroidLight,
-    LK,
+    Orb = 0,
+    XFeat = 1,
+    DroidLight = 2,
+    LK = 3,
+    LkGfttPerFrame = 4,
 };
 
 const char *DefaultSettingsForSensorMode(SensorMode mode);
@@ -98,6 +99,7 @@ struct RuntimeConfig {
     bool lkLoopClosure{false};
     float lkLoopScale{1.20f};
     float lkLoopRelaxation{1.40f};
+    std::string lkPerFrameAcceleration{"cpu"};
     bool debugRightOnlyFeatures{false};
     bool slamLowLightEnhance{false};
     bool jsonDiagnostics{false};

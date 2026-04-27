@@ -71,6 +71,13 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         }
         return false;
     }
+    if (remote.lkPerFrameAcceleration != "cpu" && remote.lkPerFrameAcceleration != "vpi-cuda" &&
+        remote.lkPerFrameAcceleration != "auto") {
+        if (err) {
+            *err = "bad lk per-frame acceleration";
+        }
+        return false;
+    }
 
     bool restartNeeded = false;
     float effectiveTbcTx = remote.tbcTx;
@@ -98,6 +105,9 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
                                   m_config.app.runtime.xfeatMaxPoints != remote.xfeatMaxPoints ||
                                   m_config.app.runtime.xfeatInputMaxWidth != remote.xfeatInputMaxWidth ||
                                   m_config.app.runtime.xfeatInputMaxHeight != remote.xfeatInputMaxHeight;
+        const bool lkSeedChanged = m_config.app.runtime.lkXFeatSeeding != remote.lkXFeatSeeding;
+        const bool lkPerFrameAccelChanged =
+            m_config.app.runtime.lkPerFrameAcceleration != remote.lkPerFrameAcceleration;
         cam.exposureUs = remote.exposureUs;
         cam.gain = remote.gain;
         cam.aeDisable = !remote.autoExposureEnabled;
@@ -118,6 +128,8 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         m_config.app.runtime.xfeatMaxPoints = remote.xfeatMaxPoints;
         m_config.app.runtime.xfeatInputMaxWidth = remote.xfeatInputMaxWidth;
         m_config.app.runtime.xfeatInputMaxHeight = remote.xfeatInputMaxHeight;
+        m_config.app.runtime.lkXFeatSeeding = remote.lkXFeatSeeding;
+        m_config.app.runtime.lkPerFrameAcceleration = remote.lkPerFrameAcceleration;
         m_config.app.sensorMode = remote.sensorMode;
         m_config.app.settings = ResolveSettingsForSensorMode(remote.sensorMode, m_config.app.settings);
         m_config.app.udp.ip = remote.udpIp;
@@ -161,7 +173,8 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         effectiveTbcPitchDeg = m_config.app.runtime.tbcPitchDeg;
         effectiveTbcYawDeg = m_config.app.runtime.tbcYawDeg;
         restartNeeded =
-            sensorModeChanged || frontendChanged || aeModeChanged || uvcConfigChanged || orbChanged || xfeatChanged;
+            sensorModeChanged || frontendChanged || aeModeChanged || uvcConfigChanged || orbChanged || xfeatChanged ||
+            lkSeedChanged || lkPerFrameAccelChanged;
     }
 
     m_tuning.slamInputFps.store(remote.slamInputFps, std::memory_order_relaxed);
@@ -419,6 +432,18 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
             } else {
                 return {false, "slam.xfeat_input_max_height type mismatch"};
             }
+        } else if (key == ConfigRegistry::kSlamLkXFeatSeeding) {
+            if (const auto *v = std::get_if<bool>(&value)) {
+                remote.lkXFeatSeeding = *v;
+            } else {
+                return {false, "slam.lk_xfeat_seeding type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamLkPerFrameAcceleration) {
+            if (const auto *v = std::get_if<std::string>(&value)) {
+                remote.lkPerFrameAcceleration = *v;
+            } else {
+                return {false, "slam.lk_per_frame_accel type mismatch"};
+            }
         } else {
             return {false, "unsupported config key: " + key};
         }
@@ -439,7 +464,9 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
                           std::to_string(remote.xfeatTopK) + " xfeat_max_points=" +
                           std::to_string(remote.xfeatMaxPoints) + " xfeat_input_max=" +
                           std::to_string(remote.xfeatInputMaxWidth) + "x" +
-                          std::to_string(remote.xfeatInputMaxHeight);
+                          std::to_string(remote.xfeatInputMaxHeight) + " lk_seed=" +
+                          (remote.lkXFeatSeeding ? "xfeat" : "gftt") +
+                          " lk_accel=" + remote.lkPerFrameAcceleration;
     return {true, message};
 }
 
@@ -481,6 +508,8 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.xfeatMaxPoints = currentConfig.app.runtime.xfeatMaxPoints;
     remote.xfeatInputMaxWidth = currentConfig.app.runtime.xfeatInputMaxWidth;
     remote.xfeatInputMaxHeight = currentConfig.app.runtime.xfeatInputMaxHeight;
+    remote.lkXFeatSeeding = currentConfig.app.runtime.lkXFeatSeeding;
+    remote.lkPerFrameAcceleration = currentConfig.app.runtime.lkPerFrameAcceleration;
     return remote;
 }
 

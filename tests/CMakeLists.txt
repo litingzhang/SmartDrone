@@ -45,6 +45,39 @@ if(ENABLE_OFFLINE_REPLAY)
     TESTS_SOURCE_DIR="${EUROC_TEST_ROOT}"
   )
 
+  if(SMART_DRONE_ENABLE_VPI)
+    set(_SMART_DRONE_VPI_CANDIDATE_ROOTS
+      "${SMART_DRONE_VPI_ROOT}"
+      "${CMAKE_SOURCE_DIR}/output/vpi2_jetson"
+      "${SYSROOT}/opt/nvidia/vpi2"
+      "/opt/nvidia/vpi2"
+    )
+    foreach(_vpi_root IN LISTS _SMART_DRONE_VPI_CANDIDATE_ROOTS)
+      if(NOT _vpi_root)
+        continue()
+      endif()
+      if(EXISTS "${_vpi_root}/include/vpi/VPI.h" AND EXISTS "${_vpi_root}/lib/aarch64-linux-gnu/libnvvpi.so")
+        set(_SMART_DRONE_RESOLVED_VPI_ROOT "${_vpi_root}")
+        break()
+      endif()
+    endforeach()
+    if(_SMART_DRONE_RESOLVED_VPI_ROOT)
+      target_compile_definitions(smart_drone_offline_replay PRIVATE SMART_DRONE_HAS_VPI=1)
+      target_include_directories(smart_drone_offline_replay PRIVATE "${_SMART_DRONE_RESOLVED_VPI_ROOT}/include")
+      target_link_directories(smart_drone_offline_replay PRIVATE "${_SMART_DRONE_RESOLVED_VPI_ROOT}/lib/aarch64-linux-gnu")
+      target_link_libraries(smart_drone_offline_replay PRIVATE nvvpi)
+      target_link_options(smart_drone_offline_replay PRIVATE
+        "-Wl,-rpath-link,${_SMART_DRONE_RESOLVED_VPI_ROOT}/lib/aarch64-linux-gnu"
+        "-Wl,--allow-shlib-undefined")
+      message(STATUS "VPI enabled for smart_drone_offline_replay: ${_SMART_DRONE_RESOLVED_VPI_ROOT}")
+    else()
+      target_compile_definitions(smart_drone_offline_replay PRIVATE SMART_DRONE_HAS_VPI=0)
+      message(WARNING "SMART_DRONE_ENABLE_VPI=ON but VPI root was not found; replay will use CPU fallback")
+    endif()
+  else()
+    target_compile_definitions(smart_drone_offline_replay PRIVATE SMART_DRONE_HAS_VPI=0)
+  endif()
+
   target_link_libraries(smart_drone_offline_replay PRIVATE
     ORB_SLAM3
     ${OpenCV_LIBS}

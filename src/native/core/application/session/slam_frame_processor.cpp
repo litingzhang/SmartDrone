@@ -140,6 +140,8 @@ Sophus::SE3f BuildBodyToCamPitchDelta(float pitchDeg)
 const char *FeatureFrontendName(FeatureFrontend frontend)
 {
     switch (frontend) {
+    case FeatureFrontend::LkGfttPerFrame:
+        return "lk_gftt_per_frame";
     case FeatureFrontend::LK:
         return "lk";
     case FeatureFrontend::DroidLight:

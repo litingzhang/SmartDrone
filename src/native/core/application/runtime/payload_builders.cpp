@@ -93,6 +93,8 @@ std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig &cfg, smartdrone::co
     oss << "slam.xfeat_max_points=" << cfg.app.runtime.xfeatMaxPoints << "\n";
     oss << "slam.xfeat_input_max_width=" << cfg.app.runtime.xfeatInputMaxWidth << "\n";
     oss << "slam.xfeat_input_max_height=" << cfg.app.runtime.xfeatInputMaxHeight << "\n";
+    oss << "slam.lk_xfeat_seeding=" << (cfg.app.runtime.lkXFeatSeeding ? "true" : "false") << "\n";
+    oss << "slam.lk_per_frame_accel=" << cfg.app.runtime.lkPerFrameAcceleration << "\n";
     oss << "slam.settings=" << cfg.app.settings << "\n";
     oss << "stream.udp_enabled=" << (cfg.app.udp.enable ? "true" : "false") << "\n";
     oss << "stream.udp_ip=" << cfg.app.udp.ip << "\n";

@@ -253,6 +253,12 @@ fi
 if [ -n "${SMART_DRONE_CAMERA_PROVIDER:-}" ]; then
     configure_native_args+=(-DSMART_DRONE_CAMERA_PROVIDER="$SMART_DRONE_CAMERA_PROVIDER")
 fi
+if [ "$JETSON_ORIN_NX" -eq 1 ] && [ -d "$REPO_ROOT/output/vpi2_jetson" ]; then
+    configure_native_args+=(
+        -DSMART_DRONE_ENABLE_VPI=ON
+        -DSMART_DRONE_VPI_ROOT="$REPO_ROOT/output/vpi2_jetson"
+    )
+fi
 
 copy_artifact() {
     local src="$1"

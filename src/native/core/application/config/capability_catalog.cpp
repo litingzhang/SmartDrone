@@ -39,7 +39,10 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault()
         "slam_mode.tracking_only=maps_to_orbslam3_localization_only",
         "slam_mode.auto=runtime_adaptive_switch_between_mapping_and_localization",
         "slam.feature_frontend.orb=full_orbslam3_tracking_path",
-        "slam.feature_frontend.lk=grid_lk_pnp_vo_with_optional_xfeat_seeding",
+        "slam.feature_frontend.lk=grid_lk_pnp_vo",
+        "slam.feature_frontend.lk_gftt_per_frame=per_frame_gftt_lk_pnp_vo",
+        "slam.lk_seed.gftt=shi_tomasi_good_features_to_track",
+        "slam.lk_seed.xfeat=async_xfeat_stereo_seed_points",
     };
     if (CompiledCameraProviderUsesPackedStereo()) {
         capabilities.behaviorNotes.push_back("camera.uvc_stereo_v4l2=single_uvc_device_packed_left_right_frame");

@@ -51,6 +51,8 @@ struct LkXFeatSeedResult {
     double totalMs{0.0};
 };
 
+struct LkPerFrameVpiState;
+
 class OrbSlam3Engine final : public core::ports::ISlamEngine {
   public:
     OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, OrbInputMode inputMode, bool useImu,
@@ -62,6 +64,7 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     void SetXFeatFrontendClient(XFeatFrontendClient *client);
     void SetXFeatInputSizeLimit(int maxWidth, int maxHeight);
     void SetLkLoopClosure(bool enabled, float scale = 1.20f, float relaxation = 1.40f);
+    void SetLkPerFrameAcceleration(std::string acceleration);
     void Stop() override;
     core::ports::SlamOutput Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
                                     bool extractPointCloud) override;
@@ -71,6 +74,8 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     bool LoadLkCalibration(const std::string &settingsPath);
     void EnsureLkRectifier(const cv::Size &inputSize);
     core::ports::SlamOutput ProcessLkStereoVo(const core::ports::SlamInputBatch &input, bool extractFeatures);
+    core::ports::SlamOutput ProcessLkGfttPerFrameStereoVo(const core::ports::SlamInputBatch &input,
+                                                          bool extractFeatures);
     Sophus::SE3f ApplyLkLoopClosure(const cv::Mat &leftRect, uint64_t frameId, const Sophus::SE3f &rawTwc);
 
     std::unique_ptr<ORB_SLAM3::System> m_system;
@@ -123,6 +128,10 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     mutable cv::Mat m_lkMap1y;
     mutable cv::Mat m_lkMap2x;
     mutable cv::Mat m_lkMap2y;
+    mutable cv::Ptr<cv::StereoSGBM> m_lkPerFrameSgbm;
+    mutable std::shared_ptr<LkPerFrameVpiState> m_lkPerFrameVpi;
+    std::string m_lkPerFrameAcceleration{"cpu"};
+    mutable bool m_lkPerFrameAccelLogged{false};
     mutable cv::Mat m_lkPrevLeft;
     mutable cv::Mat m_lkPrevRight;
     mutable std::vector<LkStereoTrack> m_lkTracks;

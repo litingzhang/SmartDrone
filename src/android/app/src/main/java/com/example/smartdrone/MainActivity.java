@@ -72,6 +72,11 @@ public class MainActivity extends Activity {
     private static final int FEATURE_FRONTEND_XFEAT = 1;
     private static final int FEATURE_FRONTEND_DROID_LIGHT = 2;
     private static final int FEATURE_FRONTEND_LK = 3;
+    private static final int FEATURE_FRONTEND_LK_GFTT_PER_FRAME = 4;
+    private static final int FEATURE_FRONTEND_LK_XFEAT = 5;
+    private static final int FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI = 6;
+    private static final int LK_PER_FRAME_ACCEL_CPU = 0;
+    private static final int LK_PER_FRAME_ACCEL_VPI_CUDA = 1;
     private static final int SLAM_MODE_MAPPING = 0;
     private static final int SLAM_MODE_LOCALIZATION = 1;
     private static final int SLAM_MODE_AUTO = 4;
@@ -274,6 +279,8 @@ public class MainActivity extends Activity {
     private int m_px4SubMode = 0;
     private int m_sensorMode = SENSOR_STEREO;
     private int m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
+    private boolean m_cfgLkXFeatSeeding = false;
+    private int m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_CPU;
     private int m_cfgExposureUs = 3000;
     private int m_cfgGain = 2;
     private boolean m_cfgAutoExposure = true;
@@ -828,7 +835,8 @@ public class MainActivity extends Activity {
             final boolean manualExposureEditable = !runtimeActive && !m_cfgAutoExposure;
             final boolean tbcEditable = m_cfgUseCustomTbc && m_sensorMode == SENSOR_STEREO;
             final boolean orbEditable = !runtimeActive;
-            final boolean xfeatEditable = !runtimeActive && m_cfgFeatureFrontend == FEATURE_FRONTEND_LK;
+            final boolean xfeatEditable = !runtimeActive && m_cfgFeatureFrontend == FEATURE_FRONTEND_LK &&
+                                          m_cfgLkXFeatSeeding;
             if (m_tvCfgExposureValue != null) {
                 m_tvCfgExposureValue.setText(m_cfgAutoExposure ? "Exposure: Auto (UVC AE)"
                                                                : String.format(Locale.US, "Exposure: %d us (UVC)",
@@ -1355,7 +1363,8 @@ public class MainActivity extends Activity {
                                   boolean autoExposure, boolean useCustomTbc, float tbcTx, float tbcTy, float tbcTz,
                                   float tbcRollDeg, float tbcPitchDeg, float tbcYawDeg, int orbNFeatures,
                                   float orbScaleFactor, int orbNLevels, int orbIniThFast, int orbMinThFast,
-                                  int xfeatTopK, int xfeatMaxPoints, int xfeatInputMaxWidth, int xfeatInputMaxHeight)
+                                  int xfeatTopK, int xfeatMaxPoints, int xfeatInputMaxWidth, int xfeatInputMaxHeight,
+                                  boolean lkXFeatSeeding, int lkPerFrameAcceleration)
     {
         try {
             int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
@@ -1363,19 +1372,21 @@ public class MainActivity extends Activity {
                                                   tbcTz, tbcRollDeg, tbcPitchDeg, tbcYawDeg, orbNFeatures,
                                                   orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast,
                                                   featureFrontend, xfeatTopK, xfeatMaxPoints, xfeatInputMaxWidth,
-                                                  xfeatInputMaxHeight);
+                                                  xfeatInputMaxHeight, lkXFeatSeeding, lkPerFrameAcceleration);
             m_tvStatus.setText(String.format(
                 Locale.US,
-                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s frontend=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d xfeat=%d/%d/%d/%d",
+                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s frontend=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d xfeat=%d/%d/%d/%d lkSeed=%s lkAccel=%s",
                 seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
-                featureFrontendToText(featureFrontend), sendImage ? "on" : "off", sendFeature ? "on" : "off",
+                runtimeFeatureFrontendToText(featureFrontend, lkXFeatSeeding, lkPerFrameAcceleration),
+                sendImage ? "on" : "off", sendFeature ? "on" : "off",
                 sendMap ? "on" : "off", autoExposure ? "on" : "off",
                 useCustomTbc
                     ? String.format(Locale.US, "on(%.3f,%.3f,%.3f,r%.1f,p%.1f,y%.1f)", tbcTx, tbcTy, tbcTz,
                                     tbcRollDeg, tbcPitchDeg, tbcYawDeg)
                     : "off",
                 orbNFeatures, orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast, xfeatTopK, xfeatMaxPoints,
-                xfeatInputMaxWidth, xfeatInputMaxHeight));
+                xfeatInputMaxWidth, xfeatInputMaxHeight, lkXFeatSeeding ? "XFeat" : "GFTT",
+                lkPerFrameAccelerationToText(lkPerFrameAcceleration)));
             return seq;
         } catch (Throwable t) {
             m_tvStatus.setText("CFG error: " + t.getMessage());
@@ -1391,7 +1402,8 @@ public class MainActivity extends Activity {
                                  m_cfgUseCustomTbc, m_cfgTbcTx, m_cfgTbcTy, m_cfgTbcTz, m_cfgTbcRollDeg,
                                  m_cfgTbcPitchDeg, m_cfgTbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor,
                                  m_cfgOrbNLevels, m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgXFeatTopK,
-                                 m_cfgXFeatMaxPoints, m_cfgXFeatInputMaxWidth, m_cfgXFeatInputMaxHeight);
+                                 m_cfgXFeatMaxPoints, m_cfgXFeatInputMaxWidth, m_cfgXFeatInputMaxHeight,
+                                 m_cfgLkXFeatSeeding, m_cfgLkPerFrameAcceleration);
     }
 
     private void sendRuntimeConfigAwaitAck(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
@@ -1420,7 +1432,8 @@ public class MainActivity extends Activity {
                                     sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy, tbcTz, tbcRollDeg, tbcPitchDeg,
                                     tbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor, m_cfgOrbNLevels,
                                     m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgXFeatTopK, m_cfgXFeatMaxPoints,
-                                    m_cfgXFeatInputMaxWidth, m_cfgXFeatInputMaxHeight);
+                                    m_cfgXFeatInputMaxWidth, m_cfgXFeatInputMaxHeight, m_cfgLkXFeatSeeding,
+                                    m_cfgLkPerFrameAcceleration);
         if (seq < 0) {
             return;
         }
@@ -1596,7 +1609,7 @@ public class MainActivity extends Activity {
             m_spinnerSensorMode.setAlpha(enabled ? 1.0f : 0.35f);
         }
         if (m_spinnerFeatureFrontend != null) {
-            boolean enabled = !sensorPending && getSupportedFeatureFrontends().length > 1;
+            boolean enabled = !runtimeActive && !sensorPending && getSupportedFeatureFrontends().length > 1;
             m_spinnerFeatureFrontend.setEnabled(enabled);
             m_spinnerFeatureFrontend.setAlpha(enabled ? 1.0f : 0.35f);
         }
@@ -1627,7 +1640,7 @@ public class MainActivity extends Activity {
         if (m_spinnerFeatureFrontend.getAdapter() == null || m_spinnerFeatureFrontend.getCount() != supportedFrontends.length) {
             String[] labels = new String[supportedFrontends.length];
             for (int i = 0; i < supportedFrontends.length; ++i) {
-                labels[i] = featureFrontendToText(supportedFrontends[i]);
+                labels[i] = featureFrontendOptionToText(supportedFrontends[i]);
             }
             ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
             adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -1635,7 +1648,7 @@ public class MainActivity extends Activity {
         }
         int targetIndex = 0;
         for (int i = 0; i < supportedFrontends.length; ++i) {
-            if (supportedFrontends[i] == m_cfgFeatureFrontend) {
+            if (supportedFrontends[i] == currentFeatureFrontendOption()) {
                 targetIndex = i;
                 break;
             }
@@ -1648,9 +1661,26 @@ public class MainActivity extends Activity {
     private int[] getSupportedFeatureFrontends()
     {
         if (m_supportsLK) {
-            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK};
+            if (m_supportsXFeat) {
+                return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK, FEATURE_FRONTEND_LK_GFTT_PER_FRAME,
+                                  FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI, FEATURE_FRONTEND_LK_XFEAT};
+            }
+            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK, FEATURE_FRONTEND_LK_GFTT_PER_FRAME,
+                              FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI};
         }
         return new int[] {FEATURE_FRONTEND_ORB};
+    }
+
+    private int currentFeatureFrontendOption()
+    {
+        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK && m_cfgLkXFeatSeeding) {
+            return FEATURE_FRONTEND_LK_XFEAT;
+        }
+        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME &&
+            m_cfgLkPerFrameAcceleration == LK_PER_FRAME_ACCEL_VPI_CUDA) {
+            return FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI;
+        }
+        return m_cfgFeatureFrontend;
     }
 
     private void updateSensorModeSpinner()
@@ -2004,12 +2034,33 @@ public class MainActivity extends Activity {
             "droidlight".equals(normalized)) {
             return FEATURE_FRONTEND_DROID_LIGHT;
         }
+        if ("lk-gftt-per-frame".equals(normalized) || "lk_gftt_per_frame".equals(normalized) ||
+            "lk-gftt-every-frame".equals(normalized) || "lk_gftt_every_frame".equals(normalized) ||
+            "per-frame-gftt".equals(normalized) || "per_frame_gftt".equals(normalized)) {
+            return FEATURE_FRONTEND_LK_GFTT_PER_FRAME;
+        }
         if ("lk".equals(normalized) || "klt".equals(normalized) || "stereo-lk".equals(normalized) ||
             "stereo_lk".equals(normalized) || "optical-flow".equals(normalized) || "optical_flow".equals(normalized)) {
             return FEATURE_FRONTEND_LK;
         }
         if ("orb".equals(normalized)) {
             return FEATURE_FRONTEND_ORB;
+        }
+        return defaultValue;
+    }
+
+    private static int parseLkPerFrameAccelerationText(String value, int defaultValue)
+    {
+        if (value == null) {
+            return defaultValue;
+        }
+        String normalized = value.trim().toLowerCase(Locale.US);
+        if ("vpi-cuda".equals(normalized) || "vpi_cuda".equals(normalized) || "vpi".equals(normalized) ||
+            "gpu".equals(normalized)) {
+            return LK_PER_FRAME_ACCEL_VPI_CUDA;
+        }
+        if ("cpu".equals(normalized) || "off".equals(normalized)) {
+            return LK_PER_FRAME_ACCEL_CPU;
         }
         return defaultValue;
     }
@@ -2144,7 +2195,8 @@ public class MainActivity extends Activity {
         m_supportsStereoImu = containsTokenList(values.get("perception_modes"), "stereo-imu");
         m_supportsMono = containsTokenList(values.get("perception_modes"), "mono");
         m_supportsMonoImu = containsTokenList(values.get("perception_modes"), "mono-imu");
-        m_supportsXFeat = false;
+        final String xfeatSeedCapability = behaviorNoteValue(behaviorNotes, "slam.lk_seed.xfeat=");
+        m_supportsXFeat = xfeatSeedCapability != null && !"disabled_at_build_time".equalsIgnoreCase(xfeatSeedCapability);
         final String droidLightCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.droid_light=");
         m_supportsDroidLight = droidLightCapability != null && !"disabled_at_build_time".equalsIgnoreCase(droidLightCapability);
         final String lkCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.lk=");
@@ -2154,10 +2206,11 @@ public class MainActivity extends Activity {
         m_pairWindowRequired = !m_isPackedStereoUvc;
         updateRuntimeButtons();
         m_tvStatus.setText(String.format(Locale.US,
-                                         "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s uvc=%s lk=%s",
+                                         "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s uvc=%s lk=%s xfeat_seed=%s",
                                          m_supportsCalib ? "yes" : "no", m_supportsStereoImu ? "yes" : "no",
                                          m_supportsMono ? "yes" : "no", m_supportsMonoImu ? "yes" : "no",
-                                         m_isPackedStereoUvc ? "packed" : "no", m_supportsLK ? "yes" : "no"));
+                                         m_isPackedStereoUvc ? "packed" : "no", m_supportsLK ? "yes" : "no",
+                                         m_supportsXFeat ? "yes" : "no"));
         return true;
     }
 
@@ -2190,8 +2243,16 @@ public class MainActivity extends Activity {
         if (!m_supportsDroidLight && m_cfgFeatureFrontend == FEATURE_FRONTEND_DROID_LIGHT) {
             m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
         }
-        if (!m_supportsLK && m_cfgFeatureFrontend == FEATURE_FRONTEND_LK) {
+        if (!m_supportsLK &&
+            (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK ||
+             m_cfgFeatureFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME)) {
             m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
+        }
+        m_cfgLkXFeatSeeding = parseBooleanText(values.get("slam.lk_xfeat_seeding"), m_cfgLkXFeatSeeding);
+        m_cfgLkPerFrameAcceleration =
+            parseLkPerFrameAccelerationText(values.get("slam.lk_per_frame_accel"), m_cfgLkPerFrameAcceleration);
+        if (m_cfgFeatureFrontend != FEATURE_FRONTEND_LK_GFTT_PER_FRAME) {
+            m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_CPU;
         }
         m_cfgUseCustomTbc = parseBooleanText(values.get("slam.tbc_override_enabled"), m_cfgUseCustomTbc);
         m_cfgTbcTx = quantizeTbcTranslationM(parseFloatOrDefault(values.get("slam.tbc_tx_m"), m_cfgTbcTx));
@@ -2302,14 +2363,56 @@ public class MainActivity extends Activity {
     private String featureFrontendToText(int featureFrontend)
     {
         switch (featureFrontend) {
+        case FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI:
+            return "LK GFTT VPI CUDA";
+        case FEATURE_FRONTEND_LK_GFTT_PER_FRAME:
+            return m_cfgLkPerFrameAcceleration == LK_PER_FRAME_ACCEL_VPI_CUDA ? "LK GFTT VPI CUDA"
+                                                                              : "LK GFTT Per-Frame";
         case FEATURE_FRONTEND_LK:
-            return "LK";
+            return m_cfgLkXFeatSeeding ? "LK + XFeat seed" : "LK GFTT";
         case FEATURE_FRONTEND_DROID_LIGHT:
             return "DROID-Light";
         case FEATURE_FRONTEND_ORB:
         default:
             return "ORB";
         }
+    }
+
+    private String featureFrontendOptionToText(int featureFrontend)
+    {
+        switch (featureFrontend) {
+        case FEATURE_FRONTEND_LK_XFEAT:
+            return "LK + XFeat seed";
+        case FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI:
+            return "LK GFTT VPI CUDA";
+        case FEATURE_FRONTEND_LK_GFTT_PER_FRAME:
+            return "LK GFTT Per-Frame";
+        case FEATURE_FRONTEND_LK:
+            return "LK GFTT";
+        case FEATURE_FRONTEND_DROID_LIGHT:
+            return "DROID-Light";
+        case FEATURE_FRONTEND_ORB:
+        default:
+            return "ORB";
+        }
+    }
+
+    private String runtimeFeatureFrontendToText(int featureFrontend, boolean lkXFeatSeeding,
+                                                int lkPerFrameAcceleration)
+    {
+        if (featureFrontend == FEATURE_FRONTEND_LK) {
+            return lkXFeatSeeding ? "LK + XFeat seed" : "LK GFTT";
+        }
+        if (featureFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME &&
+            lkPerFrameAcceleration == LK_PER_FRAME_ACCEL_VPI_CUDA) {
+            return "LK GFTT VPI CUDA";
+        }
+        return featureFrontendOptionToText(featureFrontend);
+    }
+
+    private String lkPerFrameAccelerationToText(int acceleration)
+    {
+        return acceleration == LK_PER_FRAME_ACCEL_VPI_CUDA ? "VPI CUDA" : "CPU";
     }
 
     private String slamModeToText(int slamMode)
@@ -3645,17 +3748,37 @@ public class MainActivity extends Activity {
                         return;
                     }
                     final int[] supportedFrontends = getSupportedFeatureFrontends();
-                    final int nextFrontend =
+                    final int nextOption =
                         position < supportedFrontends.length ? supportedFrontends[position] : FEATURE_FRONTEND_ORB;
-                    if (nextFrontend == m_cfgFeatureFrontend) {
+                    final int nextFrontend = nextOption == FEATURE_FRONTEND_LK_XFEAT
+                                                 ? FEATURE_FRONTEND_LK
+                                                 : (nextOption == FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI
+                                                        ? FEATURE_FRONTEND_LK_GFTT_PER_FRAME
+                                                        : nextOption);
+                    final boolean nextLkXFeatSeeding = nextOption == FEATURE_FRONTEND_LK_XFEAT;
+                    final int nextLkPerFrameAcceleration =
+                        nextOption == FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI ? LK_PER_FRAME_ACCEL_VPI_CUDA
+                                                                              : LK_PER_FRAME_ACCEL_CPU;
+                    if (nextFrontend == m_cfgFeatureFrontend && nextLkXFeatSeeding == m_cfgLkXFeatSeeding &&
+                        nextLkPerFrameAcceleration == m_cfgLkPerFrameAcceleration) {
                         return;
                     }
+                    final boolean previousLkXFeatSeeding = m_cfgLkXFeatSeeding;
+                    final int previousLkPerFrameAcceleration = m_cfgLkPerFrameAcceleration;
+                    m_cfgLkXFeatSeeding = nextLkXFeatSeeding;
+                    m_cfgLkPerFrameAcceleration = nextLkPerFrameAcceleration;
                     sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
                                               m_sensorMode, nextFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
                                               effectiveConfigLabel("Feature frontend", true), PENDING_CONFIG, () -> {
                                                   m_cfgFeatureFrontend = nextFrontend;
+                                                  m_cfgLkXFeatSeeding = nextLkXFeatSeeding;
+                                                  m_cfgLkPerFrameAcceleration = nextLkPerFrameAcceleration;
                                                   updateRuntimeButtons();
                                               });
+                    if (!isPending(PENDING_CONFIG)) {
+                        m_cfgLkXFeatSeeding = previousLkXFeatSeeding;
+                        m_cfgLkPerFrameAcceleration = previousLkPerFrameAcceleration;
+                    }
                 }
 
                 @Override public void onNothingSelected(AdapterView<?> parent) {}

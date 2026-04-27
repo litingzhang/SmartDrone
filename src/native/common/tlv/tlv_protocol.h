@@ -54,11 +54,16 @@ constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // v6 additionally stores rollDeg/yawDeg as f32le at [61..68].
 // v7 additionally stores ORB extractor params as f32le:
 // nFeatures [69..72], scaleFactor [73..76], nLevels [77..80], iniThFAST [81..84], minThFAST [85..88].
-// v8 additionally stores featureFrontend(u8) at byte [89] where 0=orb, 1=xfeat, 2=droid_light, 3=lk.
+// v8 additionally stores featureFrontend(u8) at byte [89] where
+// 0=orb, 1=xfeat, 2=droid_light, 3=lk, 4=lk_gftt_per_frame.
 // v9 additionally stores XFeat params as f32le:
 // topK [90..93], maxPoints [94..97].
 // v10 additionally stores XFeat input size limits as f32le:
 // inputMaxWidth [98..101], inputMaxHeight [102..105].
+// v11 additionally stores LK seed source:
+// lkXFeatSeeding(u8) at [106] where 0=GFTT/Shi-Tomasi, 1=XFeat seed.
+// v12 additionally stores LK GFTT per-frame acceleration:
+// lkPerFrameAcceleration(u8) at [107] where 0=cpu, 1=vpi-cuda.
 // legacy v1 (len=40) omitted pairMs and started reservedOrIp at byte 10.
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY = 40;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V2 = 42;
@@ -70,6 +75,8 @@ constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V7 = 89;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V8 = 90;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V9 = 98;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V10 = 106;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V11 = 107;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V12 = 108;
 constexpr uint16_t RUNTIME_CONFIG_PAIR_MS_OFFSET = 10;
 constexpr uint16_t RUNTIME_CONFIG_IP_OFFSET = 12;
 constexpr uint16_t RUNTIME_CONFIG_IP_LEN = 30;
@@ -93,6 +100,8 @@ constexpr uint16_t RUNTIME_CONFIG_XFEAT_TOP_K_OFFSET = 90;
 constexpr uint16_t RUNTIME_CONFIG_XFEAT_MAX_POINTS_OFFSET = 94;
 constexpr uint16_t RUNTIME_CONFIG_XFEAT_INPUT_MAX_WIDTH_OFFSET = 98;
 constexpr uint16_t RUNTIME_CONFIG_XFEAT_INPUT_MAX_HEIGHT_OFFSET = 102;
+constexpr uint16_t RUNTIME_CONFIG_LK_XFEAT_SEEDING_OFFSET = 106;
+constexpr uint16_t RUNTIME_CONFIG_LK_PER_FRAME_ACCEL_OFFSET = 107;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
@@ -132,6 +141,12 @@ enum RuntimeFeatureFrontend : uint8_t {
     RUNTIME_FEATURE_FRONTEND_XFEAT = 1,
     RUNTIME_FEATURE_FRONTEND_DROID_LIGHT = 2,
     RUNTIME_FEATURE_FRONTEND_LK = 3,
+    RUNTIME_FEATURE_FRONTEND_LK_GFTT_PER_FRAME = 4,
+};
+
+enum RuntimeLkPerFrameAcceleration : uint8_t {
+    RUNTIME_LK_PER_FRAME_ACCEL_CPU = 0,
+    RUNTIME_LK_PER_FRAME_ACCEL_VPI_CUDA = 1,
 };
 
 enum FrameType : uint8_t {

@@ -84,6 +84,11 @@ FeatureFrontend ParseFeatureFrontendText(const std::string &text)
         normalized == "droidlight") {
         return FeatureFrontend::DroidLight;
     }
+    if (normalized == "lk-gftt-per-frame" || normalized == "lk_gftt_per_frame" ||
+        normalized == "lk-gftt-every-frame" || normalized == "lk_gftt_every_frame" ||
+        normalized == "per-frame-gftt" || normalized == "per_frame_gftt") {
+        return FeatureFrontend::LkGfttPerFrame;
+    }
     if (normalized == "lk" || normalized == "klt" || normalized == "stereo-lk" || normalized == "stereo_lk" ||
         normalized == "optical-flow" || normalized == "optical_flow") {
         return FeatureFrontend::LK;
@@ -94,8 +99,12 @@ FeatureFrontend ParseFeatureFrontendText(const std::string &text)
 const char *ToFeatureFrontendText(FeatureFrontend frontend)
 {
     switch (frontend) {
+    case FeatureFrontend::LkGfttPerFrame:
+        return "lk_gftt_per_frame";
     case FeatureFrontend::LK:
         return "lk";
+    case FeatureFrontend::XFeat:
+        return "xfeat";
     case FeatureFrontend::DroidLight:
         return "droid_light";
     case FeatureFrontend::Orb:
@@ -372,6 +381,7 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.lkLoopClosure = argReader.HasFlag("--lk-loop-closure");
     config.runtime.lkLoopScale = argReader.GetFloat("--lk-loop-scale", 1.20f);
     config.runtime.lkLoopRelaxation = argReader.GetFloat("--lk-loop-relax", 1.40f);
+    config.runtime.lkPerFrameAcceleration = argReader.GetString("--lk-per-frame-accel", "cpu");
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");
     config.runtime.slamLowLightEnhance = argReader.HasFlag("--slam-lowlight-enhance");
     config.runtime.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");

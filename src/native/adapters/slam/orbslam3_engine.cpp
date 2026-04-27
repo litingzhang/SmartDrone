@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -14,10 +15,193 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
 
+#if SMART_DRONE_HAS_VPI
+#include <vpi/Array.h>
+#include <vpi/Image.h>
+#include <vpi/OpenCVInterop.hpp>
+#include <vpi/Pyramid.h>
+#include <vpi/Stream.h>
+#include <vpi/WarpMap.h>
+#include <vpi/algo/ConvertImageFormat.h>
+#include <vpi/algo/GaussianPyramid.h>
+#include <vpi/algo/OpticalFlowPyrLK.h>
+#include <vpi/algo/Remap.h>
+#include <vpi/algo/StereoDisparity.h>
+#endif
+
 #include "ImuTypes.h"
 #include "TrackedVisualData.h"
 
 namespace smartdrone::adapters::slam {
+
+#if SMART_DRONE_HAS_VPI
+struct LkPerFrameVpiState {
+    ~LkPerFrameVpiState()
+    {
+        if (prevPts != nullptr) {
+            vpiArrayDestroy(prevPts);
+        }
+        if (curPts != nullptr) {
+            vpiArrayDestroy(curPts);
+        }
+        if (trackStatus != nullptr) {
+            vpiArrayDestroy(trackStatus);
+        }
+        if (prevPyr != nullptr) {
+            vpiPyramidDestroy(prevPyr);
+        }
+        if (curPyr != nullptr) {
+            vpiPyramidDestroy(curPyr);
+        }
+        if (lkPayload != nullptr) {
+            vpiPayloadDestroy(lkPayload);
+        }
+        if (leftRect != nullptr) {
+            vpiImageDestroy(leftRect);
+        }
+        if (rightRect != nullptr) {
+            vpiImageDestroy(rightRect);
+        }
+        if (prevLeftRect != nullptr) {
+            vpiImageDestroy(prevLeftRect);
+        }
+        if (prevRightRect != nullptr) {
+            vpiImageDestroy(prevRightRect);
+        }
+        if (leftRemapPayload != nullptr) {
+            vpiPayloadDestroy(leftRemapPayload);
+        }
+        if (rightRemapPayload != nullptr) {
+            vpiPayloadDestroy(rightRemapPayload);
+        }
+        if (leftWrapper != nullptr) {
+            vpiImageDestroy(leftWrapper);
+        }
+        if (rightWrapper != nullptr) {
+            vpiImageDestroy(rightWrapper);
+        }
+        if (disparity != nullptr) {
+            vpiImageDestroy(disparity);
+        }
+        if (stereoPayload != nullptr) {
+            vpiPayloadDestroy(stereoPayload);
+        }
+        if (stream != nullptr) {
+            vpiStreamDestroy(stream);
+        }
+        vpiWarpMapFreeData(&leftWarp);
+        vpiWarpMapFreeData(&rightWarp);
+    }
+
+    int width{0};
+    int height{0};
+    int maxDisparity{0};
+    VPIStream stream{nullptr};
+    VPIPayload stereoPayload{nullptr};
+    VPIPayload leftRemapPayload{nullptr};
+    VPIPayload rightRemapPayload{nullptr};
+    VPIPayload lkPayload{nullptr};
+    VPIImage leftWrapper{nullptr};
+    VPIImage rightWrapper{nullptr};
+    VPIImage leftRect{nullptr};
+    VPIImage rightRect{nullptr};
+    VPIImage prevLeftRect{nullptr};
+    VPIImage prevRightRect{nullptr};
+    VPIImage disparity{nullptr};
+    VPIPyramid prevPyr{nullptr};
+    VPIPyramid curPyr{nullptr};
+    VPIArray prevPts{nullptr};
+    VPIArray curPts{nullptr};
+    VPIArray trackStatus{nullptr};
+    VPIWarpMap leftWarp{};
+    VPIWarpMap rightWarp{};
+    bool hasPrevRect{false};
+};
+
+const char *VpiStatusName(VPIStatus status)
+{
+    const char *name = vpiStatusGetName(status);
+    return name != nullptr ? name : "VPI_ERROR_UNKNOWN";
+}
+
+bool FillVpiWarpMapFromOpenCvMaps(const cv::Mat &mapX, const cv::Mat &mapY, VPIWarpMap &warp)
+{
+    if (mapX.empty() || mapY.empty() || mapX.size() != mapY.size() || mapX.type() != CV_32FC1 ||
+        mapY.type() != CV_32FC1) {
+        return false;
+    }
+    vpiWarpMapFreeData(&warp);
+    warp = {};
+    warp.grid.numHorizRegions = 1;
+    warp.grid.numVertRegions = 1;
+    warp.grid.regionWidth[0] = static_cast<int16_t>(mapX.cols);
+    warp.grid.regionHeight[0] = static_cast<int16_t>(mapX.rows);
+    warp.grid.horizInterval[0] = 1;
+    warp.grid.vertInterval[0] = 1;
+    VPIStatus status = vpiWarpMapAllocData(&warp);
+    if (status != VPI_SUCCESS || warp.keypoints == nullptr) {
+        std::cerr << "[lk_per_frame_accel] VPI warp map allocation failed: " << VpiStatusName(status) << "\n";
+        return false;
+    }
+    for (int y = 0; y < mapX.rows; ++y) {
+        auto *row = reinterpret_cast<VPIKeypointF32 *>(reinterpret_cast<uint8_t *>(warp.keypoints) +
+                                                      static_cast<size_t>(y) * warp.pitchBytes);
+        for (int x = 0; x < mapX.cols; ++x) {
+            row[x].x = mapX.at<float>(y, x);
+            row[x].y = mapY.at<float>(y, x);
+        }
+    }
+    return true;
+}
+
+bool EnvFlagEnabled(const char *name, bool defaultValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return defaultValue;
+    }
+    const std::string text(value);
+    return !(text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF");
+}
+
+int EnvIntValue(const char *name, int defaultValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return defaultValue;
+    }
+    char *end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    return end != value ? static_cast<int>(parsed) : defaultValue;
+}
+
+float EnvFloatValue(const char *name, float defaultValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return defaultValue;
+    }
+    char *end = nullptr;
+    const float parsed = std::strtof(value, &end);
+    return end != value ? parsed : defaultValue;
+}
+
+cv::Mat DownloadVpiU8Image(VPIImage image)
+{
+    VPIImageData data{};
+    VPIStatus status = vpiImageLockData(image, VPI_LOCK_READ, VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR, &data);
+    if (status != VPI_SUCCESS || data.bufferType != VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR ||
+        data.buffer.pitch.numPlanes < 1 || data.buffer.pitch.planes[0].data == nullptr) {
+        std::cerr << "[lk_per_frame_accel] VPI image lock failed: " << VpiStatusName(status) << "\n";
+        return {};
+    }
+    const auto &plane = data.buffer.pitch.planes[0];
+    cv::Mat view(plane.height, plane.width, CV_8UC1, plane.data, static_cast<size_t>(plane.pitchBytes));
+    cv::Mat out = view.clone();
+    vpiImageUnlock(image);
+    return out;
+}
+#endif
 
 namespace {
 
@@ -59,6 +243,7 @@ constexpr float kPoseStabilizerMaxStepMeters = 0.055f;
 constexpr float kPoseStabilizerMaxRotStepDeg = 3.0f;
 constexpr float kPoseStabilizerVelocityAlpha = 0.35f;
 constexpr float kPoseStabilizerPredictedVelocityDecay = 0.985f;
+constexpr float kLkMinDepthMeters = 0.35f;
 constexpr float kLkMaxDepthMeters = 12.0f;
 constexpr float kLkMaxFlowPx = 96.0f;
 constexpr float kLkMaxStepMeters = 0.35f;
@@ -69,8 +254,10 @@ constexpr float kLkMaxVerticalStepMeters = 0.35f;
 constexpr int kLkMinPnPPoints = 12;
 constexpr int kLkMinPnPInliers = 10;
 constexpr float kLkStereoRefineSearchRadiusPx = 10.0f;
-constexpr int kLkRecoveryMinTracks = 48;
-constexpr int kLkRecoveryMinInliers = 18;
+constexpr int kLkRecoveryMinTracks = 24;
+constexpr int kLkRecoveryMinInliers = 16;
+constexpr int kLkHardRecoveryMinTracks = 10;
+constexpr int kLkHardRecoveryMinInliers = 10;
 constexpr uint64_t kLkGridRefillIntervalFrames = 30;
 constexpr int kLkGridCols = 8;
 constexpr int kLkGridRows = 6;
@@ -78,6 +265,23 @@ constexpr int kLkGridCellCount = kLkGridCols * kLkGridRows;
 constexpr int kLkTargetTracksPerCell = 12;
 constexpr int kLkMinTracksPerCell = 6;
 constexpr size_t kLkMaxTracks = 576;
+constexpr int kLkGfttMaxCorners = 900;
+constexpr int kLkGfttPerFrameMaxCorners = 960;
+constexpr int kLkGfttPerFrameMaxCornersPerCell = 20;
+constexpr double kLkGfttQualityLevel = 0.01;
+constexpr double kLkGfttMinDistancePx = 8.0;
+constexpr int kLkGfttBlockSize = 7;
+constexpr double kLkGfttHarrisK = 0.04;
+constexpr float kLkGfttStereoSearchRadiusPx = 96.0f;
+constexpr float kLkMinConsistentDisparityPx = 1.0f;
+constexpr float kLkDisparityNeighborhoodTolerancePx = 1.5f;
+constexpr int kLkDisparityNeighborhoodRadius = 1;
+constexpr double kLkPerFramePnPReprojThresholdPx = 4.0;
+constexpr int kVpiStereoConfidenceThreshold = 32767;
+constexpr int kVpiStereoP1 = 16;
+constexpr int kVpiStereoP2 = 128;
+constexpr float kVpiStereoUniqueness = -1.0f;
+constexpr int kVpiStereoIncludeDiagonals = 1;
 constexpr size_t kLkFrameHistoryMaxSize = 64;
 constexpr float kLkMinSeedDistancePx = 3.5f;
 constexpr float kLkMinCandidateQuality = 0.18f;
@@ -375,6 +579,81 @@ bool RefineRightPointByStereoZncc(const cv::Mat &leftGray32f, const cv::Point2f 
         bestScore = predictedScore;
     }
     return bestScore >= kTemporalStereoMinZnccScore && IsStereoPairGeometricallyValid(leftPt, refinedRightPt);
+}
+
+bool FindRightPointByStereoZncc(const cv::Mat &leftGray32f, const cv::Point2f &leftPt, const cv::Mat &rightGray32f,
+                                cv::Point2f &rightPt, float &bestScore)
+{
+    bestScore = -1.0f;
+    if (leftGray32f.empty() || rightGray32f.empty()) {
+        return false;
+    }
+
+    const int minRightX =
+        static_cast<int>(std::ceil(std::max(static_cast<float>(kStereoPatchRadiusPx), leftPt.x - kStereoMaxDisparityPx)));
+    const int maxRightX = static_cast<int>(std::floor(std::min(leftPt.x - kStereoMinDisparityPx,
+                                                               static_cast<float>(rightGray32f.cols -
+                                                                                  kStereoPatchRadiusPx - 1))));
+    if (minRightX > maxRightX) {
+        return false;
+    }
+
+    const float rightY = leftPt.y;
+    for (int x = minRightX; x <= maxRightX; ++x) {
+        const cv::Point2f candidate(static_cast<float>(x), rightY);
+        float score = -1.0f;
+        if (!ComputePatchZncc(leftGray32f, leftPt, rightGray32f, candidate, score)) {
+            continue;
+        }
+        const float disparity = leftPt.x - candidate.x;
+        const float rank = score - 0.0005f * disparity;
+        const float bestRank = bestScore < -0.5f ? -1.0f : bestScore - 0.0005f * (leftPt.x - rightPt.x);
+        if (rank > bestRank) {
+            bestScore = score;
+            rightPt = candidate;
+        }
+    }
+    return bestScore >= kTemporalStereoMinZnccScore && IsStereoPairGeometricallyValid(leftPt, rightPt);
+}
+
+bool FindRightPointByStereoZnccAroundDisparity(const cv::Mat &leftGray32f, const cv::Point2f &leftPt,
+                                               const cv::Mat &rightGray32f, float expectedDisparity,
+                                               cv::Point2f &rightPt, float &bestScore)
+{
+    bestScore = -1.0f;
+    if (leftGray32f.empty() || rightGray32f.empty() || !(expectedDisparity > 0.0f) ||
+        !std::isfinite(expectedDisparity)) {
+        return FindRightPointByStereoZncc(leftGray32f, leftPt, rightGray32f, rightPt, bestScore);
+    }
+
+    const float centerRightX = leftPt.x - expectedDisparity;
+    const int minRightX = static_cast<int>(std::ceil(std::max(
+        {static_cast<float>(kStereoPatchRadiusPx), leftPt.x - kStereoMaxDisparityPx,
+         centerRightX - kLkGfttStereoSearchRadiusPx})));
+    const int maxRightX = static_cast<int>(std::floor(std::min(
+        {leftPt.x - kStereoMinDisparityPx, static_cast<float>(rightGray32f.cols - kStereoPatchRadiusPx - 1),
+         centerRightX + kLkGfttStereoSearchRadiusPx})));
+    if (minRightX > maxRightX) {
+        return FindRightPointByStereoZncc(leftGray32f, leftPt, rightGray32f, rightPt, bestScore);
+    }
+
+    const float rightY = leftPt.y;
+    for (int x = minRightX; x <= maxRightX; ++x) {
+        const cv::Point2f candidate(static_cast<float>(x), rightY);
+        float score = -1.0f;
+        if (!ComputePatchZncc(leftGray32f, leftPt, rightGray32f, candidate, score)) {
+            continue;
+        }
+        const float disparity = leftPt.x - candidate.x;
+        const float rank = score - 0.0015f * std::fabs(disparity - expectedDisparity);
+        const float bestRank =
+            bestScore < -0.5f ? -1.0f : bestScore - 0.0015f * std::fabs((leftPt.x - rightPt.x) - expectedDisparity);
+        if (rank > bestRank) {
+            bestScore = score;
+            rightPt = candidate;
+        }
+    }
+    return bestScore >= kTemporalStereoMinZnccScore && IsStereoPairGeometricallyValid(leftPt, rightPt);
 }
 
 float ComputeStereoCandidateQuality(float descriptorScore, float zncc, float epipolarErrorPx, float disparity)
@@ -905,6 +1184,34 @@ std::array<int, kLkGridCellCount> CountLkTracksByCell(const std::vector<LkStereo
     return counts;
 }
 
+std::vector<cv::Point2f> SelectGfttPointsGridBalanced(const std::vector<cv::Point2f> &points, const cv::Size &size,
+                                                      int maxTotal, int maxPerCell)
+{
+    if (points.empty() || size.area() <= 0 || maxTotal <= 0 || maxPerCell <= 0) {
+        return {};
+    }
+
+    std::array<int, kLkGridCellCount> counts{};
+    std::vector<cv::Point2f> selected;
+    selected.reserve(std::min(static_cast<size_t>(maxTotal), points.size()));
+    for (const cv::Point2f &point : points) {
+        if (static_cast<int>(selected.size()) >= maxTotal) {
+            break;
+        }
+        const int cell = LkGridCellForPoint(point, size);
+        if (cell < 0) {
+            continue;
+        }
+        int &cellCount = counts[static_cast<size_t>(cell)];
+        if (cellCount >= maxPerCell) {
+            continue;
+        }
+        selected.push_back(point);
+        ++cellCount;
+    }
+    return selected;
+}
+
 std::vector<LkStereoTrack> SelectLkTracksGridBalanced(const std::vector<LkStereoTrack> &tracks, const cv::Size &size)
 {
     if (tracks.empty() || size.area() <= 0) {
@@ -974,6 +1281,640 @@ bool LkTrackNearExisting(const cv::Point2f &left, const cv::Point2f &right, cons
         }
     }
     return false;
+}
+
+bool ReadConsistentDisparity(const cv::Mat &disp, const cv::Point2f &pt, float &disparity)
+{
+    disparity = 0.0f;
+    if (disp.empty()) {
+        return false;
+    }
+
+    const int cx = static_cast<int>(std::lround(pt.x));
+    const int cy = static_cast<int>(std::lround(pt.y));
+    if (cx < kLkDisparityNeighborhoodRadius || cy < kLkDisparityNeighborhoodRadius ||
+        cx >= disp.cols - kLkDisparityNeighborhoodRadius || cy >= disp.rows - kLkDisparityNeighborhoodRadius) {
+        return false;
+    }
+
+    const float center = disp.at<float>(cy, cx);
+    if (!(center >= kLkMinConsistentDisparityPx) || center > kStereoMaxDisparityPx || !std::isfinite(center)) {
+        return false;
+    }
+
+    std::vector<float> neighborhood;
+    neighborhood.reserve(9);
+    for (int dy = -kLkDisparityNeighborhoodRadius; dy <= kLkDisparityNeighborhoodRadius; ++dy) {
+        for (int dx = -kLkDisparityNeighborhoodRadius; dx <= kLkDisparityNeighborhoodRadius; ++dx) {
+            const float value = disp.at<float>(cy + dy, cx + dx);
+            if (value >= kLkMinConsistentDisparityPx && value <= kStereoMaxDisparityPx && std::isfinite(value)) {
+                neighborhood.push_back(value);
+            }
+        }
+    }
+    if (neighborhood.size() < 5) {
+        return false;
+    }
+
+    const size_t mid = neighborhood.size() / 2;
+    std::nth_element(neighborhood.begin(), neighborhood.begin() + static_cast<std::ptrdiff_t>(mid),
+                     neighborhood.end());
+    const float median = neighborhood[mid];
+    if (std::fabs(center - median) > kLkDisparityNeighborhoodTolerancePx) {
+        return false;
+    }
+    disparity = median;
+    return true;
+}
+
+#if SMART_DRONE_HAS_VPI
+bool EnsureVpiPerFrameState(std::shared_ptr<LkPerFrameVpiState> &state, const cv::Size &size,
+                            const cv::Mat &map1x, const cv::Mat &map1y, const cv::Mat &map2x, const cv::Mat &map2y,
+                            int maxDisparity, bool &logged)
+{
+    const bool recreate = !state || state->width != size.width || state->height != size.height ||
+                          state->maxDisparity != maxDisparity;
+    if (!recreate) {
+        return true;
+    }
+
+    state = std::make_shared<LkPerFrameVpiState>();
+    state->width = size.width;
+    state->height = size.height;
+    state->maxDisparity = maxDisparity;
+
+    VPIStatus status = vpiStreamCreate(VPI_BACKEND_CUDA, &state->stream);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI CUDA stream create failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        state.reset();
+        logged = true;
+        return false;
+    }
+
+    if (!FillVpiWarpMapFromOpenCvMaps(map1x, map1y, state->leftWarp) ||
+        !FillVpiWarpMapFromOpenCvMaps(map2x, map2y, state->rightWarp)) {
+        std::cerr << "[lk_per_frame_accel] VPI remap warp map build failed; fallback=cpu_sgbm\n";
+        state.reset();
+        logged = true;
+        return false;
+    }
+
+    status = vpiCreateRemap(VPI_BACKEND_CUDA, &state->leftWarp, &state->leftRemapPayload);
+    if (status == VPI_SUCCESS) {
+        status = vpiCreateRemap(VPI_BACKEND_CUDA, &state->rightWarp, &state->rightRemapPayload);
+    }
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI remap payload create failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        state.reset();
+        logged = true;
+        return false;
+    }
+
+    const uint64_t imageBackends = VPI_BACKEND_CUDA | VPI_BACKEND_CPU;
+    status = vpiImageCreate(size.width, size.height, VPI_IMAGE_FORMAT_U8, imageBackends, &state->leftRect);
+    if (status == VPI_SUCCESS) {
+        status = vpiImageCreate(size.width, size.height, VPI_IMAGE_FORMAT_U8, imageBackends, &state->rightRect);
+    }
+    if (status == VPI_SUCCESS) {
+        status = vpiImageCreate(size.width, size.height, VPI_IMAGE_FORMAT_U8, imageBackends, &state->prevLeftRect);
+    }
+    if (status == VPI_SUCCESS) {
+        status = vpiImageCreate(size.width, size.height, VPI_IMAGE_FORMAT_U8, imageBackends, &state->prevRightRect);
+    }
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI rectified image create failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        state.reset();
+        logged = true;
+        return false;
+    }
+
+    VPIStereoDisparityEstimatorCreationParams createParams{};
+    status = vpiInitStereoDisparityEstimatorCreationParams(&createParams);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI stereo creation params init failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        state.reset();
+        logged = true;
+        return false;
+    }
+    createParams.maxDisparity = maxDisparity;
+    createParams.downscaleFactor = 1;
+    createParams.includeDiagonals = EnvIntValue("SMART_DRONE_VPI_STEREO_DIAG", kVpiStereoIncludeDiagonals);
+    status = vpiCreateStereoDisparityEstimator(VPI_BACKEND_CUDA, size.width, size.height, VPI_IMAGE_FORMAT_U8,
+                                               &createParams, &state->stereoPayload);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI CUDA stereo payload create failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        state.reset();
+        logged = true;
+        return false;
+    }
+
+    status = vpiImageCreate(size.width, size.height, VPI_IMAGE_FORMAT_S16, VPI_BACKEND_CUDA | VPI_BACKEND_CPU,
+                            &state->disparity);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI disparity image create failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        state.reset();
+        logged = true;
+        return false;
+    }
+
+    status = vpiPyramidCreate(size.width, size.height, VPI_IMAGE_FORMAT_U8, 4, 0.5f,
+                              VPI_BACKEND_CUDA | VPI_BACKEND_CPU, &state->prevPyr);
+    if (status == VPI_SUCCESS) {
+        status = vpiPyramidCreate(size.width, size.height, VPI_IMAGE_FORMAT_U8, 4, 0.5f,
+                                  VPI_BACKEND_CUDA | VPI_BACKEND_CPU, &state->curPyr);
+    }
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI pyramid create failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_lk\n";
+        state.reset();
+        logged = true;
+        return false;
+    }
+
+    status = vpiCreateOpticalFlowPyrLK(VPI_BACKEND_CUDA, size.width, size.height, VPI_IMAGE_FORMAT_U8, 4, 0.5f,
+                                       &state->lkPayload);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI PyrLK payload create failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_lk\n";
+        state.reset();
+        logged = true;
+        return false;
+    }
+
+    status = vpiArrayCreate(kLkGfttPerFrameMaxCorners, VPI_ARRAY_TYPE_KEYPOINT_F32,
+                            VPI_BACKEND_CUDA | VPI_BACKEND_CPU, &state->prevPts);
+    if (status == VPI_SUCCESS) {
+        status = vpiArrayCreate(kLkGfttPerFrameMaxCorners, VPI_ARRAY_TYPE_KEYPOINT_F32,
+                                VPI_BACKEND_CUDA | VPI_BACKEND_CPU, &state->curPts);
+    }
+    if (status == VPI_SUCCESS) {
+        status = vpiArrayCreate(kLkGfttPerFrameMaxCorners, VPI_ARRAY_TYPE_U8, VPI_BACKEND_CUDA | VPI_BACKEND_CPU,
+                                &state->trackStatus);
+    }
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI LK array create failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_lk\n";
+        state.reset();
+        logged = true;
+        return false;
+    }
+
+    std::cerr << "[lk_per_frame_accel] backend=vpi_cuda stages=remap,stereo_disparity"
+              << " pyr_lk=" << (EnvFlagEnabled("SMART_DRONE_VPI_LK", false) ? "on" : "off") << " size=" << size.width
+              << "x" << size.height << " max_disparity=" << maxDisparity
+              << " conf=" << EnvIntValue("SMART_DRONE_VPI_STEREO_CONF", kVpiStereoConfidenceThreshold)
+              << " p1=" << EnvIntValue("SMART_DRONE_VPI_STEREO_P1", kVpiStereoP1)
+              << " p2=" << EnvIntValue("SMART_DRONE_VPI_STEREO_P2", kVpiStereoP2)
+              << " uniqueness=" << EnvFloatValue("SMART_DRONE_VPI_STEREO_UNIQUENESS", kVpiStereoUniqueness)
+              << " diag=" << EnvIntValue("SMART_DRONE_VPI_STEREO_DIAG", kVpiStereoIncludeDiagonals) << "\n";
+    logged = true;
+    return true;
+}
+
+bool StoreVpiPreviousRectified(std::shared_ptr<LkPerFrameVpiState> &state)
+{
+    if (!state || state->stream == nullptr || state->leftRect == nullptr || state->rightRect == nullptr ||
+        state->prevLeftRect == nullptr || state->prevRightRect == nullptr) {
+        return false;
+    }
+    VPIStatus status = vpiSubmitConvertImageFormat(state->stream, VPI_BACKEND_CUDA, state->leftRect,
+                                                   state->prevLeftRect, nullptr);
+    if (status == VPI_SUCCESS) {
+        status = vpiSubmitConvertImageFormat(state->stream, VPI_BACKEND_CUDA, state->rightRect, state->prevRightRect,
+                                             nullptr);
+    }
+    if (status == VPI_SUCCESS) {
+        status = vpiStreamSync(state->stream);
+    }
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI previous rect copy failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_cache\n";
+        state->hasPrevRect = false;
+        return false;
+    }
+    state->hasPrevRect = true;
+    return true;
+}
+
+bool VpiRemapCurrentStereo(const cv::Mat &leftRaw, const cv::Mat &rightRaw, cv::Mat &leftRect, cv::Mat &rightRect,
+                           std::shared_ptr<LkPerFrameVpiState> &state, const cv::Mat &map1x, const cv::Mat &map1y,
+                           const cv::Mat &map2x, const cv::Mat &map2y, bool &logged)
+{
+    if (leftRaw.empty() || rightRaw.empty() || leftRaw.size() != rightRaw.size() || leftRaw.type() != CV_8UC1 ||
+        rightRaw.type() != CV_8UC1 || map1x.empty() || map2x.empty()) {
+        return false;
+    }
+    const int maxDisparity = std::clamp(((leftRaw.cols / 8 + 15) / 16) * 16, 16, 256);
+    if (!EnsureVpiPerFrameState(state, leftRaw.size(), map1x, map1y, map2x, map2y, maxDisparity, logged)) {
+        return false;
+    }
+
+    VPIImage leftWrapper = nullptr;
+    VPIImage rightWrapper = nullptr;
+    VPIStatus status = vpiImageCreateWrapperOpenCVMat(leftRaw, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA, &leftWrapper);
+    if (status == VPI_SUCCESS) {
+        status = vpiImageCreateWrapperOpenCVMat(rightRaw, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA, &rightWrapper);
+    }
+    if (status == VPI_SUCCESS) {
+        status = vpiSubmitRemap(state->stream, VPI_BACKEND_CUDA, state->leftRemapPayload, leftWrapper, state->leftRect,
+                                VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0);
+    }
+    if (status == VPI_SUCCESS) {
+        status = vpiSubmitRemap(state->stream, VPI_BACKEND_CUDA, state->rightRemapPayload, rightWrapper,
+                                state->rightRect, VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0);
+    }
+    if (status == VPI_SUCCESS) {
+        status = vpiStreamSync(state->stream);
+    }
+    if (leftWrapper != nullptr) {
+        vpiImageDestroy(leftWrapper);
+    }
+    if (rightWrapper != nullptr) {
+        vpiImageDestroy(rightWrapper);
+    }
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI remap submit failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_remap\n";
+        state.reset();
+        return false;
+    }
+    leftRect = DownloadVpiU8Image(state->leftRect);
+    rightRect = DownloadVpiU8Image(state->rightRect);
+    return !leftRect.empty() && !rightRect.empty();
+}
+
+void ConfigureVpiStereoParams(VPIStereoDisparityEstimatorParams &params, int maxDisparity)
+{
+    params.maxDisparity = maxDisparity;
+    params.confidenceThreshold = EnvIntValue("SMART_DRONE_VPI_STEREO_CONF", kVpiStereoConfidenceThreshold);
+    params.p1 = EnvIntValue("SMART_DRONE_VPI_STEREO_P1", kVpiStereoP1);
+    params.p2 = EnvIntValue("SMART_DRONE_VPI_STEREO_P2", kVpiStereoP2);
+    params.uniqueness = EnvFloatValue("SMART_DRONE_VPI_STEREO_UNIQUENESS", kVpiStereoUniqueness);
+}
+
+bool DownloadVpiDisparity(const cv::Size &size, VPIImage disparityImage, cv::Mat &disp)
+{
+    VPIImageData data{};
+    VPIStatus status = vpiImageLockData(disparityImage, VPI_LOCK_READ, VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR, &data);
+    if (status != VPI_SUCCESS || data.bufferType != VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR ||
+        data.buffer.pitch.numPlanes < 1 || data.buffer.pitch.planes[0].data == nullptr) {
+        std::cerr << "[lk_per_frame_accel] VPI disparity lock failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        return false;
+    }
+
+    const auto &plane = data.buffer.pitch.planes[0];
+    cv::Mat disp16(size.height, size.width, CV_16S, plane.data, static_cast<size_t>(plane.pitchBytes));
+    disp16.convertTo(disp, CV_32F, 1.0 / 32.0);
+    vpiImageUnlock(disparityImage);
+    return true;
+}
+
+bool ComputeVpiCudaDisparityImages(const cv::Size &size, VPIImage leftImage, VPIImage rightImage, cv::Mat &disp,
+                                   std::shared_ptr<LkPerFrameVpiState> &state)
+{
+    if (!state || state->stream == nullptr || state->stereoPayload == nullptr || state->disparity == nullptr ||
+        leftImage == nullptr || rightImage == nullptr) {
+        return false;
+    }
+
+    VPIStereoDisparityEstimatorParams params{};
+    VPIStatus status = vpiInitStereoDisparityEstimatorParams(&params);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI stereo params init failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        return false;
+    }
+    ConfigureVpiStereoParams(params, state->maxDisparity);
+
+    status = vpiSubmitStereoDisparityEstimator(state->stream, VPI_BACKEND_CUDA, state->stereoPayload, leftImage,
+                                               rightImage, state->disparity, nullptr, &params);
+    if (status == VPI_SUCCESS) {
+        status = vpiStreamSync(state->stream);
+    }
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI stereo submit failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        return false;
+    }
+    return DownloadVpiDisparity(size, state->disparity, disp);
+}
+
+bool ComputeVpiCudaDisparity(const cv::Mat &left, const cv::Mat &right, cv::Mat &disp,
+                             std::shared_ptr<LkPerFrameVpiState> &state, bool &logged)
+{
+    if (left.empty() || right.empty() || left.size() != right.size() || left.type() != CV_8UC1 || right.type() != CV_8UC1) {
+        return false;
+    }
+
+    const int maxDisparity = std::clamp(((left.cols / 8 + 15) / 16) * 16, 16, 256);
+    const bool recreate = !state || state->width != left.cols || state->height != left.rows ||
+                          state->maxDisparity != maxDisparity;
+    if (recreate) {
+        state = std::make_shared<LkPerFrameVpiState>();
+        state->width = left.cols;
+        state->height = left.rows;
+        state->maxDisparity = maxDisparity;
+
+        VPIStatus status = vpiStreamCreate(VPI_BACKEND_CUDA, &state->stream);
+        if (status != VPI_SUCCESS) {
+            if (!logged) {
+                std::cerr << "[lk_per_frame_accel] VPI CUDA stream create failed: " << VpiStatusName(status)
+                          << "; fallback=cpu_sgbm\n";
+                logged = true;
+            }
+            state.reset();
+            return false;
+        }
+
+        VPIStereoDisparityEstimatorCreationParams createParams{};
+        status = vpiInitStereoDisparityEstimatorCreationParams(&createParams);
+        if (status != VPI_SUCCESS) {
+            std::cerr << "[lk_per_frame_accel] VPI stereo creation params init failed: " << VpiStatusName(status)
+                      << "; fallback=cpu_sgbm\n";
+            state.reset();
+            logged = true;
+            return false;
+        }
+        createParams.maxDisparity = maxDisparity;
+        createParams.downscaleFactor = 1;
+        createParams.includeDiagonals = EnvIntValue("SMART_DRONE_VPI_STEREO_DIAG", kVpiStereoIncludeDiagonals);
+
+        status = vpiCreateStereoDisparityEstimator(VPI_BACKEND_CUDA, left.cols, left.rows, VPI_IMAGE_FORMAT_U8,
+                                                   &createParams, &state->stereoPayload);
+        if (status != VPI_SUCCESS) {
+            std::cerr << "[lk_per_frame_accel] VPI CUDA stereo payload create failed: " << VpiStatusName(status)
+                      << "; fallback=cpu_sgbm\n";
+            state.reset();
+            logged = true;
+            return false;
+        }
+
+        status = vpiImageCreate(left.cols, left.rows, VPI_IMAGE_FORMAT_S16, VPI_BACKEND_CUDA | VPI_BACKEND_CPU,
+                                &state->disparity);
+        if (status != VPI_SUCCESS) {
+            std::cerr << "[lk_per_frame_accel] VPI disparity image create failed: " << VpiStatusName(status)
+                      << "; fallback=cpu_sgbm\n";
+            state.reset();
+            logged = true;
+            return false;
+        }
+
+        status = vpiImageCreateWrapperOpenCVMat(left, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA, &state->leftWrapper);
+        if (status == VPI_SUCCESS) {
+            status = vpiImageCreateWrapperOpenCVMat(right, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA, &state->rightWrapper);
+        }
+        if (status != VPI_SUCCESS) {
+            std::cerr << "[lk_per_frame_accel] VPI OpenCV wrapper create failed: " << VpiStatusName(status)
+                      << "; fallback=cpu_sgbm\n";
+            state.reset();
+            logged = true;
+            return false;
+        }
+
+        std::cerr << "[lk_per_frame_accel] backend=vpi_cuda stage=stereo_disparity size=" << left.cols << "x"
+                  << left.rows << " max_disparity=" << maxDisparity << "\n";
+        logged = true;
+    } else {
+        VPIStatus status = VPI_SUCCESS;
+        if (state->leftWrapper == nullptr) {
+            status = vpiImageCreateWrapperOpenCVMat(left, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA, &state->leftWrapper);
+        } else {
+            status = vpiImageSetWrappedOpenCVMat(state->leftWrapper, left);
+        }
+        if (status == VPI_SUCCESS) {
+            if (state->rightWrapper == nullptr) {
+                status =
+                    vpiImageCreateWrapperOpenCVMat(right, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA, &state->rightWrapper);
+            } else {
+                status = vpiImageSetWrappedOpenCVMat(state->rightWrapper, right);
+            }
+        }
+        if (status != VPI_SUCCESS) {
+            std::cerr << "[lk_per_frame_accel] VPI wrapper update failed: " << VpiStatusName(status)
+                      << "; fallback=cpu_sgbm\n";
+            state.reset();
+            return false;
+        }
+    }
+
+    VPIStereoDisparityEstimatorParams params{};
+    VPIStatus status = vpiInitStereoDisparityEstimatorParams(&params);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI stereo params init failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        return false;
+    }
+    ConfigureVpiStereoParams(params, maxDisparity);
+
+    status = vpiSubmitStereoDisparityEstimator(state->stream, VPI_BACKEND_CUDA, state->stereoPayload,
+                                               state->leftWrapper, state->rightWrapper, state->disparity, nullptr,
+                                               &params);
+    if (status == VPI_SUCCESS) {
+        status = vpiStreamSync(state->stream);
+    }
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI stereo submit failed: " << VpiStatusName(status)
+                  << "; fallback=cpu_sgbm\n";
+        return false;
+    }
+
+    return DownloadVpiDisparity(left.size(), state->disparity, disp);
+}
+
+bool ComputeVpiCudaPyrLk(const cv::Mat &prevLeft, VPIImage prevLeftImage, VPIImage curLeftImage,
+                         const std::vector<cv::Point2f> &pts0, std::vector<cv::Point2f> &pts1,
+                         std::vector<uint8_t> &statusOut, std::shared_ptr<LkPerFrameVpiState> &state)
+{
+    pts1.clear();
+    statusOut.clear();
+    if (!state || state->stream == nullptr || state->lkPayload == nullptr || state->prevPyr == nullptr ||
+        state->curPyr == nullptr || state->prevPts == nullptr || state->curPts == nullptr ||
+        state->trackStatus == nullptr || curLeftImage == nullptr || pts0.empty()) {
+        return false;
+    }
+    if (prevLeftImage == nullptr && prevLeft.empty()) {
+        return false;
+    }
+
+    const int count = std::min<int>(static_cast<int>(pts0.size()), kLkGfttPerFrameMaxCorners);
+    VPIArrayData prevData{};
+    VPIArrayData curInitData{};
+    VPIStatus vstatus =
+        vpiArrayLockData(state->prevPts, VPI_LOCK_WRITE, VPI_ARRAY_BUFFER_HOST_AOS, &prevData);
+    if (vstatus != VPI_SUCCESS || prevData.bufferType != VPI_ARRAY_BUFFER_HOST_AOS ||
+        prevData.buffer.aos.data == nullptr || prevData.buffer.aos.sizePointer == nullptr) {
+        std::cerr << "[lk_per_frame_accel] VPI prev point upload lock failed: " << VpiStatusName(vstatus)
+                  << "; fallback=cpu_lk\n";
+        return false;
+    }
+    vstatus = vpiArrayLockData(state->curPts, VPI_LOCK_WRITE, VPI_ARRAY_BUFFER_HOST_AOS, &curInitData);
+    if (vstatus != VPI_SUCCESS || curInitData.bufferType != VPI_ARRAY_BUFFER_HOST_AOS ||
+        curInitData.buffer.aos.data == nullptr || curInitData.buffer.aos.sizePointer == nullptr) {
+        std::cerr << "[lk_per_frame_accel] VPI current point init lock failed: " << VpiStatusName(vstatus)
+                  << "; fallback=cpu_lk\n";
+        vpiArrayUnlock(state->prevPts);
+        return false;
+    }
+    auto *prevKeypoints = static_cast<VPIKeypointF32 *>(prevData.buffer.aos.data);
+    auto *curInitKeypoints = static_cast<VPIKeypointF32 *>(curInitData.buffer.aos.data);
+    for (int i = 0; i < count; ++i) {
+        prevKeypoints[i].x = pts0[static_cast<size_t>(i)].x;
+        prevKeypoints[i].y = pts0[static_cast<size_t>(i)].y;
+        curInitKeypoints[i].x = pts0[static_cast<size_t>(i)].x;
+        curInitKeypoints[i].y = pts0[static_cast<size_t>(i)].y;
+    }
+    *prevData.buffer.aos.sizePointer = count;
+    *curInitData.buffer.aos.sizePointer = count;
+    vpiArrayUnlock(state->curPts);
+    vpiArrayUnlock(state->prevPts);
+    vpiArraySetSize(state->trackStatus, count);
+
+    VPIImage prevWrapper = nullptr;
+    VPIImage prevImage = prevLeftImage;
+    if (prevImage == nullptr) {
+        vstatus = vpiImageCreateWrapperOpenCVMat(prevLeft, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA, &prevWrapper);
+        prevImage = prevWrapper;
+    }
+    if (vstatus == VPI_SUCCESS) {
+        vstatus = vpiSubmitGaussianPyramidGenerator(state->stream, VPI_BACKEND_CUDA, prevImage, state->prevPyr,
+                                                    VPI_BORDER_CLAMP);
+    }
+    if (vstatus == VPI_SUCCESS) {
+        vstatus = vpiSubmitGaussianPyramidGenerator(state->stream, VPI_BACKEND_CUDA, curLeftImage, state->curPyr,
+                                                    VPI_BORDER_CLAMP);
+    }
+    VPIOpticalFlowPyrLKParams lkParams{};
+    if (vstatus == VPI_SUCCESS) {
+        vstatus = vpiInitOpticalFlowPyrLKParams(&lkParams);
+        lkParams.windowDimension = 21;
+        lkParams.numIterations = 24;
+        lkParams.useInitialFlow = 1;
+    }
+    if (vstatus == VPI_SUCCESS) {
+        vstatus = vpiSubmitOpticalFlowPyrLK(state->stream, VPI_BACKEND_CUDA, state->lkPayload, state->prevPyr,
+                                            state->curPyr, state->prevPts, state->curPts, state->trackStatus,
+                                            &lkParams);
+    }
+    if (vstatus == VPI_SUCCESS) {
+        vstatus = vpiStreamSync(state->stream);
+    }
+    if (prevWrapper != nullptr) {
+        vpiImageDestroy(prevWrapper);
+    }
+    if (vstatus != VPI_SUCCESS) {
+        std::cerr << "[lk_per_frame_accel] VPI PyrLK submit failed: " << VpiStatusName(vstatus)
+                  << "; fallback=cpu_lk\n";
+        return false;
+    }
+
+    VPIArrayData curData{};
+    VPIArrayData statusData{};
+    vstatus = vpiArrayLockData(state->curPts, VPI_LOCK_READ, VPI_ARRAY_BUFFER_HOST_AOS, &curData);
+    if (vstatus == VPI_SUCCESS) {
+        vstatus = vpiArrayLockData(state->trackStatus, VPI_LOCK_READ, VPI_ARRAY_BUFFER_HOST_AOS, &statusData);
+    }
+    if (vstatus != VPI_SUCCESS || curData.buffer.aos.data == nullptr || statusData.buffer.aos.data == nullptr) {
+        std::cerr << "[lk_per_frame_accel] VPI LK result lock failed: " << VpiStatusName(vstatus)
+                  << "; fallback=cpu_lk\n";
+        if (curData.buffer.aos.data != nullptr) {
+            vpiArrayUnlock(state->curPts);
+        }
+        return false;
+    }
+
+    auto *curKeypoints = static_cast<VPIKeypointF32 *>(curData.buffer.aos.data);
+    auto *trackStatus = static_cast<uint8_t *>(statusData.buffer.aos.data);
+    pts1.resize(static_cast<size_t>(count));
+    statusOut.resize(static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        pts1[static_cast<size_t>(i)] = cv::Point2f(curKeypoints[i].x, curKeypoints[i].y);
+        statusOut[static_cast<size_t>(i)] = trackStatus[i] == 0 ? 1 : 0;
+    }
+    vpiArrayUnlock(state->trackStatus);
+    vpiArrayUnlock(state->curPts);
+    return true;
+}
+#else
+bool VpiRemapCurrentStereo(const cv::Mat &, const cv::Mat &, cv::Mat &, cv::Mat &,
+                           std::shared_ptr<LkPerFrameVpiState> &, const cv::Mat &, const cv::Mat &, const cv::Mat &,
+                           const cv::Mat &, bool &)
+{
+    return false;
+}
+
+bool ComputeVpiCudaDisparity(const cv::Mat &, const cv::Mat &, cv::Mat &, std::shared_ptr<LkPerFrameVpiState> &,
+                             bool &logged)
+{
+    if (!logged) {
+        std::cerr << "[lk_per_frame_accel] VPI support not compiled; fallback=cpu_sgbm\n";
+        logged = true;
+    }
+    return false;
+}
+
+bool ComputeVpiCudaPyrLk(const cv::Mat &, void *, void *, const std::vector<cv::Point2f> &,
+                         std::vector<cv::Point2f> &, std::vector<uint8_t> &,
+                         std::shared_ptr<LkPerFrameVpiState> &)
+{
+    return false;
+}
+#endif
+
+std::vector<LkStereoTrack> BuildLkGfttStereoSeeds(const cv::Mat &leftGray, const cv::Mat &rightGray)
+{
+    std::vector<LkStereoTrack> seeds;
+    if (leftGray.empty() || rightGray.empty()) {
+        return seeds;
+    }
+
+    cv::Mat disp32f;
+    {
+        const int numDisparities = std::max(16, ((leftGray.cols / 8 + 15) / 16) * 16);
+        cv::Ptr<cv::StereoSGBM> sgbm = cv::StereoSGBM::create(
+            0, numDisparities, 5, 8 * 5 * 5, 32 * 5 * 5, 1, 31, 8, 60, 2, cv::StereoSGBM::MODE_SGBM_3WAY);
+        cv::Mat disp16;
+        sgbm->compute(leftGray, rightGray, disp16);
+        disp16.convertTo(disp32f, CV_32F, 1.0 / 16.0);
+    }
+
+    std::vector<cv::Point2f> leftPoints;
+    cv::goodFeaturesToTrack(leftGray, leftPoints, kLkGfttMaxCorners, kLkGfttQualityLevel, kLkGfttMinDistancePx,
+                            cv::Mat(), kLkGfttBlockSize, false, kLkGfttHarrisK);
+    if (leftPoints.empty()) {
+        return seeds;
+    }
+
+    cv::Mat left32f;
+    cv::Mat right32f;
+    leftGray.convertTo(left32f, CV_32F);
+    rightGray.convertTo(right32f, CV_32F);
+    seeds.reserve(leftPoints.size());
+    for (const cv::Point2f &leftPt : leftPoints) {
+        const int ix = static_cast<int>(std::lround(leftPt.x));
+        const int iy = static_cast<int>(std::lround(leftPt.y));
+        if (ix < 0 || iy < 0 || ix >= disp32f.cols || iy >= disp32f.rows) {
+            continue;
+        }
+        const float expectedDisparity = disp32f.at<float>(iy, ix);
+        if (!(expectedDisparity >= kStereoMinDisparityPx) || expectedDisparity > kStereoMaxDisparityPx ||
+            !std::isfinite(expectedDisparity)) {
+            continue;
+        }
+        cv::Point2f rightPt;
+        float zncc = -1.0f;
+        if (!FindRightPointByStereoZnccAroundDisparity(left32f, leftPt, right32f, expectedDisparity, rightPt, zncc)) {
+            continue;
+        }
+        seeds.push_back(LkStereoTrack{leftPt, rightPt, std::clamp((zncc + 1.0f) * 0.5f, 0.0f, 1.0f), 0});
+    }
+    return seeds;
 }
 
 std::vector<LkStereoTrack> BuildLkXFeatStereoSeeds(XFeatFrontendClient *client, const cv::Mat &leftGray,
@@ -1332,6 +2273,8 @@ void OrbSlam3Engine::SetFeatureFrontend(FeatureFrontend frontend)
     if (m_featureFrontend != frontend) {
         m_lkPrevLeft.release();
         m_lkPrevRight.release();
+        m_lkPerFrameSgbm = nullptr;
+        m_lkPerFrameVpi.reset();
         m_lkTracks.clear();
         m_lkFrameHistory.clear();
         m_lkLastXFeatSeedFrameId = 0;
@@ -1358,6 +2301,21 @@ void OrbSlam3Engine::SetLkLoopClosure(bool enabled, float scale, float relaxatio
     m_lkLoopClosureEnabled = enabled;
     m_lkLoopScale = std::clamp(scale, 0.25f, 4.0f);
     m_lkLoopRelaxation = std::clamp(relaxation, 0.0f, 4.0f);
+}
+
+void OrbSlam3Engine::SetLkPerFrameAcceleration(std::string acceleration)
+{
+    std::transform(acceleration.begin(), acceleration.end(), acceleration.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (acceleration.empty()) {
+        acceleration = "auto";
+    }
+    if (m_lkPerFrameAcceleration == acceleration) {
+        return;
+    }
+    m_lkPerFrameAcceleration = std::move(acceleration);
+    m_lkPerFrameVpi.reset();
+    m_lkPerFrameAccelLogged = false;
 }
 
 bool OrbSlam3Engine::LoadLkCalibration(const std::string &settingsPath)
@@ -1495,6 +2453,207 @@ Sophus::SE3f OrbSlam3Engine::ApplyLkLoopClosure(const cv::Mat &leftRect, uint64_
     return corrected;
 }
 
+core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core::ports::SlamInputBatch &input,
+                                                                      bool extractFeatures)
+{
+    core::ports::SlamOutput out{};
+    out.frameId = input.frameId;
+    out.captureTimestampNs = input.captureTimestampNs;
+    out.mapId = 1;
+    out.trackingState = ORB_SLAM3::Tracking::OK;
+    out.poseValid = true;
+    out.pose.valid = true;
+    out.usedXFeatFrontend = false;
+    m_lastXFeatRawLeftCount = 0;
+    m_lastXFeatRawRightCount = 0;
+    m_lastXFeatMatchedStereoCount = 0;
+    m_lastXFeatInjectedLeftCount = 0;
+    m_lastXFeatInjectedRightCount = 0;
+    m_lastXFeatSeedSourceFrameId = 0;
+    m_lastXFeatSeedCurrentFrameId = 0;
+    m_lastXFeatSeedAgeFrames = 0;
+    m_lastXFeatSeedForwardedCount = 0;
+    m_lastXFeatPrepareMs = 0.0;
+    m_lastXFeatWorkerWriteMs = 0.0;
+    m_lastXFeatWorkerReadMs = 0.0;
+    m_lastXFeatWorkerTotalMs = 0.0;
+    m_lastXFeatStereoMatchMs = 0.0;
+    m_lastXFeatTotalMs = 0.0;
+    m_lastXFeatImageCount = 0;
+    m_lastXFeatPayloadBytes = 0;
+
+    cv::Mat leftGray = EnsureGray8(input.stereo.left.gray);
+    cv::Mat rightGray = EnsureGray8(input.stereo.right.gray);
+    if (leftGray.empty() || rightGray.empty() || !m_lkCalibrationLoaded) {
+        out.trackingState = ORB_SLAM3::Tracking::LOST;
+        out.poseValid = false;
+        out.pose.valid = false;
+        return out;
+    }
+
+    EnsureLkRectifier(leftGray.size());
+    const bool requestVpi = m_lkPerFrameAcceleration == "auto" || m_lkPerFrameAcceleration == "vpi" ||
+                            m_lkPerFrameAcceleration == "vpi-cuda" ||
+                            m_lkPerFrameAcceleration == "vpi_cuda" || m_lkPerFrameAcceleration == "gpu";
+    const bool requestVpiRemap = requestVpi && EnvFlagEnabled("SMART_DRONE_VPI_REMAP", true);
+    const bool requestVpiDisparity = requestVpi && EnvFlagEnabled("SMART_DRONE_VPI_DISPARITY", true);
+    const bool requestVpiLk = requestVpi && EnvFlagEnabled("SMART_DRONE_VPI_LK", false);
+    cv::Mat leftRect = leftGray;
+    cv::Mat rightRect = rightGray;
+    bool usedVpiRemap = false;
+    if (requestVpiRemap && !m_lkMap1x.empty() && !m_lkMap2x.empty()) {
+        usedVpiRemap = VpiRemapCurrentStereo(leftGray, rightGray, leftRect, rightRect, m_lkPerFrameVpi, m_lkMap1x,
+                                             m_lkMap1y, m_lkMap2x, m_lkMap2y, m_lkPerFrameAccelLogged);
+    }
+    if (!usedVpiRemap && !m_lkMap1x.empty() && !m_lkMap2x.empty()) {
+        cv::remap(leftGray, leftRect, m_lkMap1x, m_lkMap1y, cv::INTER_LINEAR);
+        cv::remap(rightGray, rightRect, m_lkMap2x, m_lkMap2y, cv::INTER_LINEAR);
+    }
+
+    if (!m_lkHavePrev) {
+        m_lkPrevLeft = leftRect.clone();
+        m_lkPrevRight = rightRect.clone();
+#if SMART_DRONE_HAS_VPI
+        if (usedVpiRemap) {
+            StoreVpiPreviousRectified(m_lkPerFrameVpi);
+        }
+#endif
+        m_lkTwc = Sophus::SE3f();
+        m_lkHavePrev = true;
+        m_lkFrameCount = 1;
+    } else {
+        cv::Mat disp;
+        bool usedVpi = false;
+#if SMART_DRONE_HAS_VPI
+        if (usedVpiRemap && requestVpiDisparity && m_lkPerFrameVpi && m_lkPerFrameVpi->hasPrevRect) {
+            usedVpi = ComputeVpiCudaDisparityImages(m_lkPrevLeft.size(), m_lkPerFrameVpi->prevLeftRect,
+                                                    m_lkPerFrameVpi->prevRightRect, disp, m_lkPerFrameVpi);
+        }
+#endif
+        if (!usedVpi && requestVpiDisparity) {
+            usedVpi = ComputeVpiCudaDisparity(m_lkPrevLeft, m_lkPrevRight, disp, m_lkPerFrameVpi,
+                                              m_lkPerFrameAccelLogged);
+        }
+        if (!usedVpi) {
+            if (!m_lkPerFrameAccelLogged && m_lkPerFrameAcceleration == "cpu") {
+                std::cerr << "[lk_per_frame_accel] backend=cpu_sgbm\n";
+                m_lkPerFrameAccelLogged = true;
+            }
+            if (!m_lkPerFrameSgbm) {
+                const int numDisparities = std::max(16, ((leftRect.cols / 8 + 15) / 16) * 16);
+                m_lkPerFrameSgbm =
+                    cv::StereoSGBM::create(0, numDisparities, 5, 8 * 5 * 5, 32 * 5 * 5, 1, 31, 8, 60, 2,
+                                           cv::StereoSGBM::MODE_SGBM_3WAY);
+            }
+            cv::Mat disp16;
+            m_lkPerFrameSgbm->compute(m_lkPrevLeft, m_lkPrevRight, disp16);
+            disp16.convertTo(disp, CV_32F, 1.0 / 16.0);
+        }
+
+        std::vector<cv::Point2f> pts0;
+        std::vector<cv::Point2f> rawPts0;
+        cv::goodFeaturesToTrack(m_lkPrevLeft, rawPts0, kLkGfttPerFrameMaxCorners, kLkGfttQualityLevel,
+                                kLkGfttMinDistancePx,
+                                cv::Mat(), kLkGfttBlockSize, false, kLkGfttHarrisK);
+        pts0 = SelectGfttPointsGridBalanced(rawPts0, m_lkPrevLeft.size(), kLkGfttPerFrameMaxCorners,
+                                            kLkGfttPerFrameMaxCornersPerCell);
+        std::vector<cv::Point2f> pts1;
+        std::vector<uint8_t> status;
+        std::vector<float> err;
+        bool usedVpiLk = false;
+#if SMART_DRONE_HAS_VPI
+        if (usedVpiRemap && requestVpiLk && !pts0.empty() && m_lkPerFrameVpi && m_lkPerFrameVpi->leftRect != nullptr) {
+            VPIImage prevLeftImage = m_lkPerFrameVpi->hasPrevRect ? m_lkPerFrameVpi->prevLeftRect : nullptr;
+            usedVpiLk = ComputeVpiCudaPyrLk(m_lkPrevLeft, prevLeftImage, m_lkPerFrameVpi->leftRect, pts0, pts1,
+                                            status, m_lkPerFrameVpi);
+        }
+#endif
+        if (!usedVpiLk && !pts0.empty()) {
+            cv::calcOpticalFlowPyrLK(m_lkPrevLeft, leftRect, pts0, pts1, status, err, cv::Size(21, 21), 3);
+        }
+
+        std::vector<cv::Point3f> objectPoints;
+        std::vector<cv::Point2f> imagePoints;
+        objectPoints.reserve(pts0.size());
+        imagePoints.reserve(pts0.size());
+        for (size_t i = 0; i < pts0.size() && i < pts1.size(); ++i) {
+            if (i >= status.size() || !status[i]) {
+                continue;
+            }
+            const cv::Point2f &p0 = pts0[i];
+            const cv::Point2f &p1 = pts1[i];
+            if (p0.x < 1.0f || p0.y < 1.0f || p0.x >= disp.cols - 1 || p0.y >= disp.rows - 1 ||
+                p1.x < 1.0f || p1.y < 1.0f || p1.x >= leftRect.cols - 1 || p1.y >= leftRect.rows - 1) {
+                continue;
+            }
+            if (cv::norm(p1 - p0) > kLkMaxFlowPx) {
+                continue;
+            }
+            float d = 0.0f;
+            if (!ReadConsistentDisparity(disp, p0, d)) {
+                continue;
+            }
+            const float z = m_lkFx * m_lkBaseline / d;
+            if (!(z >= kLkMinDepthMeters) || z > kLkMaxDepthMeters || !std::isfinite(z)) {
+                continue;
+            }
+            objectPoints.emplace_back((p0.x - m_lkCx) * z / m_lkFx, (p0.y - m_lkCy) * z / m_lkFy, z);
+            imagePoints.push_back(p1);
+        }
+
+        int inlierCount = 0;
+        if (objectPoints.size() >= kLkMinPnPPoints) {
+            cv::Mat rvec, tvec, inliers;
+            const cv::Mat K = MakeCameraMatrix(m_lkFx, m_lkFy, m_lkCx, m_lkCy);
+            const bool ok = cv::solvePnPRansac(objectPoints, imagePoints, K, cv::Mat(), rvec, tvec, false, 80,
+                                               kLkPerFramePnPReprojThresholdPx, 0.995, inliers, cv::SOLVEPNP_EPNP);
+            inlierCount = inliers.rows;
+            if (ok && inlierCount >= kLkMinPnPInliers) {
+                cv::Mat Rcv;
+                cv::Rodrigues(rvec, Rcv);
+                Eigen::Matrix3f R = Eigen::Matrix3f::Identity();
+                Eigen::Vector3f t = Eigen::Vector3f::Zero();
+                for (int r = 0; r < 3; ++r) {
+                    for (int c = 0; c < 3; ++c) {
+                        R(r, c) = static_cast<float>(Rcv.at<double>(r, c));
+                    }
+                    t(r) = static_cast<float>(tvec.at<double>(r, 0));
+                }
+                if (std::isfinite(t.norm()) && t.norm() <= kLkMaxStepMeters) {
+                    const Sophus::SE3f TcurrPrev(Sophus::SO3f(R), t);
+                    m_lkTwc = m_lkTwc * StabilizeLkCameraDelta(TcurrPrev.inverse());
+                }
+            }
+        }
+
+        out.matchesInliers = inlierCount;
+        out.trackedMapPointCount = static_cast<uint32_t>(inlierCount);
+        out.localMapPointCount = static_cast<uint32_t>(objectPoints.size());
+        if (extractFeatures) {
+            out.leftFeatures = std::move(pts1);
+        }
+        m_lkPrevLeft = leftRect.clone();
+        m_lkPrevRight = rightRect.clone();
+#if SMART_DRONE_HAS_VPI
+        if (usedVpiRemap) {
+            StoreVpiPreviousRectified(m_lkPerFrameVpi);
+        }
+#endif
+        ++m_lkFrameCount;
+    }
+
+    const Eigen::Vector3f t = m_lkTwc.translation();
+    const Eigen::Quaternionf q(m_lkTwc.so3().unit_quaternion());
+    out.pose.x = t.x();
+    out.pose.y = t.y();
+    out.pose.z = t.z();
+    out.pose.qw = q.w();
+    out.pose.qx = q.x();
+    out.pose.qy = q.y();
+    out.pose.qz = q.z();
+    return out;
+}
+
 core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::SlamInputBatch &input,
                                                           bool extractFeatures)
 {
@@ -1587,8 +2746,29 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
         out.usedXFeatFrontend = m_lastXFeatInjectedLeftCount > 0;
         return m_lastXFeatInjectedLeftCount > 0;
     };
+    auto extractCurrentGfttSeedsIfNeeded = [&](bool force) {
+        const bool cadenceDue = m_lkLastXFeatSeedFrameId == 0 ||
+                                input.frameId >= m_lkLastXFeatSeedFrameId + kLkGridRefillIntervalFrames;
+        if (!force && (!cadenceDue || !LkHasDegradedGridCell(m_lkTracks, leftRect.size()))) {
+            return false;
+        }
+        std::vector<LkStereoTrack> seeds = BuildLkGfttStereoSeeds(leftRect, rightRect);
+        m_lkLastXFeatSeedFrameId = input.frameId;
+        if (seeds.empty()) {
+            return false;
+        }
+        const size_t before = m_lkTracks.size();
+        AppendLkSeedsForDegradedCells(seeds, leftRect.size(), m_lkTracks);
+        return m_lkTracks.size() > before;
+    };
+    auto extractCurrentSeedsIfNeeded = [&](bool force) {
+        if (m_xfeatFrontendClient != nullptr && m_xfeatFrontendClient->Running()) {
+            return extractCurrentXFeatSeedsIfNeeded(force);
+        }
+        return extractCurrentGfttSeedsIfNeeded(force);
+    };
     if (!m_lkHavePrev) {
-        extractCurrentXFeatSeedsIfNeeded(true);
+        extractCurrentSeedsIfNeeded(true);
         m_lkTracks = SelectLkTracksGridBalanced(m_lkTracks, leftRect.size());
         m_lkPrevLeft = leftRect.clone();
         m_lkPrevRight = rightRect.clone();
@@ -1661,7 +2841,7 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
             }
             const float d = p0.x - prevRight.x;
             const float z = m_lkFx * m_lkBaseline / d;
-            if (!(z > 0.05f) || z > kLkMaxDepthMeters || !std::isfinite(z)) {
+            if (!(z >= kLkMinDepthMeters) || z > kLkMaxDepthMeters || !std::isfinite(z)) {
                 continue;
             }
             objectPoints.emplace_back((p0.x - m_lkCx) * z / m_lkFx, (p0.y - m_lkCy) * z / m_lkFy, z);
@@ -1711,15 +2891,15 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
         out.matchesInliers = inlierCount;
         out.trackedMapPointCount = static_cast<uint32_t>(inlierCount);
         out.localMapPointCount = static_cast<uint32_t>(objectPoints.size());
-        const bool needRecoveryRefill =
-            trackedTracks.size() < static_cast<size_t>(kLkRecoveryMinTracks) || inlierCount < kLkRecoveryMinInliers;
-        m_lkTracks = needRecoveryRefill ? std::vector<LkStereoTrack>{}
+        const bool hardRecoveryRefill =
+            trackedTracks.size() < static_cast<size_t>(kLkHardRecoveryMinTracks) || inlierCount < kLkHardRecoveryMinInliers;
+        m_lkTracks = hardRecoveryRefill ? std::vector<LkStereoTrack>{}
                                         : SelectLkTracksGridBalanced(trackedTracks, leftRect.size());
-        if (needRecoveryRefill) {
+        if (hardRecoveryRefill) {
             // A wide-baseline jump can invalidate LK-forwarded tracks. Seed directly from the current stereo frame.
-            extractCurrentXFeatSeedsIfNeeded(true);
+            extractCurrentSeedsIfNeeded(true);
         }
-        extractCurrentXFeatSeedsIfNeeded(false);
+        extractCurrentSeedsIfNeeded(false);
         m_lkTracks = SelectLkTracksGridBalanced(m_lkTracks, leftRect.size());
         if (extractFeatures) {
             out.leftFeatures.reserve(m_lkTracks.size());
@@ -1772,6 +2952,7 @@ void OrbSlam3Engine::Stop()
     m_lastStableTimestampSec = 0.0;
     m_lkTracks.clear();
     m_lkFrameHistory.clear();
+    m_lkPerFrameSgbm = nullptr;
     m_lkLoopKeyframes.clear();
     m_lkLoopCorrection = Sophus::SE3f();
     m_lkLastLoopClosureFrameId = 0;
@@ -1862,6 +3043,10 @@ void OrbSlam3Engine::StabilizeOutputPose(core::ports::PoseEstimate &pose, bool &
 core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
                                                 bool extractPointCloud)
 {
+    if (m_featureFrontend == FeatureFrontend::LkGfttPerFrame) {
+        (void)extractPointCloud;
+        return ProcessLkGfttPerFrameStereoVo(input, extractFeatures);
+    }
     if (m_featureFrontend == FeatureFrontend::LK) {
         (void)extractPointCloud;
         return ProcessLkStereoVo(input, extractFeatures);

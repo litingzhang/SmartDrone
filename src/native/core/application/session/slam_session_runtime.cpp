@@ -218,6 +218,7 @@ bool SlamSessionRuntime::Start()
     m_slamEngine.SetXFeatInputSizeLimit(m_cfg.app.runtime.xfeatInputMaxWidth, m_cfg.app.runtime.xfeatInputMaxHeight);
     m_slamEngine.SetLkLoopClosure(m_cfg.app.runtime.lkLoopClosure, m_cfg.app.runtime.lkLoopScale,
                                   m_cfg.app.runtime.lkLoopRelaxation);
+    m_slamEngine.SetLkPerFrameAcceleration(m_cfg.app.runtime.lkPerFrameAcceleration);
     if (m_frameProcessorState.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
         std::cerr << "[slam] operation_mode=auto effective_mode=mapping\n";
     }

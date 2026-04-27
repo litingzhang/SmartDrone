@@ -9,10 +9,11 @@ import json
 import math
 from bisect import bisect_left
 from pathlib import Path
+from typing import Tuple
 
 
-Vec3 = tuple[float, float, float]
-Mat3 = tuple[Vec3, Vec3, Vec3]
+Vec3 = Tuple[float, float, float]
+Mat3 = Tuple[Vec3, Vec3, Vec3]
 
 
 def _resolve_mav0(dataset: Path) -> Path:

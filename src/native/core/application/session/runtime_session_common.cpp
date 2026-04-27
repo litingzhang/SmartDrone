@@ -221,6 +221,7 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
     a.xfeatInputMaxWidth = c.runtime.xfeatInputMaxWidth;
     a.xfeatInputMaxHeight = c.runtime.xfeatInputMaxHeight;
     a.lkXFeatSeeding = c.runtime.lkXFeatSeeding;
+    a.lkPerFrameAcceleration = c.runtime.lkPerFrameAcceleration;
     a.lkLoopClosure = c.runtime.lkLoopClosure;
     a.lkLoopScale = c.runtime.lkLoopScale;
     a.lkLoopRelaxation = c.runtime.lkLoopRelaxation;
@@ -275,7 +276,8 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
               << " minThFAST=" << app.runtime.orbMinThFAST << "\n";
     std::cerr << "lk xfeat_seeding=" << (app.runtime.lkXFeatSeeding ? "Y" : "N")
               << " loop_closure=" << (app.runtime.lkLoopClosure ? "Y" : "N")
-              << " scale=" << app.runtime.lkLoopScale << " relax=" << app.runtime.lkLoopRelaxation << "\n";
+              << " scale=" << app.runtime.lkLoopScale << " relax=" << app.runtime.lkLoopRelaxation
+              << " per_frame_accel=" << app.runtime.lkPerFrameAcceleration << "\n";
     std::cerr << "debug right_only_features=" << (a.debugRightOnlyFeatures ? "Y" : "N") << "\n";
     std::cerr << "slam lowlight_enhance=" << (a.slamLowLightEnhance ? "Y" : "N") << "\n";
     std::cerr << "diagnostics json=" << (a.jsonDiagnostics ? "Y" : "N") << "\n";

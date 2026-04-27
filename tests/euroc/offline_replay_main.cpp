@@ -45,10 +45,12 @@ struct OfflineReplayOptions {
     int slamInputFps{20};
     int timeoutMs{1000};
     size_t maxFrames{0};
+    bool lkXFeatSeeding{false};
     bool lkLoopClosure{false};
     bool lkRuntimeLoopClosure{false};
     float lkLoopScale{1.20f};
     float lkLoopRelaxation{1.40f};
+    std::string lkPerFrameAcceleration{"cpu"};
 };
 
 struct LoopClosureCorrectionSummary {
@@ -84,7 +86,7 @@ const char *UsageText()
         "  --settings <file>     ORB settings YAML path\n"
         "  --sensor-mode <mode>  stereo|stereo-imu|mono|mono-imu\n"
         "  --stereo-only         Shortcut for --sensor-mode stereo\n"
-        "  --feature-frontend <mode> orb|xfeat, default xfeat\n"
+        "  --feature-frontend <mode> orb|xfeat|lk|lk_gftt_per_frame, default xfeat\n"
         "  --xfeat-python <bin>  Python executable for XFeat worker, default python3\n"
         "  --xfeat-repo <dir>    XFeat repo root, default accelerated_features\n"
         "  --xfeat-worker <file> XFeat worker script path, default scripts/xfeat_keypoint_worker.py\n"
@@ -98,10 +100,12 @@ const char *UsageText()
         "  --slam-fps <n>        SLAM input FPS, default 20\n"
         "  --timeout-ms <n>      Batch acquire timeout, default 1000\n"
         "  --max-frames <n>      Maximum output frames, default 0(all)\n"
+        "  --lk-xfeat-seeding    Use XFeat stereo seeds in LK mode; default LK seed source is GFTT/Shi-Tomasi\n"
         "  --lk-loop-closure     Apply offline LK pose-graph loop-closure smoothing\n"
         "  --lk-runtime-loop-closure Enable image-based LK keyframe loop closure during replay\n"
         "  --lk-loop-scale <f>   Sim3 scale used by LK loop closure, default 1.20\n"
-        "  --lk-loop-relax <f>   Loop residual relaxation factor, default 1.40\n";
+        "  --lk-loop-relax <f>   Loop residual relaxation factor, default 1.40\n"
+        "  --lk-per-frame-accel <auto|cpu|vpi-cuda>  Per-frame LK GFTT stereo backend, default cpu\n";
 }
 
 std::string GetOptionValue(int argc, char **argv, const char *name, const std::string &defaultValue)
@@ -186,10 +190,12 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     opts.xfeatMaxPoints = GetOptionInt(argc, argv, "--xfeat-max-points", opts.xfeatMaxPoints);
     opts.xfeatInputMaxWidth = GetOptionInt(argc, argv, "--xfeat-input-max-width", opts.xfeatInputMaxWidth);
     opts.xfeatInputMaxHeight = GetOptionInt(argc, argv, "--xfeat-input-max-height", opts.xfeatInputMaxHeight);
+    opts.lkXFeatSeeding = HasFlag(argc, argv, "--lk-xfeat-seeding");
     opts.lkLoopClosure = HasFlag(argc, argv, "--lk-loop-closure");
     opts.lkRuntimeLoopClosure = HasFlag(argc, argv, "--lk-runtime-loop-closure");
     opts.lkLoopScale = GetOptionFloat(argc, argv, "--lk-loop-scale", opts.lkLoopScale);
     opts.lkLoopRelaxation = GetOptionFloat(argc, argv, "--lk-loop-relax", opts.lkLoopRelaxation);
+    opts.lkPerFrameAcceleration = GetOptionValue(argc, argv, "--lk-per-frame-accel", "cpu");
     opts.vocab = ResolveRuntimePath(GetOptionValue(argc, argv, "--vocab", opts.vocab), argc > 0 ? argv[0] : nullptr);
     opts.settings =
         ResolveRuntimePath(GetOptionValue(argc, argv, "--settings", DefaultSettingsForSensorMode(opts.sensorMode)),
@@ -440,9 +446,11 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     slamEngine.SetFeatureFrontend(opts.featureFrontend);
     slamEngine.SetXFeatInputSizeLimit(opts.xfeatInputMaxWidth, opts.xfeatInputMaxHeight);
     slamEngine.SetLkLoopClosure(opts.lkRuntimeLoopClosure, opts.lkLoopScale, opts.lkLoopRelaxation);
+    slamEngine.SetLkPerFrameAcceleration(opts.lkPerFrameAcceleration);
     smartdrone::adapters::slam::XFeatFrontendClient xfeatFrontendClient;
     std::string xfeatErr;
-    if (opts.featureFrontend == FeatureFrontend::XFeat || opts.featureFrontend == FeatureFrontend::LK) {
+    if (opts.featureFrontend == FeatureFrontend::XFeat ||
+        (opts.featureFrontend == FeatureFrontend::LK && opts.lkXFeatSeeding)) {
         slamEngine.SetXFeatFrontendClient(&xfeatFrontendClient);
         if (!xfeatFrontendClient.Start(opts.xfeatPython, opts.xfeatWorkerScript, opts.xfeatRepo, opts.xfeatDevice,
                                        opts.xfeatTopK, opts.xfeatMaxPoints, &xfeatErr)) {
@@ -518,6 +526,9 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     std::cout << "  settings: " << opts.settings << "\n";
     std::cout << "  vocab: " << opts.vocab << "\n";
     std::cout << "  sensor_mode: " << ToSensorModeText(opts.sensorMode) << "\n";
+    std::cout << "  feature_frontend: " << ToFeatureFrontendText(opts.featureFrontend) << "\n";
+    std::cout << "  lk_xfeat_seeding: " << (opts.lkXFeatSeeding ? "Y" : "N") << "\n";
+    std::cout << "  lk_per_frame_accel: " << opts.lkPerFrameAcceleration << "\n";
     std::cout << "  frames_out: " << outputs.size() << "\n";
     std::cout << "  pose_valid_frames: " << poseValidCount << "\n";
     std::cout << "  tracking_ok_frames: " << trackingOkCount << "\n";
@@ -544,6 +555,9 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << "  \"settings\": \"" << opts.settings << "\",\n"
                 << "  \"vocab\": \"" << opts.vocab << "\",\n"
                 << "  \"sensor_mode\": \"" << ToSensorModeText(opts.sensorMode) << "\",\n"
+                << "  \"feature_frontend\": \"" << ToFeatureFrontendText(opts.featureFrontend) << "\",\n"
+                << "  \"lk_xfeat_seeding\": " << (opts.lkXFeatSeeding ? "true" : "false") << ",\n"
+                << "  \"lk_per_frame_accel\": \"" << opts.lkPerFrameAcceleration << "\",\n"
                 << "  \"frames_out\": " << outputs.size() << ",\n"
                 << "  \"pose_valid_frames\": " << poseValidCount << ",\n"
                 << "  \"tracking_ok_frames\": " << trackingOkCount << ",\n"
