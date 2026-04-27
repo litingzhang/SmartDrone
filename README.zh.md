@@ -6,6 +6,11 @@ SmartDrone 是一个面向双目/双目惯性无人机运行时系统，包含�
 - Android 控制端（`src/android`）
 - 标定与离线回放工具
 
+相关文档：
+
+- [架构设计说明](docs/architecture.zh.md)
+- [SLAM 前端模式与 EuRoC 回归结果](docs/slam_modes_euroc.zh.md)
+
 ## 1. 目录结构
 
 ```text

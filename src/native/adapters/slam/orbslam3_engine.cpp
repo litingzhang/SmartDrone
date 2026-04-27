@@ -276,7 +276,7 @@ constexpr float kLkGfttStereoSearchRadiusPx = 96.0f;
 constexpr float kLkMinConsistentDisparityPx = 1.0f;
 constexpr float kLkDisparityNeighborhoodTolerancePx = 1.5f;
 constexpr int kLkDisparityNeighborhoodRadius = 1;
-constexpr double kLkPerFramePnPReprojThresholdPx = 4.0;
+constexpr double kLkPerFramePnPReprojThresholdPx = 3.0;
 constexpr int kVpiStereoConfidenceThreshold = 32767;
 constexpr int kVpiStereoP1 = 16;
 constexpr int kVpiStereoP2 = 128;
@@ -1256,7 +1256,56 @@ bool LkHasDegradedGridCell(const std::vector<LkStereoTrack> &tracks, const cv::S
     return std::any_of(counts.begin(), counts.end(), [](int count) { return count < kLkMinTracksPerCell; });
 }
 
-Sophus::SE3f StabilizeLkCameraDelta(const Sophus::SE3f &delta)
+bool IsHorizontalLateralFlow(const std::vector<cv::Point2f> &prevPts, const std::vector<cv::Point2f> &currPts,
+                             const std::vector<uint8_t> &status, const cv::Size &size)
+{
+    const size_t countLimit = std::min(prevPts.size(), currPts.size());
+    if (countLimit == 0 || size.width <= 0 || size.height <= 0) {
+        return false;
+    }
+
+    const cv::Point2f center(0.5f * static_cast<float>(size.width), 0.5f * static_cast<float>(size.height));
+    float sumDx = 0.0f;
+    float sumDy = 0.0f;
+    float sumRadial = 0.0f;
+    int validCount = 0;
+    for (size_t i = 0; i < countLimit; ++i) {
+        if (i >= status.size() || !status[i]) {
+            continue;
+        }
+        const cv::Point2f &p0 = prevPts[i];
+        const cv::Point2f &p1 = currPts[i];
+        if (p0.x < 1.0f || p0.y < 1.0f || p0.x >= size.width - 1 || p0.y >= size.height - 1 ||
+            p1.x < 1.0f || p1.y < 1.0f || p1.x >= size.width - 1 || p1.y >= size.height - 1) {
+            continue;
+        }
+        const cv::Point2f flow = p1 - p0;
+        if (cv::norm(flow) > kLkMaxFlowPx) {
+            continue;
+        }
+        const cv::Point2f radial = p0 - center;
+        const float radius = std::sqrt(radial.x * radial.x + radial.y * radial.y);
+        if (radius > 1.0f) {
+            sumRadial += (flow.x * radial.x + flow.y * radial.y) / radius;
+        }
+        sumDx += flow.x;
+        sumDy += flow.y;
+        ++validCount;
+    }
+
+    if (validCount < 30) {
+        return false;
+    }
+    const float invCount = 1.0f / static_cast<float>(validCount);
+    const float meanDx = sumDx * invCount;
+    const float meanDy = sumDy * invCount;
+    const float meanRadial = sumRadial * invCount;
+    const float absDx = std::abs(meanDx);
+    return absDx >= 1.5f && absDx >= 1.8f * std::max(1.0f, std::abs(meanDy)) &&
+           std::abs(meanRadial) <= 0.35f * absDx;
+}
+
+Sophus::SE3f StabilizeLkCameraDelta(const Sophus::SE3f &delta, bool horizontalLateralFlow = false)
 {
     Eigen::Vector3f t = delta.translation();
     if (!std::isfinite(t.x()) || !std::isfinite(t.y()) || !std::isfinite(t.z())) {
@@ -1265,6 +1314,10 @@ Sophus::SE3f StabilizeLkCameraDelta(const Sophus::SE3f &delta)
 
     t.x() = std::clamp(t.x(), -kLkMaxLateralStepMeters, kLkMaxLateralStepMeters);
     t.y() = std::clamp(t.y(), -kLkMaxVerticalStepMeters, kLkMaxVerticalStepMeters);
+    if (horizontalLateralFlow) {
+        const float maxForwardFromLateral = std::max(0.015f, 0.25f * std::abs(t.x()));
+        t.z() = std::clamp(t.z(), -maxForwardFromLateral, maxForwardFromLateral);
+    }
     t.z() = std::clamp(t.z() * kLkForwardAxisGain, -kLkMaxForwardStepMeters, kLkMaxForwardStepMeters);
     return Sophus::SE3f(delta.so3(), t);
 }
@@ -2571,7 +2624,6 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
         if (!usedVpiLk && !pts0.empty()) {
             cv::calcOpticalFlowPyrLK(m_lkPrevLeft, leftRect, pts0, pts1, status, err, cv::Size(21, 21), 3);
         }
-
         std::vector<cv::Point3f> objectPoints;
         std::vector<cv::Point2f> imagePoints;
         objectPoints.reserve(pts0.size());
@@ -2609,6 +2661,21 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
                                                kLkPerFramePnPReprojThresholdPx, 0.995, inliers, cv::SOLVEPNP_EPNP);
             inlierCount = inliers.rows;
             if (ok && inlierCount >= kLkMinPnPInliers) {
+                std::vector<cv::Point3f> inlierObjectPoints;
+                std::vector<cv::Point2f> inlierImagePoints;
+                inlierObjectPoints.reserve(static_cast<size_t>(inlierCount));
+                inlierImagePoints.reserve(static_cast<size_t>(inlierCount));
+                for (int row = 0; row < inliers.rows; ++row) {
+                    const int idx = inliers.at<int>(row, 0);
+                    if (idx >= 0 && static_cast<size_t>(idx) < objectPoints.size()) {
+                        inlierObjectPoints.push_back(objectPoints[static_cast<size_t>(idx)]);
+                        inlierImagePoints.push_back(imagePoints[static_cast<size_t>(idx)]);
+                    }
+                }
+                if (inlierObjectPoints.size() >= static_cast<size_t>(kLkMinPnPInliers)) {
+                    (void)cv::solvePnP(inlierObjectPoints, inlierImagePoints, K, cv::Mat(), rvec, tvec, true,
+                                       cv::SOLVEPNP_ITERATIVE);
+                }
                 cv::Mat Rcv;
                 cv::Rodrigues(rvec, Rcv);
                 Eigen::Matrix3f R = Eigen::Matrix3f::Identity();
@@ -2806,6 +2873,7 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
             (void)TrackPointsWithForwardBackward(m_lkPrevLeft, leftRect, pts0, leftPts1, status);
             (void)TrackPointsWithForwardBackward(m_lkPrevRight, rightRect, rightPts0, rightPts1, rightStatus);
         }
+        const bool horizontalLateralFlow = IsHorizontalLateralFlow(pts0, leftPts1, status, leftRect.size());
 
         std::vector<cv::Point3f> objectPoints;
         std::vector<cv::Point2f> imagePoints;
@@ -2883,7 +2951,7 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
                 }
                 if (std::isfinite(t.norm()) && t.norm() <= kLkMaxStepMeters) {
                     const Sophus::SE3f TcurrPrev(Sophus::SO3f(R), t);
-                    m_lkTwc = m_lkTwc * StabilizeLkCameraDelta(TcurrPrev.inverse());
+                    m_lkTwc = m_lkTwc * StabilizeLkCameraDelta(TcurrPrev.inverse(), horizontalLateralFlow);
                 }
             }
         }

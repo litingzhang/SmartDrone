@@ -11,6 +11,8 @@ from bisect import bisect_left
 from pathlib import Path
 from typing import Tuple
 
+import numpy as np
+
 
 Vec3 = Tuple[float, float, float]
 Mat3 = Tuple[Vec3, Vec3, Vec3]
@@ -130,28 +132,20 @@ def _quat_to_matrix(q: tuple[float, float, float, float]) -> Mat3:
 
 
 def _align_se3(source: list[Vec3], target: list[Vec3]) -> list[Vec3]:
-    source_mean = _mean(source)
-    target_mean = _mean(target)
-    covariance = [[0.0 for _ in range(3)] for _ in range(3)]
-    for source_point, target_point in zip(source, target):
-        x = _sub(source_point, source_mean)
-        y = _sub(target_point, target_mean)
-        for row in range(3):
-            for col in range(3):
-                covariance[row][col] += x[row] * y[col]
-
-    sxx, sxy, sxz = covariance[0]
-    syx, syy, syz = covariance[1]
-    szx, szy, szz = covariance[2]
-    trace = sxx + syy + szz
-    horn = [
-        [trace, syz - szy, szx - sxz, sxy - syx],
-        [syz - szy, sxx - syy - szz, sxy + syx, szx + sxz],
-        [szx - sxz, sxy + syx, -sxx + syy - szz, syz + szy],
-        [sxy - syx, szx + sxz, syz + szy, -sxx - syy + szz],
-    ]
-    rotation = _quat_to_matrix(_power_iteration_symmetric4(horn))
-    return [_add(_mat_vec_mul(rotation, _sub(point, source_mean)), target_mean) for point in source]
+    source_np = np.asarray(source, dtype=np.float64)
+    target_np = np.asarray(target, dtype=np.float64)
+    source_mean = source_np.mean(axis=0)
+    target_mean = target_np.mean(axis=0)
+    source_centered = source_np - source_mean
+    target_centered = target_np - target_mean
+    covariance = target_centered.T @ source_centered
+    u, _, vt = np.linalg.svd(covariance)
+    correction = np.eye(3)
+    if np.linalg.det(u @ vt) < 0.0:
+        correction[-1, -1] = -1.0
+    rotation = u @ correction @ vt
+    aligned = (rotation @ source_centered.T).T + target_mean
+    return [tuple(map(float, row)) for row in aligned]
 
 
 def _rmse(values: list[float]) -> float:
