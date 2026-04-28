@@ -186,6 +186,15 @@ float EnvFloatValue(const char *name, float defaultValue)
     return end != value ? parsed : defaultValue;
 }
 
+std::string EnvStringValue(const char *name, const char *defaultValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return defaultValue;
+    }
+    return value;
+}
+
 cv::Mat DownloadVpiU8Image(VPIImage image)
 {
     VPIImageData data{};
@@ -268,6 +277,14 @@ constexpr size_t kLkMaxTracks = 576;
 constexpr int kLkGfttMaxCorners = 900;
 constexpr int kLkGfttPerFrameMaxCorners = 960;
 constexpr int kLkGfttPerFrameMaxCornersPerCell = 20;
+constexpr float kLkPerFrameForwardBackwardMaxErrPx = 1.25f;
+constexpr int kLkPerFramePnPSelectGridCols = 8;
+constexpr int kLkPerFramePnPSelectGridRows = 6;
+constexpr int kLkPerFramePnPDepthBins = 4;
+constexpr int kLkPerFramePnPMaxPerGridDepthBin = 4;
+constexpr int kLkPerFrameDefaultPnPIterations = 120;
+constexpr double kLkPerFrameDefaultPnPConfidence = 0.995;
+constexpr double kLkPerFrameVpiPnPReprojThresholdPx = 3.0;
 constexpr double kLkGfttQualityLevel = 0.01;
 constexpr double kLkGfttMinDistancePx = 8.0;
 constexpr int kLkGfttBlockSize = 7;
@@ -278,9 +295,9 @@ constexpr float kLkDisparityNeighborhoodTolerancePx = 1.5f;
 constexpr int kLkDisparityNeighborhoodRadius = 1;
 constexpr double kLkPerFramePnPReprojThresholdPx = 3.0;
 constexpr int kVpiStereoConfidenceThreshold = 32767;
-constexpr int kVpiStereoP1 = 16;
-constexpr int kVpiStereoP2 = 128;
-constexpr float kVpiStereoUniqueness = -1.0f;
+constexpr int kVpiStereoP1 = 20;
+constexpr int kVpiStereoP2 = 176;
+constexpr float kVpiStereoUniqueness = 0.38f;
 constexpr int kVpiStereoIncludeDiagonals = 1;
 constexpr size_t kLkFrameHistoryMaxSize = 64;
 constexpr float kLkMinSeedDistancePx = 3.5f;
@@ -1380,6 +1397,35 @@ bool ReadConsistentDisparity(const cv::Mat &disp, const cv::Point2f &pt, float &
     return true;
 }
 
+int LkPerFrameDepthBin(float z)
+{
+    if (z < 1.5f) {
+        return 0;
+    }
+    if (z < 3.0f) {
+        return 1;
+    }
+    if (z < 6.0f) {
+        return 2;
+    }
+    return 3;
+}
+
+int LkPerFramePnPMethod()
+{
+    const std::string method = EnvStringValue("SMART_DRONE_LK_PER_FRAME_PNP", "iterative");
+    if (method == "p3p") {
+        return cv::SOLVEPNP_P3P;
+    }
+    if (method == "ap3p") {
+        return cv::SOLVEPNP_AP3P;
+    }
+    if (method == "iterative") {
+        return cv::SOLVEPNP_ITERATIVE;
+    }
+    return cv::SOLVEPNP_EPNP;
+}
+
 #if SMART_DRONE_HAS_VPI
 bool EnsureVpiPerFrameState(std::shared_ptr<LkPerFrameVpiState> &state, const cv::Size &size,
                             const cv::Mat &map1x, const cv::Mat &map1y, const cv::Mat &map2x, const cv::Mat &map2y,
@@ -2298,6 +2344,7 @@ bool OrbSlam3Engine::Start()
     m_lkPrevLeft.release();
     m_lkPrevRight.release();
     m_lkTwc = Sophus::SE3f();
+    m_lkPerFrameReferenceTwc = Sophus::SE3f();
     m_lkHavePrev = false;
     m_lkFrameCount = 0;
     return static_cast<bool>(m_system);
@@ -2332,6 +2379,7 @@ void OrbSlam3Engine::SetFeatureFrontend(FeatureFrontend frontend)
         m_lkFrameHistory.clear();
         m_lkLastXFeatSeedFrameId = 0;
         m_lkTwc = Sophus::SE3f();
+        m_lkPerFrameReferenceTwc = Sophus::SE3f();
         m_lkHavePrev = false;
         m_lkFrameCount = 0;
         m_lkLoopKeyframes.clear();
@@ -2572,6 +2620,7 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
         }
 #endif
         m_lkTwc = Sophus::SE3f();
+        m_lkPerFrameReferenceTwc = m_lkTwc;
         m_lkHavePrev = true;
         m_lkFrameCount = 1;
     } else {
@@ -2624,6 +2673,27 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
         if (!usedVpiLk && !pts0.empty()) {
             cv::calcOpticalFlowPyrLK(m_lkPrevLeft, leftRect, pts0, pts1, status, err, cv::Size(21, 21), 3);
         }
+        std::vector<cv::Point2f> pts0Back;
+        std::vector<uint8_t> statusBack;
+        std::vector<float> errBack;
+        const bool useForwardBackwardCheck = EnvFlagEnabled("SMART_DRONE_LK_PER_FRAME_FB_CHECK", false);
+        const bool useDepthBalancedPnP = EnvFlagEnabled("SMART_DRONE_LK_PER_FRAME_DEPTH_BALANCE", false);
+        const bool useKeyframeReference = EnvFlagEnabled("SMART_DRONE_LK_PER_FRAME_KEYFRAME", false);
+        const int keyframeInterval =
+            std::max(1, EnvIntValue("SMART_DRONE_LK_PER_FRAME_KEYFRAME_INTERVAL", 6));
+        if (useForwardBackwardCheck && !pts1.empty()) {
+            cv::calcOpticalFlowPyrLK(leftRect, m_lkPrevLeft, pts1, pts0Back, statusBack, errBack, cv::Size(21, 21),
+                                    3);
+        }
+struct PerFramePnPCandidate {
+            cv::Point3f object;
+            cv::Point2f image;
+            cv::Point2f prevPoint;
+            float depth{0.0f};
+            float flow{0.0f};
+        };
+        std::vector<PerFramePnPCandidate> candidates;
+        candidates.reserve(pts0.size());
         std::vector<cv::Point3f> objectPoints;
         std::vector<cv::Point2f> imagePoints;
         objectPoints.reserve(pts0.size());
@@ -2641,6 +2711,10 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
             if (cv::norm(p1 - p0) > kLkMaxFlowPx) {
                 continue;
             }
+            if (useForwardBackwardCheck && (i >= pts0Back.size() || i >= statusBack.size() || !statusBack[i] ||
+                                            cv::norm(pts0Back[i] - p0) > kLkPerFrameForwardBackwardMaxErrPx)) {
+                continue;
+            }
             float d = 0.0f;
             if (!ReadConsistentDisparity(disp, p0, d)) {
                 continue;
@@ -2649,16 +2723,57 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
             if (!(z >= kLkMinDepthMeters) || z > kLkMaxDepthMeters || !std::isfinite(z)) {
                 continue;
             }
-            objectPoints.emplace_back((p0.x - m_lkCx) * z / m_lkFx, (p0.y - m_lkCy) * z / m_lkFy, z);
-            imagePoints.push_back(p1);
+            candidates.push_back({cv::Point3f((p0.x - m_lkCx) * z / m_lkFx, (p0.y - m_lkCy) * z / m_lkFy, z), p1,
+                                  p0, z, static_cast<float>(cv::norm(p1 - p0))});
+        }
+
+        if (useDepthBalancedPnP) {
+            std::array<int, kLkPerFramePnPSelectGridCols * kLkPerFramePnPSelectGridRows * kLkPerFramePnPDepthBins>
+                bucketCounts{};
+            for (const PerFramePnPCandidate &candidate : candidates) {
+                const int gx = std::clamp(static_cast<int>(candidate.prevPoint.x * kLkPerFramePnPSelectGridCols /
+                                                           std::max(1, m_lkPrevLeft.cols)),
+                                          0, kLkPerFramePnPSelectGridCols - 1);
+                const int gy = std::clamp(static_cast<int>(candidate.prevPoint.y * kLkPerFramePnPSelectGridRows /
+                                                           std::max(1, m_lkPrevLeft.rows)),
+                                          0, kLkPerFramePnPSelectGridRows - 1);
+                const int dz = LkPerFrameDepthBin(candidate.depth);
+                const int bucket = ((gy * kLkPerFramePnPSelectGridCols) + gx) * kLkPerFramePnPDepthBins + dz;
+                if (bucketCounts[static_cast<size_t>(bucket)] >= kLkPerFramePnPMaxPerGridDepthBin) {
+                    continue;
+                }
+                ++bucketCounts[static_cast<size_t>(bucket)];
+                objectPoints.push_back(candidate.object);
+                imagePoints.push_back(candidate.image);
+            }
+        } else {
+            for (const PerFramePnPCandidate &candidate : candidates) {
+                objectPoints.push_back(candidate.object);
+                imagePoints.push_back(candidate.image);
+            }
         }
 
         int inlierCount = 0;
         if (objectPoints.size() >= kLkMinPnPPoints) {
             cv::Mat rvec, tvec, inliers;
             const cv::Mat K = MakeCameraMatrix(m_lkFx, m_lkFy, m_lkCx, m_lkCy);
-            const bool ok = cv::solvePnPRansac(objectPoints, imagePoints, K, cv::Mat(), rvec, tvec, false, 80,
-                                               kLkPerFramePnPReprojThresholdPx, 0.995, inliers, cv::SOLVEPNP_EPNP);
+            const int pnpIterations =
+                std::max(20, EnvIntValue("SMART_DRONE_LK_PER_FRAME_PNP_ITERS", kLkPerFrameDefaultPnPIterations));
+            const double pnpConfidence =
+                std::clamp(static_cast<double>(EnvFloatValue("SMART_DRONE_LK_PER_FRAME_PNP_CONF",
+                                                             static_cast<float>(kLkPerFrameDefaultPnPConfidence))),
+                           0.5, 0.9999);
+            const double defaultPnpReproj =
+                requestVpi ? kLkPerFrameVpiPnPReprojThresholdPx : kLkPerFramePnPReprojThresholdPx;
+            const char *pnpReprojOverride = std::getenv("SMART_DRONE_LK_PER_FRAME_PNP_REPROJ");
+            const double pnpReproj =
+                pnpReprojOverride != nullptr && pnpReprojOverride[0] != '\0'
+                    ? std::max(0.5, static_cast<double>(EnvFloatValue("SMART_DRONE_LK_PER_FRAME_PNP_REPROJ",
+                                                                      static_cast<float>(defaultPnpReproj))))
+                    : defaultPnpReproj;
+            const bool ok = cv::solvePnPRansac(objectPoints, imagePoints, K, cv::Mat(), rvec, tvec, false,
+                                               pnpIterations, pnpReproj, pnpConfidence, inliers,
+                                               LkPerFramePnPMethod());
             inlierCount = inliers.rows;
             if (ok && inlierCount >= kLkMinPnPInliers) {
                 std::vector<cv::Point3f> inlierObjectPoints;
@@ -2688,7 +2803,12 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
                 }
                 if (std::isfinite(t.norm()) && t.norm() <= kLkMaxStepMeters) {
                     const Sophus::SE3f TcurrPrev(Sophus::SO3f(R), t);
-                    m_lkTwc = m_lkTwc * StabilizeLkCameraDelta(TcurrPrev.inverse());
+                    const Sophus::SE3f delta = StabilizeLkCameraDelta(TcurrPrev.inverse());
+                    if (useKeyframeReference) {
+                        m_lkTwc = m_lkPerFrameReferenceTwc * delta;
+                    } else {
+                        m_lkTwc = m_lkTwc * delta;
+                    }
                 }
             }
         }
@@ -2699,13 +2819,18 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
         if (extractFeatures) {
             out.leftFeatures = std::move(pts1);
         }
-        m_lkPrevLeft = leftRect.clone();
-        m_lkPrevRight = rightRect.clone();
+        const bool refreshReference = !useKeyframeReference || (m_lkFrameCount % static_cast<uint32_t>(keyframeInterval)) == 0 ||
+                                      inlierCount < std::max(kLkMinPnPInliers * 2, 24);
+        if (refreshReference) {
+            m_lkPrevLeft = leftRect.clone();
+            m_lkPrevRight = rightRect.clone();
+            m_lkPerFrameReferenceTwc = m_lkTwc;
 #if SMART_DRONE_HAS_VPI
-        if (usedVpiRemap) {
-            StoreVpiPreviousRectified(m_lkPerFrameVpi);
-        }
+            if (usedVpiRemap) {
+                StoreVpiPreviousRectified(m_lkPerFrameVpi);
+            }
 #endif
+        }
         ++m_lkFrameCount;
     }
 

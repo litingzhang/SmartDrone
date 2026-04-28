@@ -13,10 +13,10 @@ XFEAT_REPO="${XFEAT_REPO:-/home/nvidia/accelerated_features}"
 XFEAT_WORKER="${XFEAT_WORKER:-/home/nvidia/scripts/xfeat_keypoint_worker.py}"
 XFEAT_DEVICE="${XFEAT_DEVICE:-cuda}"
 
-export LD_LIBRARY_PATH="/home/nvidia:/home/nvidia/SmartDrone_cross:/home/nvidia/sd_replay_pkg_jetson/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="/home/nvidia/vpi_root/opt/nvidia/vpi2/lib/aarch64-linux-gnu:/home/nvidia/vpi_root/opt/nvidia/cupva-2.3/lib/aarch64-linux-gnu:/home/nvidia:/home/nvidia/SmartDrone_cross:/home/nvidia/sd_replay_pkg_jetson/lib:/usr/local/cuda-11.4/targets/aarch64-linux/lib:/usr/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH:-}"
 
 read -r -a SEQUENCES <<< "${EUROC_SEQUENCES:-MH_01_easy MH_02_easy MH_03_medium MH_04_difficult MH_05_difficult}"
-read -r -a MODES <<< "${EUROC_MODES:-lk_gftt_grid lk_gftt_per_frame lk_xfeat_seed}"
+read -r -a MODES <<< "${EUROC_MODES:-orb lk_gftt_grid lk_gftt_per_frame lk_gftt_vpi_cuda lk_xfeat_seed}"
 
 for seq in "${SEQUENCES[@]}"; do
   if [[ ! -d "$DATA/$seq/mav0" ]]; then
@@ -45,11 +45,17 @@ for mode in "${MODES[@]}"; do
 
     echo "=== $mode $seq ==="
     case "$mode" in
+      orb)
+        "${common[@]}" --feature-frontend orb >"$seq_out/replay.log" 2>&1
+        ;;
       lk_gftt_grid)
         "${common[@]}" --feature-frontend lk >"$seq_out/replay.log" 2>&1
         ;;
       lk_gftt_per_frame)
-        "${common[@]}" --feature-frontend lk_gftt_per_frame >"$seq_out/replay.log" 2>&1
+        "${common[@]}" --feature-frontend lk_gftt_per_frame --lk-per-frame-accel cpu >"$seq_out/replay.log" 2>&1
+        ;;
+      lk_gftt_vpi_cuda)
+        "${common[@]}" --feature-frontend lk_gftt_per_frame --lk-per-frame-accel vpi-cuda >"$seq_out/replay.log" 2>&1
         ;;
       lk_xfeat_seed)
         "${common[@]}" \
@@ -64,6 +70,10 @@ for mode in "${MODES[@]}"; do
           --xfeat-input-max-width 640 \
           --xfeat-input-max-height 480 \
           >"$seq_out/replay.log" 2>&1
+        ;;
+      *)
+        echo "unknown mode: $mode" >&2
+        exit 2
         ;;
     esac
 

@@ -138,6 +138,7 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     mutable std::deque<LkFrameSnapshot> m_lkFrameHistory;
     mutable uint64_t m_lkLastXFeatSeedFrameId{0};
     mutable Sophus::SE3f m_lkTwc{Sophus::SE3f()};
+    mutable Sophus::SE3f m_lkPerFrameReferenceTwc{Sophus::SE3f()};
     mutable bool m_lkHavePrev{false};
     mutable uint32_t m_lkFrameCount{0};
     bool m_lkLoopClosureEnabled{false};
