@@ -267,8 +267,8 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
               << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
     std::cerr << "slam_mode=" << smartdrone::core::domain::ToString(a.slamOperationMode) << "\n";
     std::cerr << "feature_frontend=" << ToFeatureFrontendText(a.featureFrontend) << "\n";
-    std::cerr << "xfeat python=" << app.runtime.xfeatPython << " repo=" << app.runtime.xfeatRepo
-              << " worker=" << app.runtime.xfeatWorkerScript << " device=" << app.runtime.xfeatDevice
+    std::cerr << "superpoint_trt repo=" << app.runtime.xfeatRepo
+              << " device=" << app.runtime.xfeatDevice
               << " top_k=" << app.runtime.xfeatTopK
               << " max_points=" << app.runtime.xfeatMaxPoints
               << " input_max=" << app.runtime.xfeatInputMaxWidth << "x" << app.runtime.xfeatInputMaxHeight << "\n";
@@ -276,7 +276,7 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
               << " nLevels=" << app.runtime.orbNLevels << " iniThFAST=" << app.runtime.orbIniThFAST
               << " minThFAST=" << app.runtime.orbMinThFAST
               << " accel=" << app.runtime.orbAcceleration << "\n";
-    std::cerr << "lk xfeat_seeding=" << (app.runtime.lkXFeatSeeding ? "Y" : "N")
+    std::cerr << "lk seed=gftt"
               << " loop_closure=" << (app.runtime.lkLoopClosure ? "Y" : "N")
               << " scale=" << app.runtime.lkLoopScale << " relax=" << app.runtime.lkLoopRelaxation
               << " per_frame_accel=" << app.runtime.lkPerFrameAcceleration << "\n";

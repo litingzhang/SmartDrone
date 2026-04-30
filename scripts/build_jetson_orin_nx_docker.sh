@@ -126,8 +126,6 @@ cp -f config/stereo.yaml "$ARTIFACT_DIR/config/stereo.yaml"
 cp -f config/stereo_inertial.yaml "$ARTIFACT_DIR/config/stereo_inertial.yaml"
 cp -f config/mono_right.yaml "$ARTIFACT_DIR/config/mono_right.yaml"
 cp -f config/mono_inertial_right.yaml "$ARTIFACT_DIR/config/mono_inertial_right.yaml"
-cp -f scripts/xfeat_keypoint_worker.py "$ARTIFACT_DIR/scripts/xfeat_keypoint_worker.py"
-cp -f scripts/superpoint_lightglue_worker.py "$ARTIFACT_DIR/scripts/superpoint_lightglue_worker.py"
 
 file "$ARTIFACT_DIR/bin/smart_drone"
 ccache -s || true

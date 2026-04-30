@@ -41,8 +41,8 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault()
         "slam.feature_frontend.orb=full_orbslam3_tracking_path",
         "slam.feature_frontend.lk=grid_lk_pnp_vo",
         "slam.feature_frontend.lk_gftt_per_frame=per_frame_gftt_lk_pnp_vo",
+        "slam.feature_frontend.superpoint_lightglue=tensorrt_cpp_superpoint_stereo_injection",
         "slam.lk_seed.gftt=shi_tomasi_good_features_to_track",
-        "slam.lk_seed.xfeat=async_xfeat_stereo_seed_points",
     };
     if (CompiledCameraProviderUsesPackedStereo()) {
         capabilities.behaviorNotes.push_back("camera.uvc_stereo_v4l2=single_uvc_device_packed_left_right_frame");

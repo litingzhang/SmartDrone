@@ -55,13 +55,13 @@ constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // v7 additionally stores ORB extractor params as f32le:
 // nFeatures [69..72], scaleFactor [73..76], nLevels [77..80], iniThFAST [81..84], minThFAST [85..88].
 // v8 additionally stores featureFrontend(u8) at byte [89] where
-// 0=orb, 1=xfeat, 2=droid_light, 3=lk, 4=lk_gftt_per_frame, 5=superpoint_lightglue.
-// v9 additionally stores XFeat params as f32le:
+// 0=orb, 1=reserved, 2=reserved, 3=lk, 4=lk_gftt_per_frame, 5=superpoint_lightglue.
+// v9 additionally stores SuperPoint params as f32le:
 // topK [90..93], maxPoints [94..97].
-// v10 additionally stores XFeat input size limits as f32le:
+// v10 additionally stores SuperPoint input size limits as f32le:
 // inputMaxWidth [98..101], inputMaxHeight [102..105].
 // v11 additionally stores LK seed source:
-// lkXFeatSeeding(u8) at [106] where 0=GFTT/Shi-Tomasi, 1=XFeat seed.
+// deprecated LK seed selector at [106]; runtime treats LK as GFTT/Shi-Tomasi.
 // v12 additionally stores LK GFTT per-frame acceleration:
 // lkPerFrameAcceleration(u8) at [107] where 0=cpu, 1=vpi-cuda.
 // v13 additionally stores ORB acceleration/preprocess mode:

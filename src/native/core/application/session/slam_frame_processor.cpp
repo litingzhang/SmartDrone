@@ -146,8 +146,8 @@ const char *FeatureFrontendName(FeatureFrontend frontend)
         return "lk";
     case FeatureFrontend::DroidLight:
         return "droid_light";
-    case FeatureFrontend::XFeat:
-        return "xfeat";
+    case FeatureFrontend::Reserved:
+        return "orb";
     case FeatureFrontend::SuperPointLightGlue:
         return "superpoint_lightglue";
     case FeatureFrontend::Orb:
@@ -189,14 +189,13 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const FeatureFrontend configuredFrontend =
         static_cast<FeatureFrontend>(m_ctx.tuning.featureFrontend.load(std::memory_order_relaxed));
     const FeatureFrontend effectiveFrontend =
-        configuredFrontend == FeatureFrontend::XFeat ? FeatureFrontend::Orb : configuredFrontend;
+        configuredFrontend == FeatureFrontend::Reserved ? FeatureFrontend::Orb : configuredFrontend;
     const int effectiveSlamInputFps =
         ComputeAdaptiveSlamInputFps(configuredSlamInputFps, m_ctx.aliases.fps, m_state.smoothedSlamMs);
     m_state.adaptiveSlamInputFps = effectiveSlamInputFps;
     const int xfeatLoadSheddingLevel =
         ComputeXFeatLoadSheddingLevel(m_state.xfeatLoadSheddingLevel,
-                                      effectiveFrontend == FeatureFrontend::XFeat ||
-                                          effectiveFrontend == FeatureFrontend::SuperPointLightGlue,
+                                      effectiveFrontend == FeatureFrontend::SuperPointLightGlue,
                                       m_state.lastTrackingUsable, m_state.smoothedSlamMs, m_state.smoothedTotalMs);
     m_state.xfeatLoadSheddingLevel = xfeatLoadSheddingLevel;
     const auto [xfeatBudgetWidth, xfeatBudgetHeight] =
@@ -222,7 +221,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         m_state.lastLoggedConfiguredSlamInputFps = configuredSlamInputFps;
         m_state.lastLoggedEffectiveSlamInputFps = effectiveSlamInputFps;
     }
-    if ((effectiveFrontend == FeatureFrontend::XFeat || effectiveFrontend == FeatureFrontend::SuperPointLightGlue) &&
+    if (effectiveFrontend == FeatureFrontend::SuperPointLightGlue &&
         xfeatLoadSheddingLevel != m_state.lastLoggedXFeatLoadSheddingLevel) {
         std::cerr << "[slam] xfeat_load_profile=" << DescribeXFeatLoadSheddingLevel(xfeatLoadSheddingLevel)
                   << " input_max=" << xfeatBudgetWidth << "x" << xfeatBudgetHeight

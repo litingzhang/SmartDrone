@@ -9,18 +9,20 @@ ORB_SETTINGS="${EUROC_ORB_SETTINGS:-$ROOT/config/euroc/stereo_orb_official.yaml}
 VOCAB="${EUROC_VOCAB:-/home/nvidia/ORBvoc.txt}"
 EVAL="${EUROC_EVAL_SCRIPT:-$ROOT/tests/euroc/evaluate_euroc_regression.py}"
 OUT="${EUROC_OUT:-$ROOT/results/mh_feature_modes_$(date +%Y%m%d_%H%M%S)}"
-XFEAT_PYTHON="${XFEAT_PYTHON:-/usr/bin/python3}"
-XFEAT_REPO="${XFEAT_REPO:-/home/nvidia/accelerated_features}"
-XFEAT_WORKER="${XFEAT_WORKER:-/home/nvidia/scripts/xfeat_keypoint_worker.py}"
 SUPERPOINT_LIGHTGLUE_REPO="${SUPERPOINT_LIGHTGLUE_REPO:-/home/nvidia/LightGlue}"
-SUPERPOINT_LIGHTGLUE_WORKER="${SUPERPOINT_LIGHTGLUE_WORKER:-/home/nvidia/scripts/superpoint_lightglue_worker.py}"
-XFEAT_DEVICE="${XFEAT_DEVICE:-cuda}"
+SUPERPOINT_TRT_ENGINE="${SUPERPOINT_TRT_ENGINE:-}"
+if [[ -z "$SUPERPOINT_TRT_ENGINE" && -f "$SUPERPOINT_LIGHTGLUE_REPO/weights/superpoint_dense_640x480_fp16.engine" ]]; then
+  SUPERPOINT_TRT_ENGINE="$SUPERPOINT_LIGHTGLUE_REPO/weights/superpoint_dense_640x480_fp16.engine"
+elif [[ -z "$SUPERPOINT_TRT_ENGINE" && -f "$SUPERPOINT_LIGHTGLUE_REPO/weights/superpoint_dense_640x409_fp16.engine" ]]; then
+  SUPERPOINT_TRT_ENGINE="$SUPERPOINT_LIGHTGLUE_REPO/weights/superpoint_dense_640x409_fp16.engine"
+fi
+FEATURE_DEVICE="${FEATURE_DEVICE:-${XFEAT_DEVICE:-cuda}}"
 BIN_DIR="$(cd "$(dirname "$BIN")" && pwd)"
 
 export LD_LIBRARY_PATH="$BIN_DIR:/home/nvidia/opencv_cuda_orb/lib:/home/nvidia/vpi_root/opt/nvidia/vpi2/lib/aarch64-linux-gnu:/home/nvidia/vpi_root/opt/nvidia/cupva-2.3/lib/aarch64-linux-gnu:/home/nvidia:/home/nvidia/SmartDrone_cross:/home/nvidia/sd_replay_pkg_jetson/lib:/usr/local/cuda-11.4/targets/aarch64-linux/lib:/usr/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH:-}"
 
 SEQUENCES=( ${EUROC_SEQUENCES:-MH_01_easy MH_02_easy MH_03_medium MH_04_difficult MH_05_difficult} )
-MODES=( ${EUROC_MODES:-orb orb_vpi_remap orb_cuda lk_gftt_grid lk_gftt_per_frame lk_gftt_vpi_cuda lk_xfeat_seed superpoint_lightglue} )
+MODES=( ${EUROC_MODES:-orb lk_gftt_vpi_cuda superpoint_lightglue} )
 
 for seq in "${SEQUENCES[@]}"; do
   if [[ ! -d "$DATA/$seq/mav0" ]]; then
@@ -107,21 +109,13 @@ for mode in "${MODES[@]}"; do
       lk_gftt_vpi_cuda)
         "${common[@]}" --feature-frontend lk_gftt_per_frame --lk-per-frame-accel vpi-cuda >"$seq_out/replay.log" 2>&1
         ;;
-      lk_xfeat_seed)
-        "${common[@]}" \
-          --feature-frontend lk \
-          --lk-xfeat-seeding \
-          --xfeat-python "$XFEAT_PYTHON" \
-          --xfeat-repo "$XFEAT_REPO" \
-          --xfeat-worker "$XFEAT_WORKER" \
-          --xfeat-device "$XFEAT_DEVICE" \
-          --xfeat-top-k 1024 \
-          --xfeat-max-points 768 \
-          --xfeat-input-max-width 640 \
-          --xfeat-input-max-height 480 \
-          >"$seq_out/replay.log" 2>&1
-        ;;
       superpoint_lightglue)
+        export SMART_DRONE_SUPERPOINT_LIGHTGLUE_INJECT=1
+        export SMART_DRONE_FEATURE_PRECISION="${SMART_DRONE_FEATURE_PRECISION:-auto}"
+        export SMART_DRONE_LIGHTGLUE_LAYERS="${SMART_DRONE_LIGHTGLUE_LAYERS:-6}"
+        if [[ -n "$SUPERPOINT_TRT_ENGINE" ]]; then
+          export SMART_DRONE_SUPERPOINT_TRT_ENGINE="$SUPERPOINT_TRT_ENGINE"
+        fi
         "${BIN}" \
           --dataset "$DATA/$seq/mav0" \
           --settings "$ORB_SETTINGS" \
@@ -132,10 +126,8 @@ for mode in "${MODES[@]}"; do
           --out "$seq_out/euroc_pose.csv" \
           --summary-json "$seq_out/euroc_summary.json" \
           --feature-frontend superpoint_lightglue \
-          --xfeat-python "$XFEAT_PYTHON" \
           --xfeat-repo "$SUPERPOINT_LIGHTGLUE_REPO" \
-          --xfeat-worker "$SUPERPOINT_LIGHTGLUE_WORKER" \
-          --xfeat-device "$XFEAT_DEVICE" \
+          --xfeat-device "$FEATURE_DEVICE" \
           --xfeat-top-k 1024 \
           --xfeat-max-points 768 \
           --xfeat-input-max-width 640 \

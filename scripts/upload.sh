@@ -112,10 +112,18 @@ if [ -z "$UPLOAD_LAYOUT" ]; then
     fi
 fi
 if [ -z "${APK_PATH:-}" ]; then
-    if [ -f "$REPO_ROOT/output/artifacts/android/latest.apk" ]; then
-        APK_PATH="$REPO_ROOT/output/artifacts/android/latest.apk"
+    APK_ARTIFACT="$REPO_ROOT/output/artifacts/android/latest.apk"
+    APK_GRADLE="$REPO_ROOT/src/android/app/build/outputs/apk/debug/app-debug.apk"
+    if [ -f "$APK_ARTIFACT" ] && [ -f "$APK_GRADLE" ]; then
+        if [ "$APK_GRADLE" -nt "$APK_ARTIFACT" ]; then
+            APK_PATH="$APK_GRADLE"
+        else
+            APK_PATH="$APK_ARTIFACT"
+        fi
+    elif [ -f "$APK_ARTIFACT" ]; then
+        APK_PATH="$APK_ARTIFACT"
     else
-        APK_PATH="$REPO_ROOT/src/android/app/build/outputs/apk/debug/app-debug.apk"
+        APK_PATH="$APK_GRADLE"
     fi
 fi
 
@@ -127,10 +135,7 @@ CALIB_YAML="$ARTIFACT_ROOT/config/stereo_inertial.yaml"
 STEREO_YAML="$ARTIFACT_ROOT/config/stereo.yaml"
 MONO_YAML="$ARTIFACT_ROOT/config/mono_right.yaml"
 MONO_IMU_YAML="$ARTIFACT_ROOT/config/mono_inertial_right.yaml"
-XFEAT_WORKER_SCRIPT="$ARTIFACT_ROOT/scripts/xfeat_keypoint_worker.py"
-SUPERPOINT_LIGHTGLUE_WORKER_SCRIPT="$ARTIFACT_ROOT/scripts/superpoint_lightglue_worker.py"
 ORBVOC_FILE="$ARTIFACT_ROOT/ORBvoc.txt"
-ACCELERATED_FEATURES_DIR="$ARTIFACT_ROOT/accelerated_features"
 SSH_PASSWORD="${SSH_PASSWORD:-}"
 SSH_CMD=(ssh)
 SCP_CMD=(scp)
@@ -180,7 +185,7 @@ upload_atomic() {
 }
 
 ensure_remote_dirs() {
-    "${SSH_CMD[@]}" "$TARGET_HOST" "mkdir -p '$REMOTE_DIR/config' '$REMOTE_DIR/scripts' '$REMOTE_DIR/accelerated_features'"
+    "${SSH_CMD[@]}" "$TARGET_HOST" "mkdir -p '$REMOTE_DIR/config' '$REMOTE_DIR/scripts'"
 }
 
 upload_dir_atomic() {
@@ -188,21 +193,10 @@ upload_dir_atomic() {
     local remote_name="$2"
     local remote_tmp="$REMOTE_DIR/.${remote_name}.new"
     local remote_dst="$REMOTE_DIR/$remote_name"
-    local preserve_xfeat_weights=""
 
     echo "upload $remote_name/"
-    if [ "$remote_name" = "accelerated_features" ]; then
-        preserve_xfeat_weights="
-            mkdir -p '$remote_tmp/weights'
-            for weight_file in xfeat.onnx xfeat_trt_fp16.engine xfeat_trt_fp32.engine xfeat.engine; do
-                if [ -f '$remote_dst/weights/'\"\$weight_file\" ] && [ ! -f '$remote_tmp/weights/'\"\$weight_file\" ]; then
-                    cp -f '$remote_dst/weights/'\"\$weight_file\" '$remote_tmp/weights/'\"\$weight_file\"
-                fi
-            done
-        "
-    fi
     tar -C "$local_dir" -cf - . | "${SSH_CMD[@]}" "$TARGET_HOST" \
-        "rm -rf '$remote_tmp' && mkdir -p '$remote_tmp' && tar -xf - -C '$remote_tmp' && $preserve_xfeat_weights rm -rf '$remote_dst' && mv '$remote_tmp' '$remote_dst'"
+        "rm -rf '$remote_tmp' && mkdir -p '$remote_tmp' && tar -xf - -C '$remote_tmp' && rm -rf '$remote_dst' && mv '$remote_tmp' '$remote_dst'"
 }
 
 upload_artifact_root() {
@@ -270,17 +264,8 @@ if [ "$ADB_ONLY" != "1" ]; then
         upload_atomic "$STEREO_YAML" "config/stereo.yaml"
         upload_atomic "$MONO_YAML" "config/mono_right.yaml"
         upload_atomic "$MONO_IMU_YAML" "config/mono_inertial_right.yaml"
-        if [ -f "$XFEAT_WORKER_SCRIPT" ]; then
-            upload_atomic "$XFEAT_WORKER_SCRIPT" "scripts/xfeat_keypoint_worker.py"
-        fi
-        if [ -f "$SUPERPOINT_LIGHTGLUE_WORKER_SCRIPT" ]; then
-            upload_atomic "$SUPERPOINT_LIGHTGLUE_WORKER_SCRIPT" "scripts/superpoint_lightglue_worker.py"
-        fi
         if [ -f "$ORBVOC_FILE" ]; then
             upload_atomic "$ORBVOC_FILE" "ORBvoc.txt"
-        fi
-        if [ -d "$ACCELERATED_FEATURES_DIR" ]; then
-            upload_dir_atomic "$ACCELERATED_FEATURES_DIR" "accelerated_features"
         fi
     fi
 

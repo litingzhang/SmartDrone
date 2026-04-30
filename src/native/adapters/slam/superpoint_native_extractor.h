@@ -10,7 +10,7 @@ namespace smartdrone::adapters::slam {
 
 struct XFeatFeatureSet;
 
-class XFeatNativeExtractor {
+class SuperPointNativeExtractor {
   public:
     struct Stats {
         double prepareMs{0.0};
@@ -23,8 +23,8 @@ class XFeatNativeExtractor {
         uint32_t payloadBytes{0};
     };
 
-    XFeatNativeExtractor();
-    ~XFeatNativeExtractor();
+    SuperPointNativeExtractor();
+    ~SuperPointNativeExtractor();
 
     bool Start(const std::string &repoPath, const std::string &device, int topK, int maxPoints, std::string *err);
     void Stop();
@@ -41,8 +41,6 @@ class XFeatNativeExtractor {
     static bool PrepareGrayImage(const cv::Mat &gray, cv::Mat &gray8, std::string *err);
 
     bool m_running{false};
-    std::string m_repoPath;
-    std::string m_device;
     int m_topK{0};
     int m_maxPoints{0};
     Stats m_lastStats{};

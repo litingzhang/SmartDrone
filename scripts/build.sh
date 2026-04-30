@@ -338,14 +338,6 @@ sync_native_artifacts() {
 
     local scripts_dir="$NATIVE_ARTIFACTS_DIR/scripts"
     mkdir -p "$scripts_dir"
-    if [ -f "$REPO_ROOT/scripts/xfeat_keypoint_worker.py" ]; then
-        copy_artifact "$REPO_ROOT/scripts/xfeat_keypoint_worker.py" \
-            "$scripts_dir/xfeat_keypoint_worker.py"
-    fi
-    if [ -f "$REPO_ROOT/scripts/superpoint_lightglue_worker.py" ]; then
-        copy_artifact "$REPO_ROOT/scripts/superpoint_lightglue_worker.py" \
-            "$scripts_dir/superpoint_lightglue_worker.py"
-    fi
     if [ -f "$REPO_ROOT/ORBvoc.txt" ]; then
         copy_artifact "$REPO_ROOT/ORBvoc.txt" "$NATIVE_ARTIFACTS_DIR/ORBvoc.txt"
     elif [ -f "$REPO_ROOT/ORB_SLAM3/Vocabulary/ORBvoc.txt" ]; then
@@ -353,10 +345,6 @@ sync_native_artifacts() {
             "$NATIVE_ARTIFACTS_DIR/ORBvoc.txt"
     fi
 
-    if [ -d "$REPO_ROOT/accelerated_features" ]; then
-        rm -rf "$NATIVE_ARTIFACTS_DIR/accelerated_features"
-        cp -a "$REPO_ROOT/accelerated_features" "$NATIVE_ARTIFACTS_DIR/accelerated_features"
-    fi
 }
 
 sync_android_artifact() {

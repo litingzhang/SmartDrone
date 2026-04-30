@@ -76,9 +76,10 @@ RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTun
 bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::string *err)
 {
     remote.orbAcceleration = NormalizeOrbAcceleration(remote.orbAcceleration);
-    if (remote.featureFrontend == FeatureFrontend::XFeat) {
+    if (remote.featureFrontend == FeatureFrontend::Reserved) {
         remote.featureFrontend = FeatureFrontend::Orb;
     }
+    remote.lkXFeatSeeding = false;
     if (remote.featureFrontend != FeatureFrontend::Orb) {
         remote.orbAcceleration = "cpu";
     }
@@ -121,14 +122,14 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
     if (remote.xfeatTopK < 1 || remote.xfeatTopK > 4096 || remote.xfeatMaxPoints < 1 ||
         remote.xfeatMaxPoints > 4096 || remote.xfeatMaxPoints > remote.xfeatTopK) {
         if (err) {
-            *err = "xfeat config out of range";
+            *err = "superpoint config out of range";
         }
         return false;
     }
     if (remote.xfeatInputMaxWidth < 0 || remote.xfeatInputMaxWidth > 4096 || remote.xfeatInputMaxHeight < 0 ||
         remote.xfeatInputMaxHeight > 4096) {
         if (err) {
-            *err = "xfeat input size config out of range";
+            *err = "superpoint input size config out of range";
         }
         return false;
     }
@@ -538,12 +539,11 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
                           " frontend=" + std::string(ToFeatureFrontendText(remote.featureFrontend)) +
                           " slam_mode=" + std::string(smartdrone::core::domain::ToString(remote.slamOperationMode)) +
                           " slam_fps=" + std::to_string(clampedSlamFps) + " pair_ms=" +
-                          std::to_string(remote.pairMs) + " provider_specific xfeat_top_k=" +
-                          std::to_string(remote.xfeatTopK) + " xfeat_max_points=" +
-                          std::to_string(remote.xfeatMaxPoints) + " xfeat_input_max=" +
+                          std::to_string(remote.pairMs) + " provider_specific sp_top_k=" +
+                          std::to_string(remote.xfeatTopK) + " sp_max_points=" +
+                          std::to_string(remote.xfeatMaxPoints) + " sp_input_max=" +
                           std::to_string(remote.xfeatInputMaxWidth) + "x" +
-                          std::to_string(remote.xfeatInputMaxHeight) + " lk_seed=" +
-                          (remote.lkXFeatSeeding ? "xfeat" : "gftt") +
+                          std::to_string(remote.xfeatInputMaxHeight) + " lk_seed=gftt" +
                           " lk_accel=" + remote.lkPerFrameAcceleration +
                           " orb_accel=" + remote.orbAcceleration;
     return {true, message};
@@ -562,7 +562,7 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.uvcPackedStereo = currentConfig.app.camera.uvcPackedStereo;
     remote.slamInputFps = currentConfig.app.runtime.slamInputFps;
     remote.slamOperationMode = currentConfig.app.runtime.slamOperationMode;
-    remote.featureFrontend = currentConfig.app.runtime.featureFrontend == FeatureFrontend::XFeat
+    remote.featureFrontend = currentConfig.app.runtime.featureFrontend == FeatureFrontend::Reserved
                                  ? FeatureFrontend::Orb
                                  : currentConfig.app.runtime.featureFrontend;
     remote.sensorMode = currentConfig.app.sensorMode;
@@ -587,7 +587,7 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.xfeatMaxPoints = currentConfig.app.runtime.xfeatMaxPoints;
     remote.xfeatInputMaxWidth = currentConfig.app.runtime.xfeatInputMaxWidth;
     remote.xfeatInputMaxHeight = currentConfig.app.runtime.xfeatInputMaxHeight;
-    remote.lkXFeatSeeding = currentConfig.app.runtime.lkXFeatSeeding;
+    remote.lkXFeatSeeding = false;
     remote.lkPerFrameAcceleration = currentConfig.app.runtime.lkPerFrameAcceleration;
     remote.orbAcceleration = currentConfig.app.runtime.orbAcceleration;
     return remote;

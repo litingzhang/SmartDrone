@@ -144,8 +144,6 @@ const char *ToFeatureFrontendText(FeatureFrontend frontend)
         return "lk_gftt_per_frame";
     case FeatureFrontend::LK:
         return "lk";
-    case FeatureFrontend::XFeat:
-        return "xfeat";
     case FeatureFrontend::DroidLight:
         return "droid_light";
     case FeatureFrontend::SuperPointLightGlue:
@@ -380,7 +378,6 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 30);
     config.runtime.slamOperationMode = ParseSlamOperationModeText(argReader.GetString("--slam-mode", "mapping"));
     config.runtime.featureFrontend = ParseFeatureFrontendText(argReader.GetString("--feature-frontend", "orb"));
-    config.runtime.xfeatPython = argReader.GetString("--xfeat-python", "/usr/bin/python3");
     {
         const char *home = std::getenv("HOME");
         const std::string explicitRepo = argReader.GetString("--xfeat-repo", "");
@@ -388,45 +385,27 @@ AppConfig ParseAppConfig(int argc, char **argv)
             config.runtime.xfeatRepo = ResolveRuntimePath(explicitRepo, argc > 0 ? argv[0] : nullptr);
         } else {
             std::vector<std::string> repoCandidates;
-            repoCandidates.emplace_back("accelerated_features");
-            repoCandidates.emplace_back("third_party/accelerated_features");
+            repoCandidates.emplace_back("LightGlue");
+            repoCandidates.emplace_back("lightglue");
+            repoCandidates.emplace_back("third_party/LightGlue");
+            repoCandidates.emplace_back("third_party/lightglue");
             if (home != nullptr) {
-                repoCandidates.push_back((fs::path(home) / "accelerated_features").string());
-                repoCandidates.push_back((fs::path(home) / "third_party" / "accelerated_features").string());
+                repoCandidates.push_back((fs::path(home) / "LightGlue").string());
+                repoCandidates.push_back((fs::path(home) / "lightglue").string());
+                repoCandidates.push_back((fs::path(home) / "third_party" / "LightGlue").string());
+                repoCandidates.push_back((fs::path(home) / "third_party" / "lightglue").string());
             }
             config.runtime.xfeatRepo = ResolveFirstExistingRuntimePath(repoCandidates, argc > 0 ? argv[0] : nullptr);
-        }
-    }
-    {
-        const std::string explicitWorker = argReader.GetString("--xfeat-worker", "");
-        if (!explicitWorker.empty()) {
-            config.runtime.xfeatWorkerScript = ResolveRuntimePath(explicitWorker, argc > 0 ? argv[0] : nullptr);
-        } else {
-            const char *home = std::getenv("HOME");
-            std::vector<std::string> workerCandidates;
-            const bool superPointLightGlue =
-                config.runtime.featureFrontend == FeatureFrontend::SuperPointLightGlue;
-            workerCandidates.emplace_back(superPointLightGlue ? "scripts/superpoint_lightglue_worker.py"
-                                                              : "scripts/xfeat_keypoint_worker.py");
-            workerCandidates.emplace_back(superPointLightGlue ? "superpoint_lightglue_worker.py"
-                                                              : "xfeat_keypoint_worker.py");
-            if (home != nullptr) {
-                const char *workerName =
-                    superPointLightGlue ? "superpoint_lightglue_worker.py" : "xfeat_keypoint_worker.py";
-                workerCandidates.push_back((fs::path(home) / "workspace" / "SmartDrone" / "scripts" / workerName).string());
-                workerCandidates.push_back((fs::path(home) / "SmartDrone" / "scripts" / workerName).string());
-                workerCandidates.push_back((fs::path(home) / workerName).string());
-            }
-            config.runtime.xfeatWorkerScript =
-                ResolveFirstExistingRuntimePath(workerCandidates, argc > 0 ? argv[0] : nullptr);
         }
     }
     config.runtime.xfeatDevice = argReader.GetString("--xfeat-device", "auto");
     config.runtime.xfeatTopK = argReader.GetInt("--xfeat-top-k", 1024);
     config.runtime.xfeatMaxPoints = argReader.GetInt("--xfeat-max-points", 768);
     config.runtime.xfeatInputMaxWidth = argReader.GetInt("--xfeat-input-max-width", 640);
-    config.runtime.xfeatInputMaxHeight = argReader.GetInt("--xfeat-input-max-height", 400);
-    config.runtime.lkXFeatSeeding = argReader.HasFlag("--lk-xfeat-seeding");
+    config.runtime.xfeatInputMaxHeight = argReader.GetInt(
+        "--xfeat-input-max-height",
+        config.runtime.featureFrontend == FeatureFrontend::SuperPointLightGlue ? 480 : 400);
+    config.runtime.lkXFeatSeeding = false;
     config.runtime.lkLoopClosure = argReader.HasFlag("--lk-loop-closure");
     config.runtime.lkLoopScale = argReader.GetFloat("--lk-loop-scale", 1.20f);
     config.runtime.lkLoopRelaxation = argReader.GetFloat("--lk-loop-relax", 1.40f);

@@ -294,7 +294,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
                         " img=" + (r.sendImage ? "on" : "off") + " feat=" + (r.sendFeature ? "on" : "off") +
                         " map=" + (r.sendMap ? "on" : "off") + " ae=" + (r.autoExposureEnabled ? "on" : "off") +
                         " tbc_override=" + (r.useCustomTbc ? "on" : "off") +
-                        " lk_seed=" + (r.lkXFeatSeeding ? "xfeat" : "gftt") +
+                        " lk_seed=gftt" +
                         " lk_accel=" + r.lkPerFrameAcceleration +
                         " orb_accel=" + r.orbAcceleration};
 }

@@ -16,8 +16,8 @@ if(ENABLE_OFFLINE_REPLAY)
     euroc/support/replay_dataset.cpp
     euroc/support/replay_slam_runner.cpp
     ../src/native/adapters/slam/orbslam3_engine.cpp
+    ../src/native/adapters/slam/superpoint_native_extractor.cpp
     ../src/native/adapters/slam/xfeat_frontend_client.cpp
-    ../src/native/adapters/slam/xfeat_native_extractor.cpp
     ../src/native/core/application/config/app_args.cpp
     ../src/native/core/application/state/frame_timing_tracker.cpp
     ../src/native/core/application/state/perception_pipeline.cpp
@@ -76,6 +76,10 @@ if(ENABLE_OFFLINE_REPLAY)
     endif()
   else()
     target_compile_definitions(smart_drone_offline_replay PRIVATE SMART_DRONE_HAS_VPI=0)
+  endif()
+
+  if(CROSS_AARCH64)
+    configure_xfeat_native_target(smart_drone_offline_replay)
   endif()
 
   target_link_libraries(smart_drone_offline_replay PRIVATE

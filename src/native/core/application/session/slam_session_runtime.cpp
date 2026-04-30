@@ -36,7 +36,78 @@ std::string TrimCopy(const std::string &in)
 bool SuperPointLightGlueInjectionEnabled()
 {
     const char *value = std::getenv("SMART_DRONE_SUPERPOINT_LIGHTGLUE_INJECT");
-    return value != nullptr && std::string(value) == "1";
+    if (value == nullptr || value[0] == '\0') {
+        return true;
+    }
+    const std::string text(value);
+    return !(text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF");
+}
+
+bool EnvVarIsUnsetOrEmpty(const char *name)
+{
+    const char *value = std::getenv(name);
+    return value == nullptr || value[0] == '\0';
+}
+
+void SetEnvIfUnset(const char *name, const char *value)
+{
+    if (!EnvVarIsUnsetOrEmpty(name)) {
+        return;
+    }
+#if defined(_WIN32)
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 0);
+#endif
+}
+
+void ConfigureSuperPointLightGlueWorkerDefaults(const std::string &repo, int inputMaxWidth, int inputMaxHeight)
+{
+    SetEnvIfUnset("SMART_DRONE_FEATURE_PRECISION", "auto");
+    SetEnvIfUnset("SMART_DRONE_LIGHTGLUE_LAYERS", "6");
+    if (EnvVarIsUnsetOrEmpty("SMART_DRONE_SUPERPOINT_TRT_ENGINE") && !repo.empty() &&
+        inputMaxWidth > 0 && inputMaxHeight > 0) {
+        const fs::path engine =
+            fs::path(repo) / "weights" /
+            ("superpoint_dense_" + std::to_string(inputMaxWidth) + "x" + std::to_string(inputMaxHeight) +
+             "_fp16.engine");
+        std::error_code ec;
+        if (fs::exists(engine, ec)) {
+            SetEnvIfUnset("SMART_DRONE_SUPERPOINT_TRT_ENGINE", engine.string().c_str());
+        }
+    }
+}
+
+std::string FirstExistingPathOrFallback(const std::vector<std::string> &candidates, const std::string &fallback)
+{
+    for (const std::string &candidate : candidates) {
+        if (candidate.empty()) {
+            continue;
+        }
+        std::error_code ec;
+        if (fs::exists(candidate, ec)) {
+            return candidate;
+        }
+    }
+    return fallback;
+}
+
+std::string ResolveSuperPointLightGlueRepoForRuntime(const std::string &configuredRepo)
+{
+    const char *home = std::getenv("HOME");
+    std::vector<std::string> candidates;
+    if (home != nullptr) {
+        candidates.push_back((fs::path(home) / "LightGlue").string());
+        candidates.push_back((fs::path(home) / "lightglue").string());
+        candidates.push_back((fs::path(home) / "third_party" / "LightGlue").string());
+        candidates.push_back((fs::path(home) / "third_party" / "lightglue").string());
+    }
+    candidates.emplace_back("LightGlue");
+    candidates.emplace_back("lightglue");
+    candidates.emplace_back("third_party/LightGlue");
+    candidates.emplace_back("third_party/lightglue");
+    candidates.push_back(configuredRepo);
+    return FirstExistingPathOrFallback(candidates, configuredRepo);
 }
 
 bool IsYamlKeyLine(const std::string &line, const std::string &key)
@@ -280,30 +351,29 @@ bool SlamSessionRuntime::Start()
         m_stereoBodyExtrinsics = LoadStereoBodyExtrinsics(m_effectiveSettingsPath);
     }
 
-    const bool needsXFeatWorker =
-        (m_aliases.featureFrontend == FeatureFrontend::LK && m_aliases.lkXFeatSeeding) ||
-        (m_aliases.featureFrontend == FeatureFrontend::SuperPointLightGlue &&
-         SuperPointLightGlueInjectionEnabled());
-    if (needsXFeatWorker &&
-        !m_cfg.app.runtime.xfeatWorkerScript.empty()) {
-        std::string xfeatErr;
-        if (m_xfeatFrontendClient.Start(m_cfg.app.runtime.xfeatPython, m_cfg.app.runtime.xfeatWorkerScript,
-                                        m_cfg.app.runtime.xfeatRepo, m_cfg.app.runtime.xfeatDevice,
-                                        m_cfg.app.runtime.xfeatTopK,
-                                        m_cfg.app.runtime.xfeatMaxPoints, &xfeatErr)) {
-            std::cerr << "[slam] feature worker ready script=" << m_cfg.app.runtime.xfeatWorkerScript
-                      << " repo=" << m_cfg.app.runtime.xfeatRepo
+    const bool needsSuperPointTensorRt =
+        m_aliases.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLightGlueInjectionEnabled();
+    std::string featureRepo = m_cfg.app.runtime.xfeatRepo;
+    if (m_aliases.featureFrontend == FeatureFrontend::SuperPointLightGlue) {
+        featureRepo = ResolveSuperPointLightGlueRepoForRuntime(featureRepo);
+        ConfigureSuperPointLightGlueWorkerDefaults(featureRepo,
+                                                   m_cfg.app.runtime.xfeatInputMaxWidth,
+                                                   m_cfg.app.runtime.xfeatInputMaxHeight);
+    }
+    if (needsSuperPointTensorRt) {
+        std::string featureErr;
+        if (m_xfeatFrontendClient.Start(featureRepo, m_cfg.app.runtime.xfeatDevice, m_cfg.app.runtime.xfeatTopK,
+                                        m_cfg.app.runtime.xfeatMaxPoints, &featureErr)) {
+            std::cerr << "[slam] superpoint TensorRT ready repo=" << featureRepo
                       << " device=" << m_cfg.app.runtime.xfeatDevice
                       << " top_k=" << m_cfg.app.runtime.xfeatTopK
                       << " max_points=" << m_cfg.app.runtime.xfeatMaxPoints << "\n";
-        } else if (needsXFeatWorker) {
-            std::cerr << "[slam] warning: feature worker start failed: " << xfeatErr << "\n";
+        } else {
+            std::cerr << "[slam] warning: SuperPoint TensorRT start failed: " << featureErr << "\n";
         }
     }
     if (m_aliases.featureFrontend == FeatureFrontend::LK) {
-        std::cerr << "[slam] feature_frontend=lk selected; xfeat_seeding="
-                  << (m_aliases.lkXFeatSeeding ? "enabled" : "disabled")
-                  << " lk_grid=48\n";
+        std::cerr << "[slam] feature_frontend=lk selected; lk_grid=48\n";
     }
     if (m_aliases.udpEnable) {
         auto destinationResolver = [this](sockaddr_in &dst) {

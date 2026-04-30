@@ -31,11 +31,9 @@ struct OfflineReplayOptions {
     std::string vocab{"ORB_SLAM3/Vocabulary/ORBvoc.txt"};
     std::string settings{"config/stereo.yaml"};
     SensorMode sensorMode{SensorMode::StereoImu};
-    FeatureFrontend featureFrontend{FeatureFrontend::XFeat};
+    FeatureFrontend featureFrontend{FeatureFrontend::Orb};
     smartdrone::core::domain::SlamOperationMode slamMode{smartdrone::core::domain::SlamOperationMode::Mapping};
-    std::string xfeatPython{"/usr/bin/python3"};
-    std::string xfeatRepo{"accelerated_features"};
-    std::string xfeatWorkerScript{"scripts/xfeat_keypoint_worker.py"};
+    std::string xfeatRepo{"LightGlue"};
     std::string xfeatDevice{"auto"};
     int xfeatTopK{1024};
     int xfeatMaxPoints{768};
@@ -57,7 +55,11 @@ struct OfflineReplayOptions {
 bool SuperPointLightGlueInjectionEnabled()
 {
     const char *value = std::getenv("SMART_DRONE_SUPERPOINT_LIGHTGLUE_INJECT");
-    return value != nullptr && std::string(value) == "1";
+    if (value == nullptr || value[0] == '\0') {
+        return true;
+    }
+    const std::string text(value);
+    return !(text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF");
 }
 
 struct LoopClosureCorrectionSummary {
@@ -138,22 +140,18 @@ const char *UsageText()
         "  --settings <file>     ORB settings YAML path\n"
         "  --sensor-mode <mode>  stereo|stereo-imu|mono|mono-imu\n"
         "  --stereo-only         Shortcut for --sensor-mode stereo\n"
-        "  --feature-frontend <mode> orb|xfeat|superpoint_lightglue|lk|lk_gftt_per_frame, default xfeat\n"
-        "  --xfeat-python <bin>  Python executable for external feature worker, default python3\n"
-        "  --xfeat-repo <dir>    External feature repo root, default accelerated_features\n"
-        "  --xfeat-worker <file> External feature worker script path\n"
-        "                       default scripts/xfeat_keypoint_worker.py or scripts/superpoint_lightglue_worker.py\n"
-        "  --xfeat-device <dev>  External feature device auto|cpu|cuda, default auto\n"
-        "  --xfeat-top-k <n>     XFeat top-k candidate count, default 1024\n"
-        "  --xfeat-max-points <n> XFeat injected point budget, default 768\n"
-        "  --xfeat-input-max-width <n>  XFeat input width limit, default 640\n"
-        "  --xfeat-input-max-height <n> XFeat input height limit, default 400\n"
+        "  --feature-frontend <mode> orb|superpoint_lightglue|lk|lk_gftt_per_frame, default orb\n"
+        "  --xfeat-repo <dir>    SuperPoint/LightGlue repo root containing TensorRT engines\n"
+        "  --xfeat-device <dev>  TensorRT device auto|cuda, default auto\n"
+        "  --xfeat-top-k <n>     SuperPoint top-k candidate count, default 1024\n"
+        "  --xfeat-max-points <n> SuperPoint injected point budget, default 768\n"
+        "  --xfeat-input-max-width <n>  SuperPoint input width limit, default 640\n"
+        "  --xfeat-input-max-height <n> SuperPoint input height limit, default 400\n"
         "  --slam-mode <mode>    mapping|localization|relocalization|tracking-only|auto\n"
         "  --fps <n>             Camera FPS for replay pacing, default 60\n"
         "  --slam-fps <n>        SLAM input FPS, default 20\n"
         "  --timeout-ms <n>      Batch acquire timeout, default 1000\n"
         "  --max-frames <n>      Maximum output frames, default 0(all)\n"
-        "  --lk-xfeat-seeding    Use XFeat stereo seeds in LK mode; default LK seed source is GFTT/Shi-Tomasi\n"
         "  --lk-loop-closure     Apply offline LK pose-graph loop-closure smoothing\n"
         "  --lk-runtime-loop-closure Enable image-based LK keyframe loop closure during replay\n"
         "  --lk-loop-scale <f>   Sim3 scale used by LK loop closure, default 1.20\n"
@@ -260,27 +258,20 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     if (HasFlag(argc, argv, "--stereo-only")) {
         opts.sensorMode = SensorMode::Stereo;
     }
-    opts.featureFrontend = ParseFeatureFrontendText(GetOptionValue(argc, argv, "--feature-frontend", "xfeat"));
+    opts.featureFrontend = ParseFeatureFrontendText(GetOptionValue(argc, argv, "--feature-frontend", "orb"));
     opts.slamMode = ParseSlamOperationModeText(GetOptionValue(argc, argv, "--slam-mode", "mapping"));
     opts.cameraFps = GetOptionInt(argc, argv, "--fps", opts.cameraFps);
     opts.slamInputFps = GetOptionInt(argc, argv, "--slam-fps", opts.slamInputFps);
     opts.timeoutMs = GetOptionInt(argc, argv, "--timeout-ms", opts.timeoutMs);
     opts.maxFrames = GetOptionSize(argc, argv, "--max-frames", opts.maxFrames);
-    opts.xfeatPython =
-        ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-python", opts.xfeatPython), argc > 0 ? argv[0] : nullptr);
     opts.xfeatRepo =
         ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-repo", opts.xfeatRepo), argc > 0 ? argv[0] : nullptr);
-    const std::string defaultWorker = opts.featureFrontend == FeatureFrontend::SuperPointLightGlue
-                                          ? "scripts/superpoint_lightglue_worker.py"
-                                          : opts.xfeatWorkerScript;
-    opts.xfeatWorkerScript = ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-worker", defaultWorker),
-                                                argc > 0 ? argv[0] : nullptr);
     opts.xfeatDevice = GetOptionValue(argc, argv, "--xfeat-device", opts.xfeatDevice);
     opts.xfeatTopK = GetOptionInt(argc, argv, "--xfeat-top-k", opts.xfeatTopK);
     opts.xfeatMaxPoints = GetOptionInt(argc, argv, "--xfeat-max-points", opts.xfeatMaxPoints);
     opts.xfeatInputMaxWidth = GetOptionInt(argc, argv, "--xfeat-input-max-width", opts.xfeatInputMaxWidth);
     opts.xfeatInputMaxHeight = GetOptionInt(argc, argv, "--xfeat-input-max-height", opts.xfeatInputMaxHeight);
-    opts.lkXFeatSeeding = HasFlag(argc, argv, "--lk-xfeat-seeding");
+    opts.lkXFeatSeeding = false;
     opts.lkLoopClosure = HasFlag(argc, argv, "--lk-loop-closure");
     opts.lkRuntimeLoopClosure = HasFlag(argc, argv, "--lk-runtime-loop-closure");
     opts.lkLoopScale = GetOptionFloat(argc, argv, "--lk-loop-scale", opts.lkLoopScale);
@@ -541,16 +532,12 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     slamEngine.SetLkPerFrameAcceleration(opts.lkPerFrameAcceleration);
     smartdrone::adapters::slam::XFeatFrontendClient xfeatFrontendClient;
     std::string xfeatErr;
-    if (opts.featureFrontend == FeatureFrontend::XFeat ||
-        (opts.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLightGlueInjectionEnabled()) ||
-        (opts.featureFrontend == FeatureFrontend::LK && opts.lkXFeatSeeding)) {
+    if (opts.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLightGlueInjectionEnabled()) {
         slamEngine.SetXFeatFrontendClient(&xfeatFrontendClient);
-        if (!xfeatFrontendClient.Start(opts.xfeatPython, opts.xfeatWorkerScript, opts.xfeatRepo, opts.xfeatDevice,
-                                       opts.xfeatTopK, opts.xfeatMaxPoints, &xfeatErr)) {
-            std::cerr << "warning: external feature frontend start failed, falling back to orb-only replay: "
-                      << xfeatErr << "\n";
-            slamEngine.SetFeatureFrontend(FeatureFrontend::Orb);
-            slamEngine.SetXFeatFrontendClient(nullptr);
+        if (!xfeatFrontendClient.Start(opts.xfeatRepo, opts.xfeatDevice, opts.xfeatTopK, opts.xfeatMaxPoints,
+                                       &xfeatErr)) {
+            std::cerr << "error: superpoint_lightglue TensorRT start failed: " << xfeatErr << "\n";
+            return 2;
         }
     }
 

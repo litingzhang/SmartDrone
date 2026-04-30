@@ -155,6 +155,23 @@ bool FillVpiWarpMapFromOpenCvMaps(const cv::Mat &mapX, const cv::Mat &mapY, VPIW
     return true;
 }
 
+cv::Mat DownloadVpiU8Image(VPIImage image)
+{
+    VPIImageData data{};
+    VPIStatus status = vpiImageLockData(image, VPI_LOCK_READ, VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR, &data);
+    if (status != VPI_SUCCESS || data.bufferType != VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR ||
+        data.buffer.pitch.numPlanes < 1 || data.buffer.pitch.planes[0].data == nullptr) {
+        std::cerr << "[lk_per_frame_accel] VPI image lock failed: " << VpiStatusName(status) << "\n";
+        return {};
+    }
+    const auto &plane = data.buffer.pitch.planes[0];
+    cv::Mat view(plane.height, plane.width, CV_8UC1, plane.data, static_cast<size_t>(plane.pitchBytes));
+    cv::Mat out = view.clone();
+    vpiImageUnlock(image);
+    return out;
+}
+#endif
+
 bool EnvFlagEnabled(const char *name, bool defaultValue)
 {
     const char *value = std::getenv(name);
@@ -196,23 +213,6 @@ std::string EnvStringValue(const char *name, const char *defaultValue)
     return value;
 }
 
-cv::Mat DownloadVpiU8Image(VPIImage image)
-{
-    VPIImageData data{};
-    VPIStatus status = vpiImageLockData(image, VPI_LOCK_READ, VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR, &data);
-    if (status != VPI_SUCCESS || data.bufferType != VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR ||
-        data.buffer.pitch.numPlanes < 1 || data.buffer.pitch.planes[0].data == nullptr) {
-        std::cerr << "[lk_per_frame_accel] VPI image lock failed: " << VpiStatusName(status) << "\n";
-        return {};
-    }
-    const auto &plane = data.buffer.pitch.planes[0];
-    cv::Mat view(plane.height, plane.width, CV_8UC1, plane.data, static_cast<size_t>(plane.pitchBytes));
-    cv::Mat out = view.clone();
-    vpiImageUnlock(image);
-    return out;
-}
-#endif
-
 namespace {
 
 constexpr int kOrbDescriptorBorder = 19;
@@ -226,6 +226,7 @@ constexpr int kStereoPatchRadiusPx = 3;
 constexpr int kStereoGridCols = 8;
 constexpr int kStereoGridRows = 6;
 constexpr int kStereoMaxPairsPerCell = 10;
+constexpr size_t kExternalStereoMaxLeftFeatures = 1200;
 constexpr int kTemporalFlowWindowPx = 21;
 constexpr int kTemporalFlowMaxLevel = 3;
 constexpr float kTemporalForwardBackwardMaxErrorPx = 1.5f;
@@ -898,6 +899,18 @@ bool IsStereoPairNearExisting(const cv::Point2f &leftPt, const cv::Point2f &righ
     return false;
 }
 
+bool IsPointNearExisting(const cv::Point2f &pt, const std::vector<cv::KeyPoint> &existing)
+{
+    const float minDistSq = kTemporalMergeMinDistancePx * kTemporalMergeMinDistancePx;
+    for (const cv::KeyPoint &keypoint : existing) {
+        const cv::Point2f delta = keypoint.pt - pt;
+        if ((delta.x * delta.x + delta.y * delta.y) <= minDistSq) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void AppendStereoPairs(const std::vector<cv::Point2f> &sourceLeft, const std::vector<cv::Point2f> &sourceRight,
                        std::vector<cv::Point2f> &mergedLeft, std::vector<cv::Point2f> &mergedRight)
 {
@@ -967,6 +980,49 @@ bool FinalizeStereoExternalFromPairs(ORB_SLAM3::ORBextractor *leftExtractor,
     outData.rightDescriptors = std::move(rightDescriptors);
     outData.matchedStereoPairs = true;
     return true;
+}
+
+void AppendOrbLeftOnlyFeatures(ORB_SLAM3::ORBextractor *leftExtractor, const cv::Mat &leftGray,
+                               ORB_SLAM3::ExternalStereoFrameData &externalData, size_t maxLeftFeatures)
+{
+    if (leftExtractor == nullptr || leftGray.empty() || externalData.leftKeypoints.size() >= maxLeftFeatures) {
+        return;
+    }
+
+    std::vector<cv::KeyPoint> orbKeypoints;
+    cv::Mat orbDescriptors;
+    std::vector<int> lapping = {0, 0};
+    (*leftExtractor)(leftGray, cv::Mat(), orbKeypoints, orbDescriptors, lapping);
+    if (orbKeypoints.empty() || orbDescriptors.empty() || orbDescriptors.type() != CV_8U ||
+        orbDescriptors.rows != static_cast<int>(orbKeypoints.size())) {
+        return;
+    }
+
+    const size_t initialLeftCount = externalData.leftKeypoints.size();
+    std::vector<int> selectedRows;
+    selectedRows.reserve(std::min(orbKeypoints.size(), maxLeftFeatures - initialLeftCount));
+    for (size_t i = 0; i < orbKeypoints.size() && initialLeftCount + selectedRows.size() < maxLeftFeatures; ++i) {
+        if (!IsPointSafeForOrbDescriptor(orbKeypoints[i].pt, leftGray) ||
+            IsPointNearExisting(orbKeypoints[i].pt, externalData.leftKeypoints)) {
+            continue;
+        }
+        externalData.leftKeypoints.push_back(orbKeypoints[i]);
+        selectedRows.push_back(static_cast<int>(i));
+    }
+    if (selectedRows.empty()) {
+        return;
+    }
+
+    cv::Mat mergedDescriptors;
+    if (!externalData.leftDescriptors.empty()) {
+        externalData.leftDescriptors.copyTo(mergedDescriptors);
+    } else {
+        mergedDescriptors.create(0, orbDescriptors.cols, orbDescriptors.type());
+    }
+    for (int row : selectedRows) {
+        mergedDescriptors.push_back(orbDescriptors.row(row));
+    }
+    externalData.leftDescriptors = std::move(mergedDescriptors);
 }
 
 bool FinalizeStereoExternalFromTemporalCarry(const std::vector<TemporalStereoPair> &trackedPairs,
@@ -2579,6 +2635,7 @@ void OrbSlam3Engine::EnsureLkRectifier(const cv::Size &inputSize)
     if (!m_lkTc1c2.empty()) {
         cv::Mat T64;
         m_lkTc1c2.convertTo(T64, CV_64F);
+        T64 = T64.inv();
         R = T64(cv::Rect(0, 0, 3, 3)).clone();
         t = T64(cv::Rect(3, 0, 1, 3)).clone();
     }
@@ -3447,9 +3504,45 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
             m_lastXFeatMatchedStereoCount = static_cast<int>(matches.size());
 
             ORB_SLAM3::ExternalStereoFrameData externalData;
-            if (BuildExternalStereoFromFeatureMatches(leftFeatures, rightFeatures, matches, externalData)) {
+            ORB_SLAM3::Tracking *tracker = m_system->GetTracker();
+            std::vector<cv::Point2f> matchedLeftPoints;
+            std::vector<cv::Point2f> matchedRightPoints;
+            matchedLeftPoints.reserve(matches.size());
+            matchedRightPoints.reserve(matches.size());
+            for (const StereoMatchPair &match : matches) {
+                if (match.leftIndex < 0 || match.rightIndex < 0 ||
+                    static_cast<size_t>(match.leftIndex) >= leftFeatures.keypoints.size() ||
+                    static_cast<size_t>(match.rightIndex) >= rightFeatures.keypoints.size()) {
+                    continue;
+                }
+                matchedLeftPoints.push_back(leftFeatures.keypoints[static_cast<size_t>(match.leftIndex)]);
+                matchedRightPoints.push_back(rightFeatures.keypoints[static_cast<size_t>(match.rightIndex)]);
+            }
+            if (FinalizeStereoExternalFromPairs(tracker != nullptr ? tracker->GetLeftORBExtractor() : nullptr,
+                                                tracker != nullptr ? tracker->GetRightORBExtractor() : nullptr,
+                                                leftPrepared, rightPrepared, matchedLeftPoints, matchedRightPoints,
+                                                externalData)) {
+                const bool initializedForMonoAugmentation =
+                    tracker != nullptr && tracker->mState != ORB_SLAM3::Tracking::NO_IMAGES_YET &&
+                    tracker->mState != ORB_SLAM3::Tracking::NOT_INITIALIZED;
+                if (initializedForMonoAugmentation) {
+                    AppendOrbLeftOnlyFeatures(tracker->GetLeftORBExtractor(), leftPrepared, externalData,
+                                              kExternalStereoMaxLeftFeatures);
+                }
                 m_lastXFeatInjectedLeftCount = static_cast<int>(externalData.leftKeypoints.size());
                 m_lastXFeatInjectedRightCount = static_cast<int>(externalData.rightKeypoints.size());
+                out.xfeatRawLeftCount = m_lastXFeatRawLeftCount;
+                out.xfeatRawRightCount = m_lastXFeatRawRightCount;
+                out.xfeatMatchedStereoCount = m_lastXFeatMatchedStereoCount;
+                out.xfeatInjectedLeftCount = m_lastXFeatInjectedLeftCount;
+                out.xfeatInjectedRightCount = m_lastXFeatInjectedRightCount;
+                out.xfeatPrepareMs = m_lastXFeatPrepareMs;
+                out.xfeatWorkerWriteMs = m_lastXFeatWorkerWriteMs;
+                out.xfeatWorkerReadMs = m_lastXFeatWorkerReadMs;
+                out.xfeatWorkerTotalMs = m_lastXFeatWorkerTotalMs;
+                out.xfeatStereoMatchMs = m_lastXFeatStereoMatchMs;
+                out.xfeatImageCount = m_lastXFeatImageCount;
+                out.xfeatPayloadBytes = m_lastXFeatPayloadBytes;
                 const auto trackStartTp = std::chrono::steady_clock::now();
                 if (m_useImu) {
                     tcw = m_system->TrackStereoPreparedWithFeatures(leftPrepared, rightPrepared, externalData,
@@ -3462,6 +3555,7 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
                 m_lastXFeatTotalMs =
                     std::chrono::duration<double, std::milli>(trackEndTp - externalStartTp).count();
                 out.orbTrackMs = std::chrono::duration<double, std::milli>(trackEndTp - trackStartTp).count();
+                out.xfeatTotalMs = m_lastXFeatTotalMs;
                 out.usedXFeatFrontend = true;
                 out.leftFeatures.reserve(externalData.leftKeypoints.size());
                 out.rightFeatures.reserve(externalData.rightKeypoints.size());

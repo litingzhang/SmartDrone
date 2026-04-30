@@ -5,13 +5,11 @@
 #include <string>
 #include <vector>
 
-#include <sys/types.h>
-
 #include <opencv2/core.hpp>
 
 namespace smartdrone::adapters::slam {
 
-class XFeatNativeExtractor;
+class SuperPointNativeExtractor;
 
 struct XFeatFeatureSet {
     std::vector<cv::Point2f> keypoints;
@@ -35,8 +33,7 @@ class XFeatFrontendClient {
     XFeatFrontendClient(const XFeatFrontendClient &) = delete;
     XFeatFrontendClient &operator=(const XFeatFrontendClient &) = delete;
 
-    bool Start(const std::string &pythonBin, const std::string &workerScript, const std::string &repoPath,
-               const std::string &device, int topK, int maxPoints, std::string *err);
+    bool Start(const std::string &repoPath, const std::string &device, int topK, int maxPoints, std::string *err);
     void Stop();
     bool Running() const;
     bool Detect(const cv::Mat &gray, std::vector<cv::Point2f> &outPoints, std::string *err);
@@ -46,32 +43,10 @@ class XFeatFrontendClient {
     Stats LastStats() const;
 
   private:
-    enum class BackendMode : uint8_t {
-        None = 0,
-        Worker,
-        Native,
-    };
-
-    int m_stdinFd{-1};
-    int m_stdoutFd{-1};
-    pid_t m_pid{-1};
-    uint32_t m_requestSeq{0};
     Stats m_lastStats{};
-    BackendMode m_backendMode{BackendMode::None};
-    std::unique_ptr<XFeatNativeExtractor> m_nativeExtractor;
-    XFeatFeatureSet m_prevStereoLeftFeatures;
-    cv::Mat m_prevStereoLeftGray;
-    bool m_havePrevStereoLeftFeatures{false};
-    bool m_preserveStereoPairOrder{false};
+    std::unique_ptr<SuperPointNativeExtractor> m_superPointNativeExtractor;
 
-    static bool PrepareGrayImage(const cv::Mat &gray, cv::Mat &gray8, std::string *err);
-    static std::vector<int> ComputeTemporalStableIndices(const XFeatFeatureSet &previous, const cv::Mat &previousGray,
-                                                         const XFeatFeatureSet &current, const cv::Mat &currentGray);
-    static void ReorderFeaturesByIndices(const XFeatFeatureSet &source, const std::vector<int> &indices,
-                                         XFeatFeatureSet &dest);
-    bool ReadFeatureSet(XFeatFeatureSet &outFeatures, std::string *err);
-    bool WriteExact(const void *data, size_t size, std::string *err);
-    bool ReadExact(void *data, size_t size, std::string *err);
+    void CopyNativeStats();
 };
 
 } // namespace smartdrone::adapters::slam
