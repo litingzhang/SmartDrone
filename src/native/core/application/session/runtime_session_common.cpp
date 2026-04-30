@@ -222,6 +222,7 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
     a.xfeatInputMaxHeight = c.runtime.xfeatInputMaxHeight;
     a.lkXFeatSeeding = c.runtime.lkXFeatSeeding;
     a.lkPerFrameAcceleration = c.runtime.lkPerFrameAcceleration;
+    a.orbAcceleration = c.runtime.orbAcceleration;
     a.lkLoopClosure = c.runtime.lkLoopClosure;
     a.lkLoopScale = c.runtime.lkLoopScale;
     a.lkLoopRelaxation = c.runtime.lkLoopRelaxation;
@@ -273,7 +274,8 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
               << " input_max=" << app.runtime.xfeatInputMaxWidth << "x" << app.runtime.xfeatInputMaxHeight << "\n";
     std::cerr << "orb nFeatures=" << app.runtime.orbNFeatures << " scaleFactor=" << app.runtime.orbScaleFactor
               << " nLevels=" << app.runtime.orbNLevels << " iniThFAST=" << app.runtime.orbIniThFAST
-              << " minThFAST=" << app.runtime.orbMinThFAST << "\n";
+              << " minThFAST=" << app.runtime.orbMinThFAST
+              << " accel=" << app.runtime.orbAcceleration << "\n";
     std::cerr << "lk xfeat_seeding=" << (app.runtime.lkXFeatSeeding ? "Y" : "N")
               << " loop_closure=" << (app.runtime.lkLoopClosure ? "Y" : "N")
               << " scale=" << app.runtime.lkLoopScale << " relax=" << app.runtime.lkLoopRelaxation

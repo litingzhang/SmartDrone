@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cctype>
 #include <cstddef>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -30,6 +31,12 @@ std::string TrimCopy(const std::string &in)
         --end;
     }
     return in.substr(begin, end - begin);
+}
+
+bool SuperPointLightGlueInjectionEnabled()
+{
+    const char *value = std::getenv("SMART_DRONE_SUPERPOINT_LIGHTGLUE_INJECT");
+    return value != nullptr && std::string(value) == "1";
 }
 
 bool IsYamlKeyLine(const std::string &line, const std::string &key)
@@ -179,6 +186,45 @@ SlamFrameProcessor::State MakeInitialFrameProcessorState(const MainRuntimeAliase
     return state;
 }
 
+void ApplyOrbAccelerationEnvironment(const std::string &acceleration)
+{
+    std::string normalized = acceleration;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (normalized == "cuda" || normalized == "gpu" || normalized == "opencv_cuda" || normalized == "opencv-cuda") {
+#if defined(_WIN32)
+        _putenv_s("SMART_DRONE_ORB_ACCEL", "cuda");
+        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "");
+        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
+#else
+        setenv("SMART_DRONE_ORB_ACCEL", "cuda", 1);
+        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
+        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+#endif
+    } else if (normalized == "vpi" || normalized == "vpi_remap" || normalized == "vpi-remap" ||
+               normalized == "vpi_cuda_remap" || normalized == "vpi-cuda-remap") {
+#if defined(_WIN32)
+        _putenv_s("SMART_DRONE_ORB_ACCEL", "");
+        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "1");
+        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
+#else
+        unsetenv("SMART_DRONE_ORB_ACCEL");
+        setenv("SMART_DRONE_ORB_VPI_REMAP", "1", 1);
+        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+#endif
+    } else {
+#if defined(_WIN32)
+        _putenv_s("SMART_DRONE_ORB_ACCEL", "");
+        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "");
+        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
+#else
+        unsetenv("SMART_DRONE_ORB_ACCEL");
+        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
+        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+#endif
+    }
+}
+
 } // namespace
 
 SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg, LiveRuntimeTuning &tuning, Px4MavlinkGateway &mav,
@@ -191,7 +237,8 @@ SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg, LiveRuntimeTuni
       m_orbInputMode(m_monoMode ? smartdrone::adapters::slam::OrbInputMode::MonoRight
                                 : smartdrone::adapters::slam::OrbInputMode::Stereo),
       m_effectiveSettingsPath(BuildEffectiveSlamSettingsPath(cfg)),
-      m_slamSystem(std::make_unique<ORB_SLAM3::System>(cfg.app.vocab, m_effectiveSettingsPath, m_orbSensor, false)),
+      m_slamSystem((ApplyOrbAccelerationEnvironment(cfg.app.runtime.orbAcceleration),
+                    std::make_unique<ORB_SLAM3::System>(cfg.app.vocab, m_effectiveSettingsPath, m_orbSensor, false))),
       m_slamEngine(std::move(m_slamSystem), m_orbInputMode, m_useImu, m_effectiveSettingsPath),
       m_cameraProvider(CreateCameraProvider()),
       m_imuProvider(m_imuState.imuBuffer, MakeImuProviderConfig(m_aliases)), m_posePublisher(mav),
@@ -233,20 +280,24 @@ bool SlamSessionRuntime::Start()
         m_stereoBodyExtrinsics = LoadStereoBodyExtrinsics(m_effectiveSettingsPath);
     }
 
-    const bool needsXFeatWorker = m_aliases.featureFrontend == FeatureFrontend::LK && m_aliases.lkXFeatSeeding;
-    if (needsXFeatWorker && !m_cfg.app.runtime.xfeatRepo.empty() &&
+    const bool needsXFeatWorker =
+        (m_aliases.featureFrontend == FeatureFrontend::LK && m_aliases.lkXFeatSeeding) ||
+        (m_aliases.featureFrontend == FeatureFrontend::SuperPointLightGlue &&
+         SuperPointLightGlueInjectionEnabled());
+    if (needsXFeatWorker &&
         !m_cfg.app.runtime.xfeatWorkerScript.empty()) {
         std::string xfeatErr;
         if (m_xfeatFrontendClient.Start(m_cfg.app.runtime.xfeatPython, m_cfg.app.runtime.xfeatWorkerScript,
                                         m_cfg.app.runtime.xfeatRepo, m_cfg.app.runtime.xfeatDevice,
                                         m_cfg.app.runtime.xfeatTopK,
                                         m_cfg.app.runtime.xfeatMaxPoints, &xfeatErr)) {
-            std::cerr << "[slam] xfeat worker ready repo=" << m_cfg.app.runtime.xfeatRepo
+            std::cerr << "[slam] feature worker ready script=" << m_cfg.app.runtime.xfeatWorkerScript
+                      << " repo=" << m_cfg.app.runtime.xfeatRepo
                       << " device=" << m_cfg.app.runtime.xfeatDevice
                       << " top_k=" << m_cfg.app.runtime.xfeatTopK
                       << " max_points=" << m_cfg.app.runtime.xfeatMaxPoints << "\n";
         } else if (needsXFeatWorker) {
-            std::cerr << "[slam] warning: xfeat worker start failed: " << xfeatErr << "\n";
+            std::cerr << "[slam] warning: feature worker start failed: " << xfeatErr << "\n";
         }
     }
     if (m_aliases.featureFrontend == FeatureFrontend::LK) {

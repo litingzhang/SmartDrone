@@ -20,6 +20,10 @@ Options:
   --reconfigure   Re-run CMake configure for native builds even if build dir already exists
   --jetson-orin-nx
                   Cross-build native targets for Jetson Orin NX instead of the default CM5 profile
+  --opencv-cuda-orb
+                  Enable the experimental OpenCV CUDA ORB extractor path when the sysroot provides cudafeatures2d
+  --opencv-cuda-orb-root PATH
+                  OpenCV install prefix that provides cudafeatures2d for --opencv-cuda-orb
   --jobs N        Build parallelism; defaults to BUILD_JOBS or nproc
   --camera-provider NAME
                   Native camera provider, e.g. libcamera_stereo_ov9281 or uvc_stereo_opencv
@@ -72,6 +76,8 @@ JETSON_ORIN_NX=0
 NATIVE_RECONFIGURE_REQUIRED=0
 BUILD_JOBS_OVERRIDE=""
 CAMERA_PROVIDER_OVERRIDE=""
+ENABLE_OPENCV_CUDA_ORB=OFF
+OPENCV_CUDA_ORB_ROOT="${OPENCV_CUDA_ORB_ROOT:-}"
 
 case "$MODE" in
     smart_drone)
@@ -114,6 +120,21 @@ while [ "$#" -gt 0 ]; do
             ;;
         --jetson-orin-nx)
             JETSON_ORIN_NX=1
+            ;;
+        --opencv-cuda-orb)
+            ENABLE_OPENCV_CUDA_ORB=ON
+            ;;
+        --opencv-cuda-orb-root)
+            if [ "$#" -lt 2 ]; then
+                echo "--opencv-cuda-orb-root requires a value" >&2
+                usage
+                exit 1
+            fi
+            OPENCV_CUDA_ORB_ROOT="$2"
+            shift
+            ;;
+        --opencv-cuda-orb-root=*)
+            OPENCV_CUDA_ORB_ROOT="${1#--opencv-cuda-orb-root=}"
             ;;
         --jobs)
             if [ "$#" -lt 2 ]; then
@@ -253,6 +274,32 @@ fi
 if [ -n "${SMART_DRONE_CAMERA_PROVIDER:-}" ]; then
     configure_native_args+=(-DSMART_DRONE_CAMERA_PROVIDER="$SMART_DRONE_CAMERA_PROVIDER")
 fi
+configure_native_args+=(-DSMART_DRONE_ENABLE_OPENCV_CUDA_ORB="$ENABLE_OPENCV_CUDA_ORB")
+if [ "$ENABLE_OPENCV_CUDA_ORB" = "ON" ]; then
+    if [ -z "$OPENCV_CUDA_ORB_ROOT" ]; then
+        OPENCV_CUDA_ORB_ROOT="$(find_first_existing_dir \
+            "$REPO_ROOT/../third_party/opencv_cuda_orb" \
+            "$REPO_ROOT/output/opencv_cuda_orb" \
+            "$HOME/workspace/third_party/opencv_cuda_orb" \
+            "$HOME/opencv_cuda_orb" || true)"
+    fi
+    if [ -z "$OPENCV_CUDA_ORB_ROOT" ] || [ ! -f "$OPENCV_CUDA_ORB_ROOT/lib/cmake/opencv4/OpenCVConfig.cmake" ]; then
+        echo "OpenCV CUDA ORB root not found or missing OpenCVConfig.cmake." >&2
+        echo "Set OPENCV_CUDA_ORB_ROOT or pass --opencv-cuda-orb-root /path/to/opencv_cuda_orb." >&2
+        exit 1
+    fi
+    configure_native_args+=(-DSMART_DRONE_OPENCV_CUDA_ORB_ROOT="$OPENCV_CUDA_ORB_ROOT")
+    if [ -z "${CUDA_TOOLKIT_ROOT_DIR:-}" ]; then
+        _opencv_cuda_fake_root="$(find_first_existing_dir \
+            "$REPO_ROOT/../third_party/fake_cuda_11_4" \
+            "$HOME/workspace/third_party/fake_cuda_11_4" || true)"
+        if [ -n "$_opencv_cuda_fake_root" ]; then
+            configure_native_args+=(-DCUDA_TOOLKIT_ROOT_DIR="$_opencv_cuda_fake_root")
+        elif [ "$JETSON_ORIN_NX" -eq 1 ] && [ -d "$SYSROOT/usr/local/cuda-11.4" ]; then
+            configure_native_args+=(-DCUDA_TOOLKIT_ROOT_DIR="$SYSROOT/usr/local/cuda-11.4")
+        fi
+    fi
+fi
 if [ "$JETSON_ORIN_NX" -eq 1 ] && [ -d "$REPO_ROOT/output/vpi2_jetson" ]; then
     configure_native_args+=(
         -DSMART_DRONE_ENABLE_VPI=ON
@@ -294,6 +341,10 @@ sync_native_artifacts() {
     if [ -f "$REPO_ROOT/scripts/xfeat_keypoint_worker.py" ]; then
         copy_artifact "$REPO_ROOT/scripts/xfeat_keypoint_worker.py" \
             "$scripts_dir/xfeat_keypoint_worker.py"
+    fi
+    if [ -f "$REPO_ROOT/scripts/superpoint_lightglue_worker.py" ]; then
+        copy_artifact "$REPO_ROOT/scripts/superpoint_lightglue_worker.py" \
+            "$scripts_dir/superpoint_lightglue_worker.py"
     fi
     if [ -f "$REPO_ROOT/ORBvoc.txt" ]; then
         copy_artifact "$REPO_ROOT/ORBvoc.txt" "$NATIVE_ARTIFACTS_DIR/ORBvoc.txt"
@@ -378,6 +429,10 @@ echo "CLEAN_BUILD:$CLEAN_BUILD"
 echo "FORCE_RECONFIGURE:$FORCE_RECONFIGURE"
 echo "BUILD_JOBS:$BUILD_JOBS"
 echo "CMAKE_BUILD_TYPE:$CMAKE_BUILD_TYPE"
+echo "OPENCV_CUDA_ORB:$ENABLE_OPENCV_CUDA_ORB"
+if [ -n "$OPENCV_CUDA_ORB_ROOT" ]; then
+    echo "OPENCV_CUDA_ORB_ROOT:$OPENCV_CUDA_ORB_ROOT"
+fi
 echo "OUTPUT_ROOT:$OUTPUT_ROOT"
 
 if [ "$BUILD_ORB" -eq 1 ]; then

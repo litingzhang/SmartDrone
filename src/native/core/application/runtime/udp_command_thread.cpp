@@ -38,6 +38,8 @@ SensorMode ParseRuntimeSensorMode(uint8_t value)
 FeatureFrontend ParseRuntimeFeatureFrontend(uint8_t value)
 {
     switch (value) {
+    case RUNTIME_FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE:
+        return FeatureFrontend::SuperPointLightGlue;
     case RUNTIME_FEATURE_FRONTEND_LK_GFTT_PER_FRAME:
         return FeatureFrontend::LkGfttPerFrame;
     case RUNTIME_FEATURE_FRONTEND_LK:
@@ -56,6 +58,19 @@ std::string ParseRuntimeLkPerFrameAcceleration(uint8_t value)
     case RUNTIME_LK_PER_FRAME_ACCEL_VPI_CUDA:
         return "vpi-cuda";
     case RUNTIME_LK_PER_FRAME_ACCEL_CPU:
+    default:
+        return "cpu";
+    }
+}
+
+std::string ParseRuntimeOrbAcceleration(uint8_t value)
+{
+    switch (value) {
+    case RUNTIME_ORB_ACCEL_OPENCV_CUDA:
+        return "cuda";
+    case RUNTIME_ORB_ACCEL_VPI_REMAP:
+        return "vpi-remap";
+    case RUNTIME_ORB_ACCEL_CPU:
     default:
         return "cpu";
     }
@@ -106,7 +121,8 @@ RouteResult HandleRuntimeModeFrame(const TlvFrame &frame, UnifiedRuntimeControll
 RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer, UnifiedRuntimeController &controller,
                                      const PeerToIpStringFn &peerToIpString)
 {
-    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V12 &&
+    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V13 &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V12 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V11 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V10 && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V9 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V8 &&
@@ -147,6 +163,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     r.xfeatInputMaxHeight = currentCfg.app.runtime.xfeatInputMaxHeight;
     r.lkXFeatSeeding = currentCfg.app.runtime.lkXFeatSeeding;
     r.lkPerFrameAcceleration = currentCfg.app.runtime.lkPerFrameAcceleration;
+    r.orbAcceleration = currentCfg.app.runtime.orbAcceleration;
     if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
         return {ACK_E_BAD_ARGS, "bad runtime cfg args"};
     }
@@ -212,6 +229,9 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V12) {
         r.lkPerFrameAcceleration = ParseRuntimeLkPerFrameAcceleration(p[RUNTIME_CONFIG_LK_PER_FRAME_ACCEL_OFFSET]);
     }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V13) {
+        r.orbAcceleration = ParseRuntimeOrbAcceleration(p[RUNTIME_CONFIG_ORB_ACCEL_OFFSET]);
+    }
     const char *ipChars = reinterpret_cast<const char *>(&p[ipOffset]);
     size_t ipLen = 0;
     while (ipLen < RUNTIME_CONFIG_IP_LEN && ipChars[ipLen] != '\0') {
@@ -260,6 +280,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
         static_cast<int64_t>(r.xfeatInputMaxHeight);
     update.values[std::string(ConfigRegistry::kSlamLkXFeatSeeding)] = r.lkXFeatSeeding;
     update.values[std::string(ConfigRegistry::kSlamLkPerFrameAcceleration)] = r.lkPerFrameAcceleration;
+    update.values[std::string(ConfigRegistry::kSlamOrbAcceleration)] = r.orbAcceleration;
 
     RuntimeCommandService service(controller);
     const auto result = service.ApplyConfig(update);
@@ -274,7 +295,8 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
                         " map=" + (r.sendMap ? "on" : "off") + " ae=" + (r.autoExposureEnabled ? "on" : "off") +
                         " tbc_override=" + (r.useCustomTbc ? "on" : "off") +
                         " lk_seed=" + (r.lkXFeatSeeding ? "xfeat" : "gftt") +
-                        " lk_accel=" + r.lkPerFrameAcceleration};
+                        " lk_accel=" + r.lkPerFrameAcceleration +
+                        " orb_accel=" + r.orbAcceleration};
 }
 
 RouteResult HandleCalibCleanFrame(const TlvFrame &frame, UnifiedRuntimeController &controller)

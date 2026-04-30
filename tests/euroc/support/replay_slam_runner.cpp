@@ -78,6 +78,9 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
         sample.xfeatWorkerTotalMs = output.xfeatWorkerTotalMs;
         sample.xfeatStereoMatchMs = output.xfeatStereoMatchMs;
         sample.xfeatTotalMs = output.xfeatTotalMs;
+        sample.orbTrackMs = output.orbTrackMs;
+        sample.orbExtractMs = output.orbExtractMs;
+        sample.orbStereoMatchMs = output.orbStereoMatchMs;
         sample.matchesInliers = output.matchesInliers;
         sample.trackedMapPointCount = output.trackedMapPointCount;
         sample.localMapPointCount = output.localMapPointCount;

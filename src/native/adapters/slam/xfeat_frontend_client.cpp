@@ -7,6 +7,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <numeric>
 #include <string>
 #include <unordered_set>
@@ -135,21 +136,26 @@ bool XFeatFrontendClient::Start(const std::string &pythonBin, const std::string 
     Stop();
     m_lastStats = Stats{};
 
-    if (!m_nativeExtractor) {
-        m_nativeExtractor = std::make_unique<XFeatNativeExtractor>();
-    }
     std::string nativeErr;
-    if (m_nativeExtractor->Start(repoPath, device, topK, maxPoints, &nativeErr)) {
-        m_backendMode = BackendMode::Native;
-        return true;
+    const std::string workerName = std::filesystem::path(workerScript).filename().string();
+    const bool isXFeatWorker = workerName.find("xfeat") != std::string::npos;
+    m_preserveStereoPairOrder = !isXFeatWorker;
+    if (isXFeatWorker) {
+        if (!m_nativeExtractor) {
+            m_nativeExtractor = std::make_unique<XFeatNativeExtractor>();
+        }
+        if (m_nativeExtractor->Start(repoPath, device, topK, maxPoints, &nativeErr)) {
+            m_backendMode = BackendMode::Native;
+            return true;
+        }
+        m_nativeExtractor.reset();
     }
-    m_nativeExtractor.reset();
 
     int stdinPipe[2]{-1, -1};
     int stdoutPipe[2]{-1, -1};
     if (pipe(stdinPipe) != 0) {
         if (err != nullptr) {
-            *err = nativeErr + "; " + ErrnoMessage("xfeat worker stdin pipe failed");
+            *err = nativeErr + "; " + ErrnoMessage("feature worker stdin pipe failed");
         }
         return false;
     }
@@ -157,7 +163,7 @@ bool XFeatFrontendClient::Start(const std::string &pythonBin, const std::string 
         close(stdinPipe[0]);
         close(stdinPipe[1]);
         if (err != nullptr) {
-            *err = nativeErr + "; " + ErrnoMessage("xfeat worker stdout pipe failed");
+            *err = nativeErr + "; " + ErrnoMessage("feature worker stdout pipe failed");
         }
         return false;
     }
@@ -169,7 +175,7 @@ bool XFeatFrontendClient::Start(const std::string &pythonBin, const std::string 
         close(stdoutPipe[0]);
         close(stdoutPipe[1]);
         if (err != nullptr) {
-            *err = nativeErr + "; " + ErrnoMessage("xfeat worker fork failed");
+            *err = nativeErr + "; " + ErrnoMessage("feature worker fork failed");
         }
         return false;
     }
@@ -202,7 +208,7 @@ bool XFeatFrontendClient::Start(const std::string &pythonBin, const std::string 
         const std::string workerErr = err != nullptr ? *err : "worker did not report ready";
         Stop();
         if (err != nullptr) {
-            *err = nativeErr + "; xfeat worker startup failed: " + workerErr;
+            *err = nativeErr + "; feature worker startup failed: " + workerErr;
         }
         return false;
     }
@@ -504,7 +510,7 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
             m_lastStats.imageCount = nativeStats.imageCount;
             m_lastStats.payloadBytes = nativeStats.payloadBytes;
         }
-        if (ok) {
+        if (ok && !m_preserveStereoPairOrder) {
             const XFeatFeatureSet rawLeft = leftFeatures;
             const std::vector<int> stableIndices =
                 m_havePrevStereoLeftFeatures
@@ -601,25 +607,27 @@ bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const 
     }
 
     const XFeatFeatureSet rawLeft = leftFeatures;
-    const std::vector<int> stableIndices =
-        m_havePrevStereoLeftFeatures
-            ? ComputeTemporalStableIndices(m_prevStereoLeftFeatures, m_prevStereoLeftGray, rawLeft, leftGray8)
-                                     : std::vector<int>{};
-    if (stableIndices.size() >= kTemporalMinStableCount) {
-        std::vector<int> selected = stableIndices;
-        const size_t extrasAllowed = std::min(kTemporalExtraBudget, rawLeft.keypoints.size());
-        std::unordered_set<int> seen(selected.begin(), selected.end());
-        for (int idx = 0; idx < static_cast<int>(rawLeft.keypoints.size()) &&
-                          selected.size() < stableIndices.size() + extrasAllowed;
-             ++idx) {
-            if (seen.insert(idx).second) {
-                selected.push_back(idx);
+    if (!m_preserveStereoPairOrder) {
+        const std::vector<int> stableIndices =
+            m_havePrevStereoLeftFeatures
+                ? ComputeTemporalStableIndices(m_prevStereoLeftFeatures, m_prevStereoLeftGray, rawLeft, leftGray8)
+                : std::vector<int>{};
+        if (stableIndices.size() >= kTemporalMinStableCount) {
+            std::vector<int> selected = stableIndices;
+            const size_t extrasAllowed = std::min(kTemporalExtraBudget, rawLeft.keypoints.size());
+            std::unordered_set<int> seen(selected.begin(), selected.end());
+            for (int idx = 0; idx < static_cast<int>(rawLeft.keypoints.size()) &&
+                              selected.size() < stableIndices.size() + extrasAllowed;
+                 ++idx) {
+                if (seen.insert(idx).second) {
+                    selected.push_back(idx);
+                }
             }
-        }
-        XFeatFeatureSet reordered;
-        ReorderFeaturesByIndices(rawLeft, selected, reordered);
-        if (!reordered.keypoints.empty() && !reordered.descriptors.empty()) {
-            leftFeatures = std::move(reordered);
+            XFeatFeatureSet reordered;
+            ReorderFeaturesByIndices(rawLeft, selected, reordered);
+            if (!reordered.keypoints.empty() && !reordered.descriptors.empty()) {
+                leftFeatures = std::move(reordered);
+            }
         }
     }
     m_prevStereoLeftFeatures = rawLeft;

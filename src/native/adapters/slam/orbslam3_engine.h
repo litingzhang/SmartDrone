@@ -66,6 +66,7 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     void SetLkLoopClosure(bool enabled, float scale = 1.20f, float relaxation = 1.40f);
     void SetLkPerFrameAcceleration(std::string acceleration);
     void Stop() override;
+    bool ShutdownAndSaveOrbTrajectoryEuRoC(const std::string &path);
     core::ports::SlamOutput Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
                                     bool extractPointCloud) override;
 

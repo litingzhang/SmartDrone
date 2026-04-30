@@ -26,6 +26,42 @@ std::string ResolveFirstExistingRuntimePath(const std::vector<std::string> &cand
     return firstResolved;
 }
 
+std::string NormalizeAccelerationText(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (value == "cuda" || value == "gpu" || value == "opencv_cuda" || value == "opencv-cuda") {
+        return "cuda";
+    }
+    if (value == "vpi" || value == "vpi_remap" || value == "vpi-remap" || value == "vpi_cuda_remap" ||
+        value == "vpi-cuda-remap") {
+        return "vpi-remap";
+    }
+    return "cpu";
+}
+
+void ApplyOrbAccelerationEnvironment(const std::string &acceleration)
+{
+    const std::string normalized = NormalizeAccelerationText(acceleration);
+#if defined(_WIN32)
+    _putenv_s("SMART_DRONE_ORB_ACCEL", normalized == "cuda" ? "cuda" : "");
+    _putenv_s("SMART_DRONE_ORB_VPI_REMAP", normalized == "vpi-remap" ? "1" : "");
+    _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
+#else
+    if (normalized == "cuda") {
+        setenv("SMART_DRONE_ORB_ACCEL", "cuda", 1);
+    } else {
+        unsetenv("SMART_DRONE_ORB_ACCEL");
+    }
+    if (normalized == "vpi-remap") {
+        setenv("SMART_DRONE_ORB_VPI_REMAP", "1", 1);
+    } else {
+        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
+    }
+    unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+#endif
+}
+
 } // namespace
 
 const char *DefaultSettingsForSensorMode(SensorMode mode)
@@ -84,6 +120,11 @@ FeatureFrontend ParseFeatureFrontendText(const std::string &text)
         normalized == "droidlight") {
         return FeatureFrontend::DroidLight;
     }
+    if (normalized == "superpoint-lightglue" || normalized == "superpoint_lightglue" ||
+        normalized == "superpoint+lightglue" || normalized == "sp-lightglue" ||
+        normalized == "sp_lightglue" || normalized == "sp-lg" || normalized == "splg") {
+        return FeatureFrontend::SuperPointLightGlue;
+    }
     if (normalized == "lk-gftt-per-frame" || normalized == "lk_gftt_per_frame" ||
         normalized == "lk-gftt-every-frame" || normalized == "lk_gftt_every_frame" ||
         normalized == "per-frame-gftt" || normalized == "per_frame_gftt") {
@@ -107,6 +148,8 @@ const char *ToFeatureFrontendText(FeatureFrontend frontend)
         return "xfeat";
     case FeatureFrontend::DroidLight:
         return "droid_light";
+    case FeatureFrontend::SuperPointLightGlue:
+        return "superpoint_lightglue";
     case FeatureFrontend::Orb:
     default:
         return "orb";
@@ -361,12 +404,18 @@ AppConfig ParseAppConfig(int argc, char **argv)
         } else {
             const char *home = std::getenv("HOME");
             std::vector<std::string> workerCandidates;
-            workerCandidates.emplace_back("scripts/xfeat_keypoint_worker.py");
-            workerCandidates.emplace_back("xfeat_keypoint_worker.py");
+            const bool superPointLightGlue =
+                config.runtime.featureFrontend == FeatureFrontend::SuperPointLightGlue;
+            workerCandidates.emplace_back(superPointLightGlue ? "scripts/superpoint_lightglue_worker.py"
+                                                              : "scripts/xfeat_keypoint_worker.py");
+            workerCandidates.emplace_back(superPointLightGlue ? "superpoint_lightglue_worker.py"
+                                                              : "xfeat_keypoint_worker.py");
             if (home != nullptr) {
-                workerCandidates.push_back((fs::path(home) / "workspace" / "SmartDrone" / "scripts" / "xfeat_keypoint_worker.py").string());
-                workerCandidates.push_back((fs::path(home) / "SmartDrone" / "scripts" / "xfeat_keypoint_worker.py").string());
-                workerCandidates.push_back((fs::path(home) / "xfeat_keypoint_worker.py").string());
+                const char *workerName =
+                    superPointLightGlue ? "superpoint_lightglue_worker.py" : "xfeat_keypoint_worker.py";
+                workerCandidates.push_back((fs::path(home) / "workspace" / "SmartDrone" / "scripts" / workerName).string());
+                workerCandidates.push_back((fs::path(home) / "SmartDrone" / "scripts" / workerName).string());
+                workerCandidates.push_back((fs::path(home) / workerName).string());
             }
             config.runtime.xfeatWorkerScript =
                 ResolveFirstExistingRuntimePath(workerCandidates, argc > 0 ? argv[0] : nullptr);
@@ -382,6 +431,8 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.lkLoopScale = argReader.GetFloat("--lk-loop-scale", 1.20f);
     config.runtime.lkLoopRelaxation = argReader.GetFloat("--lk-loop-relax", 1.40f);
     config.runtime.lkPerFrameAcceleration = argReader.GetString("--lk-per-frame-accel", "cpu");
+    config.runtime.orbAcceleration = NormalizeAccelerationText(argReader.GetString("--orb-accel", "cpu"));
+    ApplyOrbAccelerationEnvironment(config.runtime.orbAcceleration);
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");
     config.runtime.slamLowLightEnhance = argReader.HasFlag("--slam-lowlight-enhance");
     config.runtime.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");

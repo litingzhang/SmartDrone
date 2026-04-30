@@ -22,9 +22,12 @@
 #include "Converter.h"
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <thread>
@@ -42,6 +45,13 @@
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/xml_iarchive.hpp>
 #include <boost/archive/xml_oarchive.hpp>
+#if SMART_DRONE_HAS_VPI
+#include <vpi/Image.h>
+#include <vpi/OpenCVInterop.hpp>
+#include <vpi/Stream.h>
+#include <vpi/WarpMap.h>
+#include <vpi/algo/Remap.h>
+#endif
 
 #ifdef _WIN32
 #include <direct.h>
@@ -52,6 +62,200 @@ namespace ORB_SLAM3
 
 namespace
 {
+#if SMART_DRONE_HAS_VPI
+const char *VpiStatusName(VPIStatus status)
+{
+    const char *name = vpiStatusGetName(status);
+    return name != nullptr ? name : "VPI_ERROR_UNKNOWN";
+}
+
+bool OrbEnvFlagEnabled(const char *name, bool defaultValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0')
+        return defaultValue;
+
+    std::string text(value);
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return !(text == "0" || text == "false" || text == "off" || text == "no");
+}
+
+bool FillVpiWarpMapFromOpenCvMaps(const cv::Mat &mapX, const cv::Mat &mapY, VPIWarpMap &warp)
+{
+    if (mapX.empty() || mapY.empty() || mapX.size() != mapY.size() || mapX.type() != CV_32FC1 ||
+        mapY.type() != CV_32FC1) {
+        return false;
+    }
+
+    vpiWarpMapFreeData(&warp);
+    warp = {};
+    warp.grid.numHorizRegions = 1;
+    warp.grid.numVertRegions = 1;
+    warp.grid.regionWidth[0] = static_cast<int16_t>(mapX.cols);
+    warp.grid.regionHeight[0] = static_cast<int16_t>(mapX.rows);
+    warp.grid.horizInterval[0] = 1;
+    warp.grid.vertInterval[0] = 1;
+
+    VPIStatus status = vpiWarpMapAllocData(&warp);
+    if (status != VPI_SUCCESS || warp.keypoints == nullptr) {
+        std::cerr << "[orb_vpi_remap] warp map allocation failed: " << VpiStatusName(status) << "\n";
+        return false;
+    }
+
+    for (int y = 0; y < mapX.rows; ++y) {
+        auto *row = reinterpret_cast<VPIKeypointF32 *>(reinterpret_cast<uint8_t *>(warp.keypoints) +
+                                                      static_cast<size_t>(y) * warp.pitchBytes);
+        for (int x = 0; x < mapX.cols; ++x) {
+            row[x].x = mapX.at<float>(y, x);
+            row[x].y = mapY.at<float>(y, x);
+        }
+    }
+    return true;
+}
+
+cv::Mat DownloadVpiU8Image(VPIImage image)
+{
+    VPIImageData data{};
+    VPIStatus status = vpiImageLockData(image, VPI_LOCK_READ, VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR, &data);
+    if (status != VPI_SUCCESS || data.bufferType != VPI_IMAGE_BUFFER_HOST_PITCH_LINEAR ||
+        data.buffer.pitch.numPlanes < 1 || data.buffer.pitch.planes[0].data == nullptr) {
+        std::cerr << "[orb_vpi_remap] image lock failed: " << VpiStatusName(status) << "\n";
+        return {};
+    }
+
+    const auto &plane = data.buffer.pitch.planes[0];
+    cv::Mat view(plane.height, plane.width, CV_8UC1, plane.data, static_cast<size_t>(plane.pitchBytes));
+    cv::Mat out = view.clone();
+    vpiImageUnlock(image);
+    return out;
+}
+
+struct OrbVpiRemapState
+{
+    ~OrbVpiRemapState()
+    {
+        if (leftRemapPayload != nullptr)
+            vpiPayloadDestroy(leftRemapPayload);
+        if (rightRemapPayload != nullptr)
+            vpiPayloadDestroy(rightRemapPayload);
+        if (leftRect != nullptr)
+            vpiImageDestroy(leftRect);
+        if (rightRect != nullptr)
+            vpiImageDestroy(rightRect);
+        if (stream != nullptr)
+            vpiStreamDestroy(stream);
+        vpiWarpMapFreeData(&leftWarp);
+        vpiWarpMapFreeData(&rightWarp);
+    }
+
+    int width = 0;
+    int height = 0;
+    VPIStream stream{nullptr};
+    VPIPayload leftRemapPayload{nullptr};
+    VPIPayload rightRemapPayload{nullptr};
+    VPIImage leftRect{nullptr};
+    VPIImage rightRect{nullptr};
+    VPIWarpMap leftWarp{};
+    VPIWarpMap rightWarp{};
+};
+
+bool EnsureOrbVpiRemapState(std::unique_ptr<OrbVpiRemapState> &state, const cv::Size &size, const cv::Mat &map1x,
+                            const cv::Mat &map1y, const cv::Mat &map2x, const cv::Mat &map2y)
+{
+    if (state && state->width == size.width && state->height == size.height)
+        return true;
+
+    std::unique_ptr<OrbVpiRemapState> next(new OrbVpiRemapState());
+    next->width = size.width;
+    next->height = size.height;
+
+    VPIStatus status = vpiStreamCreate(VPI_BACKEND_CUDA, &next->stream);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[orb_vpi_remap] stream create failed: " << VpiStatusName(status) << "\n";
+        return false;
+    }
+
+    if (!FillVpiWarpMapFromOpenCvMaps(map1x, map1y, next->leftWarp) ||
+        !FillVpiWarpMapFromOpenCvMaps(map2x, map2y, next->rightWarp)) {
+        return false;
+    }
+
+    status = vpiCreateRemap(VPI_BACKEND_CUDA, &next->leftWarp, &next->leftRemapPayload);
+    if (status == VPI_SUCCESS)
+        status = vpiCreateRemap(VPI_BACKEND_CUDA, &next->rightWarp, &next->rightRemapPayload);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[orb_vpi_remap] payload create failed: " << VpiStatusName(status) << "\n";
+        return false;
+    }
+
+    const uint64_t imageBackends = VPI_BACKEND_CUDA | VPI_BACKEND_CPU;
+    status = vpiImageCreate(size.width, size.height, VPI_IMAGE_FORMAT_U8, imageBackends, &next->leftRect);
+    if (status == VPI_SUCCESS)
+        status = vpiImageCreate(size.width, size.height, VPI_IMAGE_FORMAT_U8, imageBackends, &next->rightRect);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[orb_vpi_remap] output image create failed: " << VpiStatusName(status) << "\n";
+        return false;
+    }
+
+    std::cerr << "[orb_vpi_remap] backend=vpi_cuda size=" << size.width << "x" << size.height << "\n";
+    state = std::move(next);
+    return true;
+}
+
+bool VpiRemapStereoForOrb(const cv::Mat &leftRaw, const cv::Mat &rightRaw, cv::Mat &leftRect, cv::Mat &rightRect,
+                          const cv::Mat &map1x, const cv::Mat &map1y, const cv::Mat &map2x, const cv::Mat &map2y)
+{
+    if (!OrbEnvFlagEnabled("SMART_DRONE_ORB_VPI_REMAP", false))
+        return false;
+    if (leftRaw.empty() || rightRaw.empty() || leftRaw.type() != CV_8UC1 || rightRaw.type() != CV_8UC1 ||
+        leftRaw.size() != rightRaw.size())
+        return false;
+
+    static std::mutex stateMutex;
+    static std::unique_ptr<OrbVpiRemapState> state;
+    std::lock_guard<std::mutex> lock(stateMutex);
+
+    if (!EnsureOrbVpiRemapState(state, leftRaw.size(), map1x, map1y, map2x, map2y))
+        return false;
+
+    VPIImage leftWrapper = nullptr;
+    VPIImage rightWrapper = nullptr;
+    VPIStatus status = vpiImageCreateWrapperOpenCVMat(leftRaw, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA, &leftWrapper);
+    if (status == VPI_SUCCESS)
+        status = vpiImageCreateWrapperOpenCVMat(rightRaw, VPI_IMAGE_FORMAT_U8, VPI_BACKEND_CUDA, &rightWrapper);
+    if (status == VPI_SUCCESS)
+        status = vpiSubmitRemap(state->stream, VPI_BACKEND_CUDA, state->leftRemapPayload, leftWrapper, state->leftRect,
+                                VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0);
+    if (status == VPI_SUCCESS)
+        status = vpiSubmitRemap(state->stream, VPI_BACKEND_CUDA, state->rightRemapPayload, rightWrapper,
+                                state->rightRect, VPI_INTERP_LINEAR, VPI_BORDER_ZERO, 0);
+    if (status == VPI_SUCCESS)
+        status = vpiStreamSync(state->stream);
+
+    if (leftWrapper != nullptr)
+        vpiImageDestroy(leftWrapper);
+    if (rightWrapper != nullptr)
+        vpiImageDestroy(rightWrapper);
+    if (status != VPI_SUCCESS) {
+        std::cerr << "[orb_vpi_remap] submit failed: " << VpiStatusName(status) << "; fallback=cpu_remap\n";
+        state.reset();
+        return false;
+    }
+
+    leftRect = DownloadVpiU8Image(state->leftRect);
+    rightRect = DownloadVpiU8Image(state->rightRect);
+    return !leftRect.empty() && !rightRect.empty();
+}
+#else
+bool VpiRemapStereoForOrb(const cv::Mat &, const cv::Mat &, cv::Mat &, cv::Mat &, const cv::Mat &, const cv::Mat &,
+                          const cv::Mat &, const cv::Mat &)
+{
+    return false;
+}
+#endif
+
 bool GetFileMTime(const std::string& path, time_t& outTime)
 {
     struct stat st {};
@@ -360,8 +564,11 @@ bool System::PrepareStereoImagesForTracking(const cv::Mat &imLeft, const cv::Mat
         cv::Mat M1r = settings_->M1r();
         cv::Mat M2r = settings_->M2r();
 
-        cv::remap(imLeft, imLeftPrepared, M1l, M2l, cv::INTER_LINEAR);
-        cv::remap(imRight, imRightPrepared, M1r, M2r, cv::INTER_LINEAR);
+        if(!VpiRemapStereoForOrb(imLeft, imRight, imLeftPrepared, imRightPrepared, M1l, M2l, M1r, M2r))
+        {
+            cv::remap(imLeft, imLeftPrepared, M1l, M2l, cv::INTER_LINEAR);
+            cv::remap(imRight, imRightPrepared, M1r, M2r, cv::INTER_LINEAR);
+        }
     }
     else if(settings_ && settings_->needToResize()){
         cv::resize(imLeft,imLeftPrepared,settings_->newImSize());
@@ -461,8 +668,11 @@ Sophus::SE3f System::TrackStereoWithFeatures(const cv::Mat &imLeft, const cv::Ma
         cv::Mat M1r = settings_->M1r();
         cv::Mat M2r = settings_->M2r();
 
-        cv::remap(imLeft, imLeftToFeed, M1l, M2l, cv::INTER_LINEAR);
-        cv::remap(imRight, imRightToFeed, M1r, M2r, cv::INTER_LINEAR);
+        if(!VpiRemapStereoForOrb(imLeft, imRight, imLeftToFeed, imRightToFeed, M1l, M2l, M1r, M2r))
+        {
+            cv::remap(imLeft, imLeftToFeed, M1l, M2l, cv::INTER_LINEAR);
+            cv::remap(imRight, imRightToFeed, M1r, M2r, cv::INTER_LINEAR);
+        }
     }
     else if(settings_ && settings_->needToResize()){
         cv::resize(imLeft,imLeftToFeed,settings_->newImSize());

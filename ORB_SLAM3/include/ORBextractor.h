@@ -58,6 +58,7 @@ public:
                     cv::OutputArray _descriptors, std::vector<int> &vLappingArea);
     bool ComputeDescriptorsAtKeypoints(cv::InputArray _image, std::vector<cv::KeyPoint>& _keypoints,
                                        cv::OutputArray _descriptors);
+    bool LastExtractionUsedCuda() const { return mbLastExtractionUsedCuda; }
 
     int inline GetLevels(){
         return nlevels;}
@@ -107,6 +108,7 @@ protected:
     std::vector<float> mvInvScaleFactor;    
     std::vector<float> mvLevelSigma2;
     std::vector<float> mvInvLevelSigma2;
+    bool mbLastExtractionUsedCuda{false};
 };
 
 } //namespace ORB_SLAM

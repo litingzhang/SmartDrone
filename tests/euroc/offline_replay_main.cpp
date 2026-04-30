@@ -51,7 +51,14 @@ struct OfflineReplayOptions {
     float lkLoopScale{1.20f};
     float lkLoopRelaxation{1.40f};
     std::string lkPerFrameAcceleration{"cpu"};
+    std::string orbAcceleration{"cpu"};
 };
+
+bool SuperPointLightGlueInjectionEnabled()
+{
+    const char *value = std::getenv("SMART_DRONE_SUPERPOINT_LIGHTGLUE_INJECT");
+    return value != nullptr && std::string(value) == "1";
+}
 
 struct LoopClosureCorrectionSummary {
     bool enabled{false};
@@ -62,6 +69,51 @@ struct LoopClosureCorrectionSummary {
     float scale{1.0f};
     float relaxation{1.0f};
 };
+
+bool ConvertOrbEuRoCTrajectoryToReplayCsv(const fs::path &trajectoryPath, const fs::path &csvPath)
+{
+    std::ifstream input(trajectoryPath);
+    if (!input) {
+        std::cerr << "failed to open ORB EuRoC trajectory: " << trajectoryPath << "\n";
+        return false;
+    }
+
+    std::ofstream csv(csvPath);
+    if (!csv) {
+        std::cerr << "failed to open output csv: " << csvPath << "\n";
+        return false;
+    }
+
+    csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
+           "xfeat_used,xfeat_raw_left,xfeat_raw_right,xfeat_stereo,xfeat_injected_left,xfeat_injected_right,"
+           "xfeat_worker_ms,xfeat_match_ms,xfeat_total_ms,orb_track_ms,orb_extract_ms,orb_stereo_ms,"
+           "inliers,tracked_map,local_map\n";
+
+    size_t frameId = 0;
+    std::string line;
+    while (std::getline(input, line)) {
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        std::stringstream ss(line);
+        double timestampNs = 0.0;
+        double x = 0.0;
+        double y = 0.0;
+        double z = 0.0;
+        double qx = 0.0;
+        double qy = 0.0;
+        double qz = 0.0;
+        double qw = 1.0;
+        if (!(ss >> timestampNs >> x >> y >> z >> qx >> qy >> qz >> qw)) {
+            continue;
+        }
+        csv << frameId++ << ',' << static_cast<uint64_t>(std::llround(timestampNs)) << ",2,0,1," << x << ',' << y
+            << ',' << z << ',' << qw << ',' << qx << ',' << qy << ',' << qz
+            << ",0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\n";
+    }
+
+    return frameId > 0;
+}
 
 struct Vec3f {
     float x{0.0f};
@@ -86,11 +138,12 @@ const char *UsageText()
         "  --settings <file>     ORB settings YAML path\n"
         "  --sensor-mode <mode>  stereo|stereo-imu|mono|mono-imu\n"
         "  --stereo-only         Shortcut for --sensor-mode stereo\n"
-        "  --feature-frontend <mode> orb|xfeat|lk|lk_gftt_per_frame, default xfeat\n"
-        "  --xfeat-python <bin>  Python executable for XFeat worker, default python3\n"
-        "  --xfeat-repo <dir>    XFeat repo root, default accelerated_features\n"
-        "  --xfeat-worker <file> XFeat worker script path, default scripts/xfeat_keypoint_worker.py\n"
-        "  --xfeat-device <dev>  XFeat device auto|cpu|cuda, default auto\n"
+        "  --feature-frontend <mode> orb|xfeat|superpoint_lightglue|lk|lk_gftt_per_frame, default xfeat\n"
+        "  --xfeat-python <bin>  Python executable for external feature worker, default python3\n"
+        "  --xfeat-repo <dir>    External feature repo root, default accelerated_features\n"
+        "  --xfeat-worker <file> External feature worker script path\n"
+        "                       default scripts/xfeat_keypoint_worker.py or scripts/superpoint_lightglue_worker.py\n"
+        "  --xfeat-device <dev>  External feature device auto|cpu|cuda, default auto\n"
         "  --xfeat-top-k <n>     XFeat top-k candidate count, default 1024\n"
         "  --xfeat-max-points <n> XFeat injected point budget, default 768\n"
         "  --xfeat-input-max-width <n>  XFeat input width limit, default 640\n"
@@ -105,7 +158,41 @@ const char *UsageText()
         "  --lk-runtime-loop-closure Enable image-based LK keyframe loop closure during replay\n"
         "  --lk-loop-scale <f>   Sim3 scale used by LK loop closure, default 1.20\n"
         "  --lk-loop-relax <f>   Loop residual relaxation factor, default 1.40\n"
-        "  --lk-per-frame-accel <auto|cpu|vpi-cuda>  Per-frame LK GFTT stereo backend, default cpu\n";
+        "  --lk-per-frame-accel <auto|cpu|vpi-cuda>  Per-frame LK GFTT stereo backend, default cpu\n"
+        "  --orb-accel <cpu|cuda|vpi-remap>  ORB acceleration/preprocess mode, default cpu\n";
+}
+
+std::string NormalizeOrbAccelerationText(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (value == "cuda" || value == "gpu" || value == "opencv_cuda" || value == "opencv-cuda") {
+        return "cuda";
+    }
+    if (value == "vpi" || value == "vpi_remap" || value == "vpi-remap" || value == "vpi_cuda_remap" ||
+        value == "vpi-cuda-remap") {
+        return "vpi-remap";
+    }
+    return "cpu";
+}
+
+void ApplyOrbAccelerationEnvironment(const std::string &acceleration)
+{
+    const std::string normalized = NormalizeOrbAccelerationText(acceleration);
+    if (normalized == "cuda") {
+        setenv("SMART_DRONE_ORB_ACCEL", "cuda", 1);
+        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
+        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+    } else if (normalized == "vpi-remap") {
+        unsetenv("SMART_DRONE_ORB_ACCEL");
+        setenv("SMART_DRONE_ORB_VPI_REMAP", "1", 1);
+        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+    } else {
+        unsetenv("SMART_DRONE_ORB_ACCEL");
+        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
+        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+    }
 }
 
 std::string GetOptionValue(int argc, char **argv, const char *name, const std::string &defaultValue)
@@ -183,7 +270,10 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
         ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-python", opts.xfeatPython), argc > 0 ? argv[0] : nullptr);
     opts.xfeatRepo =
         ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-repo", opts.xfeatRepo), argc > 0 ? argv[0] : nullptr);
-    opts.xfeatWorkerScript = ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-worker", opts.xfeatWorkerScript),
+    const std::string defaultWorker = opts.featureFrontend == FeatureFrontend::SuperPointLightGlue
+                                          ? "scripts/superpoint_lightglue_worker.py"
+                                          : opts.xfeatWorkerScript;
+    opts.xfeatWorkerScript = ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-worker", defaultWorker),
                                                 argc > 0 ? argv[0] : nullptr);
     opts.xfeatDevice = GetOptionValue(argc, argv, "--xfeat-device", opts.xfeatDevice);
     opts.xfeatTopK = GetOptionInt(argc, argv, "--xfeat-top-k", opts.xfeatTopK);
@@ -196,6 +286,7 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     opts.lkLoopScale = GetOptionFloat(argc, argv, "--lk-loop-scale", opts.lkLoopScale);
     opts.lkLoopRelaxation = GetOptionFloat(argc, argv, "--lk-loop-relax", opts.lkLoopRelaxation);
     opts.lkPerFrameAcceleration = GetOptionValue(argc, argv, "--lk-per-frame-accel", "cpu");
+    opts.orbAcceleration = NormalizeOrbAccelerationText(GetOptionValue(argc, argv, "--orb-accel", "cpu"));
     opts.vocab = ResolveRuntimePath(GetOptionValue(argc, argv, "--vocab", opts.vocab), argc > 0 ? argv[0] : nullptr);
     opts.settings =
         ResolveRuntimePath(GetOptionValue(argc, argv, "--settings", DefaultSettingsForSensorMode(opts.sensorMode)),
@@ -439,6 +530,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     smartdrone::tests::ReplayCameraProvider camera(dataset);
     smartdrone::tests::ReplayImuProvider imu(dataset);
     const auto sensor = ResolveOrbSensor(opts.sensorMode);
+    ApplyOrbAccelerationEnvironment(opts.orbAcceleration);
     auto orbSystem = std::make_unique<ORB_SLAM3::System>(opts.vocab, opts.settings, sensor, false);
     smartdrone::adapters::slam::OrbSlam3Engine slamEngine(std::move(orbSystem), ResolveOrbInputMode(opts.sensorMode),
                                                           UseImu(opts.sensorMode), opts.settings);
@@ -450,11 +542,13 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     smartdrone::adapters::slam::XFeatFrontendClient xfeatFrontendClient;
     std::string xfeatErr;
     if (opts.featureFrontend == FeatureFrontend::XFeat ||
+        (opts.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLightGlueInjectionEnabled()) ||
         (opts.featureFrontend == FeatureFrontend::LK && opts.lkXFeatSeeding)) {
         slamEngine.SetXFeatFrontendClient(&xfeatFrontendClient);
         if (!xfeatFrontendClient.Start(opts.xfeatPython, opts.xfeatWorkerScript, opts.xfeatRepo, opts.xfeatDevice,
                                        opts.xfeatTopK, opts.xfeatMaxPoints, &xfeatErr)) {
-            std::cerr << "warning: xfeat frontend start failed, falling back to orb-only replay: " << xfeatErr << "\n";
+            std::cerr << "warning: external feature frontend start failed, falling back to orb-only replay: "
+                      << xfeatErr << "\n";
             slamEngine.SetFeatureFrontend(FeatureFrontend::Orb);
             slamEngine.SetXFeatFrontendClient(nullptr);
         }
@@ -481,19 +575,17 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     if (!opts.summaryJson.empty() && !opts.summaryJson.parent_path().empty()) {
         fs::create_directories(opts.summaryJson.parent_path());
     }
-    std::ofstream csv(opts.outputCsv);
-    if (!csv) {
-        std::cerr << "failed to open output csv: " << opts.outputCsv << "\n";
-        return 1;
-    }
 
-    csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
-           "xfeat_used,xfeat_raw_left,xfeat_raw_right,xfeat_stereo,xfeat_injected_left,xfeat_injected_right,"
-           "xfeat_worker_ms,xfeat_match_ms,xfeat_total_ms,inliers,tracked_map,local_map\n";
     size_t poseValidCount = 0;
     size_t trackingOkCount = 0;
     size_t trackingLostCount = 0;
     size_t identityPoseCount = 0;
+    double orbTrackMsSum = 0.0;
+    double orbExtractMsSum = 0.0;
+    double orbStereoMsSum = 0.0;
+    double orbTrackMsMax = 0.0;
+    double orbExtractMsMax = 0.0;
+    double orbStereoMsMax = 0.0;
     for (const auto &sample : outputs) {
         if (sample.poseValid) {
             ++poseValidCount;
@@ -510,15 +602,53 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         if (identityPose) {
             ++identityPoseCount;
         }
-        csv << sample.frameId << ',' << sample.captureTimestampNs << ',' << sample.trackingState << ','
-            << sample.mapId << ',' << (sample.poseValid ? 1 : 0) << ',' << sample.pose.x << ',' << sample.pose.y
-            << ',' << sample.pose.z << ',' << sample.pose.qw << ',' << sample.pose.qx << ',' << sample.pose.qy
-            << ',' << sample.pose.qz << ',' << sample.imuSampleCount << ',' << (sample.usedXFeatFrontend ? 1 : 0)
-            << ',' << sample.xfeatRawLeftCount << ',' << sample.xfeatRawRightCount << ','
-            << sample.xfeatMatchedStereoCount << ',' << sample.xfeatInjectedLeftCount << ','
-            << sample.xfeatInjectedRightCount << ',' << sample.xfeatWorkerTotalMs << ',' << sample.xfeatStereoMatchMs
-            << ',' << sample.xfeatTotalMs << ',' << sample.matchesInliers << ',' << sample.trackedMapPointCount << ','
-            << sample.localMapPointCount << '\n';
+        orbTrackMsSum += sample.orbTrackMs;
+        orbExtractMsSum += sample.orbExtractMs;
+        orbStereoMsSum += sample.orbStereoMatchMs;
+        orbTrackMsMax = std::max(orbTrackMsMax, sample.orbTrackMs);
+        orbExtractMsMax = std::max(orbExtractMsMax, sample.orbExtractMs);
+        orbStereoMsMax = std::max(orbStereoMsMax, sample.orbStereoMatchMs);
+    }
+    const double frameCountForMean = static_cast<double>(std::max<size_t>(1, outputs.size()));
+    const double orbTrackMsMean = orbTrackMsSum / frameCountForMean;
+    const double orbExtractMsMean = orbExtractMsSum / frameCountForMean;
+    const double orbStereoMsMean = orbStereoMsSum / frameCountForMean;
+
+    const bool useOrbOfficialEuRoC =
+        opts.featureFrontend == FeatureFrontend::Orb && !UseImu(opts.sensorMode) && opts.sensorMode == SensorMode::Stereo;
+    fs::path orbEuRoCTrajectoryPath;
+    if (useOrbOfficialEuRoC) {
+        orbEuRoCTrajectoryPath = opts.outputCsv;
+        orbEuRoCTrajectoryPath += ".orb_euroc.txt";
+        if (!slamEngine.ShutdownAndSaveOrbTrajectoryEuRoC(orbEuRoCTrajectoryPath.string()) ||
+            !ConvertOrbEuRoCTrajectoryToReplayCsv(orbEuRoCTrajectoryPath, opts.outputCsv)) {
+            std::cerr << "failed to export ORB official EuRoC trajectory\n";
+            return 1;
+        }
+    } else {
+        std::ofstream csv(opts.outputCsv);
+        if (!csv) {
+            std::cerr << "failed to open output csv: " << opts.outputCsv << "\n";
+            return 1;
+        }
+
+        csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
+               "xfeat_used,xfeat_raw_left,xfeat_raw_right,xfeat_stereo,xfeat_injected_left,xfeat_injected_right,"
+               "xfeat_worker_ms,xfeat_match_ms,xfeat_total_ms,orb_track_ms,orb_extract_ms,orb_stereo_ms,"
+               "inliers,tracked_map,local_map\n";
+        for (const auto &sample : outputs) {
+            csv << sample.frameId << ',' << sample.captureTimestampNs << ',' << sample.trackingState << ','
+                << sample.mapId << ',' << (sample.poseValid ? 1 : 0) << ',' << sample.pose.x << ',' << sample.pose.y
+                << ',' << sample.pose.z << ',' << sample.pose.qw << ',' << sample.pose.qx << ',' << sample.pose.qy
+                << ',' << sample.pose.qz << ',' << sample.imuSampleCount << ',' << (sample.usedXFeatFrontend ? 1 : 0)
+                << ',' << sample.xfeatRawLeftCount << ',' << sample.xfeatRawRightCount << ','
+                << sample.xfeatMatchedStereoCount << ',' << sample.xfeatInjectedLeftCount << ','
+                << sample.xfeatInjectedRightCount << ',' << sample.xfeatWorkerTotalMs << ','
+                << sample.xfeatStereoMatchMs << ',' << sample.xfeatTotalMs << ',' << sample.orbTrackMs << ','
+                << sample.orbExtractMs << ',' << sample.orbStereoMatchMs << ',' << sample.matchesInliers << ','
+                << sample.trackedMapPointCount << ',' << sample.localMapPointCount << '\n';
+        }
+        csv.flush();
     }
 
     std::cout << "offline replay complete\n";
@@ -527,6 +657,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     std::cout << "  vocab: " << opts.vocab << "\n";
     std::cout << "  sensor_mode: " << ToSensorModeText(opts.sensorMode) << "\n";
     std::cout << "  feature_frontend: " << ToFeatureFrontendText(opts.featureFrontend) << "\n";
+    std::cout << "  orb_accel: " << opts.orbAcceleration << "\n";
     std::cout << "  lk_xfeat_seeding: " << (opts.lkXFeatSeeding ? "Y" : "N") << "\n";
     std::cout << "  lk_per_frame_accel: " << opts.lkPerFrameAcceleration << "\n";
     std::cout << "  frames_out: " << outputs.size() << "\n";
@@ -534,6 +665,12 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     std::cout << "  tracking_ok_frames: " << trackingOkCount << "\n";
     std::cout << "  tracking_lost_frames: " << trackingLostCount << "\n";
     std::cout << "  identity_pose_frames: " << identityPoseCount << "\n";
+    std::cout << "  orb_track_ms_mean/max: " << orbTrackMsMean << "/" << orbTrackMsMax << "\n";
+    std::cout << "  orb_extract_ms_mean/max: " << orbExtractMsMean << "/" << orbExtractMsMax << "\n";
+    std::cout << "  orb_stereo_ms_mean/max: " << orbStereoMsMean << "/" << orbStereoMsMax << "\n";
+    if (!orbEuRoCTrajectoryPath.empty()) {
+        std::cout << "  orb_euroc_trajectory: " << orbEuRoCTrajectoryPath << "\n";
+    }
     if (loopClosureSummary.enabled) {
         std::cout << "  lk_loop_closure_anchors: " << loopClosureSummary.anchors << "\n";
         std::cout << "  lk_loop_closure_visual_edges: " << loopClosureSummary.visualLoopEdges << "\n";
@@ -556,6 +693,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << "  \"vocab\": \"" << opts.vocab << "\",\n"
                 << "  \"sensor_mode\": \"" << ToSensorModeText(opts.sensorMode) << "\",\n"
                 << "  \"feature_frontend\": \"" << ToFeatureFrontendText(opts.featureFrontend) << "\",\n"
+                << "  \"orb_accel\": \"" << opts.orbAcceleration << "\",\n"
                 << "  \"lk_xfeat_seeding\": " << (opts.lkXFeatSeeding ? "true" : "false") << ",\n"
                 << "  \"lk_per_frame_accel\": \"" << opts.lkPerFrameAcceleration << "\",\n"
                 << "  \"frames_out\": " << outputs.size() << ",\n"
@@ -563,6 +701,12 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << "  \"tracking_ok_frames\": " << trackingOkCount << ",\n"
                 << "  \"tracking_lost_frames\": " << trackingLostCount << ",\n"
                 << "  \"identity_pose_frames\": " << identityPoseCount << ",\n"
+                << "  \"orb_track_ms_mean\": " << orbTrackMsMean << ",\n"
+                << "  \"orb_track_ms_max\": " << orbTrackMsMax << ",\n"
+                << "  \"orb_extract_ms_mean\": " << orbExtractMsMean << ",\n"
+                << "  \"orb_extract_ms_max\": " << orbExtractMsMax << ",\n"
+                << "  \"orb_stereo_ms_mean\": " << orbStereoMsMean << ",\n"
+                << "  \"orb_stereo_ms_max\": " << orbStereoMsMax << ",\n"
                 << "  \"lk_loop_closure_enabled\": " << (loopClosureSummary.enabled ? "true" : "false") << ",\n"
                 << "  \"lk_loop_closure_anchors\": " << loopClosureSummary.anchors << ",\n"
                 << "  \"lk_loop_closure_visual_edges\": " << loopClosureSummary.visualLoopEdges << ",\n"
@@ -570,13 +714,13 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << "  \"lk_loop_closure_terminal_drift_m\": " << loopClosureSummary.terminalDriftMeters << ",\n"
                 << "  \"lk_loop_closure_scale\": " << loopClosureSummary.scale << ",\n"
                 << "  \"lk_loop_closure_relaxation\": " << loopClosureSummary.relaxation << ",\n"
+                << "  \"orb_euroc_trajectory\": \"" << orbEuRoCTrajectoryPath.string() << "\",\n"
                 << "  \"output_csv\": \"" << opts.outputCsv.string() << "\"\n"
                 << "}\n";
         summary.flush();
         std::cout << "  summary_json: " << opts.summaryJson << "\n";
     }
 
-    csv.flush();
     xfeatFrontendClient.Stop();
     std::cout.flush();
     std::_Exit(0);

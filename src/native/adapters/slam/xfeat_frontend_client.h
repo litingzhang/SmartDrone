@@ -62,6 +62,7 @@ class XFeatFrontendClient {
     XFeatFeatureSet m_prevStereoLeftFeatures;
     cv::Mat m_prevStereoLeftGray;
     bool m_havePrevStereoLeftFeatures{false};
+    bool m_preserveStereoPairOrder{false};
 
     static bool PrepareGrayImage(const cv::Mat &gray, cv::Mat &gray8, std::string *err);
     static std::vector<int> ComputeTemporalStableIndices(const XFeatFeatureSet &previous, const cv::Mat &previousGray,

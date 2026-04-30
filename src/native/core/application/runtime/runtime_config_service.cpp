@@ -1,7 +1,9 @@
 #include "core/application/runtime/runtime_config_service.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <variant>
 
 #include "core/application/config/app_args.h"
@@ -9,6 +11,61 @@
 #include "core/application/session/runtime_session_common.h"
 
 namespace smartdrone::core::application {
+namespace {
+
+std::string NormalizeOrbAcceleration(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (value == "cuda" || value == "gpu" || value == "opencv_cuda" || value == "opencv-cuda") {
+        return "cuda";
+    }
+    if (value == "vpi" || value == "vpi_remap" || value == "vpi-remap" || value == "vpi_cuda_remap" ||
+        value == "vpi-cuda-remap") {
+        return "vpi-remap";
+    }
+    if (value == "cpu" || value == "off" || value.empty()) {
+        return "cpu";
+    }
+    return value;
+}
+
+void ApplyOrbAccelerationEnvironment(const std::string &acceleration)
+{
+    if (NormalizeOrbAcceleration(acceleration) == "cuda") {
+#if defined(_WIN32)
+        _putenv_s("SMART_DRONE_ORB_ACCEL", "cuda");
+        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "");
+        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
+#else
+        setenv("SMART_DRONE_ORB_ACCEL", "cuda", 1);
+        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
+        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+#endif
+    } else if (NormalizeOrbAcceleration(acceleration) == "vpi-remap") {
+#if defined(_WIN32)
+        _putenv_s("SMART_DRONE_ORB_ACCEL", "");
+        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "1");
+        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
+#else
+        unsetenv("SMART_DRONE_ORB_ACCEL");
+        setenv("SMART_DRONE_ORB_VPI_REMAP", "1", 1);
+        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+#endif
+    } else {
+#if defined(_WIN32)
+        _putenv_s("SMART_DRONE_ORB_ACCEL", "");
+        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "");
+        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
+#else
+        unsetenv("SMART_DRONE_ORB_ACCEL");
+        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
+        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+#endif
+    }
+}
+
+} // namespace
 
 RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTuning &tuning, std::mutex &configMutex,
                                            RestartFn requestRestart)
@@ -18,8 +75,12 @@ RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTun
 
 bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::string *err)
 {
+    remote.orbAcceleration = NormalizeOrbAcceleration(remote.orbAcceleration);
     if (remote.featureFrontend == FeatureFrontend::XFeat) {
         remote.featureFrontend = FeatureFrontend::Orb;
+    }
+    if (remote.featureFrontend != FeatureFrontend::Orb) {
+        remote.orbAcceleration = "cpu";
     }
     if (remote.exposureUs <= 0 || !std::isfinite(remote.gain) || remote.gain < 0.0f || remote.pairMs <= 0 ||
         remote.slamInputFps < 0 ||
@@ -78,6 +139,13 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         }
         return false;
     }
+    if (remote.orbAcceleration != "cpu" && remote.orbAcceleration != "cuda" &&
+        remote.orbAcceleration != "vpi-remap") {
+        if (err) {
+            *err = "bad orb acceleration";
+        }
+        return false;
+    }
 
     bool restartNeeded = false;
     float effectiveTbcTx = remote.tbcTx;
@@ -108,6 +176,7 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         const bool lkSeedChanged = m_config.app.runtime.lkXFeatSeeding != remote.lkXFeatSeeding;
         const bool lkPerFrameAccelChanged =
             m_config.app.runtime.lkPerFrameAcceleration != remote.lkPerFrameAcceleration;
+        const bool orbAccelChanged = m_config.app.runtime.orbAcceleration != remote.orbAcceleration;
         cam.exposureUs = remote.exposureUs;
         cam.gain = remote.gain;
         cam.aeDisable = !remote.autoExposureEnabled;
@@ -130,6 +199,7 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         m_config.app.runtime.xfeatInputMaxHeight = remote.xfeatInputMaxHeight;
         m_config.app.runtime.lkXFeatSeeding = remote.lkXFeatSeeding;
         m_config.app.runtime.lkPerFrameAcceleration = remote.lkPerFrameAcceleration;
+        m_config.app.runtime.orbAcceleration = remote.orbAcceleration;
         m_config.app.sensorMode = remote.sensorMode;
         m_config.app.settings = ResolveSettingsForSensorMode(remote.sensorMode, m_config.app.settings);
         m_config.app.udp.ip = remote.udpIp;
@@ -174,8 +244,10 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         effectiveTbcYawDeg = m_config.app.runtime.tbcYawDeg;
         restartNeeded =
             sensorModeChanged || frontendChanged || aeModeChanged || uvcConfigChanged || orbChanged || xfeatChanged ||
-            lkSeedChanged || lkPerFrameAccelChanged;
+            lkSeedChanged || lkPerFrameAccelChanged || orbAccelChanged;
     }
+
+    ApplyOrbAccelerationEnvironment(remote.orbAcceleration);
 
     m_tuning.slamInputFps.store(remote.slamInputFps, std::memory_order_relaxed);
     m_tuning.slamOperationMode.store(static_cast<uint8_t>(remote.slamOperationMode), std::memory_order_relaxed);
@@ -444,6 +516,12 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
             } else {
                 return {false, "slam.lk_per_frame_accel type mismatch"};
             }
+        } else if (key == ConfigRegistry::kSlamOrbAcceleration) {
+            if (const auto *v = std::get_if<std::string>(&value)) {
+                remote.orbAcceleration = *v;
+            } else {
+                return {false, "slam.orb_accel type mismatch"};
+            }
         } else {
             return {false, "unsupported config key: " + key};
         }
@@ -466,7 +544,8 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
                           std::to_string(remote.xfeatInputMaxWidth) + "x" +
                           std::to_string(remote.xfeatInputMaxHeight) + " lk_seed=" +
                           (remote.lkXFeatSeeding ? "xfeat" : "gftt") +
-                          " lk_accel=" + remote.lkPerFrameAcceleration;
+                          " lk_accel=" + remote.lkPerFrameAcceleration +
+                          " orb_accel=" + remote.orbAcceleration;
     return {true, message};
 }
 
@@ -510,6 +589,7 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.xfeatInputMaxHeight = currentConfig.app.runtime.xfeatInputMaxHeight;
     remote.lkXFeatSeeding = currentConfig.app.runtime.lkXFeatSeeding;
     remote.lkPerFrameAcceleration = currentConfig.app.runtime.lkPerFrameAcceleration;
+    remote.orbAcceleration = currentConfig.app.runtime.orbAcceleration;
     return remote;
 }
 

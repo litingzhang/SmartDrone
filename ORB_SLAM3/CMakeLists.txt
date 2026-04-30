@@ -5,6 +5,10 @@ cmake_minimum_required(VERSION 3.16)
 project(ORB_SLAM3)
 
 option(ENABLE_ARM_CPU_TUNING "Enable tuned ARM CPU flags for the deployment target" ON)
+option(SMART_DRONE_ENABLE_OPENCV_CUDA_ORB "Enable experimental OpenCV CUDA ORB extraction path" OFF)
+option(SMART_DRONE_ENABLE_VPI "Enable NVIDIA VPI acceleration for ORB-SLAM3 image preprocessing" OFF)
+set(SMART_DRONE_OPENCV_CUDA_ORB_ROOT "" CACHE PATH "OpenCV install prefix that provides cudafeatures2d")
+set(SMART_DRONE_VPI_ROOT "" CACHE PATH "NVIDIA VPI root, e.g. /opt/nvidia/vpi2")
 set(ARM_CPU_TUNE "cortex-a76" CACHE STRING "ARM CPU passed to -mcpu/-mtune when tuning is enabled")
 
 # set(CMAKE_SYSROOT "/home/ltz/sysroots/cm5")
@@ -32,10 +36,39 @@ endif()
 
 LIST(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_modules)
 
-find_package(OpenCV 4.2)
-   if(NOT OpenCV_FOUND)
-      message(FATAL_ERROR "OpenCV >= 4.2 not found.")
-   endif()
+set(_ORB_SLAM3_OPENCV_COMPONENTS core features2d highgui imgproc)
+if(SMART_DRONE_ENABLE_OPENCV_CUDA_ORB AND SMART_DRONE_OPENCV_CUDA_ORB_ROOT)
+  set(_opencv_cuda_orb_lib_dir "${SMART_DRONE_OPENCV_CUDA_ORB_ROOT}/lib")
+  set(OpenCV_INCLUDE_DIRS
+      "${SMART_DRONE_OPENCV_CUDA_ORB_ROOT}/include/opencv4"
+      "${CMAKE_SYSROOT}/usr/include/opencv4")
+  set(OpenCV_LIBS
+      "${_opencv_cuda_orb_lib_dir}/libopencv_cudafeatures2d.so"
+      "${_opencv_cuda_orb_lib_dir}/libopencv_cudawarping.so"
+      "${_opencv_cuda_orb_lib_dir}/libopencv_cudaimgproc.so"
+      "${_opencv_cuda_orb_lib_dir}/libopencv_cudafilters.so"
+      "${_opencv_cuda_orb_lib_dir}/libopencv_cudaarithm.so"
+      "${_opencv_cuda_orb_lib_dir}/libopencv_calib3d.so"
+      "${_opencv_cuda_orb_lib_dir}/libopencv_features2d.so"
+      "${_opencv_cuda_orb_lib_dir}/libopencv_flann.so"
+      "${_opencv_cuda_orb_lib_dir}/libopencv_imgproc.so"
+      "${_opencv_cuda_orb_lib_dir}/libopencv_core.so")
+  set(OpenCV_VERSION "4.2.0")
+  foreach(_opencv_lib IN LISTS OpenCV_LIBS)
+    if(NOT EXISTS "${_opencv_lib}")
+      message(FATAL_ERROR "OpenCV CUDA ORB library not found: ${_opencv_lib}")
+    endif()
+  endforeach()
+  message(STATUS "Using manual OpenCV CUDA ORB prefix: ${SMART_DRONE_OPENCV_CUDA_ORB_ROOT}")
+elseif(SMART_DRONE_ENABLE_OPENCV_CUDA_ORB)
+  list(APPEND _ORB_SLAM3_OPENCV_COMPONENTS cudafeatures2d cudawarping)
+  find_package(OpenCV 4.2 REQUIRED COMPONENTS ${_ORB_SLAM3_OPENCV_COMPONENTS})
+else()
+  find_package(OpenCV 4.2 REQUIRED COMPONENTS ${_ORB_SLAM3_OPENCV_COMPONENTS})
+endif()
+if(NOT OpenCV_LIBS)
+   message(FATAL_ERROR "OpenCV >= 4.2 not found.")
+endif()
 
 find_package(Boost REQUIRED COMPONENTS serialization)
 
@@ -52,6 +85,7 @@ ${PROJECT_SOURCE_DIR}/include
 ${PROJECT_SOURCE_DIR}/include/CameraModels
 ${PROJECT_SOURCE_DIR}/Thirdparty/Sophus
 ${EIGEN3_INCLUDE_DIR}
+${OpenCV_INCLUDE_DIRS}
 # ${Pangolin_INCLUDE_DIRS}
 )
 
@@ -130,6 +164,48 @@ DBoW2
 g2o
 -lcrypto
 )
+
+if(SMART_DRONE_ENABLE_OPENCV_CUDA_ORB)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE SMART_DRONE_HAS_OPENCV_CUDA_ORB=1)
+  message(STATUS "Experimental OpenCV CUDA ORB path enabled")
+  if(SMART_DRONE_OPENCV_CUDA_ORB_ROOT)
+    target_link_directories(${PROJECT_NAME} PRIVATE "${SMART_DRONE_OPENCV_CUDA_ORB_ROOT}/lib")
+    target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-rpath-link,${SMART_DRONE_OPENCV_CUDA_ORB_ROOT}/lib")
+  endif()
+endif()
+
+if(SMART_DRONE_ENABLE_VPI)
+  set(_ORB_SLAM3_VPI_CANDIDATE_ROOTS
+    "${SMART_DRONE_VPI_ROOT}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../output/vpi2_jetson"
+    "${CMAKE_SYSROOT}/opt/nvidia/vpi2"
+    "/opt/nvidia/vpi2"
+  )
+  foreach(_vpi_root IN LISTS _ORB_SLAM3_VPI_CANDIDATE_ROOTS)
+    if(NOT _vpi_root)
+      continue()
+    endif()
+    if(EXISTS "${_vpi_root}/include/vpi/VPI.h" AND EXISTS "${_vpi_root}/lib/aarch64-linux-gnu/libnvvpi.so")
+      set(_ORB_SLAM3_RESOLVED_VPI_ROOT "${_vpi_root}")
+      break()
+    endif()
+  endforeach()
+  if(_ORB_SLAM3_RESOLVED_VPI_ROOT)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SMART_DRONE_HAS_VPI=1)
+    target_include_directories(${PROJECT_NAME} PRIVATE "${_ORB_SLAM3_RESOLVED_VPI_ROOT}/include")
+    target_link_directories(${PROJECT_NAME} PRIVATE "${_ORB_SLAM3_RESOLVED_VPI_ROOT}/lib/aarch64-linux-gnu")
+    target_link_libraries(${PROJECT_NAME} nvvpi)
+    target_link_options(${PROJECT_NAME} PRIVATE
+      "-Wl,-rpath-link,${_ORB_SLAM3_RESOLVED_VPI_ROOT}/lib/aarch64-linux-gnu"
+      "-Wl,--allow-shlib-undefined")
+    message(STATUS "VPI remap path enabled for ORB-SLAM3: ${_ORB_SLAM3_RESOLVED_VPI_ROOT}")
+  else()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SMART_DRONE_HAS_VPI=0)
+    message(WARNING "SMART_DRONE_ENABLE_VPI=ON but VPI root was not found; ORB-SLAM3 will use CPU remap")
+  endif()
+else()
+  target_compile_definitions(${PROJECT_NAME} PRIVATE SMART_DRONE_HAS_VPI=0)
+endif()
 
 # If RealSense SDK is found the library is added and its examples compiled
 # if(realsense2_FOUND)

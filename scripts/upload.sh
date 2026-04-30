@@ -128,6 +128,7 @@ STEREO_YAML="$ARTIFACT_ROOT/config/stereo.yaml"
 MONO_YAML="$ARTIFACT_ROOT/config/mono_right.yaml"
 MONO_IMU_YAML="$ARTIFACT_ROOT/config/mono_inertial_right.yaml"
 XFEAT_WORKER_SCRIPT="$ARTIFACT_ROOT/scripts/xfeat_keypoint_worker.py"
+SUPERPOINT_LIGHTGLUE_WORKER_SCRIPT="$ARTIFACT_ROOT/scripts/superpoint_lightglue_worker.py"
 ORBVOC_FILE="$ARTIFACT_ROOT/ORBvoc.txt"
 ACCELERATED_FEATURES_DIR="$ARTIFACT_ROOT/accelerated_features"
 SSH_PASSWORD="${SSH_PASSWORD:-}"
@@ -271,6 +272,9 @@ if [ "$ADB_ONLY" != "1" ]; then
         upload_atomic "$MONO_IMU_YAML" "config/mono_inertial_right.yaml"
         if [ -f "$XFEAT_WORKER_SCRIPT" ]; then
             upload_atomic "$XFEAT_WORKER_SCRIPT" "scripts/xfeat_keypoint_worker.py"
+        fi
+        if [ -f "$SUPERPOINT_LIGHTGLUE_WORKER_SCRIPT" ]; then
+            upload_atomic "$SUPERPOINT_LIGHTGLUE_WORKER_SCRIPT" "scripts/superpoint_lightglue_worker.py"
         fi
         if [ -f "$ORBVOC_FILE" ]; then
             upload_atomic "$ORBVOC_FILE" "ORBvoc.txt"

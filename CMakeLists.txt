@@ -25,6 +25,7 @@ set(SMART_DRONE_GPIOD_LIBRARY_DIRS "")
 set(SMART_DRONE_GPIOD_LIBRARIES gpiod)
 set(SMART_DRONE_GPIOD_CFLAGS_OTHER "")
 option(SMART_DRONE_ENABLE_VPI "Enable NVIDIA VPI acceleration when headers and libraries are available" OFF)
+option(SMART_DRONE_ENABLE_OPENCV_CUDA_ORB "Enable experimental OpenCV CUDA ORB extraction when supported" OFF)
 set(SMART_DRONE_VPI_ROOT "" CACHE PATH "NVIDIA VPI root, e.g. /opt/nvidia/vpi2")
 
 if(NOT BUILD_SMART_DRONE AND NOT ENABLE_UNIT_TESTS AND NOT ENABLE_OFFLINE_REPLAY)

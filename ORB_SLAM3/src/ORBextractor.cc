@@ -56,6 +56,16 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#ifdef SMART_DRONE_HAS_OPENCV_CUDA_ORB
+#include <opencv2/core/cuda.hpp>
+#include <opencv2/cudafeatures2d.hpp>
+#include <opencv2/cudawarping.hpp>
+#endif
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <mutex>
+#include <string>
 #include <vector>
 #include <iostream>
 
@@ -72,6 +82,49 @@ namespace ORB_SLAM3
     const int HALF_PATCH_SIZE = 15;
     const int EDGE_THRESHOLD = 19;
 
+    static bool IsOpenCvCudaOrbRequested()
+    {
+        const char *value = std::getenv("SMART_DRONE_ORB_ACCEL");
+        if (value == nullptr)
+            return false;
+
+        std::string normalized(value);
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return normalized == "opencv_cuda" || normalized == "cuda" || normalized == "gpu";
+    }
+
+    static bool IsOpenCvCudaStereoRefinementRequested()
+    {
+        const char *value = std::getenv("SMART_DRONE_ORB_CUDA_STEREO_REFINEMENT");
+        if (value == nullptr)
+            return false;
+
+        std::string normalized(value);
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "yes";
+    }
+
+    static bool IsOpenCvCudaPyramidRequested()
+    {
+        const char *value = std::getenv("SMART_DRONE_ORB_CUDA_PYRAMID");
+        if (value == nullptr)
+            return false;
+
+        std::string normalized(value);
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "yes" ||
+               normalized == "cuda" || normalized == "gpu";
+    }
+
+#ifdef SMART_DRONE_HAS_OPENCV_CUDA_ORB
+    static void WarmOpenCvCudaOrbContext();
+#endif
 
     static float IC_Angle(const Mat& image, Point2f pt,  const vector<int> & u_max)
     {
@@ -466,7 +519,70 @@ namespace ORB_SLAM3
             umax[v] = v0;
             ++v0;
         }
+
+#ifdef SMART_DRONE_HAS_OPENCV_CUDA_ORB
+        if (IsOpenCvCudaOrbRequested())
+            WarmOpenCvCudaOrbContext();
+#endif
     }
+
+#ifdef SMART_DRONE_HAS_OPENCV_CUDA_ORB
+    bool TryComputeOpenCvCudaPyramid(const Mat &image, const std::vector<float> &invScaleFactors,
+                                     std::vector<Mat> &imagePyramid)
+    {
+        if (!IsOpenCvCudaPyramidRequested())
+            return false;
+
+        try
+        {
+            if (cv::cuda::getCudaEnabledDeviceCount() <= 0)
+                return false;
+
+            static std::once_flag logOnce;
+            std::call_once(logOnce, []() {
+                std::cerr << "[orb_cuda_pyramid] backend=opencv_cuda_resize\n";
+            });
+
+            cv::cuda::setDevice(0);
+            cv::cuda::GpuMat previousLevel;
+            previousLevel.upload(image);
+
+            for (int level = 0; level < static_cast<int>(imagePyramid.size()); ++level)
+            {
+                const float scale = invScaleFactors[level];
+                const Size sz(cvRound(static_cast<float>(image.cols) * scale),
+                              cvRound(static_cast<float>(image.rows) * scale));
+                const Size wholeSize(sz.width + EDGE_THRESHOLD * 2, sz.height + EDGE_THRESHOLD * 2);
+                Mat temp(wholeSize, image.type());
+                imagePyramid[level] = temp(Rect(EDGE_THRESHOLD, EDGE_THRESHOLD, sz.width, sz.height));
+
+                if (level == 0)
+                {
+                    image.copyTo(imagePyramid[level]);
+                    copyMakeBorder(image, temp, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD,
+                                   BORDER_REFLECT_101);
+                    continue;
+                }
+
+                cv::cuda::GpuMat resizedLevel;
+                cv::cuda::resize(previousLevel, resizedLevel, sz, 0, 0, INTER_LINEAR);
+                resizedLevel.download(imagePyramid[level]);
+                copyMakeBorder(imagePyramid[level], temp, EDGE_THRESHOLD, EDGE_THRESHOLD, EDGE_THRESHOLD,
+                               EDGE_THRESHOLD, BORDER_REFLECT_101 + BORDER_ISOLATED);
+                previousLevel = resizedLevel;
+            }
+            return true;
+        }
+        catch (const cv::Exception &)
+        {
+            static std::once_flag warnOnce;
+            std::call_once(warnOnce, []() {
+                std::cerr << "[orb_cuda_pyramid] failed; fallback=cpu_pyramid\n";
+            });
+            return false;
+        }
+    }
+#endif
 
     static void computeOrientation(const Mat& image, vector<KeyPoint>& keypoints, const vector<int>& umax)
     {
@@ -1084,6 +1200,119 @@ namespace ORB_SLAM3
             computeOrbDescriptor(keypoints[i], image, &pattern[0], descriptors.ptr((int)i));
     }
 
+#ifdef SMART_DRONE_HAS_OPENCV_CUDA_ORB
+    struct OpenCvCudaOrbState
+    {
+        cv::Ptr<cv::cuda::ORB> orb;
+        cv::cuda::GpuMat image;
+        cv::cuda::GpuMat keypoints;
+        cv::cuda::GpuMat descriptors;
+        int nfeatures = -1;
+        int nlevels = -1;
+        int iniThFAST = -1;
+        double scaleFactor = -1.0;
+    };
+
+    static void WarmOpenCvCudaOrbContext()
+    {
+        static std::once_flag once;
+        std::call_once(once, []() {
+            if (cv::cuda::getCudaEnabledDeviceCount() <= 0)
+                return;
+
+            cv::cuda::setDevice(0);
+            cv::Ptr<cv::cuda::ORB> warmOrb =
+                cv::cuda::ORB::create(64, 1.2f, 1, EDGE_THRESHOLD, 0, 2, cv::ORB::HARRIS_SCORE, PATCH_SIZE, 20, false);
+            cv::Mat warmImage(64, 64, CV_8UC1, cv::Scalar(0));
+            cv::cuda::GpuMat warmGpuImage(warmImage);
+            cv::cuda::GpuMat warmKeypoints;
+            cv::cuda::GpuMat warmDescriptors;
+            warmOrb->detectAndComputeAsync(warmGpuImage, cv::cuda::GpuMat(), warmKeypoints, warmDescriptors, false);
+            cv::cuda::Stream::Null().waitForCompletion();
+        });
+    }
+
+    bool TryOpenCvCudaOrb(const Mat &image, int nfeatures, double scaleFactor, int nlevels, int iniThFAST,
+                          vector<KeyPoint> &_keypoints, OutputArray _descriptors,
+                          const std::vector<int> &vLappingArea, int &monoCount)
+    {
+        if (!IsOpenCvCudaOrbRequested())
+            return false;
+
+        try
+        {
+            if (cv::cuda::getCudaEnabledDeviceCount() <= 0)
+                return false;
+
+            WarmOpenCvCudaOrbContext();
+
+            static thread_local OpenCvCudaOrbState state;
+            const bool recreate = state.orb.empty() || state.nfeatures != nfeatures || state.nlevels != nlevels ||
+                                  state.iniThFAST != iniThFAST || state.scaleFactor != scaleFactor;
+            if (recreate)
+            {
+                state.orb = cv::cuda::ORB::create(nfeatures, static_cast<float>(scaleFactor), nlevels, EDGE_THRESHOLD, 0,
+                                                  2, cv::ORB::HARRIS_SCORE, PATCH_SIZE, std::max(1, iniThFAST), false);
+                state.nfeatures = nfeatures;
+                state.nlevels = nlevels;
+                state.iniThFAST = iniThFAST;
+                state.scaleFactor = scaleFactor;
+            }
+
+            state.image.upload(image);
+            state.keypoints.release();
+            state.descriptors.release();
+            state.orb->detectAndComputeAsync(state.image, cv::cuda::GpuMat(), state.keypoints, state.descriptors,
+                                             false);
+
+            vector<KeyPoint> cudaKeypoints;
+            state.orb->convert(state.keypoints, cudaKeypoints);
+            if (cudaKeypoints.empty() || state.descriptors.empty())
+                return false;
+
+            Mat descriptorsDownloaded;
+            state.descriptors.download(descriptorsDownloaded);
+            if (descriptorsDownloaded.empty() || descriptorsDownloaded.type() != CV_8U || descriptorsDownloaded.cols != 32 ||
+                descriptorsDownloaded.rows != static_cast<int>(cudaKeypoints.size()))
+            {
+                return false;
+            }
+
+            _descriptors.create(descriptorsDownloaded.rows, descriptorsDownloaded.cols, descriptorsDownloaded.type());
+            Mat descriptors = _descriptors.getMat();
+            _keypoints = vector<cv::KeyPoint>(cudaKeypoints.size());
+
+            const int overlapMin = vLappingArea.size() > 0 ? vLappingArea[0] : image.cols;
+            const int overlapMax = vLappingArea.size() > 1 ? vLappingArea[1] : -1;
+            int monoIndex = 0;
+            int stereoIndex = static_cast<int>(cudaKeypoints.size()) - 1;
+            for (int i = 0; i < static_cast<int>(cudaKeypoints.size()); ++i)
+            {
+                const KeyPoint &keypoint = cudaKeypoints[i];
+                if (keypoint.pt.x >= overlapMin && keypoint.pt.x <= overlapMax)
+                {
+                    _keypoints.at(stereoIndex) = keypoint;
+                    descriptorsDownloaded.row(i).copyTo(descriptors.row(stereoIndex));
+                    stereoIndex--;
+                }
+                else
+                {
+                    _keypoints.at(monoIndex) = keypoint;
+                    descriptorsDownloaded.row(i).copyTo(descriptors.row(monoIndex));
+                    monoIndex++;
+                }
+            }
+
+            monoCount = monoIndex;
+            return true;
+        }
+        catch (const cv::Exception &)
+        {
+            return false;
+        }
+    }
+#endif
+
     int ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPoint>& _keypoints,
                                   OutputArray _descriptors, std::vector<int> &vLappingArea)
     {
@@ -1094,7 +1323,22 @@ namespace ORB_SLAM3
         Mat image = _image.getMat();
         assert(image.type() == CV_8UC1 );
 
-        // Pre-compute the scale pyramid
+        mbLastExtractionUsedCuda = false;
+
+#ifdef SMART_DRONE_HAS_OPENCV_CUDA_ORB
+        int cudaMonoCount = 0;
+        if (TryOpenCvCudaOrb(image, nfeatures, scaleFactor, nlevels, iniThFAST, _keypoints, _descriptors, vLappingArea,
+                             cudaMonoCount))
+        {
+            mbLastExtractionUsedCuda = true;
+            if (IsOpenCvCudaStereoRefinementRequested())
+            {
+                ComputePyramid(image);
+            }
+            return cudaMonoCount;
+        }
+#endif
+
         ComputePyramid(image);
 
         vector < vector<KeyPoint> > allKeypoints;
@@ -1214,6 +1458,11 @@ namespace ORB_SLAM3
 
     void ORBextractor::ComputePyramid(cv::Mat image)
     {
+#ifdef SMART_DRONE_HAS_OPENCV_CUDA_ORB
+        if (TryComputeOpenCvCudaPyramid(image, mvInvScaleFactor, mvImagePyramid))
+            return;
+#endif
+
         for (int level = 0; level < nlevels; ++level)
         {
             float scale = mvInvScaleFactor[level];

@@ -44,6 +44,7 @@ std::vector<domain::ConfigDescriptor> ConfigRegistry::DefaultDescriptors()
              true, false),
         Make(kSlamLkPerFrameAcceleration, "Acceleration backend for LK GFTT per-frame mode: cpu or vpi-cuda", false,
              true, false),
+        Make(kSlamOrbAcceleration, "Acceleration backend for ORB: cpu, cuda, or vpi-remap", false, true, false),
         Make(kStreamUdpEnabled, "Enable UDP preview and telemetry streaming", false, true, false),
         Make(kStreamUdpIp, "Destination IP for UDP preview streaming", false, true, false),
         Make(kStreamSendImage, "Enable image preview streaming", false, true, false),

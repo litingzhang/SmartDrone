@@ -148,6 +148,8 @@ const char *FeatureFrontendName(FeatureFrontend frontend)
         return "droid_light";
     case FeatureFrontend::XFeat:
         return "xfeat";
+    case FeatureFrontend::SuperPointLightGlue:
+        return "superpoint_lightglue";
     case FeatureFrontend::Orb:
     default:
         return "orb";
@@ -192,7 +194,9 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         ComputeAdaptiveSlamInputFps(configuredSlamInputFps, m_ctx.aliases.fps, m_state.smoothedSlamMs);
     m_state.adaptiveSlamInputFps = effectiveSlamInputFps;
     const int xfeatLoadSheddingLevel =
-        ComputeXFeatLoadSheddingLevel(m_state.xfeatLoadSheddingLevel, effectiveFrontend == FeatureFrontend::XFeat,
+        ComputeXFeatLoadSheddingLevel(m_state.xfeatLoadSheddingLevel,
+                                      effectiveFrontend == FeatureFrontend::XFeat ||
+                                          effectiveFrontend == FeatureFrontend::SuperPointLightGlue,
                                       m_state.lastTrackingUsable, m_state.smoothedSlamMs, m_state.smoothedTotalMs);
     m_state.xfeatLoadSheddingLevel = xfeatLoadSheddingLevel;
     const auto [xfeatBudgetWidth, xfeatBudgetHeight] =
@@ -218,7 +222,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         m_state.lastLoggedConfiguredSlamInputFps = configuredSlamInputFps;
         m_state.lastLoggedEffectiveSlamInputFps = effectiveSlamInputFps;
     }
-    if (effectiveFrontend == FeatureFrontend::XFeat &&
+    if ((effectiveFrontend == FeatureFrontend::XFeat || effectiveFrontend == FeatureFrontend::SuperPointLightGlue) &&
         xfeatLoadSheddingLevel != m_state.lastLoggedXFeatLoadSheddingLevel) {
         std::cerr << "[slam] xfeat_load_profile=" << DescribeXFeatLoadSheddingLevel(xfeatLoadSheddingLevel)
                   << " input_max=" << xfeatBudgetWidth << "x" << xfeatBudgetHeight
@@ -487,6 +491,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 "\"xfeat_seed_age_frames\":%u,\"xfeat_seed_forwarded\":%d,"
                 "\"xfeat_prepare_ms\":%.3f,\"xfeat_write_ms\":%.3f,\"xfeat_read_ms\":%.3f,"
                 "\"xfeat_worker_ms\":%.3f,\"xfeat_match_ms\":%.3f,\"xfeat_total_ms\":%.3f,"
+                "\"orb_track_ms\":%.3f,\"orb_extract_ms\":%.3f,\"orb_stereo_ms\":%.3f,"
                 "\"xfeat_image_count\":%u,\"xfeat_payload_bytes\":%u,"
                 "\"pair_dt_ms\":%.3f,\"reject_dt_ms\":%.3f,\"pending_left\":%zu,\"pending_right\":%zu,"
                 "\"drop_left\":%llu,\"drop_right\":%llu,\"rate_drop\":%llu,"
@@ -507,7 +512,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 slamOutput.xfeatSeedAgeFrames, slamOutput.xfeatSeedForwardedCount,
                 slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
                 slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs, slamOutput.xfeatStereoMatchMs,
-                slamOutput.xfeatTotalMs, slamOutput.xfeatImageCount, slamOutput.xfeatPayloadBytes,
+                slamOutput.xfeatTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
+                slamOutput.orbStereoMatchMs, slamOutput.xfeatImageCount, slamOutput.xfeatPayloadBytes,
                 static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
                 static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
@@ -523,6 +529,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 "xfeat=%s stereo_warn=%s raw=%d/%d stereo=%d injected=%d/%d "
                 "seed=%llu->%llu age=%u fwd=%d "
                 "xfeat_ms=prep %.3f write %.3f read %.3f worker %.3f match %.3f total %.3f "
+                "orb_ms=track %.3f extract %.3f stereo %.3f "
                 "xfeat_io=%uimg/%ubytes "
                 "pair_dt=%.3f reject_dt=%.3f pend=%zu/%zu drop=%llu/%llu rate_drop=%llu "
                 "img_std=%.2f/%.2f sharp=%.2f/%.2f "
@@ -541,7 +548,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 slamOutput.xfeatSeedAgeFrames, slamOutput.xfeatSeedForwardedCount,
                 slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
                 slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs, slamOutput.xfeatStereoMatchMs,
-                slamOutput.xfeatTotalMs, slamOutput.xfeatImageCount, slamOutput.xfeatPayloadBytes,
+                slamOutput.xfeatTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
+                slamOutput.orbStereoMatchMs, slamOutput.xfeatImageCount, slamOutput.xfeatPayloadBytes,
                 static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
                 static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,

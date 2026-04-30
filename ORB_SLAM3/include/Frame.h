@@ -317,10 +317,8 @@ public:
 
     int mnDataset;
 
-#ifdef REGISTER_TIMES
-    double mTimeORB_Ext;
-    double mTimeStereoMatch;
-#endif
+    double mTimeORB_Ext{0.0};
+    double mTimeStereoMatch{0.0};
 
     bool mbExternalStereoInjected{false};
 

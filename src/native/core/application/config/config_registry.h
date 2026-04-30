@@ -44,6 +44,7 @@ class ConfigRegistry {
     static constexpr std::string_view kSlamXFeatInputMaxHeight = "slam.xfeat_input_max_height";
     static constexpr std::string_view kSlamLkXFeatSeeding = "slam.lk_xfeat_seeding";
     static constexpr std::string_view kSlamLkPerFrameAcceleration = "slam.lk_per_frame_accel";
+    static constexpr std::string_view kSlamOrbAcceleration = "slam.orb_accel";
 
     static std::vector<domain::ConfigDescriptor> DefaultDescriptors();
 

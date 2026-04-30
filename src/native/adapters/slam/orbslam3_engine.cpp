@@ -7,6 +7,7 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1124,6 +1125,99 @@ std::vector<StereoMatchPair> MatchStereoPairs(const XFeatFeatureSet &left, const
         return a.disparity < b.disparity;
     });
     return SelectGridBalancedPairs(matches, left.keypoints, leftGray.cols, leftGray.rows);
+}
+
+std::vector<StereoMatchPair> BuildAlignedStereoPairs(const XFeatFeatureSet &left, const XFeatFeatureSet &right,
+                                                     const cv::Mat &leftGray, const cv::Mat &rightGray)
+{
+    std::vector<StereoMatchPair> matches;
+    const size_t pairCount = std::min(left.keypoints.size(), right.keypoints.size());
+    if (pairCount == 0 || leftGray.empty() || rightGray.empty()) {
+        return matches;
+    }
+
+    cv::Mat leftGray32f;
+    cv::Mat rightGray32f;
+    leftGray.convertTo(leftGray32f, CV_32F);
+    rightGray.convertTo(rightGray32f, CV_32F);
+
+    matches.reserve(pairCount);
+    for (size_t i = 0; i < pairCount; ++i) {
+        const cv::Point2f &leftPt = left.keypoints[i];
+        const cv::Point2f &rightPt = right.keypoints[i];
+        const float yDelta = std::fabs(leftPt.y - rightPt.y);
+        const float disparity = leftPt.x - rightPt.x;
+        if (yDelta > kStereoMaxEpipolarDeltaPx || disparity < kStereoMinDisparityPx ||
+            disparity > kStereoMaxDisparityPx) {
+            continue;
+        }
+
+        float zncc = -1.0f;
+        if (!ComputePatchZncc(leftGray32f, leftPt, rightGray32f, rightPt, zncc) || zncc < kStereoMinZnccScore) {
+            continue;
+        }
+
+        const float quality = ComputeStereoCandidateQuality(1.0f, zncc, yDelta, disparity);
+        if (quality < kLkMinCandidateQuality) {
+            continue;
+        }
+        matches.push_back(
+            StereoMatchPair{static_cast<int>(i), static_cast<int>(i), 1.0f, zncc, disparity, quality});
+    }
+
+    std::sort(matches.begin(), matches.end(), [](const StereoMatchPair &a, const StereoMatchPair &b) {
+        if (a.quality != b.quality) {
+            return a.quality > b.quality;
+        }
+        if (a.zncc != b.zncc) {
+            return a.zncc > b.zncc;
+        }
+        return a.disparity < b.disparity;
+    });
+    return SelectGridBalancedPairs(matches, left.keypoints, leftGray.cols, leftGray.rows);
+}
+
+bool BuildExternalStereoFromFeatureMatches(const XFeatFeatureSet &left, const XFeatFeatureSet &right,
+                                           const std::vector<StereoMatchPair> &matches,
+                                           ORB_SLAM3::ExternalStereoFrameData &outData)
+{
+    if (!HasValidXFeatDescriptors(left) || !HasValidXFeatDescriptors(right) || matches.empty() ||
+        left.descriptors.cols != right.descriptors.cols) {
+        return false;
+    }
+
+    const int descriptorDim = left.descriptors.cols;
+    cv::Mat leftDescriptors(static_cast<int>(matches.size()), descriptorDim, CV_32F);
+    cv::Mat rightDescriptors(static_cast<int>(matches.size()), descriptorDim, CV_32F);
+    std::vector<cv::KeyPoint> leftKeypoints;
+    std::vector<cv::KeyPoint> rightKeypoints;
+    leftKeypoints.reserve(matches.size());
+    rightKeypoints.reserve(matches.size());
+
+    for (const StereoMatchPair &match : matches) {
+        if (match.leftIndex < 0 || match.rightIndex < 0 ||
+            static_cast<size_t>(match.leftIndex) >= left.keypoints.size() ||
+            static_cast<size_t>(match.rightIndex) >= right.keypoints.size()) {
+            continue;
+        }
+        const int row = static_cast<int>(leftKeypoints.size());
+        leftKeypoints.push_back(MakeKeyPoint(left.keypoints[static_cast<size_t>(match.leftIndex)]));
+        rightKeypoints.push_back(MakeKeyPoint(right.keypoints[static_cast<size_t>(match.rightIndex)]));
+        left.descriptors.row(match.leftIndex).copyTo(leftDescriptors.row(row));
+        right.descriptors.row(match.rightIndex).copyTo(rightDescriptors.row(row));
+    }
+
+    if (leftKeypoints.empty()) {
+        return false;
+    }
+
+    const int validRows = static_cast<int>(leftKeypoints.size());
+    outData.leftKeypoints = std::move(leftKeypoints);
+    outData.rightKeypoints = std::move(rightKeypoints);
+    outData.leftDescriptors = leftDescriptors.rowRange(0, validRows).clone();
+    outData.rightDescriptors = rightDescriptors.rowRange(0, validRows).clone();
+    outData.matchedStereoPairs = true;
+    return true;
 }
 
 std::vector<cv::Point2f> ToPointList(const std::vector<cv::KeyPoint> &keypoints)
@@ -3158,6 +3252,16 @@ void OrbSlam3Engine::Stop()
     }
 }
 
+bool OrbSlam3Engine::ShutdownAndSaveOrbTrajectoryEuRoC(const std::string &path)
+{
+    if (!m_system || path.empty()) {
+        return false;
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    m_system->SaveTrajectoryEuRoC(path);
+    return true;
+}
+
 void OrbSlam3Engine::StabilizeOutputPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
                                          int trackingState)
 {
@@ -3290,19 +3394,110 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     out.xfeatImageCount = m_lastXFeatImageCount;
     out.xfeatPayloadBytes = m_lastXFeatPayloadBytes;
 
-    if (m_useImu) {
-        if (monoMode) {
-            tcw = m_system->TrackMonocular(monoImage, input.frameTimeSec, input.imu);
-        } else {
-            tcw = m_system->TrackStereo(input.stereo.left.gray, input.stereo.right.gray, input.frameTimeSec,
-                                        input.imu);
+    const bool useExternalStereoFrontend = m_featureFrontend == FeatureFrontend::SuperPointLightGlue && !monoMode &&
+                                           m_xfeatFrontendClient != nullptr && m_xfeatFrontendClient->Running();
+    bool trackedByExternalFrontend = false;
+    if (useExternalStereoFrontend) {
+        const auto externalStartTp = std::chrono::steady_clock::now();
+        cv::Mat leftPrepared = EnsureGray8(input.stereo.left.gray);
+        cv::Mat rightPrepared = EnsureGray8(input.stereo.right.gray);
+        if (m_lkCalibrationLoaded && !leftPrepared.empty() && !rightPrepared.empty()) {
+            EnsureLkRectifier(leftPrepared.size());
+            if (!m_lkMap1x.empty() && !m_lkMap2x.empty()) {
+                cv::Mat leftRect;
+                cv::Mat rightRect;
+                cv::remap(leftPrepared, leftRect, m_lkMap1x, m_lkMap1y, cv::INTER_LINEAR);
+                cv::remap(rightPrepared, rightRect, m_lkMap2x, m_lkMap2y, cv::INTER_LINEAR);
+                leftPrepared = std::move(leftRect);
+                rightPrepared = std::move(rightRect);
+            }
         }
-    } else {
-        if (monoMode) {
-            tcw = m_system->TrackMonocular(monoImage, input.frameTimeSec);
-        } else {
-            tcw = m_system->TrackStereo(input.stereo.left.gray, input.stereo.right.gray, input.frameTimeSec);
+
+        float leftScaleX = 1.0f;
+        float leftScaleY = 1.0f;
+        float rightScaleX = 1.0f;
+        float rightScaleY = 1.0f;
+        const cv::Mat leftInput = BuildXFeatInputImage(leftPrepared, m_xfeatInputMaxWidth, m_xfeatInputMaxHeight,
+                                                       leftScaleX, leftScaleY);
+        const cv::Mat rightInput = BuildXFeatInputImage(rightPrepared, m_xfeatInputMaxWidth, m_xfeatInputMaxHeight,
+                                                        rightScaleX, rightScaleY);
+        XFeatFeatureSet leftFeatures;
+        XFeatFeatureSet rightFeatures;
+        std::string featureErr;
+        if (m_xfeatFrontendClient->DetectAndComputeStereo(leftInput, rightInput, leftFeatures, rightFeatures,
+                                                          &featureErr)) {
+            const XFeatFrontendClient::Stats stats = m_xfeatFrontendClient->LastStats();
+            m_lastXFeatPrepareMs = stats.prepareMs;
+            m_lastXFeatWorkerWriteMs = stats.writeMs;
+            m_lastXFeatWorkerReadMs = stats.readMs;
+            m_lastXFeatWorkerTotalMs = stats.totalMs;
+            m_lastXFeatImageCount = stats.imageCount;
+            m_lastXFeatPayloadBytes = stats.payloadBytes;
+            m_lastXFeatRawLeftCount = static_cast<int>(leftFeatures.keypoints.size());
+            m_lastXFeatRawRightCount = static_cast<int>(rightFeatures.keypoints.size());
+
+            RemapKeypointsToSource(leftFeatures.keypoints, leftScaleX, leftScaleY);
+            RemapKeypointsToSource(rightFeatures.keypoints, rightScaleX, rightScaleY);
+            const auto matchStartTp = std::chrono::steady_clock::now();
+            const std::vector<StereoMatchPair> rawMatches =
+                BuildAlignedStereoPairs(leftFeatures, rightFeatures, leftPrepared, rightPrepared);
+            const std::vector<StereoMatchPair> matches = FilterStereoPairsByDisparityConsistency(rawMatches);
+            m_lastXFeatStereoMatchMs =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - matchStartTp).count();
+            m_lastXFeatMatchedStereoCount = static_cast<int>(matches.size());
+
+            ORB_SLAM3::ExternalStereoFrameData externalData;
+            if (BuildExternalStereoFromFeatureMatches(leftFeatures, rightFeatures, matches, externalData)) {
+                m_lastXFeatInjectedLeftCount = static_cast<int>(externalData.leftKeypoints.size());
+                m_lastXFeatInjectedRightCount = static_cast<int>(externalData.rightKeypoints.size());
+                const auto trackStartTp = std::chrono::steady_clock::now();
+                if (m_useImu) {
+                    tcw = m_system->TrackStereoPreparedWithFeatures(leftPrepared, rightPrepared, externalData,
+                                                                    input.frameTimeSec, input.imu);
+                } else {
+                    tcw = m_system->TrackStereoPreparedWithFeatures(leftPrepared, rightPrepared, externalData,
+                                                                    input.frameTimeSec);
+                }
+                const auto trackEndTp = std::chrono::steady_clock::now();
+                m_lastXFeatTotalMs =
+                    std::chrono::duration<double, std::milli>(trackEndTp - externalStartTp).count();
+                out.orbTrackMs = std::chrono::duration<double, std::milli>(trackEndTp - trackStartTp).count();
+                out.usedXFeatFrontend = true;
+                out.leftFeatures.reserve(externalData.leftKeypoints.size());
+                out.rightFeatures.reserve(externalData.rightKeypoints.size());
+                for (const cv::KeyPoint &kp : externalData.leftKeypoints) {
+                    out.leftFeatures.push_back(kp.pt);
+                }
+                for (const cv::KeyPoint &kp : externalData.rightKeypoints) {
+                    out.rightFeatures.push_back(kp.pt);
+                }
+                trackedByExternalFrontend = true;
+            }
         }
+    }
+
+    if (!trackedByExternalFrontend) {
+        const auto orbTrackStartTp = std::chrono::steady_clock::now();
+        if (m_useImu) {
+            if (monoMode) {
+                tcw = m_system->TrackMonocular(monoImage, input.frameTimeSec, input.imu);
+            } else {
+                tcw = m_system->TrackStereo(input.stereo.left.gray, input.stereo.right.gray, input.frameTimeSec,
+                                            input.imu);
+            }
+        } else {
+            if (monoMode) {
+                tcw = m_system->TrackMonocular(monoImage, input.frameTimeSec);
+            } else {
+                tcw = m_system->TrackStereo(input.stereo.left.gray, input.stereo.right.gray, input.frameTimeSec);
+            }
+        }
+        const auto orbTrackEndTp = std::chrono::steady_clock::now();
+        out.orbTrackMs = std::chrono::duration<double, std::milli>(orbTrackEndTp - orbTrackStartTp).count();
+    }
+    if (const ORB_SLAM3::Tracking *tracker = m_system->GetTracker()) {
+        out.orbExtractMs = tracker->mCurrentFrame.mTimeORB_Ext;
+        out.orbStereoMatchMs = tracker->mCurrentFrame.mTimeStereoMatch;
     }
 
     out.trackingState = m_system->GetTrackingState();
@@ -3325,7 +3520,9 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     out.pose.qy = q.y();
     out.pose.qz = q.z();
 
-    StabilizeOutputPose(out.pose, out.poseValid, input.frameTimeSec, out.trackingState);
+    if (EnvFlagEnabled("SMART_DRONE_POSE_STABILIZER", false)) {
+        StabilizeOutputPose(out.pose, out.poseValid, input.frameTimeSec, out.trackingState);
+    }
 
     const bool needVisualExtraction = extractPointCloud || extractFeatures;
     if (!needVisualExtraction) {

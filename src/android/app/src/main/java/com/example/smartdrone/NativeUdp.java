@@ -26,6 +26,6 @@ public class NativeUdp {
                                                int orbIniThFAST, int orbMinThFAST, int featureFrontend,
                                                int xfeatTopK, int xfeatMaxPoints, int xfeatInputMaxWidth,
                                                int xfeatInputMaxHeight, boolean lkXFeatSeeding,
-                                               int lkPerFrameAcceleration);
+                                               int lkPerFrameAcceleration, int orbAcceleration);
     public static native byte[] pollRecv();
 }

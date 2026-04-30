@@ -73,10 +73,16 @@ public class MainActivity extends Activity {
     private static final int FEATURE_FRONTEND_DROID_LIGHT = 2;
     private static final int FEATURE_FRONTEND_LK = 3;
     private static final int FEATURE_FRONTEND_LK_GFTT_PER_FRAME = 4;
-    private static final int FEATURE_FRONTEND_LK_XFEAT = 5;
-    private static final int FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI = 6;
+    private static final int FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE = 5;
+    private static final int FEATURE_FRONTEND_LK_XFEAT = 6;
+    private static final int FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI = 7;
+    private static final int FEATURE_FRONTEND_ORB_CUDA = 8;
+    private static final int FEATURE_FRONTEND_ORB_VPI_REMAP = 9;
     private static final int LK_PER_FRAME_ACCEL_CPU = 0;
     private static final int LK_PER_FRAME_ACCEL_VPI_CUDA = 1;
+    private static final int ORB_ACCEL_CPU = 0;
+    private static final int ORB_ACCEL_CUDA = 1;
+    private static final int ORB_ACCEL_VPI_REMAP = 2;
     private static final int SLAM_MODE_MAPPING = 0;
     private static final int SLAM_MODE_LOCALIZATION = 1;
     private static final int SLAM_MODE_AUTO = 4;
@@ -281,6 +287,7 @@ public class MainActivity extends Activity {
     private int m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
     private boolean m_cfgLkXFeatSeeding = false;
     private int m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_CPU;
+    private int m_cfgOrbAcceleration = ORB_ACCEL_CPU;
     private int m_cfgExposureUs = 3000;
     private int m_cfgGain = 2;
     private boolean m_cfgAutoExposure = true;
@@ -1364,7 +1371,7 @@ public class MainActivity extends Activity {
                                   float tbcRollDeg, float tbcPitchDeg, float tbcYawDeg, int orbNFeatures,
                                   float orbScaleFactor, int orbNLevels, int orbIniThFast, int orbMinThFast,
                                   int xfeatTopK, int xfeatMaxPoints, int xfeatInputMaxWidth, int xfeatInputMaxHeight,
-                                  boolean lkXFeatSeeding, int lkPerFrameAcceleration)
+                                  boolean lkXFeatSeeding, int lkPerFrameAcceleration, int orbAcceleration)
     {
         try {
             int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
@@ -1372,19 +1379,21 @@ public class MainActivity extends Activity {
                                                   tbcTz, tbcRollDeg, tbcPitchDeg, tbcYawDeg, orbNFeatures,
                                                   orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast,
                                                   featureFrontend, xfeatTopK, xfeatMaxPoints, xfeatInputMaxWidth,
-                                                  xfeatInputMaxHeight, lkXFeatSeeding, lkPerFrameAcceleration);
+                                                  xfeatInputMaxHeight, lkXFeatSeeding, lkPerFrameAcceleration,
+                                                  orbAcceleration);
             m_tvStatus.setText(String.format(
                 Locale.US,
-                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s frontend=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d xfeat=%d/%d/%d/%d lkSeed=%s lkAccel=%s",
+                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s frontend=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d orbAccel=%s xfeat=%d/%d/%d/%d lkSeed=%s lkAccel=%s",
                 seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
-                runtimeFeatureFrontendToText(featureFrontend, lkXFeatSeeding, lkPerFrameAcceleration),
+                runtimeFeatureFrontendToText(featureFrontend, lkXFeatSeeding, lkPerFrameAcceleration, orbAcceleration),
                 sendImage ? "on" : "off", sendFeature ? "on" : "off",
                 sendMap ? "on" : "off", autoExposure ? "on" : "off",
                 useCustomTbc
                     ? String.format(Locale.US, "on(%.3f,%.3f,%.3f,r%.1f,p%.1f,y%.1f)", tbcTx, tbcTy, tbcTz,
                                     tbcRollDeg, tbcPitchDeg, tbcYawDeg)
                     : "off",
-                orbNFeatures, orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast, xfeatTopK, xfeatMaxPoints,
+                orbNFeatures, orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast,
+                orbAccelerationToText(orbAcceleration), xfeatTopK, xfeatMaxPoints,
                 xfeatInputMaxWidth, xfeatInputMaxHeight, lkXFeatSeeding ? "XFeat" : "GFTT",
                 lkPerFrameAccelerationToText(lkPerFrameAcceleration)));
             return seq;
@@ -1403,7 +1412,7 @@ public class MainActivity extends Activity {
                                  m_cfgTbcPitchDeg, m_cfgTbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor,
                                  m_cfgOrbNLevels, m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgXFeatTopK,
                                  m_cfgXFeatMaxPoints, m_cfgXFeatInputMaxWidth, m_cfgXFeatInputMaxHeight,
-                                 m_cfgLkXFeatSeeding, m_cfgLkPerFrameAcceleration);
+                                 m_cfgLkXFeatSeeding, m_cfgLkPerFrameAcceleration, m_cfgOrbAcceleration);
     }
 
     private void sendRuntimeConfigAwaitAck(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
@@ -1433,7 +1442,7 @@ public class MainActivity extends Activity {
                                     tbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor, m_cfgOrbNLevels,
                                     m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgXFeatTopK, m_cfgXFeatMaxPoints,
                                     m_cfgXFeatInputMaxWidth, m_cfgXFeatInputMaxHeight, m_cfgLkXFeatSeeding,
-                                    m_cfgLkPerFrameAcceleration);
+                                    m_cfgLkPerFrameAcceleration, m_cfgOrbAcceleration);
         if (seq < 0) {
             return;
         }
@@ -1662,13 +1671,14 @@ public class MainActivity extends Activity {
     {
         if (m_supportsLK) {
             if (m_supportsXFeat) {
-                return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK, FEATURE_FRONTEND_LK_GFTT_PER_FRAME,
-                                  FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI, FEATURE_FRONTEND_LK_XFEAT};
+                return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_ORB_VPI_REMAP, FEATURE_FRONTEND_ORB_CUDA, FEATURE_FRONTEND_LK,
+                                  FEATURE_FRONTEND_LK_GFTT_PER_FRAME, FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI,
+                                  FEATURE_FRONTEND_LK_XFEAT, FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE};
             }
-            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK, FEATURE_FRONTEND_LK_GFTT_PER_FRAME,
-                              FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI};
+            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_ORB_VPI_REMAP, FEATURE_FRONTEND_ORB_CUDA, FEATURE_FRONTEND_LK,
+                              FEATURE_FRONTEND_LK_GFTT_PER_FRAME, FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI};
         }
-        return new int[] {FEATURE_FRONTEND_ORB};
+        return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_ORB_VPI_REMAP, FEATURE_FRONTEND_ORB_CUDA};
     }
 
     private int currentFeatureFrontendOption()
@@ -1679,6 +1689,12 @@ public class MainActivity extends Activity {
         if (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME &&
             m_cfgLkPerFrameAcceleration == LK_PER_FRAME_ACCEL_VPI_CUDA) {
             return FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI;
+        }
+        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_ORB && m_cfgOrbAcceleration == ORB_ACCEL_CUDA) {
+            return FEATURE_FRONTEND_ORB_CUDA;
+        }
+        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_ORB && m_cfgOrbAcceleration == ORB_ACCEL_VPI_REMAP) {
+            return FEATURE_FRONTEND_ORB_VPI_REMAP;
         }
         return m_cfgFeatureFrontend;
     }
@@ -2034,6 +2050,11 @@ public class MainActivity extends Activity {
             "droidlight".equals(normalized)) {
             return FEATURE_FRONTEND_DROID_LIGHT;
         }
+        if ("superpoint-lightglue".equals(normalized) || "superpoint_lightglue".equals(normalized) ||
+            "superpoint+lightglue".equals(normalized) || "sp-lightglue".equals(normalized) ||
+            "sp_lightglue".equals(normalized) || "sp-lg".equals(normalized) || "splg".equals(normalized)) {
+            return FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE;
+        }
         if ("lk-gftt-per-frame".equals(normalized) || "lk_gftt_per_frame".equals(normalized) ||
             "lk-gftt-every-frame".equals(normalized) || "lk_gftt_every_frame".equals(normalized) ||
             "per-frame-gftt".equals(normalized) || "per_frame_gftt".equals(normalized)) {
@@ -2061,6 +2082,26 @@ public class MainActivity extends Activity {
         }
         if ("cpu".equals(normalized) || "off".equals(normalized)) {
             return LK_PER_FRAME_ACCEL_CPU;
+        }
+        return defaultValue;
+    }
+
+    private static int parseOrbAccelerationText(String value, int defaultValue)
+    {
+        if (value == null) {
+            return defaultValue;
+        }
+        String normalized = value.trim().toLowerCase(Locale.US);
+        if ("cuda".equals(normalized) || "gpu".equals(normalized) || "opencv_cuda".equals(normalized) ||
+            "opencv-cuda".equals(normalized)) {
+            return ORB_ACCEL_CUDA;
+        }
+        if ("vpi".equals(normalized) || "vpi_remap".equals(normalized) || "vpi-remap".equals(normalized) ||
+            "vpi_cuda_remap".equals(normalized) || "vpi-cuda-remap".equals(normalized)) {
+            return ORB_ACCEL_VPI_REMAP;
+        }
+        if ("cpu".equals(normalized) || "off".equals(normalized)) {
+            return ORB_ACCEL_CPU;
         }
         return defaultValue;
     }
@@ -2254,6 +2295,10 @@ public class MainActivity extends Activity {
         if (m_cfgFeatureFrontend != FEATURE_FRONTEND_LK_GFTT_PER_FRAME) {
             m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_CPU;
         }
+        m_cfgOrbAcceleration = parseOrbAccelerationText(values.get("slam.orb_accel"), m_cfgOrbAcceleration);
+        if (m_cfgFeatureFrontend != FEATURE_FRONTEND_ORB) {
+            m_cfgOrbAcceleration = ORB_ACCEL_CPU;
+        }
         m_cfgUseCustomTbc = parseBooleanText(values.get("slam.tbc_override_enabled"), m_cfgUseCustomTbc);
         m_cfgTbcTx = quantizeTbcTranslationM(parseFloatOrDefault(values.get("slam.tbc_tx_m"), m_cfgTbcTx));
         m_cfgTbcTy = quantizeTbcTranslationM(parseFloatOrDefault(values.get("slam.tbc_ty_m"), m_cfgTbcTy));
@@ -2372,9 +2417,18 @@ public class MainActivity extends Activity {
             return m_cfgLkXFeatSeeding ? "LK + XFeat seed" : "LK GFTT";
         case FEATURE_FRONTEND_DROID_LIGHT:
             return "DROID-Light";
+        case FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE:
+            return "SuperPoint + LightGlue";
+        case FEATURE_FRONTEND_ORB_VPI_REMAP:
+            return "ORB VPI Remap";
+        case FEATURE_FRONTEND_ORB_CUDA:
+            return "ORB CUDA";
         case FEATURE_FRONTEND_ORB:
         default:
-            return "ORB";
+            return m_cfgOrbAcceleration == ORB_ACCEL_CUDA ? "ORB CUDA"
+                                                          : (m_cfgOrbAcceleration == ORB_ACCEL_VPI_REMAP
+                                                                 ? "ORB VPI Remap"
+                                                                 : "ORB");
         }
     }
 
@@ -2391,6 +2445,12 @@ public class MainActivity extends Activity {
             return "LK GFTT";
         case FEATURE_FRONTEND_DROID_LIGHT:
             return "DROID-Light";
+        case FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE:
+            return "SuperPoint + LightGlue";
+        case FEATURE_FRONTEND_ORB_VPI_REMAP:
+            return "ORB VPI Remap";
+        case FEATURE_FRONTEND_ORB_CUDA:
+            return "ORB CUDA";
         case FEATURE_FRONTEND_ORB:
         default:
             return "ORB";
@@ -2398,8 +2458,14 @@ public class MainActivity extends Activity {
     }
 
     private String runtimeFeatureFrontendToText(int featureFrontend, boolean lkXFeatSeeding,
-                                                int lkPerFrameAcceleration)
+                                                int lkPerFrameAcceleration, int orbAcceleration)
     {
+        if (featureFrontend == FEATURE_FRONTEND_ORB && orbAcceleration == ORB_ACCEL_CUDA) {
+            return "ORB CUDA";
+        }
+        if (featureFrontend == FEATURE_FRONTEND_ORB && orbAcceleration == ORB_ACCEL_VPI_REMAP) {
+            return "ORB VPI Remap";
+        }
         if (featureFrontend == FEATURE_FRONTEND_LK) {
             return lkXFeatSeeding ? "LK + XFeat seed" : "LK GFTT";
         }
@@ -2413,6 +2479,11 @@ public class MainActivity extends Activity {
     private String lkPerFrameAccelerationToText(int acceleration)
     {
         return acceleration == LK_PER_FRAME_ACCEL_VPI_CUDA ? "VPI CUDA" : "CPU";
+    }
+
+    private String orbAccelerationToText(int acceleration)
+    {
+        return acceleration == ORB_ACCEL_CUDA ? "CUDA" : (acceleration == ORB_ACCEL_VPI_REMAP ? "VPI Remap" : "CPU");
     }
 
     private String slamModeToText(int slamMode)
@@ -3754,30 +3825,42 @@ public class MainActivity extends Activity {
                                                  ? FEATURE_FRONTEND_LK
                                                  : (nextOption == FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI
                                                         ? FEATURE_FRONTEND_LK_GFTT_PER_FRAME
-                                                        : nextOption);
+                                                        : (nextOption == FEATURE_FRONTEND_ORB_CUDA ||
+                                                           nextOption == FEATURE_FRONTEND_ORB_VPI_REMAP
+                                                               ? FEATURE_FRONTEND_ORB
+                                                               : nextOption));
                     final boolean nextLkXFeatSeeding = nextOption == FEATURE_FRONTEND_LK_XFEAT;
                     final int nextLkPerFrameAcceleration =
                         nextOption == FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI ? LK_PER_FRAME_ACCEL_VPI_CUDA
                                                                               : LK_PER_FRAME_ACCEL_CPU;
+                    final int nextOrbAcceleration =
+                        nextOption == FEATURE_FRONTEND_ORB_CUDA
+                            ? ORB_ACCEL_CUDA
+                            : (nextOption == FEATURE_FRONTEND_ORB_VPI_REMAP ? ORB_ACCEL_VPI_REMAP : ORB_ACCEL_CPU);
                     if (nextFrontend == m_cfgFeatureFrontend && nextLkXFeatSeeding == m_cfgLkXFeatSeeding &&
-                        nextLkPerFrameAcceleration == m_cfgLkPerFrameAcceleration) {
+                        nextLkPerFrameAcceleration == m_cfgLkPerFrameAcceleration &&
+                        nextOrbAcceleration == m_cfgOrbAcceleration) {
                         return;
                     }
                     final boolean previousLkXFeatSeeding = m_cfgLkXFeatSeeding;
                     final int previousLkPerFrameAcceleration = m_cfgLkPerFrameAcceleration;
+                    final int previousOrbAcceleration = m_cfgOrbAcceleration;
                     m_cfgLkXFeatSeeding = nextLkXFeatSeeding;
                     m_cfgLkPerFrameAcceleration = nextLkPerFrameAcceleration;
+                    m_cfgOrbAcceleration = nextOrbAcceleration;
                     sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
                                               m_sensorMode, nextFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
                                               effectiveConfigLabel("Feature frontend", true), PENDING_CONFIG, () -> {
                                                   m_cfgFeatureFrontend = nextFrontend;
                                                   m_cfgLkXFeatSeeding = nextLkXFeatSeeding;
                                                   m_cfgLkPerFrameAcceleration = nextLkPerFrameAcceleration;
+                                                  m_cfgOrbAcceleration = nextOrbAcceleration;
                                                   updateRuntimeButtons();
                                               });
                     if (!isPending(PENDING_CONFIG)) {
                         m_cfgLkXFeatSeeding = previousLkXFeatSeeding;
                         m_cfgLkPerFrameAcceleration = previousLkPerFrameAcceleration;
+                        m_cfgOrbAcceleration = previousOrbAcceleration;
                     }
                 }
 

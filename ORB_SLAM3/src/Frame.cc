@@ -27,6 +27,7 @@
 #include "GeometricCamera.h"
 
 #include <atomic>
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -115,6 +116,12 @@ bool StereoMatchDebugEnabled()
     return value && value[0] != '\0' && std::string(value) != "0";
 }
 
+bool ForceCudaStereoPatchRefinement()
+{
+    const char* value = std::getenv("SMART_DRONE_ORB_CUDA_STEREO_REFINEMENT");
+    return value && value[0] != '\0' && std::string(value) != "0";
+}
+
 void LogStereoMatchDebug(int leftCount, int rightCount, int rowLinked, int accepted,
                          int uniqueMatches, int finalMatches, float median, float threshold)
 {
@@ -151,10 +158,8 @@ cv::BFMatcher Frame::BFmatcher = cv::BFMatcher(cv::NORM_HAMMING);
 
 Frame::Frame(): mpcpi(NULL), mpImuPreintegrated(NULL), mpPrevFrame(NULL), mpImuPreintegratedFrame(NULL), mpReferenceKF(static_cast<KeyFrame*>(NULL)), mbIsSet(false), mbImuPreintegrated(false), mbHasPose(false), mbHasVelocity(false)
 {
-#ifdef REGISTER_TIMES
     mTimeStereoMatch = 0;
     mTimeORB_Ext = 0;
-#endif
 }
 
 
@@ -200,10 +205,8 @@ Frame::Frame(const Frame &frame)
     mmProjectPoints = frame.mmProjectPoints;
     mmMatchedInImage = frame.mmMatchedInImage;
 
-#ifdef REGISTER_TIMES
     mTimeStereoMatch = frame.mTimeStereoMatch;
     mTimeORB_Ext = frame.mTimeORB_Ext;
-#endif
 }
 
 
@@ -225,18 +228,21 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
     // ORB extraction
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
-#endif
     thread threadLeft(&Frame::ExtractORB,this,0,imLeft,0,0);
     thread threadRight(&Frame::ExtractORB,this,1,imRight,0,0);
     threadLeft.join();
     threadRight.join();
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_EndExtORB = std::chrono::steady_clock::now();
 
     mTimeORB_Ext = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndExtORB - time_StartExtORB).count();
-#endif
+
+    if(mpORBextractorLeft->LastExtractionUsedCuda() && mpORBextractorRight->LastExtractionUsedCuda() &&
+       !ForceCudaStereoPatchRefinement())
+    {
+        imgLeft = imLeft;
+        imgRight = imRight;
+    }
 
     N = mvKeys.size();
     if(mvKeys.empty())
@@ -244,15 +250,11 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
 
     UndistortKeyPoints();
 
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_StartStereoMatches = std::chrono::steady_clock::now();
-#endif
     ComputeStereoMatches();
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_EndStereoMatches = std::chrono::steady_clock::now();
 
     mTimeStereoMatch = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndStereoMatches - time_StartStereoMatches).count();
-#endif
 
     mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
     mvbOutlier = vector<bool>(N,false);
@@ -325,15 +327,11 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
     // ORB extraction
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
-#endif
     ExtractORB(0,imGray,0,0);
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_EndExtORB = std::chrono::steady_clock::now();
 
     mTimeORB_Ext = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndExtORB - time_StartExtORB).count();
-#endif
 
 
     N = mvKeys.size();
@@ -414,15 +412,11 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
     // ORB extraction
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
-#endif
     ExtractORB(0,imGray,0,1000);
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_EndExtORB = std::chrono::steady_clock::now();
 
     mTimeORB_Ext = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndExtORB - time_StartExtORB).count();
-#endif
 
 
     N = mvKeys.size();
@@ -1121,6 +1115,11 @@ void Frame::ComputeStereoMatches()
     mvuRight = vector<float>(N,-1.0f);
     mvDepth = vector<float>(N,-1.0f);
 
+    const bool cudaLevel0StereoRefinement = mpORBextractorLeft != nullptr && mpORBextractorRight != nullptr &&
+                                            mpORBextractorLeft->LastExtractionUsedCuda() &&
+                                            mpORBextractorRight->LastExtractionUsedCuda() &&
+                                            !ForceCudaStereoPatchRefinement() &&
+                                            !imgLeft.empty() && !imgRight.empty();
     struct StereoCandidate
     {
         int leftIdx;
@@ -1132,7 +1131,19 @@ void Frame::ComputeStereoMatches()
 
     const int thOrbDist = (ORBmatcher::TH_HIGH+ORBmatcher::TH_LOW)/2;
 
-    const int nRows = mpORBextractorLeft->mvImagePyramid[0].rows;
+    int nRows = 0;
+    if(mpORBextractorLeft != nullptr && !mpORBextractorLeft->mvImagePyramid.empty() &&
+       !mpORBextractorLeft->mvImagePyramid[0].empty())
+    {
+        nRows = mpORBextractorLeft->mvImagePyramid[0].rows;
+    }
+    else if(!imgLeft.empty())
+    {
+        nRows = imgLeft.rows;
+    }
+    if(nRows <= 0)
+        return;
+
     const int Nr = mvKeysRight.size();
     int rowLinked = 0;
 
@@ -1235,15 +1246,15 @@ void Frame::ComputeStereoMatches()
         {
             // coordinates in image pyramid at keypoint scale
             const float uR0 = mvKeysRight[bestIdxR].pt.x;
-            const float scaleFactor = mvInvScaleFactors[kpL.octave];
+            const float scaleFactor = cudaLevel0StereoRefinement ? 1.0f : mvInvScaleFactors[kpL.octave];
             const float scaleduL = round(kpL.pt.x*scaleFactor);
             const float scaledvL = round(kpL.pt.y*scaleFactor);
             const float scaleduR0 = round(uR0*scaleFactor);
 
             // sliding window search
             const int w = 5;
-            const cv::Mat &leftLevel = mpORBextractorLeft->mvImagePyramid[kpL.octave];
-            const cv::Mat &rightLevel = mpORBextractorRight->mvImagePyramid[kpL.octave];
+            const cv::Mat &leftLevel = cudaLevel0StereoRefinement ? imgLeft : mpORBextractorLeft->mvImagePyramid[kpL.octave];
+            const cv::Mat &rightLevel = cudaLevel0StereoRefinement ? imgRight : mpORBextractorRight->mvImagePyramid[kpL.octave];
             if(scaledvL-w < 0 || scaledvL+w >= leftLevel.rows ||
                scaleduL-w < 0 || scaleduL+w >= leftLevel.cols)
                 continue;
@@ -1251,8 +1262,7 @@ void Frame::ComputeStereoMatches()
             int bestDist = INT_MAX;
             int bestincR = 0;
             const int L = 5;
-            vector<float> vDists;
-            vDists.resize(2*L+1);
+            std::array<float, 2*L+1> vDists{};
 
             const float iniu = scaleduR0+L-w;
             const float endu = scaleduR0+L+w+1;
@@ -1288,7 +1298,8 @@ void Frame::ComputeStereoMatches()
                 continue;
 
             // Re-scaled coordinate
-            float bestuR = mvScaleFactors[kpL.octave]*((float)scaleduR0+(float)bestincR+deltaR);
+            const float levelScale = cudaLevel0StereoRefinement ? 1.0f : mvScaleFactors[kpL.octave];
+            float bestuR = levelScale*((float)scaleduR0+(float)bestincR+deltaR);
 
             float disparity = (uL-bestuR);
 
@@ -1434,18 +1445,14 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
     // ORB extraction
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_StartExtORB = std::chrono::steady_clock::now();
-#endif
     thread threadLeft(&Frame::ExtractORB,this,0,imLeft,static_cast<KannalaBrandt8*>(mpCamera)->mvLappingArea[0],static_cast<KannalaBrandt8*>(mpCamera)->mvLappingArea[1]);
     thread threadRight(&Frame::ExtractORB,this,1,imRight,static_cast<KannalaBrandt8*>(mpCamera2)->mvLappingArea[0],static_cast<KannalaBrandt8*>(mpCamera2)->mvLappingArea[1]);
     threadLeft.join();
     threadRight.join();
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_EndExtORB = std::chrono::steady_clock::now();
 
     mTimeORB_Ext = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndExtORB - time_StartExtORB).count();
-#endif
 
     Nleft = mvKeys.size();
     Nright = mvKeysRight.size();
@@ -1480,15 +1487,11 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
     mRlr = mTlr.rotationMatrix();
     mtlr = mTlr.translation();
 
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_StartStereoMatches = std::chrono::steady_clock::now();
-#endif
     ComputeStereoFishEyeMatches();
-#ifdef REGISTER_TIMES
     std::chrono::steady_clock::time_point time_EndStereoMatches = std::chrono::steady_clock::now();
 
     mTimeStereoMatch = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndStereoMatches - time_StartStereoMatches).count();
-#endif
 
     //Put all descriptors in the same matrix
     cv::vconcat(mDescriptors,mDescriptorsRight,mDescriptors);

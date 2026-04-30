@@ -40,6 +40,9 @@ struct ReplayPoseSample {
     double xfeatWorkerTotalMs{0.0};
     double xfeatStereoMatchMs{0.0};
     double xfeatTotalMs{0.0};
+    double orbTrackMs{0.0};
+    double orbExtractMs{0.0};
+    double orbStereoMatchMs{0.0};
     int matchesInliers{0};
     uint32_t trackedMapPointCount{0};
     uint32_t localMapPointCount{0};
