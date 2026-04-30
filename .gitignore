@@ -2,7 +2,7 @@
 build
 output
 temp
-*gradle*
+.gradle/
 .cxx
 .vscode
 *.png
