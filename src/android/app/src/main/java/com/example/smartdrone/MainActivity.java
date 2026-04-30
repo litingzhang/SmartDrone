@@ -1674,11 +1674,11 @@ public class MainActivity extends Activity {
     private int[] getSupportedFeatureFrontends()
     {
         if (m_supportsLK && m_supportsSuperPointLightGlue) {
-            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI,
+            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK_GFTT_PER_FRAME,
                               FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE};
         }
         if (m_supportsLK) {
-            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI};
+            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK_GFTT_PER_FRAME};
         }
         if (m_supportsSuperPointLightGlue) {
             return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE};
@@ -2413,10 +2413,9 @@ public class MainActivity extends Activity {
     {
         switch (featureFrontend) {
         case FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI:
-            return "LK GFTT VPI CUDA";
+            return "KLT Tracking";
         case FEATURE_FRONTEND_LK_GFTT_PER_FRAME:
-            return m_cfgLkPerFrameAcceleration == LK_PER_FRAME_ACCEL_VPI_CUDA ? "LK GFTT VPI CUDA"
-                                                                              : "LK GFTT Per-Frame";
+            return "KLT Tracking";
         case FEATURE_FRONTEND_LK:
             return "LK GFTT";
         case FEATURE_FRONTEND_DROID_LIGHT:
@@ -2433,9 +2432,9 @@ public class MainActivity extends Activity {
     {
         switch (featureFrontend) {
         case FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI:
-            return "LK GFTT VPI CUDA";
+            return "KLT Tracking";
         case FEATURE_FRONTEND_LK_GFTT_PER_FRAME:
-            return "LK GFTT Per-Frame";
+            return "KLT Tracking";
         case FEATURE_FRONTEND_LK:
             return "LK GFTT";
         case FEATURE_FRONTEND_DROID_LIGHT:
@@ -2456,7 +2455,7 @@ public class MainActivity extends Activity {
         }
         if (featureFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME &&
             lkPerFrameAcceleration == LK_PER_FRAME_ACCEL_VPI_CUDA) {
-            return "LK GFTT VPI CUDA";
+            return "KLT Tracking";
         }
         return featureFrontendOptionToText(featureFrontend);
     }

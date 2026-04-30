@@ -40,7 +40,7 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault()
         "slam_mode.auto=runtime_adaptive_switch_between_mapping_and_localization",
         "slam.feature_frontend.orb=full_orbslam3_tracking_path",
         "slam.feature_frontend.lk=grid_lk_pnp_vo",
-        "slam.feature_frontend.lk_gftt_per_frame=per_frame_gftt_lk_pnp_vo",
+        "slam.feature_frontend.lk_gftt_per_frame=klt_tracking_pnp_vo",
         "slam.feature_frontend.superpoint_lightglue=tensorrt_cpp_superpoint_stereo_injection",
         "slam.lk_seed.gftt=shi_tomasi_good_features_to_track",
     };

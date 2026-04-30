@@ -127,7 +127,8 @@ FeatureFrontend ParseFeatureFrontendText(const std::string &text)
     }
     if (normalized == "lk-gftt-per-frame" || normalized == "lk_gftt_per_frame" ||
         normalized == "lk-gftt-every-frame" || normalized == "lk_gftt_every_frame" ||
-        normalized == "per-frame-gftt" || normalized == "per_frame_gftt") {
+        normalized == "per-frame-gftt" || normalized == "per_frame_gftt" ||
+        normalized == "klt-tracking" || normalized == "klt_tracking") {
         return FeatureFrontend::LkGfttPerFrame;
     }
     if (normalized == "lk" || normalized == "klt" || normalized == "stereo-lk" || normalized == "stereo_lk" ||

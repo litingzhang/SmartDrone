@@ -1714,8 +1714,8 @@ bool EnsureVpiPerFrameState(std::shared_ptr<LkPerFrameVpiState> &state, const cv
         return false;
     }
 
-    std::cerr << "[lk_per_frame_accel] backend=vpi_cuda stages=remap,stereo_disparity"
-              << " pyr_lk=" << (EnvFlagEnabled("SMART_DRONE_VPI_LK", false) ? "on" : "off") << " size=" << size.width
+    std::cerr << "[lk_per_frame_accel] backend=vpi_cuda stages=remap,stereo_disparity,pyr_lk"
+              << " pyr_lk=available size=" << size.width
               << "x" << size.height << " max_disparity=" << maxDisparity
               << " conf=" << EnvIntValue("SMART_DRONE_VPI_STEREO_CONF", kVpiStereoConfidenceThreshold)
               << " p1=" << EnvIntValue("SMART_DRONE_VPI_STEREO_P1", kVpiStereoP1)
@@ -2635,7 +2635,6 @@ void OrbSlam3Engine::EnsureLkRectifier(const cv::Size &inputSize)
     if (!m_lkTc1c2.empty()) {
         cv::Mat T64;
         m_lkTc1c2.convertTo(T64, CV_64F);
-        T64 = T64.inv();
         R = T64(cv::Rect(0, 0, 3, 3)).clone();
         t = T64(cv::Rect(3, 0, 1, 3)).clone();
     }

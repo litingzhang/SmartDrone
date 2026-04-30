@@ -22,7 +22,7 @@ BIN_DIR="$(cd "$(dirname "$BIN")" && pwd)"
 export LD_LIBRARY_PATH="$BIN_DIR:/home/nvidia/opencv_cuda_orb/lib:/home/nvidia/vpi_root/opt/nvidia/vpi2/lib/aarch64-linux-gnu:/home/nvidia/vpi_root/opt/nvidia/cupva-2.3/lib/aarch64-linux-gnu:/home/nvidia:/home/nvidia/SmartDrone_cross:/home/nvidia/sd_replay_pkg_jetson/lib:/usr/local/cuda-11.4/targets/aarch64-linux/lib:/usr/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH:-}"
 
 SEQUENCES=( ${EUROC_SEQUENCES:-MH_01_easy MH_02_easy MH_03_medium MH_04_difficult MH_05_difficult} )
-MODES=( ${EUROC_MODES:-orb lk_gftt_vpi_cuda superpoint_lightglue} )
+MODES=( ${EUROC_MODES:-orb klt_tracking superpoint_lightglue} )
 
 for seq in "${SEQUENCES[@]}"; do
   if [[ ! -d "$DATA/$seq/mav0" ]]; then
@@ -106,8 +106,8 @@ for mode in "${MODES[@]}"; do
       lk_gftt_per_frame)
         "${common[@]}" --feature-frontend lk_gftt_per_frame --lk-per-frame-accel cpu >"$seq_out/replay.log" 2>&1
         ;;
-      lk_gftt_vpi_cuda)
-        "${common[@]}" --feature-frontend lk_gftt_per_frame --lk-per-frame-accel vpi-cuda >"$seq_out/replay.log" 2>&1
+      klt_tracking)
+        "${common[@]}" --feature-frontend klt_tracking --lk-per-frame-accel cpu >"$seq_out/replay.log" 2>&1
         ;;
       superpoint_lightglue)
         export SMART_DRONE_SUPERPOINT_LIGHTGLUE_INJECT=1
