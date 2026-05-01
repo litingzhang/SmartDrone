@@ -98,7 +98,7 @@ struct RuntimeConfig {
     bool lkLoopClosure{false};
     float lkLoopScale{1.20f};
     float lkLoopRelaxation{1.40f};
-    std::string lkPerFrameAcceleration{"cpu"};
+    std::string lkPerFrameAcceleration{"vpi-cuda"};
     std::string orbAcceleration{"cpu"};
     bool debugRightOnlyFeatures{false};
     bool slamLowLightEnhance{false};

@@ -410,7 +410,7 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.lkLoopClosure = argReader.HasFlag("--lk-loop-closure");
     config.runtime.lkLoopScale = argReader.GetFloat("--lk-loop-scale", 1.20f);
     config.runtime.lkLoopRelaxation = argReader.GetFloat("--lk-loop-relax", 1.40f);
-    config.runtime.lkPerFrameAcceleration = argReader.GetString("--lk-per-frame-accel", "cpu");
+    config.runtime.lkPerFrameAcceleration = argReader.GetString("--lk-per-frame-accel", "vpi-cuda");
     config.runtime.orbAcceleration = NormalizeAccelerationText(argReader.GetString("--orb-accel", "cpu"));
     ApplyOrbAccelerationEnvironment(config.runtime.orbAcceleration);
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");

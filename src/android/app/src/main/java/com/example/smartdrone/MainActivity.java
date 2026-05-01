@@ -288,7 +288,7 @@ public class MainActivity extends Activity {
     private int m_sensorMode = SENSOR_STEREO;
     private int m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
     private boolean m_cfgLkXFeatSeeding = false;
-    private int m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_CPU;
+    private int m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_VPI_CUDA;
     private int m_cfgOrbAcceleration = ORB_ACCEL_CPU;
     private int m_cfgExposureUs = 3000;
     private int m_cfgGain = 2;
@@ -1688,10 +1688,6 @@ public class MainActivity extends Activity {
 
     private int currentFeatureFrontendOption()
     {
-        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME &&
-            m_cfgLkPerFrameAcceleration == LK_PER_FRAME_ACCEL_VPI_CUDA) {
-            return FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI;
-        }
         return m_cfgFeatureFrontend;
     }
 
@@ -3810,8 +3806,8 @@ public class MainActivity extends Activity {
                                                  : nextOption;
                     final boolean nextLkXFeatSeeding = false;
                     final int nextLkPerFrameAcceleration =
-                        nextOption == FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI ? LK_PER_FRAME_ACCEL_VPI_CUDA
-                                                                              : LK_PER_FRAME_ACCEL_CPU;
+                        nextFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME ? LK_PER_FRAME_ACCEL_VPI_CUDA
+                                                                           : LK_PER_FRAME_ACCEL_CPU;
                     final int nextOrbAcceleration = ORB_ACCEL_CPU;
                     final int nextXFeatInputMaxWidth =
                         nextFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE ? SUPERPOINT_LIGHTGLUE_INPUT_MAX_WIDTH

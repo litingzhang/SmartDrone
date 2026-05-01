@@ -284,7 +284,7 @@ constexpr int kLkPerFramePnPSelectGridCols = 8;
 constexpr int kLkPerFramePnPSelectGridRows = 6;
 constexpr int kLkPerFramePnPDepthBins = 4;
 constexpr int kLkPerFramePnPMaxPerGridDepthBin = 4;
-constexpr int kLkPerFrameDefaultPnPIterations = 120;
+constexpr int kLkPerFrameDefaultPnPIterations = 80;
 constexpr double kLkPerFrameDefaultPnPConfidence = 0.995;
 constexpr double kLkPerFrameVpiPnPReprojThresholdPx = 3.0;
 constexpr double kLkGfttQualityLevel = 0.01;
@@ -1563,15 +1563,12 @@ int LkPerFrameDepthBin(float z)
 
 int LkPerFramePnPMethod()
 {
-    const std::string method = EnvStringValue("SMART_DRONE_LK_PER_FRAME_PNP", "iterative");
+    const std::string method = EnvStringValue("SMART_DRONE_LK_PER_FRAME_PNP", "epnp");
     if (method == "p3p") {
         return cv::SOLVEPNP_P3P;
     }
     if (method == "ap3p") {
         return cv::SOLVEPNP_AP3P;
-    }
-    if (method == "iterative") {
-        return cv::SOLVEPNP_ITERATIVE;
     }
     return cv::SOLVEPNP_EPNP;
 }
@@ -2748,7 +2745,7 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
                             m_lkPerFrameAcceleration == "vpi_cuda" || m_lkPerFrameAcceleration == "gpu";
     const bool requestVpiRemap = requestVpi && EnvFlagEnabled("SMART_DRONE_VPI_REMAP", true);
     const bool requestVpiDisparity = requestVpi && EnvFlagEnabled("SMART_DRONE_VPI_DISPARITY", true);
-    const bool requestVpiLk = requestVpi && EnvFlagEnabled("SMART_DRONE_VPI_LK", false);
+    const bool requestVpiLk = requestVpi && EnvFlagEnabled("SMART_DRONE_VPI_LK", true);
     cv::Mat leftRect = leftGray;
     cv::Mat rightRect = rightGray;
     bool usedVpiRemap = false;
@@ -2827,7 +2824,7 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
         std::vector<uint8_t> statusBack;
         std::vector<float> errBack;
         const bool useForwardBackwardCheck = EnvFlagEnabled("SMART_DRONE_LK_PER_FRAME_FB_CHECK", false);
-        const bool useDepthBalancedPnP = EnvFlagEnabled("SMART_DRONE_LK_PER_FRAME_DEPTH_BALANCE", false);
+        const bool useDepthBalancedPnP = EnvFlagEnabled("SMART_DRONE_LK_PER_FRAME_DEPTH_BALANCE", true);
         const bool useKeyframeReference = EnvFlagEnabled("SMART_DRONE_LK_PER_FRAME_KEYFRAME", false);
         const int keyframeInterval =
             std::max(1, EnvIntValue("SMART_DRONE_LK_PER_FRAME_KEYFRAME_INTERVAL", 6));
@@ -2904,6 +2901,7 @@ struct PerFramePnPCandidate {
         }
 
         int inlierCount = 0;
+        bool poseUpdated = false;
         if (objectPoints.size() >= kLkMinPnPPoints) {
             cv::Mat rvec, tvec, inliers;
             const cv::Mat K = MakeCameraMatrix(m_lkFx, m_lkFy, m_lkCx, m_lkCy);
@@ -2921,10 +2919,15 @@ struct PerFramePnPCandidate {
                     ? std::max(0.5, static_cast<double>(EnvFloatValue("SMART_DRONE_LK_PER_FRAME_PNP_REPROJ",
                                                                       static_cast<float>(defaultPnpReproj))))
                     : defaultPnpReproj;
-            const bool ok = cv::solvePnPRansac(objectPoints, imagePoints, K, cv::Mat(), rvec, tvec, false,
-                                               pnpIterations, pnpReproj, pnpConfidence, inliers,
-                                               LkPerFramePnPMethod());
-            inlierCount = inliers.rows;
+            bool ok = false;
+            try {
+                ok = cv::solvePnPRansac(objectPoints, imagePoints, K, cv::Mat(), rvec, tvec, false, pnpIterations,
+                                        pnpReproj, pnpConfidence, inliers, LkPerFramePnPMethod());
+                inlierCount = inliers.rows;
+            } catch (const cv::Exception &e) {
+                std::cerr << "[lk_per_frame_pnp] solvePnPRansac skipped points=" << objectPoints.size()
+                          << " error=" << e.what() << "\n";
+            }
             if (ok && inlierCount >= kLkMinPnPInliers) {
                 std::vector<cv::Point3f> inlierObjectPoints;
                 std::vector<cv::Point2f> inlierImagePoints;
@@ -2938,8 +2941,13 @@ struct PerFramePnPCandidate {
                     }
                 }
                 if (inlierObjectPoints.size() >= static_cast<size_t>(kLkMinPnPInliers)) {
-                    (void)cv::solvePnP(inlierObjectPoints, inlierImagePoints, K, cv::Mat(), rvec, tvec, true,
-                                       cv::SOLVEPNP_ITERATIVE);
+                    try {
+                        (void)cv::solvePnP(inlierObjectPoints, inlierImagePoints, K, cv::Mat(), rvec, tvec, true,
+                                           cv::SOLVEPNP_ITERATIVE);
+                    } catch (const cv::Exception &e) {
+                        std::cerr << "[lk_per_frame_pnp] iterative refine skipped inliers="
+                                  << inlierObjectPoints.size() << " error=" << e.what() << "\n";
+                    }
                 }
                 cv::Mat Rcv;
                 cv::Rodrigues(rvec, Rcv);
@@ -2959,6 +2967,7 @@ struct PerFramePnPCandidate {
                     } else {
                         m_lkTwc = m_lkTwc * delta;
                     }
+                    poseUpdated = true;
                 }
             }
         }
@@ -2980,6 +2989,11 @@ struct PerFramePnPCandidate {
                 StoreVpiPreviousRectified(m_lkPerFrameVpi);
             }
 #endif
+        }
+        if (!poseUpdated) {
+            out.trackingState = ORB_SLAM3::Tracking::LOST;
+            out.poseValid = false;
+            out.pose.valid = false;
         }
         ++m_lkFrameCount;
     }
@@ -3199,9 +3213,15 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
         if (objectPoints.size() >= kLkMinPnPPoints) {
             cv::Mat rvec, tvec, inliers;
             const cv::Mat K = MakeCameraMatrix(m_lkFx, m_lkFy, m_lkCx, m_lkCy);
-            const bool ok = cv::solvePnPRansac(objectPoints, imagePoints, K, cv::Mat(), rvec, tvec, false, 80, 4.0,
-                                               0.995, inliers, cv::SOLVEPNP_EPNP);
-            inlierCount = inliers.rows;
+            bool ok = false;
+            try {
+                ok = cv::solvePnPRansac(objectPoints, imagePoints, K, cv::Mat(), rvec, tvec, false, 80, 4.0, 0.995,
+                                        inliers, cv::SOLVEPNP_EPNP);
+                inlierCount = inliers.rows;
+            } catch (const cv::Exception &e) {
+                std::cerr << "[lk_pnp] solvePnPRansac skipped points=" << objectPoints.size()
+                          << " error=" << e.what() << "\n";
+            }
             if (ok && inlierCount >= kLkMinPnPInliers) {
                 std::vector<LkStereoTrack> inlierTracks;
                 inlierTracks.reserve(static_cast<size_t>(inlierCount));
