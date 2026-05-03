@@ -157,11 +157,11 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     r.orbNLevels = currentCfg.app.runtime.orbNLevels;
     r.orbIniThFAST = currentCfg.app.runtime.orbIniThFAST;
     r.orbMinThFAST = currentCfg.app.runtime.orbMinThFAST;
-    r.xfeatTopK = currentCfg.app.runtime.xfeatTopK;
-    r.xfeatMaxPoints = currentCfg.app.runtime.xfeatMaxPoints;
-    r.xfeatInputMaxWidth = currentCfg.app.runtime.xfeatInputMaxWidth;
-    r.xfeatInputMaxHeight = currentCfg.app.runtime.xfeatInputMaxHeight;
-    r.lkXFeatSeeding = currentCfg.app.runtime.lkXFeatSeeding;
+    r.superpointTopK = currentCfg.app.runtime.superpointTopK;
+    r.superpointMaxPoints = currentCfg.app.runtime.superpointMaxPoints;
+    r.superpointInputMaxWidth = currentCfg.app.runtime.superpointInputMaxWidth;
+    r.superpointInputMaxHeight = currentCfg.app.runtime.superpointInputMaxHeight;
+    r.lkSuperPointSeeding = currentCfg.app.runtime.lkSuperPointSeeding;
     r.lkPerFrameAcceleration = currentCfg.app.runtime.lkPerFrameAcceleration;
     r.orbAcceleration = currentCfg.app.runtime.orbAcceleration;
     if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
@@ -214,17 +214,17 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
         r.featureFrontend = ParseRuntimeFeatureFrontend(p[RUNTIME_CONFIG_FEATURE_FRONTEND_OFFSET]);
     }
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V9) {
-        r.xfeatTopK = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_XFEAT_TOP_K_OFFSET])));
-        r.xfeatMaxPoints = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_XFEAT_MAX_POINTS_OFFSET])));
+        r.superpointTopK = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_SUPERPOINT_TOP_K_OFFSET])));
+        r.superpointMaxPoints = static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_SUPERPOINT_MAX_POINTS_OFFSET])));
     }
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V10) {
-        r.xfeatInputMaxWidth =
-            static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_XFEAT_INPUT_MAX_WIDTH_OFFSET])));
-        r.xfeatInputMaxHeight =
-            static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_XFEAT_INPUT_MAX_HEIGHT_OFFSET])));
+        r.superpointInputMaxWidth =
+            static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_SUPERPOINT_INPUT_MAX_WIDTH_OFFSET])));
+        r.superpointInputMaxHeight =
+            static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_SUPERPOINT_INPUT_MAX_HEIGHT_OFFSET])));
     }
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V11) {
-        r.lkXFeatSeeding = p[RUNTIME_CONFIG_LK_XFEAT_SEEDING_OFFSET] != 0;
+        r.lkSuperPointSeeding = p[RUNTIME_CONFIG_LK_SUPERPOINT_SEEDING_OFFSET] != 0;
     }
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V12) {
         r.lkPerFrameAcceleration = ParseRuntimeLkPerFrameAcceleration(p[RUNTIME_CONFIG_LK_PER_FRAME_ACCEL_OFFSET]);
@@ -272,13 +272,13 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     update.values[std::string(ConfigRegistry::kSlamOrbNLevels)] = static_cast<int64_t>(r.orbNLevels);
     update.values[std::string(ConfigRegistry::kSlamOrbIniThFast)] = static_cast<int64_t>(r.orbIniThFAST);
     update.values[std::string(ConfigRegistry::kSlamOrbMinThFast)] = static_cast<int64_t>(r.orbMinThFAST);
-    update.values[std::string(ConfigRegistry::kSlamXFeatTopK)] = static_cast<int64_t>(r.xfeatTopK);
-    update.values[std::string(ConfigRegistry::kSlamXFeatMaxPoints)] = static_cast<int64_t>(r.xfeatMaxPoints);
-    update.values[std::string(ConfigRegistry::kSlamXFeatInputMaxWidth)] =
-        static_cast<int64_t>(r.xfeatInputMaxWidth);
-    update.values[std::string(ConfigRegistry::kSlamXFeatInputMaxHeight)] =
-        static_cast<int64_t>(r.xfeatInputMaxHeight);
-    update.values[std::string(ConfigRegistry::kSlamLkXFeatSeeding)] = r.lkXFeatSeeding;
+    update.values[std::string(ConfigRegistry::kSlamSuperPointTopK)] = static_cast<int64_t>(r.superpointTopK);
+    update.values[std::string(ConfigRegistry::kSlamSuperPointMaxPoints)] = static_cast<int64_t>(r.superpointMaxPoints);
+    update.values[std::string(ConfigRegistry::kSlamSuperPointInputMaxWidth)] =
+        static_cast<int64_t>(r.superpointInputMaxWidth);
+    update.values[std::string(ConfigRegistry::kSlamSuperPointInputMaxHeight)] =
+        static_cast<int64_t>(r.superpointInputMaxHeight);
+    update.values[std::string(ConfigRegistry::kSlamLkSuperPointSeeding)] = r.lkSuperPointSeeding;
     update.values[std::string(ConfigRegistry::kSlamLkPerFrameAcceleration)] = r.lkPerFrameAcceleration;
     update.values[std::string(ConfigRegistry::kSlamOrbAcceleration)] = r.orbAcceleration;
 

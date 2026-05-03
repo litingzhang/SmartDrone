@@ -6,7 +6,7 @@ usage() {
 Usage:
   ./scripts/sync_jetson_runtime_libs.sh [--jetson HOST] [--sysroot PATH] [--setup-key] [--with-tensorrt]
 
-Copies Jetson runtime libraries required by TensorRT XFeat into the cross-build
+Copies Jetson runtime libraries required by TensorRT SuperPoint into the cross-build
 sysroot, preserving their absolute directory layout.
 
 Options:

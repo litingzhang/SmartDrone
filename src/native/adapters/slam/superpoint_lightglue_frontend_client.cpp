@@ -1,4 +1,4 @@
-#include "adapters/slam/xfeat_frontend_client.h"
+#include "adapters/slam/superpoint_lightglue_frontend_client.h"
 
 #include "adapters/slam/superpoint_native_extractor.h"
 
@@ -6,11 +6,11 @@
 
 namespace smartdrone::adapters::slam {
 
-XFeatFrontendClient::XFeatFrontendClient() = default;
+SuperPointLightGlueFrontendClient::SuperPointLightGlueFrontendClient() = default;
 
-XFeatFrontendClient::~XFeatFrontendClient() { Stop(); }
+SuperPointLightGlueFrontendClient::~SuperPointLightGlueFrontendClient() { Stop(); }
 
-bool XFeatFrontendClient::Start(const std::string &repoPath, const std::string &device, int topK, int maxPoints,
+bool SuperPointLightGlueFrontendClient::Start(const std::string &repoPath, const std::string &device, int topK, int maxPoints,
                                 std::string *err)
 {
     Stop();
@@ -25,7 +25,7 @@ bool XFeatFrontendClient::Start(const std::string &repoPath, const std::string &
     return true;
 }
 
-void XFeatFrontendClient::Stop()
+void SuperPointLightGlueFrontendClient::Stop()
 {
     if (m_superPointNativeExtractor) {
         m_superPointNativeExtractor->Stop();
@@ -34,14 +34,14 @@ void XFeatFrontendClient::Stop()
     m_lastStats = Stats{};
 }
 
-bool XFeatFrontendClient::Running() const
+bool SuperPointLightGlueFrontendClient::Running() const
 {
     return m_superPointNativeExtractor && m_superPointNativeExtractor->Running();
 }
 
-XFeatFrontendClient::Stats XFeatFrontendClient::LastStats() const { return m_lastStats; }
+SuperPointLightGlueFrontendClient::Stats SuperPointLightGlueFrontendClient::LastStats() const { return m_lastStats; }
 
-void XFeatFrontendClient::CopyNativeStats()
+void SuperPointLightGlueFrontendClient::CopyNativeStats()
 {
     if (!m_superPointNativeExtractor) {
         m_lastStats = Stats{};
@@ -49,14 +49,14 @@ void XFeatFrontendClient::CopyNativeStats()
     }
     const SuperPointNativeExtractor::Stats nativeStats = m_superPointNativeExtractor->LastStats();
     m_lastStats.prepareMs = nativeStats.prepareMs;
-    m_lastStats.writeMs = nativeStats.inputMs;
-    m_lastStats.readMs = nativeStats.forwardMs;
+    m_lastStats.inputMs = nativeStats.inputMs;
+    m_lastStats.forwardMs = nativeStats.forwardMs;
     m_lastStats.totalMs = nativeStats.totalMs;
     m_lastStats.imageCount = nativeStats.imageCount;
     m_lastStats.payloadBytes = nativeStats.payloadBytes;
 }
 
-bool XFeatFrontendClient::Detect(const cv::Mat &gray, std::vector<cv::Point2f> &outPoints, std::string *err)
+bool SuperPointLightGlueFrontendClient::Detect(const cv::Mat &gray, std::vector<cv::Point2f> &outPoints, std::string *err)
 {
     if (!m_superPointNativeExtractor) {
         if (err != nullptr) {
@@ -69,7 +69,7 @@ bool XFeatFrontendClient::Detect(const cv::Mat &gray, std::vector<cv::Point2f> &
     return ok;
 }
 
-bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet &outFeatures, std::string *err)
+bool SuperPointLightGlueFrontendClient::DetectAndCompute(const cv::Mat &gray, SuperPointFeatureSet &outFeatures, std::string *err)
 {
     if (!m_superPointNativeExtractor) {
         if (err != nullptr) {
@@ -82,8 +82,8 @@ bool XFeatFrontendClient::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet 
     return ok;
 }
 
-bool XFeatFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const cv::Mat &rightGray,
-                                                 XFeatFeatureSet &leftFeatures, XFeatFeatureSet &rightFeatures,
+bool SuperPointLightGlueFrontendClient::DetectAndComputeStereo(const cv::Mat &leftGray, const cv::Mat &rightGray,
+                                                 SuperPointFeatureSet &leftFeatures, SuperPointFeatureSet &rightFeatures,
                                                  std::string *err)
 {
     if (!m_superPointNativeExtractor) {

@@ -18,7 +18,7 @@ namespace smartdrone::core::application {
 namespace {
 
 constexpr uint64_t kSlamDfxLogEveryNFrames = 30;
-constexpr int kXFeatStereoWeakMatchThreshold = 24;
+constexpr int kSuperPointStereoWeakMatchThreshold = 24;
 constexpr double kAdaptiveTimingEmaAlpha = 0.18;
 constexpr double kAdaptiveInputFpsHeadroom = 1.25;
 constexpr double kAdaptiveInputExtraOverheadMs = 12.0;
@@ -49,10 +49,10 @@ int ComputeAdaptiveSlamInputFps(int configuredFps, int cameraFps, double smoothe
     return std::clamp(throughputAlignedFps, kAdaptiveMinInputFps, cappedConfiguredFps);
 }
 
-int ComputeXFeatLoadSheddingLevel(int currentLevel, bool xfeatEnabled, bool lastTrackingUsable, double smoothedSlamMs,
+int ComputeSuperPointLoadSheddingLevel(int currentLevel, bool superpointEnabled, bool lastTrackingUsable, double smoothedSlamMs,
                                   double smoothedTotalMs)
 {
-    if (!xfeatEnabled) {
+    if (!superpointEnabled) {
         return 0;
     }
 
@@ -79,7 +79,7 @@ int ComputeXFeatLoadSheddingLevel(int currentLevel, bool xfeatEnabled, bool last
     return 0;
 }
 
-std::pair<int, int> ComputeXFeatInputBudget(int baseWidth, int baseHeight, int loadSheddingLevel)
+std::pair<int, int> ComputeSuperPointInputBudget(int baseWidth, int baseHeight, int loadSheddingLevel)
 {
     const int safeBaseWidth = std::max(1, baseWidth);
     const int safeBaseHeight = std::max(1, baseHeight);
@@ -95,7 +95,7 @@ std::pair<int, int> ComputeXFeatInputBudget(int baseWidth, int baseHeight, int l
     return {std::min(width, safeBaseWidth), std::min(height, safeBaseHeight)};
 }
 
-const char *DescribeXFeatLoadSheddingLevel(int loadSheddingLevel)
+const char *DescribeSuperPointLoadSheddingLevel(int loadSheddingLevel)
 {
     switch (loadSheddingLevel) {
     case 2:
@@ -193,20 +193,20 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const int effectiveSlamInputFps =
         ComputeAdaptiveSlamInputFps(configuredSlamInputFps, m_ctx.aliases.fps, m_state.smoothedSlamMs);
     m_state.adaptiveSlamInputFps = effectiveSlamInputFps;
-    const int xfeatLoadSheddingLevel =
-        ComputeXFeatLoadSheddingLevel(m_state.xfeatLoadSheddingLevel,
+    const int superpointLoadSheddingLevel =
+        ComputeSuperPointLoadSheddingLevel(m_state.superpointLoadSheddingLevel,
                                       effectiveFrontend == FeatureFrontend::SuperPointLightGlue,
                                       m_state.lastTrackingUsable, m_state.smoothedSlamMs, m_state.smoothedTotalMs);
-    m_state.xfeatLoadSheddingLevel = xfeatLoadSheddingLevel;
-    const auto [xfeatBudgetWidth, xfeatBudgetHeight] =
-        ComputeXFeatInputBudget(m_ctx.aliases.xfeatInputMaxWidth, m_ctx.aliases.xfeatInputMaxHeight,
-                                xfeatLoadSheddingLevel);
-    m_ctx.slamEngine.SetXFeatInputSizeLimit(xfeatBudgetWidth, xfeatBudgetHeight);
+    m_state.superpointLoadSheddingLevel = superpointLoadSheddingLevel;
+    const auto [superpointBudgetWidth, superpointBudgetHeight] =
+        ComputeSuperPointInputBudget(m_ctx.aliases.superpointInputMaxWidth, m_ctx.aliases.superpointInputMaxHeight,
+                                superpointLoadSheddingLevel);
+    m_ctx.slamEngine.SetSuperPointInputSizeLimit(superpointBudgetWidth, superpointBudgetHeight);
     m_ctx.slamEngine.SetFeatureFrontend(effectiveFrontend);
     if (effectiveFrontend != m_state.lastAppliedFeatureFrontend) {
         std::cerr << "[slam] effective_feature_frontend=" << FeatureFrontendName(effectiveFrontend)
                   << " requested=" << FeatureFrontendName(configuredFrontend)
-                  << " stereo_xfeat_gate=mode_selected"
+                  << " stereo_superpoint_gate=mode_selected"
                   << " prev_tracking_state=" << m_state.lastTrackingState
                   << " prev_tracking_usable=" << (m_state.lastTrackingUsable ? 1 : 0) << "\n";
         m_state.lastAppliedFeatureFrontend = effectiveFrontend;
@@ -222,13 +222,13 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         m_state.lastLoggedEffectiveSlamInputFps = effectiveSlamInputFps;
     }
     if (effectiveFrontend == FeatureFrontend::SuperPointLightGlue &&
-        xfeatLoadSheddingLevel != m_state.lastLoggedXFeatLoadSheddingLevel) {
-        std::cerr << "[slam] xfeat_load_profile=" << DescribeXFeatLoadSheddingLevel(xfeatLoadSheddingLevel)
-                  << " input_max=" << xfeatBudgetWidth << "x" << xfeatBudgetHeight
+        superpointLoadSheddingLevel != m_state.lastLoggedSuperPointLoadSheddingLevel) {
+        std::cerr << "[slam] superpoint_load_profile=" << DescribeSuperPointLoadSheddingLevel(superpointLoadSheddingLevel)
+                  << " input_max=" << superpointBudgetWidth << "x" << superpointBudgetHeight
                   << " tracking_usable=" << (m_state.lastTrackingUsable ? 1 : 0)
                   << " smoothed_slam_ms=" << m_state.smoothedSlamMs
                   << " smoothed_total_ms=" << m_state.smoothedTotalMs << "\n";
-        m_state.lastLoggedXFeatLoadSheddingLevel = xfeatLoadSheddingLevel;
+        m_state.lastLoggedSuperPointLoadSheddingLevel = superpointLoadSheddingLevel;
     }
 
     const auto acquireStartTp = std::chrono::steady_clock::now();
@@ -467,14 +467,14 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
 
     ++m_state.frameIndex;
     m_state.lastPublishedFrameNs = logicalFrameTimestampNs;
-    const bool xfeatStereoWeak =
-        slamOutput.usedXFeatFrontend && !m_ctx.monoMode &&
-        slamOutput.xfeatMatchedStereoCount < kXFeatStereoWeakMatchThreshold;
+    const bool superpointStereoWeak =
+        slamOutput.usedSuperPointFrontend && !m_ctx.monoMode &&
+        slamOutput.superpointMatchedStereoCount < kSuperPointStereoWeakMatchThreshold;
     const double totalMs = DurationMs(frameStartTp, publishEndTp);
     const bool slamDfxPeriodic = (kSlamDfxLogEveryNFrames > 0) && ((m_state.frameIndex % kSlamDfxLogEveryNFrames) == 0);
     const bool slamDfxAbnormal = !poseResult.poseEstimate.valid || state <= 0 || totalMs > 80.0 ||
                                  slamOutput.leftFeatures.empty() || slamOutput.rightFeatures.empty() ||
-                                 xfeatStereoWeak;
+                                 superpointStereoWeak;
     if (slamDfxPeriodic || slamDfxAbnormal) {
         char dfxLine[1408];
         if (m_ctx.aliases.jsonDiagnostics) {
@@ -484,14 +484,14 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 "\"reset_counter\":%u,\"reset_map_count\":%u,"
                 "\"imu_count\":%zu,\"feat_left\":%zu,\"feat_right\":%zu,\"points\":%zu,"
                 "\"track_points\":%u,\"local_points\":%u,\"inliers\":%d,"
-                "\"xfeat_used\":%d,\"xfeat_stereo_weak\":%d,\"xfeat_raw_left\":%d,\"xfeat_raw_right\":%d,"
-                "\"xfeat_match_stereo\":%d,\"xfeat_injected_left\":%d,\"xfeat_injected_right\":%d,"
-                "\"xfeat_seed_source_frame\":%llu,\"xfeat_seed_current_frame\":%llu,"
-                "\"xfeat_seed_age_frames\":%u,\"xfeat_seed_forwarded\":%d,"
-                "\"xfeat_prepare_ms\":%.3f,\"xfeat_write_ms\":%.3f,\"xfeat_read_ms\":%.3f,"
-                "\"xfeat_worker_ms\":%.3f,\"xfeat_match_ms\":%.3f,\"xfeat_total_ms\":%.3f,"
+                "\"superpoint_used\":%d,\"superpoint_stereo_weak\":%d,\"superpoint_raw_left\":%d,\"superpoint_raw_right\":%d,"
+                "\"superpoint_match_stereo\":%d,\"superpoint_injected_left\":%d,\"superpoint_injected_right\":%d,"
+                "\"superpoint_seed_source_frame\":%llu,\"superpoint_seed_current_frame\":%llu,"
+                "\"superpoint_seed_age_frames\":%u,\"superpoint_seed_forwarded\":%d,"
+                "\"superpoint_prepare_ms\":%.3f,\"superpoint_input_ms\":%.3f,\"superpoint_forward_ms\":%.3f,"
+                "\"superpoint_frontend_ms\":%.3f,\"superpoint_match_ms\":%.3f,\"superpoint_total_ms\":%.3f,"
                 "\"orb_track_ms\":%.3f,\"orb_extract_ms\":%.3f,\"orb_stereo_ms\":%.3f,"
-                "\"xfeat_image_count\":%u,\"xfeat_payload_bytes\":%u,"
+                "\"superpoint_image_count\":%u,\"superpoint_payload_bytes\":%u,"
                 "\"pair_dt_ms\":%.3f,\"reject_dt_ms\":%.3f,\"pending_left\":%zu,\"pending_right\":%zu,"
                 "\"drop_left\":%llu,\"drop_right\":%llu,\"rate_drop\":%llu,"
                 "\"img_std_left\":%.2f,\"img_std_right\":%.2f,\"sharp_left\":%.2f,\"sharp_right\":%.2f,"
@@ -502,17 +502,17 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
                 slamOutput.rightFeatures.size(), pointCount, slamOutput.trackedMapPointCount,
-                slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedXFeatFrontend ? 1 : 0,
-                xfeatStereoWeak ? 1 : 0, slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount,
-                slamOutput.xfeatMatchedStereoCount, slamOutput.xfeatInjectedLeftCount,
-                slamOutput.xfeatInjectedRightCount,
-                static_cast<unsigned long long>(slamOutput.xfeatSeedSourceFrameId),
-                static_cast<unsigned long long>(slamOutput.xfeatSeedCurrentFrameId),
-                slamOutput.xfeatSeedAgeFrames, slamOutput.xfeatSeedForwardedCount,
-                slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
-                slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs, slamOutput.xfeatStereoMatchMs,
-                slamOutput.xfeatTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
-                slamOutput.orbStereoMatchMs, slamOutput.xfeatImageCount, slamOutput.xfeatPayloadBytes,
+                slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedSuperPointFrontend ? 1 : 0,
+                superpointStereoWeak ? 1 : 0, slamOutput.superpointRawLeftCount, slamOutput.superpointRawRightCount,
+                slamOutput.superpointMatchedStereoCount, slamOutput.superpointInjectedLeftCount,
+                slamOutput.superpointInjectedRightCount,
+                static_cast<unsigned long long>(slamOutput.superpointSeedSourceFrameId),
+                static_cast<unsigned long long>(slamOutput.superpointSeedCurrentFrameId),
+                slamOutput.superpointSeedAgeFrames, slamOutput.superpointSeedForwardedCount,
+                slamOutput.superpointPrepareMs, slamOutput.superpointInputMs,
+                slamOutput.superpointForwardMs, slamOutput.superpointFrontendMs, slamOutput.superpointStereoMatchMs,
+                slamOutput.superpointTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
+                slamOutput.orbStereoMatchMs, slamOutput.superpointImageCount, slamOutput.superpointPayloadBytes,
                 static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
                 static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
@@ -525,11 +525,11 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 dfxLine, sizeof(dfxLine),
                 "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
                 "imu=%zu feat=%zu/%zu points=%zu track=%u local=%u inliers=%d "
-                "xfeat=%s stereo_warn=%s raw=%d/%d stereo=%d injected=%d/%d "
+                "superpoint=%s stereo_warn=%s raw=%d/%d stereo=%d injected=%d/%d "
                 "seed=%llu->%llu age=%u fwd=%d "
-                "xfeat_ms=prep %.3f write %.3f read %.3f worker %.3f match %.3f total %.3f "
+                "superpoint_ms=prep %.3f input %.3f forward %.3f frontend %.3f match %.3f total %.3f "
                 "orb_ms=track %.3f extract %.3f stereo %.3f "
-                "xfeat_io=%uimg/%ubytes "
+                "superpoint_io=%uimg/%ubytes "
                 "pair_dt=%.3f reject_dt=%.3f pend=%zu/%zu drop=%llu/%llu rate_drop=%llu "
                 "img_std=%.2f/%.2f sharp=%.2f/%.2f "
                 "timing_ms gap=%.3f mono=%.3f acquire=%.3f imu=%.3f slam=%.3f cloud=%.3f udp=%.3f post=%.3f "
@@ -538,17 +538,17 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
                 slamOutput.rightFeatures.size(), pointCount, slamOutput.trackedMapPointCount,
-                slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedXFeatFrontend ? "on" : "off",
-                xfeatStereoWeak ? "weak" : "ok", slamOutput.xfeatRawLeftCount, slamOutput.xfeatRawRightCount,
-                slamOutput.xfeatMatchedStereoCount, slamOutput.xfeatInjectedLeftCount,
-                slamOutput.xfeatInjectedRightCount,
-                static_cast<unsigned long long>(slamOutput.xfeatSeedSourceFrameId),
-                static_cast<unsigned long long>(slamOutput.xfeatSeedCurrentFrameId),
-                slamOutput.xfeatSeedAgeFrames, slamOutput.xfeatSeedForwardedCount,
-                slamOutput.xfeatPrepareMs, slamOutput.xfeatWorkerWriteMs,
-                slamOutput.xfeatWorkerReadMs, slamOutput.xfeatWorkerTotalMs, slamOutput.xfeatStereoMatchMs,
-                slamOutput.xfeatTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
-                slamOutput.orbStereoMatchMs, slamOutput.xfeatImageCount, slamOutput.xfeatPayloadBytes,
+                slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedSuperPointFrontend ? "on" : "off",
+                superpointStereoWeak ? "weak" : "ok", slamOutput.superpointRawLeftCount, slamOutput.superpointRawRightCount,
+                slamOutput.superpointMatchedStereoCount, slamOutput.superpointInjectedLeftCount,
+                slamOutput.superpointInjectedRightCount,
+                static_cast<unsigned long long>(slamOutput.superpointSeedSourceFrameId),
+                static_cast<unsigned long long>(slamOutput.superpointSeedCurrentFrameId),
+                slamOutput.superpointSeedAgeFrames, slamOutput.superpointSeedForwardedCount,
+                slamOutput.superpointPrepareMs, slamOutput.superpointInputMs,
+                slamOutput.superpointForwardMs, slamOutput.superpointFrontendMs, slamOutput.superpointStereoMatchMs,
+                slamOutput.superpointTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
+                slamOutput.orbStereoMatchMs, slamOutput.superpointImageCount, slamOutput.superpointPayloadBytes,
                 static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
                 static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,

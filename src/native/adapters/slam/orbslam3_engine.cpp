@@ -215,6 +215,34 @@ std::string EnvStringValue(const char *name, const char *defaultValue)
 
 namespace {
 
+size_t EnvSizeValueClamped(const char *name, size_t defaultValue, size_t minValue, size_t maxValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return defaultValue;
+    }
+    char *end = nullptr;
+    const unsigned long parsed = std::strtoul(value, &end, 10);
+    if (end == value) {
+        return defaultValue;
+    }
+    return std::clamp(static_cast<size_t>(parsed), minValue, maxValue);
+}
+
+int EnvIntValueClamped(const char *name, int defaultValue, int minValue, int maxValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return defaultValue;
+    }
+    char *end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    if (end == value) {
+        return defaultValue;
+    }
+    return std::clamp(static_cast<int>(parsed), minValue, maxValue);
+}
+
 constexpr int kOrbDescriptorBorder = 19;
 constexpr float kStereoMaxEpipolarDeltaPx = 1.5f;
 constexpr float kStereoMinDisparityPx = 0.75f;
@@ -227,6 +255,8 @@ constexpr int kStereoGridCols = 8;
 constexpr int kStereoGridRows = 6;
 constexpr int kStereoMaxPairsPerCell = 10;
 constexpr size_t kExternalStereoMaxLeftFeatures = 1200;
+constexpr size_t kExternalStereoMaxLeftFeaturesLimit = 2500;
+constexpr int kStereoMaxPairsPerCellLimit = 32;
 constexpr int kTemporalFlowWindowPx = 21;
 constexpr int kTemporalFlowMaxLevel = 3;
 constexpr float kTemporalForwardBackwardMaxErrorPx = 1.5f;
@@ -462,7 +492,7 @@ bool IsBetterRightCandidate(float candidateScore, float candidateZncc, float cur
     return candidateZncc > currentZncc;
 }
 
-bool HasValidXFeatDescriptors(const XFeatFeatureSet &features)
+bool HasValidSuperPointDescriptors(const SuperPointFeatureSet &features)
 {
     return !features.descriptors.empty() && features.descriptors.type() == CV_32F &&
            features.descriptors.rows == static_cast<int>(features.keypoints.size()) && features.descriptors.cols > 0;
@@ -526,6 +556,8 @@ std::vector<StereoMatchPair> SelectGridBalancedPairs(const std::vector<StereoMat
 
     const int cellWidth = std::max(1, (imageWidth + kStereoGridCols - 1) / kStereoGridCols);
     const int cellHeight = std::max(1, (imageHeight + kStereoGridRows - 1) / kStereoGridRows);
+    const int maxPairsPerCell = EnvIntValueClamped("SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL",
+                                                   kStereoMaxPairsPerCell, 1, kStereoMaxPairsPerCellLimit);
     std::vector<int> cellCounts(static_cast<size_t>(kStereoGridCols * kStereoGridRows), 0);
     std::vector<StereoMatchPair> selected;
     selected.reserve(matches.size());
@@ -535,7 +567,7 @@ std::vector<StereoMatchPair> SelectGridBalancedPairs(const std::vector<StereoMat
         const int col = std::clamp(static_cast<int>(pt.x) / cellWidth, 0, kStereoGridCols - 1);
         const int row = std::clamp(static_cast<int>(pt.y) / cellHeight, 0, kStereoGridRows - 1);
         const size_t cellIndex = static_cast<size_t>(row * kStereoGridCols + col);
-        if (cellCounts[cellIndex] >= kStereoMaxPairsPerCell) {
+        if (cellCounts[cellIndex] >= maxPairsPerCell) {
             continue;
         }
         ++cellCounts[cellIndex];
@@ -1076,11 +1108,11 @@ bool FinalizeStereoExternalFromTemporalCarry(const std::vector<TemporalStereoPai
     return true;
 }
 
-std::vector<StereoMatchPair> MatchStereoPairs(const XFeatFeatureSet &left, const XFeatFeatureSet &right,
+std::vector<StereoMatchPair> MatchStereoPairs(const SuperPointFeatureSet &left, const SuperPointFeatureSet &right,
                                               const cv::Mat &leftGray, const cv::Mat &rightGray)
 {
     std::vector<StereoMatchPair> matches;
-    if (!HasValidXFeatDescriptors(left) || !HasValidXFeatDescriptors(right) || left.keypoints.empty() ||
+    if (!HasValidSuperPointDescriptors(left) || !HasValidSuperPointDescriptors(right) || left.keypoints.empty() ||
         right.keypoints.empty()) {
         return matches;
     }
@@ -1183,7 +1215,7 @@ std::vector<StereoMatchPair> MatchStereoPairs(const XFeatFeatureSet &left, const
     return SelectGridBalancedPairs(matches, left.keypoints, leftGray.cols, leftGray.rows);
 }
 
-std::vector<StereoMatchPair> BuildAlignedStereoPairs(const XFeatFeatureSet &left, const XFeatFeatureSet &right,
+std::vector<StereoMatchPair> BuildAlignedStereoPairs(const SuperPointFeatureSet &left, const SuperPointFeatureSet &right,
                                                      const cv::Mat &leftGray, const cv::Mat &rightGray)
 {
     std::vector<StereoMatchPair> matches;
@@ -1233,11 +1265,11 @@ std::vector<StereoMatchPair> BuildAlignedStereoPairs(const XFeatFeatureSet &left
     return SelectGridBalancedPairs(matches, left.keypoints, leftGray.cols, leftGray.rows);
 }
 
-bool BuildExternalStereoFromFeatureMatches(const XFeatFeatureSet &left, const XFeatFeatureSet &right,
+bool BuildExternalStereoFromFeatureMatches(const SuperPointFeatureSet &left, const SuperPointFeatureSet &right,
                                            const std::vector<StereoMatchPair> &matches,
                                            ORB_SLAM3::ExternalStereoFrameData &outData)
 {
-    if (!HasValidXFeatDescriptors(left) || !HasValidXFeatDescriptors(right) || matches.empty() ||
+    if (!HasValidSuperPointDescriptors(left) || !HasValidSuperPointDescriptors(right) || matches.empty() ||
         left.descriptors.cols != right.descriptors.cols) {
         return false;
     }
@@ -1286,7 +1318,7 @@ std::vector<cv::Point2f> ToPointList(const std::vector<cv::KeyPoint> &keypoints)
     return points;
 }
 
-cv::Mat BuildXFeatInputImage(const cv::Mat &gray, int maxWidth, int maxHeight, float &scaleX, float &scaleY)
+cv::Mat BuildSuperPointInputImage(const cv::Mat &gray, int maxWidth, int maxHeight, float &scaleX, float &scaleY)
 {
     scaleX = 1.0f;
     scaleY = 1.0f;
@@ -2163,9 +2195,9 @@ std::vector<LkStereoTrack> BuildLkGfttStereoSeeds(const cv::Mat &leftGray, const
     return seeds;
 }
 
-std::vector<LkStereoTrack> BuildLkXFeatStereoSeeds(XFeatFrontendClient *client, const cv::Mat &leftGray,
+std::vector<LkStereoTrack> BuildLkSuperPointStereoSeeds(SuperPointLightGlueFrontendClient *client, const cv::Mat &leftGray,
                                                    const cv::Mat &rightGray, int maxWidth, int maxHeight,
-                                                   XFeatFrontendClient::Stats *stats, double *matchMs)
+                                                   SuperPointLightGlueFrontendClient::Stats *stats, double *matchMs)
 {
     std::vector<LkStereoTrack> seeds;
     if (client == nullptr || !client->Running() || leftGray.empty() || rightGray.empty()) {
@@ -2176,10 +2208,10 @@ std::vector<LkStereoTrack> BuildLkXFeatStereoSeeds(XFeatFrontendClient *client, 
     float leftScaleY = 1.0f;
     float rightScaleX = 1.0f;
     float rightScaleY = 1.0f;
-    const cv::Mat leftInput = BuildXFeatInputImage(leftGray, maxWidth, maxHeight, leftScaleX, leftScaleY);
-    const cv::Mat rightInput = BuildXFeatInputImage(rightGray, maxWidth, maxHeight, rightScaleX, rightScaleY);
-    XFeatFeatureSet leftFeatures;
-    XFeatFeatureSet rightFeatures;
+    const cv::Mat leftInput = BuildSuperPointInputImage(leftGray, maxWidth, maxHeight, leftScaleX, leftScaleY);
+    const cv::Mat rightInput = BuildSuperPointInputImage(rightGray, maxWidth, maxHeight, rightScaleX, rightScaleY);
+    SuperPointFeatureSet leftFeatures;
+    SuperPointFeatureSet rightFeatures;
     std::string err;
     if (!client->DetectAndComputeStereo(leftInput, rightInput, leftFeatures, rightFeatures, &err)) {
         return seeds;
@@ -2213,13 +2245,13 @@ std::vector<LkStereoTrack> BuildLkXFeatStereoSeeds(XFeatFrontendClient *client, 
     return seeds;
 }
 
-LkXFeatSeedResult BuildLkXFeatStereoSeedResult(uint64_t frameId, XFeatFrontendClient *client, const cv::Mat &leftGray,
+LkSuperPointSeedResult BuildLkSuperPointStereoSeedResult(uint64_t frameId, SuperPointLightGlueFrontendClient *client, const cv::Mat &leftGray,
                                                const cv::Mat &rightGray, int maxWidth, int maxHeight)
 {
-    LkXFeatSeedResult result{};
+    LkSuperPointSeedResult result{};
     result.frameId = frameId;
     const auto startTp = std::chrono::steady_clock::now();
-    result.seeds = BuildLkXFeatStereoSeeds(client, leftGray, rightGray, maxWidth, maxHeight, &result.stats,
+    result.seeds = BuildLkSuperPointStereoSeeds(client, leftGray, rightGray, maxWidth, maxHeight, &result.stats,
                                            &result.matchMs);
     result.totalMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - startTp).count();
     return result;
@@ -2242,7 +2274,7 @@ void PushLkFrameSnapshot(std::deque<LkFrameSnapshot> &history, uint64_t frameId,
     }
 }
 
-std::vector<LkStereoTrack> TrackLkSeedsToFrame(const LkXFeatSeedResult &result,
+std::vector<LkStereoTrack> TrackLkSeedsToFrame(const LkSuperPointSeedResult &result,
                                                const std::deque<LkFrameSnapshot> &history, uint64_t currentFrameId)
 {
     if (result.seeds.empty() || history.empty()) {
@@ -2346,7 +2378,7 @@ void AppendLkSeedsForDegradedCells(const std::vector<LkStereoTrack> &seeds, cons
     }
 }
 
-bool IsXFeatTrackingStateSafe(int trackingState)
+bool IsSuperPointTrackingStateSafe(int trackingState)
 {
     switch (trackingState) {
     case ORB_SLAM3::Tracking::OK:
@@ -2484,7 +2516,7 @@ bool OrbSlam3Engine::Start()
     m_lastStableTimestampSec = 0.0;
     m_lkTracks.clear();
     m_lkFrameHistory.clear();
-    m_lkLastXFeatSeedFrameId = 0;
+    m_lkLastSuperPointSeedFrameId = 0;
     m_stableVelX = 0.0f;
     m_stableVelY = 0.0f;
     m_stableVelZ = 0.0f;
@@ -2524,7 +2556,7 @@ void OrbSlam3Engine::SetFeatureFrontend(FeatureFrontend frontend)
         m_lkPerFrameVpi.reset();
         m_lkTracks.clear();
         m_lkFrameHistory.clear();
-        m_lkLastXFeatSeedFrameId = 0;
+        m_lkLastSuperPointSeedFrameId = 0;
         m_lkTwc = Sophus::SE3f();
         m_lkPerFrameReferenceTwc = Sophus::SE3f();
         m_lkHavePrev = false;
@@ -2536,12 +2568,12 @@ void OrbSlam3Engine::SetFeatureFrontend(FeatureFrontend frontend)
     m_featureFrontend = frontend;
 }
 
-void OrbSlam3Engine::SetXFeatFrontendClient(XFeatFrontendClient *client) { m_xfeatFrontendClient = client; }
+void OrbSlam3Engine::SetSuperPointLightGlueFrontendClient(SuperPointLightGlueFrontendClient *client) { m_superpointFrontendClient = client; }
 
-void OrbSlam3Engine::SetXFeatInputSizeLimit(int maxWidth, int maxHeight)
+void OrbSlam3Engine::SetSuperPointInputSizeLimit(int maxWidth, int maxHeight)
 {
-    m_xfeatInputMaxWidth = std::max(0, maxWidth);
-    m_xfeatInputMaxHeight = std::max(0, maxHeight);
+    m_superpointInputMaxWidth = std::max(0, maxWidth);
+    m_superpointInputMaxHeight = std::max(0, maxHeight);
 }
 
 void OrbSlam3Engine::SetLkLoopClosure(bool enabled, float scale, float relaxation)
@@ -2711,34 +2743,38 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
     out.trackingState = ORB_SLAM3::Tracking::OK;
     out.poseValid = true;
     out.pose.valid = true;
-    out.usedXFeatFrontend = false;
-    m_lastXFeatRawLeftCount = 0;
-    m_lastXFeatRawRightCount = 0;
-    m_lastXFeatMatchedStereoCount = 0;
-    m_lastXFeatInjectedLeftCount = 0;
-    m_lastXFeatInjectedRightCount = 0;
-    m_lastXFeatSeedSourceFrameId = 0;
-    m_lastXFeatSeedCurrentFrameId = 0;
-    m_lastXFeatSeedAgeFrames = 0;
-    m_lastXFeatSeedForwardedCount = 0;
-    m_lastXFeatPrepareMs = 0.0;
-    m_lastXFeatWorkerWriteMs = 0.0;
-    m_lastXFeatWorkerReadMs = 0.0;
-    m_lastXFeatWorkerTotalMs = 0.0;
-    m_lastXFeatStereoMatchMs = 0.0;
-    m_lastXFeatTotalMs = 0.0;
-    m_lastXFeatImageCount = 0;
-    m_lastXFeatPayloadBytes = 0;
+    out.usedSuperPointFrontend = false;
+    m_lastSuperPointRawLeftCount = 0;
+    m_lastSuperPointRawRightCount = 0;
+    m_lastSuperPointMatchedStereoCount = 0;
+    m_lastSuperPointInjectedLeftCount = 0;
+    m_lastSuperPointInjectedRightCount = 0;
+    m_lastSuperPointSeedSourceFrameId = 0;
+    m_lastSuperPointSeedCurrentFrameId = 0;
+    m_lastSuperPointSeedAgeFrames = 0;
+    m_lastSuperPointSeedForwardedCount = 0;
+    m_lastSuperPointPrepareMs = 0.0;
+    m_lastSuperPointInputMs = 0.0;
+    m_lastSuperPointForwardMs = 0.0;
+    m_lastSuperPointFrontendMs = 0.0;
+    m_lastSuperPointStereoMatchMs = 0.0;
+    m_lastSuperPointTotalMs = 0.0;
+    m_lastSuperPointImageCount = 0;
+    m_lastSuperPointPayloadBytes = 0;
 
+    const auto prepareStartTp = std::chrono::steady_clock::now();
     cv::Mat leftGray = EnsureGray8(input.stereo.left.gray);
     cv::Mat rightGray = EnsureGray8(input.stereo.right.gray);
     if (leftGray.empty() || rightGray.empty() || !m_lkCalibrationLoaded) {
         out.trackingState = ORB_SLAM3::Tracking::LOST;
         out.poseValid = false;
         out.pose.valid = false;
+        out.inputPrepareMs =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prepareStartTp).count();
         return out;
     }
 
+    const auto rectifyStartTp = std::chrono::steady_clock::now();
     EnsureLkRectifier(leftGray.size());
     const bool requestVpi = m_lkPerFrameAcceleration == "auto" || m_lkPerFrameAcceleration == "vpi" ||
                             m_lkPerFrameAcceleration == "vpi-cuda" ||
@@ -2757,6 +2793,9 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
         cv::remap(leftGray, leftRect, m_lkMap1x, m_lkMap1y, cv::INTER_LINEAR);
         cv::remap(rightGray, rightRect, m_lkMap2x, m_lkMap2y, cv::INTER_LINEAR);
     }
+    const auto rectifyEndTp = std::chrono::steady_clock::now();
+    out.lkRectifyMs = std::chrono::duration<double, std::milli>(rectifyEndTp - rectifyStartTp).count();
+    out.inputPrepareMs = std::chrono::duration<double, std::milli>(rectifyEndTp - prepareStartTp).count();
 
     if (!m_lkHavePrev) {
         m_lkPrevLeft = leftRect.clone();
@@ -2771,6 +2810,7 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
         m_lkHavePrev = true;
         m_lkFrameCount = 1;
     } else {
+        const auto disparityStartTp = std::chrono::steady_clock::now();
         cv::Mat disp;
         bool usedVpi = false;
 #if SMART_DRONE_HAS_VPI
@@ -2798,7 +2838,10 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
             m_lkPerFrameSgbm->compute(m_lkPrevLeft, m_lkPrevRight, disp16);
             disp16.convertTo(disp, CV_32F, 1.0 / 16.0);
         }
+        const auto disparityEndTp = std::chrono::steady_clock::now();
+        out.lkDisparityMs = std::chrono::duration<double, std::milli>(disparityEndTp - disparityStartTp).count();
 
+        const auto gfttStartTp = std::chrono::steady_clock::now();
         std::vector<cv::Point2f> pts0;
         std::vector<cv::Point2f> rawPts0;
         cv::goodFeaturesToTrack(m_lkPrevLeft, rawPts0, kLkGfttPerFrameMaxCorners, kLkGfttQualityLevel,
@@ -2806,10 +2849,13 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
                                 cv::Mat(), kLkGfttBlockSize, false, kLkGfttHarrisK);
         pts0 = SelectGfttPointsGridBalanced(rawPts0, m_lkPrevLeft.size(), kLkGfttPerFrameMaxCorners,
                                             kLkGfttPerFrameMaxCornersPerCell);
+        const auto gfttEndTp = std::chrono::steady_clock::now();
+        out.lkGfttMs = std::chrono::duration<double, std::milli>(gfttEndTp - gfttStartTp).count();
         std::vector<cv::Point2f> pts1;
         std::vector<uint8_t> status;
         std::vector<float> err;
         bool usedVpiLk = false;
+        const auto flowStartTp = std::chrono::steady_clock::now();
 #if SMART_DRONE_HAS_VPI
         if (usedVpiRemap && requestVpiLk && !pts0.empty() && m_lkPerFrameVpi && m_lkPerFrameVpi->leftRect != nullptr) {
             VPIImage prevLeftImage = m_lkPerFrameVpi->hasPrevRect ? m_lkPerFrameVpi->prevLeftRect : nullptr;
@@ -2832,6 +2878,8 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkGfttPerFrameStereoVo(const core
             cv::calcOpticalFlowPyrLK(leftRect, m_lkPrevLeft, pts1, pts0Back, statusBack, errBack, cv::Size(21, 21),
                                     3);
         }
+        const auto flowEndTp = std::chrono::steady_clock::now();
+        out.lkFlowMs = std::chrono::duration<double, std::milli>(flowEndTp - flowStartTp).count();
 struct PerFramePnPCandidate {
             cv::Point3f object;
             cv::Point2f image;
@@ -2845,6 +2893,7 @@ struct PerFramePnPCandidate {
         std::vector<cv::Point2f> imagePoints;
         objectPoints.reserve(pts0.size());
         imagePoints.reserve(pts0.size());
+        const auto candidateStartTp = std::chrono::steady_clock::now();
         for (size_t i = 0; i < pts0.size() && i < pts1.size(); ++i) {
             if (i >= status.size() || !status[i]) {
                 continue;
@@ -2899,9 +2948,12 @@ struct PerFramePnPCandidate {
                 imagePoints.push_back(candidate.image);
             }
         }
+        const auto candidateEndTp = std::chrono::steady_clock::now();
+        out.lkCandidateMs = std::chrono::duration<double, std::milli>(candidateEndTp - candidateStartTp).count();
 
         int inlierCount = 0;
         bool poseUpdated = false;
+        const auto pnpStartTp = std::chrono::steady_clock::now();
         if (objectPoints.size() >= kLkMinPnPPoints) {
             cv::Mat rvec, tvec, inliers;
             const cv::Mat K = MakeCameraMatrix(m_lkFx, m_lkFy, m_lkCx, m_lkCy);
@@ -2971,6 +3023,10 @@ struct PerFramePnPCandidate {
                 }
             }
         }
+        const auto pnpEndTp = std::chrono::steady_clock::now();
+        out.lkPnpMs = std::chrono::duration<double, std::milli>(pnpEndTp - pnpStartTp).count();
+        out.frontendMs =
+            out.lkDisparityMs + out.lkGfttMs + out.lkFlowMs + out.lkCandidateMs + out.lkPnpMs;
 
         out.matchesInliers = inlierCount;
         out.trackedMapPointCount = static_cast<uint32_t>(inlierCount);
@@ -2980,6 +3036,7 @@ struct PerFramePnPCandidate {
         }
         const bool refreshReference = !useKeyframeReference || (m_lkFrameCount % static_cast<uint32_t>(keyframeInterval)) == 0 ||
                                       inlierCount < std::max(kLkMinPnPInliers * 2, 24);
+        const auto updateStartTp = std::chrono::steady_clock::now();
         if (refreshReference) {
             m_lkPrevLeft = leftRect.clone();
             m_lkPrevRight = rightRect.clone();
@@ -2990,6 +3047,8 @@ struct PerFramePnPCandidate {
             }
 #endif
         }
+        out.lkUpdateMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - updateStartTp)
+                             .count();
         if (!poseUpdated) {
             out.trackingState = ORB_SLAM3::Tracking::LOST;
             out.poseValid = false;
@@ -3020,24 +3079,24 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
     out.trackingState = ORB_SLAM3::Tracking::OK;
     out.poseValid = true;
     out.pose.valid = true;
-    out.usedXFeatFrontend = false;
-    m_lastXFeatRawLeftCount = 0;
-    m_lastXFeatRawRightCount = 0;
-    m_lastXFeatMatchedStereoCount = 0;
-    m_lastXFeatInjectedLeftCount = 0;
-    m_lastXFeatInjectedRightCount = 0;
-    m_lastXFeatSeedSourceFrameId = 0;
-    m_lastXFeatSeedCurrentFrameId = 0;
-    m_lastXFeatSeedAgeFrames = 0;
-    m_lastXFeatSeedForwardedCount = 0;
-    m_lastXFeatPrepareMs = 0.0;
-    m_lastXFeatWorkerWriteMs = 0.0;
-    m_lastXFeatWorkerReadMs = 0.0;
-    m_lastXFeatWorkerTotalMs = 0.0;
-    m_lastXFeatStereoMatchMs = 0.0;
-    m_lastXFeatTotalMs = 0.0;
-    m_lastXFeatImageCount = 0;
-    m_lastXFeatPayloadBytes = 0;
+    out.usedSuperPointFrontend = false;
+    m_lastSuperPointRawLeftCount = 0;
+    m_lastSuperPointRawRightCount = 0;
+    m_lastSuperPointMatchedStereoCount = 0;
+    m_lastSuperPointInjectedLeftCount = 0;
+    m_lastSuperPointInjectedRightCount = 0;
+    m_lastSuperPointSeedSourceFrameId = 0;
+    m_lastSuperPointSeedCurrentFrameId = 0;
+    m_lastSuperPointSeedAgeFrames = 0;
+    m_lastSuperPointSeedForwardedCount = 0;
+    m_lastSuperPointPrepareMs = 0.0;
+    m_lastSuperPointInputMs = 0.0;
+    m_lastSuperPointForwardMs = 0.0;
+    m_lastSuperPointFrontendMs = 0.0;
+    m_lastSuperPointStereoMatchMs = 0.0;
+    m_lastSuperPointTotalMs = 0.0;
+    m_lastSuperPointImageCount = 0;
+    m_lastSuperPointPayloadBytes = 0;
 
     cv::Mat leftGray = EnsureGray8(input.stereo.left.gray);
     cv::Mat rightGray = EnsureGray8(input.stereo.right.gray);
@@ -3057,59 +3116,59 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
     }
     PushLkFrameSnapshot(m_lkFrameHistory, input.frameId, leftRect, rightRect);
 
-    bool extractedXFeatThisFrame = false;
-    auto extractCurrentXFeatSeedsIfNeeded = [&](bool force) {
-        if (extractedXFeatThisFrame) {
+    bool extractedSuperPointThisFrame = false;
+    auto extractCurrentSuperPointSeedsIfNeeded = [&](bool force) {
+        if (extractedSuperPointThisFrame) {
             return false;
         }
-        const bool cadenceDue = m_lkLastXFeatSeedFrameId == 0 ||
-                                input.frameId >= m_lkLastXFeatSeedFrameId + kLkGridRefillIntervalFrames;
+        const bool cadenceDue = m_lkLastSuperPointSeedFrameId == 0 ||
+                                input.frameId >= m_lkLastSuperPointSeedFrameId + kLkGridRefillIntervalFrames;
         if ((!force && (!cadenceDue || !LkHasDegradedGridCell(m_lkTracks, leftRect.size()))) ||
-            m_xfeatFrontendClient == nullptr || !m_xfeatFrontendClient->Running()) {
+            m_superpointFrontendClient == nullptr || !m_superpointFrontendClient->Running()) {
             return false;
         }
-        extractedXFeatThisFrame = true;
-        LkXFeatSeedResult result = BuildLkXFeatStereoSeedResult(input.frameId, m_xfeatFrontendClient, leftRect,
-                                                                rightRect, m_xfeatInputMaxWidth,
-                                                                m_xfeatInputMaxHeight);
-        m_lastXFeatPrepareMs = result.stats.prepareMs;
-        m_lastXFeatWorkerWriteMs = result.stats.writeMs;
-        m_lastXFeatWorkerReadMs = result.stats.readMs;
-        m_lastXFeatWorkerTotalMs = result.stats.totalMs;
-        m_lastXFeatStereoMatchMs = result.matchMs;
-        m_lastXFeatImageCount = result.stats.imageCount;
-        m_lastXFeatPayloadBytes = result.stats.payloadBytes;
-        m_lastXFeatRawLeftCount = static_cast<int>(result.seeds.size());
-        m_lastXFeatRawRightCount = static_cast<int>(result.seeds.size());
-        m_lastXFeatMatchedStereoCount = static_cast<int>(result.seeds.size());
-        m_lkLastXFeatSeedFrameId = input.frameId;
+        extractedSuperPointThisFrame = true;
+        LkSuperPointSeedResult result = BuildLkSuperPointStereoSeedResult(input.frameId, m_superpointFrontendClient, leftRect,
+                                                                rightRect, m_superpointInputMaxWidth,
+                                                                m_superpointInputMaxHeight);
+        m_lastSuperPointPrepareMs = result.stats.prepareMs;
+        m_lastSuperPointInputMs = result.stats.inputMs;
+        m_lastSuperPointForwardMs = result.stats.forwardMs;
+        m_lastSuperPointFrontendMs = result.stats.totalMs;
+        m_lastSuperPointStereoMatchMs = result.matchMs;
+        m_lastSuperPointImageCount = result.stats.imageCount;
+        m_lastSuperPointPayloadBytes = result.stats.payloadBytes;
+        m_lastSuperPointRawLeftCount = static_cast<int>(result.seeds.size());
+        m_lastSuperPointRawRightCount = static_cast<int>(result.seeds.size());
+        m_lastSuperPointMatchedStereoCount = static_cast<int>(result.seeds.size());
+        m_lkLastSuperPointSeedFrameId = input.frameId;
         if (result.seeds.empty()) {
             return false;
         }
         std::vector<LkStereoTrack> seeds = std::move(result.seeds);
-        m_lastXFeatSeedSourceFrameId = result.frameId;
-        m_lastXFeatSeedCurrentFrameId = input.frameId;
-        m_lastXFeatSeedAgeFrames = 0;
-        m_lastXFeatSeedForwardedCount = static_cast<int>(seeds.size());
+        m_lastSuperPointSeedSourceFrameId = result.frameId;
+        m_lastSuperPointSeedCurrentFrameId = input.frameId;
+        m_lastSuperPointSeedAgeFrames = 0;
+        m_lastSuperPointSeedForwardedCount = static_cast<int>(seeds.size());
         if (seeds.empty()) {
             return false;
         }
         const size_t before = m_lkTracks.size();
         AppendLkSeedsForDegradedCells(seeds, leftRect.size(), m_lkTracks);
-        m_lastXFeatInjectedLeftCount = static_cast<int>(m_lkTracks.size() - before);
-        m_lastXFeatInjectedRightCount = m_lastXFeatInjectedLeftCount;
-        m_lastXFeatTotalMs = result.totalMs;
-        out.usedXFeatFrontend = m_lastXFeatInjectedLeftCount > 0;
-        return m_lastXFeatInjectedLeftCount > 0;
+        m_lastSuperPointInjectedLeftCount = static_cast<int>(m_lkTracks.size() - before);
+        m_lastSuperPointInjectedRightCount = m_lastSuperPointInjectedLeftCount;
+        m_lastSuperPointTotalMs = result.totalMs;
+        out.usedSuperPointFrontend = m_lastSuperPointInjectedLeftCount > 0;
+        return m_lastSuperPointInjectedLeftCount > 0;
     };
     auto extractCurrentGfttSeedsIfNeeded = [&](bool force) {
-        const bool cadenceDue = m_lkLastXFeatSeedFrameId == 0 ||
-                                input.frameId >= m_lkLastXFeatSeedFrameId + kLkGridRefillIntervalFrames;
+        const bool cadenceDue = m_lkLastSuperPointSeedFrameId == 0 ||
+                                input.frameId >= m_lkLastSuperPointSeedFrameId + kLkGridRefillIntervalFrames;
         if (!force && (!cadenceDue || !LkHasDegradedGridCell(m_lkTracks, leftRect.size()))) {
             return false;
         }
         std::vector<LkStereoTrack> seeds = BuildLkGfttStereoSeeds(leftRect, rightRect);
-        m_lkLastXFeatSeedFrameId = input.frameId;
+        m_lkLastSuperPointSeedFrameId = input.frameId;
         if (seeds.empty()) {
             return false;
         }
@@ -3118,8 +3177,8 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
         return m_lkTracks.size() > before;
     };
     auto extractCurrentSeedsIfNeeded = [&](bool force) {
-        if (m_xfeatFrontendClient != nullptr && m_xfeatFrontendClient->Running()) {
-            return extractCurrentXFeatSeedsIfNeeded(force);
+        if (m_superpointFrontendClient != nullptr && m_superpointFrontendClient->Running()) {
+            return extractCurrentSuperPointSeedsIfNeeded(force);
         }
         return extractCurrentGfttSeedsIfNeeded(force);
     };
@@ -3279,24 +3338,24 @@ core::ports::SlamOutput OrbSlam3Engine::ProcessLkStereoVo(const core::ports::Sla
 
     const Sophus::SE3f outputTwc = ApplyLkLoopClosure(leftRect, input.frameId, m_lkTwc);
     const Eigen::Vector3f t = outputTwc.translation();
-    out.usedXFeatFrontend = out.usedXFeatFrontend || m_lastXFeatInjectedLeftCount > 0;
-    out.xfeatRawLeftCount = m_lastXFeatRawLeftCount;
-    out.xfeatRawRightCount = m_lastXFeatRawRightCount;
-    out.xfeatMatchedStereoCount = m_lastXFeatMatchedStereoCount;
-    out.xfeatInjectedLeftCount = m_lastXFeatInjectedLeftCount;
-    out.xfeatInjectedRightCount = m_lastXFeatInjectedRightCount;
-    out.xfeatSeedSourceFrameId = m_lastXFeatSeedSourceFrameId;
-    out.xfeatSeedCurrentFrameId = m_lastXFeatSeedCurrentFrameId;
-    out.xfeatSeedAgeFrames = m_lastXFeatSeedAgeFrames;
-    out.xfeatSeedForwardedCount = m_lastXFeatSeedForwardedCount;
-    out.xfeatPrepareMs = m_lastXFeatPrepareMs;
-    out.xfeatWorkerWriteMs = m_lastXFeatWorkerWriteMs;
-    out.xfeatWorkerReadMs = m_lastXFeatWorkerReadMs;
-    out.xfeatWorkerTotalMs = m_lastXFeatWorkerTotalMs;
-    out.xfeatStereoMatchMs = m_lastXFeatStereoMatchMs;
-    out.xfeatTotalMs = m_lastXFeatTotalMs;
-    out.xfeatImageCount = m_lastXFeatImageCount;
-    out.xfeatPayloadBytes = m_lastXFeatPayloadBytes;
+    out.usedSuperPointFrontend = out.usedSuperPointFrontend || m_lastSuperPointInjectedLeftCount > 0;
+    out.superpointRawLeftCount = m_lastSuperPointRawLeftCount;
+    out.superpointRawRightCount = m_lastSuperPointRawRightCount;
+    out.superpointMatchedStereoCount = m_lastSuperPointMatchedStereoCount;
+    out.superpointInjectedLeftCount = m_lastSuperPointInjectedLeftCount;
+    out.superpointInjectedRightCount = m_lastSuperPointInjectedRightCount;
+    out.superpointSeedSourceFrameId = m_lastSuperPointSeedSourceFrameId;
+    out.superpointSeedCurrentFrameId = m_lastSuperPointSeedCurrentFrameId;
+    out.superpointSeedAgeFrames = m_lastSuperPointSeedAgeFrames;
+    out.superpointSeedForwardedCount = m_lastSuperPointSeedForwardedCount;
+    out.superpointPrepareMs = m_lastSuperPointPrepareMs;
+    out.superpointInputMs = m_lastSuperPointInputMs;
+    out.superpointForwardMs = m_lastSuperPointForwardMs;
+    out.superpointFrontendMs = m_lastSuperPointFrontendMs;
+    out.superpointStereoMatchMs = m_lastSuperPointStereoMatchMs;
+    out.superpointTotalMs = m_lastSuperPointTotalMs;
+    out.superpointImageCount = m_lastSuperPointImageCount;
+    out.superpointPayloadBytes = m_lastSuperPointPayloadBytes;
     const Eigen::Quaternionf q(outputTwc.so3().unit_quaternion());
     out.pose.x = t.x();
     out.pose.y = t.y();
@@ -3319,7 +3378,7 @@ void OrbSlam3Engine::Stop()
     m_lkLoopKeyframes.clear();
     m_lkLoopCorrection = Sophus::SE3f();
     m_lkLastLoopClosureFrameId = 0;
-    m_lkLastXFeatSeedFrameId = 0;
+    m_lkLastSuperPointSeedFrameId = 0;
     m_stableVelX = 0.0f;
     m_stableVelY = 0.0f;
     m_stableVelZ = 0.0f;
@@ -3431,19 +3490,19 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     }
     out.frameId = input.frameId;
     out.captureTimestampNs = input.captureTimestampNs;
-    m_lastXFeatRawLeftCount = 0;
-    m_lastXFeatRawRightCount = 0;
-    m_lastXFeatMatchedStereoCount = 0;
-    m_lastXFeatInjectedLeftCount = 0;
-    m_lastXFeatInjectedRightCount = 0;
-    m_lastXFeatPrepareMs = 0.0;
-    m_lastXFeatWorkerWriteMs = 0.0;
-    m_lastXFeatWorkerReadMs = 0.0;
-    m_lastXFeatWorkerTotalMs = 0.0;
-    m_lastXFeatStereoMatchMs = 0.0;
-    m_lastXFeatTotalMs = 0.0;
-    m_lastXFeatImageCount = 0;
-    m_lastXFeatPayloadBytes = 0;
+    m_lastSuperPointRawLeftCount = 0;
+    m_lastSuperPointRawRightCount = 0;
+    m_lastSuperPointMatchedStereoCount = 0;
+    m_lastSuperPointInjectedLeftCount = 0;
+    m_lastSuperPointInjectedRightCount = 0;
+    m_lastSuperPointPrepareMs = 0.0;
+    m_lastSuperPointInputMs = 0.0;
+    m_lastSuperPointForwardMs = 0.0;
+    m_lastSuperPointFrontendMs = 0.0;
+    m_lastSuperPointStereoMatchMs = 0.0;
+    m_lastSuperPointTotalMs = 0.0;
+    m_lastSuperPointImageCount = 0;
+    m_lastSuperPointPayloadBytes = 0;
 
     Sophus::SE3f tcw;
     const bool monoMode = (m_inputMode != OrbInputMode::Stereo);
@@ -3451,30 +3510,31 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
         (m_inputMode == OrbInputMode::MonoRight) ? input.stereo.right.gray : input.stereo.left.gray;
     cv::Mat preparedLeftImage;
     cv::Mat preparedRightImage;
-    out.usedXFeatFrontend = false;
-    out.xfeatRawLeftCount = m_lastXFeatRawLeftCount;
-    out.xfeatRawRightCount = m_lastXFeatRawRightCount;
-    out.xfeatMatchedStereoCount = m_lastXFeatMatchedStereoCount;
-    out.xfeatInjectedLeftCount = m_lastXFeatInjectedLeftCount;
-    out.xfeatInjectedRightCount = m_lastXFeatInjectedRightCount;
-    out.xfeatSeedSourceFrameId = m_lastXFeatSeedSourceFrameId;
-    out.xfeatSeedCurrentFrameId = m_lastXFeatSeedCurrentFrameId;
-    out.xfeatSeedAgeFrames = m_lastXFeatSeedAgeFrames;
-    out.xfeatSeedForwardedCount = m_lastXFeatSeedForwardedCount;
-    out.xfeatPrepareMs = m_lastXFeatPrepareMs;
-    out.xfeatWorkerWriteMs = m_lastXFeatWorkerWriteMs;
-    out.xfeatWorkerReadMs = m_lastXFeatWorkerReadMs;
-    out.xfeatWorkerTotalMs = m_lastXFeatWorkerTotalMs;
-    out.xfeatStereoMatchMs = m_lastXFeatStereoMatchMs;
-    out.xfeatTotalMs = m_lastXFeatTotalMs;
-    out.xfeatImageCount = m_lastXFeatImageCount;
-    out.xfeatPayloadBytes = m_lastXFeatPayloadBytes;
+    out.usedSuperPointFrontend = false;
+    out.superpointRawLeftCount = m_lastSuperPointRawLeftCount;
+    out.superpointRawRightCount = m_lastSuperPointRawRightCount;
+    out.superpointMatchedStereoCount = m_lastSuperPointMatchedStereoCount;
+    out.superpointInjectedLeftCount = m_lastSuperPointInjectedLeftCount;
+    out.superpointInjectedRightCount = m_lastSuperPointInjectedRightCount;
+    out.superpointSeedSourceFrameId = m_lastSuperPointSeedSourceFrameId;
+    out.superpointSeedCurrentFrameId = m_lastSuperPointSeedCurrentFrameId;
+    out.superpointSeedAgeFrames = m_lastSuperPointSeedAgeFrames;
+    out.superpointSeedForwardedCount = m_lastSuperPointSeedForwardedCount;
+    out.superpointPrepareMs = m_lastSuperPointPrepareMs;
+    out.superpointInputMs = m_lastSuperPointInputMs;
+    out.superpointForwardMs = m_lastSuperPointForwardMs;
+    out.superpointFrontendMs = m_lastSuperPointFrontendMs;
+    out.superpointStereoMatchMs = m_lastSuperPointStereoMatchMs;
+    out.superpointTotalMs = m_lastSuperPointTotalMs;
+    out.superpointImageCount = m_lastSuperPointImageCount;
+    out.superpointPayloadBytes = m_lastSuperPointPayloadBytes;
 
     const bool useExternalStereoFrontend = m_featureFrontend == FeatureFrontend::SuperPointLightGlue && !monoMode &&
-                                           m_xfeatFrontendClient != nullptr && m_xfeatFrontendClient->Running();
+                                           m_superpointFrontendClient != nullptr && m_superpointFrontendClient->Running();
     bool trackedByExternalFrontend = false;
     if (useExternalStereoFrontend) {
         const auto externalStartTp = std::chrono::steady_clock::now();
+        const auto prepareStartTp = externalStartTp;
         cv::Mat leftPrepared = EnsureGray8(input.stereo.left.gray);
         cv::Mat rightPrepared = EnsureGray8(input.stereo.right.gray);
         if (m_lkCalibrationLoaded && !leftPrepared.empty() && !rightPrepared.empty()) {
@@ -3488,29 +3548,33 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
                 rightPrepared = std::move(rightRect);
             }
         }
-
         float leftScaleX = 1.0f;
         float leftScaleY = 1.0f;
         float rightScaleX = 1.0f;
         float rightScaleY = 1.0f;
-        const cv::Mat leftInput = BuildXFeatInputImage(leftPrepared, m_xfeatInputMaxWidth, m_xfeatInputMaxHeight,
+        const cv::Mat leftInput = BuildSuperPointInputImage(leftPrepared, m_superpointInputMaxWidth, m_superpointInputMaxHeight,
                                                        leftScaleX, leftScaleY);
-        const cv::Mat rightInput = BuildXFeatInputImage(rightPrepared, m_xfeatInputMaxWidth, m_xfeatInputMaxHeight,
+        const cv::Mat rightInput = BuildSuperPointInputImage(rightPrepared, m_superpointInputMaxWidth, m_superpointInputMaxHeight,
                                                         rightScaleX, rightScaleY);
-        XFeatFeatureSet leftFeatures;
-        XFeatFeatureSet rightFeatures;
+        const auto inputEndTp = std::chrono::steady_clock::now();
+        out.inputPrepareMs = std::chrono::duration<double, std::milli>(inputEndTp - prepareStartTp).count();
+        SuperPointFeatureSet leftFeatures;
+        SuperPointFeatureSet rightFeatures;
         std::string featureErr;
-        if (m_xfeatFrontendClient->DetectAndComputeStereo(leftInput, rightInput, leftFeatures, rightFeatures,
+        const auto frontendStartTp = std::chrono::steady_clock::now();
+        if (m_superpointFrontendClient->DetectAndComputeStereo(leftInput, rightInput, leftFeatures, rightFeatures,
                                                           &featureErr)) {
-            const XFeatFrontendClient::Stats stats = m_xfeatFrontendClient->LastStats();
-            m_lastXFeatPrepareMs = stats.prepareMs;
-            m_lastXFeatWorkerWriteMs = stats.writeMs;
-            m_lastXFeatWorkerReadMs = stats.readMs;
-            m_lastXFeatWorkerTotalMs = stats.totalMs;
-            m_lastXFeatImageCount = stats.imageCount;
-            m_lastXFeatPayloadBytes = stats.payloadBytes;
-            m_lastXFeatRawLeftCount = static_cast<int>(leftFeatures.keypoints.size());
-            m_lastXFeatRawRightCount = static_cast<int>(rightFeatures.keypoints.size());
+            const auto frontendEndTp = std::chrono::steady_clock::now();
+            const SuperPointLightGlueFrontendClient::Stats stats = m_superpointFrontendClient->LastStats();
+            m_lastSuperPointPrepareMs = stats.prepareMs;
+            m_lastSuperPointInputMs = stats.inputMs;
+            m_lastSuperPointForwardMs = stats.forwardMs;
+            m_lastSuperPointFrontendMs = stats.totalMs;
+            m_lastSuperPointImageCount = stats.imageCount;
+            m_lastSuperPointPayloadBytes = stats.payloadBytes;
+            m_lastSuperPointRawLeftCount = static_cast<int>(leftFeatures.keypoints.size());
+            m_lastSuperPointRawRightCount = static_cast<int>(rightFeatures.keypoints.size());
+            out.frontendMs = std::chrono::duration<double, std::milli>(frontendEndTp - frontendStartTp).count();
 
             RemapKeypointsToSource(leftFeatures.keypoints, leftScaleX, leftScaleY);
             RemapKeypointsToSource(rightFeatures.keypoints, rightScaleX, rightScaleY);
@@ -3518,12 +3582,14 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
             const std::vector<StereoMatchPair> rawMatches =
                 BuildAlignedStereoPairs(leftFeatures, rightFeatures, leftPrepared, rightPrepared);
             const std::vector<StereoMatchPair> matches = FilterStereoPairsByDisparityConsistency(rawMatches);
-            m_lastXFeatStereoMatchMs =
+            m_lastSuperPointStereoMatchMs =
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - matchStartTp).count();
-            m_lastXFeatMatchedStereoCount = static_cast<int>(matches.size());
+            out.stereoPairMs = m_lastSuperPointStereoMatchMs;
+            m_lastSuperPointMatchedStereoCount = static_cast<int>(matches.size());
 
             ORB_SLAM3::ExternalStereoFrameData externalData;
             ORB_SLAM3::Tracking *tracker = m_system->GetTracker();
+            const auto packStartTp = std::chrono::steady_clock::now();
             std::vector<cv::Point2f> matchedLeftPoints;
             std::vector<cv::Point2f> matchedRightPoints;
             matchedLeftPoints.reserve(matches.size());
@@ -3541,27 +3607,37 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
                                                 tracker != nullptr ? tracker->GetRightORBExtractor() : nullptr,
                                                 leftPrepared, rightPrepared, matchedLeftPoints, matchedRightPoints,
                                                 externalData)) {
+                const auto packEndTp = std::chrono::steady_clock::now();
+                out.externalPackMs = std::chrono::duration<double, std::milli>(packEndTp - packStartTp).count();
                 const bool initializedForMonoAugmentation =
                     tracker != nullptr && tracker->mState != ORB_SLAM3::Tracking::NO_IMAGES_YET &&
                     tracker->mState != ORB_SLAM3::Tracking::NOT_INITIALIZED;
                 if (initializedForMonoAugmentation) {
+                    const auto augmentStartTp = std::chrono::steady_clock::now();
+                    const size_t maxLeftFeatures =
+                        EnvSizeValueClamped("SMART_DRONE_EXTERNAL_STEREO_MAX_LEFT_FEATURES",
+                                            kExternalStereoMaxLeftFeatures, kExternalStereoMaxLeftFeatures,
+                                            kExternalStereoMaxLeftFeaturesLimit);
                     AppendOrbLeftOnlyFeatures(tracker->GetLeftORBExtractor(), leftPrepared, externalData,
-                                              kExternalStereoMaxLeftFeatures);
+                                              maxLeftFeatures);
+                    out.monoAugmentMs =
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - augmentStartTp)
+                            .count();
                 }
-                m_lastXFeatInjectedLeftCount = static_cast<int>(externalData.leftKeypoints.size());
-                m_lastXFeatInjectedRightCount = static_cast<int>(externalData.rightKeypoints.size());
-                out.xfeatRawLeftCount = m_lastXFeatRawLeftCount;
-                out.xfeatRawRightCount = m_lastXFeatRawRightCount;
-                out.xfeatMatchedStereoCount = m_lastXFeatMatchedStereoCount;
-                out.xfeatInjectedLeftCount = m_lastXFeatInjectedLeftCount;
-                out.xfeatInjectedRightCount = m_lastXFeatInjectedRightCount;
-                out.xfeatPrepareMs = m_lastXFeatPrepareMs;
-                out.xfeatWorkerWriteMs = m_lastXFeatWorkerWriteMs;
-                out.xfeatWorkerReadMs = m_lastXFeatWorkerReadMs;
-                out.xfeatWorkerTotalMs = m_lastXFeatWorkerTotalMs;
-                out.xfeatStereoMatchMs = m_lastXFeatStereoMatchMs;
-                out.xfeatImageCount = m_lastXFeatImageCount;
-                out.xfeatPayloadBytes = m_lastXFeatPayloadBytes;
+                m_lastSuperPointInjectedLeftCount = static_cast<int>(externalData.leftKeypoints.size());
+                m_lastSuperPointInjectedRightCount = static_cast<int>(externalData.rightKeypoints.size());
+                out.superpointRawLeftCount = m_lastSuperPointRawLeftCount;
+                out.superpointRawRightCount = m_lastSuperPointRawRightCount;
+                out.superpointMatchedStereoCount = m_lastSuperPointMatchedStereoCount;
+                out.superpointInjectedLeftCount = m_lastSuperPointInjectedLeftCount;
+                out.superpointInjectedRightCount = m_lastSuperPointInjectedRightCount;
+                out.superpointPrepareMs = m_lastSuperPointPrepareMs;
+                out.superpointInputMs = m_lastSuperPointInputMs;
+                out.superpointForwardMs = m_lastSuperPointForwardMs;
+                out.superpointFrontendMs = m_lastSuperPointFrontendMs;
+                out.superpointStereoMatchMs = m_lastSuperPointStereoMatchMs;
+                out.superpointImageCount = m_lastSuperPointImageCount;
+                out.superpointPayloadBytes = m_lastSuperPointPayloadBytes;
                 const auto trackStartTp = std::chrono::steady_clock::now();
                 if (m_useImu) {
                     tcw = m_system->TrackStereoPreparedWithFeatures(leftPrepared, rightPrepared, externalData,
@@ -3571,11 +3647,12 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
                                                                     input.frameTimeSec);
                 }
                 const auto trackEndTp = std::chrono::steady_clock::now();
-                m_lastXFeatTotalMs =
+                m_lastSuperPointTotalMs =
                     std::chrono::duration<double, std::milli>(trackEndTp - externalStartTp).count();
                 out.orbTrackMs = std::chrono::duration<double, std::milli>(trackEndTp - trackStartTp).count();
-                out.xfeatTotalMs = m_lastXFeatTotalMs;
-                out.usedXFeatFrontend = true;
+                out.frontendMs = m_lastSuperPointFrontendMs > 0.0 ? m_lastSuperPointFrontendMs : out.frontendMs;
+                out.superpointTotalMs = m_lastSuperPointTotalMs;
+                out.usedSuperPointFrontend = true;
                 out.leftFeatures.reserve(externalData.leftKeypoints.size());
                 out.rightFeatures.reserve(externalData.rightKeypoints.size());
                 for (const cv::KeyPoint &kp : externalData.leftKeypoints) {
@@ -3650,7 +3727,7 @@ core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatc
     out.matchesInliers = visual.matchesInliers;
     out.trackedMapPointCount = static_cast<uint32_t>(visual.trackedMapPointCount);
     out.localMapPointCount = static_cast<uint32_t>(visual.localMapPointCount);
-    if (extractFeatures && !out.usedXFeatFrontend) {
+    if (extractFeatures && !out.usedSuperPointFrontend) {
         if (m_inputMode == OrbInputMode::MonoRight) {
             out.rightFeatures = std::move(visual.leftFeatures);
         } else {

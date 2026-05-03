@@ -8,7 +8,7 @@
 #include "System.h"
 #include "adapters/imu/icm42688_imu_provider.h"
 #include "adapters/slam/orbslam3_engine.h"
-#include "adapters/slam/xfeat_frontend_client.h"
+#include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "adapters/stream/udp_image_sender.h"
 #include "adapters/telemetry/mavlink_pose_publisher.h"
 #include "adapters/telemetry/px4_mavlink_gateway.h"
@@ -53,7 +53,7 @@ class SlamSessionRuntime {
 
     std::unique_ptr<ORB_SLAM3::System> m_slamSystem;
     smartdrone::adapters::slam::OrbSlam3Engine m_slamEngine;
-    smartdrone::adapters::slam::XFeatFrontendClient m_xfeatFrontendClient;
+    smartdrone::adapters::slam::SuperPointLightGlueFrontendClient m_superpointFrontendClient;
     AutoSlamModeController m_autoSlamModeController{};
     StereoBodyExtrinsics m_stereoBodyExtrinsics{};
     UdpImageSender m_udp;

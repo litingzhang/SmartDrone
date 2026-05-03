@@ -174,7 +174,7 @@ function(configure_orb_target target_name)
   )
 endfunction()
 
-function(configure_xfeat_native_target target_name)
+function(configure_superpoint_native_target target_name)
   set(_SMART_DRONE_JETSON_DEP_DIRS
     "${SYSROOT}/usr/local/cuda/targets/aarch64-linux/lib"
     "${SYSROOT}/usr/local/cuda/lib64"
@@ -252,7 +252,7 @@ function(configure_xfeat_native_target target_name)
   if(_SMART_DRONE_TENSORRT_INCLUDE AND _SMART_DRONE_TENSORRT_LIBS)
     if(_SMART_DRONE_MISSING_CUDA_DEPS)
       message(FATAL_ERROR
-        "Missing Jetson runtime libraries required by TensorRT XFeat: ${_SMART_DRONE_MISSING_CUDA_DEPS}. "
+        "Missing Jetson runtime libraries required by TensorRT SuperPoint: ${_SMART_DRONE_MISSING_CUDA_DEPS}. "
         "Sync CUDA/cuDNN into the sysroot or set SMART_DRONE_JETSON_LIB_DIR.")
     endif()
     message(STATUS "Resolved TensorRT include: ${_SMART_DRONE_TENSORRT_INCLUDE}")
@@ -264,10 +264,10 @@ function(configure_xfeat_native_target target_name)
     )
     target_link_libraries(${target_name} PRIVATE ${_SMART_DRONE_TENSORRT_LIBS})
     target_link_libraries(${target_name} PRIVATE ${_SMART_DRONE_CUDA_DEP_LIBS})
-    target_compile_definitions(${target_name} PRIVATE SMART_DRONE_XFEAT_TENSORRT_AVAILABLE=1)
-    target_compile_definitions(${target_name} PRIVATE SMART_DRONE_XFEAT_NATIVE_AVAILABLE=1)
+    target_compile_definitions(${target_name} PRIVATE SMART_DRONE_SUPERPOINT_TENSORRT_AVAILABLE=1)
+    target_compile_definitions(${target_name} PRIVATE SMART_DRONE_SUPERPOINT_NATIVE_AVAILABLE=1)
   else()
-    message(STATUS "TensorRT headers/libs not found in sysroot; XFeat TensorRT backend disabled")
+    message(STATUS "TensorRT headers/libs not found in sysroot; SuperPoint TensorRT backend disabled")
   endif()
 endfunction()
 
@@ -349,7 +349,7 @@ if(BUILD_SMART_DRONE)
     target_compile_definitions(smart_drone PRIVATE SMART_DRONE_CAMERA_PROVIDER_UVC_OPENCV=1)
   endif()
   configure_common_target(smart_drone)
-  configure_xfeat_native_target(smart_drone)
+  configure_superpoint_native_target(smart_drone)
   configure_orb_target(smart_drone)
 endif()
 

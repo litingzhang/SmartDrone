@@ -8,7 +8,7 @@
 
 namespace smartdrone::adapters::slam {
 
-struct XFeatFeatureSet;
+struct SuperPointFeatureSet;
 
 class SuperPointNativeExtractor {
   public:
@@ -30,9 +30,9 @@ class SuperPointNativeExtractor {
     void Stop();
     bool Running() const;
     bool Detect(const cv::Mat &gray, std::vector<cv::Point2f> &outPoints, std::string *err);
-    bool DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet &outFeatures, std::string *err);
-    bool DetectAndComputeStereo(const cv::Mat &leftGray, const cv::Mat &rightGray, XFeatFeatureSet &leftFeatures,
-                                XFeatFeatureSet &rightFeatures, std::string *err);
+    bool DetectAndCompute(const cv::Mat &gray, SuperPointFeatureSet &outFeatures, std::string *err);
+    bool DetectAndComputeStereo(const cv::Mat &leftGray, const cv::Mat &rightGray, SuperPointFeatureSet &leftFeatures,
+                                SuperPointFeatureSet &rightFeatures, std::string *err);
     Stats LastStats() const;
 
   private:

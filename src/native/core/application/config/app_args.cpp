@@ -381,9 +381,9 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.featureFrontend = ParseFeatureFrontendText(argReader.GetString("--feature-frontend", "orb"));
     {
         const char *home = std::getenv("HOME");
-        const std::string explicitRepo = argReader.GetString("--xfeat-repo", "");
+        const std::string explicitRepo = argReader.GetString("--superpoint-repo", "");
         if (!explicitRepo.empty()) {
-            config.runtime.xfeatRepo = ResolveRuntimePath(explicitRepo, argc > 0 ? argv[0] : nullptr);
+            config.runtime.superpointRepo = ResolveRuntimePath(explicitRepo, argc > 0 ? argv[0] : nullptr);
         } else {
             std::vector<std::string> repoCandidates;
             repoCandidates.emplace_back("LightGlue");
@@ -396,17 +396,17 @@ AppConfig ParseAppConfig(int argc, char **argv)
                 repoCandidates.push_back((fs::path(home) / "third_party" / "LightGlue").string());
                 repoCandidates.push_back((fs::path(home) / "third_party" / "lightglue").string());
             }
-            config.runtime.xfeatRepo = ResolveFirstExistingRuntimePath(repoCandidates, argc > 0 ? argv[0] : nullptr);
+            config.runtime.superpointRepo = ResolveFirstExistingRuntimePath(repoCandidates, argc > 0 ? argv[0] : nullptr);
         }
     }
-    config.runtime.xfeatDevice = argReader.GetString("--xfeat-device", "auto");
-    config.runtime.xfeatTopK = argReader.GetInt("--xfeat-top-k", 1024);
-    config.runtime.xfeatMaxPoints = argReader.GetInt("--xfeat-max-points", 768);
-    config.runtime.xfeatInputMaxWidth = argReader.GetInt("--xfeat-input-max-width", 640);
-    config.runtime.xfeatInputMaxHeight = argReader.GetInt(
-        "--xfeat-input-max-height",
+    config.runtime.superpointDevice = argReader.GetString("--superpoint-device", "auto");
+    config.runtime.superpointTopK = argReader.GetInt("--superpoint-top-k", 1024);
+    config.runtime.superpointMaxPoints = argReader.GetInt("--superpoint-max-points", 768);
+    config.runtime.superpointInputMaxWidth = argReader.GetInt("--superpoint-input-max-width", 640);
+    config.runtime.superpointInputMaxHeight = argReader.GetInt(
+        "--superpoint-input-max-height",
         config.runtime.featureFrontend == FeatureFrontend::SuperPointLightGlue ? 480 : 400);
-    config.runtime.lkXFeatSeeding = false;
+    config.runtime.lkSuperPointSeeding = false;
     config.runtime.lkLoopClosure = argReader.HasFlag("--lk-loop-closure");
     config.runtime.lkLoopScale = argReader.GetFloat("--lk-loop-scale", 1.20f);
     config.runtime.lkLoopRelaxation = argReader.GetFloat("--lk-loop-relax", 1.40f);

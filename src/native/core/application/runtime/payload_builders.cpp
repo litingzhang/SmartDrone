@@ -89,11 +89,11 @@ std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig &cfg, smartdrone::co
     oss << "slam.orb_nlevels=" << cfg.app.runtime.orbNLevels << "\n";
     oss << "slam.orb_ini_th_fast=" << cfg.app.runtime.orbIniThFAST << "\n";
     oss << "slam.orb_min_th_fast=" << cfg.app.runtime.orbMinThFAST << "\n";
-    oss << "slam.xfeat_top_k=" << cfg.app.runtime.xfeatTopK << "\n";
-    oss << "slam.xfeat_max_points=" << cfg.app.runtime.xfeatMaxPoints << "\n";
-    oss << "slam.xfeat_input_max_width=" << cfg.app.runtime.xfeatInputMaxWidth << "\n";
-    oss << "slam.xfeat_input_max_height=" << cfg.app.runtime.xfeatInputMaxHeight << "\n";
-    oss << "slam.lk_xfeat_seeding=" << (cfg.app.runtime.lkXFeatSeeding ? "true" : "false") << "\n";
+    oss << "slam.superpoint_top_k=" << cfg.app.runtime.superpointTopK << "\n";
+    oss << "slam.superpoint_max_points=" << cfg.app.runtime.superpointMaxPoints << "\n";
+    oss << "slam.superpoint_input_max_width=" << cfg.app.runtime.superpointInputMaxWidth << "\n";
+    oss << "slam.superpoint_input_max_height=" << cfg.app.runtime.superpointInputMaxHeight << "\n";
+    oss << "slam.lk_superpoint_seeding=" << (cfg.app.runtime.lkSuperPointSeeding ? "true" : "false") << "\n";
     oss << "slam.lk_per_frame_accel=" << cfg.app.runtime.lkPerFrameAcceleration << "\n";
     oss << "slam.orb_accel=" << cfg.app.runtime.orbAcceleration << "\n";
     oss << "slam.settings=" << cfg.app.settings << "\n";

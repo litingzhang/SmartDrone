@@ -79,7 +79,7 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
     if (remote.featureFrontend == FeatureFrontend::Reserved) {
         remote.featureFrontend = FeatureFrontend::Orb;
     }
-    remote.lkXFeatSeeding = false;
+    remote.lkSuperPointSeeding = false;
     if (remote.featureFrontend != FeatureFrontend::Orb) {
         remote.orbAcceleration = "cpu";
     }
@@ -119,15 +119,15 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         }
         return false;
     }
-    if (remote.xfeatTopK < 1 || remote.xfeatTopK > 4096 || remote.xfeatMaxPoints < 1 ||
-        remote.xfeatMaxPoints > 4096 || remote.xfeatMaxPoints > remote.xfeatTopK) {
+    if (remote.superpointTopK < 1 || remote.superpointTopK > 4096 || remote.superpointMaxPoints < 1 ||
+        remote.superpointMaxPoints > 4096 || remote.superpointMaxPoints > remote.superpointTopK) {
         if (err) {
             *err = "superpoint config out of range";
         }
         return false;
     }
-    if (remote.xfeatInputMaxWidth < 0 || remote.xfeatInputMaxWidth > 4096 || remote.xfeatInputMaxHeight < 0 ||
-        remote.xfeatInputMaxHeight > 4096) {
+    if (remote.superpointInputMaxWidth < 0 || remote.superpointInputMaxWidth > 4096 || remote.superpointInputMaxHeight < 0 ||
+        remote.superpointInputMaxHeight > 4096) {
         if (err) {
             *err = "superpoint input size config out of range";
         }
@@ -170,11 +170,11 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
                                 m_config.app.runtime.orbNLevels != remote.orbNLevels ||
                                 m_config.app.runtime.orbIniThFAST != remote.orbIniThFAST ||
                                 m_config.app.runtime.orbMinThFAST != remote.orbMinThFAST;
-        const bool xfeatChanged = m_config.app.runtime.xfeatTopK != remote.xfeatTopK ||
-                                  m_config.app.runtime.xfeatMaxPoints != remote.xfeatMaxPoints ||
-                                  m_config.app.runtime.xfeatInputMaxWidth != remote.xfeatInputMaxWidth ||
-                                  m_config.app.runtime.xfeatInputMaxHeight != remote.xfeatInputMaxHeight;
-        const bool lkSeedChanged = m_config.app.runtime.lkXFeatSeeding != remote.lkXFeatSeeding;
+        const bool superpointChanged = m_config.app.runtime.superpointTopK != remote.superpointTopK ||
+                                  m_config.app.runtime.superpointMaxPoints != remote.superpointMaxPoints ||
+                                  m_config.app.runtime.superpointInputMaxWidth != remote.superpointInputMaxWidth ||
+                                  m_config.app.runtime.superpointInputMaxHeight != remote.superpointInputMaxHeight;
+        const bool lkSeedChanged = m_config.app.runtime.lkSuperPointSeeding != remote.lkSuperPointSeeding;
         const bool lkPerFrameAccelChanged =
             m_config.app.runtime.lkPerFrameAcceleration != remote.lkPerFrameAcceleration;
         const bool orbAccelChanged = m_config.app.runtime.orbAcceleration != remote.orbAcceleration;
@@ -194,11 +194,11 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         m_config.app.runtime.orbNLevels = remote.orbNLevels;
         m_config.app.runtime.orbIniThFAST = remote.orbIniThFAST;
         m_config.app.runtime.orbMinThFAST = remote.orbMinThFAST;
-        m_config.app.runtime.xfeatTopK = remote.xfeatTopK;
-        m_config.app.runtime.xfeatMaxPoints = remote.xfeatMaxPoints;
-        m_config.app.runtime.xfeatInputMaxWidth = remote.xfeatInputMaxWidth;
-        m_config.app.runtime.xfeatInputMaxHeight = remote.xfeatInputMaxHeight;
-        m_config.app.runtime.lkXFeatSeeding = remote.lkXFeatSeeding;
+        m_config.app.runtime.superpointTopK = remote.superpointTopK;
+        m_config.app.runtime.superpointMaxPoints = remote.superpointMaxPoints;
+        m_config.app.runtime.superpointInputMaxWidth = remote.superpointInputMaxWidth;
+        m_config.app.runtime.superpointInputMaxHeight = remote.superpointInputMaxHeight;
+        m_config.app.runtime.lkSuperPointSeeding = remote.lkSuperPointSeeding;
         m_config.app.runtime.lkPerFrameAcceleration = remote.lkPerFrameAcceleration;
         m_config.app.runtime.orbAcceleration = remote.orbAcceleration;
         m_config.app.sensorMode = remote.sensorMode;
@@ -244,7 +244,7 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         effectiveTbcPitchDeg = m_config.app.runtime.tbcPitchDeg;
         effectiveTbcYawDeg = m_config.app.runtime.tbcYawDeg;
         restartNeeded =
-            sensorModeChanged || frontendChanged || aeModeChanged || uvcConfigChanged || orbChanged || xfeatChanged ||
+            sensorModeChanged || frontendChanged || aeModeChanged || uvcConfigChanged || orbChanged || superpointChanged ||
             lkSeedChanged || lkPerFrameAccelChanged || orbAccelChanged;
     }
 
@@ -473,43 +473,43 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
             } else {
                 return {false, "slam.orb_min_th_fast type mismatch"};
             }
-        } else if (key == ConfigRegistry::kSlamXFeatTopK) {
+        } else if (key == ConfigRegistry::kSlamSuperPointTopK) {
             if (const auto *v = std::get_if<int64_t>(&value)) {
-                remote.xfeatTopK = static_cast<int>(*v);
+                remote.superpointTopK = static_cast<int>(*v);
             } else if (const auto *vFloat = std::get_if<double>(&value)) {
-                remote.xfeatTopK = static_cast<int>(*vFloat);
+                remote.superpointTopK = static_cast<int>(*vFloat);
             } else {
-                return {false, "slam.xfeat_top_k type mismatch"};
+                return {false, "slam.superpoint_top_k type mismatch"};
             }
-        } else if (key == ConfigRegistry::kSlamXFeatMaxPoints) {
+        } else if (key == ConfigRegistry::kSlamSuperPointMaxPoints) {
             if (const auto *v = std::get_if<int64_t>(&value)) {
-                remote.xfeatMaxPoints = static_cast<int>(*v);
+                remote.superpointMaxPoints = static_cast<int>(*v);
             } else if (const auto *vFloat = std::get_if<double>(&value)) {
-                remote.xfeatMaxPoints = static_cast<int>(*vFloat);
+                remote.superpointMaxPoints = static_cast<int>(*vFloat);
             } else {
-                return {false, "slam.xfeat_max_points type mismatch"};
+                return {false, "slam.superpoint_max_points type mismatch"};
             }
-        } else if (key == ConfigRegistry::kSlamXFeatInputMaxWidth) {
+        } else if (key == ConfigRegistry::kSlamSuperPointInputMaxWidth) {
             if (const auto *v = std::get_if<int64_t>(&value)) {
-                remote.xfeatInputMaxWidth = static_cast<int>(*v);
+                remote.superpointInputMaxWidth = static_cast<int>(*v);
             } else if (const auto *vFloat = std::get_if<double>(&value)) {
-                remote.xfeatInputMaxWidth = static_cast<int>(*vFloat);
+                remote.superpointInputMaxWidth = static_cast<int>(*vFloat);
             } else {
-                return {false, "slam.xfeat_input_max_width type mismatch"};
+                return {false, "slam.superpoint_input_max_width type mismatch"};
             }
-        } else if (key == ConfigRegistry::kSlamXFeatInputMaxHeight) {
+        } else if (key == ConfigRegistry::kSlamSuperPointInputMaxHeight) {
             if (const auto *v = std::get_if<int64_t>(&value)) {
-                remote.xfeatInputMaxHeight = static_cast<int>(*v);
+                remote.superpointInputMaxHeight = static_cast<int>(*v);
             } else if (const auto *vFloat = std::get_if<double>(&value)) {
-                remote.xfeatInputMaxHeight = static_cast<int>(*vFloat);
+                remote.superpointInputMaxHeight = static_cast<int>(*vFloat);
             } else {
-                return {false, "slam.xfeat_input_max_height type mismatch"};
+                return {false, "slam.superpoint_input_max_height type mismatch"};
             }
-        } else if (key == ConfigRegistry::kSlamLkXFeatSeeding) {
+        } else if (key == ConfigRegistry::kSlamLkSuperPointSeeding) {
             if (const auto *v = std::get_if<bool>(&value)) {
-                remote.lkXFeatSeeding = *v;
+                remote.lkSuperPointSeeding = *v;
             } else {
-                return {false, "slam.lk_xfeat_seeding type mismatch"};
+                return {false, "slam.lk_superpoint_seeding type mismatch"};
             }
         } else if (key == ConfigRegistry::kSlamLkPerFrameAcceleration) {
             if (const auto *v = std::get_if<std::string>(&value)) {
@@ -540,10 +540,10 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
                           " slam_mode=" + std::string(smartdrone::core::domain::ToString(remote.slamOperationMode)) +
                           " slam_fps=" + std::to_string(clampedSlamFps) + " pair_ms=" +
                           std::to_string(remote.pairMs) + " provider_specific sp_top_k=" +
-                          std::to_string(remote.xfeatTopK) + " sp_max_points=" +
-                          std::to_string(remote.xfeatMaxPoints) + " sp_input_max=" +
-                          std::to_string(remote.xfeatInputMaxWidth) + "x" +
-                          std::to_string(remote.xfeatInputMaxHeight) + " lk_seed=gftt" +
+                          std::to_string(remote.superpointTopK) + " sp_max_points=" +
+                          std::to_string(remote.superpointMaxPoints) + " sp_input_max=" +
+                          std::to_string(remote.superpointInputMaxWidth) + "x" +
+                          std::to_string(remote.superpointInputMaxHeight) + " lk_seed=gftt" +
                           " lk_accel=" + remote.lkPerFrameAcceleration +
                           " orb_accel=" + remote.orbAcceleration;
     return {true, message};
@@ -583,11 +583,11 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.orbNLevels = currentConfig.app.runtime.orbNLevels;
     remote.orbIniThFAST = currentConfig.app.runtime.orbIniThFAST;
     remote.orbMinThFAST = currentConfig.app.runtime.orbMinThFAST;
-    remote.xfeatTopK = currentConfig.app.runtime.xfeatTopK;
-    remote.xfeatMaxPoints = currentConfig.app.runtime.xfeatMaxPoints;
-    remote.xfeatInputMaxWidth = currentConfig.app.runtime.xfeatInputMaxWidth;
-    remote.xfeatInputMaxHeight = currentConfig.app.runtime.xfeatInputMaxHeight;
-    remote.lkXFeatSeeding = false;
+    remote.superpointTopK = currentConfig.app.runtime.superpointTopK;
+    remote.superpointMaxPoints = currentConfig.app.runtime.superpointMaxPoints;
+    remote.superpointInputMaxWidth = currentConfig.app.runtime.superpointInputMaxWidth;
+    remote.superpointInputMaxHeight = currentConfig.app.runtime.superpointInputMaxHeight;
+    remote.lkSuperPointSeeding = false;
     remote.lkPerFrameAcceleration = currentConfig.app.runtime.lkPerFrameAcceleration;
     remote.orbAcceleration = currentConfig.app.runtime.orbAcceleration;
     return remote;

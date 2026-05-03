@@ -218,9 +218,9 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
     a.sendFeature = c.udp.sendFeature;
     a.sendMap = c.udp.sendMap;
     a.udpQueue = c.udp.queue;
-    a.xfeatInputMaxWidth = c.runtime.xfeatInputMaxWidth;
-    a.xfeatInputMaxHeight = c.runtime.xfeatInputMaxHeight;
-    a.lkXFeatSeeding = c.runtime.lkXFeatSeeding;
+    a.superpointInputMaxWidth = c.runtime.superpointInputMaxWidth;
+    a.superpointInputMaxHeight = c.runtime.superpointInputMaxHeight;
+    a.lkSuperPointSeeding = c.runtime.lkSuperPointSeeding;
     a.lkPerFrameAcceleration = c.runtime.lkPerFrameAcceleration;
     a.orbAcceleration = c.runtime.orbAcceleration;
     a.lkLoopClosure = c.runtime.lkLoopClosure;
@@ -267,11 +267,11 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
               << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
     std::cerr << "slam_mode=" << smartdrone::core::domain::ToString(a.slamOperationMode) << "\n";
     std::cerr << "feature_frontend=" << ToFeatureFrontendText(a.featureFrontend) << "\n";
-    std::cerr << "superpoint_trt repo=" << app.runtime.xfeatRepo
-              << " device=" << app.runtime.xfeatDevice
-              << " top_k=" << app.runtime.xfeatTopK
-              << " max_points=" << app.runtime.xfeatMaxPoints
-              << " input_max=" << app.runtime.xfeatInputMaxWidth << "x" << app.runtime.xfeatInputMaxHeight << "\n";
+    std::cerr << "superpoint_trt repo=" << app.runtime.superpointRepo
+              << " device=" << app.runtime.superpointDevice
+              << " top_k=" << app.runtime.superpointTopK
+              << " max_points=" << app.runtime.superpointMaxPoints
+              << " input_max=" << app.runtime.superpointInputMaxWidth << "x" << app.runtime.superpointInputMaxHeight << "\n";
     std::cerr << "orb nFeatures=" << app.runtime.orbNFeatures << " scaleFactor=" << app.runtime.orbScaleFactor
               << " nLevels=" << app.runtime.orbNLevels << " iniThFAST=" << app.runtime.orbIniThFAST
               << " minThFAST=" << app.runtime.orbMinThFAST

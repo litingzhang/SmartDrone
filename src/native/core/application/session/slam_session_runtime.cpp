@@ -61,7 +61,7 @@ void SetEnvIfUnset(const char *name, const char *value)
 #endif
 }
 
-void ConfigureSuperPointLightGlueWorkerDefaults(const std::string &repo, int inputMaxWidth, int inputMaxHeight)
+void ConfigureSuperPointLightGlueRuntimeDefaults(const std::string &repo, int inputMaxWidth, int inputMaxHeight)
 {
     SetEnvIfUnset("SMART_DRONE_FEATURE_PRECISION", "auto");
     SetEnvIfUnset("SMART_DRONE_LIGHTGLUE_LAYERS", "6");
@@ -332,8 +332,8 @@ bool SlamSessionRuntime::Start()
 
     m_slamEngine.SetOperationMode(m_frameProcessorState.effectiveSlamMode);
     m_slamEngine.SetFeatureFrontend(m_aliases.featureFrontend);
-    m_slamEngine.SetXFeatFrontendClient(&m_xfeatFrontendClient);
-    m_slamEngine.SetXFeatInputSizeLimit(m_cfg.app.runtime.xfeatInputMaxWidth, m_cfg.app.runtime.xfeatInputMaxHeight);
+    m_slamEngine.SetSuperPointLightGlueFrontendClient(&m_superpointFrontendClient);
+    m_slamEngine.SetSuperPointInputSizeLimit(m_cfg.app.runtime.superpointInputMaxWidth, m_cfg.app.runtime.superpointInputMaxHeight);
     m_slamEngine.SetLkLoopClosure(m_cfg.app.runtime.lkLoopClosure, m_cfg.app.runtime.lkLoopScale,
                                   m_cfg.app.runtime.lkLoopRelaxation);
     m_slamEngine.SetLkPerFrameAcceleration(m_cfg.app.runtime.lkPerFrameAcceleration);
@@ -353,21 +353,21 @@ bool SlamSessionRuntime::Start()
 
     const bool needsSuperPointTensorRt =
         m_aliases.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLightGlueInjectionEnabled();
-    std::string featureRepo = m_cfg.app.runtime.xfeatRepo;
+    std::string featureRepo = m_cfg.app.runtime.superpointRepo;
     if (m_aliases.featureFrontend == FeatureFrontend::SuperPointLightGlue) {
         featureRepo = ResolveSuperPointLightGlueRepoForRuntime(featureRepo);
-        ConfigureSuperPointLightGlueWorkerDefaults(featureRepo,
-                                                   m_cfg.app.runtime.xfeatInputMaxWidth,
-                                                   m_cfg.app.runtime.xfeatInputMaxHeight);
+        ConfigureSuperPointLightGlueRuntimeDefaults(featureRepo,
+                                                    m_cfg.app.runtime.superpointInputMaxWidth,
+                                                    m_cfg.app.runtime.superpointInputMaxHeight);
     }
     if (needsSuperPointTensorRt) {
         std::string featureErr;
-        if (m_xfeatFrontendClient.Start(featureRepo, m_cfg.app.runtime.xfeatDevice, m_cfg.app.runtime.xfeatTopK,
-                                        m_cfg.app.runtime.xfeatMaxPoints, &featureErr)) {
+        if (m_superpointFrontendClient.Start(featureRepo, m_cfg.app.runtime.superpointDevice, m_cfg.app.runtime.superpointTopK,
+                                        m_cfg.app.runtime.superpointMaxPoints, &featureErr)) {
             std::cerr << "[slam] superpoint TensorRT ready repo=" << featureRepo
-                      << " device=" << m_cfg.app.runtime.xfeatDevice
-                      << " top_k=" << m_cfg.app.runtime.xfeatTopK
-                      << " max_points=" << m_cfg.app.runtime.xfeatMaxPoints << "\n";
+                      << " device=" << m_cfg.app.runtime.superpointDevice
+                      << " top_k=" << m_cfg.app.runtime.superpointTopK
+                      << " max_points=" << m_cfg.app.runtime.superpointMaxPoints << "\n";
         } else {
             std::cerr << "[slam] warning: SuperPoint TensorRT start failed: " << featureErr << "\n";
         }
@@ -430,7 +430,7 @@ void SlamSessionRuntime::Stop()
         m_slamEngine.Stop();
         m_slamStarted = false;
     }
-    m_xfeatFrontendClient.Stop();
+    m_superpointFrontendClient.Stop();
     std::cerr << "[session] slam shutdown complete\n";
     m_livePose.SetRuntimeMode(RUNTIME_MODE_IDLE);
     std::cerr << "[session] slam exit\n";
@@ -453,7 +453,7 @@ SlamFrameProcessor &SlamSessionRuntime::FrameProcessor()
 {
     if (!m_frameProcessorContext) {
         m_frameProcessorContext = std::make_unique<SlamFrameProcessor::Context>(SlamFrameProcessor::Context{
-            m_aliases, m_monoMode, m_useImu, m_tuning, m_livePose, m_mav, m_slamEngine, &m_xfeatFrontendClient,
+            m_aliases, m_monoMode, m_useImu, m_tuning, m_livePose, m_mav, m_slamEngine, &m_superpointFrontendClient,
             *m_cameraProvider, m_imuProvider, m_posePublisher, m_udp, m_frameTimingTracker, m_perceptionPipeline,
             m_posePostprocessor,
             m_autoSlamModeController, m_stereoBodyExtrinsics});
@@ -478,7 +478,7 @@ void SlamSessionRuntime::CleanupAfterStartFailure()
         m_udp.Close();
         m_udpOpen = false;
     }
-    m_xfeatFrontendClient.Stop();
+    m_superpointFrontendClient.Stop();
     m_mav.StopSetpointStream();
     if (m_slamStarted) {
         m_slamEngine.Stop();

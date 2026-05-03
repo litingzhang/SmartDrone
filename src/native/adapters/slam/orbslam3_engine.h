@@ -10,7 +10,7 @@
 #include <opencv2/core.hpp>
 
 #include "System.h"
-#include "adapters/slam/xfeat_frontend_client.h"
+#include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "core/application/config/app_args.h"
 #include "core/domain/runtime_mode.h"
 #include "core/ports/slam_engine.h"
@@ -43,10 +43,10 @@ struct LkLoopKeyframe {
     cv::Mat descriptor;
 };
 
-struct LkXFeatSeedResult {
+struct LkSuperPointSeedResult {
     uint64_t frameId{0};
     std::vector<LkStereoTrack> seeds;
-    XFeatFrontendClient::Stats stats{};
+    SuperPointLightGlueFrontendClient::Stats stats{};
     double matchMs{0.0};
     double totalMs{0.0};
 };
@@ -61,8 +61,8 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     bool Start() override;
     void SetOperationMode(core::domain::SlamOperationMode mode);
     void SetFeatureFrontend(FeatureFrontend frontend);
-    void SetXFeatFrontendClient(XFeatFrontendClient *client);
-    void SetXFeatInputSizeLimit(int maxWidth, int maxHeight);
+    void SetSuperPointLightGlueFrontendClient(SuperPointLightGlueFrontendClient *client);
+    void SetSuperPointInputSizeLimit(int maxWidth, int maxHeight);
     void SetLkLoopClosure(bool enabled, float scale = 1.20f, float relaxation = 1.40f);
     void SetLkPerFrameAcceleration(std::string acceleration);
     void Stop() override;
@@ -84,27 +84,27 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     bool m_useImu{false};
     core::domain::SlamOperationMode m_operationMode{core::domain::SlamOperationMode::Mapping};
     FeatureFrontend m_featureFrontend{FeatureFrontend::Orb};
-    XFeatFrontendClient *m_xfeatFrontendClient{nullptr};
-    int m_xfeatInputMaxWidth{640};
-    int m_xfeatInputMaxHeight{400};
-    mutable int m_lastXFeatRawLeftCount{0};
-    mutable int m_lastXFeatRawRightCount{0};
-    mutable int m_lastXFeatMatchedStereoCount{0};
-    mutable int m_lastXFeatInjectedLeftCount{0};
-    mutable int m_lastXFeatInjectedRightCount{0};
-    mutable uint64_t m_lastXFeatSeedSourceFrameId{0};
-    mutable uint64_t m_lastXFeatSeedCurrentFrameId{0};
-    mutable uint32_t m_lastXFeatSeedAgeFrames{0};
-    mutable int m_lastXFeatSeedForwardedCount{0};
-    mutable double m_lastXFeatPrepareMs{0.0};
-    mutable double m_lastXFeatWorkerWriteMs{0.0};
-    mutable double m_lastXFeatWorkerReadMs{0.0};
-    mutable double m_lastXFeatWorkerTotalMs{0.0};
-    mutable double m_lastXFeatStereoMatchMs{0.0};
-    mutable double m_lastXFeatTotalMs{0.0};
-    mutable uint32_t m_lastXFeatImageCount{0};
-    mutable uint32_t m_lastXFeatPayloadBytes{0};
-    mutable std::string m_lastXFeatStatusReason;
+    SuperPointLightGlueFrontendClient *m_superpointFrontendClient{nullptr};
+    int m_superpointInputMaxWidth{640};
+    int m_superpointInputMaxHeight{400};
+    mutable int m_lastSuperPointRawLeftCount{0};
+    mutable int m_lastSuperPointRawRightCount{0};
+    mutable int m_lastSuperPointMatchedStereoCount{0};
+    mutable int m_lastSuperPointInjectedLeftCount{0};
+    mutable int m_lastSuperPointInjectedRightCount{0};
+    mutable uint64_t m_lastSuperPointSeedSourceFrameId{0};
+    mutable uint64_t m_lastSuperPointSeedCurrentFrameId{0};
+    mutable uint32_t m_lastSuperPointSeedAgeFrames{0};
+    mutable int m_lastSuperPointSeedForwardedCount{0};
+    mutable double m_lastSuperPointPrepareMs{0.0};
+    mutable double m_lastSuperPointInputMs{0.0};
+    mutable double m_lastSuperPointForwardMs{0.0};
+    mutable double m_lastSuperPointFrontendMs{0.0};
+    mutable double m_lastSuperPointStereoMatchMs{0.0};
+    mutable double m_lastSuperPointTotalMs{0.0};
+    mutable uint32_t m_lastSuperPointImageCount{0};
+    mutable uint32_t m_lastSuperPointPayloadBytes{0};
+    mutable std::string m_lastSuperPointStatusReason;
     core::ports::PoseEstimate m_lastStablePose{};
     bool m_haveLastStablePose{false};
     double m_lastStableTimestampSec{0.0};
@@ -137,7 +137,7 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     mutable cv::Mat m_lkPrevRight;
     mutable std::vector<LkStereoTrack> m_lkTracks;
     mutable std::deque<LkFrameSnapshot> m_lkFrameHistory;
-    mutable uint64_t m_lkLastXFeatSeedFrameId{0};
+    mutable uint64_t m_lkLastSuperPointSeedFrameId{0};
     mutable Sophus::SE3f m_lkTwc{Sophus::SE3f()};
     mutable Sophus::SE3f m_lkPerFrameReferenceTwc{Sophus::SE3f()};
     mutable bool m_lkHavePrev{false};

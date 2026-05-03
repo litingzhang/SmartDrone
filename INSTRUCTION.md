@@ -20,7 +20,24 @@ SmartDrone is a stereo / stereo-inertial drone runtime built around `ORB_SLAM3`,
 `- output/           # Build caches and packaged artifacts
 ```
 
-The runtime entry point is [`src/native/main.cpp`](/d:/SmartDrone/src/native/main.cpp).
+The runtime entry point is `src/native/main.cpp`.
+
+## System Overview
+
+```mermaid
+flowchart LR
+    A[Camera/IMU providers] --> B[PerceptionPipeline]
+    B --> C[SlamFrameProcessor]
+    C --> D{Feature frontend}
+    D --> E[ORB-SLAM3 ORB]
+    D --> F[KLT Tracking VO]
+    D --> G[SuperPoint/LightGlue native frontend]
+    E --> H[SlamOutput]
+    F --> H
+    G --> I[ORB-SLAM3 external-feature tracking]
+    I --> H
+    H --> J[UDP preview / MAVLink pose / replay artifacts]
+```
 
 ## Build
 
@@ -77,19 +94,19 @@ By default `scripts/build.sh` uses `$(nproc)`.
 
 ## Workspace Customizations
 
-Relative to the baseline repository, the current workspace includes a set of dedicated adaptations for `Jetson Orin NX + single-UVC packed stereo + XFeat`:
+Relative to the baseline repository, the current workspace includes a set of dedicated adaptations for `Jetson Orin NX + single-UVC packed stereo + SuperPoint`:
 
 - `uvc_stereo_opencv` is now treated as one UVC device that returns one packed left-right stereo frame. A total frame size such as `1280x480` therefore means `640x480` per eye.
-- The UVC path prefers `YUYV/YUV2` capture, converts it to grayscale, then splits the packed frame into left and right eye images on the device side before sending them into SLAM / XFeat.
+- The UVC path prefers `YUYV/YUV2` capture, converts it to grayscale, then splits the packed frame into left and right eye images on the device side before sending them into SLAM / SuperPoint.
 - Packed stereo no longer depends on left-right timestamp pairing. Both eye images share the same software monotonic timestamp taken immediately after the grab completes.
-- To preserve real-time behavior, the packed-UVC queue is forced down to `1`, so the runtime keeps the newest frame instead of accumulating stale frames behind slow SLAM/XFeat processing.
-- The XFeat worker supports `auto/cpu/cuda`. On Jetson, it can run with CUDA-enabled PyTorch and now enables `fp16`, `autocast`, and `cudnn.benchmark`.
-- `slam_dfx` now reports XFeat stage timings and payload counters so that bottlenecks can be separated into preprocessing, IPC write/read, worker inference, and stereo matching.
+- To preserve real-time behavior, the packed-UVC queue is forced down to `1`, so the runtime keeps the newest frame instead of accumulating stale frames behind slow SLAM/SuperPoint processing.
+- The SuperPoint/LightGlue frontend supports `auto/cpu/cuda`. On Jetson, the CUDA path uses the native TensorRT SuperPoint extractor when the engine is available.
+- `slam_dfx` now reports SuperPoint stage timings and payload counters so that bottlenecks can be separated into preprocessing, native input, network forward, frontend total, and stereo matching.
 - UDP image delivery no longer has to stay pinned to one static IP. The runtime can resolve the current active phone peer dynamically and switch the preview destination accordingly.
 - `UdpImageSender` now caps image streaming at `30 FPS`, while the Android-side `slam.input_fps` limit was raised to better match high-FPS UVC modes.
-- The Android source tree was also updated so that exposure/gain/AE, packed-stereo capability handling, XFeat capability display, and higher SLAM FPS limits remain aligned with the updated UVC behavior.
+- The Android source tree was also updated so that exposure/gain/AE, packed-stereo capability handling, SuperPoint capability display, and higher SLAM FPS limits remain aligned with the updated UVC behavior.
 
-If only the device/runtime side is being maintained, priority may be given to the native runtime and scripts; the Android-side changes are primarily intended to keep the UI and configuration protocol aligned with the updated UVC/XFeat pipeline.
+If only the device/runtime side is being maintained, priority may be given to the native runtime and scripts; the Android-side changes are primarily intended to keep the UI and configuration protocol aligned with the updated UVC/SuperPoint pipeline.
 
 ## From Scratch On CM5 / Jetson Orin NX
 
@@ -104,7 +121,7 @@ Execution sequence:
 2. Export a sysroot from that device.
 3. Cross-build on the host with `scripts/build.sh`.
 4. Upload `output/artifacts/<platform>` to the device.
-5. Run `smart_drone` on the device with the correct config, vocabulary, and Python/XFeat environment if needed.
+5. Run `smart_drone` on the device with the correct config, vocabulary, and optional SuperPoint/LightGlue TensorRT assets if needed.
 
 ### 1. Host Build Machine Prerequisites
 
@@ -151,28 +168,27 @@ Runtime prerequisites:
 - if you run with stereo-IMU or mono-IMU modes, the SPI IMU node and GPIO line must be available on the target
 - if you run with the default MAVLink setup, `/dev/ttyAMA0` or your chosen serial device must exist and be accessible
 
-### 3. XFeat Runtime Environment
+### 3. SuperPoint/LightGlue Runtime Assets
 
-XFeat is an optional component. The default ORB frontend does not require it.
+SuperPoint is an optional component. The default ORB frontend does not require it.
 
-If you want `slam.feature_frontend=xfeat`, prepare Python on the target:
+If you want `slam.feature_frontend=superpoint_lightglue`, prepare the LightGlue repository and TensorRT engines on the target:
 
 ```bash
-./scripts/install_xfeat_cm5.sh
+./scripts/export_superpoint_tensorrt.sh --repo /home/nvidia/LightGlue --width 640 --height 480
+./scripts/export_lightglue_tensorrt.sh --repo /home/nvidia/LightGlue --points 768 --layers 6
 ```
 
-This installs:
+Runtime uses C++/TensorRT inference. Python is used only by the export scripts that produce ONNX/TensorRT assets.
 
-- a Python virtualenv
-- CPU PyTorch wheels
-- the `accelerated_features` repository
-- OpenCV/tqdm demo dependencies when enabled
+Point runtime arguments or config to:
 
-After that, point runtime arguments or config to:
-
-- `--xfeat-python`
-- `--xfeat-repo`
-- `--xfeat-worker`
+- `--superpoint-repo`
+- `--superpoint-device`
+- `--superpoint-top-k`
+- `--superpoint-max-points`
+- `--superpoint-input-max-width`
+- `--superpoint-input-max-height`
 
 ### 4. Export a Sysroot
 
@@ -256,7 +272,7 @@ The current `scripts/build.sh` also provides the following Jetson-specific workf
 - `orb` mode is available to build `ORB_SLAM3` and its shared libraries independently.
 - `--jetson-orin-nx` auto-detects common sysroot locations, cross-toolchain prefixes, and host libdirs instead of requiring all environment variables every time.
 - `SMART_DRONE_CAMERA_PROVIDER=uvc_stereo_opencv` can be passed directly through to CMake from the unified build entry point.
-- Artifact packaging now also attempts to include `ORBvoc.txt`, `scripts/xfeat_keypoint_worker.py`, and the local `accelerated_features/` repository.
+- Artifact packaging now also attempts to include `ORBvoc.txt` and the local SuperPoint/LightGlue runtime assets.
 
 Recommended Jetson build command on the build server:
 
@@ -286,7 +302,7 @@ TARGET_HOST=ltz@192.168.0.105 REMOTE_DIR=/home/ltz \
 - `--jetson-orin-nx` defaults to `nvidia@192.168.0.103:/home/nvidia/SmartDrone_cross`
 - Jetson uses `artifact-root` deployment by default, replacing the entire `output/artifacts/jetson-orin-nx` layout atomically on the remote side
 - `SSH_PASSWORD=...` is supported through `sshpass`, including unattended `sudo systemctl restart`
-- artifact-root deployment carries `bin/`, `lib/`, `config/`, `scripts/`, plus packaged `ORBvoc.txt` / `accelerated_features` when present
+- artifact-root deployment carries `bin/`, `lib/`, `config/`, `scripts/`, plus packaged `ORBvoc.txt` and SuperPoint/LightGlue runtime assets when present
 
 Recommended Jetson deploy command:
 
@@ -304,7 +320,7 @@ The uploader expects these files to exist in `output/artifacts/<platform>`:
 - `config/stereo_inertial.yaml`
 - `config/mono_right.yaml`
 - `config/mono_inertial_right.yaml`
-- `scripts/xfeat_keypoint_worker.py` when the packaged worker script is present
+- SuperPoint/LightGlue TensorRT engine assets when present
 
 ### 8. Initial Run On The Device
 
@@ -367,7 +383,7 @@ The following items still require manual preparation:
 
 - exporting and refreshing the target sysroot
 - making sure `ORBvoc.txt` is present on the device
-- preparing the XFeat Python environment when using the XFeat frontend
+- preparing SuperPoint/LightGlue TensorRT engine assets when using the `superpoint_lightglue` frontend
 - camera-specific permissions, device nodes, and service user setup
 - Jetson-specific camera integration if you do not use the current `libcamera` or packed-UVC paths
 
@@ -455,7 +471,7 @@ The Jetson sysroot should contain at least:
 Jetson support boundary:
 
 - native `aarch64 + sysroot + pkg-config` cross-compilation is now wired in
-- the Python/XFeat worker environment still needs to be prepared on the target device
+- the SuperPoint/LightGlue TensorRT engine assets still need to be prepared on the target device
 - the runtime now has build-time entry points for both `libcamera_stereo_ov9281` and standard `uvc_stereo_opencv`; if Jetson uses a different camera stack, a dedicated provider is still required
 - a successful cross-build does not by itself guarantee that the Jetson camera pipeline is runnable unchanged
 
@@ -588,7 +604,7 @@ apt-get install -y --no-install-recommends python3-scipy
 
 ### 2. Generate Stereo Calibration Parameters
 
-The repository root [`scripts/make_rosbag.py`](/d:/SmartDrone/scripts/make_rosbag.py) now generates both bags in one run:
+The repository root `scripts/make_rosbag.py` now generates both bags in one run:
 
 ```bash
 python3 scripts/make_rosbag.py
@@ -634,7 +650,7 @@ rosrun kalibr kalibr_calibrate_imu_camera \
 
 ### 4. Convert Kalibr Results To Runtime YAML
 
-After Kalibr finishes, use [`scripts/convert_kalibr_to_smartdrone_yaml.py`](/d:/SmartDrone/scripts/convert_kalibr_to_smartdrone_yaml.py) to convert the Kalibr output into SmartDrone runtime configs:
+After Kalibr finishes, use `scripts/convert_kalibr_to_smartdrone_yaml.py` to convert the Kalibr output into SmartDrone runtime configs:
 
 ```bash
 python3 scripts/convert_kalibr_to_smartdrone_yaml.py \
@@ -689,7 +705,7 @@ Deployment behavior:
 - Create `~/config` on the target when needed
 - Upload `config/stereo.yaml` and `config/stereo_inertial.yaml`
 - Upload `config/mono_right.yaml` and `config/mono_inertial_right.yaml`
-- Upload `scripts/xfeat_keypoint_worker.py` when it exists under `output/artifacts/<platform>/scripts/`
+- Upload SuperPoint/LightGlue TensorRT engine assets when they exist under `output/artifacts/<platform>/`
 - Upload to temporary `*.new` files first, then atomically replace the final files with `mv`
 
 Deployment environment variables:
@@ -729,7 +745,7 @@ ADB constraints:
 - `slam.orb_ini_th_fast`
 - `slam.orb_min_th_fast`
 
-Additional notes related to the current UVC/XFeat adaptation:
+Additional notes related to the current UVC/SuperPoint adaptation:
 
 - On packed-UVC, `camera.auto_exposure` means handing control back to the UVC camera firmware / ISP auto-exposure path rather than libcamera AE.
 - On packed-UVC, `camera.pair_window_ms` is kept only as a compatibility field and is not used for left-right software pairing.
@@ -741,4 +757,3 @@ Application semantics:
 - ORB parameter changes trigger a SLAM session restart.
 - Before SLAM starts, runtime generates `*.runtime_orb.yaml` from the active settings file, overrides `ORBextractor.*`, then initializes ORB-SLAM3 with that file.
 - `slam.orb_min_th_fast` must be less than or equal to `slam.orb_ini_th_fast`; otherwise the config update is rejected.
-

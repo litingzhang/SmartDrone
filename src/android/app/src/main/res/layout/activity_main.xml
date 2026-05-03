@@ -855,7 +855,7 @@
                             android:textSize="10sp" />
 
                         <TextView
-                            android:id="@+id/tvCfgXFeatTopKValue"
+                            android:id="@+id/tvCfgSuperPointTopKValue"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="10dp"
@@ -865,13 +865,13 @@
                             android:textStyle="bold" />
 
                         <SeekBar
-                            android:id="@+id/sbCfgXFeatTopK"
+                            android:id="@+id/sbCfgSuperPointTopK"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:contentDescription="SuperPoint topK slider" />
 
                         <TextView
-                            android:id="@+id/tvCfgXFeatMaxPointsValue"
+                            android:id="@+id/tvCfgSuperPointMaxPointsValue"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
@@ -881,13 +881,13 @@
                             android:textStyle="bold" />
 
                         <SeekBar
-                            android:id="@+id/sbCfgXFeatMaxPoints"
+                            android:id="@+id/sbCfgSuperPointMaxPoints"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:contentDescription="SuperPoint max points slider" />
 
                         <TextView
-                            android:id="@+id/tvCfgXFeatInputMaxWidthValue"
+                            android:id="@+id/tvCfgSuperPointInputMaxWidthValue"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
@@ -897,13 +897,13 @@
                             android:textStyle="bold" />
 
                         <SeekBar
-                            android:id="@+id/sbCfgXFeatInputMaxWidth"
+                            android:id="@+id/sbCfgSuperPointInputMaxWidth"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:contentDescription="SuperPoint input max width slider" />
 
                         <TextView
-                            android:id="@+id/tvCfgXFeatInputMaxHeightValue"
+                            android:id="@+id/tvCfgSuperPointInputMaxHeightValue"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="8dp"
@@ -913,7 +913,7 @@
                             android:textStyle="bold" />
 
                         <SeekBar
-                            android:id="@+id/sbCfgXFeatInputMaxHeight"
+                            android:id="@+id/sbCfgSuperPointInputMaxHeight"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:contentDescription="SuperPoint input max height slider" />

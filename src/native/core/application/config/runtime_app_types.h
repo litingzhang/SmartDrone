@@ -48,11 +48,11 @@ struct RemoteRuntimeConfig {
     int orbNLevels{0};
     int orbIniThFAST{0};
     int orbMinThFAST{0};
-    int xfeatTopK{512};
-    int xfeatMaxPoints{320};
-    int xfeatInputMaxWidth{640};
-    int xfeatInputMaxHeight{400};
-    bool lkXFeatSeeding{false};
+    int superpointTopK{512};
+    int superpointMaxPoints{320};
+    int superpointInputMaxWidth{640};
+    int superpointInputMaxHeight{400};
+    bool lkSuperPointSeeding{false};
     std::string lkPerFrameAcceleration{"vpi-cuda"};
     std::string orbAcceleration{"cpu"};
     bool lkLoopClosure{false};
@@ -72,8 +72,8 @@ struct MainRuntimeAliases {
     bool sendImage{true}, sendFeature{true}, sendMap{false};
     float gain{};
     std::string udpIp, spiDev, gpiochip;
-    int xfeatInputMaxWidth{}, xfeatInputMaxHeight{};
-    bool lkXFeatSeeding{};
+    int superpointInputMaxWidth{}, superpointInputMaxHeight{};
+    bool lkSuperPointSeeding{};
     std::string lkPerFrameAcceleration{"vpi-cuda"};
     std::string orbAcceleration{"cpu"};
     bool lkLoopClosure{};

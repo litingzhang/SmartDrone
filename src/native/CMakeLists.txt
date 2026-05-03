@@ -30,7 +30,7 @@ set(SMART_DRONE_ADAPTER_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688_imu_provider.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orbslam3_engine.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint_native_extractor.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/xfeat_frontend_client.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint_lightglue_frontend_client.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/stream/udp_image_sender.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/mavlink_pose_publisher.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/mavlink_serial_transport.cpp"

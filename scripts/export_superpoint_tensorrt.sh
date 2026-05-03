@@ -10,7 +10,7 @@ Usage:
 Exports the SuperPoint dense convolutional backbone from LightGlue to ONNX and
 builds a TensorRT engine. The engine outputs dense detector logits and dense
 descriptor maps; NMS/top-k/descriptor sampling are intentionally kept outside
-the engine so the worker can preserve the existing keypoint format.
+the engine so the native frontend can preserve the existing keypoint format.
 USAGE
 }
 

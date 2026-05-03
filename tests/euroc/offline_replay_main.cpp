@@ -14,7 +14,7 @@
 
 #include "System.h"
 #include "adapters/slam/orbslam3_engine.h"
-#include "adapters/slam/xfeat_frontend_client.h"
+#include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "core/application/config/app_args.h"
 #include "core/domain/runtime_mode.h"
 #include "support/replay_dataset.h"
@@ -33,17 +33,17 @@ struct OfflineReplayOptions {
     SensorMode sensorMode{SensorMode::StereoImu};
     FeatureFrontend featureFrontend{FeatureFrontend::Orb};
     smartdrone::core::domain::SlamOperationMode slamMode{smartdrone::core::domain::SlamOperationMode::Mapping};
-    std::string xfeatRepo{"LightGlue"};
-    std::string xfeatDevice{"auto"};
-    int xfeatTopK{1024};
-    int xfeatMaxPoints{768};
-    int xfeatInputMaxWidth{640};
-    int xfeatInputMaxHeight{400};
+    std::string superpointRepo{"LightGlue"};
+    std::string superpointDevice{"auto"};
+    int superpointTopK{1024};
+    int superpointMaxPoints{768};
+    int superpointInputMaxWidth{640};
+    int superpointInputMaxHeight{400};
     int cameraFps{60};
     int slamInputFps{20};
     int timeoutMs{1000};
     size_t maxFrames{0};
-    bool lkXFeatSeeding{false};
+    bool lkSuperPointSeeding{false};
     bool lkLoopClosure{false};
     bool lkRuntimeLoopClosure{false};
     float lkLoopScale{1.20f};
@@ -72,6 +72,19 @@ struct LoopClosureCorrectionSummary {
     float relaxation{1.0f};
 };
 
+struct MetricAccumulator {
+    double sum{0.0};
+    double max{0.0};
+
+    void Add(double value)
+    {
+        sum += value;
+        max = std::max(max, value);
+    }
+
+    double Mean(size_t count) const { return sum / static_cast<double>(std::max<size_t>(1, count)); }
+};
+
 bool ConvertOrbEuRoCTrajectoryToReplayCsv(const fs::path &trajectoryPath, const fs::path &csvPath)
 {
     std::ifstream input(trajectoryPath);
@@ -87,8 +100,11 @@ bool ConvertOrbEuRoCTrajectoryToReplayCsv(const fs::path &trajectoryPath, const 
     }
 
     csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
-           "xfeat_used,xfeat_raw_left,xfeat_raw_right,xfeat_stereo,xfeat_injected_left,xfeat_injected_right,"
-           "xfeat_worker_ms,xfeat_match_ms,xfeat_total_ms,orb_track_ms,orb_extract_ms,orb_stereo_ms,"
+           "superpoint_used,superpoint_raw_left,superpoint_raw_right,superpoint_stereo,superpoint_injected_left,superpoint_injected_right,"
+           "superpoint_frontend_ms,superpoint_match_ms,superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
+           "input_prepare_ms,frontend_ms,stereo_pair_ms,external_pack_ms,mono_augment_ms,"
+           "lk_rectify_ms,lk_disparity_ms,lk_gftt_ms,lk_flow_ms,lk_candidate_ms,lk_pnp_ms,lk_update_ms,"
+           "orb_track_ms,orb_extract_ms,orb_stereo_ms,"
            "inliers,tracked_map,local_map\n";
 
     size_t frameId = 0;
@@ -110,8 +126,11 @@ bool ConvertOrbEuRoCTrajectoryToReplayCsv(const fs::path &trajectoryPath, const 
             continue;
         }
         csv << frameId++ << ',' << static_cast<uint64_t>(std::llround(timestampNs)) << ",2,0,1," << x << ',' << y
-            << ',' << z << ',' << qw << ',' << qx << ',' << qy << ',' << qz
-            << ",0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\n";
+            << ',' << z << ',' << qw << ',' << qx << ',' << qy << ',' << qz;
+        for (int i = 0; i < 31; ++i) {
+            csv << ",0";
+        }
+        csv << '\n';
     }
 
     return frameId > 0;
@@ -141,12 +160,12 @@ const char *UsageText()
         "  --sensor-mode <mode>  stereo|stereo-imu|mono|mono-imu\n"
         "  --stereo-only         Shortcut for --sensor-mode stereo\n"
         "  --feature-frontend <mode> orb|superpoint_lightglue|lk|lk_gftt_per_frame, default orb\n"
-        "  --xfeat-repo <dir>    SuperPoint/LightGlue repo root containing TensorRT engines\n"
-        "  --xfeat-device <dev>  TensorRT device auto|cuda, default auto\n"
-        "  --xfeat-top-k <n>     SuperPoint top-k candidate count, default 1024\n"
-        "  --xfeat-max-points <n> SuperPoint injected point budget, default 768\n"
-        "  --xfeat-input-max-width <n>  SuperPoint input width limit, default 640\n"
-        "  --xfeat-input-max-height <n> SuperPoint input height limit, default 400\n"
+        "  --superpoint-repo <dir>    SuperPoint/LightGlue repo root containing TensorRT engines\n"
+        "  --superpoint-device <dev>  TensorRT device auto|cuda, default auto\n"
+        "  --superpoint-top-k <n>     SuperPoint top-k candidate count, default 1024\n"
+        "  --superpoint-max-points <n> SuperPoint injected point budget, default 768\n"
+        "  --superpoint-input-max-width <n>  SuperPoint input width limit, default 640\n"
+        "  --superpoint-input-max-height <n> SuperPoint input height limit, default 400\n"
         "  --slam-mode <mode>    mapping|localization|relocalization|tracking-only|auto\n"
         "  --fps <n>             Camera FPS for replay pacing, default 60\n"
         "  --slam-fps <n>        SLAM input FPS, default 20\n"
@@ -264,14 +283,14 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     opts.slamInputFps = GetOptionInt(argc, argv, "--slam-fps", opts.slamInputFps);
     opts.timeoutMs = GetOptionInt(argc, argv, "--timeout-ms", opts.timeoutMs);
     opts.maxFrames = GetOptionSize(argc, argv, "--max-frames", opts.maxFrames);
-    opts.xfeatRepo =
-        ResolveRuntimePath(GetOptionValue(argc, argv, "--xfeat-repo", opts.xfeatRepo), argc > 0 ? argv[0] : nullptr);
-    opts.xfeatDevice = GetOptionValue(argc, argv, "--xfeat-device", opts.xfeatDevice);
-    opts.xfeatTopK = GetOptionInt(argc, argv, "--xfeat-top-k", opts.xfeatTopK);
-    opts.xfeatMaxPoints = GetOptionInt(argc, argv, "--xfeat-max-points", opts.xfeatMaxPoints);
-    opts.xfeatInputMaxWidth = GetOptionInt(argc, argv, "--xfeat-input-max-width", opts.xfeatInputMaxWidth);
-    opts.xfeatInputMaxHeight = GetOptionInt(argc, argv, "--xfeat-input-max-height", opts.xfeatInputMaxHeight);
-    opts.lkXFeatSeeding = false;
+    opts.superpointRepo =
+        ResolveRuntimePath(GetOptionValue(argc, argv, "--superpoint-repo", opts.superpointRepo), argc > 0 ? argv[0] : nullptr);
+    opts.superpointDevice = GetOptionValue(argc, argv, "--superpoint-device", opts.superpointDevice);
+    opts.superpointTopK = GetOptionInt(argc, argv, "--superpoint-top-k", opts.superpointTopK);
+    opts.superpointMaxPoints = GetOptionInt(argc, argv, "--superpoint-max-points", opts.superpointMaxPoints);
+    opts.superpointInputMaxWidth = GetOptionInt(argc, argv, "--superpoint-input-max-width", opts.superpointInputMaxWidth);
+    opts.superpointInputMaxHeight = GetOptionInt(argc, argv, "--superpoint-input-max-height", opts.superpointInputMaxHeight);
+    opts.lkSuperPointSeeding = false;
     opts.lkLoopClosure = HasFlag(argc, argv, "--lk-loop-closure");
     opts.lkRuntimeLoopClosure = HasFlag(argc, argv, "--lk-runtime-loop-closure");
     opts.lkLoopScale = GetOptionFloat(argc, argv, "--lk-loop-scale", opts.lkLoopScale);
@@ -527,16 +546,16 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                                                           UseImu(opts.sensorMode), opts.settings);
     slamEngine.SetOperationMode(opts.slamMode);
     slamEngine.SetFeatureFrontend(opts.featureFrontend);
-    slamEngine.SetXFeatInputSizeLimit(opts.xfeatInputMaxWidth, opts.xfeatInputMaxHeight);
+    slamEngine.SetSuperPointInputSizeLimit(opts.superpointInputMaxWidth, opts.superpointInputMaxHeight);
     slamEngine.SetLkLoopClosure(opts.lkRuntimeLoopClosure, opts.lkLoopScale, opts.lkLoopRelaxation);
     slamEngine.SetLkPerFrameAcceleration(opts.lkPerFrameAcceleration);
-    smartdrone::adapters::slam::XFeatFrontendClient xfeatFrontendClient;
-    std::string xfeatErr;
+    smartdrone::adapters::slam::SuperPointLightGlueFrontendClient superpointFrontendClient;
+    std::string superpointErr;
     if (opts.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLightGlueInjectionEnabled()) {
-        slamEngine.SetXFeatFrontendClient(&xfeatFrontendClient);
-        if (!xfeatFrontendClient.Start(opts.xfeatRepo, opts.xfeatDevice, opts.xfeatTopK, opts.xfeatMaxPoints,
-                                       &xfeatErr)) {
-            std::cerr << "error: superpoint_lightglue TensorRT start failed: " << xfeatErr << "\n";
+        slamEngine.SetSuperPointLightGlueFrontendClient(&superpointFrontendClient);
+        if (!superpointFrontendClient.Start(opts.superpointRepo, opts.superpointDevice, opts.superpointTopK, opts.superpointMaxPoints,
+                                       &superpointErr)) {
+            std::cerr << "error: superpoint_lightglue TensorRT start failed: " << superpointErr << "\n";
             return 2;
         }
     }
@@ -573,6 +592,24 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     double orbTrackMsMax = 0.0;
     double orbExtractMsMax = 0.0;
     double orbStereoMsMax = 0.0;
+    MetricAccumulator replayAcquireMs;
+    MetricAccumulator replayImuMs;
+    MetricAccumulator slamTotalMs;
+    MetricAccumulator inputPrepareMs;
+    MetricAccumulator frontendMs;
+    MetricAccumulator stereoPairMs;
+    MetricAccumulator externalPackMs;
+    MetricAccumulator monoAugmentMs;
+    MetricAccumulator lkRectifyMs;
+    MetricAccumulator lkDisparityMs;
+    MetricAccumulator lkGfttMs;
+    MetricAccumulator lkFlowMs;
+    MetricAccumulator lkCandidateMs;
+    MetricAccumulator lkPnpMs;
+    MetricAccumulator lkUpdateMs;
+    MetricAccumulator superpointFrontendMs;
+    MetricAccumulator superpointMatchMs;
+    MetricAccumulator superpointTotalMs;
     for (const auto &sample : outputs) {
         if (sample.poseValid) {
             ++poseValidCount;
@@ -595,6 +632,24 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         orbTrackMsMax = std::max(orbTrackMsMax, sample.orbTrackMs);
         orbExtractMsMax = std::max(orbExtractMsMax, sample.orbExtractMs);
         orbStereoMsMax = std::max(orbStereoMsMax, sample.orbStereoMatchMs);
+        replayAcquireMs.Add(sample.replayAcquireMs);
+        replayImuMs.Add(sample.replayImuMs);
+        slamTotalMs.Add(sample.slamTotalMs);
+        inputPrepareMs.Add(sample.inputPrepareMs);
+        frontendMs.Add(sample.frontendMs);
+        stereoPairMs.Add(sample.stereoPairMs);
+        externalPackMs.Add(sample.externalPackMs);
+        monoAugmentMs.Add(sample.monoAugmentMs);
+        lkRectifyMs.Add(sample.lkRectifyMs);
+        lkDisparityMs.Add(sample.lkDisparityMs);
+        lkGfttMs.Add(sample.lkGfttMs);
+        lkFlowMs.Add(sample.lkFlowMs);
+        lkCandidateMs.Add(sample.lkCandidateMs);
+        lkPnpMs.Add(sample.lkPnpMs);
+        lkUpdateMs.Add(sample.lkUpdateMs);
+        superpointFrontendMs.Add(sample.superpointFrontendMs);
+        superpointMatchMs.Add(sample.superpointStereoMatchMs);
+        superpointTotalMs.Add(sample.superpointTotalMs);
     }
     const double frameCountForMean = static_cast<double>(std::max<size_t>(1, outputs.size()));
     const double orbTrackMsMean = orbTrackMsSum / frameCountForMean;
@@ -620,18 +675,26 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         }
 
         csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
-               "xfeat_used,xfeat_raw_left,xfeat_raw_right,xfeat_stereo,xfeat_injected_left,xfeat_injected_right,"
-               "xfeat_worker_ms,xfeat_match_ms,xfeat_total_ms,orb_track_ms,orb_extract_ms,orb_stereo_ms,"
+               "superpoint_used,superpoint_raw_left,superpoint_raw_right,superpoint_stereo,superpoint_injected_left,superpoint_injected_right,"
+               "superpoint_frontend_ms,superpoint_match_ms,superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
+               "input_prepare_ms,frontend_ms,stereo_pair_ms,external_pack_ms,mono_augment_ms,"
+               "lk_rectify_ms,lk_disparity_ms,lk_gftt_ms,lk_flow_ms,lk_candidate_ms,lk_pnp_ms,lk_update_ms,"
+               "orb_track_ms,orb_extract_ms,orb_stereo_ms,"
                "inliers,tracked_map,local_map\n";
         for (const auto &sample : outputs) {
             csv << sample.frameId << ',' << sample.captureTimestampNs << ',' << sample.trackingState << ','
                 << sample.mapId << ',' << (sample.poseValid ? 1 : 0) << ',' << sample.pose.x << ',' << sample.pose.y
                 << ',' << sample.pose.z << ',' << sample.pose.qw << ',' << sample.pose.qx << ',' << sample.pose.qy
-                << ',' << sample.pose.qz << ',' << sample.imuSampleCount << ',' << (sample.usedXFeatFrontend ? 1 : 0)
-                << ',' << sample.xfeatRawLeftCount << ',' << sample.xfeatRawRightCount << ','
-                << sample.xfeatMatchedStereoCount << ',' << sample.xfeatInjectedLeftCount << ','
-                << sample.xfeatInjectedRightCount << ',' << sample.xfeatWorkerTotalMs << ','
-                << sample.xfeatStereoMatchMs << ',' << sample.xfeatTotalMs << ',' << sample.orbTrackMs << ','
+                << ',' << sample.pose.qz << ',' << sample.imuSampleCount << ',' << (sample.usedSuperPointFrontend ? 1 : 0)
+                << ',' << sample.superpointRawLeftCount << ',' << sample.superpointRawRightCount << ','
+                << sample.superpointMatchedStereoCount << ',' << sample.superpointInjectedLeftCount << ','
+                << sample.superpointInjectedRightCount << ',' << sample.superpointFrontendMs << ','
+                << sample.superpointStereoMatchMs << ',' << sample.superpointTotalMs << ',' << sample.replayAcquireMs << ','
+                << sample.replayImuMs << ',' << sample.slamTotalMs << ',' << sample.inputPrepareMs << ','
+                << sample.frontendMs << ',' << sample.stereoPairMs << ',' << sample.externalPackMs << ','
+                << sample.monoAugmentMs << ',' << sample.lkRectifyMs << ',' << sample.lkDisparityMs << ','
+                << sample.lkGfttMs << ',' << sample.lkFlowMs << ',' << sample.lkCandidateMs << ','
+                << sample.lkPnpMs << ',' << sample.lkUpdateMs << ',' << sample.orbTrackMs << ','
                 << sample.orbExtractMs << ',' << sample.orbStereoMatchMs << ',' << sample.matchesInliers << ','
                 << sample.trackedMapPointCount << ',' << sample.localMapPointCount << '\n';
         }
@@ -645,13 +708,31 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     std::cout << "  sensor_mode: " << ToSensorModeText(opts.sensorMode) << "\n";
     std::cout << "  feature_frontend: " << ToFeatureFrontendText(opts.featureFrontend) << "\n";
     std::cout << "  orb_accel: " << opts.orbAcceleration << "\n";
-    std::cout << "  lk_xfeat_seeding: " << (opts.lkXFeatSeeding ? "Y" : "N") << "\n";
+    std::cout << "  lk_superpoint_seeding: " << (opts.lkSuperPointSeeding ? "Y" : "N") << "\n";
     std::cout << "  lk_per_frame_accel: " << opts.lkPerFrameAcceleration << "\n";
     std::cout << "  frames_out: " << outputs.size() << "\n";
     std::cout << "  pose_valid_frames: " << poseValidCount << "\n";
     std::cout << "  tracking_ok_frames: " << trackingOkCount << "\n";
     std::cout << "  tracking_lost_frames: " << trackingLostCount << "\n";
     std::cout << "  identity_pose_frames: " << identityPoseCount << "\n";
+    std::cout << "  replay_acquire_ms_mean/max: " << replayAcquireMs.Mean(outputs.size()) << "/"
+              << replayAcquireMs.max << "\n";
+    std::cout << "  replay_imu_ms_mean/max: " << replayImuMs.Mean(outputs.size()) << "/" << replayImuMs.max << "\n";
+    std::cout << "  slam_total_ms_mean/max: " << slamTotalMs.Mean(outputs.size()) << "/" << slamTotalMs.max << "\n";
+    std::cout << "  input_prepare_ms_mean/max: " << inputPrepareMs.Mean(outputs.size()) << "/"
+              << inputPrepareMs.max << "\n";
+    std::cout << "  frontend_ms_mean/max: " << frontendMs.Mean(outputs.size()) << "/" << frontendMs.max << "\n";
+    std::cout << "  stereo_pair_ms_mean/max: " << stereoPairMs.Mean(outputs.size()) << "/" << stereoPairMs.max
+              << "\n";
+    std::cout << "  external_pack_ms_mean/max: " << externalPackMs.Mean(outputs.size()) << "/" << externalPackMs.max
+              << "\n";
+    std::cout << "  lk_disparity_ms_mean/max: " << lkDisparityMs.Mean(outputs.size()) << "/" << lkDisparityMs.max
+              << "\n";
+    std::cout << "  lk_gftt_ms_mean/max: " << lkGfttMs.Mean(outputs.size()) << "/" << lkGfttMs.max << "\n";
+    std::cout << "  lk_flow_ms_mean/max: " << lkFlowMs.Mean(outputs.size()) << "/" << lkFlowMs.max << "\n";
+    std::cout << "  lk_candidate_ms_mean/max: " << lkCandidateMs.Mean(outputs.size()) << "/" << lkCandidateMs.max
+              << "\n";
+    std::cout << "  lk_pnp_ms_mean/max: " << lkPnpMs.Mean(outputs.size()) << "/" << lkPnpMs.max << "\n";
     std::cout << "  orb_track_ms_mean/max: " << orbTrackMsMean << "/" << orbTrackMsMax << "\n";
     std::cout << "  orb_extract_ms_mean/max: " << orbExtractMsMean << "/" << orbExtractMsMax << "\n";
     std::cout << "  orb_stereo_ms_mean/max: " << orbStereoMsMean << "/" << orbStereoMsMax << "\n";
@@ -681,13 +762,49 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << "  \"sensor_mode\": \"" << ToSensorModeText(opts.sensorMode) << "\",\n"
                 << "  \"feature_frontend\": \"" << ToFeatureFrontendText(opts.featureFrontend) << "\",\n"
                 << "  \"orb_accel\": \"" << opts.orbAcceleration << "\",\n"
-                << "  \"lk_xfeat_seeding\": " << (opts.lkXFeatSeeding ? "true" : "false") << ",\n"
+                << "  \"lk_superpoint_seeding\": " << (opts.lkSuperPointSeeding ? "true" : "false") << ",\n"
                 << "  \"lk_per_frame_accel\": \"" << opts.lkPerFrameAcceleration << "\",\n"
                 << "  \"frames_out\": " << outputs.size() << ",\n"
                 << "  \"pose_valid_frames\": " << poseValidCount << ",\n"
                 << "  \"tracking_ok_frames\": " << trackingOkCount << ",\n"
                 << "  \"tracking_lost_frames\": " << trackingLostCount << ",\n"
                 << "  \"identity_pose_frames\": " << identityPoseCount << ",\n"
+                << "  \"replay_acquire_ms_mean\": " << replayAcquireMs.Mean(outputs.size()) << ",\n"
+                << "  \"replay_acquire_ms_max\": " << replayAcquireMs.max << ",\n"
+                << "  \"replay_imu_ms_mean\": " << replayImuMs.Mean(outputs.size()) << ",\n"
+                << "  \"replay_imu_ms_max\": " << replayImuMs.max << ",\n"
+                << "  \"slam_total_ms_mean\": " << slamTotalMs.Mean(outputs.size()) << ",\n"
+                << "  \"slam_total_ms_max\": " << slamTotalMs.max << ",\n"
+                << "  \"input_prepare_ms_mean\": " << inputPrepareMs.Mean(outputs.size()) << ",\n"
+                << "  \"input_prepare_ms_max\": " << inputPrepareMs.max << ",\n"
+                << "  \"frontend_ms_mean\": " << frontendMs.Mean(outputs.size()) << ",\n"
+                << "  \"frontend_ms_max\": " << frontendMs.max << ",\n"
+                << "  \"stereo_pair_ms_mean\": " << stereoPairMs.Mean(outputs.size()) << ",\n"
+                << "  \"stereo_pair_ms_max\": " << stereoPairMs.max << ",\n"
+                << "  \"external_pack_ms_mean\": " << externalPackMs.Mean(outputs.size()) << ",\n"
+                << "  \"external_pack_ms_max\": " << externalPackMs.max << ",\n"
+                << "  \"mono_augment_ms_mean\": " << monoAugmentMs.Mean(outputs.size()) << ",\n"
+                << "  \"mono_augment_ms_max\": " << monoAugmentMs.max << ",\n"
+                << "  \"lk_rectify_ms_mean\": " << lkRectifyMs.Mean(outputs.size()) << ",\n"
+                << "  \"lk_rectify_ms_max\": " << lkRectifyMs.max << ",\n"
+                << "  \"lk_disparity_ms_mean\": " << lkDisparityMs.Mean(outputs.size()) << ",\n"
+                << "  \"lk_disparity_ms_max\": " << lkDisparityMs.max << ",\n"
+                << "  \"lk_gftt_ms_mean\": " << lkGfttMs.Mean(outputs.size()) << ",\n"
+                << "  \"lk_gftt_ms_max\": " << lkGfttMs.max << ",\n"
+                << "  \"lk_flow_ms_mean\": " << lkFlowMs.Mean(outputs.size()) << ",\n"
+                << "  \"lk_flow_ms_max\": " << lkFlowMs.max << ",\n"
+                << "  \"lk_candidate_ms_mean\": " << lkCandidateMs.Mean(outputs.size()) << ",\n"
+                << "  \"lk_candidate_ms_max\": " << lkCandidateMs.max << ",\n"
+                << "  \"lk_pnp_ms_mean\": " << lkPnpMs.Mean(outputs.size()) << ",\n"
+                << "  \"lk_pnp_ms_max\": " << lkPnpMs.max << ",\n"
+                << "  \"lk_update_ms_mean\": " << lkUpdateMs.Mean(outputs.size()) << ",\n"
+                << "  \"lk_update_ms_max\": " << lkUpdateMs.max << ",\n"
+                << "  \"superpoint_frontend_ms_mean\": " << superpointFrontendMs.Mean(outputs.size()) << ",\n"
+                << "  \"superpoint_frontend_ms_max\": " << superpointFrontendMs.max << ",\n"
+                << "  \"superpoint_match_ms_mean\": " << superpointMatchMs.Mean(outputs.size()) << ",\n"
+                << "  \"superpoint_match_ms_max\": " << superpointMatchMs.max << ",\n"
+                << "  \"superpoint_total_ms_mean\": " << superpointTotalMs.Mean(outputs.size()) << ",\n"
+                << "  \"superpoint_total_ms_max\": " << superpointTotalMs.max << ",\n"
                 << "  \"orb_track_ms_mean\": " << orbTrackMsMean << ",\n"
                 << "  \"orb_track_ms_max\": " << orbTrackMsMax << ",\n"
                 << "  \"orb_extract_ms_mean\": " << orbExtractMsMean << ",\n"
@@ -708,7 +825,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         std::cout << "  summary_json: " << opts.summaryJson << "\n";
     }
 
-    xfeatFrontendClient.Stop();
+    superpointFrontendClient.Stop();
     std::cout.flush();
     std::_Exit(0);
 }

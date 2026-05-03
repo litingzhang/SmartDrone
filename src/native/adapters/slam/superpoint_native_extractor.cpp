@@ -1,6 +1,6 @@
 #include "adapters/slam/superpoint_native_extractor.h"
 
-#include "adapters/slam/xfeat_frontend_client.h"
+#include "adapters/slam/superpoint_lightglue_frontend_client.h"
 
 #include <algorithm>
 #include <array>
@@ -17,7 +17,7 @@
 
 #include <opencv2/imgproc.hpp>
 
-#if defined(SMART_DRONE_XFEAT_TENSORRT_AVAILABLE)
+#if defined(SMART_DRONE_SUPERPOINT_TENSORRT_AVAILABLE)
 #include <NvInfer.h>
 #include <NvInferPlugin.h>
 #include <cuda_runtime_api.h>
@@ -298,11 +298,11 @@ std::vector<Candidate> ExtractCandidates(const TensorBlob &detector, int batch, 
     return candidates;
 }
 
-void MatchStereoPairs(const XFeatFeatureSet &leftRaw, const XFeatFeatureSet &rightRaw, int maxPoints,
-                      XFeatFeatureSet &leftOut, XFeatFeatureSet &rightOut)
+void MatchStereoPairs(const SuperPointFeatureSet &leftRaw, const SuperPointFeatureSet &rightRaw, int maxPoints,
+                      SuperPointFeatureSet &leftOut, SuperPointFeatureSet &rightOut)
 {
-    leftOut = XFeatFeatureSet{};
-    rightOut = XFeatFeatureSet{};
+    leftOut = SuperPointFeatureSet{};
+    rightOut = SuperPointFeatureSet{};
     if (leftRaw.descriptors.empty() || rightRaw.descriptors.empty() || leftRaw.descriptors.type() != CV_32F ||
         rightRaw.descriptors.type() != CV_32F || leftRaw.descriptors.cols != rightRaw.descriptors.cols) {
         return;
@@ -396,7 +396,7 @@ void MatchStereoPairs(const XFeatFeatureSet &leftRaw, const XFeatFeatureSet &rig
     }
 }
 
-#if defined(SMART_DRONE_XFEAT_TENSORRT_AVAILABLE)
+#if defined(SMART_DRONE_SUPERPOINT_TENSORRT_AVAILABLE)
 
 class TensorRtLogger final : public nvinfer1::ILogger {
   public:
@@ -1060,7 +1060,7 @@ class TensorRtLightGlueEngine {
 } // namespace
 
 struct SuperPointNativeExtractor::Impl {
-#if defined(SMART_DRONE_XFEAT_TENSORRT_AVAILABLE)
+#if defined(SMART_DRONE_SUPERPOINT_TENSORRT_AVAILABLE)
     std::unique_ptr<TensorRtSuperPointEngine> trtEngine;
     std::unique_ptr<TensorRtLightGlueEngine> lightGlueEngine;
     TensorBlob detector;
@@ -1082,8 +1082,8 @@ struct SuperPointNativeExtractor::Impl {
             }
             return false;
         }
-        const int widthHint = EnvInt("SMART_DRONE_XFEAT_INPUT_MAX_WIDTH", 640);
-        const int heightHint = EnvInt("SMART_DRONE_XFEAT_INPUT_MAX_HEIGHT", 480);
+        const int widthHint = EnvInt("SMART_DRONE_SUPERPOINT_INPUT_MAX_WIDTH", 640);
+        const int heightHint = EnvInt("SMART_DRONE_SUPERPOINT_INPUT_MAX_HEIGHT", 480);
         const std::filesystem::path enginePath = ResolveSuperPointEnginePath(repoPath, widthHint, heightHint);
         if (enginePath.empty()) {
             if (err != nullptr) {
@@ -1131,10 +1131,10 @@ struct SuperPointNativeExtractor::Impl {
     int maxPointsForLightGlue() const { return EnvInt("SMART_DRONE_LIGHTGLUE_POINTS", 768); }
 
     bool DetectAndComputeBatch(const std::vector<cv::Mat> &grayImages, int maxPoints,
-                               std::vector<XFeatFeatureSet> &outputs, double *inputMs, double *forwardMs,
+                               std::vector<SuperPointFeatureSet> &outputs, double *inputMs, double *forwardMs,
                                double *postMs, std::string *err)
     {
-        outputs.assign(grayImages.size(), XFeatFeatureSet{});
+        outputs.assign(grayImages.size(), SuperPointFeatureSet{});
         if (!trtEngine || grayImages.empty()) {
             if (err != nullptr) {
                 *err = "SuperPoint TensorRT backend is not ready";
@@ -1173,7 +1173,7 @@ struct SuperPointNativeExtractor::Impl {
             }
             const auto postStartTp = forwardEndTp;
             std::vector<Candidate> candidates = ExtractCandidates(detector, 0, targetWidth, targetHeight, maxPoints);
-            XFeatFeatureSet &output = outputs[batchIndex];
+            SuperPointFeatureSet &output = outputs[batchIndex];
             output.keypoints.reserve(candidates.size());
             if (!candidates.empty()) {
                 output.descriptors = cv::Mat(static_cast<int>(candidates.size()), kSuperPointDescriptorDim, CV_32F);
@@ -1215,12 +1215,12 @@ struct SuperPointNativeExtractor::Impl {
         return true;
     }
 
-    bool MatchWithLightGlue(const XFeatFeatureSet &leftRaw, const XFeatFeatureSet &rightRaw, int maxPoints,
-                            int imageWidth, int imageHeight, XFeatFeatureSet &leftOut, XFeatFeatureSet &rightOut,
+    bool MatchWithLightGlue(const SuperPointFeatureSet &leftRaw, const SuperPointFeatureSet &rightRaw, int maxPoints,
+                            int imageWidth, int imageHeight, SuperPointFeatureSet &leftOut, SuperPointFeatureSet &rightOut,
                             double *matchMs, std::string *err)
     {
-        leftOut = XFeatFeatureSet{};
-        rightOut = XFeatFeatureSet{};
+        leftOut = SuperPointFeatureSet{};
+        rightOut = SuperPointFeatureSet{};
         if (!lightGlueEngine || lightGluePointCount <= 0 || leftRaw.descriptors.empty() ||
             rightRaw.descriptors.empty() || leftRaw.descriptors.type() != CV_32F ||
             rightRaw.descriptors.type() != CV_32F || leftRaw.descriptors.cols != kSuperPointDescriptorDim ||
@@ -1372,7 +1372,7 @@ bool SuperPointNativeExtractor::Start(const std::string &repoPath, const std::st
     m_topK = topK;
     m_maxPoints = maxPoints;
     m_lastStats = Stats{};
-#if defined(SMART_DRONE_XFEAT_TENSORRT_AVAILABLE)
+#if defined(SMART_DRONE_SUPERPOINT_TENSORRT_AVAILABLE)
     m_impl = std::make_unique<Impl>();
     if (!m_impl->Load(repoPath, device, err)) {
         m_impl.reset();
@@ -1403,7 +1403,7 @@ SuperPointNativeExtractor::Stats SuperPointNativeExtractor::LastStats() const { 
 
 bool SuperPointNativeExtractor::Detect(const cv::Mat &gray, std::vector<cv::Point2f> &outPoints, std::string *err)
 {
-    XFeatFeatureSet features;
+    SuperPointFeatureSet features;
     if (!DetectAndCompute(gray, features, err)) {
         return false;
     }
@@ -1411,11 +1411,11 @@ bool SuperPointNativeExtractor::Detect(const cv::Mat &gray, std::vector<cv::Poin
     return true;
 }
 
-bool SuperPointNativeExtractor::DetectAndCompute(const cv::Mat &gray, XFeatFeatureSet &outFeatures, std::string *err)
+bool SuperPointNativeExtractor::DetectAndCompute(const cv::Mat &gray, SuperPointFeatureSet &outFeatures, std::string *err)
 {
-    outFeatures = XFeatFeatureSet{};
+    outFeatures = SuperPointFeatureSet{};
     m_lastStats = Stats{};
-#if defined(SMART_DRONE_XFEAT_TENSORRT_AVAILABLE)
+#if defined(SMART_DRONE_SUPERPOINT_TENSORRT_AVAILABLE)
     if (!m_running || !m_impl) {
         if (err != nullptr) {
             *err = "SuperPoint TensorRT backend not running";
@@ -1429,7 +1429,7 @@ bool SuperPointNativeExtractor::DetectAndCompute(const cv::Mat &gray, XFeatFeatu
         return false;
     }
     const auto prepareEndTp = std::chrono::steady_clock::now();
-    std::vector<XFeatFeatureSet> outputs;
+    std::vector<SuperPointFeatureSet> outputs;
     const auto inferStartTp = prepareEndTp;
     double inputMs = 0.0;
     double forwardMs = 0.0;
@@ -1460,13 +1460,13 @@ bool SuperPointNativeExtractor::DetectAndCompute(const cv::Mat &gray, XFeatFeatu
 }
 
 bool SuperPointNativeExtractor::DetectAndComputeStereo(const cv::Mat &leftGray, const cv::Mat &rightGray,
-                                                       XFeatFeatureSet &leftFeatures, XFeatFeatureSet &rightFeatures,
+                                                       SuperPointFeatureSet &leftFeatures, SuperPointFeatureSet &rightFeatures,
                                                        std::string *err)
 {
-    leftFeatures = XFeatFeatureSet{};
-    rightFeatures = XFeatFeatureSet{};
+    leftFeatures = SuperPointFeatureSet{};
+    rightFeatures = SuperPointFeatureSet{};
     m_lastStats = Stats{};
-#if defined(SMART_DRONE_XFEAT_TENSORRT_AVAILABLE)
+#if defined(SMART_DRONE_SUPERPOINT_TENSORRT_AVAILABLE)
     if (!m_running || !m_impl) {
         if (err != nullptr) {
             *err = "SuperPoint TensorRT backend not running";
@@ -1481,7 +1481,7 @@ bool SuperPointNativeExtractor::DetectAndComputeStereo(const cv::Mat &leftGray, 
         return false;
     }
     const auto prepareEndTp = std::chrono::steady_clock::now();
-    std::vector<XFeatFeatureSet> rawOutputs;
+    std::vector<SuperPointFeatureSet> rawOutputs;
     const auto inferStartTp = prepareEndTp;
     double inputMs = 0.0;
     double forwardMs = 0.0;

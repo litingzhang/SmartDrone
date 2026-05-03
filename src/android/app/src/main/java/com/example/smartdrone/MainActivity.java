@@ -69,12 +69,12 @@ public class MainActivity extends Activity {
     private static final int SENSOR_MONO = 2;
     private static final int SENSOR_MONO_IMU = 3;
     private static final int FEATURE_FRONTEND_ORB = 0;
-    private static final int FEATURE_FRONTEND_XFEAT = 1;
+    private static final int FEATURE_FRONTEND_SUPERPOINT = 1;
     private static final int FEATURE_FRONTEND_DROID_LIGHT = 2;
     private static final int FEATURE_FRONTEND_LK = 3;
     private static final int FEATURE_FRONTEND_LK_GFTT_PER_FRAME = 4;
     private static final int FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE = 5;
-    private static final int FEATURE_FRONTEND_LK_XFEAT = 6;
+    private static final int FEATURE_FRONTEND_LK_SUPERPOINT = 6;
     private static final int FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI = 7;
     private static final int FEATURE_FRONTEND_ORB_CUDA = 8;
     private static final int FEATURE_FRONTEND_ORB_VPI_REMAP = 9;
@@ -137,13 +137,13 @@ public class MainActivity extends Activity {
     private static final int ORB_NLEVELS_MAX = 12;
     private static final int ORB_FAST_TH_MIN = 2;
     private static final int ORB_FAST_TH_MAX = 40;
-    private static final int XFEAT_TOP_K_MIN = 1;
-    private static final int XFEAT_TOP_K_MAX = 4096;
-    private static final int XFEAT_MAX_POINTS_MIN = 1;
-    private static final int XFEAT_MAX_POINTS_MAX = 4096;
-    private static final int XFEAT_INPUT_MAX_MIN = 0;
-    private static final int XFEAT_INPUT_MAX_MAX = 4096;
-    private static final int XFEAT_INPUT_MAX_STEP = 16;
+    private static final int SUPERPOINT_TOP_K_MIN = 1;
+    private static final int SUPERPOINT_TOP_K_MAX = 4096;
+    private static final int SUPERPOINT_MAX_POINTS_MIN = 1;
+    private static final int SUPERPOINT_MAX_POINTS_MAX = 4096;
+    private static final int SUPERPOINT_INPUT_MAX_MIN = 0;
+    private static final int SUPERPOINT_INPUT_MAX_MAX = 4096;
+    private static final int SUPERPOINT_INPUT_MAX_STEP = 16;
     private static final int SUPERPOINT_LIGHTGLUE_INPUT_MAX_WIDTH = 640;
     private static final int SUPERPOINT_LIGHTGLUE_INPUT_MAX_HEIGHT = 480;
 
@@ -217,10 +217,10 @@ public class MainActivity extends Activity {
     private TextView m_tvCfgOrbNLevelsValue;
     private TextView m_tvCfgOrbIniThFastValue;
     private TextView m_tvCfgOrbMinThFastValue;
-    private TextView m_tvCfgXFeatTopKValue;
-    private TextView m_tvCfgXFeatMaxPointsValue;
-    private TextView m_tvCfgXFeatInputMaxWidthValue;
-    private TextView m_tvCfgXFeatInputMaxHeightValue;
+    private TextView m_tvCfgSuperPointTopKValue;
+    private TextView m_tvCfgSuperPointMaxPointsValue;
+    private TextView m_tvCfgSuperPointInputMaxWidthValue;
+    private TextView m_tvCfgSuperPointInputMaxHeightValue;
     private SeekBar m_sbCfgExposure;
     private SeekBar m_sbCfgGain;
     private SeekBar m_sbCfgPairMs;
@@ -236,10 +236,10 @@ public class MainActivity extends Activity {
     private SeekBar m_sbCfgOrbNLevels;
     private SeekBar m_sbCfgOrbIniThFast;
     private SeekBar m_sbCfgOrbMinThFast;
-    private SeekBar m_sbCfgXFeatTopK;
-    private SeekBar m_sbCfgXFeatMaxPoints;
-    private SeekBar m_sbCfgXFeatInputMaxWidth;
-    private SeekBar m_sbCfgXFeatInputMaxHeight;
+    private SeekBar m_sbCfgSuperPointTopK;
+    private SeekBar m_sbCfgSuperPointMaxPoints;
+    private SeekBar m_sbCfgSuperPointInputMaxWidth;
+    private SeekBar m_sbCfgSuperPointInputMaxHeight;
 
     private View m_joystickLeft;
     private View m_joystickRight;
@@ -287,7 +287,7 @@ public class MainActivity extends Activity {
     private int m_px4SubMode = 0;
     private int m_sensorMode = SENSOR_STEREO;
     private int m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
-    private boolean m_cfgLkXFeatSeeding = false;
+    private boolean m_cfgLkSuperPointSeeding = false;
     private int m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_VPI_CUDA;
     private int m_cfgOrbAcceleration = ORB_ACCEL_CPU;
     private int m_cfgExposureUs = 3000;
@@ -308,10 +308,10 @@ public class MainActivity extends Activity {
     private int m_cfgOrbNLevels = 8;
     private int m_cfgOrbIniThFast = 16;
     private int m_cfgOrbMinThFast = 6;
-    private int m_cfgXFeatTopK = 512;
-    private int m_cfgXFeatMaxPoints = 320;
-    private int m_cfgXFeatInputMaxWidth = 640;
-    private int m_cfgXFeatInputMaxHeight = 400;
+    private int m_cfgSuperPointTopK = 512;
+    private int m_cfgSuperPointMaxPoints = 320;
+    private int m_cfgSuperPointInputMaxWidth = 640;
+    private int m_cfgSuperPointInputMaxHeight = 400;
     private int m_effectiveSlamMode = SLAM_MODE_MAPPING;
     private int m_videoPktCount = 0;
     private int m_videoFrameOk = 0;
@@ -338,7 +338,7 @@ public class MainActivity extends Activity {
     private boolean m_supportsStereoImu = true;
     private boolean m_supportsMono = true;
     private boolean m_supportsMonoImu = true;
-    private boolean m_supportsXFeat = false;
+    private boolean m_supportsSuperPoint = false;
     private boolean m_supportsSuperPointLightGlue = true;
     private boolean m_supportsDroidLight = false;
     private boolean m_supportsLK = true;
@@ -646,21 +646,21 @@ public class MainActivity extends Activity {
 
     private static int quantizeOrbFastThreshold(int value) { return clampInt(value, ORB_FAST_TH_MIN, ORB_FAST_TH_MAX); }
 
-    private static int quantizeXFeatTopK(int value) { return clampInt(value, XFEAT_TOP_K_MIN, XFEAT_TOP_K_MAX); }
+    private static int quantizeSuperPointTopK(int value) { return clampInt(value, SUPERPOINT_TOP_K_MIN, SUPERPOINT_TOP_K_MAX); }
 
-    private static int quantizeXFeatMaxPoints(int value, int topK)
+    private static int quantizeSuperPointMaxPoints(int value, int topK)
     {
-        return clampInt(value, XFEAT_MAX_POINTS_MIN, Math.max(XFEAT_MAX_POINTS_MIN, quantizeXFeatTopK(topK)));
+        return clampInt(value, SUPERPOINT_MAX_POINTS_MIN, Math.max(SUPERPOINT_MAX_POINTS_MIN, quantizeSuperPointTopK(topK)));
     }
 
-    private static int quantizeXFeatInputMax(int value)
+    private static int quantizeSuperPointInputMax(int value)
     {
-        final int clamped = clampInt(value, XFEAT_INPUT_MAX_MIN, XFEAT_INPUT_MAX_MAX);
+        final int clamped = clampInt(value, SUPERPOINT_INPUT_MAX_MIN, SUPERPOINT_INPUT_MAX_MAX);
         if (clamped == 0) {
             return 0;
         }
-        return clampInt(Math.round((float)clamped / (float)XFEAT_INPUT_MAX_STEP) * XFEAT_INPUT_MAX_STEP,
-                        XFEAT_INPUT_MAX_STEP, XFEAT_INPUT_MAX_MAX);
+        return clampInt(Math.round((float)clamped / (float)SUPERPOINT_INPUT_MAX_STEP) * SUPERPOINT_INPUT_MAX_STEP,
+                        SUPERPOINT_INPUT_MAX_STEP, SUPERPOINT_INPUT_MAX_MAX);
     }
 
     private static Float findPoseField(String text, String... keys)
@@ -845,10 +845,10 @@ public class MainActivity extends Activity {
             final boolean manualExposureEditable = !runtimeActive && !m_cfgAutoExposure;
             final boolean tbcEditable = m_cfgUseCustomTbc && m_sensorMode == SENSOR_STEREO;
             final boolean orbEditable = !runtimeActive;
-            final boolean xfeatEditable =
+            final boolean superpointEditable =
                 !runtimeActive &&
                 (m_cfgFeatureFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE ||
-                 (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK && m_cfgLkXFeatSeeding));
+                 (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK && m_cfgLkSuperPointSeeding));
             if (m_tvCfgExposureValue != null) {
                 m_tvCfgExposureValue.setText(m_cfgAutoExposure ? "Exposure: Auto (UVC AE)"
                                                                : String.format(Locale.US, "Exposure: %d us (UVC)",
@@ -912,23 +912,23 @@ public class MainActivity extends Activity {
                 m_tvCfgOrbMinThFastValue.setText(String.format(Locale.US, "ORB minThFAST: %d", m_cfgOrbMinThFast));
                 m_tvCfgOrbMinThFastValue.setAlpha(orbEditable ? 1.0f : 0.45f);
             }
-            if (m_tvCfgXFeatTopKValue != null) {
-                m_tvCfgXFeatTopKValue.setText(String.format(Locale.US, "SuperPoint topK: %d", m_cfgXFeatTopK));
-                m_tvCfgXFeatTopKValue.setAlpha(xfeatEditable ? 1.0f : 0.45f);
+            if (m_tvCfgSuperPointTopKValue != null) {
+                m_tvCfgSuperPointTopKValue.setText(String.format(Locale.US, "SuperPoint topK: %d", m_cfgSuperPointTopK));
+                m_tvCfgSuperPointTopKValue.setAlpha(superpointEditable ? 1.0f : 0.45f);
             }
-            if (m_tvCfgXFeatMaxPointsValue != null) {
-                m_tvCfgXFeatMaxPointsValue.setText(String.format(Locale.US, "SuperPoint maxPoints: %d", m_cfgXFeatMaxPoints));
-                m_tvCfgXFeatMaxPointsValue.setAlpha(xfeatEditable ? 1.0f : 0.45f);
+            if (m_tvCfgSuperPointMaxPointsValue != null) {
+                m_tvCfgSuperPointMaxPointsValue.setText(String.format(Locale.US, "SuperPoint maxPoints: %d", m_cfgSuperPointMaxPoints));
+                m_tvCfgSuperPointMaxPointsValue.setAlpha(superpointEditable ? 1.0f : 0.45f);
             }
-            if (m_tvCfgXFeatInputMaxWidthValue != null) {
-                final String widthText = m_cfgXFeatInputMaxWidth > 0 ? Integer.toString(m_cfgXFeatInputMaxWidth) : "off";
-                m_tvCfgXFeatInputMaxWidthValue.setText("SuperPoint input max width: " + widthText);
-                m_tvCfgXFeatInputMaxWidthValue.setAlpha(xfeatEditable ? 1.0f : 0.45f);
+            if (m_tvCfgSuperPointInputMaxWidthValue != null) {
+                final String widthText = m_cfgSuperPointInputMaxWidth > 0 ? Integer.toString(m_cfgSuperPointInputMaxWidth) : "off";
+                m_tvCfgSuperPointInputMaxWidthValue.setText("SuperPoint input max width: " + widthText);
+                m_tvCfgSuperPointInputMaxWidthValue.setAlpha(superpointEditable ? 1.0f : 0.45f);
             }
-            if (m_tvCfgXFeatInputMaxHeightValue != null) {
-                final String heightText = m_cfgXFeatInputMaxHeight > 0 ? Integer.toString(m_cfgXFeatInputMaxHeight) : "off";
-                m_tvCfgXFeatInputMaxHeightValue.setText("SuperPoint input max height: " + heightText);
-                m_tvCfgXFeatInputMaxHeightValue.setAlpha(xfeatEditable ? 1.0f : 0.45f);
+            if (m_tvCfgSuperPointInputMaxHeightValue != null) {
+                final String heightText = m_cfgSuperPointInputMaxHeight > 0 ? Integer.toString(m_cfgSuperPointInputMaxHeight) : "off";
+                m_tvCfgSuperPointInputMaxHeightValue.setText("SuperPoint input max height: " + heightText);
+                m_tvCfgSuperPointInputMaxHeightValue.setAlpha(superpointEditable ? 1.0f : 0.45f);
             }
             if (m_sbCfgExposure != null) {
                 int progress = (m_cfgExposureUs - EXPOSURE_MIN_US) / EXPOSURE_STEP_US;
@@ -1049,37 +1049,37 @@ public class MainActivity extends Activity {
                 m_sbCfgOrbMinThFast.setEnabled(orbEditable);
                 m_sbCfgOrbMinThFast.setAlpha(orbEditable ? 1.0f : 0.35f);
             }
-            if (m_sbCfgXFeatTopK != null) {
-                final int progress = m_cfgXFeatTopK - XFEAT_TOP_K_MIN;
-                if (m_sbCfgXFeatTopK.getProgress() != progress) {
-                    m_sbCfgXFeatTopK.setProgress(progress);
+            if (m_sbCfgSuperPointTopK != null) {
+                final int progress = m_cfgSuperPointTopK - SUPERPOINT_TOP_K_MIN;
+                if (m_sbCfgSuperPointTopK.getProgress() != progress) {
+                    m_sbCfgSuperPointTopK.setProgress(progress);
                 }
-                m_sbCfgXFeatTopK.setEnabled(xfeatEditable);
-                m_sbCfgXFeatTopK.setAlpha(xfeatEditable ? 1.0f : 0.35f);
+                m_sbCfgSuperPointTopK.setEnabled(superpointEditable);
+                m_sbCfgSuperPointTopK.setAlpha(superpointEditable ? 1.0f : 0.35f);
             }
-            if (m_sbCfgXFeatMaxPoints != null) {
-                final int progress = m_cfgXFeatMaxPoints - XFEAT_MAX_POINTS_MIN;
-                if (m_sbCfgXFeatMaxPoints.getProgress() != progress) {
-                    m_sbCfgXFeatMaxPoints.setProgress(progress);
+            if (m_sbCfgSuperPointMaxPoints != null) {
+                final int progress = m_cfgSuperPointMaxPoints - SUPERPOINT_MAX_POINTS_MIN;
+                if (m_sbCfgSuperPointMaxPoints.getProgress() != progress) {
+                    m_sbCfgSuperPointMaxPoints.setProgress(progress);
                 }
-                m_sbCfgXFeatMaxPoints.setEnabled(xfeatEditable);
-                m_sbCfgXFeatMaxPoints.setAlpha(xfeatEditable ? 1.0f : 0.35f);
+                m_sbCfgSuperPointMaxPoints.setEnabled(superpointEditable);
+                m_sbCfgSuperPointMaxPoints.setAlpha(superpointEditable ? 1.0f : 0.35f);
             }
-            if (m_sbCfgXFeatInputMaxWidth != null) {
-                final int progress = m_cfgXFeatInputMaxWidth / XFEAT_INPUT_MAX_STEP;
-                if (m_sbCfgXFeatInputMaxWidth.getProgress() != progress) {
-                    m_sbCfgXFeatInputMaxWidth.setProgress(progress);
+            if (m_sbCfgSuperPointInputMaxWidth != null) {
+                final int progress = m_cfgSuperPointInputMaxWidth / SUPERPOINT_INPUT_MAX_STEP;
+                if (m_sbCfgSuperPointInputMaxWidth.getProgress() != progress) {
+                    m_sbCfgSuperPointInputMaxWidth.setProgress(progress);
                 }
-                m_sbCfgXFeatInputMaxWidth.setEnabled(xfeatEditable);
-                m_sbCfgXFeatInputMaxWidth.setAlpha(xfeatEditable ? 1.0f : 0.35f);
+                m_sbCfgSuperPointInputMaxWidth.setEnabled(superpointEditable);
+                m_sbCfgSuperPointInputMaxWidth.setAlpha(superpointEditable ? 1.0f : 0.35f);
             }
-            if (m_sbCfgXFeatInputMaxHeight != null) {
-                final int progress = m_cfgXFeatInputMaxHeight / XFEAT_INPUT_MAX_STEP;
-                if (m_sbCfgXFeatInputMaxHeight.getProgress() != progress) {
-                    m_sbCfgXFeatInputMaxHeight.setProgress(progress);
+            if (m_sbCfgSuperPointInputMaxHeight != null) {
+                final int progress = m_cfgSuperPointInputMaxHeight / SUPERPOINT_INPUT_MAX_STEP;
+                if (m_sbCfgSuperPointInputMaxHeight.getProgress() != progress) {
+                    m_sbCfgSuperPointInputMaxHeight.setProgress(progress);
                 }
-                m_sbCfgXFeatInputMaxHeight.setEnabled(xfeatEditable);
-                m_sbCfgXFeatInputMaxHeight.setAlpha(xfeatEditable ? 1.0f : 0.35f);
+                m_sbCfgSuperPointInputMaxHeight.setEnabled(superpointEditable);
+                m_sbCfgSuperPointInputMaxHeight.setAlpha(superpointEditable ? 1.0f : 0.35f);
             }
             if (m_btnAutoExposureToggle != null) {
                 m_btnAutoExposureToggle.setChecked(m_cfgAutoExposure);
@@ -1375,22 +1375,22 @@ public class MainActivity extends Activity {
                                   boolean autoExposure, boolean useCustomTbc, float tbcTx, float tbcTy, float tbcTz,
                                   float tbcRollDeg, float tbcPitchDeg, float tbcYawDeg, int orbNFeatures,
                                   float orbScaleFactor, int orbNLevels, int orbIniThFast, int orbMinThFast,
-                                  int xfeatTopK, int xfeatMaxPoints, int xfeatInputMaxWidth, int xfeatInputMaxHeight,
-                                  boolean lkXFeatSeeding, int lkPerFrameAcceleration, int orbAcceleration)
+                                  int superpointTopK, int superpointMaxPoints, int superpointInputMaxWidth, int superpointInputMaxHeight,
+                                  boolean lkSuperPointSeeding, int lkPerFrameAcceleration, int orbAcceleration)
     {
         try {
             int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
                                                   sendFeature, sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy,
                                                   tbcTz, tbcRollDeg, tbcPitchDeg, tbcYawDeg, orbNFeatures,
                                                   orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast,
-                                                  featureFrontend, xfeatTopK, xfeatMaxPoints, xfeatInputMaxWidth,
-                                                  xfeatInputMaxHeight, lkXFeatSeeding, lkPerFrameAcceleration,
+                                                  featureFrontend, superpointTopK, superpointMaxPoints, superpointInputMaxWidth,
+                                                  superpointInputMaxHeight, lkSuperPointSeeding, lkPerFrameAcceleration,
                                                   orbAcceleration);
             m_tvStatus.setText(String.format(
                 Locale.US,
                 "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s frontend=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d orbAccel=%s sp=%d/%d/%d/%d lkAccel=%s",
                 seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
-                runtimeFeatureFrontendToText(featureFrontend, lkXFeatSeeding, lkPerFrameAcceleration, orbAcceleration),
+                runtimeFeatureFrontendToText(featureFrontend, lkSuperPointSeeding, lkPerFrameAcceleration, orbAcceleration),
                 sendImage ? "on" : "off", sendFeature ? "on" : "off",
                 sendMap ? "on" : "off", autoExposure ? "on" : "off",
                 useCustomTbc
@@ -1398,8 +1398,8 @@ public class MainActivity extends Activity {
                                     tbcRollDeg, tbcPitchDeg, tbcYawDeg)
                     : "off",
                 orbNFeatures, orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast,
-                orbAccelerationToText(orbAcceleration), xfeatTopK, xfeatMaxPoints,
-                xfeatInputMaxWidth, xfeatInputMaxHeight, lkPerFrameAccelerationToText(lkPerFrameAcceleration)));
+                orbAccelerationToText(orbAcceleration), superpointTopK, superpointMaxPoints,
+                superpointInputMaxWidth, superpointInputMaxHeight, lkPerFrameAccelerationToText(lkPerFrameAcceleration)));
             return seq;
         } catch (Throwable t) {
             m_tvStatus.setText("CFG error: " + t.getMessage());
@@ -1414,9 +1414,9 @@ public class MainActivity extends Activity {
                                  m_cfgAutoExposure,
                                  m_cfgUseCustomTbc, m_cfgTbcTx, m_cfgTbcTy, m_cfgTbcTz, m_cfgTbcRollDeg,
                                  m_cfgTbcPitchDeg, m_cfgTbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor,
-                                 m_cfgOrbNLevels, m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgXFeatTopK,
-                                 m_cfgXFeatMaxPoints, m_cfgXFeatInputMaxWidth, m_cfgXFeatInputMaxHeight,
-                                 m_cfgLkXFeatSeeding, m_cfgLkPerFrameAcceleration, m_cfgOrbAcceleration);
+                                 m_cfgOrbNLevels, m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgSuperPointTopK,
+                                 m_cfgSuperPointMaxPoints, m_cfgSuperPointInputMaxWidth, m_cfgSuperPointInputMaxHeight,
+                                 m_cfgLkSuperPointSeeding, m_cfgLkPerFrameAcceleration, m_cfgOrbAcceleration);
     }
 
     private void sendRuntimeConfigAwaitAck(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
@@ -1444,8 +1444,8 @@ public class MainActivity extends Activity {
         int seq = sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, featureFrontend, sendImage, sendFeature,
                                     sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy, tbcTz, tbcRollDeg, tbcPitchDeg,
                                     tbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor, m_cfgOrbNLevels,
-                                    m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgXFeatTopK, m_cfgXFeatMaxPoints,
-                                    m_cfgXFeatInputMaxWidth, m_cfgXFeatInputMaxHeight, m_cfgLkXFeatSeeding,
+                                    m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgSuperPointTopK, m_cfgSuperPointMaxPoints,
+                                    m_cfgSuperPointInputMaxWidth, m_cfgSuperPointInputMaxHeight, m_cfgLkSuperPointSeeding,
                                     m_cfgLkPerFrameAcceleration, m_cfgOrbAcceleration);
         if (seq < 0) {
             return;
@@ -2228,7 +2228,7 @@ public class MainActivity extends Activity {
         m_supportsStereoImu = containsTokenList(values.get("perception_modes"), "stereo-imu");
         m_supportsMono = containsTokenList(values.get("perception_modes"), "mono");
         m_supportsMonoImu = containsTokenList(values.get("perception_modes"), "mono-imu");
-        m_supportsXFeat = false;
+        m_supportsSuperPoint = false;
         final String spLgCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.superpoint_lightglue=");
         m_supportsSuperPointLightGlue = spLgCapability == null
                                             ? true
@@ -2273,8 +2273,8 @@ public class MainActivity extends Activity {
         m_cfgSlamFps = quantizeSlamFps(parsedSlamFps);
         m_cfgSlamMode = parseSlamModeText(values.get("slam.operation_mode"), m_cfgSlamMode);
         m_cfgFeatureFrontend = parseFeatureFrontendText(values.get("slam.feature_frontend"), m_cfgFeatureFrontend);
-        m_cfgLkXFeatSeeding = false;
-        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_XFEAT || m_cfgFeatureFrontend == FEATURE_FRONTEND_DROID_LIGHT ||
+        m_cfgLkSuperPointSeeding = false;
+        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_SUPERPOINT || m_cfgFeatureFrontend == FEATURE_FRONTEND_DROID_LIGHT ||
             m_cfgFeatureFrontend == FEATURE_FRONTEND_LK) {
             m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
         }
@@ -2289,7 +2289,7 @@ public class MainActivity extends Activity {
              m_cfgFeatureFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME)) {
             m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
         }
-        m_cfgLkXFeatSeeding = false;
+        m_cfgLkSuperPointSeeding = false;
         m_cfgLkPerFrameAcceleration =
             parseLkPerFrameAccelerationText(values.get("slam.lk_per_frame_accel"), m_cfgLkPerFrameAcceleration);
         if (m_cfgFeatureFrontend != FEATURE_FRONTEND_LK_GFTT_PER_FRAME) {
@@ -2318,13 +2318,13 @@ public class MainActivity extends Activity {
         if (m_cfgOrbMinThFast > m_cfgOrbIniThFast) {
             m_cfgOrbMinThFast = m_cfgOrbIniThFast;
         }
-        m_cfgXFeatTopK = quantizeXFeatTopK(parseI(values.get("slam.xfeat_top_k"), m_cfgXFeatTopK));
-        m_cfgXFeatMaxPoints =
-            quantizeXFeatMaxPoints(parseI(values.get("slam.xfeat_max_points"), m_cfgXFeatMaxPoints), m_cfgXFeatTopK);
-        m_cfgXFeatInputMaxWidth =
-            quantizeXFeatInputMax(parseI(values.get("slam.xfeat_input_max_width"), m_cfgXFeatInputMaxWidth));
-        m_cfgXFeatInputMaxHeight =
-            quantizeXFeatInputMax(parseI(values.get("slam.xfeat_input_max_height"), m_cfgXFeatInputMaxHeight));
+        m_cfgSuperPointTopK = quantizeSuperPointTopK(parseI(values.get("slam.superpoint_top_k"), m_cfgSuperPointTopK));
+        m_cfgSuperPointMaxPoints =
+            quantizeSuperPointMaxPoints(parseI(values.get("slam.superpoint_max_points"), m_cfgSuperPointMaxPoints), m_cfgSuperPointTopK);
+        m_cfgSuperPointInputMaxWidth =
+            quantizeSuperPointInputMax(parseI(values.get("slam.superpoint_input_max_width"), m_cfgSuperPointInputMaxWidth));
+        m_cfgSuperPointInputMaxHeight =
+            quantizeSuperPointInputMax(parseI(values.get("slam.superpoint_input_max_height"), m_cfgSuperPointInputMaxHeight));
         m_sensorMode = parseSensorModeText(values.get("slam.perception_mode"), m_sensorMode);
         m_sendImage = parseBooleanText(values.get("stream.send_image"), m_sendImage);
         final boolean remoteSendFeature = parseBooleanText(values.get("stream.send_feature"), m_sendFeature);
@@ -2357,8 +2357,8 @@ public class MainActivity extends Activity {
                                          featureFrontendToText(m_cfgFeatureFrontend),
                                          slamModeToText(m_cfgSlamMode), m_cfgSlamFps, m_cfgAutoExposure ? "on" : "off",
                                          m_cfgUseCustomTbc ? "override" : "yaml", m_cfgOrbNFeatures,
-                                         m_cfgOrbScaleFactor, m_cfgOrbNLevels, m_cfgXFeatTopK, m_cfgXFeatMaxPoints,
-                                         m_cfgXFeatInputMaxWidth, m_cfgXFeatInputMaxHeight));
+                                         m_cfgOrbScaleFactor, m_cfgOrbNLevels, m_cfgSuperPointTopK, m_cfgSuperPointMaxPoints,
+                                         m_cfgSuperPointInputMaxWidth, m_cfgSuperPointInputMaxHeight));
         return true;
     }
 
@@ -2443,7 +2443,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String runtimeFeatureFrontendToText(int featureFrontend, boolean lkXFeatSeeding,
+    private String runtimeFeatureFrontendToText(int featureFrontend, boolean lkSuperPointSeeding,
                                                 int lkPerFrameAcceleration, int orbAcceleration)
     {
         if (featureFrontend == FEATURE_FRONTEND_LK) {
@@ -3095,10 +3095,10 @@ public class MainActivity extends Activity {
         m_tvCfgOrbNLevelsValue = findViewById(R.id.tvCfgOrbNLevelsValue);
         m_tvCfgOrbIniThFastValue = findViewById(R.id.tvCfgOrbIniThFastValue);
         m_tvCfgOrbMinThFastValue = findViewById(R.id.tvCfgOrbMinThFastValue);
-        m_tvCfgXFeatTopKValue = findViewById(R.id.tvCfgXFeatTopKValue);
-        m_tvCfgXFeatMaxPointsValue = findViewById(R.id.tvCfgXFeatMaxPointsValue);
-        m_tvCfgXFeatInputMaxWidthValue = findViewById(R.id.tvCfgXFeatInputMaxWidthValue);
-        m_tvCfgXFeatInputMaxHeightValue = findViewById(R.id.tvCfgXFeatInputMaxHeightValue);
+        m_tvCfgSuperPointTopKValue = findViewById(R.id.tvCfgSuperPointTopKValue);
+        m_tvCfgSuperPointMaxPointsValue = findViewById(R.id.tvCfgSuperPointMaxPointsValue);
+        m_tvCfgSuperPointInputMaxWidthValue = findViewById(R.id.tvCfgSuperPointInputMaxWidthValue);
+        m_tvCfgSuperPointInputMaxHeightValue = findViewById(R.id.tvCfgSuperPointInputMaxHeightValue);
         m_sbCfgExposure = findViewById(R.id.sbCfgExposure);
         m_sbCfgGain = findViewById(R.id.sbCfgGain);
         m_sbCfgPairMs = findViewById(R.id.sbCfgPairMs);
@@ -3114,10 +3114,10 @@ public class MainActivity extends Activity {
         m_sbCfgOrbNLevels = findViewById(R.id.sbCfgOrbNLevels);
         m_sbCfgOrbIniThFast = findViewById(R.id.sbCfgOrbIniThFast);
         m_sbCfgOrbMinThFast = findViewById(R.id.sbCfgOrbMinThFast);
-        m_sbCfgXFeatTopK = findViewById(R.id.sbCfgXFeatTopK);
-        m_sbCfgXFeatMaxPoints = findViewById(R.id.sbCfgXFeatMaxPoints);
-        m_sbCfgXFeatInputMaxWidth = findViewById(R.id.sbCfgXFeatInputMaxWidth);
-        m_sbCfgXFeatInputMaxHeight = findViewById(R.id.sbCfgXFeatInputMaxHeight);
+        m_sbCfgSuperPointTopK = findViewById(R.id.sbCfgSuperPointTopK);
+        m_sbCfgSuperPointMaxPoints = findViewById(R.id.sbCfgSuperPointMaxPoints);
+        m_sbCfgSuperPointInputMaxWidth = findViewById(R.id.sbCfgSuperPointInputMaxWidth);
+        m_sbCfgSuperPointInputMaxHeight = findViewById(R.id.sbCfgSuperPointInputMaxHeight);
 
         m_joystickLeft = findViewById(R.id.joystickLeft);
         m_joystickRight = findViewById(R.id.joystickRight);
@@ -3472,16 +3472,16 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        if (m_sbCfgXFeatTopK != null) {
-            m_sbCfgXFeatTopK.setMax(XFEAT_TOP_K_MAX - XFEAT_TOP_K_MIN);
-            m_sbCfgXFeatTopK.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        if (m_sbCfgSuperPointTopK != null) {
+            m_sbCfgSuperPointTopK.setMax(SUPERPOINT_TOP_K_MAX - SUPERPOINT_TOP_K_MIN);
+            m_sbCfgSuperPointTopK.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
                 {
                     if (m_updatingConfigUi || !fromUser) {
                         return;
                     }
-                    m_cfgXFeatTopK = quantizeXFeatTopK(XFEAT_TOP_K_MIN + progress);
-                    m_cfgXFeatMaxPoints = quantizeXFeatMaxPoints(m_cfgXFeatMaxPoints, m_cfgXFeatTopK);
+                    m_cfgSuperPointTopK = quantizeSuperPointTopK(SUPERPOINT_TOP_K_MIN + progress);
+                    m_cfgSuperPointMaxPoints = quantizeSuperPointMaxPoints(m_cfgSuperPointMaxPoints, m_cfgSuperPointTopK);
                     updateConfigViews();
                 }
 
@@ -3493,15 +3493,15 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        if (m_sbCfgXFeatMaxPoints != null) {
-            m_sbCfgXFeatMaxPoints.setMax(XFEAT_MAX_POINTS_MAX - XFEAT_MAX_POINTS_MIN);
-            m_sbCfgXFeatMaxPoints.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        if (m_sbCfgSuperPointMaxPoints != null) {
+            m_sbCfgSuperPointMaxPoints.setMax(SUPERPOINT_MAX_POINTS_MAX - SUPERPOINT_MAX_POINTS_MIN);
+            m_sbCfgSuperPointMaxPoints.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
                 {
                     if (m_updatingConfigUi || !fromUser) {
                         return;
                     }
-                    m_cfgXFeatMaxPoints = quantizeXFeatMaxPoints(XFEAT_MAX_POINTS_MIN + progress, m_cfgXFeatTopK);
+                    m_cfgSuperPointMaxPoints = quantizeSuperPointMaxPoints(SUPERPOINT_MAX_POINTS_MIN + progress, m_cfgSuperPointTopK);
                     updateConfigViews();
                 }
 
@@ -3513,15 +3513,15 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        if (m_sbCfgXFeatInputMaxWidth != null) {
-            m_sbCfgXFeatInputMaxWidth.setMax(XFEAT_INPUT_MAX_MAX / XFEAT_INPUT_MAX_STEP);
-            m_sbCfgXFeatInputMaxWidth.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        if (m_sbCfgSuperPointInputMaxWidth != null) {
+            m_sbCfgSuperPointInputMaxWidth.setMax(SUPERPOINT_INPUT_MAX_MAX / SUPERPOINT_INPUT_MAX_STEP);
+            m_sbCfgSuperPointInputMaxWidth.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
                 {
                     if (m_updatingConfigUi || !fromUser) {
                         return;
                     }
-                    m_cfgXFeatInputMaxWidth = quantizeXFeatInputMax(progress * XFEAT_INPUT_MAX_STEP);
+                    m_cfgSuperPointInputMaxWidth = quantizeSuperPointInputMax(progress * SUPERPOINT_INPUT_MAX_STEP);
                     updateConfigViews();
                 }
 
@@ -3533,15 +3533,15 @@ public class MainActivity extends Activity {
                 }
             });
         }
-        if (m_sbCfgXFeatInputMaxHeight != null) {
-            m_sbCfgXFeatInputMaxHeight.setMax(XFEAT_INPUT_MAX_MAX / XFEAT_INPUT_MAX_STEP);
-            m_sbCfgXFeatInputMaxHeight.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        if (m_sbCfgSuperPointInputMaxHeight != null) {
+            m_sbCfgSuperPointInputMaxHeight.setMax(SUPERPOINT_INPUT_MAX_MAX / SUPERPOINT_INPUT_MAX_STEP);
+            m_sbCfgSuperPointInputMaxHeight.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
                 {
                     if (m_updatingConfigUi || !fromUser) {
                         return;
                     }
-                    m_cfgXFeatInputMaxHeight = quantizeXFeatInputMax(progress * XFEAT_INPUT_MAX_STEP);
+                    m_cfgSuperPointInputMaxHeight = quantizeSuperPointInputMax(progress * SUPERPOINT_INPUT_MAX_STEP);
                     updateConfigViews();
                 }
 
@@ -3571,10 +3571,10 @@ public class MainActivity extends Activity {
         if (m_cfgOrbMinThFast > m_cfgOrbIniThFast) {
             m_cfgOrbMinThFast = m_cfgOrbIniThFast;
         }
-        m_cfgXFeatTopK = quantizeXFeatTopK(m_cfgXFeatTopK);
-        m_cfgXFeatMaxPoints = quantizeXFeatMaxPoints(m_cfgXFeatMaxPoints, m_cfgXFeatTopK);
-        m_cfgXFeatInputMaxWidth = quantizeXFeatInputMax(m_cfgXFeatInputMaxWidth);
-        m_cfgXFeatInputMaxHeight = quantizeXFeatInputMax(m_cfgXFeatInputMaxHeight);
+        m_cfgSuperPointTopK = quantizeSuperPointTopK(m_cfgSuperPointTopK);
+        m_cfgSuperPointMaxPoints = quantizeSuperPointMaxPoints(m_cfgSuperPointMaxPoints, m_cfgSuperPointTopK);
+        m_cfgSuperPointInputMaxWidth = quantizeSuperPointInputMax(m_cfgSuperPointInputMaxWidth);
+        m_cfgSuperPointInputMaxHeight = quantizeSuperPointInputMax(m_cfgSuperPointInputMaxHeight);
         m_cfgSlamMode = SLAM_MODE_MAPPING;
         updateConfigViews();
         updatePoseMapFromText();
@@ -3804,51 +3804,51 @@ public class MainActivity extends Activity {
                     final int nextFrontend = nextOption == FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI
                                                  ? FEATURE_FRONTEND_LK_GFTT_PER_FRAME
                                                  : nextOption;
-                    final boolean nextLkXFeatSeeding = false;
+                    final boolean nextLkSuperPointSeeding = false;
                     final int nextLkPerFrameAcceleration =
                         nextFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME ? LK_PER_FRAME_ACCEL_VPI_CUDA
                                                                            : LK_PER_FRAME_ACCEL_CPU;
                     final int nextOrbAcceleration = ORB_ACCEL_CPU;
-                    final int nextXFeatInputMaxWidth =
+                    final int nextSuperPointInputMaxWidth =
                         nextFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE ? SUPERPOINT_LIGHTGLUE_INPUT_MAX_WIDTH
-                                                                               : m_cfgXFeatInputMaxWidth;
-                    final int nextXFeatInputMaxHeight =
+                                                                               : m_cfgSuperPointInputMaxWidth;
+                    final int nextSuperPointInputMaxHeight =
                         nextFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE ? SUPERPOINT_LIGHTGLUE_INPUT_MAX_HEIGHT
-                                                                               : m_cfgXFeatInputMaxHeight;
-                    if (nextFrontend == m_cfgFeatureFrontend && nextLkXFeatSeeding == m_cfgLkXFeatSeeding &&
+                                                                               : m_cfgSuperPointInputMaxHeight;
+                    if (nextFrontend == m_cfgFeatureFrontend && nextLkSuperPointSeeding == m_cfgLkSuperPointSeeding &&
                         nextLkPerFrameAcceleration == m_cfgLkPerFrameAcceleration &&
                         nextOrbAcceleration == m_cfgOrbAcceleration &&
-                        nextXFeatInputMaxWidth == m_cfgXFeatInputMaxWidth &&
-                        nextXFeatInputMaxHeight == m_cfgXFeatInputMaxHeight) {
+                        nextSuperPointInputMaxWidth == m_cfgSuperPointInputMaxWidth &&
+                        nextSuperPointInputMaxHeight == m_cfgSuperPointInputMaxHeight) {
                         return;
                     }
-                    final boolean previousLkXFeatSeeding = m_cfgLkXFeatSeeding;
+                    final boolean previousLkSuperPointSeeding = m_cfgLkSuperPointSeeding;
                     final int previousLkPerFrameAcceleration = m_cfgLkPerFrameAcceleration;
                     final int previousOrbAcceleration = m_cfgOrbAcceleration;
-                    final int previousXFeatInputMaxWidth = m_cfgXFeatInputMaxWidth;
-                    final int previousXFeatInputMaxHeight = m_cfgXFeatInputMaxHeight;
-                    m_cfgLkXFeatSeeding = nextLkXFeatSeeding;
+                    final int previousSuperPointInputMaxWidth = m_cfgSuperPointInputMaxWidth;
+                    final int previousSuperPointInputMaxHeight = m_cfgSuperPointInputMaxHeight;
+                    m_cfgLkSuperPointSeeding = nextLkSuperPointSeeding;
                     m_cfgLkPerFrameAcceleration = nextLkPerFrameAcceleration;
                     m_cfgOrbAcceleration = nextOrbAcceleration;
-                    m_cfgXFeatInputMaxWidth = nextXFeatInputMaxWidth;
-                    m_cfgXFeatInputMaxHeight = nextXFeatInputMaxHeight;
+                    m_cfgSuperPointInputMaxWidth = nextSuperPointInputMaxWidth;
+                    m_cfgSuperPointInputMaxHeight = nextSuperPointInputMaxHeight;
                     sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
                                               m_sensorMode, nextFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
                                               effectiveConfigLabel("Feature frontend", true), PENDING_CONFIG, () -> {
                                                   m_cfgFeatureFrontend = nextFrontend;
-                                                  m_cfgLkXFeatSeeding = nextLkXFeatSeeding;
+                                                  m_cfgLkSuperPointSeeding = nextLkSuperPointSeeding;
                                                   m_cfgLkPerFrameAcceleration = nextLkPerFrameAcceleration;
                                                   m_cfgOrbAcceleration = nextOrbAcceleration;
-                                                  m_cfgXFeatInputMaxWidth = nextXFeatInputMaxWidth;
-                                                  m_cfgXFeatInputMaxHeight = nextXFeatInputMaxHeight;
+                                                  m_cfgSuperPointInputMaxWidth = nextSuperPointInputMaxWidth;
+                                                  m_cfgSuperPointInputMaxHeight = nextSuperPointInputMaxHeight;
                                                   updateRuntimeButtons();
                                               });
                     if (!isPending(PENDING_CONFIG)) {
-                        m_cfgLkXFeatSeeding = previousLkXFeatSeeding;
+                        m_cfgLkSuperPointSeeding = previousLkSuperPointSeeding;
                         m_cfgLkPerFrameAcceleration = previousLkPerFrameAcceleration;
                         m_cfgOrbAcceleration = previousOrbAcceleration;
-                        m_cfgXFeatInputMaxWidth = previousXFeatInputMaxWidth;
-                        m_cfgXFeatInputMaxHeight = previousXFeatInputMaxHeight;
+                        m_cfgSuperPointInputMaxWidth = previousSuperPointInputMaxWidth;
+                        m_cfgSuperPointInputMaxHeight = previousSuperPointInputMaxHeight;
                     }
                 }
 

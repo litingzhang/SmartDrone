@@ -97,46 +97,46 @@ The current implementation also introduces several UVC/streaming/real-time polic
 - Software timestamp strategy:
   for packed-UVC, the timestamp is taken from the monotonic clock immediately after frame grab completion, and both eye images share that same timestamp.
 - Newest-frame priority:
-  the packed-UVC path forces its internal frame queue to `1`, thereby preferring fresh frames over preserving stale frames behind slow SLAM / XFeat processing.
+  the packed-UVC path forces its internal frame queue to `1`, thereby preferring fresh frames over preserving stale frames behind slow SLAM / SuperPoint processing.
 - Dynamic preview destination:
   `SlamSessionRuntime` resolves the UDP image destination from the current active peer stored in `LivePoseState`, thereby avoiding a permanently hard-coded phone IP.
 - Preview rate limiting:
   `UdpImageSender` now rate-limits image output independently, with a maximum image send rate of `30 FPS`, decoupled from the SLAM input rate.
 
-### 3.4A XFeat Integration Adaptations
+### 3.4A SuperPoint Integration Adaptations
 
-The current `xfeat` integration is an external frontend adaptation layer on top of the existing ORB-SLAM3 tracking pipeline rather than a full native frontend replacement.
+The current `superpoint` integration is an external frontend adaptation layer on top of the existing ORB-SLAM3 tracking pipeline rather than a full native frontend replacement.
 
-The implementation contains the following XFeat-specific adaptations:
+The implementation contains the following SuperPoint-specific adaptations:
 
-- Worker-process frontend execution:
-  `smart_drone` starts a separate Python worker through `XFeatFrontendClient`, exchanges grayscale frames through a binary pipe protocol, and receives keypoints plus `CV_32F` descriptors.
+- Native TensorRT frontend execution:
+  `smart_drone` owns a `SuperPointLightGlueFrontendClient`, which delegates SuperPoint keypoint and descriptor extraction to `SuperPointNativeExtractor` and keeps keypoints plus `CV_32F` descriptors in process.
 - Runtime-selectable execution device:
-  the worker accepts `auto/cpu/cuda` device selection. `auto` resolves to CUDA on Jetson-class targets when available and falls back to CPU on CM5-class targets.
+  the frontend accepts `auto/cpu/cuda` device selection. The Jetson path resolves to CUDA/TensorRT when the native engine is available.
 - Jetson CUDA optimizations:
-  on the CUDA path, the worker enables `torch.float16`, `torch.autocast(...)`, `torch.inference_mode()`, and `cudnn.benchmark` in order to reduce frontend inference cost on Jetson.
-- Runtime-configurable XFeat tuning:
-  runtime config exposes `slam.xfeat_top_k`, `slam.xfeat_max_points`, `slam.xfeat_input_max_width`, and `slam.xfeat_input_max_height`. Changes are applied through the runtime-config pipeline and restart the SLAM session so that the worker and frontend use the updated limits.
+  on the CUDA path, TensorRT engine selection is derived from `SMART_DRONE_SUPERPOINT_TRT_ENGINE` or from the configured SuperPoint/LightGlue repo and input-size limits.
+- Runtime-configurable SuperPoint tuning:
+  runtime config exposes `slam.superpoint_top_k`, `slam.superpoint_max_points`, `slam.superpoint_input_max_width`, and `slam.superpoint_input_max_height`. Changes are applied through the runtime-config pipeline and restart the SLAM session so that the native frontend uses the updated limits.
 - Stereo batch inference:
-  left and right images are combined into one worker request and one model invocation in stereo mode. This reduces per-frame IPC and Python dispatch overhead while keeping the output split per image.
+  left and right images are submitted through one stereo frontend call in stereo mode, keeping output split per image while sharing the native extractor path.
 - Input-size adaptation:
-  XFeat input images are downscaled before inference through a dedicated preprocessing step in `orbslam3_engine` in order to cap frontend cost on embedded targets. The width and height limits are runtime-configurable. A value of `0` disables the limit on that dimension. Setting both limits to `0` disables XFeat downscaling.
+  SuperPoint input images are downscaled before inference through a dedicated preprocessing step in `orbslam3_engine` in order to cap frontend cost on embedded targets. The width and height limits are runtime-configurable. A value of `0` disables the limit on that dimension. Setting both limits to `0` disables SuperPoint downscaling.
 - Rectified-image stereo injection:
-  for stereo pinhole configurations that require rectification, XFeat is extracted on the same prepared images used by ORB-SLAM3 tracking. `System::PrepareStereoImagesForTracking(...)` and `System::TrackStereoPreparedWithFeatures(...)` were added so that feature coordinates and tracking images remain in the same rectified coordinate system.
+  for stereo pinhole configurations that require rectification, SuperPoint is extracted on the same prepared images used by ORB-SLAM3 tracking. `System::PrepareStereoImagesForTracking(...)` and `System::TrackStereoPreparedWithFeatures(...)` were added so that feature coordinates and tracking images remain in the same rectified coordinate system.
 - Stability gate before injection:
-  XFeat injection is enabled only when the worker is running and the previous ORB-SLAM3 tracking state is stable (`OK` or `OK_KLT`). Initialization, recovery, and unstable phases continue to use the original ORB path.
+  SuperPoint injection is enabled only when the frontend is running and the previous ORB-SLAM3 tracking state is stable (`OK` or `OK_KLT`). Initialization, recovery, and unstable phases continue to use the original ORB path.
 - Separate raw-display and injected-feature semantics:
-  the runtime records raw XFeat detections for diagnostics and overlay output, while the features injected into ORB-SLAM3 are the stereo-matched subset. This avoids conflating display density with the effective tracking input.
+  the runtime records raw SuperPoint detections for diagnostics and overlay output, while the features injected into ORB-SLAM3 are the stereo-matched subset. This avoids conflating display density with the effective tracking input.
 - Stereo-specific pair construction:
   externally injected stereo features are required to be pre-matched. The adaptation layer performs left-right pairing with epipolar and disparity constraints and emits `matchedStereoPairs=true` before entering ORB-SLAM3.
 - Float-descriptor matcher compatibility:
-  ORB-SLAM3 matcher code was extended so that `ORBmatcher::DescriptorDistance(...)` accepts `CV_32F` descriptors through cosine-distance-style scoring. This is required because XFeat descriptors are not ORB binary descriptors.
+  ORB-SLAM3 matcher code was extended so that `ORBmatcher::DescriptorDistance(...)` accepts `CV_32F` descriptors through cosine-distance-style scoring. This is required because SuperPoint descriptors are not ORB binary descriptors.
 - BoW compatibility limits remain explicit:
-  `Frame::ComputeBoW()` and `KeyFrame::ComputeBoW()` still only build BoW vectors for `CV_8U` descriptors. As a result, the XFeat path is compatible with tracking injection, but it does not replace the full ORB vocabulary-based frontend assumptions.
+  `Frame::ComputeBoW()` and `KeyFrame::ComputeBoW()` still only build BoW vectors for `CV_8U` descriptors. As a result, the SuperPoint path is compatible with tracking injection, but it does not replace the full ORB vocabulary-based frontend assumptions.
 - Explicit runtime diagnostics:
-  `slam_dfx` reports `xfeat_used`, `xfeat_raw_left/right`, `xfeat_match_stereo`, and `xfeat_injected_left/right`. `orbslam3_engine` also emits `xfeat_runtime_status=...` to distinguish worker availability, tracking-state gating, and prepared-image enablement.
+  `slam_dfx` reports `superpoint_used`, `superpoint_raw_left/right`, `superpoint_match_stereo`, and `superpoint_injected_left/right`. `orbslam3_engine` also emits `superpoint_runtime_status=...` to distinguish frontend availability, tracking-state gating, and prepared-image enablement.
 - Stage-level timing and payload diagnostics:
-  `slam_dfx` additionally reports `xfeat_prepare_ms`, `xfeat_write_ms`, `xfeat_read_ms`, `xfeat_worker_ms`, `xfeat_match_ms`, `xfeat_total_ms`, `xfeat_image_count`, and `xfeat_payload_bytes`, enabling direct bottleneck identification.
+  `slam_dfx` additionally reports `superpoint_prepare_ms`, `superpoint_input_ms`, `superpoint_forward_ms`, `superpoint_frontend_ms`, `superpoint_match_ms`, `superpoint_total_ms`, `superpoint_image_count`, and `superpoint_payload_bytes`, enabling direct bottleneck identification.
 
 ### 3.5 Calibration Session Features
 
@@ -157,7 +157,7 @@ Config domains:
 - SLAM: input FPS/perception mode/operation mode
 - runtime `T_b_c1` override: enable flag, translation (tx/ty/tz), and rotation (roll/pitch/yaw)
 - ORB extractor: `nFeatures`, `scaleFactor`, `nLevels`, `iniThFAST`, `minThFAST`
-- XFeat extractor: `top_k`, `max_points`, `input_max_width`, `input_max_height`
+- SuperPoint extractor: `top_k`, `max_points`, `input_max_width`, `input_max_height`
 - stream: UDP IP and image/feature/map flags
 
 The current implementation adds two provider-specific semantics on top of those keys:
@@ -183,7 +183,7 @@ Android `MainActivity` provides:
 - command/config dispatch and ACK handling
 - state, point-cloud, and video/feature visualization
 
-The current implementation also updates the Android source so that it remains aligned with the packed-UVC/XFeat pipeline:
+The current implementation also updates the Android source so that it remains aligned with the packed-UVC/SuperPoint pipeline:
 
 - only the perception modes that match the compiled provider are exposed in the UI/capability handling path
 - exposure, gain, and auto-exposure ranges were widened to fit the current UVC camera behavior
@@ -310,8 +310,8 @@ Concurrency properties:
 Throughput control in the current implementation is centered on the following behavior:
 
 - camera acquisition and SLAM processing are decoupled so that freshness is preferred over processing every historical frame
-- `slam.input_fps` caps the rate entering SLAM/XFeat
-- `UdpImageSender` separately caps preview output to the phone at `30 FPS`, so phone preview FPS does not have to match SLAM/XFeat FPS
+- `slam.input_fps` caps the rate entering SLAM/SuperPoint
+- `UdpImageSender` separately caps preview output to the phone at `30 FPS`, so phone preview FPS does not have to match SLAM/SuperPoint FPS
 
 ### 7.2 Latency Instrumentation
 
@@ -614,4 +614,4 @@ sequenceDiagram
 - Discovery has been integrated with Android auto-connect behavior.
 - Setpoint behavior is split as designed: OFFBOARD streams setpoints; POSITION mode stops setpoint streaming.
 - Heartbeat timeout LAND is implemented on both companion and Android sides for redundant fail-safe coverage.
-- The current implementation now provides a runnable `Jetson Orin NX + single-UVC packed stereo + XFeat worker + dynamic UDP preview destination` path, but final SLAM and preview quality still depend on stereo mounting, calibration quality, and the phone reconnecting after redeploy.
+- The current implementation now provides a runnable `Jetson Orin NX + single-UVC packed stereo + SuperPoint/LightGlue native frontend + dynamic UDP preview destination` path, but final SLAM and preview quality still depend on stereo mounting, calibration quality, and the phone reconnecting after redeploy.

@@ -8,7 +8,7 @@
 
 #include "adapters/imu/icm42688_imu_provider.h"
 #include "adapters/slam/orbslam3_engine.h"
-#include "adapters/slam/xfeat_frontend_client.h"
+#include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "adapters/stream/udp_image_sender.h"
 #include "adapters/telemetry/mavlink_pose_publisher.h"
 #include "adapters/telemetry/px4_mavlink_gateway.h"
@@ -34,7 +34,7 @@ class SlamFrameProcessor {
         LivePoseState &livePose;
         Px4MavlinkGateway &mav;
         smartdrone::adapters::slam::OrbSlam3Engine &slamEngine;
-        smartdrone::adapters::slam::XFeatFrontendClient *xfeatFrontendClient{nullptr};
+        smartdrone::adapters::slam::SuperPointLightGlueFrontendClient *superpointFrontendClient{nullptr};
         smartdrone::core::ports::ICameraProvider &cameraProvider;
         smartdrone::adapters::imu::Icm42688ImuProvider &imuProvider;
         smartdrone::adapters::telemetry::MavlinkPosePublisher &posePublisher;
@@ -65,8 +65,8 @@ class SlamFrameProcessor {
         double smoothedSlamMs{0.0};
         double smoothedTotalMs{0.0};
         int adaptiveSlamInputFps{0};
-        int xfeatLoadSheddingLevel{0};
-        int lastLoggedXFeatLoadSheddingLevel{-1};
+        int superpointLoadSheddingLevel{0};
+        int lastLoggedSuperPointLoadSheddingLevel{-1};
         uint8_t sessionResetCounterBase{0};
         uint16_t sessionResetMapCountBase{0};
         bool lastTrackingUsable{false};
