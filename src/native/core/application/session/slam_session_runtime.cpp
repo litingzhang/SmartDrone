@@ -332,11 +332,11 @@ bool SlamSessionRuntime::Start()
 
     m_slamEngine.SetOperationMode(m_frameProcessorState.effectiveSlamMode);
     m_slamEngine.SetFeatureFrontend(m_aliases.featureFrontend);
-    m_slamEngine.SetSuperPointLightGlueFrontendClient(&m_superpointFrontendClient);
-    m_slamEngine.SetSuperPointInputSizeLimit(m_cfg.app.runtime.superpointInputMaxWidth, m_cfg.app.runtime.superpointInputMaxHeight);
-    m_slamEngine.SetLkLoopClosure(m_cfg.app.runtime.lkLoopClosure, m_cfg.app.runtime.lkLoopScale,
-                                  m_cfg.app.runtime.lkLoopRelaxation);
-    m_slamEngine.SetLkPerFrameAcceleration(m_cfg.app.runtime.lkPerFrameAcceleration);
+    m_slamEngine.SetExternalFeatureFrontendClient(&m_superpointFrontendClient);
+    m_slamEngine.SetExternalFeatureInputSizeLimit(m_cfg.app.runtime.superpointInputMaxWidth, m_cfg.app.runtime.superpointInputMaxHeight);
+    m_slamEngine.SetStereoVoLoopClosure(m_cfg.app.runtime.lkLoopClosure, m_cfg.app.runtime.lkLoopScale,
+                                        m_cfg.app.runtime.lkLoopRelaxation);
+    m_slamEngine.SetStereoVoPerFrameAcceleration(m_cfg.app.runtime.lkPerFrameAcceleration);
     if (m_frameProcessorState.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
         std::cerr << "[slam] operation_mode=auto effective_mode=mapping\n";
     }

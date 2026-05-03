@@ -17,8 +17,6 @@ enum class SensorMode {
 
 enum class FeatureFrontend {
     Orb = 0,
-    Reserved = 1,
-    DroidLight = 2,
     LK = 3,
     LkGfttPerFrame = 4,
     SuperPointLightGlue = 5,
@@ -94,7 +92,6 @@ struct RuntimeConfig {
     int superpointMaxPoints{768};
     int superpointInputMaxWidth{640};
     int superpointInputMaxHeight{400};
-    bool lkSuperPointSeeding{false};
     bool lkLoopClosure{false};
     float lkLoopScale{1.20f};
     float lkLoopRelaxation{1.40f};

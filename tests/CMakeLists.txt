@@ -16,6 +16,11 @@ if(ENABLE_OFFLINE_REPLAY)
     euroc/support/replay_dataset.cpp
     euroc/support/replay_slam_runner.cpp
     ../src/native/adapters/slam/orbslam3_engine.cpp
+    ../src/native/adapters/slam/orbslam3_mode_state.cpp
+    ../src/native/adapters/slam/orbslam3_mode_strategy.cpp
+    ../src/native/adapters/slam/orbslam3_orb_mode_strategy.cpp
+    ../src/native/adapters/slam/orbslam3_klt_mode_strategy.cpp
+    ../src/native/adapters/slam/orbslam3_superpoint_lightglue_mode_strategy.cpp
     ../src/native/adapters/slam/superpoint_native_extractor.cpp
     ../src/native/adapters/slam/superpoint_lightglue_frontend_client.cpp
     ../src/native/core/application/config/app_args.cpp

@@ -43,7 +43,6 @@ struct OfflineReplayOptions {
     int slamInputFps{20};
     int timeoutMs{1000};
     size_t maxFrames{0};
-    bool lkSuperPointSeeding{false};
     bool lkLoopClosure{false};
     bool lkRuntimeLoopClosure{false};
     float lkLoopScale{1.20f};
@@ -290,7 +289,6 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     opts.superpointMaxPoints = GetOptionInt(argc, argv, "--superpoint-max-points", opts.superpointMaxPoints);
     opts.superpointInputMaxWidth = GetOptionInt(argc, argv, "--superpoint-input-max-width", opts.superpointInputMaxWidth);
     opts.superpointInputMaxHeight = GetOptionInt(argc, argv, "--superpoint-input-max-height", opts.superpointInputMaxHeight);
-    opts.lkSuperPointSeeding = false;
     opts.lkLoopClosure = HasFlag(argc, argv, "--lk-loop-closure");
     opts.lkRuntimeLoopClosure = HasFlag(argc, argv, "--lk-runtime-loop-closure");
     opts.lkLoopScale = GetOptionFloat(argc, argv, "--lk-loop-scale", opts.lkLoopScale);
@@ -546,13 +544,13 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                                                           UseImu(opts.sensorMode), opts.settings);
     slamEngine.SetOperationMode(opts.slamMode);
     slamEngine.SetFeatureFrontend(opts.featureFrontend);
-    slamEngine.SetSuperPointInputSizeLimit(opts.superpointInputMaxWidth, opts.superpointInputMaxHeight);
-    slamEngine.SetLkLoopClosure(opts.lkRuntimeLoopClosure, opts.lkLoopScale, opts.lkLoopRelaxation);
-    slamEngine.SetLkPerFrameAcceleration(opts.lkPerFrameAcceleration);
+    slamEngine.SetExternalFeatureInputSizeLimit(opts.superpointInputMaxWidth, opts.superpointInputMaxHeight);
+    slamEngine.SetStereoVoLoopClosure(opts.lkRuntimeLoopClosure, opts.lkLoopScale, opts.lkLoopRelaxation);
+    slamEngine.SetStereoVoPerFrameAcceleration(opts.lkPerFrameAcceleration);
     smartdrone::adapters::slam::SuperPointLightGlueFrontendClient superpointFrontendClient;
     std::string superpointErr;
     if (opts.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLightGlueInjectionEnabled()) {
-        slamEngine.SetSuperPointLightGlueFrontendClient(&superpointFrontendClient);
+        slamEngine.SetExternalFeatureFrontendClient(&superpointFrontendClient);
         if (!superpointFrontendClient.Start(opts.superpointRepo, opts.superpointDevice, opts.superpointTopK, opts.superpointMaxPoints,
                                        &superpointErr)) {
             std::cerr << "error: superpoint_lightglue TensorRT start failed: " << superpointErr << "\n";
@@ -708,7 +706,6 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     std::cout << "  sensor_mode: " << ToSensorModeText(opts.sensorMode) << "\n";
     std::cout << "  feature_frontend: " << ToFeatureFrontendText(opts.featureFrontend) << "\n";
     std::cout << "  orb_accel: " << opts.orbAcceleration << "\n";
-    std::cout << "  lk_superpoint_seeding: " << (opts.lkSuperPointSeeding ? "Y" : "N") << "\n";
     std::cout << "  lk_per_frame_accel: " << opts.lkPerFrameAcceleration << "\n";
     std::cout << "  frames_out: " << outputs.size() << "\n";
     std::cout << "  pose_valid_frames: " << poseValidCount << "\n";
@@ -762,7 +759,6 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << "  \"sensor_mode\": \"" << ToSensorModeText(opts.sensorMode) << "\",\n"
                 << "  \"feature_frontend\": \"" << ToFeatureFrontendText(opts.featureFrontend) << "\",\n"
                 << "  \"orb_accel\": \"" << opts.orbAcceleration << "\",\n"
-                << "  \"lk_superpoint_seeding\": " << (opts.lkSuperPointSeeding ? "true" : "false") << ",\n"
                 << "  \"lk_per_frame_accel\": \"" << opts.lkPerFrameAcceleration << "\",\n"
                 << "  \"frames_out\": " << outputs.size() << ",\n"
                 << "  \"pose_valid_frames\": " << poseValidCount << ",\n"

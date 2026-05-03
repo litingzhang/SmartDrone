@@ -116,10 +116,6 @@ FeatureFrontend ParseFeatureFrontendText(const std::string &text)
     std::string normalized = text;
     std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (normalized == "droid" || normalized == "droid-light" || normalized == "droid_light" ||
-        normalized == "droidlight") {
-        return FeatureFrontend::DroidLight;
-    }
     if (normalized == "superpoint-lightglue" || normalized == "superpoint_lightglue" ||
         normalized == "superpoint+lightglue" || normalized == "sp-lightglue" ||
         normalized == "sp_lightglue" || normalized == "sp-lg" || normalized == "splg") {
@@ -145,8 +141,6 @@ const char *ToFeatureFrontendText(FeatureFrontend frontend)
         return "lk_gftt_per_frame";
     case FeatureFrontend::LK:
         return "lk";
-    case FeatureFrontend::DroidLight:
-        return "droid_light";
     case FeatureFrontend::SuperPointLightGlue:
         return "superpoint_lightglue";
     case FeatureFrontend::Orb:
@@ -406,7 +400,6 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.superpointInputMaxHeight = argReader.GetInt(
         "--superpoint-input-max-height",
         config.runtime.featureFrontend == FeatureFrontend::SuperPointLightGlue ? 480 : 400);
-    config.runtime.lkSuperPointSeeding = false;
     config.runtime.lkLoopClosure = argReader.HasFlag("--lk-loop-closure");
     config.runtime.lkLoopScale = argReader.GetFloat("--lk-loop-scale", 1.20f);
     config.runtime.lkLoopRelaxation = argReader.GetFloat("--lk-loop-relax", 1.40f);

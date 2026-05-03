@@ -76,10 +76,6 @@ RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTun
 bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::string *err)
 {
     remote.orbAcceleration = NormalizeOrbAcceleration(remote.orbAcceleration);
-    if (remote.featureFrontend == FeatureFrontend::Reserved) {
-        remote.featureFrontend = FeatureFrontend::Orb;
-    }
-    remote.lkSuperPointSeeding = false;
     if (remote.featureFrontend != FeatureFrontend::Orb) {
         remote.orbAcceleration = "cpu";
     }
@@ -174,7 +170,6 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
                                   m_config.app.runtime.superpointMaxPoints != remote.superpointMaxPoints ||
                                   m_config.app.runtime.superpointInputMaxWidth != remote.superpointInputMaxWidth ||
                                   m_config.app.runtime.superpointInputMaxHeight != remote.superpointInputMaxHeight;
-        const bool lkSeedChanged = m_config.app.runtime.lkSuperPointSeeding != remote.lkSuperPointSeeding;
         const bool lkPerFrameAccelChanged =
             m_config.app.runtime.lkPerFrameAcceleration != remote.lkPerFrameAcceleration;
         const bool orbAccelChanged = m_config.app.runtime.orbAcceleration != remote.orbAcceleration;
@@ -198,7 +193,6 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         m_config.app.runtime.superpointMaxPoints = remote.superpointMaxPoints;
         m_config.app.runtime.superpointInputMaxWidth = remote.superpointInputMaxWidth;
         m_config.app.runtime.superpointInputMaxHeight = remote.superpointInputMaxHeight;
-        m_config.app.runtime.lkSuperPointSeeding = remote.lkSuperPointSeeding;
         m_config.app.runtime.lkPerFrameAcceleration = remote.lkPerFrameAcceleration;
         m_config.app.runtime.orbAcceleration = remote.orbAcceleration;
         m_config.app.sensorMode = remote.sensorMode;
@@ -245,7 +239,7 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         effectiveTbcYawDeg = m_config.app.runtime.tbcYawDeg;
         restartNeeded =
             sensorModeChanged || frontendChanged || aeModeChanged || uvcConfigChanged || orbChanged || superpointChanged ||
-            lkSeedChanged || lkPerFrameAccelChanged || orbAccelChanged;
+            lkPerFrameAccelChanged || orbAccelChanged;
     }
 
     ApplyOrbAccelerationEnvironment(remote.orbAcceleration);
@@ -506,9 +500,7 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
                 return {false, "slam.superpoint_input_max_height type mismatch"};
             }
         } else if (key == ConfigRegistry::kSlamLkSuperPointSeeding) {
-            if (const auto *v = std::get_if<bool>(&value)) {
-                remote.lkSuperPointSeeding = *v;
-            } else {
+            if (!std::holds_alternative<bool>(value)) {
                 return {false, "slam.lk_superpoint_seeding type mismatch"};
             }
         } else if (key == ConfigRegistry::kSlamLkPerFrameAcceleration) {
@@ -562,9 +554,7 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.uvcPackedStereo = currentConfig.app.camera.uvcPackedStereo;
     remote.slamInputFps = currentConfig.app.runtime.slamInputFps;
     remote.slamOperationMode = currentConfig.app.runtime.slamOperationMode;
-    remote.featureFrontend = currentConfig.app.runtime.featureFrontend == FeatureFrontend::Reserved
-                                 ? FeatureFrontend::Orb
-                                 : currentConfig.app.runtime.featureFrontend;
+    remote.featureFrontend = currentConfig.app.runtime.featureFrontend;
     remote.sensorMode = currentConfig.app.sensorMode;
     remote.udpIp = currentConfig.app.udp.ip;
     remote.udpEnabled = currentConfig.app.udp.enable;
@@ -587,7 +577,6 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.superpointMaxPoints = currentConfig.app.runtime.superpointMaxPoints;
     remote.superpointInputMaxWidth = currentConfig.app.runtime.superpointInputMaxWidth;
     remote.superpointInputMaxHeight = currentConfig.app.runtime.superpointInputMaxHeight;
-    remote.lkSuperPointSeeding = false;
     remote.lkPerFrameAcceleration = currentConfig.app.runtime.lkPerFrameAcceleration;
     remote.orbAcceleration = currentConfig.app.runtime.orbAcceleration;
     return remote;

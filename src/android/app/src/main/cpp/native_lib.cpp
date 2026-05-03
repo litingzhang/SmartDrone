@@ -182,7 +182,7 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
     jfloat tbcTx, jfloat tbcTy, jfloat tbcTz, jfloat tbcRollDeg, jfloat tbcPitchDeg, jfloat tbcYawDeg,
     jint orbNFeatures, jfloat orbScaleFactor, jint orbNLevels, jint orbIniThFAST, jint orbMinThFAST,
     jint featureFrontend, jint superpointTopK, jint superpointMaxPoints, jint superpointInputMaxWidth, jint superpointInputMaxHeight,
-    jboolean lkSuperPointSeeding, jint lkPerFrameAcceleration, jint orbAcceleration)
+    jint lkPerFrameAcceleration, jint orbAcceleration)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     const uint32_t seq = g_seqCounter.fetch_add(1);
@@ -223,7 +223,7 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
     WriteF32LeAt(payload, 94, static_cast<float>(superpointMaxPoints));
     WriteF32LeAt(payload, 98, static_cast<float>(superpointInputMaxWidth));
     WriteF32LeAt(payload, 102, static_cast<float>(superpointInputMaxHeight));
-    payload[106] = static_cast<uint8_t>(lkSuperPointSeeding == JNI_TRUE ? 1 : 0);
+    payload[106] = 0;
     payload[107] = static_cast<uint8_t>(lkPerFrameAcceleration);
 
     const std::vector<uint8_t> frame =

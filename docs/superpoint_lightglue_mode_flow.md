@@ -21,7 +21,8 @@ flowchart TD
     C --> D[Load TensorRT engines<br/>SuperPoint + LightGlue]
     D --> E[Acquire stereo frame]
     E --> F[OrbSlam3Engine::Process]
-    F --> G{SP+LG gate passes?}
+    F --> F2[SuperPointLightGlueModeStrategy]
+    F2 --> G{SP+LG gate passes?}
     G -- no --> Z[Fallback native ORB TrackStereo]
     G -- yes --> H[Prepare images<br/>gray8, rectify, resize/budget]
     H --> I[DetectAndComputeStereo]
@@ -53,7 +54,8 @@ flowchart TD
 | Live frame loop | `src/native/core/application/session/slam_frame_processor.cpp` | Applies frontend mode, load shedding, input size budget, and calls SLAM engine. |
 | Frontend client | `src/native/adapters/slam/superpoint_lightglue_frontend_client.cpp` | Owns frontend lifetime and delegates native extraction/matching to `SuperPointNativeExtractor`. |
 | TensorRT frontend | `src/native/adapters/slam/superpoint_native_extractor.cpp` | Loads engines, runs SuperPoint batch inference, attempts LightGlue matching, applies descriptor-match fallback, records stats. |
-| SLAM adapter | `src/native/adapters/slam/orbslam3_engine.cpp` | Prepares images, filters stereo pairs, builds external feature data, calls ORB-SLAM3 or fallback. |
+| Mode strategy | `src/native/adapters/slam/orbslam3_mode_strategy.cpp`, `src/native/adapters/slam/orbslam3_superpoint_lightglue_mode_strategy.cpp` | Maps `FeatureFrontend::SuperPointLightGlue` to the SP+LG strategy and enables external feature injection. |
+| ORB backend adapter | `src/native/adapters/slam/orbslam3_orb_mode_strategy.cpp` | Runs the shared ORB-SLAM3 backend path and fallback output conversion. |
 
 ## Startup and Engine Loading
 
@@ -82,7 +84,7 @@ The engine resolution logic prefers names such as:
 Runtime parameters are controlled by CLI flags and environment variables:
 
 - `--superpoint-repo`
-- `--superpoint-device`
+- `--superpoint-device` (`auto` or `cuda` in the native TensorRT runtime)
 - `--superpoint-top-k`
 - `--superpoint-max-points`
 - `--superpoint-input-max-width`
@@ -94,10 +96,15 @@ Runtime parameters are controlled by CLI flags and environment variables:
 
 ## Runtime Gate and Load Budget
 
-The SP+LG branch in `OrbSlam3Engine::Process(...)` runs only if:
+`OrbSlam3Engine::Process(...)` delegates frontend dispatch to `SlamModeStrategy`. The SP+LG strategy enables the shared ORB backend path with external stereo feature injection:
 
 ```cpp
-m_featureFrontend == FeatureFrontend::SuperPointLightGlue &&
+OrbModeStrategy::ProcessOrbSlamBackend(..., true)
+```
+
+The external stereo frontend gate then requires:
+
+```cpp
 !monoMode &&
 m_superpointFrontendClient != nullptr &&
 m_superpointFrontendClient->Running()

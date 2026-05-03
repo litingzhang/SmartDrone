@@ -52,7 +52,6 @@ struct RemoteRuntimeConfig {
     int superpointMaxPoints{320};
     int superpointInputMaxWidth{640};
     int superpointInputMaxHeight{400};
-    bool lkSuperPointSeeding{false};
     std::string lkPerFrameAcceleration{"vpi-cuda"};
     std::string orbAcceleration{"cpu"};
     bool lkLoopClosure{false};
@@ -73,7 +72,6 @@ struct MainRuntimeAliases {
     float gain{};
     std::string udpIp, spiDev, gpiochip;
     int superpointInputMaxWidth{}, superpointInputMaxHeight{};
-    bool lkSuperPointSeeding{};
     std::string lkPerFrameAcceleration{"vpi-cuda"};
     std::string orbAcceleration{"cpu"};
     bool lkLoopClosure{};

@@ -1,4 +1,4 @@
-﻿# SmartDrone Architecture Specification
+# SmartDrone Architecture Specification
 
 > Version: V1.0  
 > Scope: Architecture design, functional design, reliability design, performance design, DFX design, and 4+1 views.
@@ -97,22 +97,22 @@ The current implementation also introduces several UVC/streaming/real-time polic
 - Software timestamp strategy:
   for packed-UVC, the timestamp is taken from the monotonic clock immediately after frame grab completion, and both eye images share that same timestamp.
 - Newest-frame priority:
-  the packed-UVC path forces its internal frame queue to `1`, thereby preferring fresh frames over preserving stale frames behind slow SLAM / SuperPoint processing.
+  the packed-UVC path forces its internal frame queue to `1`, thereby preferring fresh frames over preserving stale frames behind slow SLAM or learned-frontend processing.
 - Dynamic preview destination:
   `SlamSessionRuntime` resolves the UDP image destination from the current active peer stored in `LivePoseState`, thereby avoiding a permanently hard-coded phone IP.
 - Preview rate limiting:
   `UdpImageSender` now rate-limits image output independently, with a maximum image send rate of `30 FPS`, decoupled from the SLAM input rate.
 
-### 3.4A SuperPoint Integration Adaptations
+### 3.5 SuperPoint/LightGlue Integration Adaptations
 
-The current `superpoint` integration is an external frontend adaptation layer on top of the existing ORB-SLAM3 tracking pipeline rather than a full native frontend replacement.
+The current SuperPoint/LightGlue integration is an external frontend adaptation layer on top of the existing ORB-SLAM3 tracking pipeline rather than a full native frontend replacement.
 
-The implementation contains the following SuperPoint-specific adaptations:
+The implementation contains the following SuperPoint/LightGlue-specific adaptations:
 
 - Native TensorRT frontend execution:
   `smart_drone` owns a `SuperPointLightGlueFrontendClient`, which delegates SuperPoint keypoint and descriptor extraction to `SuperPointNativeExtractor` and keeps keypoints plus `CV_32F` descriptors in process.
 - Runtime-selectable execution device:
-  the frontend accepts `auto/cpu/cuda` device selection. The Jetson path resolves to CUDA/TensorRT when the native engine is available.
+  the frontend accepts `auto/cuda` device selection in the current native TensorRT runtime. The Jetson path resolves to CUDA/TensorRT when the native engine is available.
 - Jetson CUDA optimizations:
   on the CUDA path, TensorRT engine selection is derived from `SMART_DRONE_SUPERPOINT_TRT_ENGINE` or from the configured SuperPoint/LightGlue repo and input-size limits.
 - Runtime-configurable SuperPoint tuning:
@@ -138,7 +138,7 @@ The implementation contains the following SuperPoint-specific adaptations:
 - Stage-level timing and payload diagnostics:
   `slam_dfx` additionally reports `superpoint_prepare_ms`, `superpoint_input_ms`, `superpoint_forward_ms`, `superpoint_frontend_ms`, `superpoint_match_ms`, `superpoint_total_ms`, `superpoint_image_count`, and `superpoint_payload_bytes`, enabling direct bottleneck identification.
 
-### 3.5 Calibration Session Features
+### 3.6 Calibration Session Features
 
 `RunCalibSession` handles:
 
@@ -147,7 +147,7 @@ The implementation contains the following SuperPoint-specific adaptations:
 - optional UDP image preview
 - flush/fsync on stop for durability
 
-### 3.6 Runtime Configuration Features
+### 3.7 Runtime Configuration Features
 
 `CMD_RUNTIME_CONFIG` updates are validated and applied by `RuntimeConfigService`.
 
@@ -167,14 +167,14 @@ The current implementation adds two provider-specific semantics on top of those 
 
 `ConfigRegistry` defines reload and restart semantics per key.
 
-### 3.7 Capabilities and Config Query
+### 3.8 Capabilities and Config Query
 
 - `CMD_GET_CAPABILITIES` -> `CMD_CAPABILITIES`
 - `CMD_GET_CONFIG` -> `CMD_CONFIG`
 
 Returned payload includes runtime modes, perception modes, SLAM modes, providers, and configurable keys.
 
-### 3.8 Android App Features
+### 3.9 Android App Features
 
 Android `MainActivity` provides:
 
@@ -183,7 +183,7 @@ Android `MainActivity` provides:
 - command/config dispatch and ACK handling
 - state, point-cloud, and video/feature visualization
 
-The current implementation also updates the Android source so that it remains aligned with the packed-UVC/SuperPoint pipeline:
+The current implementation also updates the Android source so that it remains aligned with the packed-UVC and SuperPoint/LightGlue pipeline:
 
 - only the perception modes that match the compiled provider are exposed in the UI/capability handling path
 - exposure, gain, and auto-exposure ranges were widened to fit the current UVC camera behavior
@@ -310,8 +310,8 @@ Concurrency properties:
 Throughput control in the current implementation is centered on the following behavior:
 
 - camera acquisition and SLAM processing are decoupled so that freshness is preferred over processing every historical frame
-- `slam.input_fps` caps the rate entering SLAM/SuperPoint
-- `UdpImageSender` separately caps preview output to the phone at `30 FPS`, so phone preview FPS does not have to match SLAM/SuperPoint FPS
+- `slam.input_fps` caps the rate entering SLAM or the selected learned frontend
+- `UdpImageSender` separately caps preview output to the phone at `30 FPS`, so phone preview FPS does not have to match SLAM/frontend FPS
 
 ### 7.2 Latency Instrumentation
 
@@ -557,7 +557,12 @@ sequenceDiagram
 - `camera.gain`
 - `camera.auto_exposure`
 - `camera.pair_window_ms`
+- `camera.uvc_device_index`
+- `camera.uvc_eye_width`
+- `camera.uvc_eye_height`
+- `camera.uvc_packed_stereo`
 - `slam.input_fps`
+- `slam.feature_frontend`
 - `slam.perception_mode`
 - `slam.operation_mode`
 - `slam.tbc_override_enabled`
@@ -572,6 +577,13 @@ sequenceDiagram
 - `slam.orb_nlevels`
 - `slam.orb_ini_th_fast`
 - `slam.orb_min_th_fast`
+- `slam.superpoint_top_k`
+- `slam.superpoint_max_points`
+- `slam.superpoint_input_max_width`
+- `slam.superpoint_input_max_height`
+- `slam.lk_superpoint_seeding`
+- `slam.lk_per_frame_accel`
+- `slam.orb_accel`
 - `stream.udp_enabled`
 - `stream.udp_ip`
 - `stream.send_image`

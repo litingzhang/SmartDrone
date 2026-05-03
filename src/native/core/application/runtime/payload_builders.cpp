@@ -93,7 +93,7 @@ std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig &cfg, smartdrone::co
     oss << "slam.superpoint_max_points=" << cfg.app.runtime.superpointMaxPoints << "\n";
     oss << "slam.superpoint_input_max_width=" << cfg.app.runtime.superpointInputMaxWidth << "\n";
     oss << "slam.superpoint_input_max_height=" << cfg.app.runtime.superpointInputMaxHeight << "\n";
-    oss << "slam.lk_superpoint_seeding=" << (cfg.app.runtime.lkSuperPointSeeding ? "true" : "false") << "\n";
+    oss << "slam.lk_superpoint_seeding=false\n";
     oss << "slam.lk_per_frame_accel=" << cfg.app.runtime.lkPerFrameAcceleration << "\n";
     oss << "slam.orb_accel=" << cfg.app.runtime.orbAcceleration << "\n";
     oss << "slam.settings=" << cfg.app.settings << "\n";

@@ -220,7 +220,6 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
     a.udpQueue = c.udp.queue;
     a.superpointInputMaxWidth = c.runtime.superpointInputMaxWidth;
     a.superpointInputMaxHeight = c.runtime.superpointInputMaxHeight;
-    a.lkSuperPointSeeding = c.runtime.lkSuperPointSeeding;
     a.lkPerFrameAcceleration = c.runtime.lkPerFrameAcceleration;
     a.orbAcceleration = c.runtime.orbAcceleration;
     a.lkLoopClosure = c.runtime.lkLoopClosure;

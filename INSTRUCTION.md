@@ -1,4 +1,4 @@
-﻿# SmartDrone
+# SmartDrone
 
 SmartDrone is a stereo / stereo-inertial drone runtime built around `ORB_SLAM3`, IMU input, UDP preview streaming, MAVLink pose publishing, and a small Android control app.
 
@@ -94,19 +94,19 @@ By default `scripts/build.sh` uses `$(nproc)`.
 
 ## Workspace Customizations
 
-Relative to the baseline repository, the current workspace includes a set of dedicated adaptations for `Jetson Orin NX + single-UVC packed stereo + SuperPoint`:
+Relative to the baseline repository, the current workspace includes a set of dedicated adaptations for `Jetson Orin NX + single-UVC packed stereo + SuperPoint/LightGlue`:
 
 - `uvc_stereo_opencv` is now treated as one UVC device that returns one packed left-right stereo frame. A total frame size such as `1280x480` therefore means `640x480` per eye.
-- The UVC path prefers `YUYV/YUV2` capture, converts it to grayscale, then splits the packed frame into left and right eye images on the device side before sending them into SLAM / SuperPoint.
+- The UVC path prefers `YUYV/YUV2` capture, converts it to grayscale, then splits the packed frame into left and right eye images on the device side before sending them into SLAM or the selected learned frontend.
 - Packed stereo no longer depends on left-right timestamp pairing. Both eye images share the same software monotonic timestamp taken immediately after the grab completes.
-- To preserve real-time behavior, the packed-UVC queue is forced down to `1`, so the runtime keeps the newest frame instead of accumulating stale frames behind slow SLAM/SuperPoint processing.
-- The SuperPoint/LightGlue frontend supports `auto/cpu/cuda`. On Jetson, the CUDA path uses the native TensorRT SuperPoint extractor when the engine is available.
+- To preserve real-time behavior, the packed-UVC queue is forced down to `1`, so the runtime keeps the newest frame instead of accumulating stale frames behind slow SLAM or learned-frontend processing.
+- The SuperPoint/LightGlue frontend supports `auto/cuda` in the current native TensorRT runtime. On Jetson, the CUDA path uses the native TensorRT SuperPoint extractor when the engine is available.
 - `slam_dfx` now reports SuperPoint stage timings and payload counters so that bottlenecks can be separated into preprocessing, native input, network forward, frontend total, and stereo matching.
 - UDP image delivery no longer has to stay pinned to one static IP. The runtime can resolve the current active phone peer dynamically and switch the preview destination accordingly.
 - `UdpImageSender` now caps image streaming at `30 FPS`, while the Android-side `slam.input_fps` limit was raised to better match high-FPS UVC modes.
-- The Android source tree was also updated so that exposure/gain/AE, packed-stereo capability handling, SuperPoint capability display, and higher SLAM FPS limits remain aligned with the updated UVC behavior.
+- The Android source tree was also updated so that exposure/gain/AE, packed-stereo capability handling, SuperPoint/LightGlue capability display, and higher SLAM FPS limits remain aligned with the updated UVC behavior.
 
-If only the device/runtime side is being maintained, priority may be given to the native runtime and scripts; the Android-side changes are primarily intended to keep the UI and configuration protocol aligned with the updated UVC/SuperPoint pipeline.
+If only the device/runtime side is being maintained, priority may be given to the native runtime and scripts; the Android-side changes are primarily intended to keep the UI and configuration protocol aligned with the updated UVC and SuperPoint/LightGlue pipeline.
 
 ## From Scratch On CM5 / Jetson Orin NX
 
@@ -170,7 +170,7 @@ Runtime prerequisites:
 
 ### 3. SuperPoint/LightGlue Runtime Assets
 
-SuperPoint is an optional component. The default ORB frontend does not require it.
+SuperPoint/LightGlue is an optional component. The default ORB frontend does not require it.
 
 If you want `slam.feature_frontend=superpoint_lightglue`, prepare the LightGlue repository and TensorRT engines on the target:
 
@@ -184,7 +184,7 @@ Runtime uses C++/TensorRT inference. Python is used only by the export scripts t
 Point runtime arguments or config to:
 
 - `--superpoint-repo`
-- `--superpoint-device`
+- `--superpoint-device` (`auto` or `cuda` in the native TensorRT runtime)
 - `--superpoint-top-k`
 - `--superpoint-max-points`
 - `--superpoint-input-max-width`
@@ -735,17 +735,16 @@ ADB constraints:
 
 ## Mobile Runtime Tuning
 
-`CMD_RUNTIME_CONFIG` now supports two SLAM-related tuning groups from Android:
+`CMD_RUNTIME_CONFIG` supports the runtime tuning domains exposed by `ConfigRegistry`:
 
+- Camera and stream controls: `camera.auto_exposure`, `camera.pair_window_ms`, `stream.send_image`, `stream.send_feature`, and related UDP stream keys.
 - Runtime `T_b_c1` override: `slam.tbc_override_enabled` (default off), `slam.tbc_tx_m / ty_m / tz_m`, and `slam.tbc_roll_deg / pitch_deg / yaw_deg` (Android range: roll/yaw `-10.0~10.0`, pitch `-10.0~100.0`, step `0.1`).
-- ORB extractor parameters:
-- `slam.orb_nfeatures`
-- `slam.orb_scale_factor`
-- `slam.orb_nlevels`
-- `slam.orb_ini_th_fast`
-- `slam.orb_min_th_fast`
+- Frontend and mode controls: `slam.input_fps`, `slam.feature_frontend`, `slam.perception_mode`, and `slam.operation_mode`.
+- ORB extractor controls: `slam.orb_nfeatures`, `slam.orb_scale_factor`, `slam.orb_nlevels`, `slam.orb_ini_th_fast`, and `slam.orb_min_th_fast`.
+- SuperPoint/LightGlue controls: `slam.superpoint_top_k`, `slam.superpoint_max_points`, `slam.superpoint_input_max_width`, and `slam.superpoint_input_max_height`.
+- Acceleration selectors: `slam.lk_per_frame_accel` and `slam.orb_accel`.
 
-Additional notes related to the current UVC/SuperPoint adaptation:
+Additional notes related to the current UVC and SuperPoint/LightGlue adaptation:
 
 - On packed-UVC, `camera.auto_exposure` means handing control back to the UVC camera firmware / ISP auto-exposure path rather than libcamera AE.
 - On packed-UVC, `camera.pair_window_ms` is kept only as a compatibility field and is not used for left-right software pairing.

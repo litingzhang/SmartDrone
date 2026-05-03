@@ -44,8 +44,8 @@ FeatureFrontend ParseRuntimeFeatureFrontend(uint8_t value)
         return FeatureFrontend::LkGfttPerFrame;
     case RUNTIME_FEATURE_FRONTEND_LK:
         return FeatureFrontend::LK;
-    case RUNTIME_FEATURE_FRONTEND_DROID_LIGHT:
-        return FeatureFrontend::DroidLight;
+    case RUNTIME_FEATURE_FRONTEND_RESERVED_SUPERPOINT:
+    case RUNTIME_FEATURE_FRONTEND_RESERVED_LEGACY:
     case RUNTIME_FEATURE_FRONTEND_ORB:
     default:
         return FeatureFrontend::Orb;
@@ -161,7 +161,6 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     r.superpointMaxPoints = currentCfg.app.runtime.superpointMaxPoints;
     r.superpointInputMaxWidth = currentCfg.app.runtime.superpointInputMaxWidth;
     r.superpointInputMaxHeight = currentCfg.app.runtime.superpointInputMaxHeight;
-    r.lkSuperPointSeeding = currentCfg.app.runtime.lkSuperPointSeeding;
     r.lkPerFrameAcceleration = currentCfg.app.runtime.lkPerFrameAcceleration;
     r.orbAcceleration = currentCfg.app.runtime.orbAcceleration;
     if (r.exposureUs <= 0 || !std::isfinite(r.gain)) {
@@ -223,9 +222,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
         r.superpointInputMaxHeight =
             static_cast<int>(std::lround(ReadF32Le(&p[RUNTIME_CONFIG_SUPERPOINT_INPUT_MAX_HEIGHT_OFFSET])));
     }
-    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V11) {
-        r.lkSuperPointSeeding = p[RUNTIME_CONFIG_LK_SUPERPOINT_SEEDING_OFFSET] != 0;
-    }
+    // Offset 106 is retained for wire compatibility; LK seeding is always GFTT.
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V12) {
         r.lkPerFrameAcceleration = ParseRuntimeLkPerFrameAcceleration(p[RUNTIME_CONFIG_LK_PER_FRAME_ACCEL_OFFSET]);
     }
@@ -278,7 +275,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
         static_cast<int64_t>(r.superpointInputMaxWidth);
     update.values[std::string(ConfigRegistry::kSlamSuperPointInputMaxHeight)] =
         static_cast<int64_t>(r.superpointInputMaxHeight);
-    update.values[std::string(ConfigRegistry::kSlamLkSuperPointSeeding)] = r.lkSuperPointSeeding;
+    update.values[std::string(ConfigRegistry::kSlamLkSuperPointSeeding)] = false;
     update.values[std::string(ConfigRegistry::kSlamLkPerFrameAcceleration)] = r.lkPerFrameAcceleration;
     update.values[std::string(ConfigRegistry::kSlamOrbAcceleration)] = r.orbAcceleration;
 

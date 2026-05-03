@@ -15,8 +15,8 @@ flowchart TD
     E -- no --> D
     E -- yes --> F[Build SlamInputBatch<br/>left/right gray, frame id, timestamp, optional IMU]
     F --> G[OrbSlam3Engine::Process]
-    G --> H{KLT or SP+LG branch?}
-    H -- no, ORB --> I[ORB_SLAM3::System::TrackStereo<br/>or TrackStereo with IMU]
+    G --> H[OrbModeStrategy]
+    H --> I[ORB_SLAM3::System::TrackStereo<br/>or TrackStereo with IMU]
     I --> J[ORB-SLAM3 internal pipeline<br/>ORB extract, stereo match, tracking, mapping]
     J --> K[Read tracker/system telemetry]
     K --> L[Invert Tcw to Twc<br/>fill PoseEstimate]
@@ -33,7 +33,8 @@ flowchart TD
 | Replay loop | `tests/euroc/support/replay_slam_runner.cpp` | Pull stereo frames and IMU windows, call `ISlamEngine::Process`, collect per-frame timing. |
 | Live loop | `src/native/core/application/session/slam_frame_processor.cpp` | Read runtime tuning, apply frontend mode, acquire camera frames, call SLAM engine. |
 | Rate limiter | `src/native/core/application/state/perception_pipeline.cpp` | Enforce SLAM input FPS and derive stable capture/logical timestamps. |
-| SLAM adapter | `src/native/adapters/slam/orbslam3_engine.cpp` | Dispatch frontend mode, call ORB-SLAM3, convert pose/telemetry to `SlamOutput`. |
+| Mode strategy | `src/native/adapters/slam/orbslam3_mode_strategy.cpp`, `src/native/adapters/slam/orbslam3_orb_mode_strategy.cpp` | Select `FeatureFrontend::Orb`, call ORB-SLAM3, and convert pose/telemetry to `SlamOutput`. |
+| Engine state | `src/native/adapters/slam/orbslam3_engine.cpp` | Own ORB-SLAM3 system lifetime, calibration, shared state, and runtime setters. |
 | Output contract | `src/native/core/ports/slam_engine.h` | Defines `SlamInputBatch` and `SlamOutput`. |
 
 ## Configuration and Mode Selection
@@ -87,22 +88,15 @@ Important implementation details:
 - Offline EuRoC replay uses `ReplayCameraProvider::GrabStereo(...)`, which loads left/right grayscale images from disk.
 - IMU samples are converted to `ORB_SLAM3::IMU::Point` only if the sensor mode uses IMU. The documented EuRoC run uses `--stereo-only`, so no IMU is passed.
 
-## ORB Branch Dispatch
+## ORB Strategy Dispatch
 
-`OrbSlam3Engine::Process(...)` first checks custom frontends:
+`OrbSlam3Engine::Process(...)` delegates mode selection to `SlamModeStrategy`. `CreateSlamModeStrategy(...)` maps `FeatureFrontend::Orb` to `OrbModeStrategy`, and that strategy owns the ORB backend execution:
 
 ```cpp
-if (m_featureFrontend == FeatureFrontend::LkGfttPerFrame) {
-    return ProcessLkGfttPerFrameStereoVo(input, extractFeatures);
-}
-if (m_featureFrontend == FeatureFrontend::LK) {
-    return ProcessLkStereoVo(input, extractFeatures);
-}
+return ProcessOrbSlamBackend(engine, input, extractFeatures, extractPointCloud, false);
 ```
 
-Then it checks the SP+LG external frontend gate. In ORB mode that gate is false because `m_featureFrontend != FeatureFrontend::SuperPointLightGlue`.
-
-The resulting ORB execution path is:
+The ORB mode entry point disables external SP+LG feature injection and executes the native ORB-SLAM3 path:
 
 ```cpp
 const auto orbTrackStartTp = std::chrono::steady_clock::now();

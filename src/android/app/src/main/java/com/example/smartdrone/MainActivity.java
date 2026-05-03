@@ -69,15 +69,9 @@ public class MainActivity extends Activity {
     private static final int SENSOR_MONO = 2;
     private static final int SENSOR_MONO_IMU = 3;
     private static final int FEATURE_FRONTEND_ORB = 0;
-    private static final int FEATURE_FRONTEND_SUPERPOINT = 1;
-    private static final int FEATURE_FRONTEND_DROID_LIGHT = 2;
     private static final int FEATURE_FRONTEND_LK = 3;
     private static final int FEATURE_FRONTEND_LK_GFTT_PER_FRAME = 4;
     private static final int FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE = 5;
-    private static final int FEATURE_FRONTEND_LK_SUPERPOINT = 6;
-    private static final int FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI = 7;
-    private static final int FEATURE_FRONTEND_ORB_CUDA = 8;
-    private static final int FEATURE_FRONTEND_ORB_VPI_REMAP = 9;
     private static final int LK_PER_FRAME_ACCEL_CPU = 0;
     private static final int LK_PER_FRAME_ACCEL_VPI_CUDA = 1;
     private static final int ORB_ACCEL_CPU = 0;
@@ -287,7 +281,6 @@ public class MainActivity extends Activity {
     private int m_px4SubMode = 0;
     private int m_sensorMode = SENSOR_STEREO;
     private int m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
-    private boolean m_cfgLkSuperPointSeeding = false;
     private int m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_VPI_CUDA;
     private int m_cfgOrbAcceleration = ORB_ACCEL_CPU;
     private int m_cfgExposureUs = 3000;
@@ -338,9 +331,7 @@ public class MainActivity extends Activity {
     private boolean m_supportsStereoImu = true;
     private boolean m_supportsMono = true;
     private boolean m_supportsMonoImu = true;
-    private boolean m_supportsSuperPoint = false;
     private boolean m_supportsSuperPointLightGlue = true;
-    private boolean m_supportsDroidLight = false;
     private boolean m_supportsLK = true;
     private boolean m_isPackedStereoUvc = false;
     private boolean m_pairWindowRequired = true;
@@ -846,9 +837,7 @@ public class MainActivity extends Activity {
             final boolean tbcEditable = m_cfgUseCustomTbc && m_sensorMode == SENSOR_STEREO;
             final boolean orbEditable = !runtimeActive;
             final boolean superpointEditable =
-                !runtimeActive &&
-                (m_cfgFeatureFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE ||
-                 (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK && m_cfgLkSuperPointSeeding));
+                !runtimeActive && m_cfgFeatureFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE;
             if (m_tvCfgExposureValue != null) {
                 m_tvCfgExposureValue.setText(m_cfgAutoExposure ? "Exposure: Auto (UVC AE)"
                                                                : String.format(Locale.US, "Exposure: %d us (UVC)",
@@ -1375,8 +1364,8 @@ public class MainActivity extends Activity {
                                   boolean autoExposure, boolean useCustomTbc, float tbcTx, float tbcTy, float tbcTz,
                                   float tbcRollDeg, float tbcPitchDeg, float tbcYawDeg, int orbNFeatures,
                                   float orbScaleFactor, int orbNLevels, int orbIniThFast, int orbMinThFast,
-                                  int superpointTopK, int superpointMaxPoints, int superpointInputMaxWidth, int superpointInputMaxHeight,
-                                  boolean lkSuperPointSeeding, int lkPerFrameAcceleration, int orbAcceleration)
+                                  int superpointTopK, int superpointMaxPoints, int superpointInputMaxWidth,
+                                  int superpointInputMaxHeight, int lkPerFrameAcceleration, int orbAcceleration)
     {
         try {
             int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
@@ -1384,13 +1373,12 @@ public class MainActivity extends Activity {
                                                   tbcTz, tbcRollDeg, tbcPitchDeg, tbcYawDeg, orbNFeatures,
                                                   orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast,
                                                   featureFrontend, superpointTopK, superpointMaxPoints, superpointInputMaxWidth,
-                                                  superpointInputMaxHeight, lkSuperPointSeeding, lkPerFrameAcceleration,
-                                                  orbAcceleration);
+                                                  superpointInputMaxHeight, lkPerFrameAcceleration, orbAcceleration);
             m_tvStatus.setText(String.format(
                 Locale.US,
                 "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s frontend=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d orbAccel=%s sp=%d/%d/%d/%d lkAccel=%s",
                 seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
-                runtimeFeatureFrontendToText(featureFrontend, lkSuperPointSeeding, lkPerFrameAcceleration, orbAcceleration),
+                runtimeFeatureFrontendToText(featureFrontend, lkPerFrameAcceleration, orbAcceleration),
                 sendImage ? "on" : "off", sendFeature ? "on" : "off",
                 sendMap ? "on" : "off", autoExposure ? "on" : "off",
                 useCustomTbc
@@ -1416,7 +1404,7 @@ public class MainActivity extends Activity {
                                  m_cfgTbcPitchDeg, m_cfgTbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor,
                                  m_cfgOrbNLevels, m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgSuperPointTopK,
                                  m_cfgSuperPointMaxPoints, m_cfgSuperPointInputMaxWidth, m_cfgSuperPointInputMaxHeight,
-                                 m_cfgLkSuperPointSeeding, m_cfgLkPerFrameAcceleration, m_cfgOrbAcceleration);
+                                 m_cfgLkPerFrameAcceleration, m_cfgOrbAcceleration);
     }
 
     private void sendRuntimeConfigAwaitAck(int exposureUs, float gain, int pairMs, int slamFps, int slamMode,
@@ -1445,8 +1433,8 @@ public class MainActivity extends Activity {
                                     sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy, tbcTz, tbcRollDeg, tbcPitchDeg,
                                     tbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor, m_cfgOrbNLevels,
                                     m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgSuperPointTopK, m_cfgSuperPointMaxPoints,
-                                    m_cfgSuperPointInputMaxWidth, m_cfgSuperPointInputMaxHeight, m_cfgLkSuperPointSeeding,
-                                    m_cfgLkPerFrameAcceleration, m_cfgOrbAcceleration);
+                                    m_cfgSuperPointInputMaxWidth, m_cfgSuperPointInputMaxHeight, m_cfgLkPerFrameAcceleration,
+                                    m_cfgOrbAcceleration);
         if (seq < 0) {
             return;
         }
@@ -1653,7 +1641,7 @@ public class MainActivity extends Activity {
         if (m_spinnerFeatureFrontend.getAdapter() == null || m_spinnerFeatureFrontend.getCount() != supportedFrontends.length) {
             String[] labels = new String[supportedFrontends.length];
             for (int i = 0; i < supportedFrontends.length; ++i) {
-                labels[i] = featureFrontendOptionToText(supportedFrontends[i]);
+                labels[i] = featureFrontendToText(supportedFrontends[i]);
             }
             ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
             adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -2038,10 +2026,6 @@ public class MainActivity extends Activity {
             return defaultValue;
         }
         String normalized = value.trim().toLowerCase(Locale.US);
-        if ("droid".equals(normalized) || "droid-light".equals(normalized) || "droid_light".equals(normalized) ||
-            "droidlight".equals(normalized)) {
-            return FEATURE_FRONTEND_DROID_LIGHT;
-        }
         if ("superpoint-lightglue".equals(normalized) || "superpoint_lightglue".equals(normalized) ||
             "superpoint+lightglue".equals(normalized) || "sp-lightglue".equals(normalized) ||
             "sp_lightglue".equals(normalized) || "sp-lg".equals(normalized) || "splg".equals(normalized)) {
@@ -2228,13 +2212,10 @@ public class MainActivity extends Activity {
         m_supportsStereoImu = containsTokenList(values.get("perception_modes"), "stereo-imu");
         m_supportsMono = containsTokenList(values.get("perception_modes"), "mono");
         m_supportsMonoImu = containsTokenList(values.get("perception_modes"), "mono-imu");
-        m_supportsSuperPoint = false;
         final String spLgCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.superpoint_lightglue=");
         m_supportsSuperPointLightGlue = spLgCapability == null
                                             ? true
                                             : !"disabled_at_build_time".equalsIgnoreCase(spLgCapability);
-        final String droidLightCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.droid_light=");
-        m_supportsDroidLight = droidLightCapability != null && !"disabled_at_build_time".equalsIgnoreCase(droidLightCapability);
         final String lkCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.lk=");
         m_supportsLK = lkCapability != null && !"disabled_at_build_time".equalsIgnoreCase(lkCapability);
         m_isPackedStereoUvc = containsTokenList(cameraProviders, "uvc_stereo_opencv") &&
@@ -2273,12 +2254,7 @@ public class MainActivity extends Activity {
         m_cfgSlamFps = quantizeSlamFps(parsedSlamFps);
         m_cfgSlamMode = parseSlamModeText(values.get("slam.operation_mode"), m_cfgSlamMode);
         m_cfgFeatureFrontend = parseFeatureFrontendText(values.get("slam.feature_frontend"), m_cfgFeatureFrontend);
-        m_cfgLkSuperPointSeeding = false;
-        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_SUPERPOINT || m_cfgFeatureFrontend == FEATURE_FRONTEND_DROID_LIGHT ||
-            m_cfgFeatureFrontend == FEATURE_FRONTEND_LK) {
-            m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
-        }
-        if (!m_supportsDroidLight && m_cfgFeatureFrontend == FEATURE_FRONTEND_DROID_LIGHT) {
+        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK) {
             m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
         }
         if (!m_supportsSuperPointLightGlue && m_cfgFeatureFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE) {
@@ -2289,7 +2265,6 @@ public class MainActivity extends Activity {
              m_cfgFeatureFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME)) {
             m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
         }
-        m_cfgLkSuperPointSeeding = false;
         m_cfgLkPerFrameAcceleration =
             parseLkPerFrameAccelerationText(values.get("slam.lk_per_frame_accel"), m_cfgLkPerFrameAcceleration);
         if (m_cfgFeatureFrontend != FEATURE_FRONTEND_LK_GFTT_PER_FRAME) {
@@ -2408,14 +2383,10 @@ public class MainActivity extends Activity {
     private String featureFrontendToText(int featureFrontend)
     {
         switch (featureFrontend) {
-        case FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI:
-            return "KLT Tracking";
         case FEATURE_FRONTEND_LK_GFTT_PER_FRAME:
             return "KLT Tracking";
         case FEATURE_FRONTEND_LK:
             return "LK GFTT";
-        case FEATURE_FRONTEND_DROID_LIGHT:
-            return "DROID-Light";
         case FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE:
             return "SuperPoint + LightGlue";
         case FEATURE_FRONTEND_ORB:
@@ -2424,27 +2395,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String featureFrontendOptionToText(int featureFrontend)
-    {
-        switch (featureFrontend) {
-        case FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI:
-            return "KLT Tracking";
-        case FEATURE_FRONTEND_LK_GFTT_PER_FRAME:
-            return "KLT Tracking";
-        case FEATURE_FRONTEND_LK:
-            return "LK GFTT";
-        case FEATURE_FRONTEND_DROID_LIGHT:
-            return "DROID-Light";
-        case FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE:
-            return "SuperPoint + LightGlue";
-        case FEATURE_FRONTEND_ORB:
-        default:
-            return "ORB";
-        }
-    }
-
-    private String runtimeFeatureFrontendToText(int featureFrontend, boolean lkSuperPointSeeding,
-                                                int lkPerFrameAcceleration, int orbAcceleration)
+    private String runtimeFeatureFrontendToText(int featureFrontend, int lkPerFrameAcceleration, int orbAcceleration)
     {
         if (featureFrontend == FEATURE_FRONTEND_LK) {
             return "LK GFTT";
@@ -2453,7 +2404,7 @@ public class MainActivity extends Activity {
             lkPerFrameAcceleration == LK_PER_FRAME_ACCEL_VPI_CUDA) {
             return "KLT Tracking";
         }
-        return featureFrontendOptionToText(featureFrontend);
+        return featureFrontendToText(featureFrontend);
     }
 
     private String lkPerFrameAccelerationToText(int acceleration)
@@ -3801,10 +3752,7 @@ public class MainActivity extends Activity {
                     final int[] supportedFrontends = getSupportedFeatureFrontends();
                     final int nextOption =
                         position < supportedFrontends.length ? supportedFrontends[position] : FEATURE_FRONTEND_ORB;
-                    final int nextFrontend = nextOption == FEATURE_FRONTEND_LK_GFTT_PER_FRAME_VPI
-                                                 ? FEATURE_FRONTEND_LK_GFTT_PER_FRAME
-                                                 : nextOption;
-                    final boolean nextLkSuperPointSeeding = false;
+                    final int nextFrontend = nextOption;
                     final int nextLkPerFrameAcceleration =
                         nextFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME ? LK_PER_FRAME_ACCEL_VPI_CUDA
                                                                            : LK_PER_FRAME_ACCEL_CPU;
@@ -3815,19 +3763,16 @@ public class MainActivity extends Activity {
                     final int nextSuperPointInputMaxHeight =
                         nextFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE ? SUPERPOINT_LIGHTGLUE_INPUT_MAX_HEIGHT
                                                                                : m_cfgSuperPointInputMaxHeight;
-                    if (nextFrontend == m_cfgFeatureFrontend && nextLkSuperPointSeeding == m_cfgLkSuperPointSeeding &&
-                        nextLkPerFrameAcceleration == m_cfgLkPerFrameAcceleration &&
+                    if (nextFrontend == m_cfgFeatureFrontend && nextLkPerFrameAcceleration == m_cfgLkPerFrameAcceleration &&
                         nextOrbAcceleration == m_cfgOrbAcceleration &&
                         nextSuperPointInputMaxWidth == m_cfgSuperPointInputMaxWidth &&
                         nextSuperPointInputMaxHeight == m_cfgSuperPointInputMaxHeight) {
                         return;
                     }
-                    final boolean previousLkSuperPointSeeding = m_cfgLkSuperPointSeeding;
                     final int previousLkPerFrameAcceleration = m_cfgLkPerFrameAcceleration;
                     final int previousOrbAcceleration = m_cfgOrbAcceleration;
                     final int previousSuperPointInputMaxWidth = m_cfgSuperPointInputMaxWidth;
                     final int previousSuperPointInputMaxHeight = m_cfgSuperPointInputMaxHeight;
-                    m_cfgLkSuperPointSeeding = nextLkSuperPointSeeding;
                     m_cfgLkPerFrameAcceleration = nextLkPerFrameAcceleration;
                     m_cfgOrbAcceleration = nextOrbAcceleration;
                     m_cfgSuperPointInputMaxWidth = nextSuperPointInputMaxWidth;
@@ -3836,7 +3781,6 @@ public class MainActivity extends Activity {
                                               m_sensorMode, nextFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
                                               effectiveConfigLabel("Feature frontend", true), PENDING_CONFIG, () -> {
                                                   m_cfgFeatureFrontend = nextFrontend;
-                                                  m_cfgLkSuperPointSeeding = nextLkSuperPointSeeding;
                                                   m_cfgLkPerFrameAcceleration = nextLkPerFrameAcceleration;
                                                   m_cfgOrbAcceleration = nextOrbAcceleration;
                                                   m_cfgSuperPointInputMaxWidth = nextSuperPointInputMaxWidth;
@@ -3844,7 +3788,6 @@ public class MainActivity extends Activity {
                                                   updateRuntimeButtons();
                                               });
                     if (!isPending(PENDING_CONFIG)) {
-                        m_cfgLkSuperPointSeeding = previousLkSuperPointSeeding;
                         m_cfgLkPerFrameAcceleration = previousLkPerFrameAcceleration;
                         m_cfgOrbAcceleration = previousOrbAcceleration;
                         m_cfgSuperPointInputMaxWidth = previousSuperPointInputMaxWidth;

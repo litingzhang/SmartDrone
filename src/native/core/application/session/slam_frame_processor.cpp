@@ -144,15 +144,26 @@ const char *FeatureFrontendName(FeatureFrontend frontend)
         return "lk_gftt_per_frame";
     case FeatureFrontend::LK:
         return "lk";
-    case FeatureFrontend::DroidLight:
-        return "droid_light";
-    case FeatureFrontend::Reserved:
-        return "orb";
     case FeatureFrontend::SuperPointLightGlue:
         return "superpoint_lightglue";
     case FeatureFrontend::Orb:
     default:
         return "orb";
+    }
+}
+
+FeatureFrontend ParseRuntimeFeatureFrontendValue(uint8_t value)
+{
+    switch (value) {
+    case static_cast<uint8_t>(FeatureFrontend::SuperPointLightGlue):
+        return FeatureFrontend::SuperPointLightGlue;
+    case static_cast<uint8_t>(FeatureFrontend::LkGfttPerFrame):
+        return FeatureFrontend::LkGfttPerFrame;
+    case static_cast<uint8_t>(FeatureFrontend::LK):
+        return FeatureFrontend::LK;
+    case static_cast<uint8_t>(FeatureFrontend::Orb):
+    default:
+        return FeatureFrontend::Orb;
     }
 }
 
@@ -186,10 +197,9 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
 
     const int configuredSlamInputFps =
         m_ctx.perceptionPipeline.ClampTargetFps(m_ctx.tuning.slamInputFps.load(std::memory_order_relaxed));
-    const FeatureFrontend configuredFrontend =
-        static_cast<FeatureFrontend>(m_ctx.tuning.featureFrontend.load(std::memory_order_relaxed));
+    const uint8_t configuredFrontendValue = m_ctx.tuning.featureFrontend.load(std::memory_order_relaxed);
     const FeatureFrontend effectiveFrontend =
-        configuredFrontend == FeatureFrontend::Reserved ? FeatureFrontend::Orb : configuredFrontend;
+        ParseRuntimeFeatureFrontendValue(configuredFrontendValue);
     const int effectiveSlamInputFps =
         ComputeAdaptiveSlamInputFps(configuredSlamInputFps, m_ctx.aliases.fps, m_state.smoothedSlamMs);
     m_state.adaptiveSlamInputFps = effectiveSlamInputFps;
@@ -201,11 +211,11 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     const auto [superpointBudgetWidth, superpointBudgetHeight] =
         ComputeSuperPointInputBudget(m_ctx.aliases.superpointInputMaxWidth, m_ctx.aliases.superpointInputMaxHeight,
                                 superpointLoadSheddingLevel);
-    m_ctx.slamEngine.SetSuperPointInputSizeLimit(superpointBudgetWidth, superpointBudgetHeight);
+    m_ctx.slamEngine.SetExternalFeatureInputSizeLimit(superpointBudgetWidth, superpointBudgetHeight);
     m_ctx.slamEngine.SetFeatureFrontend(effectiveFrontend);
     if (effectiveFrontend != m_state.lastAppliedFeatureFrontend) {
         std::cerr << "[slam] effective_feature_frontend=" << FeatureFrontendName(effectiveFrontend)
-                  << " requested=" << FeatureFrontendName(configuredFrontend)
+                  << " requested_value=" << static_cast<unsigned>(configuredFrontendValue)
                   << " stereo_superpoint_gate=mode_selected"
                   << " prev_tracking_state=" << m_state.lastTrackingState
                   << " prev_tracking_usable=" << (m_state.lastTrackingUsable ? 1 : 0) << "\n";
@@ -486,8 +496,6 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 "\"track_points\":%u,\"local_points\":%u,\"inliers\":%d,"
                 "\"superpoint_used\":%d,\"superpoint_stereo_weak\":%d,\"superpoint_raw_left\":%d,\"superpoint_raw_right\":%d,"
                 "\"superpoint_match_stereo\":%d,\"superpoint_injected_left\":%d,\"superpoint_injected_right\":%d,"
-                "\"superpoint_seed_source_frame\":%llu,\"superpoint_seed_current_frame\":%llu,"
-                "\"superpoint_seed_age_frames\":%u,\"superpoint_seed_forwarded\":%d,"
                 "\"superpoint_prepare_ms\":%.3f,\"superpoint_input_ms\":%.3f,\"superpoint_forward_ms\":%.3f,"
                 "\"superpoint_frontend_ms\":%.3f,\"superpoint_match_ms\":%.3f,\"superpoint_total_ms\":%.3f,"
                 "\"orb_track_ms\":%.3f,\"orb_extract_ms\":%.3f,\"orb_stereo_ms\":%.3f,"
@@ -506,9 +514,6 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 superpointStereoWeak ? 1 : 0, slamOutput.superpointRawLeftCount, slamOutput.superpointRawRightCount,
                 slamOutput.superpointMatchedStereoCount, slamOutput.superpointInjectedLeftCount,
                 slamOutput.superpointInjectedRightCount,
-                static_cast<unsigned long long>(slamOutput.superpointSeedSourceFrameId),
-                static_cast<unsigned long long>(slamOutput.superpointSeedCurrentFrameId),
-                slamOutput.superpointSeedAgeFrames, slamOutput.superpointSeedForwardedCount,
                 slamOutput.superpointPrepareMs, slamOutput.superpointInputMs,
                 slamOutput.superpointForwardMs, slamOutput.superpointFrontendMs, slamOutput.superpointStereoMatchMs,
                 slamOutput.superpointTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
@@ -526,7 +531,6 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
                 "imu=%zu feat=%zu/%zu points=%zu track=%u local=%u inliers=%d "
                 "superpoint=%s stereo_warn=%s raw=%d/%d stereo=%d injected=%d/%d "
-                "seed=%llu->%llu age=%u fwd=%d "
                 "superpoint_ms=prep %.3f input %.3f forward %.3f frontend %.3f match %.3f total %.3f "
                 "orb_ms=track %.3f extract %.3f stereo %.3f "
                 "superpoint_io=%uimg/%ubytes "
@@ -542,9 +546,6 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                 superpointStereoWeak ? "weak" : "ok", slamOutput.superpointRawLeftCount, slamOutput.superpointRawRightCount,
                 slamOutput.superpointMatchedStereoCount, slamOutput.superpointInjectedLeftCount,
                 slamOutput.superpointInjectedRightCount,
-                static_cast<unsigned long long>(slamOutput.superpointSeedSourceFrameId),
-                static_cast<unsigned long long>(slamOutput.superpointSeedCurrentFrameId),
-                slamOutput.superpointSeedAgeFrames, slamOutput.superpointSeedForwardedCount,
                 slamOutput.superpointPrepareMs, slamOutput.superpointInputMs,
                 slamOutput.superpointForwardMs, slamOutput.superpointFrontendMs, slamOutput.superpointStereoMatchMs,
                 slamOutput.superpointTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
