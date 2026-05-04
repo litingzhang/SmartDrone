@@ -1,14 +1,26 @@
-#include "adapters/slam/orbslam3_mode_state.h"
+#include "adapters/slam/slam_mode_state.h"
 
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 
-#include "adapters/slam/orbslam3_mode_common.h"
+#include "adapters/slam/slam_engine_adapter.h"
+#include "adapters/slam/slam_mode_common.h"
 
 namespace smartdrone::adapters::slam {
 
 SlamModeSharedState::~SlamModeSharedState() = default;
+
+void SlamEngineAdapter::SetExternalFeatureFrontendClient(ExternalFeatureFrontendClient *client)
+{
+    m_modeState->m_externalFeatureFrontendClient = client;
+}
+
+void SlamEngineAdapter::SetExternalFeatureInputSizeLimit(int maxWidth, int maxHeight)
+{
+    m_modeState->m_externalFeatureInputMaxWidth = std::max(0, maxWidth);
+    m_modeState->m_externalFeatureInputMaxHeight = std::max(0, maxHeight);
+}
 
 bool SlamModeSharedState::LoadStereoCalibration(const std::string &settingsPath)
 {
@@ -111,7 +123,7 @@ void SlamModeSharedState::ResetTrackingState()
     m_lkLastLoopClosureFrameId = 0;
 }
 
-void SlamModeSharedState::ResetSuperPointStats()
+void SlamModeSharedState::ResetExternalFeatureStats()
 {
     m_lastSuperPointRawLeftCount = 0;
     m_lastSuperPointRawRightCount = 0;
@@ -128,7 +140,7 @@ void SlamModeSharedState::ResetSuperPointStats()
     m_lastSuperPointPayloadBytes = 0;
 }
 
-void SlamModeSharedState::CopySuperPointStatsToOutput(core::ports::SlamOutput &out) const
+void SlamModeSharedState::CopyExternalFeatureStatsToOutput(core::ports::SlamOutput &out) const
 {
     out.superpointRawLeftCount = m_lastSuperPointRawLeftCount;
     out.superpointRawRightCount = m_lastSuperPointRawRightCount;

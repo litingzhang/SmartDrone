@@ -1,6 +1,6 @@
 #pragma once
 
-#include "adapters/slam/orbslam3_engine.h"
+#include "adapters/slam/slam_engine_adapter.h"
 
 #include <algorithm>
 #include <array>

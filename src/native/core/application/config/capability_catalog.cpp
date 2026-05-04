@@ -31,14 +31,14 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault()
     };
     capabilities.cameraProviders = {std::string(compiledCameraProvider)};
     capabilities.imuProviders = {"icm42688_spi"};
-    capabilities.slamEngines = {"orbslam3"};
+    capabilities.slamEngines = {"slam_adapter"};
     capabilities.commandChannels = {"udp_tlv"};
     capabilities.behaviorNotes = {
         std::string("camera.provider.compiled=") + std::string(compiledCameraProvider),
-        "slam_mode.relocalization=maps_to_orbslam3_localization_only",
-        "slam_mode.tracking_only=maps_to_orbslam3_localization_only",
+        "slam_mode.relocalization=maps_to_backend_localization_only",
+        "slam_mode.tracking_only=maps_to_backend_localization_only",
         "slam_mode.auto=runtime_adaptive_switch_between_mapping_and_localization",
-        "slam.feature_frontend.orb=full_orbslam3_tracking_path",
+        "slam.feature_frontend.orb=full_slam_tracking_path",
         "slam.feature_frontend.lk=grid_lk_pnp_vo",
         "slam.feature_frontend.lk_gftt_per_frame=klt_tracking_pnp_vo",
         "slam.feature_frontend.superpoint_lightglue=tensorrt_cpp_superpoint_stereo_injection",

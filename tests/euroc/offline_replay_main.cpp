@@ -13,7 +13,7 @@
 #include <opencv2/imgcodecs.hpp>
 
 #include "System.h"
-#include "adapters/slam/orbslam3_engine.h"
+#include "adapters/slam/slam_engine_adapter.h"
 #include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "core/application/config/app_args.h"
 #include "core/domain/runtime_mode.h"
@@ -317,10 +317,10 @@ ORB_SLAM3::System::eSensor ResolveOrbSensor(SensorMode mode)
     }
 }
 
-smartdrone::adapters::slam::OrbInputMode ResolveOrbInputMode(SensorMode mode)
+smartdrone::adapters::slam::SlamInputMode ResolveSlamInputMode(SensorMode mode)
 {
-    return (mode == SensorMode::Mono || mode == SensorMode::MonoImu) ? smartdrone::adapters::slam::OrbInputMode::MonoRight
-                                                                     : smartdrone::adapters::slam::OrbInputMode::Stereo;
+    return (mode == SensorMode::Mono || mode == SensorMode::MonoImu) ? smartdrone::adapters::slam::SlamInputMode::MonoRight
+                                                                     : smartdrone::adapters::slam::SlamInputMode::Stereo;
 }
 
 bool UseImu(SensorMode mode) { return mode == SensorMode::StereoImu || mode == SensorMode::MonoImu; }
@@ -540,7 +540,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     const auto sensor = ResolveOrbSensor(opts.sensorMode);
     ApplyOrbAccelerationEnvironment(opts.orbAcceleration);
     auto orbSystem = std::make_unique<ORB_SLAM3::System>(opts.vocab, opts.settings, sensor, false);
-    smartdrone::adapters::slam::OrbSlam3Engine slamEngine(std::move(orbSystem), ResolveOrbInputMode(opts.sensorMode),
+    smartdrone::adapters::slam::SlamEngineAdapter slamEngine(std::move(orbSystem), ResolveSlamInputMode(opts.sensorMode),
                                                           UseImu(opts.sensorMode), opts.settings);
     slamEngine.SetOperationMode(opts.slamMode);
     slamEngine.SetFeatureFrontend(opts.featureFrontend);
@@ -660,7 +660,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     if (useOrbOfficialEuRoC) {
         orbEuRoCTrajectoryPath = opts.outputCsv;
         orbEuRoCTrajectoryPath += ".orb_euroc.txt";
-        if (!slamEngine.ShutdownAndSaveOrbTrajectoryEuRoC(orbEuRoCTrajectoryPath.string()) ||
+        if (!slamEngine.ShutdownAndSaveTrajectoryEuRoC(orbEuRoCTrajectoryPath.string()) ||
             !ConvertOrbEuRoCTrajectoryToReplayCsv(orbEuRoCTrajectoryPath, opts.outputCsv)) {
             std::cerr << "failed to export ORB official EuRoC trajectory\n";
             return 1;

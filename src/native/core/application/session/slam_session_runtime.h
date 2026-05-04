@@ -7,7 +7,7 @@
 
 #include "System.h"
 #include "adapters/imu/icm42688_imu_provider.h"
-#include "adapters/slam/orbslam3_engine.h"
+#include "adapters/slam/slam_engine_adapter.h"
 #include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "adapters/stream/udp_image_sender.h"
 #include "adapters/telemetry/mavlink_pose_publisher.h"
@@ -48,11 +48,11 @@ class SlamSessionRuntime {
     bool m_monoMode{false};
     bool m_useImu{false};
     ORB_SLAM3::System::eSensor m_orbSensor{ORB_SLAM3::System::STEREO};
-    smartdrone::adapters::slam::OrbInputMode m_orbInputMode{smartdrone::adapters::slam::OrbInputMode::Stereo};
+    smartdrone::adapters::slam::SlamInputMode m_slamInputMode{smartdrone::adapters::slam::SlamInputMode::Stereo};
     std::string m_effectiveSettingsPath;
 
     std::unique_ptr<ORB_SLAM3::System> m_slamSystem;
-    smartdrone::adapters::slam::OrbSlam3Engine m_slamEngine;
+    smartdrone::adapters::slam::SlamEngineAdapter m_slamEngine;
     smartdrone::adapters::slam::SuperPointLightGlueFrontendClient m_superpointFrontendClient;
     AutoSlamModeController m_autoSlamModeController{};
     StereoBodyExtrinsics m_stereoBodyExtrinsics{};

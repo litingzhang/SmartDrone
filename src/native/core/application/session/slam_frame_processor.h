@@ -7,7 +7,7 @@
 #include <sophus/se3.hpp>
 
 #include "adapters/imu/icm42688_imu_provider.h"
-#include "adapters/slam/orbslam3_engine.h"
+#include "adapters/slam/slam_engine_adapter.h"
 #include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "adapters/stream/udp_image_sender.h"
 #include "adapters/telemetry/mavlink_pose_publisher.h"
@@ -33,7 +33,7 @@ class SlamFrameProcessor {
         LiveRuntimeTuning &tuning;
         LivePoseState &livePose;
         Px4MavlinkGateway &mav;
-        smartdrone::adapters::slam::OrbSlam3Engine &slamEngine;
+        smartdrone::adapters::slam::SlamEngineAdapter &slamEngine;
         smartdrone::adapters::slam::SuperPointLightGlueFrontendClient *superpointFrontendClient{nullptr};
         smartdrone::core::ports::ICameraProvider &cameraProvider;
         smartdrone::adapters::imu::Icm42688ImuProvider &imuProvider;

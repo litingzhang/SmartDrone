@@ -1,4 +1,4 @@
-#include "adapters/slam/orbslam3_engine.h"
+#include "adapters/slam/slam_engine_adapter.h"
 
 #include <algorithm>
 #include <chrono>
@@ -11,12 +11,12 @@
 
 #include "ImuTypes.h"
 #include "TrackedVisualData.h"
-#include "adapters/slam/orbslam3_mode_strategy.h"
-#include "adapters/slam/orbslam3_mode_common.h"
+#include "adapters/slam/slam_mode_strategy.h"
+#include "adapters/slam/slam_mode_common.h"
 
 namespace smartdrone::adapters::slam {
 
-OrbSlam3Engine::OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, OrbInputMode inputMode, bool useImu,
+SlamEngineAdapter::SlamEngineAdapter(std::unique_ptr<ORB_SLAM3::System> system, SlamInputMode inputMode, bool useImu,
                                std::string settingsPath)
     : m_system(std::move(system)), m_modeState(std::make_unique<SlamModeSharedState>()), m_inputMode(inputMode),
       m_useImu(useImu), m_modeStrategy(CreateSlamModeStrategy(FeatureFrontend::Orb)),
@@ -25,9 +25,9 @@ OrbSlam3Engine::OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, OrbInp
     m_modeState->LoadStereoCalibration(m_settingsPath);
 }
 
-OrbSlam3Engine::~OrbSlam3Engine() = default;
+SlamEngineAdapter::~SlamEngineAdapter() = default;
 
-bool OrbSlam3Engine::Start()
+bool SlamEngineAdapter::Start()
 {
     m_lastStablePose = core::ports::PoseEstimate{};
     m_haveLastStablePose = false;
@@ -39,7 +39,7 @@ bool OrbSlam3Engine::Start()
     return static_cast<bool>(m_system);
 }
 
-void OrbSlam3Engine::SetOperationMode(core::domain::SlamOperationMode mode)
+void SlamEngineAdapter::SetOperationMode(core::domain::SlamOperationMode mode)
 {
     if (!m_system || m_operationMode == mode) {
         return;
@@ -57,7 +57,7 @@ void OrbSlam3Engine::SetOperationMode(core::domain::SlamOperationMode mode)
     m_operationMode = mode;
 }
 
-void OrbSlam3Engine::SetFeatureFrontend(FeatureFrontend frontend)
+void SlamEngineAdapter::SetFeatureFrontend(FeatureFrontend frontend)
 {
     if (m_featureFrontend != frontend) {
         m_modeState->ResetTrackingState();
@@ -70,7 +70,7 @@ void OrbSlam3Engine::SetFeatureFrontend(FeatureFrontend frontend)
     }
 }
 
-void OrbSlam3Engine::Stop()
+void SlamEngineAdapter::Stop()
 {
     m_lastStablePose = core::ports::PoseEstimate{};
     m_haveLastStablePose = false;
@@ -84,7 +84,7 @@ void OrbSlam3Engine::Stop()
     }
 }
 
-bool OrbSlam3Engine::ShutdownAndSaveOrbTrajectoryEuRoC(const std::string &path)
+bool SlamEngineAdapter::ShutdownAndSaveTrajectoryEuRoC(const std::string &path)
 {
     if (!m_system || path.empty()) {
         return false;
@@ -94,7 +94,7 @@ bool OrbSlam3Engine::ShutdownAndSaveOrbTrajectoryEuRoC(const std::string &path)
     return true;
 }
 
-void OrbSlam3Engine::StabilizeOutputPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+void SlamEngineAdapter::StabilizeOutputPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
                                          int trackingState)
 {
     pose.valid = poseValid && IsFinitePose(pose);

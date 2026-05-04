@@ -39,12 +39,12 @@ struct SlamModeSharedState {
     bool LoadStereoCalibration(const std::string &settingsPath);
     void EnsureStereoRectifier(const cv::Size &inputSize);
     void ResetTrackingState();
-    void ResetSuperPointStats();
-    void CopySuperPointStatsToOutput(core::ports::SlamOutput &out) const;
+    void ResetExternalFeatureStats();
+    void CopyExternalFeatureStatsToOutput(core::ports::SlamOutput &out) const;
 
-    ExternalFeatureFrontendClient *m_superpointFrontendClient{nullptr};
-    int m_superpointInputMaxWidth{640};
-    int m_superpointInputMaxHeight{400};
+    ExternalFeatureFrontendClient *m_externalFeatureFrontendClient{nullptr};
+    int m_externalFeatureInputMaxWidth{640};
+    int m_externalFeatureInputMaxHeight{400};
     mutable int m_lastSuperPointRawLeftCount{0};
     mutable int m_lastSuperPointRawRightCount{0};
     mutable int m_lastSuperPointMatchedStereoCount{0};

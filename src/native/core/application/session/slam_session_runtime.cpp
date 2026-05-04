@@ -305,12 +305,12 @@ SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg, LiveRuntimeTuni
       m_monoMode(m_aliases.sensorMode == SensorMode::Mono || m_aliases.sensorMode == SensorMode::MonoImu),
       m_useImu(m_aliases.sensorMode == SensorMode::StereoImu || m_aliases.sensorMode == SensorMode::MonoImu),
       m_orbSensor(ResolveOrbSensor(m_aliases)),
-      m_orbInputMode(m_monoMode ? smartdrone::adapters::slam::OrbInputMode::MonoRight
-                                : smartdrone::adapters::slam::OrbInputMode::Stereo),
+      m_slamInputMode(m_monoMode ? smartdrone::adapters::slam::SlamInputMode::MonoRight
+                                : smartdrone::adapters::slam::SlamInputMode::Stereo),
       m_effectiveSettingsPath(BuildEffectiveSlamSettingsPath(cfg)),
       m_slamSystem((ApplyOrbAccelerationEnvironment(cfg.app.runtime.orbAcceleration),
                     std::make_unique<ORB_SLAM3::System>(cfg.app.vocab, m_effectiveSettingsPath, m_orbSensor, false))),
-      m_slamEngine(std::move(m_slamSystem), m_orbInputMode, m_useImu, m_effectiveSettingsPath),
+      m_slamEngine(std::move(m_slamSystem), m_slamInputMode, m_useImu, m_effectiveSettingsPath),
       m_cameraProvider(CreateCameraProvider()),
       m_imuProvider(m_imuState.imuBuffer, MakeImuProviderConfig(m_aliases)), m_posePublisher(mav),
       m_perceptionPipeline(PerceptionPipelineConfig{m_aliases.fps, true}),

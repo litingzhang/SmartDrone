@@ -11,51 +11,46 @@
 
 namespace smartdrone::adapters::slam {
 
-class OrbSlam3Engine;
+class SlamEngineAdapter;
 
 class SlamModeStrategy {
   public:
     virtual ~SlamModeStrategy() = default;
 
     virtual FeatureFrontend Frontend() const = 0;
-    virtual core::ports::SlamOutput Process(OrbSlam3Engine &engine, const core::ports::SlamInputBatch &input,
+    virtual core::ports::SlamOutput Process(SlamEngineAdapter &engine, const core::ports::SlamInputBatch &input,
                                             bool extractFeatures, bool extractPointCloud) = 0;
 };
 
 class OrbModeStrategy final : public SlamModeStrategy {
   public:
     FeatureFrontend Frontend() const override;
-    core::ports::SlamOutput Process(OrbSlam3Engine &engine, const core::ports::SlamInputBatch &input,
+    core::ports::SlamOutput Process(SlamEngineAdapter &engine, const core::ports::SlamInputBatch &input,
                                     bool extractFeatures, bool extractPointCloud) override;
-
-    static core::ports::SlamOutput ProcessOrbSlamBackend(OrbSlam3Engine &engine,
-                                                         const core::ports::SlamInputBatch &input,
-                                                         bool extractFeatures, bool extractPointCloud,
-                                                         bool enableSuperPointLightGlue);
 };
 
 class KltModeStrategy final : public SlamModeStrategy {
   public:
     FeatureFrontend Frontend() const override;
-    core::ports::SlamOutput Process(OrbSlam3Engine &engine, const core::ports::SlamInputBatch &input,
+    core::ports::SlamOutput Process(SlamEngineAdapter &engine, const core::ports::SlamInputBatch &input,
                                     bool extractFeatures, bool extractPointCloud) override;
 
   private:
-    static Sophus::SE3f ApplyLoopClosure(OrbSlam3Engine &engine, const cv::Mat &leftRect, uint64_t frameId,
+    static Sophus::SE3f ApplyLoopClosure(SlamEngineAdapter &engine, const cv::Mat &leftRect, uint64_t frameId,
                                          const Sophus::SE3f &rawTwc);
 };
 
 class KltPerFrameModeStrategy final : public SlamModeStrategy {
   public:
     FeatureFrontend Frontend() const override;
-    core::ports::SlamOutput Process(OrbSlam3Engine &engine, const core::ports::SlamInputBatch &input,
+    core::ports::SlamOutput Process(SlamEngineAdapter &engine, const core::ports::SlamInputBatch &input,
                                     bool extractFeatures, bool extractPointCloud) override;
 };
 
 class SuperPointLightGlueModeStrategy final : public SlamModeStrategy {
   public:
     FeatureFrontend Frontend() const override;
-    core::ports::SlamOutput Process(OrbSlam3Engine &engine, const core::ports::SlamInputBatch &input,
+    core::ports::SlamOutput Process(SlamEngineAdapter &engine, const core::ports::SlamInputBatch &input,
                                     bool extractFeatures, bool extractPointCloud) override;
 };
 

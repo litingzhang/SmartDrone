@@ -1,6 +1,6 @@
-#include "adapters/slam/orbslam3_mode_strategy.h"
+#include "adapters/slam/slam_mode_strategy.h"
 
-#include "adapters/slam/orbslam3_engine.h"
+#include "adapters/slam/slam_engine_adapter.h"
 
 namespace smartdrone::adapters::slam {
 
@@ -19,7 +19,7 @@ std::unique_ptr<SlamModeStrategy> CreateSlamModeStrategy(FeatureFrontend fronten
     }
 }
 
-core::ports::SlamOutput OrbSlam3Engine::Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
+core::ports::SlamOutput SlamEngineAdapter::Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
                                                 bool extractPointCloud)
 {
     if (!m_modeStrategy || m_modeStrategy->Frontend() != m_featureFrontend) {

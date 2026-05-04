@@ -5,28 +5,28 @@
 #include <string>
 
 #include "System.h"
-#include "adapters/slam/orbslam3_mode_state.h"
+#include "adapters/slam/slam_mode_state.h"
 #include "core/application/config/app_args.h"
 #include "core/domain/runtime_mode.h"
 #include "core/ports/slam_engine.h"
 
 namespace smartdrone::adapters::slam {
 
-enum class OrbInputMode : uint8_t {
+enum class SlamInputMode : uint8_t {
     Stereo,
     MonoLeft,
     MonoRight,
 };
 
-class OrbSlam3EngineAccess;
+class SlamEngineAccess;
 class SlamModeStrategy;
 class ExternalFeatureFrontendClient;
 
-class OrbSlam3Engine final : public core::ports::ISlamEngine {
+class SlamEngineAdapter final : public core::ports::ISlamEngine {
   public:
-    OrbSlam3Engine(std::unique_ptr<ORB_SLAM3::System> system, OrbInputMode inputMode, bool useImu,
+    SlamEngineAdapter(std::unique_ptr<ORB_SLAM3::System> system, SlamInputMode inputMode, bool useImu,
                    std::string settingsPath = {});
-    ~OrbSlam3Engine() override;
+    ~SlamEngineAdapter() override;
 
     bool Start() override;
     void SetOperationMode(core::domain::SlamOperationMode mode);
@@ -36,18 +36,18 @@ class OrbSlam3Engine final : public core::ports::ISlamEngine {
     void SetStereoVoLoopClosure(bool enabled, float scale = 1.20f, float relaxation = 1.40f);
     void SetStereoVoPerFrameAcceleration(std::string acceleration);
     void Stop() override;
-    bool ShutdownAndSaveOrbTrajectoryEuRoC(const std::string &path);
+    bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path);
     core::ports::SlamOutput Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
                                     bool extractPointCloud) override;
 
   private:
-    friend class OrbSlam3EngineAccess;
+    friend class SlamEngineAccess;
 
     void StabilizeOutputPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec, int trackingState);
 
     std::unique_ptr<ORB_SLAM3::System> m_system;
     std::unique_ptr<SlamModeSharedState> m_modeState;
-    OrbInputMode m_inputMode{OrbInputMode::Stereo};
+    SlamInputMode m_inputMode{SlamInputMode::Stereo};
     bool m_useImu{false};
     core::domain::SlamOperationMode m_operationMode{core::domain::SlamOperationMode::Mapping};
     FeatureFrontend m_featureFrontend{FeatureFrontend::Orb};

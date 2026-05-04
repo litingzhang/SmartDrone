@@ -1,19 +1,19 @@
-#include "adapters/slam/orbslam3_mode_strategy.h"
-#include "adapters/slam/orbslam3_engine_access.h"
-#include "adapters/slam/orbslam3_mode_common.h"
+#include "adapters/slam/slam_mode_strategy.h"
+#include "adapters/slam/slam_engine_access.h"
+#include "adapters/slam/slam_mode_common.h"
 
 #include <cctype>
 
 namespace smartdrone::adapters::slam {
 
-void OrbSlam3Engine::SetStereoVoLoopClosure(bool enabled, float scale, float relaxation)
+void SlamEngineAdapter::SetStereoVoLoopClosure(bool enabled, float scale, float relaxation)
 {
     m_modeState->m_lkLoopClosureEnabled = enabled;
     m_modeState->m_lkLoopScale = std::clamp(scale, 0.25f, 4.0f);
     m_modeState->m_lkLoopRelaxation = std::clamp(relaxation, 0.0f, 4.0f);
 }
 
-void OrbSlam3Engine::SetStereoVoPerFrameAcceleration(std::string acceleration)
+void SlamEngineAdapter::SetStereoVoPerFrameAcceleration(std::string acceleration)
 {
     std::transform(acceleration.begin(), acceleration.end(), acceleration.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -30,12 +30,12 @@ void OrbSlam3Engine::SetStereoVoPerFrameAcceleration(std::string acceleration)
 
 FeatureFrontend KltModeStrategy::Frontend() const { return FeatureFrontend::LK; }
 
-core::ports::SlamOutput KltModeStrategy::Process(OrbSlam3Engine &engine,
+core::ports::SlamOutput KltModeStrategy::Process(SlamEngineAdapter &engine,
                                                 const core::ports::SlamInputBatch &input,
                                                 bool extractFeatures, bool extractPointCloud)
 {
     (void)extractPointCloud;
-    SlamModeSharedState &state = OrbSlam3EngineAccess::ModeState(engine);
+    SlamModeSharedState &state = SlamEngineAccess::ModeState(engine);
 
     core::ports::SlamOutput out{};
     out.frameId = input.frameId;
@@ -45,7 +45,7 @@ core::ports::SlamOutput KltModeStrategy::Process(OrbSlam3Engine &engine,
     out.poseValid = true;
     out.pose.valid = true;
     out.usedSuperPointFrontend = false;
-    state.ResetSuperPointStats();
+    state.ResetExternalFeatureStats();
 
     cv::Mat leftGray = EnsureGray8(input.stereo.left.gray);
     cv::Mat rightGray = EnsureGray8(input.stereo.right.gray);
@@ -235,7 +235,7 @@ core::ports::SlamOutput KltModeStrategy::Process(OrbSlam3Engine &engine,
     const Sophus::SE3f outputTwc = KltModeStrategy::ApplyLoopClosure(engine, leftRect, input.frameId, state.m_lkTwc);
     const Eigen::Vector3f t = outputTwc.translation();
     out.usedSuperPointFrontend = out.usedSuperPointFrontend || state.m_lastSuperPointInjectedLeftCount > 0;
-    state.CopySuperPointStatsToOutput(out);
+    state.CopyExternalFeatureStatsToOutput(out);
     const Eigen::Quaternionf q(outputTwc.so3().unit_quaternion());
     out.pose.x = t.x();
     out.pose.y = t.y();
@@ -249,10 +249,10 @@ core::ports::SlamOutput KltModeStrategy::Process(OrbSlam3Engine &engine,
 
 
 
-Sophus::SE3f KltModeStrategy::ApplyLoopClosure(OrbSlam3Engine &engine, const cv::Mat &leftRect,
+Sophus::SE3f KltModeStrategy::ApplyLoopClosure(SlamEngineAdapter &engine, const cv::Mat &leftRect,
                                                uint64_t frameId, const Sophus::SE3f &rawTwc)
 {
-    SlamModeSharedState &state = OrbSlam3EngineAccess::ModeState(engine);
+    SlamModeSharedState &state = SlamEngineAccess::ModeState(engine);
     if (!state.m_lkLoopClosureEnabled || leftRect.empty()) {
         return rawTwc;
     }
@@ -307,13 +307,13 @@ Sophus::SE3f KltModeStrategy::ApplyLoopClosure(OrbSlam3Engine &engine, const cv:
 
 FeatureFrontend KltPerFrameModeStrategy::Frontend() const { return FeatureFrontend::LkGfttPerFrame; }
 
-core::ports::SlamOutput KltPerFrameModeStrategy::Process(OrbSlam3Engine &engine,
+core::ports::SlamOutput KltPerFrameModeStrategy::Process(SlamEngineAdapter &engine,
                                                         const core::ports::SlamInputBatch &input,
                                                         bool extractFeatures, bool extractPointCloud)
 {
     (void)extractFeatures;
     (void)extractPointCloud;
-    SlamModeSharedState &state = OrbSlam3EngineAccess::ModeState(engine);
+    SlamModeSharedState &state = SlamEngineAccess::ModeState(engine);
 
     core::ports::SlamOutput out{};
     out.frameId = input.frameId;
@@ -323,7 +323,7 @@ core::ports::SlamOutput KltPerFrameModeStrategy::Process(OrbSlam3Engine &engine,
     out.poseValid = true;
     out.pose.valid = true;
     out.usedSuperPointFrontend = false;
-    state.ResetSuperPointStats();
+    state.ResetExternalFeatureStats();
 
     const auto prepareStartTp = std::chrono::steady_clock::now();
     cv::Mat leftGray = EnsureGray8(input.stereo.left.gray);
