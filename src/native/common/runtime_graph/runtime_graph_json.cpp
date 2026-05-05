@@ -1,0 +1,429 @@
+#include "common/runtime_graph/runtime_graph.h"
+
+#include <cctype>
+#include <fstream>
+#include <sstream>
+
+namespace smartdrone {
+namespace runtime_graph {
+namespace {
+
+class JsonValue {
+public:
+    enum class Kind {
+        Null,
+        Bool,
+        Number,
+        String,
+        Array,
+        Object
+    };
+
+    Kind kind{Kind::Null};
+    bool boolean{};
+    double number{};
+    std::string string;
+    std::vector<JsonValue> array;
+    std::map<std::string, JsonValue> object;
+
+    const JsonValue& At(const std::string& key) const {
+        auto it = object.find(key);
+        if (it == object.end()) {
+            throw std::runtime_error("missing json field: " + key);
+        }
+        return it->second;
+    }
+
+    const JsonValue* Find(const std::string& key) const {
+        auto it = object.find(key);
+        return it == object.end() ? nullptr : &it->second;
+    }
+};
+
+class JsonParser {
+public:
+    explicit JsonParser(const std::string& text) : m_text(text) {}
+
+    JsonValue Parse() {
+        auto value = ParseValue();
+        SkipWhitespace();
+        if (m_pos != m_text.size()) {
+            Fail("unexpected trailing json content");
+        }
+        return value;
+    }
+
+private:
+    JsonValue ParseValue() {
+        SkipWhitespace();
+        if (m_pos >= m_text.size()) {
+            Fail("unexpected end of json");
+        }
+
+        const char c = m_text[m_pos];
+        if (c == '{') {
+            return ParseObject();
+        }
+        if (c == '[') {
+            return ParseArray();
+        }
+        if (c == '"') {
+            JsonValue value;
+            value.kind = JsonValue::Kind::String;
+            value.string = ParseString();
+            return value;
+        }
+        if (c == 't' || c == 'f') {
+            return ParseBool();
+        }
+        if (c == 'n') {
+            return ParseNull();
+        }
+        if (c == '-' || std::isdigit(static_cast<unsigned char>(c))) {
+            return ParseNumber();
+        }
+        Fail("invalid json value");
+        return {};
+    }
+
+    JsonValue ParseObject() {
+        JsonValue value;
+        value.kind = JsonValue::Kind::Object;
+        Expect('{');
+        SkipWhitespace();
+        if (Consume('}')) {
+            return value;
+        }
+        for (;;) {
+            SkipWhitespace();
+            if (Peek() != '"') {
+                Fail("expected json object key");
+            }
+            auto key = ParseString();
+            SkipWhitespace();
+            Expect(':');
+            value.object.emplace(std::move(key), ParseValue());
+            SkipWhitespace();
+            if (Consume('}')) {
+                break;
+            }
+            Expect(',');
+        }
+        return value;
+    }
+
+    JsonValue ParseArray() {
+        JsonValue value;
+        value.kind = JsonValue::Kind::Array;
+        Expect('[');
+        SkipWhitespace();
+        if (Consume(']')) {
+            return value;
+        }
+        for (;;) {
+            value.array.push_back(ParseValue());
+            SkipWhitespace();
+            if (Consume(']')) {
+                break;
+            }
+            Expect(',');
+        }
+        return value;
+    }
+
+    std::string ParseString() {
+        Expect('"');
+        std::string result;
+        while (m_pos < m_text.size()) {
+            const char c = m_text[m_pos++];
+            if (c == '"') {
+                return result;
+            }
+            if (c == '\\') {
+                if (m_pos >= m_text.size()) {
+                    Fail("unterminated json escape");
+                }
+                const char escaped = m_text[m_pos++];
+                switch (escaped) {
+                    case '"':
+                    case '\\':
+                    case '/':
+                        result.push_back(escaped);
+                        break;
+                    case 'b':
+                        result.push_back('\b');
+                        break;
+                    case 'f':
+                        result.push_back('\f');
+                        break;
+                    case 'n':
+                        result.push_back('\n');
+                        break;
+                    case 'r':
+                        result.push_back('\r');
+                        break;
+                    case 't':
+                        result.push_back('\t');
+                        break;
+                    default:
+                        Fail("unsupported json escape");
+                }
+            } else {
+                result.push_back(c);
+            }
+        }
+        Fail("unterminated json string");
+        return {};
+    }
+
+    JsonValue ParseBool() {
+        JsonValue value;
+        value.kind = JsonValue::Kind::Bool;
+        if (Match("true")) {
+            value.boolean = true;
+            return value;
+        }
+        if (Match("false")) {
+            value.boolean = false;
+            return value;
+        }
+        Fail("invalid json boolean");
+        return {};
+    }
+
+    JsonValue ParseNull() {
+        if (!Match("null")) {
+            Fail("invalid json null");
+        }
+        return {};
+    }
+
+    JsonValue ParseNumber() {
+        const auto start = m_pos;
+        if (Peek() == '-') {
+            ++m_pos;
+        }
+        while (m_pos < m_text.size() && std::isdigit(static_cast<unsigned char>(m_text[m_pos]))) {
+            ++m_pos;
+        }
+        if (m_pos < m_text.size() && m_text[m_pos] == '.') {
+            ++m_pos;
+            while (m_pos < m_text.size() && std::isdigit(static_cast<unsigned char>(m_text[m_pos]))) {
+                ++m_pos;
+            }
+        }
+        if (m_pos < m_text.size() && (m_text[m_pos] == 'e' || m_text[m_pos] == 'E')) {
+            ++m_pos;
+            if (m_pos < m_text.size() && (m_text[m_pos] == '+' || m_text[m_pos] == '-')) {
+                ++m_pos;
+            }
+            while (m_pos < m_text.size() && std::isdigit(static_cast<unsigned char>(m_text[m_pos]))) {
+                ++m_pos;
+            }
+        }
+
+        JsonValue value;
+        value.kind = JsonValue::Kind::Number;
+        value.number = std::stod(m_text.substr(start, m_pos - start));
+        return value;
+    }
+
+    void SkipWhitespace() {
+        while (m_pos < m_text.size() &&
+               std::isspace(static_cast<unsigned char>(m_text[m_pos]))) {
+            ++m_pos;
+        }
+    }
+
+    char Peek() const {
+        return m_pos < m_text.size() ? m_text[m_pos] : '\0';
+    }
+
+    bool Consume(char expected) {
+        if (Peek() != expected) {
+            return false;
+        }
+        ++m_pos;
+        return true;
+    }
+
+    void Expect(char expected) {
+        if (!Consume(expected)) {
+            Fail(std::string("expected '") + expected + "'");
+        }
+    }
+
+    bool Match(const char* literal) {
+        const std::string expected(literal);
+        if (m_text.compare(m_pos, expected.size(), expected) != 0) {
+            return false;
+        }
+        m_pos += expected.size();
+        return true;
+    }
+
+    [[noreturn]] void Fail(const std::string& message) const {
+        throw std::runtime_error("json parse error at byte " + std::to_string(m_pos) + ": " + message);
+    }
+
+    const std::string& m_text;
+    std::size_t m_pos{};
+};
+
+std::string RequiredString(const JsonValue& value, const std::string& field) {
+    const auto& child = value.At(field);
+    if (child.kind != JsonValue::Kind::String) {
+        throw std::runtime_error("json field must be string: " + field);
+    }
+    return child.string;
+}
+
+std::size_t RequiredSize(const JsonValue& value, const std::string& field) {
+    const auto& child = value.At(field);
+    if (child.kind != JsonValue::Kind::Number || child.number < 0) {
+        throw std::runtime_error("json field must be non-negative number: " + field);
+    }
+    return static_cast<std::size_t>(child.number);
+}
+
+std::chrono::milliseconds OptionalMilliseconds(const JsonValue& value,
+                                               const std::string& field,
+                                               std::chrono::milliseconds fallback) {
+    const auto* child = value.Find(field);
+    if (!child) {
+        return fallback;
+    }
+    if (child->kind != JsonValue::Kind::Number || child->number < 0) {
+        throw std::runtime_error("json field must be non-negative number: " + field);
+    }
+    return std::chrono::milliseconds(static_cast<int>(child->number));
+}
+
+std::vector<std::string> OptionalStringArray(const JsonValue& value, const std::string& field) {
+    std::vector<std::string> result;
+    const auto* child = value.Find(field);
+    if (!child) {
+        return result;
+    }
+    if (child->kind != JsonValue::Kind::Array) {
+        throw std::runtime_error("json field must be string array: " + field);
+    }
+    for (const auto& item : child->array) {
+        if (item.kind != JsonValue::Kind::String) {
+            throw std::runtime_error("json array item must be string: " + field);
+        }
+        result.push_back(item.string);
+    }
+    return result;
+}
+
+std::map<std::string, std::string> OptionalStringMap(const JsonValue& value, const std::string& field) {
+    std::map<std::string, std::string> result;
+    const auto* child = value.Find(field);
+    if (!child) {
+        return result;
+    }
+    if (child->kind != JsonValue::Kind::Object) {
+        throw std::runtime_error("json field must be object: " + field);
+    }
+    for (const auto& pair : child->object) {
+        if (pair.second.kind != JsonValue::Kind::String) {
+            throw std::runtime_error("json object value must be string: " + field + "." + pair.first);
+        }
+        result[pair.first] = pair.second.string;
+    }
+    return result;
+}
+
+OverflowPolicy ParseOverflow(const std::string& value) {
+    if (value == "drop_newest" || value == "tail_drop") {
+        return OverflowPolicy::DropNewest;
+    }
+    if (value == "overwrite_oldest" || value == "circular_overwrite") {
+        return OverflowPolicy::OverwriteOldest;
+    }
+    throw std::runtime_error("unsupported queue overflow policy: " + value);
+}
+
+TriggerMode ParseTriggerMode(const std::string& value) {
+    if (value == "periodic") {
+        return TriggerMode::Periodic;
+    }
+    if (value == "any_queue_ready") {
+        return TriggerMode::AnyQueueReady;
+    }
+    if (value == "all_queue_ready") {
+        return TriggerMode::AllQueueReady;
+    }
+    if (value == "periodic_or_any_queue_ready") {
+        return TriggerMode::PeriodicOrAnyQueueReady;
+    }
+    throw std::runtime_error("unsupported task trigger mode: " + value);
+}
+
+} // namespace
+
+RuntimeGraphConfig ParseRuntimeGraphConfigJson(const std::string& jsonText) {
+    const auto root = JsonParser(jsonText).Parse();
+    if (root.kind != JsonValue::Kind::Object) {
+        throw std::runtime_error("runtime graph json root must be object");
+    }
+
+    RuntimeGraphConfig config;
+
+    const auto& queues = root.At("queues");
+    if (queues.kind != JsonValue::Kind::Array) {
+        throw std::runtime_error("json field must be array: queues");
+    }
+    for (const auto& item : queues.array) {
+        if (item.kind != JsonValue::Kind::Object) {
+            throw std::runtime_error("queue config must be object");
+        }
+        QueueConfig queue;
+        queue.name = RequiredString(item, "name");
+        queue.type = RequiredString(item, "type");
+        queue.depth = RequiredSize(item, "depth");
+        queue.overflow = ParseOverflow(RequiredString(item, "overflow"));
+        config.queues.push_back(std::move(queue));
+    }
+
+    const auto& tasks = root.At("tasks");
+    if (tasks.kind != JsonValue::Kind::Array) {
+        throw std::runtime_error("json field must be array: tasks");
+    }
+    for (const auto& item : tasks.array) {
+        if (item.kind != JsonValue::Kind::Object) {
+            throw std::runtime_error("task config must be object");
+        }
+        TaskConfig task;
+        task.name = RequiredString(item, "name");
+        task.type = RequiredString(item, "type");
+        task.inputs = OptionalStringMap(item, "inputs");
+        task.outputs = OptionalStringMap(item, "outputs");
+
+        const auto& trigger = item.At("trigger");
+        if (trigger.kind != JsonValue::Kind::Object) {
+            throw std::runtime_error("task trigger must be object: " + task.name);
+        }
+        task.trigger.mode = ParseTriggerMode(RequiredString(trigger, "mode"));
+        task.trigger.interval = OptionalMilliseconds(trigger, "interval_ms", std::chrono::milliseconds(0));
+        task.trigger.queues = OptionalStringArray(trigger, "queues");
+
+        config.tasks.push_back(std::move(task));
+    }
+
+    return config;
+}
+
+RuntimeGraphConfig ParseRuntimeGraphConfigJsonFile(const std::string& path) {
+    std::ifstream input(path);
+    if (!input) {
+        throw std::runtime_error("failed to open runtime graph json file: " + path);
+    }
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    return ParseRuntimeGraphConfigJson(buffer.str());
+}
+
+} // namespace runtime_graph
+} // namespace smartdrone

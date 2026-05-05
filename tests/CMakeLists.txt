@@ -3,7 +3,29 @@ find_package(Threads REQUIRED)
 find_package(Eigen3 QUIET)
 
 if(ENABLE_UNIT_TESTS)
-  message(STATUS "ENABLE_UNIT_TESTS is on, but only EuRoC offline replay tests are kept in this repo.")
+  add_executable(runtime_graph_tests
+    runtime_graph/runtime_graph_test.cpp
+    ../src/native/common/runtime_graph/runtime_graph_context.cpp
+    ../src/native/common/runtime_graph/runtime_graph.cpp
+    ../src/native/common/runtime_graph/runtime_graph_json.cpp
+    ../src/native/common/runtime_graph/runtime_graph_mermaid.cpp
+    ../src/native/common/runtime_graph/runtime_graph_task_runner.cpp
+  )
+
+  target_include_directories(runtime_graph_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src/native"
+  )
+
+  target_compile_definitions(runtime_graph_tests PRIVATE
+    TEST_RUNTIME_GRAPH_DIR="${CMAKE_CURRENT_SOURCE_DIR}/runtime_graph"
+  )
+
+  target_link_libraries(runtime_graph_tests PRIVATE
+    GTest::gtest_main
+    Threads::Threads
+  )
+
+  add_test(NAME RuntimeGraphTests COMMAND runtime_graph_tests)
 endif()
 
 if(ENABLE_OFFLINE_REPLAY)

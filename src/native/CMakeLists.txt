@@ -6,6 +6,22 @@ set(SMART_DRONE_MAIN_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/main.cpp"
 )
 
+add_library(smart_drone_runtime_graph STATIC
+  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_graph/runtime_graph_context.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_graph/runtime_graph.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_graph/runtime_graph_json.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_graph/runtime_graph_mermaid.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_graph/runtime_graph_task_runner.cpp"
+)
+
+target_include_directories(smart_drone_runtime_graph PUBLIC
+  "${SMART_DRONE_NATIVE_ROOT}"
+)
+
+target_link_libraries(smart_drone_runtime_graph PUBLIC
+  Threads::Threads
+)
+
 set(SMART_DRONE_CAMERA_SOURCES)
 if(SMART_DRONE_CAMERA_PROVIDER STREQUAL "libcamera_stereo_ov9281")
   list(APPEND SMART_DRONE_CAMERA_SOURCES
@@ -71,12 +87,16 @@ set(SMART_DRONE_CORE_APPLICATION_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/runtime_controller.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/runtime_session_supervisor.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/udp_command_thread.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/session/calib_session_graph_service.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/calib_session_service.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/calib_storage_helpers.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/session/native_runtime_graph_messages.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/session/native_runtime_graph_registry.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/slam_frame_processor.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/runtime_session_common.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/sensor_runtime_helpers.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/slam_processing_support.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/session/slam_session_graph_service.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/slam_session_runtime.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/slam_session_service.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/state/frame_timing_tracker.cpp"
@@ -109,6 +129,10 @@ target_sources(smart_drone PRIVATE
 target_include_directories(smart_drone PRIVATE
   "${SMART_DRONE_NATIVE_ROOT}"
   "${SMART_DRONE_NATIVE_ROOT}/common/tlv"
+)
+
+target_link_libraries(smart_drone PRIVATE
+  smart_drone_runtime_graph
 )
 
 source_group(TREE "${SMART_DRONE_NATIVE_ROOT}" FILES

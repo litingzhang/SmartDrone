@@ -1,0 +1,8 @@
+flowchart LR
+  fanout_source["type=TestFanoutSourceTask; trigger=periodic; interval_ms=1"]
+  left_forward["type=TestForwardTask; trigger=any_queue_ready"]
+  join_sink["type=TestAllInputsSinkTask; trigger=all_queue_ready"]
+
+  fanout_source -->|"type=TestPacket; depth=8; overflow=drop_newest"| left_forward
+  fanout_source -->|"type=TestPacket; depth=8; overflow=drop_newest"| join_sink
+  left_forward -->|"type=TestPacket; depth=8; overflow=drop_newest"| join_sink

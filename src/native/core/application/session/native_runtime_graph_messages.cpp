@@ -1,0 +1,24 @@
+#include "core/application/session/native_runtime_graph_messages.h"
+
+namespace smartdrone::core::application {
+
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(NativeSlamResourceReady, "NativeSlamResourceReady")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(NativeSlamTick, "NativeSlamTick")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(NativeSlamFrameReady, "NativeSlamFrameReady")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(NativeSlamPreparedFrame, "NativeSlamPreparedFrame")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(NativeSlamTrackedFrame, "NativeSlamTrackedFrame")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(NativeSlamPublishedFrame, "NativeSlamPublishedFrame")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(NativeSlamStatus, "NativeSlamStatus")
+
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(CalibResourceReady, "CalibResourceReady")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(NativeCalibTick, "NativeCalibTick")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(CalibStereoFrame, "CalibStereoFrame")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(CalibSavePair, "CalibSavePair")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(CalibCaptureDone, "CalibCaptureDone")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(CalibStorageStatus, "CalibStorageStatus")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(CalibImuStatus, "CalibImuStatus")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(CalibPreviewStatus, "CalibPreviewStatus")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(CalibFlushRequest, "CalibFlushRequest")
+SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(NativeCalibStatus, "NativeCalibStatus")
+
+} // namespace smartdrone::core::application

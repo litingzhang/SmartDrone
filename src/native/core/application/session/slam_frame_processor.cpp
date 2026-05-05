@@ -171,9 +171,10 @@ FeatureFrontend ParseRuntimeFeatureFrontendValue(uint8_t value)
 
 SlamFrameProcessor::SlamFrameProcessor(Context &context, State &state) : m_ctx(context), m_state(state) {}
 
-SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessionOk)
+SlamFrameProcessor::StepResult SlamFrameProcessor::AcquireAndPrepareFrame(bool &sessionOk, PreparedFrame &frame)
 {
-    const auto frameStartTp = std::chrono::steady_clock::now();
+    frame = PreparedFrame{};
+    frame.frameStartTp = std::chrono::steady_clock::now();
     const auto configuredSlamMode = static_cast<smartdrone::core::domain::SlamOperationMode>(
         m_ctx.tuning.slamOperationMode.load(std::memory_order_relaxed));
     if (configuredSlamMode != m_state.requestedSlamMode) {
@@ -335,6 +336,54 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         sendMap &&
         (captureTimestampNs - m_state.lastPointCloudUpdateNs) >= kPointCloudUpdateIntervalNs;
 
+    frame.acquireStartTp = acquireStartTp;
+    frame.acquireEndTp = acquireEndTp;
+    frame.imuStartTp = imuStartTp;
+    frame.imuEndTp = imuEndTp;
+    frame.stereoBatch = std::move(stereoBatch);
+    frame.slamInput = std::move(slamInput);
+    frame.configuredSlamInputFps = configuredSlamInputFps;
+    frame.effectiveSlamInputFps = effectiveSlamInputFps;
+    frame.sendImage = sendImage;
+    frame.sendFeature = sendFeature;
+    frame.sendMap = sendMap;
+    frame.pairDtMs = pairDtMs;
+    frame.rejectDtMs = rejectDtMs;
+    frame.dropUnpairedL = dropUnpairedL;
+    frame.dropUnpairedR = dropUnpairedR;
+    frame.pendingL = pendingL;
+    frame.pendingR = pendingR;
+    frame.captureTimestampNs = captureTimestampNs;
+    frame.logicalFrameTimestampNs = logicalFrameTimestampNs;
+    frame.frameTime = frameTime;
+    frame.frameGapMs = frameGapMs;
+    frame.monoStepMs = monoStepMs;
+    frame.meanL = meanL;
+    frame.stdL = stdL;
+    frame.meanR = meanR;
+    frame.stdR = stdR;
+    frame.sharpL = sharpL;
+    frame.sharpR = sharpR;
+    frame.debugRightOnlyFeatures = debugRightOnlyFeatures;
+    frame.extractFeatures = extractFeatures;
+    frame.updatePointCloud = updatePointCloud;
+    return StepResult::Continue;
+}
+
+SlamFrameProcessor::StepResult SlamFrameProcessor::TrackPreparedFrame(std::shared_ptr<PreparedFrame> frame,
+                                                                      TrackedFrame &tracked)
+{
+    if (!frame) {
+        return StepResult::Continue;
+    }
+    auto &stereoBatch = frame->stereoBatch;
+    auto &slamInput = frame->slamInput;
+    auto &L = stereoBatch.stereo.left;
+    auto &R = stereoBatch.stereo.right;
+    const bool debugRightOnlyFeatures = frame->debugRightOnlyFeatures;
+    const bool extractFeatures = frame->extractFeatures;
+    const bool updatePointCloud = frame->updatePointCloud;
+
     const auto slamStartTp = std::chrono::steady_clock::now();
     const uint64_t slamInputTimestampNs = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(slamStartTp.time_since_epoch()).count());
@@ -353,31 +402,48 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         std::chrono::duration_cast<std::chrono::nanoseconds>(slamEndTp.time_since_epoch()).count());
     m_ctx.frameTimingTracker.MarkSlamOut(slamInput.frameId, slamOutputTimestampNs);
 
-    const auto cloudStartTp = std::chrono::steady_clock::now();
-    size_t pointCount = 0;
-    if (m_ctx.aliases.udpEnable && (sendImage || sendFeature || sendMap)) {
-        if (updatePointCloud) {
-            m_ctx.livePose.UpdatePointCloud(slamOutput.pointCloudXyz);
-            m_state.lastPointCloudUpdateNs = captureTimestampNs;
-        }
-        pointCount = slamOutput.pointCloudXyz.size() / 3;
-    }
-    const auto cloudEndTp = std::chrono::steady_clock::now();
+    tracked.frame = std::move(frame);
+    tracked.slamOutput = std::move(slamOutput);
+    tracked.slamStartTp = slamStartTp;
+    tracked.slamEndTp = slamEndTp;
+    return StepResult::Continue;
+}
 
-    const auto udpStartTp = std::chrono::steady_clock::now();
-    if (m_ctx.aliases.udpEnable && (sendImage || sendFeature || sendMap)) {
-        if (m_ctx.monoMode) {
-            m_ctx.udpSender.Enqueue(1, slamOutput.frameId, R.sequence, frameTime, R.gray, slamOutput.rightFeatures,
-                                    sendImage, sendFeature);
-        } else {
-            m_ctx.udpSender.Enqueue(0, slamOutput.frameId, L.sequence, frameTime, L.gray, slamOutput.leftFeatures,
-                                    sendImage, sendFeature);
-            m_ctx.udpSender.Enqueue(1, slamOutput.frameId, R.sequence, frameTime, R.gray, slamOutput.rightFeatures,
-                                    sendImage, sendFeature);
-        }
+SlamFrameProcessor::StepResult SlamFrameProcessor::PostprocessTrackedFrame(std::shared_ptr<TrackedFrame> tracked,
+                                                                          PublishedFrame &published)
+{
+    if (!tracked || !tracked->frame) {
+        return StepResult::Continue;
     }
-    const auto udpEndTp = std::chrono::steady_clock::now();
-
+    auto &frame = *tracked->frame;
+    auto &stereoBatch = frame.stereoBatch;
+    auto &slamInput = frame.slamInput;
+    auto &L = stereoBatch.stereo.left;
+    auto &R = stereoBatch.stereo.right;
+    auto &slamOutput = tracked->slamOutput;
+    const auto frameStartTp = frame.frameStartTp;
+    const auto acquireStartTp = frame.acquireStartTp;
+    const auto acquireEndTp = frame.acquireEndTp;
+    const auto imuStartTp = frame.imuStartTp;
+    const auto imuEndTp = frame.imuEndTp;
+    const auto slamStartTp = tracked->slamStartTp;
+    const auto slamEndTp = tracked->slamEndTp;
+    const bool sendMap = frame.sendMap;
+    const int64_t pairDtMs = frame.pairDtMs;
+    const double rejectDtMs = frame.rejectDtMs;
+    const uint64_t dropUnpairedL = frame.dropUnpairedL;
+    const uint64_t dropUnpairedR = frame.dropUnpairedR;
+    const size_t pendingL = frame.pendingL;
+    const size_t pendingR = frame.pendingR;
+    const int64_t captureTimestampNs = frame.captureTimestampNs;
+    const int64_t logicalFrameTimestampNs = frame.logicalFrameTimestampNs;
+    const double frameGapMs = frame.frameGapMs;
+    const double monoStepMs = frame.monoStepMs;
+    const double stdL = frame.stdL;
+    const double stdR = frame.stdR;
+    const double sharpL = frame.sharpL;
+    const double sharpR = frame.sharpR;
+    const bool debugRightOnlyFeatures = frame.debugRightOnlyFeatures;
     const int state = debugRightOnlyFeatures ? ORB_SLAM3::Tracking::LOST : slamOutput.trackingState;
     const bool trackingUsable = !debugRightOnlyFeatures && IsTrackingPoseUsable(state);
     m_state.lastTrackingState = state;
@@ -442,23 +508,6 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
         ComposeResetMapCount(m_state.sessionResetMapCountBase, poseResult.resetMapCount);
     const auto postEndTp = std::chrono::steady_clock::now();
 
-    const auto livePoseStartTp = std::chrono::steady_clock::now();
-    const bool livePoseValid = slamOutput.poseValid && poseResult.poseEstimate.valid && trackingUsable &&
-                               poseResult.quality != smartdrone::core::ports::PoseQuality::Lost;
-    m_ctx.livePose.UpdatePose(RUNTIME_MODE_SLAM, static_cast<uint8_t>(state), effectiveResetCounter,
-                              effectiveResetMapCount, poseResult.alignedPose,
-                              poseResult.quality == smartdrone::core::ports::PoseQuality::Good ? OdomQualityMode::GOOD
-                              : poseResult.quality == smartdrone::core::ports::PoseQuality::Weak
-                                  ? OdomQualityMode::WEAK
-                                  : OdomQualityMode::LOST,
-                              livePoseValid);
-    const auto livePoseEndTp = std::chrono::steady_clock::now();
-
-    const auto publishStartTp = std::chrono::steady_clock::now();
-    m_ctx.posePublisher.PublishPose(slamOutput.frameId, poseResult.poseEstimate, poseResult.velocityEstimate,
-                                    effectiveResetCounter, effectiveResetMapCount, state, poseResult.quality);
-    const auto publishEndTp = std::chrono::steady_clock::now();
-
     if (m_state.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
         const auto autoEffectiveMode =
             m_ctx.autoSlamModeController.Observe(trackingUsable, poseResult.quality, frameGapMs,
@@ -474,6 +523,179 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
                       << " frame_gap_ms=" << frameGapMs << "\n";
         }
     }
+
+    published.frame = std::move(tracked);
+    published.poseResult = poseResult;
+    published.cloudStartTp = postEndTp;
+    published.cloudEndTp = postEndTp;
+    published.udpStartTp = postEndTp;
+    published.udpEndTp = postEndTp;
+    published.postStartTp = postStartTp;
+    published.postEndTp = postEndTp;
+    published.livePoseStartTp = postEndTp;
+    published.livePoseEndTp = postEndTp;
+    published.publishStartTp = postEndTp;
+    published.publishEndTp = postEndTp;
+    published.pointCount = sendMap ? slamOutput.pointCloudXyz.size() / 3 : 0;
+    published.trackingState = state;
+    published.trackingUsable = trackingUsable;
+    published.effectiveResetCounter = effectiveResetCounter;
+    published.effectiveResetMapCount = effectiveResetMapCount;
+    return StepResult::Continue;
+}
+
+SlamFrameProcessor::StepResult SlamFrameProcessor::PublishTrackedFrame(std::shared_ptr<TrackedFrame> tracked,
+                                                                       PublishedFrame &published)
+{
+    return PostprocessTrackedFrame(std::move(tracked), published);
+}
+
+SlamFrameProcessor::StepResult SlamFrameProcessor::EmitPointCloud(PublishedFrame &published)
+{
+    if (!published.frame || !published.frame->frame) {
+        return StepResult::Continue;
+    }
+    auto &tracked = *published.frame;
+    auto &frame = *tracked.frame;
+    auto &slamOutput = tracked.slamOutput;
+    const bool sendImage = frame.sendImage;
+    const bool sendFeature = frame.sendFeature;
+    const bool sendMap = frame.sendMap;
+    const bool updatePointCloud = frame.updatePointCloud;
+
+    const auto cloudStartTp = std::chrono::steady_clock::now();
+    size_t pointCount = 0;
+    if (m_ctx.aliases.udpEnable && (sendImage || sendFeature || sendMap)) {
+        if (updatePointCloud) {
+            m_ctx.livePose.UpdatePointCloud(slamOutput.pointCloudXyz);
+            m_state.lastPointCloudUpdateNs = frame.captureTimestampNs;
+        }
+        pointCount = slamOutput.pointCloudXyz.size() / 3;
+    }
+    published.cloudStartTp = cloudStartTp;
+    published.cloudEndTp = std::chrono::steady_clock::now();
+    published.pointCount = pointCount;
+    return StepResult::Continue;
+}
+
+SlamFrameProcessor::StepResult SlamFrameProcessor::EmitLivePose(PublishedFrame &published)
+{
+    if (!published.frame || !published.frame->frame) {
+        return StepResult::Continue;
+    }
+    auto &tracked = *published.frame;
+    auto &slamOutput = tracked.slamOutput;
+    const auto &poseResult = published.poseResult;
+    const auto livePoseStartTp = std::chrono::steady_clock::now();
+    const bool livePoseValid = slamOutput.poseValid && poseResult.poseEstimate.valid && published.trackingUsable &&
+                               poseResult.quality != smartdrone::core::ports::PoseQuality::Lost;
+    m_ctx.livePose.UpdatePose(RUNTIME_MODE_SLAM, static_cast<uint8_t>(published.trackingState),
+                              published.effectiveResetCounter, published.effectiveResetMapCount,
+                              poseResult.alignedPose,
+                              poseResult.quality == smartdrone::core::ports::PoseQuality::Good ? OdomQualityMode::GOOD
+                              : poseResult.quality == smartdrone::core::ports::PoseQuality::Weak
+                                  ? OdomQualityMode::WEAK
+                                  : OdomQualityMode::LOST,
+                              livePoseValid);
+    published.livePoseStartTp = livePoseStartTp;
+    published.livePoseEndTp = std::chrono::steady_clock::now();
+    return StepResult::Continue;
+}
+
+SlamFrameProcessor::StepResult SlamFrameProcessor::EmitMavlink(PublishedFrame &published)
+{
+    if (!published.frame || !published.frame->frame) {
+        return StepResult::Continue;
+    }
+    auto &tracked = *published.frame;
+    auto &slamOutput = tracked.slamOutput;
+    const auto &poseResult = published.poseResult;
+    const auto publishStartTp = std::chrono::steady_clock::now();
+    m_ctx.posePublisher.PublishPose(slamOutput.frameId, poseResult.poseEstimate, poseResult.velocityEstimate,
+                                    published.effectiveResetCounter, published.effectiveResetMapCount,
+                                    published.trackingState, poseResult.quality);
+    published.publishStartTp = publishStartTp;
+    published.publishEndTp = std::chrono::steady_clock::now();
+    return StepResult::Continue;
+}
+
+SlamFrameProcessor::StepResult SlamFrameProcessor::EmitUdp(PublishedFrame &published)
+{
+    if (!published.frame || !published.frame->frame) {
+        return StepResult::Continue;
+    }
+    auto &tracked = *published.frame;
+    auto &frame = *tracked.frame;
+    auto &stereoBatch = frame.stereoBatch;
+    auto &slamOutput = tracked.slamOutput;
+    auto &L = stereoBatch.stereo.left;
+    auto &R = stereoBatch.stereo.right;
+    const bool sendImage = frame.sendImage;
+    const bool sendFeature = frame.sendFeature;
+    const bool sendMap = frame.sendMap;
+    const double frameTime = frame.frameTime;
+
+    const auto udpStartTp = std::chrono::steady_clock::now();
+    if (m_ctx.aliases.udpEnable && (sendImage || sendFeature || sendMap)) {
+        if (m_ctx.monoMode) {
+            m_ctx.udpSender.Enqueue(1, slamOutput.frameId, R.sequence, frameTime, R.gray, slamOutput.rightFeatures,
+                                    sendImage, sendFeature);
+        } else {
+            m_ctx.udpSender.Enqueue(0, slamOutput.frameId, L.sequence, frameTime, L.gray, slamOutput.leftFeatures,
+                                    sendImage, sendFeature);
+            m_ctx.udpSender.Enqueue(1, slamOutput.frameId, R.sequence, frameTime, R.gray, slamOutput.rightFeatures,
+                                    sendImage, sendFeature);
+        }
+    }
+    published.udpStartTp = udpStartTp;
+    published.udpEndTp = std::chrono::steady_clock::now();
+    return StepResult::Continue;
+}
+
+SlamFrameProcessor::StepResult SlamFrameProcessor::EmitDfx(PublishedFrame &published)
+{
+    if (!published.frame || !published.frame->frame) {
+        return StepResult::Continue;
+    }
+    auto &tracked = *published.frame;
+    auto &frame = *tracked.frame;
+    auto &slamInput = frame.slamInput;
+    auto &slamOutput = tracked.slamOutput;
+    const auto frameStartTp = frame.frameStartTp;
+    const auto acquireStartTp = frame.acquireStartTp;
+    const auto acquireEndTp = frame.acquireEndTp;
+    const auto imuStartTp = frame.imuStartTp;
+    const auto imuEndTp = frame.imuEndTp;
+    const auto slamStartTp = tracked.slamStartTp;
+    const auto slamEndTp = tracked.slamEndTp;
+    const auto cloudStartTp = published.cloudStartTp;
+    const auto cloudEndTp = published.cloudEndTp;
+    const auto udpStartTp = published.udpStartTp;
+    const auto udpEndTp = published.udpEndTp;
+    const auto postStartTp = published.postStartTp;
+    const auto postEndTp = published.postEndTp;
+    const auto livePoseStartTp = published.livePoseStartTp;
+    const auto livePoseEndTp = published.livePoseEndTp;
+    const auto publishStartTp = published.publishStartTp;
+    const auto publishEndTp = published.publishEndTp;
+    const auto &poseResult = published.poseResult;
+    const int state = published.trackingState;
+    const uint8_t effectiveResetCounter = published.effectiveResetCounter;
+    const uint16_t effectiveResetMapCount = published.effectiveResetMapCount;
+    const int64_t logicalFrameTimestampNs = frame.logicalFrameTimestampNs;
+    const int64_t pairDtMs = frame.pairDtMs;
+    const double rejectDtMs = frame.rejectDtMs;
+    const uint64_t dropUnpairedL = frame.dropUnpairedL;
+    const uint64_t dropUnpairedR = frame.dropUnpairedR;
+    const size_t pendingL = frame.pendingL;
+    const size_t pendingR = frame.pendingR;
+    const double frameGapMs = frame.frameGapMs;
+    const double monoStepMs = frame.monoStepMs;
+    const double stdL = frame.stdL;
+    const double stdR = frame.stdR;
+    const double sharpL = frame.sharpL;
+    const double sharpR = frame.sharpR;
+    const size_t pointCount = published.pointCount;
 
     ++m_state.frameIndex;
     m_state.lastPublishedFrameNs = logicalFrameTimestampNs;
@@ -567,6 +789,55 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessio
     m_state.smoothedTotalMs = UpdateEma(m_state.smoothedTotalMs, totalMs);
 
     return StepResult::Continue;
+}
+
+SlamFrameProcessor::StepResult SlamFrameProcessor::PublishTrackedFrame(TrackedFrame &tracked, bool &sessionOk)
+{
+    (void)sessionOk;
+    PublishedFrame published;
+    auto trackedPtr = std::make_shared<TrackedFrame>(std::move(tracked));
+    const StepResult publishResult = PublishTrackedFrame(std::move(trackedPtr), published);
+    if (publishResult != StepResult::Continue || !published.frame) {
+        return publishResult;
+    }
+    const StepResult pointCloudResult = EmitPointCloud(published);
+    if (pointCloudResult != StepResult::Continue) {
+        return pointCloudResult;
+    }
+    const StepResult livePoseResult = EmitLivePose(published);
+    if (livePoseResult != StepResult::Continue) {
+        return livePoseResult;
+    }
+    const StepResult mavlinkResult = EmitMavlink(published);
+    if (mavlinkResult != StepResult::Continue) {
+        return mavlinkResult;
+    }
+    const StepResult udpResult = EmitUdp(published);
+    if (udpResult != StepResult::Continue) {
+        return udpResult;
+    }
+    return EmitDfx(published);
+}
+
+SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessPreparedFrame(PreparedFrame &frame, bool &sessionOk)
+{
+    auto framePtr = std::make_shared<PreparedFrame>(std::move(frame));
+    TrackedFrame tracked;
+    const StepResult trackResult = TrackPreparedFrame(std::move(framePtr), tracked);
+    if (trackResult != StepResult::Continue || !tracked.frame) {
+        return trackResult;
+    }
+    return PublishTrackedFrame(tracked, sessionOk);
+}
+
+SlamFrameProcessor::StepResult SlamFrameProcessor::ProcessNextFrame(bool &sessionOk)
+{
+    PreparedFrame frame;
+    const StepResult acquireResult = AcquireAndPrepareFrame(sessionOk, frame);
+    if (acquireResult != StepResult::Continue || frame.slamInput.frameId == 0) {
+        return acquireResult;
+    }
+    return ProcessPreparedFrame(frame, sessionOk);
 }
 
 } // namespace smartdrone::core::application

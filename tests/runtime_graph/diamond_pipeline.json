@@ -1,0 +1,62 @@
+{
+  "queues": [
+    {
+      "name": "left_packets",
+      "type": "TestPacket",
+      "depth": 8,
+      "overflow": "drop_newest"
+    },
+    {
+      "name": "right_packets",
+      "type": "TestPacket",
+      "depth": 8,
+      "overflow": "drop_newest"
+    },
+    {
+      "name": "forwarded_left_packets",
+      "type": "TestPacket",
+      "depth": 8,
+      "overflow": "drop_newest"
+    }
+  ],
+  "tasks": [
+    {
+      "name": "fanout_source",
+      "type": "TestFanoutSourceTask",
+      "trigger": {
+        "mode": "periodic",
+        "interval_ms": 1
+      },
+      "outputs": {
+        "left": "left_packets",
+        "right": "right_packets"
+      }
+    },
+    {
+      "name": "left_forward",
+      "type": "TestForwardTask",
+      "trigger": {
+        "mode": "any_queue_ready",
+        "queues": ["left_packets"]
+      },
+      "inputs": {
+        "in": "left_packets"
+      },
+      "outputs": {
+        "out": "forwarded_left_packets"
+      }
+    },
+    {
+      "name": "join_sink",
+      "type": "TestAllInputsSinkTask",
+      "trigger": {
+        "mode": "all_queue_ready",
+        "queues": ["forwarded_left_packets", "right_packets"]
+      },
+      "inputs": {
+        "left": "forwarded_left_packets",
+        "right": "right_packets"
+      }
+    }
+  ]
+}

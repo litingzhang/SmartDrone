@@ -135,6 +135,7 @@ CALIB_YAML="$ARTIFACT_ROOT/config/stereo_inertial.yaml"
 STEREO_YAML="$ARTIFACT_ROOT/config/stereo.yaml"
 MONO_YAML="$ARTIFACT_ROOT/config/mono_right.yaml"
 MONO_IMU_YAML="$ARTIFACT_ROOT/config/mono_inertial_right.yaml"
+RUNTIME_GRAPH_CONFIG_DIR="$ARTIFACT_ROOT/config/runtime_graph"
 ORBVOC_FILE="$ARTIFACT_ROOT/ORBvoc.txt"
 SSH_PASSWORD="${SSH_PASSWORD:-}"
 SSH_CMD=(ssh)
@@ -264,6 +265,9 @@ if [ "$ADB_ONLY" != "1" ]; then
         upload_atomic "$STEREO_YAML" "config/stereo.yaml"
         upload_atomic "$MONO_YAML" "config/mono_right.yaml"
         upload_atomic "$MONO_IMU_YAML" "config/mono_inertial_right.yaml"
+        if [ -d "$RUNTIME_GRAPH_CONFIG_DIR" ]; then
+            upload_dir_atomic "$RUNTIME_GRAPH_CONFIG_DIR" "config/runtime_graph"
+        fi
         if [ -f "$ORBVOC_FILE" ]; then
             upload_atomic "$ORBVOC_FILE" "ORBvoc.txt"
         fi

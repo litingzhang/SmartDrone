@@ -335,6 +335,11 @@ sync_native_artifacts() {
             copy_artifact "$REPO_ROOT/config/$cfg" "$config_dir/$cfg"
         fi
     done
+    if [ -d "$REPO_ROOT/config/runtime_graph" ]; then
+        rm -rf "$config_dir/runtime_graph"
+        mkdir -p "$config_dir/runtime_graph"
+        cp -f "$REPO_ROOT"/config/runtime_graph/*.md "$config_dir/runtime_graph/" 2>/dev/null || true
+    fi
 
     local scripts_dir="$NATIVE_ARTIFACTS_DIR/scripts"
     mkdir -p "$scripts_dir"
