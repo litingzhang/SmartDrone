@@ -1,0 +1,16 @@
+digraph ChainPipeline {
+  subgraph cluster_test_graph {
+    label="Chain Pipeline";
+
+    source [label="{source|type=TestSourceTask|trigger=periodic|interval_ms=1}"];
+    forward [label="{forward|type=TestForwardTask|trigger=any_queue_ready}"];
+    sink [label="{sink|type=TestSinkTask|trigger=any_queue_ready}"];
+
+    source -> forward [
+      taillabel="0", headlabel="0", label="TestPacket\ndepth=8\noverflow=drop_newest"
+    ];
+    forward -> sink [
+      taillabel="0", headlabel="0", label="TestPacket\ndepth=8\noverflow=drop_newest"
+    ];
+  }
+}

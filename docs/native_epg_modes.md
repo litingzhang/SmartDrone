@@ -1,4 +1,4 @@
-# SmartDrone Native Runtime Graph Modes
+# SmartDrone Native EventPipelineGraph Modes
 
 This document records the native runtime migration shape for the three exposed runtime modes:
 
@@ -6,24 +6,24 @@ This document records the native runtime migration shape for the three exposed r
 - `Slam`
 - `Calib`
 
-The native runtime uses runtime_graph at two levels:
+The native runtime uses epg at two levels:
 
 - `RuntimeSessionSupervisor` is driven by a small periodic graph task for mode/session orchestration.
 - Active `Slam` and `Calib` sessions are delegated to graph-backed session runners.
 
-The only maintained topology file is `config/runtime_graph/native_runtime_topology.md`. It must show only implemented runtime_graph tasks and queues, not future target nodes. The currently implemented supervisor/session graphs are assembled in C++ `RuntimeGraphConfig` objects.
+The only maintained topology file is `config/epg/native_epg_topology.dot`. It must show only implemented epg tasks and queues, not future target nodes. The currently implemented supervisor/session graphs are assembled in C++ `GraphConfig` objects.
 
 ## Mode Dispatch Graph
 
-`UnifiedRuntimeController` still owns the public API and config mutation. `RuntimeSessionSupervisor` now runs its orchestration step through runtime_graph instead of a hand-written worker loop.
+`UnifiedRuntimeController` still owns the public API and config mutation. `RuntimeSessionSupervisor` now runs its orchestration step through epg instead of a hand-written worker loop.
 
-See `config/runtime_graph/native_runtime_topology.md` for the maintained topology. That diagram uses queue metadata only on edges, omits queue names, and contains no task port suffixes or implicit Mermaid nodes.
+See `config/epg/native_epg_topology.dot` for the maintained topology. That diagram uses queue metadata only on edges, omits queue names, and contains no task port suffixes or implicit Mermaid nodes.
 
 `Idle` remains a zero-work state: no hardware session thread is active, and the supervisor graph only polls for mode changes, restart requests, and shutdown.
 
 ## SLAM Graph
 
-SLAM is graph-backed by a C++-assembled runtime_graph. The maintained visual topology is only `config/runtime_graph/native_runtime_topology.md`.
+SLAM is graph-backed by a C++-assembled epg. The maintained visual topology is only `config/epg/native_epg_topology.dot`.
 
 Current responsibility split:
 
@@ -44,7 +44,7 @@ These tasks share the existing `SlamFrameProcessor` state through a guarded proc
 
 ## Calibration Graph
 
-Calibration is graph-backed through a C++-assembled runtime_graph. The maintained visual topology is only `config/runtime_graph/native_runtime_topology.md`.
+Calibration is graph-backed through a C++-assembled epg. The maintained visual topology is only `config/epg/native_epg_topology.dot`.
 
 Current responsibility split:
 

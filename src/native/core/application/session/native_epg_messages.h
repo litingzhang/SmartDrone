@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-#include "common/runtime_graph/runtime_graph.h"
+#include "common/epg/epg.h"
 #include "core/application/session/slam_frame_processor.h"
 #include "core/application/session/slam_session_runtime.h"
 #include "core/ports/camera_provider.h"

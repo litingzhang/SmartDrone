@@ -1,13 +1,13 @@
 {
   "queues": [
     {
-      "name": "left_packets",
+      "name": "source_to_forward",
       "type": "TestPacket",
       "depth": 8,
       "overflow": "drop_newest"
     },
     {
-      "name": "right_packets",
+      "name": "forward_to_sink",
       "type": "TestPacket",
       "depth": 8,
       "overflow": "drop_newest"
@@ -15,37 +15,35 @@
   ],
   "tasks": [
     {
-      "name": "fanout_source",
-      "type": "TestFanoutSourceTask",
+      "name": "source",
+      "type": "TestSourceTask",
       "trigger": {
         "mode": "periodic",
         "interval_ms": 1
       },
-      "outputs": {
-        "left": "left_packets",
-        "right": "right_packets"
+      "outputs": {"0": "source_to_forward"
       }
     },
     {
-      "name": "left_sink",
-      "type": "TestSinkTask",
+      "name": "forward",
+      "type": "TestForwardTask",
       "trigger": {
         "mode": "any_queue_ready",
-        "queues": ["left_packets"]
+        "queues": ["source_to_forward"]
       },
-      "inputs": {
-        "in": "left_packets"
+      "inputs": {"0": "source_to_forward"
+      },
+      "outputs": {"0": "forward_to_sink"
       }
     },
     {
-      "name": "right_sink",
+      "name": "sink",
       "type": "TestSinkTask",
       "trigger": {
         "mode": "any_queue_ready",
-        "queues": ["right_packets"]
+        "queues": ["forward_to_sink"]
       },
-      "inputs": {
-        "in": "right_packets"
+      "inputs": {"0": "forward_to_sink"
       }
     }
   ]

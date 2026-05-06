@@ -1,4 +1,4 @@
-#include "common/runtime_graph/runtime_graph.h"
+#include "common/epg/epg.h"
 
 #include <algorithm>
 #include <cctype>
@@ -7,8 +7,7 @@
 #include <set>
 #include <sstream>
 
-namespace smartdrone {
-namespace runtime_graph {
+namespace epg {
 namespace {
 
 std::string Trim(const std::string& value) {
@@ -23,24 +22,6 @@ std::string Trim(const std::string& value) {
     }
 
     return std::string(begin, end);
-}
-
-std::string ToLower(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return value;
-}
-
-bool PeerNameMatchesPort(const std::string& peerNode, const std::string& portName) {
-    const auto peer = ToLower(peerNode);
-    const auto port = ToLower(portName);
-    if (peer.find(port) != std::string::npos) {
-        return true;
-    }
-    if (port.size() >= 4 && port.back() == 'e') {
-        return peer.find(port.substr(0, port.size() - 1)) != std::string::npos;
-    }
-    return false;
 }
 
 std::string StripQuotes(std::string value) {
@@ -163,7 +144,12 @@ TriggerMode ParseMermaidTriggerMode(const std::string& value) {
 
 std::size_t ParseSize(const std::string& value, const std::string& field) {
     std::size_t parsedChars = 0;
-    const auto parsed = std::stoul(value, &parsedChars, 10);
+    std::size_t parsed = 0;
+    try {
+        parsed = std::stoul(value, &parsedChars, 10);
+    } catch (const std::exception&) {
+        throw std::runtime_error("Mermaid numeric field is invalid: " + field + "=" + value);
+    }
     if (parsedChars != value.size()) {
         throw std::runtime_error("Mermaid numeric field is invalid: " + field + "=" + value);
     }
@@ -197,7 +183,8 @@ std::string SanitizeQueueName(std::string value) {
 
 struct Endpoint {
     std::string node;
-    std::string port;
+    PortId port{};
+    bool hasPort{false};
 };
 
 Endpoint ParseEndpoint(const std::string& value) {
@@ -207,16 +194,19 @@ Endpoint ParseEndpoint(const std::string& value) {
         if (endpoint.empty()) {
             throw std::runtime_error("Mermaid edge endpoint must not be empty");
         }
-        return Endpoint{endpoint, ""};
+        return Endpoint{endpoint, 0, false};
     }
     if (pos == 0 || pos + 1 >= endpoint.size()) {
         throw std::runtime_error("Mermaid edge endpoint must be node.port: " + endpoint);
     }
-    return Endpoint{endpoint.substr(0, pos), endpoint.substr(pos + 1)};
+    return Endpoint{endpoint.substr(0, pos),
+                    static_cast<PortId>(ParseSize(endpoint.substr(pos + 1), "port")),
+                    true};
 }
 
 std::string AutoQueueName(const Endpoint& from, const Endpoint& to) {
-    return SanitizeQueueName(from.node + "_" + from.port + "_to_" + to.node + "_" + to.port);
+    return SanitizeQueueName(from.node + "_" + std::to_string(from.port) +
+                             "_to_" + to.node + "_" + std::to_string(to.port));
 }
 
 TaskConfig ParseNodeLine(const std::string& line) {
@@ -259,6 +249,16 @@ struct EdgeConfig {
     QueueConfig queue;
 };
 
+bool ParsePortPairField(const std::string& field, PortId& from, PortId& to) {
+    const auto arrow = field.find("->");
+    if (arrow == std::string::npos) {
+        return false;
+    }
+    from = static_cast<PortId>(ParseSize(Trim(field.substr(0, arrow)), "from_port"));
+    to = static_cast<PortId>(ParseSize(Trim(field.substr(arrow + 2)), "to_port"));
+    return true;
+}
+
 EdgeConfig ParseEdgeLine(const std::string& line) {
     const auto arrow = line.find("-->");
     if (arrow == std::string::npos) {
@@ -284,16 +284,29 @@ EdgeConfig ParseEdgeLine(const std::string& line) {
 
     edge.to = ParseEndpoint(right);
 
-    const auto fields = ParseFields(StripQuotes(label));
-    const auto fromIt = fields.find("from");
-    if (edge.from.port.empty() && fromIt != fields.end()) {
-        edge.from.port = fromIt->second;
-    }
-    const auto toIt = fields.find("to");
-    if (edge.to.port.empty() && toIt != fields.end()) {
-        edge.to.port = toIt->second;
+    const auto labelFields = SplitFields(NormalizeMermaidLabel(StripQuotes(label)));
+    std::vector<std::string> metadataFields;
+    for (const auto& field : labelFields) {
+        PortId fromPort = 0;
+        PortId toPort = 0;
+        if (ParsePortPairField(field, fromPort, toPort)) {
+            edge.from.port = fromPort;
+            edge.from.hasPort = true;
+            edge.to.port = toPort;
+            edge.to.hasPort = true;
+            continue;
+        }
+        metadataFields.push_back(field);
     }
 
+    std::ostringstream metadata;
+    for (std::size_t i = 0; i < metadataFields.size(); ++i) {
+        if (i != 0) {
+            metadata << ';';
+        }
+        metadata << metadataFields[i];
+    }
+    const auto fields = ParseFields(metadata.str());
     const auto nameIt = fields.find("name");
     if (nameIt != fields.end()) {
         edge.queue.name = nameIt->second;
@@ -304,7 +317,7 @@ EdgeConfig ParseEdgeLine(const std::string& line) {
     return edge;
 }
 
-const Registry::TaskTypeInfo& FindTaskTypeOrThrow(const Registry& registry,
+const Registry::TaskTypeInfo& FindTaskTypeOrThrow(Registry& registry,
                                                   const TaskConfig& task) {
     const auto* type = registry.FindTaskType(task.type);
     if (!type) {
@@ -325,13 +338,11 @@ std::vector<PortSpec> MatchingPorts(const std::vector<PortSpec>& ports,
     return result;
 }
 
-std::string InferPort(const std::vector<PortSpec>& declaredPorts,
-                      const std::set<std::string>& usedPorts,
-                      const std::string& messageType,
-                      const std::string& ownerNode,
-                      const std::string& peerNode,
-                      const std::string& peerPort,
-                      const std::string& direction) {
+PortId InferPort(const std::vector<PortSpec>& declaredPorts,
+                 const std::set<PortId>& usedPorts,
+                 const std::string& messageType,
+                 const std::string& ownerNode,
+                 const std::string& direction) {
     auto candidates = MatchingPorts(declaredPorts, messageType);
     if (candidates.empty()) {
         throw std::runtime_error("Mermaid cannot infer " + direction +
@@ -341,7 +352,7 @@ std::string InferPort(const std::vector<PortSpec>& declaredPorts,
 
     std::vector<PortSpec> unused;
     for (const auto& candidate : candidates) {
-        if (usedPorts.find(candidate.name) == usedPorts.end()) {
+        if (usedPorts.find(candidate.id) == usedPorts.end()) {
             unused.push_back(candidate);
         }
     }
@@ -350,42 +361,19 @@ std::string InferPort(const std::vector<PortSpec>& declaredPorts,
     }
 
     if (candidates.size() == 1) {
-        return candidates.front().name;
-    }
-
-    std::vector<PortSpec> peerPortMatches;
-    if (!peerPort.empty()) {
-        for (const auto& candidate : candidates) {
-            if (candidate.name == peerPort) {
-                peerPortMatches.push_back(candidate);
-            }
-        }
-        if (peerPortMatches.size() == 1) {
-            return peerPortMatches.front().name;
-        }
-    }
-
-    std::vector<PortSpec> peerNameMatches;
-    for (const auto& candidate : candidates) {
-        if (PeerNameMatchesPort(peerNode, candidate.name)) {
-            peerNameMatches.push_back(candidate);
-        }
-    }
-    if (peerNameMatches.size() == 1) {
-        return peerNameMatches.front().name;
+        return candidates.front().id;
     }
 
     throw std::runtime_error("Mermaid cannot infer " + direction +
-                             " port for node '" + ownerNode +
-                             "': specify from/to or make the graph unambiguous");
+                             " port for node '" + ownerNode + "': specify a numeric port pair");
 }
 
 void InferMissingPorts(EdgeConfig& edge,
-                       const RuntimeGraphConfig& config,
+                       const GraphConfig& config,
                        const std::map<std::string, std::size_t>& taskIndexByName,
-                       const Registry& registry,
-                       const std::map<std::string, std::set<std::string>>& usedOutputs,
-                       const std::map<std::string, std::set<std::string>>& usedInputs) {
+                       Registry& registry,
+                       const std::map<std::string, std::set<PortId>>& usedOutputs,
+                       const std::map<std::string, std::set<PortId>>& usedInputs) {
     const auto& fromTask = config.tasks.at(taskIndexByName.at(edge.from.node));
     const auto& toTask = config.tasks.at(taskIndexByName.at(edge.to.node));
     const auto& fromType = FindTaskTypeOrThrow(registry, fromTask);
@@ -393,27 +381,25 @@ void InferMissingPorts(EdgeConfig& edge,
 
     const auto fromUsedIt = usedOutputs.find(edge.from.node);
     const auto toUsedIt = usedInputs.find(edge.to.node);
-    const std::set<std::string> noUsedPorts;
+    const std::set<PortId> noUsedPorts;
     const auto& fromUsed = fromUsedIt == usedOutputs.end() ? noUsedPorts : fromUsedIt->second;
     const auto& toUsed = toUsedIt == usedInputs.end() ? noUsedPorts : toUsedIt->second;
 
-    if (edge.from.port.empty()) {
+    if (!edge.from.hasPort) {
         edge.from.port = InferPort(fromType.outputs,
                                    fromUsed,
                                    edge.queue.type,
                                    edge.from.node,
-                                   edge.to.node,
-                                   edge.to.port,
                                    "output");
+        edge.from.hasPort = true;
     }
-    if (edge.to.port.empty()) {
+    if (!edge.to.hasPort) {
         edge.to.port = InferPort(toType.inputs,
                                  toUsed,
                                  edge.queue.type,
                                  edge.to.node,
-                                 edge.from.node,
-                                 edge.from.port,
                                  "input");
+        edge.to.hasPort = true;
     }
 
     if (edge.queue.name.empty()) {
@@ -575,14 +561,16 @@ std::string ExtractMermaidSubgraphBlock(const std::string& mermaidText,
 
 } // namespace
 
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaidInternal(const std::string& mermaidText,
-                                                          const Registry* registry) {
-    RuntimeGraphConfig config;
+GraphConfig ParseGraphConfigMermaidInternal(const std::string& mermaidText,
+                                                          Registry* registry) {
+    GraphConfig config;
     std::map<std::string, std::size_t> taskIndexByName;
     std::set<std::string> queueNames;
-    std::map<std::string, std::set<std::string>> usedOutputs;
-    std::map<std::string, std::set<std::string>> usedInputs;
+    std::map<std::string, std::set<PortId>> usedOutputs;
+    std::map<std::string, std::set<PortId>> usedInputs;
     std::map<std::string, QueueConfig> queueByName;
+    std::map<std::string, std::vector<PortSpec>> graphInputsByTaskType;
+    std::map<std::string, std::vector<PortSpec>> graphOutputsByTaskType;
 
     std::istringstream input(ExtractMermaidBlock(mermaidText));
     std::string rawLine;
@@ -609,11 +597,11 @@ RuntimeGraphConfig ParseRuntimeGraphConfigMermaidInternal(const std::string& mer
             if (registry) {
                 InferMissingPorts(edge, config, taskIndexByName, *registry, usedOutputs, usedInputs);
             } else {
-                if (edge.from.port.empty()) {
-                    throw std::runtime_error("missing Mermaid field 'from' on " + edge.from.node);
+                if (!edge.from.hasPort) {
+                    throw std::runtime_error("missing Mermaid source port on " + edge.from.node);
                 }
-                if (edge.to.port.empty()) {
-                    throw std::runtime_error("missing Mermaid field 'to' on " + edge.to.node);
+                if (!edge.to.hasPort) {
+                    throw std::runtime_error("missing Mermaid target port on " + edge.to.node);
                 }
                 if (edge.queue.name.empty()) {
                     edge.queue.name = AutoQueueName(edge.from, edge.to);
@@ -628,13 +616,15 @@ RuntimeGraphConfig ParseRuntimeGraphConfigMermaidInternal(const std::string& mer
             queueByName[edge.queue.name] = edge.queue;
             auto& from = config.tasks[fromTask->second];
             auto& to = config.tasks[toTask->second];
+            graphOutputsByTaskType[from.type].push_back(PortSpec{edge.from.port, edge.queue.type});
+            graphInputsByTaskType[to.type].push_back(PortSpec{edge.to.port, edge.queue.type});
             if (!from.outputs.emplace(edge.from.port, edge.queue.name).second) {
                 throw std::runtime_error("Mermaid output port is connected more than once: " +
-                                         edge.from.node + "." + edge.from.port);
+                                         edge.from.node + "." + std::to_string(edge.from.port));
             }
             if (!to.inputs.emplace(edge.to.port, edge.queue.name).second) {
                 throw std::runtime_error("Mermaid input port is connected more than once: " +
-                                         edge.to.node + "." + edge.to.port);
+                                         edge.to.node + "." + std::to_string(edge.to.port));
             }
             usedOutputs[edge.from.node].insert(edge.from.port);
             usedInputs[edge.to.node].insert(edge.to.port);
@@ -653,56 +643,68 @@ RuntimeGraphConfig ParseRuntimeGraphConfigMermaidInternal(const std::string& mer
         task.trigger.queues = ResolveTriggerQueues(task, queueByName);
     }
 
+    if (registry) {
+        std::set<std::string> mergedTaskTypes;
+        for (const auto& task : config.tasks) {
+            if (!mergedTaskTypes.insert(task.type).second) {
+                continue;
+            }
+            registry->MergeTaskPorts(
+                task.type,
+                graphInputsByTaskType[task.type],
+                graphOutputsByTaskType[task.type]);
+        }
+    }
+
     return config;
 }
 
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaid(const std::string& mermaidText) {
-    return ParseRuntimeGraphConfigMermaidInternal(mermaidText, nullptr);
+GraphConfig ParseGraphConfigMermaid(const std::string& mermaidText) {
+    return ParseGraphConfigMermaidInternal(mermaidText, nullptr);
 }
 
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaid(const std::string& mermaidText,
-                                                  const Registry& registry) {
-    return ParseRuntimeGraphConfigMermaidInternal(mermaidText, &registry);
+GraphConfig ParseGraphConfigMermaid(const std::string& mermaidText,
+                                                  Registry& registry) {
+    return ParseGraphConfigMermaidInternal(mermaidText, &registry);
 }
 
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaidFile(const std::string& path) {
+GraphConfig ParseGraphConfigMermaidFile(const std::string& path) {
     std::ifstream input(path);
     if (!input) {
-        throw std::runtime_error("failed to open runtime graph Mermaid file: " + path);
+        throw std::runtime_error("failed to open EventPipelineGraph Mermaid file: " + path);
     }
     std::ostringstream buffer;
     buffer << input.rdbuf();
-    return ParseRuntimeGraphConfigMermaid(buffer.str());
+    return ParseGraphConfigMermaid(buffer.str());
 }
 
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaidFile(const std::string& path,
-                                                      const Registry& registry) {
+GraphConfig ParseGraphConfigMermaidFile(const std::string& path,
+                                                      Registry& registry) {
     std::ifstream input(path);
     if (!input) {
-        throw std::runtime_error("failed to open runtime graph Mermaid file: " + path);
+        throw std::runtime_error("failed to open EventPipelineGraph Mermaid file: " + path);
     }
     std::ostringstream buffer;
     buffer << input.rdbuf();
-    return ParseRuntimeGraphConfigMermaid(buffer.str(), registry);
+    return ParseGraphConfigMermaid(buffer.str(), registry);
 }
 
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaidSubgraph(const std::string& mermaidText,
+GraphConfig ParseGraphConfigMermaidSubgraph(const std::string& mermaidText,
                                                           const std::string& subgraphName,
-                                                          const Registry& registry) {
-    return ParseRuntimeGraphConfigMermaid(ExtractMermaidSubgraphBlock(mermaidText, subgraphName), registry);
+                                                          Registry& registry) {
+    return ParseGraphConfigMermaid(ExtractMermaidSubgraphBlock(mermaidText, subgraphName), registry);
 }
 
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaidSubgraphFile(const std::string& path,
+GraphConfig ParseGraphConfigMermaidSubgraphFile(const std::string& path,
                                                               const std::string& subgraphName,
-                                                              const Registry& registry) {
+                                                              Registry& registry) {
     std::ifstream input(path);
     if (!input) {
-        throw std::runtime_error("failed to open runtime graph Mermaid file: " + path);
+        throw std::runtime_error("failed to open EventPipelineGraph Mermaid file: " + path);
     }
     std::ostringstream buffer;
     buffer << input.rdbuf();
-    return ParseRuntimeGraphConfigMermaidSubgraph(buffer.str(), subgraphName, registry);
+    return ParseGraphConfigMermaidSubgraph(buffer.str(), subgraphName, registry);
 }
 
-} // namespace runtime_graph
-} // namespace smartdrone
+} // namespace epg

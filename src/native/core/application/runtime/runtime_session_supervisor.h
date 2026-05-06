@@ -10,7 +10,7 @@
 #include <thread>
 
 #include "adapters/telemetry/px4_mavlink_gateway.h"
-#include "common/runtime_graph/runtime_graph.h"
+#include "common/epg/epg.h"
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/mode_manager.h"
 #include "core/application/state/live_pose_state.h"
@@ -56,8 +56,8 @@ class RuntimeSessionSupervisor {
     bool m_sessionDone{false};
     bool m_stopping{false};
     std::atomic<bool> m_sessionStop{false};
-    smartdrone::runtime_graph::Registry m_graphRegistry;
-    std::unique_ptr<smartdrone::runtime_graph::RuntimeGraph> m_graph;
+    epg::Registry m_graphRegistry;
+    std::unique_ptr<epg::EventPipelineGraph> m_graph;
     std::thread m_session;
 };
 

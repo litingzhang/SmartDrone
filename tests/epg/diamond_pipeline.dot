@@ -1,0 +1,19 @@
+digraph DiamondPipeline {
+  subgraph cluster_test_graph {
+    label="Diamond Pipeline";
+
+    fanout_source [label="{fanout_source|type=TestFanoutSourceTask|trigger=periodic|interval_ms=1}"];
+    left_forward [label="{left_forward|type=TestForwardTask|trigger=any_queue_ready}"];
+    join_sink [label="{join_sink|type=TestAllInputsSinkTask|trigger=all_queue_ready}"];
+
+    fanout_source -> left_forward [
+      taillabel="0", headlabel="0", label="TestPacket\ndepth=8\noverflow=drop_newest"
+    ];
+    fanout_source -> join_sink [
+      taillabel="1", headlabel="1", label="TestPacket\ndepth=8\noverflow=drop_newest"
+    ];
+    left_forward -> join_sink [
+      taillabel="0", headlabel="0", label="TestPacket\ndepth=8\noverflow=drop_newest"
+    ];
+  }
+}

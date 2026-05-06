@@ -81,7 +81,7 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
 
     const std::string mavDev = GetEnvOrDefault("SMART_DRONE_MAVLINK_DEV", "/dev/ttyAMA0");
     const int mavBaud = GetEnvIntOrDefault("SMART_DRONE_MAVLINK_BAUD", 921600);
-    std::cerr << "[runtime] native_runtime_graph=on\n";
+    std::cerr << "[runtime] native_epg=on\n";
     Px4MavlinkGateway mav(mavDev, mavBaud);
     mav.SetJsonDiagnostics(cfg.app.runtime.jsonDiagnostics);
     mav.StartRx();

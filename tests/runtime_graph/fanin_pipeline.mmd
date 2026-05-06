@@ -1,7 +1,0 @@
-flowchart LR
-  left_source["type=TestSourceTask; trigger=periodic; interval_ms=1"]
-  right_source["type=TestSecondSourceTask; trigger=periodic; interval_ms=2"]
-  join_sink["type=TestAllInputsSinkTask; trigger=all_queue_ready"]
-
-  left_source -->|"type=TestPacket; depth=8; overflow=drop_newest"| join_sink
-  right_source -->|"type=TestPacket; depth=8; overflow=drop_newest"| join_sink

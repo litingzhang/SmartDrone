@@ -3,29 +3,30 @@ find_package(Threads REQUIRED)
 find_package(Eigen3 QUIET)
 
 if(ENABLE_UNIT_TESTS)
-  add_executable(runtime_graph_tests
-    runtime_graph/runtime_graph_test.cpp
-    ../src/native/common/runtime_graph/runtime_graph_context.cpp
-    ../src/native/common/runtime_graph/runtime_graph.cpp
-    ../src/native/common/runtime_graph/runtime_graph_json.cpp
-    ../src/native/common/runtime_graph/runtime_graph_mermaid.cpp
-    ../src/native/common/runtime_graph/runtime_graph_task_runner.cpp
+  add_executable(epg_tests
+    epg/epg_test.cpp
+    ../src/native/common/epg/epg_context.cpp
+    ../src/native/common/epg/epg.cpp
+    ../src/native/common/epg/epg_dot.cpp
+    ../src/native/common/epg/epg_json.cpp
+    ../src/native/common/epg/epg_mermaid.cpp
+    ../src/native/common/epg/epg_task_runner.cpp
   )
 
-  target_include_directories(runtime_graph_tests PRIVATE
+  target_include_directories(epg_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../src/native"
   )
 
-  target_compile_definitions(runtime_graph_tests PRIVATE
-    TEST_RUNTIME_GRAPH_DIR="${CMAKE_CURRENT_SOURCE_DIR}/runtime_graph"
+  target_compile_definitions(epg_tests PRIVATE
+    TEST_EPG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/epg"
   )
 
-  target_link_libraries(runtime_graph_tests PRIVATE
+  target_link_libraries(epg_tests PRIVATE
     GTest::gtest_main
     Threads::Threads
   )
 
-  add_test(NAME RuntimeGraphTests COMMAND runtime_graph_tests)
+  add_test(NAME EventPipelineGraphTests COMMAND epg_tests)
 endif()
 
 if(ENABLE_OFFLINE_REPLAY)

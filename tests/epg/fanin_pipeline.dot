@@ -1,0 +1,16 @@
+digraph FaninPipeline {
+  subgraph cluster_test_graph {
+    label="Fanin Pipeline";
+
+    left_source [label="{left_source|type=TestSourceTask|trigger=periodic|interval_ms=1}"];
+    right_source [label="{right_source|type=TestSecondSourceTask|trigger=periodic|interval_ms=2}"];
+    join_sink [label="{join_sink|type=TestAllInputsSinkTask|trigger=all_queue_ready}"];
+
+    left_source -> join_sink [
+      taillabel="0", headlabel="0", label="TestPacket\ndepth=8\noverflow=drop_newest"
+    ];
+    right_source -> join_sink [
+      taillabel="0", headlabel="1", label="TestPacket\ndepth=8\noverflow=drop_newest"
+    ];
+  }
+}

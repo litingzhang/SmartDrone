@@ -27,9 +27,8 @@
         "mode": "periodic",
         "interval_ms": 1
       },
-      "outputs": {
-        "left": "left_packets",
-        "right": "right_packets"
+      "outputs": {"0": "left_packets",
+        "1": "right_packets"
       }
     },
     {
@@ -39,11 +38,9 @@
         "mode": "any_queue_ready",
         "queues": ["left_packets"]
       },
-      "inputs": {
-        "in": "left_packets"
+      "inputs": {"0": "left_packets"
       },
-      "outputs": {
-        "out": "forwarded_left_packets"
+      "outputs": {"0": "forwarded_left_packets"
       }
     },
     {
@@ -53,9 +50,8 @@
         "mode": "all_queue_ready",
         "queues": ["forwarded_left_packets", "right_packets"]
       },
-      "inputs": {
-        "left": "forwarded_left_packets",
-        "right": "right_packets"
+      "inputs": {"0": "forwarded_left_packets",
+        "1": "right_packets"
       }
     }
   ]

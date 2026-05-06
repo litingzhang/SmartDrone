@@ -6,19 +6,20 @@ set(SMART_DRONE_MAIN_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/main.cpp"
 )
 
-add_library(smart_drone_runtime_graph STATIC
-  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_graph/runtime_graph_context.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_graph/runtime_graph.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_graph/runtime_graph_json.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_graph/runtime_graph_mermaid.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/common/runtime_graph/runtime_graph_task_runner.cpp"
+add_library(epg STATIC
+  "${SMART_DRONE_NATIVE_ROOT}/common/epg/epg_context.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/common/epg/epg.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/common/epg/epg_dot.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/common/epg/epg_json.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/common/epg/epg_mermaid.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/common/epg/epg_task_runner.cpp"
 )
 
-target_include_directories(smart_drone_runtime_graph PUBLIC
+target_include_directories(epg PUBLIC
   "${SMART_DRONE_NATIVE_ROOT}"
 )
 
-target_link_libraries(smart_drone_runtime_graph PUBLIC
+target_link_libraries(epg PUBLIC
   Threads::Threads
 )
 
@@ -90,8 +91,8 @@ set(SMART_DRONE_CORE_APPLICATION_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/calib_session_graph_service.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/calib_session_service.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/calib_storage_helpers.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/core/application/session/native_runtime_graph_messages.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/core/application/session/native_runtime_graph_registry.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/session/native_epg_messages.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/session/native_epg_registry.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/slam_frame_processor.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/runtime_session_common.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/sensor_runtime_helpers.cpp"
@@ -132,7 +133,7 @@ target_include_directories(smart_drone PRIVATE
 )
 
 target_link_libraries(smart_drone PRIVATE
-  smart_drone_runtime_graph
+  epg
 )
 
 source_group(TREE "${SMART_DRONE_NATIVE_ROOT}" FILES

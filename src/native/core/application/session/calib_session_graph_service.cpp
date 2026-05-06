@@ -20,12 +20,12 @@
 
 #include "adapters/imu/icm42688/icm42688_imu.h"
 #include "adapters/stream/udp_image_sender.h"
-#include "common/runtime_graph/runtime_graph.h"
+#include "common/epg/epg.h"
 #include "common/tlv/tlv_protocol.h"
 #include "core/application/session/calib_session_service.h"
 #include "core/application/session/calib_storage_helpers.h"
-#include "core/application/session/native_runtime_graph_messages.h"
-#include "core/application/session/native_runtime_graph_registry.h"
+#include "core/application/session/native_epg_messages.h"
+#include "core/application/session/native_epg_registry.h"
 #include "core/application/session/runtime_session_common.h"
 #include "core/application/session/sensor_runtime_helpers.h"
 #include "core/ports/camera_provider.h"
@@ -364,7 +364,7 @@ class NativeCalibRuntimeState final {
     bool m_finalized{false};
 };
 
-class CalibResourceTask final : public smartdrone::runtime_graph::ITask {
+class CalibResourceTask final : public epg::ITask {
   public:
     CalibResourceTask(std::shared_ptr<NativeCalibRuntimeState> state, std::atomic<bool> &stop,
                       std::atomic<bool> &runningFlag)
@@ -372,7 +372,7 @@ class CalibResourceTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (m_emitted || !m_runningFlag.load() || m_stop.load()) {
             return;
@@ -384,17 +384,17 @@ class CalibResourceTask final : public smartdrone::runtime_graph::ITask {
         }
         auto ready = context.Make<CalibResourceReady>();
         ready->ready = true;
-        const bool cameraOk = context.Push("camera", ready);
-        const bool imuOk = context.Push("imu", std::move(ready));
+        const bool cameraOk = context.Push(0, ready);
+        const bool imuOk = context.Push(1, std::move(ready));
         m_emitted = cameraOk || imuOk;
     }
 
   private:
-    void EmitDone(smartdrone::runtime_graph::TaskContext &context, bool sessionOk)
+    void EmitDone(epg::TaskContext &context, bool sessionOk)
     {
         auto done = context.Make<CalibCaptureDone>();
         done->sessionOk = sessionOk;
-        context.Push("done", std::move(done));
+        context.Push(2, std::move(done));
     }
 
     std::shared_ptr<NativeCalibRuntimeState> m_state;
@@ -402,29 +402,23 @@ class CalibResourceTask final : public smartdrone::runtime_graph::ITask {
     std::atomic<bool> &m_runningFlag;
     bool m_emitted{false};
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    CalibResourceTask, "CalibResourceTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("camera", "CalibResourceReady"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("imu", "CalibResourceReady"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("done", "CalibCaptureDone")})
+EPG_REGISTER_TASK_TYPE(CalibResourceTask, "CalibResourceTask")
 
-class NativeCalibClockTask final : public smartdrone::runtime_graph::ITask {
+class NativeCalibClockTask final : public epg::ITask {
   public:
     NativeCalibClockTask(std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
         : m_stop(stop), m_runningFlag(runningFlag)
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
         auto tick = context.Make<NativeCalibTick>();
         tick->sequence = ++m_sequence;
-        context.Push("tick", std::move(tick));
+        context.Push(0, std::move(tick));
     }
 
   private:
@@ -432,13 +426,9 @@ class NativeCalibClockTask final : public smartdrone::runtime_graph::ITask {
     std::atomic<bool> &m_runningFlag;
     std::uint64_t m_sequence{0};
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeCalibClockTask, "NativeCalibClockTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("tick", "NativeCalibTick")})
+EPG_REGISTER_TASK_TYPE(NativeCalibClockTask, "NativeCalibClockTask")
 
-class CalibCameraAcquireTask final : public smartdrone::runtime_graph::ITask {
+class CalibCameraAcquireTask final : public epg::ITask {
   public:
     CalibCameraAcquireTask(std::shared_ptr<NativeCalibRuntimeState> state, std::atomic<bool> &stop,
                            std::atomic<bool> &runningFlag)
@@ -446,12 +436,12 @@ class CalibCameraAcquireTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
-        if (auto ready = context.TryPopLatest<CalibResourceReady>("ready")) {
+        if (auto ready = context.TryPopLatest<CalibResourceReady>(0)) {
             m_ready = ready->ready;
         }
-        const auto tick = context.TryPopLatest<NativeCalibTick>("tick");
+        const auto tick = context.TryPopLatest<NativeCalibTick>(1);
         if (!m_ready || !tick || !m_runningFlag.load() || m_stop.load()) {
             return;
         }
@@ -491,12 +481,12 @@ class CalibCameraAcquireTask final : public smartdrone::runtime_graph::ITask {
             }
         }
 
-        context.Push("pace", frame);
-        context.Push("preview", frame);
+        context.Push(0, frame);
+        context.Push(1, frame);
     }
 
   private:
-    void EmitDone(smartdrone::runtime_graph::TaskContext &context, bool sessionOk)
+    void EmitDone(epg::TaskContext &context, bool sessionOk)
     {
         if (m_doneEmitted) {
             return;
@@ -504,7 +494,7 @@ class CalibCameraAcquireTask final : public smartdrone::runtime_graph::ITask {
         m_doneEmitted = true;
         auto done = context.Make<CalibCaptureDone>();
         done->sessionOk = sessionOk;
-        context.Push("done", std::move(done));
+        context.Push(2, std::move(done));
     }
 
     std::shared_ptr<NativeCalibRuntimeState> m_state;
@@ -514,23 +504,15 @@ class CalibCameraAcquireTask final : public smartdrone::runtime_graph::ITask {
     bool m_doneEmitted{false};
     int m_droppedWide{0};
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    CalibCameraAcquireTask, "CalibCameraAcquireTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("ready", "CalibResourceReady"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("tick", "NativeCalibTick")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("pace", "CalibStereoFrame"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("preview", "CalibStereoFrame"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("done", "CalibCaptureDone")})
+EPG_REGISTER_TASK_TYPE(CalibCameraAcquireTask, "CalibCameraAcquireTask")
 
-class CalibPacingFilterTask final : public smartdrone::runtime_graph::ITask {
+class CalibPacingFilterTask final : public epg::ITask {
   public:
     explicit CalibPacingFilterTask(std::shared_ptr<NativeCalibRuntimeState> state) : m_state(std::move(state)) {}
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
-        while (auto frame = context.TryPop<CalibStereoFrame>("stereo")) {
+        while (auto frame = context.TryPop<CalibStereoFrame>(0)) {
             const auto &L = frame->stereo.left;
             const auto &R = frame->stereo.right;
             std::int64_t pairNs = static_cast<std::int64_t>((L.timestampNs + R.timestampNs) / 2);
@@ -545,68 +527,53 @@ class CalibPacingFilterTask final : public smartdrone::runtime_graph::ITask {
             save->name = TsToName(adjustedPairNs);
             save->fnL = m_state->Cam0Path(save->name);
             save->fnR = m_state->Cam1Path(save->name);
-            context.Push("save", std::move(save));
+            context.Push(0, std::move(save));
         }
     }
 
   private:
     std::shared_ptr<NativeCalibRuntimeState> m_state;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    CalibPacingFilterTask, "CalibPacingFilterTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("stereo", "CalibStereoFrame")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("save", "CalibSavePair")})
+EPG_REGISTER_TASK_TYPE(CalibPacingFilterTask, "CalibPacingFilterTask")
 
-class CalibStorageWriteTask final : public smartdrone::runtime_graph::ITask {
+class CalibStorageWriteTask final : public epg::ITask {
   public:
     explicit CalibStorageWriteTask(std::shared_ptr<NativeCalibRuntimeState> state) : m_state(std::move(state)) {}
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
-        while (auto save = context.TryPop<CalibSavePair>("save")) {
+        while (auto save = context.TryPop<CalibSavePair>(0)) {
             auto status = context.Make<CalibStorageStatus>();
             status->ok = m_state->WriteSavePair(*save);
-            context.Push("status", std::move(status));
+            context.Push(0, std::move(status));
         }
     }
 
   private:
     std::shared_ptr<NativeCalibRuntimeState> m_state;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    CalibStorageWriteTask, "CalibStorageWriteTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("save", "CalibSavePair")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "CalibStorageStatus")})
+EPG_REGISTER_TASK_TYPE(CalibStorageWriteTask, "CalibStorageWriteTask")
 
-class CalibUdpPreviewTask final : public smartdrone::runtime_graph::ITask {
+class CalibUdpPreviewTask final : public epg::ITask {
   public:
     explicit CalibUdpPreviewTask(std::shared_ptr<NativeCalibRuntimeState> state) : m_state(std::move(state)) {}
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
-        while (auto frame = context.TryPopLatest<CalibStereoFrame>("stereo")) {
+        while (auto frame = context.TryPopLatest<CalibStereoFrame>(0)) {
             m_state->EnqueuePreview(*frame);
             auto status = context.Make<CalibPreviewStatus>();
             status->ok = true;
-            context.Push("status", std::move(status));
+            context.Push(0, std::move(status));
         }
     }
 
   private:
     std::shared_ptr<NativeCalibRuntimeState> m_state;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    CalibUdpPreviewTask, "CalibUdpPreviewTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("stereo", "CalibStereoFrame")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "CalibPreviewStatus")})
+EPG_REGISTER_TASK_TYPE(CalibUdpPreviewTask, "CalibUdpPreviewTask")
 
-class CalibImuWriterTask final : public smartdrone::runtime_graph::ITask {
+class CalibImuWriterTask final : public epg::ITask {
   public:
     CalibImuWriterTask(std::shared_ptr<NativeCalibRuntimeState> state, std::atomic<bool> &stop,
                        std::atomic<bool> &runningFlag)
@@ -614,9 +581,9 @@ class CalibImuWriterTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
-        if (auto ready = context.TryPopLatest<CalibResourceReady>("ready")) {
+        if (auto ready = context.TryPopLatest<CalibResourceReady>(0)) {
             m_ready = ready->ready;
         }
         if (!m_ready || !m_runningFlag.load() || m_stop.load()) {
@@ -641,7 +608,7 @@ class CalibImuWriterTask final : public smartdrone::runtime_graph::ITask {
         const bool ok = m_state->WriteImuSample(sample);
         auto imuStatus = context.Make<CalibImuStatus>();
         imuStatus->ok = ok;
-        context.Push("status", std::move(imuStatus));
+        context.Push(0, std::move(imuStatus));
     }
 
   private:
@@ -681,30 +648,25 @@ class CalibImuWriterTask final : public smartdrone::runtime_graph::ITask {
     bool m_opened{false};
     bool m_openFailed{false};
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    CalibImuWriterTask, "CalibImuWriterTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("ready", "CalibResourceReady")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "CalibImuStatus")})
+EPG_REGISTER_TASK_TYPE(CalibImuWriterTask, "CalibImuWriterTask")
 
-class CalibCompletionTask final : public smartdrone::runtime_graph::ITask {
+class CalibCompletionTask final : public epg::ITask {
   public:
     explicit CalibCompletionTask(std::shared_ptr<NativeCalibRuntimeState> state) : m_state(std::move(state)) {}
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
-        while (auto status = context.TryPop<CalibStorageStatus>("storage")) {
+        while (auto status = context.TryPop<CalibStorageStatus>(1)) {
             if (!status->ok) {
                 m_sessionOk = false;
             }
         }
-        while (auto status = context.TryPop<CalibImuStatus>("imu")) {
+        while (auto status = context.TryPop<CalibImuStatus>(2)) {
             m_seenImu = m_seenImu || status->ok;
         }
-        while (context.TryPop<CalibPreviewStatus>("preview")) {
+        while (context.TryPop<CalibPreviewStatus>(3)) {
         }
-        while (auto done = context.TryPop<CalibCaptureDone>("capture")) {
+        while (auto done = context.TryPop<CalibCaptureDone>(0)) {
             m_sessionOk = m_sessionOk && done->sessionOk;
             EmitFlush(context);
         }
@@ -714,7 +676,7 @@ class CalibCompletionTask final : public smartdrone::runtime_graph::ITask {
     }
 
   private:
-    void EmitFlush(smartdrone::runtime_graph::TaskContext &context)
+    void EmitFlush(epg::TaskContext &context)
     {
         if (m_flushEmitted) {
             return;
@@ -722,7 +684,7 @@ class CalibCompletionTask final : public smartdrone::runtime_graph::ITask {
         m_flushEmitted = true;
         auto flush = context.Make<CalibFlushRequest>();
         flush->sessionOk = m_sessionOk;
-        context.Push("flush", std::move(flush));
+        context.Push(0, std::move(flush));
     }
 
     std::shared_ptr<NativeCalibRuntimeState> m_state;
@@ -730,17 +692,9 @@ class CalibCompletionTask final : public smartdrone::runtime_graph::ITask {
     bool m_seenImu{false};
     bool m_flushEmitted{false};
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    CalibCompletionTask, "CalibCompletionTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("capture", "CalibCaptureDone"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("storage", "CalibStorageStatus"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("imu", "CalibImuStatus"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("preview", "CalibPreviewStatus")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("flush", "CalibFlushRequest")})
+EPG_REGISTER_TASK_TYPE(CalibCompletionTask, "CalibCompletionTask")
 
-class CalibFlushSyncTask final : public smartdrone::runtime_graph::ITask {
+class CalibFlushSyncTask final : public epg::ITask {
   public:
     CalibFlushSyncTask(std::shared_ptr<NativeCalibRuntimeState> state, std::atomic<bool> &completed,
                        std::atomic<bool> &sessionOk)
@@ -748,18 +702,18 @@ class CalibFlushSyncTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (m_completed.load(std::memory_order_relaxed)) {
             return;
         }
-        if (auto flush = context.TryPopLatest<CalibFlushRequest>("flush")) {
+        if (auto flush = context.TryPopLatest<CalibFlushRequest>(0)) {
             m_state->Finalize(flush->sessionOk);
             m_sessionOk.store(flush->sessionOk, std::memory_order_relaxed);
             auto status = context.Make<NativeCalibStatus>();
             status->sessionOk = flush->sessionOk;
             status->completed = true;
-            context.Push("status", std::move(status));
+            context.Push(0, std::move(status));
         }
     }
 
@@ -768,23 +722,18 @@ class CalibFlushSyncTask final : public smartdrone::runtime_graph::ITask {
     std::atomic<bool> &m_completed;
     std::atomic<bool> &m_sessionOk;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    CalibFlushSyncTask, "CalibFlushSyncTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("flush", "CalibFlushRequest")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeCalibStatus")})
+EPG_REGISTER_TASK_TYPE(CalibFlushSyncTask, "CalibFlushSyncTask")
 
-class NativeCalibMonitorTask final : public smartdrone::runtime_graph::ITask {
+class NativeCalibMonitorTask final : public epg::ITask {
   public:
     NativeCalibMonitorTask(std::atomic<bool> &sessionOk, std::atomic<bool> &completed)
         : m_sessionOk(sessionOk), m_completed(completed)
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
-        while (auto status = context.TryPop<NativeCalibStatus>("status")) {
+        while (auto status = context.TryPop<NativeCalibStatus>(0)) {
             m_sessionOk.store(status->sessionOk, std::memory_order_relaxed);
             if (status->completed) {
                 m_completed.store(true, std::memory_order_relaxed);
@@ -796,59 +745,55 @@ class NativeCalibMonitorTask final : public smartdrone::runtime_graph::ITask {
     std::atomic<bool> &m_sessionOk;
     std::atomic<bool> &m_completed;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeCalibMonitorTask, "NativeCalibMonitorTask",
-	    std::vector<smartdrone::runtime_graph::PortSpec>{
-	        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeCalibStatus")},
-	    std::vector<smartdrone::runtime_graph::PortSpec>{})
+EPG_REGISTER_TASK_TYPE(NativeCalibMonitorTask, "NativeCalibMonitorTask")
 
-NativeRuntimeGraphTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
+NativeEventPipelineGraphTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
     const std::shared_ptr<NativeCalibRuntimeState> &state,
     std::atomic<bool> &stop,
     std::atomic<bool> &runningFlag,
     std::atomic<bool> &sessionOk,
     std::atomic<bool> &completed)
 {
-    auto &catalog = smartdrone::runtime_graph::RuntimeGraphTypeCatalog::Global();
-    return smartdrone::runtime_graph::RuntimeGraphTypeCatalog::MakeTaskFactoryResolver({
+    auto &catalog = epg::TypeCatalog::Global();
+    return epg::TypeCatalog::MakeTaskFactoryResolver({
         catalog.MakeTaskFactoryEntry<CalibResourceTask>([state, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new CalibResourceTask(state, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<NativeCalibClockTask>([&stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeCalibClockTask(stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<CalibCameraAcquireTask>([state, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new CalibCameraAcquireTask(state, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<CalibPacingFilterTask>([state]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new CalibPacingFilterTask(state));
             }),
         catalog.MakeTaskFactoryEntry<CalibStorageWriteTask>([state]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new CalibStorageWriteTask(state));
             }),
         catalog.MakeTaskFactoryEntry<CalibImuWriterTask>([state, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new CalibImuWriterTask(state, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<CalibUdpPreviewTask>([state]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new CalibUdpPreviewTask(state));
             }),
         catalog.MakeTaskFactoryEntry<CalibCompletionTask>([state]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new CalibCompletionTask(state));
             }),
         catalog.MakeTaskFactoryEntry<CalibFlushSyncTask>([state, &completed, &sessionOk]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new CalibFlushSyncTask(state, completed, sessionOk));
             }),
         catalog.MakeTaskFactoryEntry<NativeCalibMonitorTask>([&sessionOk, &completed]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeCalibMonitorTask(sessionOk, completed));
             }),
     });
@@ -863,14 +808,14 @@ bool RunCalibSessionGraph(const UnifiedConfig &cfg, std::atomic<bool> &stop, Liv
     std::atomic<bool> completed{false};
 
     {
-        smartdrone::runtime_graph::Registry registry;
+        epg::Registry registry;
         auto state = std::make_shared<NativeCalibRuntimeState>(cfg, stop, livePose, runningFlag);
-        RegisterNativeRuntimeGraphTypes(
-            registry, NativeRuntimeGraphDomain::CalibSession,
+        RegisterNativeEventPipelineGraphTypes(
+            registry, NativeEventPipelineGraphDomain::CalibSession,
             MakeCalibGraphTaskFactoryResolver(state, stop, runningFlag, sessionOk, completed));
 
-        smartdrone::runtime_graph::RuntimeGraph graph(registry);
-        graph.Configure(CompileNativeRuntimeGraphConfig(NativeRuntimeGraphDomain::CalibSession, registry));
+        epg::EventPipelineGraph graph(registry);
+        graph.Configure(CompileNativeEventPipelineGraphConfig(NativeEventPipelineGraphDomain::CalibSession, registry));
         graph.Start();
 
         while (runningFlag.load() && !stop.load() && !completed.load(std::memory_order_relaxed)) {

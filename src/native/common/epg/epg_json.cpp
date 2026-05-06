@@ -1,11 +1,10 @@
-#include "common/runtime_graph/runtime_graph.h"
+#include "common/epg/epg.h"
 
 #include <cctype>
 #include <fstream>
 #include <sstream>
 
-namespace smartdrone {
-namespace runtime_graph {
+namespace epg {
 namespace {
 
 class JsonValue {
@@ -317,8 +316,17 @@ std::vector<std::string> OptionalStringArray(const JsonValue& value, const std::
     return result;
 }
 
-std::map<std::string, std::string> OptionalStringMap(const JsonValue& value, const std::string& field) {
-    std::map<std::string, std::string> result;
+PortId ParsePortId(const std::string& value, const std::string& field) {
+    std::size_t parsedChars = 0;
+    const auto parsed = std::stoul(value, &parsedChars, 10);
+    if (parsedChars != value.size()) {
+        throw std::runtime_error("json port id must be a non-negative integer: " + field);
+    }
+    return static_cast<PortId>(parsed);
+}
+
+std::map<PortId, std::string> OptionalPortQueueMap(const JsonValue& value, const std::string& field) {
+    std::map<PortId, std::string> result;
     const auto* child = value.Find(field);
     if (!child) {
         return result;
@@ -330,7 +338,7 @@ std::map<std::string, std::string> OptionalStringMap(const JsonValue& value, con
         if (pair.second.kind != JsonValue::Kind::String) {
             throw std::runtime_error("json object value must be string: " + field + "." + pair.first);
         }
-        result[pair.first] = pair.second.string;
+        result[ParsePortId(pair.first, field + "." + pair.first)] = pair.second.string;
     }
     return result;
 }
@@ -363,13 +371,13 @@ TriggerMode ParseTriggerMode(const std::string& value) {
 
 } // namespace
 
-RuntimeGraphConfig ParseRuntimeGraphConfigJson(const std::string& jsonText) {
+GraphConfig ParseGraphConfigJson(const std::string& jsonText) {
     const auto root = JsonParser(jsonText).Parse();
     if (root.kind != JsonValue::Kind::Object) {
-        throw std::runtime_error("runtime graph json root must be object");
+        throw std::runtime_error("EventPipelineGraph json root must be object");
     }
 
-    RuntimeGraphConfig config;
+    GraphConfig config;
 
     const auto& queues = root.At("queues");
     if (queues.kind != JsonValue::Kind::Array) {
@@ -398,8 +406,8 @@ RuntimeGraphConfig ParseRuntimeGraphConfigJson(const std::string& jsonText) {
         TaskConfig task;
         task.name = RequiredString(item, "name");
         task.type = RequiredString(item, "type");
-        task.inputs = OptionalStringMap(item, "inputs");
-        task.outputs = OptionalStringMap(item, "outputs");
+        task.inputs = OptionalPortQueueMap(item, "inputs");
+        task.outputs = OptionalPortQueueMap(item, "outputs");
 
         const auto& trigger = item.At("trigger");
         if (trigger.kind != JsonValue::Kind::Object) {
@@ -415,15 +423,14 @@ RuntimeGraphConfig ParseRuntimeGraphConfigJson(const std::string& jsonText) {
     return config;
 }
 
-RuntimeGraphConfig ParseRuntimeGraphConfigJsonFile(const std::string& path) {
+GraphConfig ParseGraphConfigJsonFile(const std::string& path) {
     std::ifstream input(path);
     if (!input) {
-        throw std::runtime_error("failed to open runtime graph json file: " + path);
+        throw std::runtime_error("failed to open EventPipelineGraph json file: " + path);
     }
     std::ostringstream buffer;
     buffer << input.rdbuf();
-    return ParseRuntimeGraphConfigJson(buffer.str());
+    return ParseGraphConfigJson(buffer.str());
 }
 
-} // namespace runtime_graph
-} // namespace smartdrone
+} // namespace epg

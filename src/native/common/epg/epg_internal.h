@@ -1,11 +1,10 @@
 #pragma once
 
-#include "common/runtime_graph/runtime_graph.h"
+#include "common/epg/epg.h"
 
 #include <algorithm>
 
-namespace smartdrone {
-namespace runtime_graph {
+namespace epg {
 
 inline bool IsQueueTriggeredMode(TriggerMode mode) {
     return mode == TriggerMode::AnyQueueReady ||
@@ -23,20 +22,20 @@ inline TaskDiagnosticsSnapshot SnapshotTaskDiagnostics(const TaskDiagnostics& di
     return result;
 }
 
-inline std::map<std::string, PortSpec> MakePortMap(const std::vector<PortSpec>& specs) {
-    std::map<std::string, PortSpec> result;
+inline std::map<PortId, PortSpec> MakePortMap(const std::vector<PortSpec>& specs) {
+    std::map<PortId, PortSpec> result;
     for (const auto& spec : specs) {
-        result.emplace(spec.name, spec);
+        result.emplace(spec.id, spec);
     }
     return result;
 }
 
-class RuntimeGraph::TaskRunner {
+class EventPipelineGraph::TaskRunner {
 public:
     TaskRunner(TaskConfig config,
                std::unique_ptr<ITask> task,
-               std::unordered_map<std::string, IQueue*> inputs,
-               std::unordered_map<std::string, IQueue*> outputs,
+               std::unordered_map<PortId, IQueue*> inputs,
+               std::unordered_map<PortId, IQueue*> outputs,
                std::vector<IQueue*> triggerQueues);
     ~TaskRunner();
 
@@ -55,12 +54,11 @@ private:
     std::unique_ptr<ITask> m_task;
     TaskContext m_context;
     std::vector<IQueue*> m_triggerQueues;
-    mutable ::smartdrone::runtime_graph::TaskDiagnostics m_diag;
+    mutable ::epg::TaskDiagnostics m_diag;
     std::atomic<bool> m_running{false};
     std::thread m_thread;
     std::mutex m_mutex;
     std::condition_variable m_cv;
 };
 
-} // namespace runtime_graph
-} // namespace smartdrone
+} // namespace epg

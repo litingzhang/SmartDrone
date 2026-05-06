@@ -21,8 +21,17 @@
         "mode": "periodic",
         "interval_ms": 1
       },
-      "outputs": {
-        "out": "left_packets"
+      "outputs": {"0": "left_packets"
+      }
+    },
+    {
+      "name": "left_sink",
+      "type": "TestSinkTask",
+      "trigger": {
+        "mode": "any_queue_ready",
+        "queues": ["left_packets"]
+      },
+      "inputs": {"0": "left_packets"
       }
     },
     {
@@ -30,22 +39,19 @@
       "type": "TestSecondSourceTask",
       "trigger": {
         "mode": "periodic",
-        "interval_ms": 2
+        "interval_ms": 1
       },
-      "outputs": {
-        "out": "right_packets"
+      "outputs": {"0": "right_packets"
       }
     },
     {
-      "name": "join_sink",
-      "type": "TestAllInputsSinkTask",
+      "name": "right_sink",
+      "type": "TestSinkTask",
       "trigger": {
-        "mode": "all_queue_ready",
-        "queues": ["left_packets", "right_packets"]
+        "mode": "any_queue_ready",
+        "queues": ["right_packets"]
       },
-      "inputs": {
-        "left": "left_packets",
-        "right": "right_packets"
+      "inputs": {"0": "right_packets"
       }
     }
   ]

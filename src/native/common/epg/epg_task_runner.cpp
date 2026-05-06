@@ -1,12 +1,11 @@
-#include "common/runtime_graph/runtime_graph_internal.h"
+#include "common/epg/epg_internal.h"
 
-namespace smartdrone {
-namespace runtime_graph {
+namespace epg {
 
-RuntimeGraph::TaskRunner::TaskRunner(TaskConfig config,
+EventPipelineGraph::TaskRunner::TaskRunner(TaskConfig config,
                                      std::unique_ptr<ITask> task,
-                                     std::unordered_map<std::string, IQueue*> inputs,
-                                     std::unordered_map<std::string, IQueue*> outputs,
+                                     std::unordered_map<PortId, IQueue*> inputs,
+                                     std::unordered_map<PortId, IQueue*> outputs,
                                      std::vector<IQueue*> triggerQueues)
     : m_config(std::move(config)),
       m_task(std::move(task)),
@@ -14,22 +13,22 @@ RuntimeGraph::TaskRunner::TaskRunner(TaskConfig config,
       m_triggerQueues(std::move(triggerQueues)) {
 }
 
-RuntimeGraph::TaskRunner::~TaskRunner() {
+EventPipelineGraph::TaskRunner::~TaskRunner() {
     Stop();
 }
 
-const std::string& RuntimeGraph::TaskRunner::Name() const {
+const std::string& EventPipelineGraph::TaskRunner::Name() const {
     return m_config.name;
 }
 
-void RuntimeGraph::TaskRunner::Start() {
+void EventPipelineGraph::TaskRunner::Start() {
     if (m_running.exchange(true, std::memory_order_acq_rel)) {
         return;
     }
     m_thread = std::thread([this]() { Run(); });
 }
 
-void RuntimeGraph::TaskRunner::Stop() {
+void EventPipelineGraph::TaskRunner::Stop() {
     if (!m_running.exchange(false, std::memory_order_acq_rel)) {
         return;
     }
@@ -39,18 +38,18 @@ void RuntimeGraph::TaskRunner::Stop() {
     }
 }
 
-void RuntimeGraph::TaskRunner::Notify() {
+void EventPipelineGraph::TaskRunner::Notify() {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
     }
     m_cv.notify_one();
 }
 
-TaskDiagnosticsSnapshot RuntimeGraph::TaskRunner::Diagnostics() const {
+TaskDiagnosticsSnapshot EventPipelineGraph::TaskRunner::Diagnostics() const {
     return SnapshotTaskDiagnostics(m_diag);
 }
 
-void RuntimeGraph::TaskRunner::Run() {
+void EventPipelineGraph::TaskRunner::Run() {
     while (m_running.load(std::memory_order_acquire)) {
         if (!WaitForTrigger()) {
             break;
@@ -82,7 +81,7 @@ void RuntimeGraph::TaskRunner::Run() {
     }
 }
 
-bool RuntimeGraph::TaskRunner::WaitForTrigger() {
+bool EventPipelineGraph::TaskRunner::WaitForTrigger() {
     switch (m_config.trigger.mode) {
         case TriggerMode::Periodic:
             if (m_config.trigger.interval.count() > 0) {
@@ -112,7 +111,7 @@ bool RuntimeGraph::TaskRunner::WaitForTrigger() {
     return false;
 }
 
-bool RuntimeGraph::TaskRunner::QueuesReady() const {
+bool EventPipelineGraph::TaskRunner::QueuesReady() const {
     if (m_triggerQueues.empty()) {
         return false;
     }
@@ -124,5 +123,4 @@ bool RuntimeGraph::TaskRunner::QueuesReady() const {
                        [](const IQueue* queue) { return !queue->Empty(); });
 }
 
-} // namespace runtime_graph
-} // namespace smartdrone
+} // namespace epg

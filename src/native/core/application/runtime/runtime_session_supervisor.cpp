@@ -10,11 +10,11 @@ namespace smartdrone::core::application {
 
 namespace {
 
-class FunctionTask final : public smartdrone::runtime_graph::ITask {
+class FunctionTask final : public epg::ITask {
   public:
     explicit FunctionTask(std::function<void()> onTick) : m_onTick(std::move(onTick)) {}
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         (void)context;
         m_onTick();
@@ -24,15 +24,15 @@ class FunctionTask final : public smartdrone::runtime_graph::ITask {
     std::function<void()> m_onTick;
 };
 
-smartdrone::runtime_graph::RuntimeGraphConfig MakeRuntimeSupervisorGraphConfig()
+epg::GraphConfig MakeRuntimeSupervisorGraphConfig()
 {
-    smartdrone::runtime_graph::TaskConfig supervisor;
+    epg::TaskConfig supervisor;
     supervisor.name = "supervisor";
     supervisor.type = "RuntimeSupervisorTask";
-    supervisor.trigger.mode = smartdrone::runtime_graph::TriggerMode::Periodic;
+    supervisor.trigger.mode = epg::TriggerMode::Periodic;
     supervisor.trigger.interval = std::chrono::milliseconds(100);
 
-    smartdrone::runtime_graph::RuntimeGraphConfig config;
+    epg::GraphConfig config;
     config.tasks.push_back(std::move(supervisor));
     return config;
 }
@@ -134,9 +134,9 @@ void RuntimeSessionSupervisor::ConfigureGraph()
     m_graphRegistry.RegisterTaskFactory(
         "RuntimeSupervisorTask", {}, {},
         [this]() {
-            return std::unique_ptr<smartdrone::runtime_graph::ITask>(new FunctionTask([this]() { StepSupervisor(); }));
+            return std::unique_ptr<epg::ITask>(new FunctionTask([this]() { StepSupervisor(); }));
         });
-    m_graph.reset(new smartdrone::runtime_graph::RuntimeGraph(m_graphRegistry));
+    m_graph.reset(new epg::EventPipelineGraph(m_graphRegistry));
     m_graph->Configure(MakeRuntimeSupervisorGraphConfig());
 }
 

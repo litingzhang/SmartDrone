@@ -1,7 +1,0 @@
-flowchart LR
-  source["type=TestSourceTask; trigger=periodic; interval_ms=1"]
-  forward["type=TestForwardTask; trigger=any_queue_ready"]
-  sink["type=TestSinkTask; trigger=any_queue_ready"]
-
-  source -->|"type=TestPacket; depth=8; overflow=drop_newest"| forward
-  forward -->|"type=TestPacket; depth=8; overflow=drop_newest"| sink

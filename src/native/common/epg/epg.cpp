@@ -1,24 +1,23 @@
-#include "common/runtime_graph/runtime_graph_internal.h"
+#include "common/epg/epg_internal.h"
 
 #include <set>
 
-namespace smartdrone {
-namespace runtime_graph {
+namespace epg {
 
-RuntimeGraph::RuntimeGraph(const Registry& registry) : m_registry(registry) {
+EventPipelineGraph::EventPipelineGraph(const Registry& registry) : m_registry(registry) {
 }
 
-RuntimeGraph::~RuntimeGraph() {
+EventPipelineGraph::~EventPipelineGraph() {
     Stop();
 }
 
-void RuntimeGraph::ConfigureJson(const std::string& jsonText) {
-    Configure(ParseRuntimeGraphConfigJson(jsonText));
+void EventPipelineGraph::ConfigureJson(const std::string& jsonText) {
+    Configure(ParseGraphConfigJson(jsonText));
 }
 
-void RuntimeGraph::Configure(const RuntimeGraphConfig& config) {
+void EventPipelineGraph::Configure(const GraphConfig& config) {
     if (m_running) {
-        throw std::runtime_error("cannot configure a running RuntimeGraph");
+        throw std::runtime_error("cannot configure a running EventPipelineGraph");
     }
 
     m_queues.clear();
@@ -66,17 +65,17 @@ void RuntimeGraph::Configure(const RuntimeGraphConfig& config) {
         for (const auto& input : taskConfig.inputs) {
             const auto specIt = declaredInputs.find(input.first);
             if (specIt == declaredInputs.end()) {
-                throw std::runtime_error("task input slot is not declared: " +
-                                         taskConfig.name + "." + input.first);
+                throw std::runtime_error("task input port is not declared: " +
+                                         taskConfig.name + "." + std::to_string(input.first));
             }
             const auto qIt = m_queues.find(input.second);
             if (qIt == m_queues.end()) {
                 throw std::runtime_error("task input references missing queue: " +
-                                         taskConfig.name + "." + input.first + " -> " + input.second);
+                                         taskConfig.name + "." + std::to_string(input.first) + " -> " + input.second);
             }
             if (qIt->second->TypeName() != specIt->second.type) {
                 throw std::runtime_error("task input type mismatch: " +
-                                         taskConfig.name + "." + input.first);
+                                         taskConfig.name + "." + std::to_string(input.first));
             }
             consumers[input.second] += 1;
         }
@@ -84,17 +83,17 @@ void RuntimeGraph::Configure(const RuntimeGraphConfig& config) {
         for (const auto& output : taskConfig.outputs) {
             const auto specIt = declaredOutputs.find(output.first);
             if (specIt == declaredOutputs.end()) {
-                throw std::runtime_error("task output slot is not declared: " +
-                                         taskConfig.name + "." + output.first);
+                throw std::runtime_error("task output port is not declared: " +
+                                         taskConfig.name + "." + std::to_string(output.first));
             }
             const auto qIt = m_queues.find(output.second);
             if (qIt == m_queues.end()) {
                 throw std::runtime_error("task output references missing queue: " +
-                                         taskConfig.name + "." + output.first + " -> " + output.second);
+                                         taskConfig.name + "." + std::to_string(output.first) + " -> " + output.second);
             }
             if (qIt->second->TypeName() != specIt->second.type) {
                 throw std::runtime_error("task output type mismatch: " +
-                                         taskConfig.name + "." + output.first);
+                                         taskConfig.name + "." + std::to_string(output.first));
             }
             producers[output.second] += 1;
         }
@@ -119,7 +118,7 @@ void RuntimeGraph::Configure(const RuntimeGraphConfig& config) {
                 }
                 const auto usedAsInput =
                     std::find_if(taskConfig.inputs.begin(), taskConfig.inputs.end(),
-                                 [&triggerQueue](const std::pair<const std::string, std::string>& input) {
+                                 [&triggerQueue](const std::pair<const PortId, std::string>& input) {
                                      return input.second == triggerQueue;
                                  }) != taskConfig.inputs.end();
                 if (!usedAsInput) {
@@ -146,8 +145,8 @@ void RuntimeGraph::Configure(const RuntimeGraphConfig& config) {
 
     for (const auto& taskConfig : config.tasks) {
         const auto* taskType = m_registry.FindTaskType(taskConfig.type);
-        std::unordered_map<std::string, IQueue*> inputs;
-        std::unordered_map<std::string, IQueue*> outputs;
+        std::unordered_map<PortId, IQueue*> inputs;
+        std::unordered_map<PortId, IQueue*> outputs;
         std::vector<IQueue*> triggerQueues;
 
         for (const auto& input : taskConfig.inputs) {
@@ -184,9 +183,9 @@ void RuntimeGraph::Configure(const RuntimeGraphConfig& config) {
     m_configured = true;
 }
 
-void RuntimeGraph::Start() {
+void EventPipelineGraph::Start() {
     if (!m_configured) {
-        throw std::runtime_error("RuntimeGraph must be configured before start");
+        throw std::runtime_error("EventPipelineGraph must be configured before start");
     }
     if (m_running) {
         return;
@@ -197,7 +196,7 @@ void RuntimeGraph::Start() {
     }
 }
 
-void RuntimeGraph::Stop() {
+void EventPipelineGraph::Stop() {
     if (!m_running) {
         return;
     }
@@ -207,21 +206,21 @@ void RuntimeGraph::Stop() {
     m_running = false;
 }
 
-bool RuntimeGraph::Running() const {
+bool EventPipelineGraph::Running() const {
     return m_running;
 }
 
-IQueue* RuntimeGraph::Queue(const std::string& name) {
+IQueue* EventPipelineGraph::Queue(const std::string& name) {
     auto it = m_queues.find(name);
     return it == m_queues.end() ? nullptr : it->second.get();
 }
 
-const IQueue* RuntimeGraph::Queue(const std::string& name) const {
+const IQueue* EventPipelineGraph::Queue(const std::string& name) const {
     auto it = m_queues.find(name);
     return it == m_queues.end() ? nullptr : it->second.get();
 }
 
-std::map<std::string, QueueDiagnosticsSnapshot> RuntimeGraph::QueueDiagnostics() const {
+std::map<std::string, QueueDiagnosticsSnapshot> EventPipelineGraph::QueueDiagnostics() const {
     std::map<std::string, QueueDiagnosticsSnapshot> result;
     for (const auto& queue : m_queues) {
         result[queue.first] = queue.second->Diagnostics();
@@ -229,7 +228,7 @@ std::map<std::string, QueueDiagnosticsSnapshot> RuntimeGraph::QueueDiagnostics()
     return result;
 }
 
-std::map<std::string, TaskDiagnosticsSnapshot> RuntimeGraph::TaskDiagnostics() const {
+std::map<std::string, TaskDiagnosticsSnapshot> EventPipelineGraph::TaskDiagnostics() const {
     std::map<std::string, TaskDiagnosticsSnapshot> result;
     for (const auto& runner : m_runners) {
         result[runner->Name()] = runner->Diagnostics();
@@ -237,5 +236,4 @@ std::map<std::string, TaskDiagnosticsSnapshot> RuntimeGraph::TaskDiagnostics() c
     return result;
 }
 
-} // namespace runtime_graph
-} // namespace smartdrone
+} // namespace epg

@@ -15,8 +15,7 @@
         "mode": "periodic",
         "interval_ms": 1
       },
-      "outputs": {
-        "out": "packets"
+      "outputs": {"0": "packets"
       }
     },
     {
@@ -26,8 +25,7 @@
         "mode": "any_queue_ready",
         "queues": ["packets"]
       },
-      "inputs": {
-        "in": "packets"
+      "inputs": {"0": "packets"
       }
     }
   ]

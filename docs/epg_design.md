@@ -1,0 +1,325 @@
+# EPG Framework Design
+
+EPG is short for `EventPipelineGraph`. It is a generic C++ execution framework for
+event-driven pipeline graphs.
+
+The design center is:
+
+- event-driven task wakeup
+- typed message queues between tasks
+- explicit pipeline topology
+- topology-driven graph compilation and validation
+- graph-level optimization hooks for scheduling, buffering, and visualization
+
+EPG is intentionally independent from SmartDrone business code. SmartDrone native
+sessions register their own message/task types and provide DOT topology files, but
+the graph runtime itself lives under `src/native/common/epg`.
+
+## Core Model
+
+An EPG graph is compiled into `epg::GraphConfig`.
+
+`GraphConfig` contains:
+
+- `QueueConfig`: queue name, message type, depth, overflow policy
+- `TaskConfig`: task name, task type, trigger config, input ports, output ports
+- `TriggerConfig`: trigger mode, optional interval, optional trigger queues
+
+Tasks communicate only through typed queues. Each task sees queues through numeric
+port ids:
+
+- input ports are addressed by `TaskContext::TryPop<T>(PortId)`
+- output ports are addressed by `TaskContext::Push<T>(PortId, item)`
+- input and output port id spaces are separate per task
+
+The graph compiler is responsible for turning topology edges into queue configs and
+task port bindings.
+
+## Runtime Components
+
+`epg::Registry`
+
+Stores message types and task types. It validates queue types and task port types
+when a graph is configured.
+
+`epg::TypeCatalog`
+
+Stores reflected registrations emitted by the `EPG_REGISTER_*` macros. Native code
+uses this so task declarations can stay near task implementations.
+
+`epg::EventPipelineGraph`
+
+Owns queues and task runners. `Configure` validates the graph, creates queues,
+binds task input/output ports, and builds task runners. `Start` launches task
+runner threads; `Stop` joins them.
+
+`epg::TaskContext`
+
+The task-facing API for typed queue access. It prevents tasks from accessing
+undeclared ports and checks message type consistency.
+
+`epg::SpscSharedPtrQueue<T>`
+
+The default typed queue implementation. It is single-producer/single-consumer and
+supports bounded depth with `drop_newest` or `overwrite_oldest` overflow behavior.
+
+## Task Registration
+
+Message types are registered with:
+
+```cpp
+EPG_REGISTER_MESSAGE(NativeSlamTick, "NativeSlamTick")
+```
+
+Task types are registered with:
+
+```cpp
+EPG_REGISTER_TASK_TYPE(NativeSlamClockTask, "NativeSlamClockTask")
+```
+
+When ports are declared directly in C++, use:
+
+```cpp
+EPG_REGISTER_TASK(
+    SourceTask, "SourceTask",
+    std::vector<epg::PortSpec>{},
+    std::vector<epg::PortSpec>{EPG_PORT(0, "ExamplePacket")})
+```
+
+For DOT-compiled graphs, prefer `EPG_REGISTER_TASK_TYPE`; graph-declared ports are
+merged into the registry during DOT compilation.
+
+## Trigger Modes
+
+Supported trigger modes:
+
+- `periodic`: run at a fixed interval
+- `any_queue_ready`: run when any trigger input queue has data
+- `all_queue_ready`: run when all trigger input queues have data
+- `periodic_or_any_queue_ready`: run periodically or when a trigger queue wakes it
+
+Periodic tasks must set `interval_ms`.
+
+For queue-triggered tasks, `trigger_queues` may be omitted; in that case all input
+queues are trigger queues.
+
+## Interrupt Events
+
+External interrupt-like events enter the graph through `CreateExternalIngress<T>`.
+
+The ingress binds to a queue that has no task producer. Pushing into the ingress
+uses the same queue notifier path as task-produced messages, so queue-triggered
+tasks wake naturally.
+
+```cpp
+auto ingress = graph.CreateExternalIngress<StopEvent>("stop_event");
+ingress.Emplace();
+```
+
+Use this for signals, command-channel events, hardware callbacks, and other events
+that originate outside the graph runner.
+
+## Graph Compilation Flow
+
+The native SmartDrone flow is:
+
+1. Business code registers message and task types.
+2. A DOT subgraph is selected from `config/epg/native_epg_topology.dot`.
+3. The DOT compiler reads task nodes and edges.
+4. Edges become queues.
+5. Edge endpoint labels become numeric task port bindings.
+6. Graph-declared task ports are merged into `epg::Registry`.
+7. `epg::EventPipelineGraph::Configure` performs final runtime validation.
+
+This keeps topology in one maintained source: the DOT file is both the visual graph
+source and the compilation source.
+
+## DOT Topology Format
+
+Use one `digraph` with one `subgraph cluster_*` per compilable runtime domain.
+
+```dot
+digraph NativeEventPipelineGraphTopology {
+  graph [rankdir=TB];
+
+  subgraph cluster_slam_session_graph {
+    label="SLAM Session Graph";
+
+    SourceTask [label="{SourceTask|type=SourceTask|trigger=periodic|interval_ms=1}"];
+    SinkTask [label="{SinkTask|type=SinkTask|trigger=any_queue_ready|trigger_queues=ExamplePacket}"];
+
+    SourceTask -> SinkTask [
+      taillabel="0", headlabel="0", label="ExamplePacket\ndepth=8\noverflow=drop_newest"
+    ];
+  }
+}
+```
+
+The native compiler currently selects:
+
+- `cluster_slam_session_graph`
+- `cluster_calib_session_graph`
+
+### Task Nodes
+
+Every compilable node must be a task node with a record `label`.
+
+Required fields:
+
+- first record field: node display name, normally the same as the DOT node id
+- `type`: registered EPG task type
+- `trigger`: task trigger mode
+
+Optional fields:
+
+- `interval_ms`: required for `periodic` and `periodic_or_any_queue_ready`
+- `trigger_queues`: queue type names or queue names separated by `+`
+- other fields such as `stage` are allowed for humans and ignored by the compiler
+
+Example:
+
+```dot
+NativeSlamAcquireTask [
+  label="{NativeSlamAcquireTask|type=NativeSlamAcquireTask|stage=frame_acquire_and_prepare|trigger=any_queue_ready|trigger_queues=NativeSlamFrameReady}"
+];
+```
+
+### Edges And Ports
+
+Every compilable edge must connect two declared task nodes and include:
+
+- `taillabel`: source task output `PortId`
+- `headlabel`: target task input `PortId`
+- `label`: queue metadata
+
+Example:
+
+```dot
+NativeSlamClockTask -> NativeSlamImuGateTask [
+  taillabel="0", headlabel="1", label="NativeSlamTick\ndepth=1\noverflow=overwrite_oldest"
+];
+```
+
+Port ids are unsigned integers. Input ports and output ports are separate
+namespaces per task.
+
+### Edge Label Format
+
+The edge `label` is parsed line by line.
+
+Line 1 is the queue message type.
+
+Required metadata lines:
+
+- `depth=<positive_integer>`
+- `overflow=<policy>`
+
+Recommended format:
+
+```dot
+label="NativeSlamPreparedFrame\ndepth=1\noverflow=overwrite_oldest"
+```
+
+The parser also accepts legacy compact metadata:
+
+```dot
+label="NativeSlamPreparedFrame\ndepth=1 overwrite_oldest"
+```
+
+Supported overflow policies:
+
+- `drop_newest`
+- `overwrite_oldest`
+- aliases: `tail_drop`, `circular_overwrite`
+
+### Queue Names
+
+Do not write queue names in DOT.
+
+The compiler derives queue names automatically:
+
+```text
+<source_node>_<source_port>_to_<target_node>_<target_port>
+```
+
+Example:
+
+```dot
+NativeSlamClockTask -> NativeSlamImuGateTask [
+  taillabel="0", headlabel="1", label="NativeSlamTick\ndepth=1\noverflow=overwrite_oldest"
+];
+```
+
+Compiles to:
+
+```text
+NativeSlamClockTask_0_to_NativeSlamImuGateTask_1
+```
+
+### Trigger Queue Resolution
+
+For queue-triggered tasks, `trigger_queues` may refer to:
+
+- explicit queue names generated by the compiler
+- queue message types
+
+Prefer message types in hand-written DOT:
+
+```dot
+label="{NativeSlamImuGateTask|type=NativeSlamImuGateTask|trigger=any_queue_ready|trigger_queues=NativeSlamResourceReady+NativeSlamTick}"
+```
+
+If omitted, all input queues are used as trigger queues.
+
+### DOT Validation
+
+The DOT compiler validates:
+
+- selected subgraph exists
+- each task node has `type` and `trigger`
+- each task `type` is registered
+- each edge references declared task nodes
+- each edge has integer `taillabel` and `headlabel`
+- each edge has queue type, positive `depth`, and valid overflow policy
+- each input port is connected at most once
+- each output port is connected at most once
+- port type consistency when graph-declared ports are merged into the task registry
+
+`EventPipelineGraph::Configure` performs additional validation:
+
+- queue type is registered
+- task type is registered
+- task input/output port exists
+- input/output queue type matches port type
+- SPSC queues have exactly one producer and at most one consumer
+- trigger queues exist and are task inputs
+
+### Graphviz Styling
+
+These attributes are rendering-only and ignored by the compiler:
+
+- top-level `graph`, `node`, and `edge` attributes
+- subgraph `label`, `color`, and `style`
+- node styling such as `shape`, `fillcolor`, `fontname`
+- edge styling such as `color`, `fontsize`, `labeldistance`, `labelangle`
+
+Use styling freely, but do not encode runtime behavior in styling attributes.
+
+## Authoring Rules
+
+Do:
+
+- keep every compilable task node inside its domain subgraph
+- use numeric port ids in `taillabel` and `headlabel`
+- keep queue metadata in edge labels
+- keep task ids stable; generated queue names depend on them
+- use `trigger_queues` as message type names for readability
+
+Do not:
+
+- put `inputs=` or `outputs=` in node labels; edge endpoint labels already define ports
+- use string port names such as `ready`, `status`, or `published`
+- write queue names manually in DOT
+- rely on node or edge colors/styles for compiler behavior
+- connect one output port to multiple queues unless EPG supports that producer pattern
+- connect multiple edges to the same input port

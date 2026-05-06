@@ -9,9 +9,9 @@
 #include <utility>
 #include <vector>
 
-#include "common/runtime_graph/runtime_graph.h"
-#include "core/application/session/native_runtime_graph_messages.h"
-#include "core/application/session/native_runtime_graph_registry.h"
+#include "common/epg/epg.h"
+#include "core/application/session/native_epg_messages.h"
+#include "core/application/session/native_epg_registry.h"
 #include "core/application/session/slam_frame_processor.h"
 #include "core/application/session/slam_session_runtime.h"
 
@@ -84,7 +84,7 @@ class NativeSlamRuntimeState final {
     bool m_startFailed{false};
 };
 
-class NativeSlamResourceTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamResourceTask final : public epg::ITask {
   public:
     NativeSlamResourceTask(std::shared_ptr<NativeSlamRuntimeState> state, std::atomic<bool> &stop,
                            std::atomic<bool> &runningFlag)
@@ -94,7 +94,7 @@ class NativeSlamResourceTask final : public smartdrone::runtime_graph::ITask {
 
     ~NativeSlamResourceTask() override { m_state->Stop(); }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (m_readyEmitted || !m_runningFlag.load() || m_stop.load()) {
             return;
@@ -105,7 +105,7 @@ class NativeSlamResourceTask final : public smartdrone::runtime_graph::ITask {
         }
         auto ready = context.Make<NativeSlamResourceReady>();
         ready->ready = true;
-        if (context.Push("ready", std::move(ready))) {
+        if (context.Push(0, std::move(ready))) {
             m_readyEmitted = true;
         }
     }
@@ -116,27 +116,23 @@ class NativeSlamResourceTask final : public smartdrone::runtime_graph::ITask {
     std::atomic<bool> &m_runningFlag;
     bool m_readyEmitted{false};
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamResourceTask, "NativeSlamResourceTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("ready", "NativeSlamResourceReady")})
+EPG_REGISTER_TASK_TYPE(NativeSlamResourceTask, "NativeSlamResourceTask")
 
-class NativeSlamClockTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamClockTask final : public epg::ITask {
   public:
     NativeSlamClockTask(std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
         : m_stop(stop), m_runningFlag(runningFlag)
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
         auto tick = context.Make<NativeSlamTick>();
         tick->sequence = ++m_sequence;
-        context.Push("tick", std::move(tick));
+        context.Push(0, std::move(tick));
     }
 
   private:
@@ -144,13 +140,9 @@ class NativeSlamClockTask final : public smartdrone::runtime_graph::ITask {
     std::atomic<bool> &m_runningFlag;
     std::uint64_t m_sequence{0};
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamClockTask, "NativeSlamClockTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("tick", "NativeSlamTick")})
+EPG_REGISTER_TASK_TYPE(NativeSlamClockTask, "NativeSlamClockTask")
 
-class NativeSlamImuGateTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamImuGateTask final : public epg::ITask {
   public:
     NativeSlamImuGateTask(std::shared_ptr<NativeSlamRuntimeState> state, std::atomic<bool> &stop,
                           std::atomic<bool> &runningFlag)
@@ -158,12 +150,12 @@ class NativeSlamImuGateTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
-        if (auto ready = context.TryPopLatest<NativeSlamResourceReady>("ready")) {
+        if (auto ready = context.TryPopLatest<NativeSlamResourceReady>(0)) {
             m_resourceReady = ready->ready;
         }
-        const auto tick = context.TryPopLatest<NativeSlamTick>("tick");
+        const auto tick = context.TryPopLatest<NativeSlamTick>(1);
         if (m_state->StartFailed()) {
             PushStatus(context, false, true);
             return;
@@ -188,16 +180,16 @@ class NativeSlamImuGateTask final : public smartdrone::runtime_graph::ITask {
 
         auto frameReady = context.Make<NativeSlamFrameReady>();
         frameReady->runtime = std::move(runtime);
-        context.Push("frame_ready", std::move(frameReady));
+        context.Push(0, std::move(frameReady));
     }
 
   private:
-    void PushStatus(smartdrone::runtime_graph::TaskContext &context, bool sessionOk, bool abortRequested)
+    void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
         auto status = context.Make<NativeSlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
-        context.Push("status", std::move(status));
+        context.Push(1, std::move(status));
     }
 
     std::shared_ptr<NativeSlamRuntimeState> m_state;
@@ -205,16 +197,9 @@ class NativeSlamImuGateTask final : public smartdrone::runtime_graph::ITask {
     std::atomic<bool> &m_runningFlag;
     bool m_resourceReady{false};
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamImuGateTask, "NativeSlamImuGateTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("ready", "NativeSlamResourceReady"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("tick", "NativeSlamTick")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("frame_ready", "NativeSlamFrameReady"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeSlamStatus")})
+EPG_REGISTER_TASK_TYPE(NativeSlamImuGateTask, "NativeSlamImuGateTask")
 
-class NativeSlamAcquireTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamAcquireTask final : public epg::ITask {
   public:
     NativeSlamAcquireTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                           std::atomic<bool> &runningFlag)
@@ -222,12 +207,12 @@ class NativeSlamAcquireTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto frameReady = context.TryPopLatest<NativeSlamFrameReady>("frame_ready");
+        const auto frameReady = context.TryPopLatest<NativeSlamFrameReady>(0);
         if (!frameReady || !frameReady->runtime) {
             return;
         }
@@ -248,31 +233,25 @@ class NativeSlamAcquireTask final : public smartdrone::runtime_graph::ITask {
         auto prepared = context.Make<NativeSlamPreparedFrame>();
         prepared->runtime = frameReady->runtime;
         prepared->frame = std::move(preparedFrame);
-        context.Push("prepared", std::move(prepared));
+        context.Push(0, std::move(prepared));
     }
 
   private:
-    void PushStatus(smartdrone::runtime_graph::TaskContext &context, bool sessionOk, bool abortRequested)
+    void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
         auto status = context.Make<NativeSlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
-        context.Push("status", std::move(status));
+        context.Push(1, std::move(status));
     }
 
     std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamAcquireTask, "NativeSlamAcquireTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("frame_ready", "NativeSlamFrameReady")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("prepared", "NativeSlamPreparedFrame"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeSlamStatus")})
+EPG_REGISTER_TASK_TYPE(NativeSlamAcquireTask, "NativeSlamAcquireTask")
 
-class NativeSlamTrackingTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamTrackingTask final : public epg::ITask {
   public:
     NativeSlamTrackingTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                            std::atomic<bool> &runningFlag)
@@ -280,12 +259,12 @@ class NativeSlamTrackingTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto prepared = context.TryPopLatest<NativeSlamPreparedFrame>("prepared");
+        const auto prepared = context.TryPopLatest<NativeSlamPreparedFrame>(0);
         if (!prepared || !prepared->runtime || !prepared->frame) {
             return;
         }
@@ -306,31 +285,25 @@ class NativeSlamTrackingTask final : public smartdrone::runtime_graph::ITask {
         auto tracked = context.Make<NativeSlamTrackedFrame>();
         tracked->runtime = prepared->runtime;
         tracked->frame = std::move(trackedFrame);
-        context.Push("tracked", std::move(tracked));
+        context.Push(0, std::move(tracked));
     }
 
   private:
-    void PushStatus(smartdrone::runtime_graph::TaskContext &context, bool sessionOk, bool abortRequested)
+    void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
         auto status = context.Make<NativeSlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
-        context.Push("status", std::move(status));
+        context.Push(1, std::move(status));
     }
 
     std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamTrackingTask, "NativeSlamTrackingTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("prepared", "NativeSlamPreparedFrame")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("tracked", "NativeSlamTrackedFrame"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeSlamStatus")})
+EPG_REGISTER_TASK_TYPE(NativeSlamTrackingTask, "NativeSlamTrackingTask")
 
-class NativeSlamPosePostprocessTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamPosePostprocessTask final : public epg::ITask {
   public:
     NativeSlamPosePostprocessTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                           std::atomic<bool> &runningFlag)
@@ -338,12 +311,12 @@ class NativeSlamPosePostprocessTask final : public smartdrone::runtime_graph::IT
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto tracked = context.TryPopLatest<NativeSlamTrackedFrame>("tracked");
+        const auto tracked = context.TryPopLatest<NativeSlamTrackedFrame>(0);
         if (!tracked || !tracked->runtime || !tracked->frame) {
             return;
         }
@@ -364,31 +337,25 @@ class NativeSlamPosePostprocessTask final : public smartdrone::runtime_graph::IT
         auto published = context.Make<NativeSlamPublishedFrame>();
         published->runtime = tracked->runtime;
         published->frame = std::move(publishedFrame);
-        context.Push("published", std::move(published));
+        context.Push(0, std::move(published));
     }
 
   private:
-    void PushStatus(smartdrone::runtime_graph::TaskContext &context, bool sessionOk, bool abortRequested)
+    void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
         auto status = context.Make<NativeSlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
-        context.Push("status", std::move(status));
+        context.Push(1, std::move(status));
     }
 
     std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamPosePostprocessTask, "NativeSlamPosePostprocessTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("tracked", "NativeSlamTrackedFrame")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("published", "NativeSlamPublishedFrame"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeSlamStatus")})
+EPG_REGISTER_TASK_TYPE(NativeSlamPosePostprocessTask, "NativeSlamPosePostprocessTask")
 
-class NativeSlamPointCloudTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamPointCloudTask final : public epg::ITask {
   public:
     NativeSlamPointCloudTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                              std::atomic<bool> &runningFlag)
@@ -396,12 +363,12 @@ class NativeSlamPointCloudTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>("published");
+        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>(0);
         if (!published || !published->runtime || !published->frame) {
             return;
         }
@@ -416,31 +383,25 @@ class NativeSlamPointCloudTask final : public smartdrone::runtime_graph::ITask {
             }
         }
 
-        context.Push("published", published);
+        context.Push(0, published);
     }
 
   private:
-    void PushStatus(smartdrone::runtime_graph::TaskContext &context, bool sessionOk, bool abortRequested)
+    void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
         auto status = context.Make<NativeSlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
-        context.Push("status", std::move(status));
+        context.Push(1, std::move(status));
     }
 
     std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamPointCloudTask, "NativeSlamPointCloudTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("published", "NativeSlamPublishedFrame")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("published", "NativeSlamPublishedFrame"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeSlamStatus")})
+EPG_REGISTER_TASK_TYPE(NativeSlamPointCloudTask, "NativeSlamPointCloudTask")
 
-class NativeSlamDfxTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamDfxTask final : public epg::ITask {
   public:
     NativeSlamDfxTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                       std::atomic<bool> &runningFlag)
@@ -448,12 +409,12 @@ class NativeSlamDfxTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>("published");
+        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>(0);
         if (!published || !published->runtime || !published->frame) {
             return;
         }
@@ -469,26 +430,21 @@ class NativeSlamDfxTask final : public smartdrone::runtime_graph::ITask {
     }
 
   private:
-    void PushStatus(smartdrone::runtime_graph::TaskContext &context, bool sessionOk, bool abortRequested)
+    void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
         auto status = context.Make<NativeSlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
-        context.Push("status", std::move(status));
+        context.Push(1, std::move(status));
     }
 
     std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamDfxTask, "NativeSlamDfxTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("published", "NativeSlamPublishedFrame")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeSlamStatus")})
+EPG_REGISTER_TASK_TYPE(NativeSlamDfxTask, "NativeSlamDfxTask")
 
-class NativeSlamUdpTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamUdpTask final : public epg::ITask {
   public:
     NativeSlamUdpTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                       std::atomic<bool> &runningFlag)
@@ -496,12 +452,12 @@ class NativeSlamUdpTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>("published");
+        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>(0);
         if (!published || !published->runtime || !published->frame) {
             return;
         }
@@ -516,31 +472,25 @@ class NativeSlamUdpTask final : public smartdrone::runtime_graph::ITask {
             }
         }
 
-        context.Push("published", published);
+        context.Push(0, published);
     }
 
   private:
-    void PushStatus(smartdrone::runtime_graph::TaskContext &context, bool sessionOk, bool abortRequested)
+    void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
         auto status = context.Make<NativeSlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
-        context.Push("status", std::move(status));
+        context.Push(1, std::move(status));
     }
 
     std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamUdpTask, "NativeSlamUdpTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("published", "NativeSlamPublishedFrame")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("published", "NativeSlamPublishedFrame"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeSlamStatus")})
+EPG_REGISTER_TASK_TYPE(NativeSlamUdpTask, "NativeSlamUdpTask")
 
-class NativeSlamMavlinkTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamMavlinkTask final : public epg::ITask {
   public:
     NativeSlamMavlinkTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                           std::atomic<bool> &runningFlag)
@@ -548,12 +498,12 @@ class NativeSlamMavlinkTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>("published");
+        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>(0);
         if (!published || !published->runtime || !published->frame) {
             return;
         }
@@ -568,31 +518,25 @@ class NativeSlamMavlinkTask final : public smartdrone::runtime_graph::ITask {
             }
         }
 
-        context.Push("published", published);
+        context.Push(0, published);
     }
 
   private:
-    void PushStatus(smartdrone::runtime_graph::TaskContext &context, bool sessionOk, bool abortRequested)
+    void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
         auto status = context.Make<NativeSlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
-        context.Push("status", std::move(status));
+        context.Push(1, std::move(status));
     }
 
     std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamMavlinkTask, "NativeSlamMavlinkTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("published", "NativeSlamPublishedFrame")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("published", "NativeSlamPublishedFrame"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeSlamStatus")})
+EPG_REGISTER_TASK_TYPE(NativeSlamMavlinkTask, "NativeSlamMavlinkTask")
 
-class NativeSlamLivePoseTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamLivePoseTask final : public epg::ITask {
   public:
     NativeSlamLivePoseTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                            std::atomic<bool> &runningFlag)
@@ -600,12 +544,12 @@ class NativeSlamLivePoseTask final : public smartdrone::runtime_graph::ITask {
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>("published");
+        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>(0);
         if (!published || !published->runtime || !published->frame) {
             return;
         }
@@ -620,39 +564,33 @@ class NativeSlamLivePoseTask final : public smartdrone::runtime_graph::ITask {
             }
         }
 
-        context.Push("published", published);
+        context.Push(0, published);
     }
 
   private:
-    void PushStatus(smartdrone::runtime_graph::TaskContext &context, bool sessionOk, bool abortRequested)
+    void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
         auto status = context.Make<NativeSlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
-        context.Push("status", std::move(status));
+        context.Push(1, std::move(status));
     }
 
     std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamLivePoseTask, "NativeSlamLivePoseTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("published", "NativeSlamPublishedFrame")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("published", "NativeSlamPublishedFrame"),
-        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeSlamStatus")})
+EPG_REGISTER_TASK_TYPE(NativeSlamLivePoseTask, "NativeSlamLivePoseTask")
 
-class NativeSlamMonitorTask final : public smartdrone::runtime_graph::ITask {
+class NativeSlamMonitorTask final : public epg::ITask {
   public:
     NativeSlamMonitorTask(std::atomic<bool> &stop, std::atomic<bool> &sessionOk) : m_stop(stop), m_sessionOk(sessionOk)
     {
     }
 
-    void OnTick(smartdrone::runtime_graph::TaskContext &context) override
+    void OnTick(epg::TaskContext &context) override
     {
-        while (auto status = context.TryPop<NativeSlamStatus>("status")) {
+        while (auto status = context.TryPop<NativeSlamStatus>(0)) {
             m_sessionOk.store(status->sessionOk, std::memory_order_relaxed);
             if (status->abortRequested) {
                 m_stop.store(true);
@@ -664,67 +602,63 @@ class NativeSlamMonitorTask final : public smartdrone::runtime_graph::ITask {
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_sessionOk;
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
-    NativeSlamMonitorTask, "NativeSlamMonitorTask",
-	    std::vector<smartdrone::runtime_graph::PortSpec>{
-	        SMARTDRONE_RUNTIME_GRAPH_PORT("status", "NativeSlamStatus")},
-	    std::vector<smartdrone::runtime_graph::PortSpec>{})
+EPG_REGISTER_TASK_TYPE(NativeSlamMonitorTask, "NativeSlamMonitorTask")
 
-NativeRuntimeGraphTaskFactoryResolver MakeSlamGraphTaskFactoryResolver(
+NativeEventPipelineGraphTaskFactoryResolver MakeSlamGraphTaskFactoryResolver(
     const std::shared_ptr<NativeSlamRuntimeState> &runtimeState,
     const std::shared_ptr<std::mutex> &processorMu,
     std::atomic<bool> &stop,
     std::atomic<bool> &runningFlag,
     std::atomic<bool> &sessionOk)
 {
-    auto &catalog = smartdrone::runtime_graph::RuntimeGraphTypeCatalog::Global();
-    return smartdrone::runtime_graph::RuntimeGraphTypeCatalog::MakeTaskFactoryResolver({
+    auto &catalog = epg::TypeCatalog::Global();
+    return epg::TypeCatalog::MakeTaskFactoryResolver({
         catalog.MakeTaskFactoryEntry<NativeSlamResourceTask>([runtimeState, &stop, &runningFlag]() {
-                    return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                    return std::unique_ptr<epg::ITask>(
                         new NativeSlamResourceTask(runtimeState, stop, runningFlag));
                 }),
         catalog.MakeTaskFactoryEntry<NativeSlamClockTask>([&stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeSlamClockTask(stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<NativeSlamImuGateTask>([runtimeState, &stop, &runningFlag]() {
-                    return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                    return std::unique_ptr<epg::ITask>(
                         new NativeSlamImuGateTask(runtimeState, stop, runningFlag));
                 }),
         catalog.MakeTaskFactoryEntry<NativeSlamAcquireTask>([processorMu, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeSlamAcquireTask(processorMu, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<NativeSlamTrackingTask>([processorMu, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeSlamTrackingTask(processorMu, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<NativeSlamPosePostprocessTask>([processorMu, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeSlamPosePostprocessTask(processorMu, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<NativeSlamPointCloudTask>([processorMu, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeSlamPointCloudTask(processorMu, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<NativeSlamLivePoseTask>([processorMu, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeSlamLivePoseTask(processorMu, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<NativeSlamMavlinkTask>([processorMu, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeSlamMavlinkTask(processorMu, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<NativeSlamUdpTask>([processorMu, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeSlamUdpTask(processorMu, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<NativeSlamDfxTask>([processorMu, &stop, &runningFlag]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeSlamDfxTask(processorMu, stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<NativeSlamMonitorTask>([&stop, &sessionOk]() {
-                return std::unique_ptr<smartdrone::runtime_graph::ITask>(
+                return std::unique_ptr<epg::ITask>(
                     new NativeSlamMonitorTask(stop, sessionOk));
             }),
     });
@@ -738,16 +672,16 @@ bool RunSlamSessionGraph(const UnifiedConfig &cfg, LiveRuntimeTuning &tuning, Px
     std::atomic<bool> sessionOk{true};
 
     {
-        smartdrone::runtime_graph::Registry registry;
+        epg::Registry registry;
         auto runtimeState =
             std::make_shared<NativeSlamRuntimeState>(cfg, tuning, mav, stop, livePose, runningFlag);
         auto processorMu = std::make_shared<std::mutex>();
-        RegisterNativeRuntimeGraphTypes(
-            registry, NativeRuntimeGraphDomain::SlamSession,
+        RegisterNativeEventPipelineGraphTypes(
+            registry, NativeEventPipelineGraphDomain::SlamSession,
             MakeSlamGraphTaskFactoryResolver(runtimeState, processorMu, stop, runningFlag, sessionOk));
 
-        smartdrone::runtime_graph::RuntimeGraph graph(registry);
-        graph.Configure(CompileNativeRuntimeGraphConfig(NativeRuntimeGraphDomain::SlamSession, registry));
+        epg::EventPipelineGraph graph(registry);
+        graph.Configure(CompileNativeEventPipelineGraphConfig(NativeEventPipelineGraphDomain::SlamSession, registry));
         graph.Start();
 
         while (runningFlag.load() && !stop.load()) {

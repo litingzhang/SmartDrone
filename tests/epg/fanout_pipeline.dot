@@ -1,0 +1,16 @@
+digraph FanoutPipeline {
+  subgraph cluster_test_graph {
+    label="Fanout Pipeline";
+
+    fanout_source [label="{fanout_source|type=TestFanoutSourceTask|trigger=periodic|interval_ms=1}"];
+    left_sink [label="{left_sink|type=TestSinkTask|trigger=any_queue_ready}"];
+    right_sink [label="{right_sink|type=TestSinkTask|trigger=any_queue_ready}"];
+
+    fanout_source -> left_sink [
+      taillabel="0", headlabel="0", label="TestPacket\ndepth=8\noverflow=drop_newest"
+    ];
+    fanout_source -> right_sink [
+      taillabel="1", headlabel="0", label="TestPacket\ndepth=8\noverflow=drop_newest"
+    ];
+  }
+}

@@ -1,0 +1,12 @@
+digraph BasicPipeline {
+  subgraph cluster_test_graph {
+    label="Basic Pipeline";
+
+    source [label="{source|type=TestSourceTask|trigger=periodic|interval_ms=1}"];
+    sink [label="{sink|type=TestSinkTask|trigger=any_queue_ready}"];
+
+    source -> sink [
+      taillabel="0", headlabel="0", label="TestPacket\ndepth=8\noverflow=drop_newest"
+    ];
+  }
+}

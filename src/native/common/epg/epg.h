@@ -19,8 +19,9 @@
 #include <utility>
 #include <vector>
 
-namespace smartdrone {
-namespace runtime_graph {
+namespace epg {
+
+using PortId = std::uint32_t;
 
 enum class OverflowPolicy {
     DropNewest,
@@ -85,34 +86,40 @@ struct TaskConfig {
     std::string name;
     std::string type;
     TriggerConfig trigger;
-    std::map<std::string, std::string> inputs;
-    std::map<std::string, std::string> outputs;
+    std::map<PortId, std::string> inputs;
+    std::map<PortId, std::string> outputs;
 };
 
-struct RuntimeGraphConfig {
+struct GraphConfig {
     std::vector<QueueConfig> queues;
     std::vector<TaskConfig> tasks;
 };
 
 class Registry;
 
-RuntimeGraphConfig ParseRuntimeGraphConfigJson(const std::string& jsonText);
-RuntimeGraphConfig ParseRuntimeGraphConfigJsonFile(const std::string& path);
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaid(const std::string& mermaidText);
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaidFile(const std::string& path);
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaid(const std::string& mermaidText,
-                                                  const Registry& registry);
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaidFile(const std::string& path,
-                                                      const Registry& registry);
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaidSubgraph(const std::string& mermaidText,
+GraphConfig ParseGraphConfigJson(const std::string& jsonText);
+GraphConfig ParseGraphConfigJsonFile(const std::string& path);
+GraphConfig ParseGraphConfigMermaid(const std::string& mermaidText);
+GraphConfig ParseGraphConfigMermaidFile(const std::string& path);
+GraphConfig ParseGraphConfigMermaid(const std::string& mermaidText,
+                                                  Registry& registry);
+GraphConfig ParseGraphConfigMermaidFile(const std::string& path,
+                                                      Registry& registry);
+GraphConfig ParseGraphConfigMermaidSubgraph(const std::string& mermaidText,
                                                           const std::string& subgraphName,
-                                                          const Registry& registry);
-RuntimeGraphConfig ParseRuntimeGraphConfigMermaidSubgraphFile(const std::string& path,
+                                                          Registry& registry);
+GraphConfig ParseGraphConfigMermaidSubgraphFile(const std::string& path,
                                                               const std::string& subgraphName,
-                                                              const Registry& registry);
+                                                              Registry& registry);
+GraphConfig ParseGraphConfigDot(const std::string& dotText,
+                                              const std::string& subgraphName,
+                                              Registry& registry);
+GraphConfig ParseGraphConfigDotFile(const std::string& path,
+                                                  const std::string& subgraphName,
+                                                  Registry& registry);
 
 struct PortSpec {
-    std::string name;
+    PortId id{};
     std::string type;
 };
 
@@ -292,8 +299,8 @@ private:
 
 class TaskContext {
 public:
-    TaskContext(std::unordered_map<std::string, IQueue*> inputs,
-                std::unordered_map<std::string, IQueue*> outputs);
+    TaskContext(std::unordered_map<PortId, IQueue*> inputs,
+                std::unordered_map<PortId, IQueue*> outputs);
 
     template <class T, class... Args>
     std::shared_ptr<T> Make(Args&&... args) {
@@ -301,53 +308,53 @@ public:
     }
 
     template <class T>
-    std::shared_ptr<T> TryPop(const std::string& slot) {
-        auto* queue = InputQueue<T>(slot);
+    std::shared_ptr<T> TryPop(PortId port) {
+        auto* queue = InputQueue<T>(port);
         return std::static_pointer_cast<T>(queue->TryPopErased());
     }
 
     template <class T>
-    std::shared_ptr<T> TryPopLatest(const std::string& slot) {
-        auto* queue = InputQueue<T>(slot);
+    std::shared_ptr<T> TryPopLatest(PortId port) {
+        auto* queue = InputQueue<T>(port);
         return std::static_pointer_cast<T>(queue->TryPopLatestErased());
     }
 
     template <class T>
-    bool Push(const std::string& slot, std::shared_ptr<T> item) {
-        auto* queue = OutputQueue<T>(slot);
+    bool Push(PortId port, std::shared_ptr<T> item) {
+        auto* queue = OutputQueue<T>(port);
         return queue->PushErased(std::static_pointer_cast<void>(std::move(item)));
     }
 
-    bool InputReady(const std::string& slot) const;
-    bool OutputExists(const std::string& slot) const;
+    bool InputReady(PortId port) const;
+    bool OutputExists(PortId port) const;
 
 private:
     template <class T>
-    IQueue* InputQueue(const std::string& slot) {
-        auto it = m_inputs.find(slot);
+    IQueue* InputQueue(PortId port) {
+        auto it = m_inputs.find(port);
         if (it == m_inputs.end()) {
-            throw std::runtime_error("missing input slot: " + slot);
+            throw std::runtime_error("missing input port: " + std::to_string(port));
         }
         if (it->second->TypeIndex() != std::type_index(typeid(T))) {
-            throw std::runtime_error("input slot type mismatch: " + slot);
+            throw std::runtime_error("input port type mismatch: " + std::to_string(port));
         }
         return it->second;
     }
 
     template <class T>
-    IQueue* OutputQueue(const std::string& slot) {
-        auto it = m_outputs.find(slot);
+    IQueue* OutputQueue(PortId port) {
+        auto it = m_outputs.find(port);
         if (it == m_outputs.end()) {
-            throw std::runtime_error("missing output slot: " + slot);
+            throw std::runtime_error("missing output port: " + std::to_string(port));
         }
         if (it->second->TypeIndex() != std::type_index(typeid(T))) {
-            throw std::runtime_error("output slot type mismatch: " + slot);
+            throw std::runtime_error("output port type mismatch: " + std::to_string(port));
         }
         return it->second;
     }
 
-    std::unordered_map<std::string, IQueue*> m_inputs;
-    std::unordered_map<std::string, IQueue*> m_outputs;
+    std::unordered_map<PortId, IQueue*> m_inputs;
+    std::unordered_map<PortId, IQueue*> m_outputs;
 };
 
 class ITask {
@@ -404,6 +411,9 @@ public:
                              std::vector<PortSpec> inputs,
                              std::vector<PortSpec> outputs,
                              TaskFactory factory);
+    void MergeTaskPorts(const std::string& name,
+                        const std::vector<PortSpec>& inputs,
+                        const std::vector<PortSpec>& outputs);
 
     const QueueTypeInfo* FindQueueType(const std::string& name) const;
     const TaskTypeInfo* FindTaskType(const std::string& name) const;
@@ -413,12 +423,12 @@ private:
     std::unordered_map<std::string, TaskTypeInfo> m_taskTypes;
 };
 
-class RuntimeGraphTypeCatalog {
+class TypeCatalog {
 public:
     using TaskFactoryResolver = std::function<Registry::TaskFactory(const std::string&)>;
     using TaskFactoryEntry = std::pair<std::string, Registry::TaskFactory>;
 
-    static RuntimeGraphTypeCatalog& Global();
+    static TypeCatalog& Global();
 
     template <class T>
     bool RegisterMessage(const std::string& name) {
@@ -444,6 +454,13 @@ public:
         m_tasks[info.name] = std::move(info);
         m_taskNamesByType[std::type_index(typeid(TTask))] = registeredName;
         return true;
+    }
+
+    template <class TTask>
+    bool RegisterTaskType(std::string name) {
+        static_assert(std::is_base_of<ITask, TTask>::value,
+                      "reflected task must derive from ITask");
+        return RegisterTask<TTask>(std::move(name), {}, {});
     }
 
     template <class TTask>
@@ -482,23 +499,29 @@ private:
     std::unordered_map<std::type_index, std::string> m_taskNamesByType;
 };
 
-#define SMARTDRONE_RUNTIME_GRAPH_PORT(portName, portType) \
-    smartdrone::runtime_graph::PortSpec{portName, portType}
+#define EPG_PORT(portId, portType) \
+    epg::PortSpec{portId, portType}
 
-#define SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(messageType, messageName) \
+#define EPG_REGISTER_MESSAGE(messageType, messageName) \
     namespace { \
-    const bool kRuntimeGraphMessageRegistration_##messageType = \
-        smartdrone::runtime_graph::RuntimeGraphTypeCatalog::Global().RegisterMessage<messageType>(messageName); \
+    const bool kEventPipelineGraphMessageRegistration_##messageType = \
+        epg::TypeCatalog::Global().RegisterMessage<messageType>(messageName); \
     }
 
-#define SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(taskType, taskName, ...) \
+#define EPG_REGISTER_TASK(taskType, taskName, ...) \
     namespace { \
-    const bool kRuntimeGraphTaskRegistration_##taskType = \
-        smartdrone::runtime_graph::RuntimeGraphTypeCatalog::Global().RegisterTask<taskType>( \
+    const bool kEventPipelineGraphTaskRegistration_##taskType = \
+        epg::TypeCatalog::Global().RegisterTask<taskType>( \
             taskName, __VA_ARGS__); \
     }
 
-class RuntimeGraph {
+#define EPG_REGISTER_TASK_TYPE(taskType, taskName) \
+    namespace { \
+    const bool kEventPipelineGraphTaskRegistration_##taskType = \
+        epg::TypeCatalog::Global().RegisterTaskType<taskType>(taskName); \
+    }
+
+class EventPipelineGraph {
 public:
     template <class T>
     class ExternalIngress {
@@ -515,7 +538,7 @@ public:
         bool TryPush(std::shared_ptr<T> item) const
         {
             if (!m_queue) {
-                throw std::runtime_error("runtime graph ingress is not bound");
+                throw std::runtime_error("EventPipelineGraph ingress is not bound");
             }
             return m_queue->PushErased(std::static_pointer_cast<void>(std::move(item)));
         }
@@ -527,19 +550,19 @@ public:
         }
 
     private:
-        friend class RuntimeGraph;
+        friend class EventPipelineGraph;
         explicit ExternalIngress(IQueue* queue) : m_queue(queue) {}
 
         IQueue* m_queue{nullptr};
     };
 
-    explicit RuntimeGraph(const Registry& registry);
-    ~RuntimeGraph();
+    explicit EventPipelineGraph(const Registry& registry);
+    ~EventPipelineGraph();
 
-    RuntimeGraph(const RuntimeGraph&) = delete;
-    RuntimeGraph& operator=(const RuntimeGraph&) = delete;
+    EventPipelineGraph(const EventPipelineGraph&) = delete;
+    EventPipelineGraph& operator=(const EventPipelineGraph&) = delete;
 
-    void Configure(const RuntimeGraphConfig& config);
+    void Configure(const GraphConfig& config);
     void ConfigureJson(const std::string& jsonText);
     void Start();
     void Stop();
@@ -550,17 +573,17 @@ public:
     {
         auto it = m_queues.find(queueName);
         if (it == m_queues.end()) {
-            throw std::runtime_error("runtime graph ingress queue not found: " + queueName);
+            throw std::runtime_error("EventPipelineGraph ingress queue not found: " + queueName);
         }
         IQueue* queue = it->second.get();
         if (queue->TypeIndex() != std::type_index(typeid(T))) {
-            throw std::runtime_error("runtime graph ingress queue type mismatch: " + queueName);
+            throw std::runtime_error("EventPipelineGraph ingress queue type mismatch: " + queueName);
         }
         if (m_taskProducedQueues.find(queueName) != m_taskProducedQueues.end()) {
-            throw std::runtime_error("runtime graph ingress queue already has task producer: " + queueName);
+            throw std::runtime_error("EventPipelineGraph ingress queue already has task producer: " + queueName);
         }
         if (!m_externalIngressQueues.insert(queueName).second) {
-            throw std::runtime_error("runtime graph ingress already exists for queue: " + queueName);
+            throw std::runtime_error("EventPipelineGraph ingress already exists for queue: " + queueName);
         }
         return ExternalIngress<T>(queue);
     }
@@ -582,5 +605,4 @@ private:
     std::vector<std::unique_ptr<TaskRunner>> m_runners;
 };
 
-} // namespace runtime_graph
-} // namespace smartdrone
+} // namespace epg

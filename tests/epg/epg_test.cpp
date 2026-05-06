@@ -1,4 +1,4 @@
-#include "common/runtime_graph/runtime_graph.h"
+#include "common/epg/epg.h"
 
 #include <gtest/gtest.h>
 
@@ -11,13 +11,13 @@
 
 namespace {
 
-using smartdrone::runtime_graph::ITask;
-using smartdrone::runtime_graph::OverflowPolicy;
-using smartdrone::runtime_graph::PortSpec;
-using smartdrone::runtime_graph::Registry;
-using smartdrone::runtime_graph::RuntimeGraph;
-using smartdrone::runtime_graph::SpscSharedPtrQueue;
-using smartdrone::runtime_graph::TaskContext;
+using epg::ITask;
+using epg::OverflowPolicy;
+using epg::PortSpec;
+using epg::Registry;
+using epg::EventPipelineGraph;
+using epg::SpscSharedPtrQueue;
+using epg::TaskContext;
 
 struct TestPacket {
     int sequence{};
@@ -30,7 +30,7 @@ struct OtherPacket {
 struct ReflectedPacket {
     int sequence{};
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_MESSAGE(ReflectedPacket, "ReflectedPacket")
+EPG_REGISTER_MESSAGE(ReflectedPacket, "ReflectedPacket")
 
 struct NativeSlamResourceReady {};
 struct NativeSlamTick {};
@@ -55,7 +55,7 @@ public:
     void OnTick(TaskContext& context) override {
         auto packet = context.Make<TestPacket>();
         packet->sequence = ++m_sequence;
-        context.Push<TestPacket>("out", std::move(packet));
+        context.Push<TestPacket>(0, std::move(packet));
     }
 
 private:
@@ -67,7 +67,7 @@ public:
     void OnTick(TaskContext& context) override {
         auto packet = context.Make<TestPacket>();
         packet->sequence = ++m_sequence;
-        context.Push<TestPacket>("out", std::move(packet));
+        context.Push<TestPacket>(0, std::move(packet));
     }
 
 private:
@@ -81,11 +81,11 @@ public:
 
         auto left = context.Make<TestPacket>();
         left->sequence = m_sequence;
-        context.Push<TestPacket>("left", std::move(left));
+        context.Push<TestPacket>(0, std::move(left));
 
         auto right = context.Make<TestPacket>();
         right->sequence = m_sequence;
-        context.Push<TestPacket>("right", std::move(right));
+        context.Push<TestPacket>(1, std::move(right));
     }
 
 private:
@@ -95,7 +95,7 @@ private:
 class TestSinkTask final : public ITask {
 public:
     void OnTick(TaskContext& context) override {
-        while (auto packet = context.TryPop<TestPacket>("in")) {
+        while (auto packet = context.TryPop<TestPacket>(0)) {
             (void)packet;
         }
     }
@@ -104,10 +104,10 @@ public:
 class TestForwardTask final : public ITask {
 public:
     void OnTick(TaskContext& context) override {
-        while (auto packet = context.TryPop<TestPacket>("in")) {
+        while (auto packet = context.TryPop<TestPacket>(0)) {
             auto forwarded = context.Make<TestPacket>();
             forwarded->sequence = packet->sequence;
-            context.Push<TestPacket>("out", std::move(forwarded));
+            context.Push<TestPacket>(0, std::move(forwarded));
         }
     }
 };
@@ -115,8 +115,8 @@ public:
 class TestAllInputsSinkTask final : public ITask {
 public:
     void OnTick(TaskContext& context) override {
-        auto left = context.TryPop<TestPacket>("left");
-        auto right = context.TryPop<TestPacket>("right");
+        auto left = context.TryPop<TestPacket>(0);
+        auto right = context.TryPop<TestPacket>(1);
         if (!left || !right) {
             throw std::runtime_error("all-input sink woke before both queues were ready");
         }
@@ -141,7 +141,7 @@ public:
 class TestBadContextTask final : public ITask {
 public:
     void OnTick(TaskContext& context) override {
-        (void)context.TryPop<TestPacket>("missing");
+        (void)context.TryPop<TestPacket>(999);
     }
 };
 
@@ -163,7 +163,7 @@ public:
     explicit TestCountingSinkTask(int& packets) : m_packets(packets) {}
 
     void OnTick(TaskContext& context) override {
-        while (auto packet = context.TryPop<TestPacket>("in")) {
+        while (auto packet = context.TryPop<TestPacket>(0)) {
             (void)packet;
             ++m_packets;
         }
@@ -178,31 +178,31 @@ public:
     void OnTick(TaskContext& context) override {
         auto packet = context.Make<ReflectedPacket>();
         packet->sequence = ++m_sequence;
-        context.Push("out", std::move(packet));
+        context.Push(0, std::move(packet));
     }
 
 private:
     int m_sequence{};
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
+EPG_REGISTER_TASK(
     ReflectedSourceTask, "ReflectedSourceTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{},
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("out", "ReflectedPacket")})
+    std::vector<epg::PortSpec>{},
+    std::vector<epg::PortSpec>{
+        EPG_PORT(0, "ReflectedPacket")})
 
 class ReflectedSinkTask final : public ITask {
 public:
     void OnTick(TaskContext& context) override {
-        while (auto packet = context.TryPop<ReflectedPacket>("in")) {
+        while (auto packet = context.TryPop<ReflectedPacket>(0)) {
             (void)packet;
         }
     }
 };
-SMARTDRONE_RUNTIME_GRAPH_REGISTER_TASK(
+EPG_REGISTER_TASK(
     ReflectedSinkTask, "ReflectedSinkTask",
-    std::vector<smartdrone::runtime_graph::PortSpec>{
-        SMARTDRONE_RUNTIME_GRAPH_PORT("in", "ReflectedPacket")},
-    std::vector<smartdrone::runtime_graph::PortSpec>{})
+    std::vector<epg::PortSpec>{
+        EPG_PORT(0, "ReflectedPacket")},
+    std::vector<epg::PortSpec>{})
 
 Registry MakeRegistry() {
     Registry registry;
@@ -211,26 +211,26 @@ Registry MakeRegistry() {
     registry.RegisterTaskType<TestSourceTask>(
         "TestSourceTask",
         {},
-        {PortSpec{"out", "TestPacket"}});
+        {PortSpec{0, "TestPacket"}});
     registry.RegisterTaskType<TestSecondSourceTask>(
         "TestSecondSourceTask",
         {},
-        {PortSpec{"out", "TestPacket"}});
+        {PortSpec{0, "TestPacket"}});
     registry.RegisterTaskType<TestFanoutSourceTask>(
         "TestFanoutSourceTask",
         {},
-        {PortSpec{"left", "TestPacket"}, PortSpec{"right", "TestPacket"}});
+        {PortSpec{0, "TestPacket"}, PortSpec{1, "TestPacket"}});
     registry.RegisterTaskType<TestSinkTask>(
         "TestSinkTask",
-        {PortSpec{"in", "TestPacket"}},
+        {PortSpec{0, "TestPacket"}},
         {});
     registry.RegisterTaskType<TestForwardTask>(
         "TestForwardTask",
-        {PortSpec{"in", "TestPacket"}},
-        {PortSpec{"out", "TestPacket"}});
+        {PortSpec{0, "TestPacket"}},
+        {PortSpec{0, "TestPacket"}});
     registry.RegisterTaskType<TestAllInputsSinkTask>(
         "TestAllInputsSinkTask",
-        {PortSpec{"left", "TestPacket"}, PortSpec{"right", "TestPacket"}},
+        {PortSpec{0, "TestPacket"}, PortSpec{1, "TestPacket"}},
         {});
     registry.RegisterTaskType<TestHeartbeatTask>(
         "TestHeartbeatTask",
@@ -260,54 +260,18 @@ Registry MakeNativeSlamShapeRegistry() {
     const auto factory = []() {
         return std::unique_ptr<ITask>(new TestHeartbeatTask());
     };
-    registry.RegisterTaskFactory("NativeSlamResourceTask", {}, {{"ready", "NativeSlamResourceReady"}}, factory);
-    registry.RegisterTaskFactory("NativeSlamClockTask", {}, {{"tick", "NativeSlamTick"}}, factory);
-    registry.RegisterTaskFactory(
-        "NativeSlamImuGateTask",
-        {{"ready", "NativeSlamResourceReady"}, {"tick", "NativeSlamTick"}},
-        {{"frame_ready", "NativeSlamFrameReady"}, {"status", "NativeSlamStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "NativeSlamAcquireTask",
-        {{"frame_ready", "NativeSlamFrameReady"}},
-        {{"prepared", "NativeSlamPreparedFrame"}, {"status", "NativeSlamStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "NativeSlamTrackingTask",
-        {{"prepared", "NativeSlamPreparedFrame"}},
-        {{"tracked", "NativeSlamTrackedFrame"}, {"status", "NativeSlamStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "NativeSlamPosePostprocessTask",
-        {{"tracked", "NativeSlamTrackedFrame"}},
-        {{"published", "NativeSlamPublishedFrame"}, {"status", "NativeSlamStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "NativeSlamPointCloudTask",
-        {{"published", "NativeSlamPublishedFrame"}},
-        {{"published", "NativeSlamPublishedFrame"}, {"status", "NativeSlamStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "NativeSlamLivePoseTask",
-        {{"published", "NativeSlamPublishedFrame"}},
-        {{"published", "NativeSlamPublishedFrame"}, {"status", "NativeSlamStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "NativeSlamMavlinkTask",
-        {{"published", "NativeSlamPublishedFrame"}},
-        {{"published", "NativeSlamPublishedFrame"}, {"status", "NativeSlamStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "NativeSlamUdpTask",
-        {{"published", "NativeSlamPublishedFrame"}},
-        {{"published", "NativeSlamPublishedFrame"}, {"status", "NativeSlamStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "NativeSlamDfxTask",
-        {{"published", "NativeSlamPublishedFrame"}},
-        {{"status", "NativeSlamStatus"}},
-        factory);
-    registry.RegisterTaskFactory("NativeSlamMonitorTask", {{"status", "NativeSlamStatus"}}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamResourceTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamClockTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamImuGateTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamAcquireTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamTrackingTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamPosePostprocessTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamPointCloudTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamLivePoseTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamMavlinkTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamUdpTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamDfxTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeSlamMonitorTask", {}, {}, factory);
     return registry;
 }
 
@@ -327,51 +291,16 @@ Registry MakeNativeCalibShapeRegistry() {
     const auto factory = []() {
         return std::unique_ptr<ITask>(new TestHeartbeatTask());
     };
-    registry.RegisterTaskFactory(
-        "CalibResourceTask",
-        {},
-        {{"camera", "CalibResourceReady"}, {"imu", "CalibResourceReady"}, {"done", "CalibCaptureDone"}},
-        factory);
-    registry.RegisterTaskFactory("NativeCalibClockTask", {}, {{"tick", "NativeCalibTick"}}, factory);
-    registry.RegisterTaskFactory(
-        "CalibCameraAcquireTask",
-        {{"ready", "CalibResourceReady"}, {"tick", "NativeCalibTick"}},
-        {{"pace", "CalibStereoFrame"}, {"preview", "CalibStereoFrame"}, {"done", "CalibCaptureDone"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "CalibPacingFilterTask",
-        {{"stereo", "CalibStereoFrame"}},
-        {{"save", "CalibSavePair"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "CalibStorageWriteTask",
-        {{"save", "CalibSavePair"}},
-        {{"status", "CalibStorageStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "CalibImuWriterTask",
-        {{"ready", "CalibResourceReady"}},
-        {{"status", "CalibImuStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "CalibUdpPreviewTask",
-        {{"stereo", "CalibStereoFrame"}},
-        {{"status", "CalibPreviewStatus"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "CalibCompletionTask",
-        {{"capture", "CalibCaptureDone"},
-         {"storage", "CalibStorageStatus"},
-         {"imu", "CalibImuStatus"},
-         {"preview", "CalibPreviewStatus"}},
-        {{"flush", "CalibFlushRequest"}},
-        factory);
-    registry.RegisterTaskFactory(
-        "CalibFlushSyncTask",
-        {{"flush", "CalibFlushRequest"}},
-        {{"status", "NativeCalibStatus"}},
-        factory);
-    registry.RegisterTaskFactory("NativeCalibMonitorTask", {{"status", "NativeCalibStatus"}}, {}, factory);
+    registry.RegisterTaskFactory("CalibResourceTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeCalibClockTask", {}, {}, factory);
+    registry.RegisterTaskFactory("CalibCameraAcquireTask", {}, {}, factory);
+    registry.RegisterTaskFactory("CalibPacingFilterTask", {}, {}, factory);
+    registry.RegisterTaskFactory("CalibStorageWriteTask", {}, {}, factory);
+    registry.RegisterTaskFactory("CalibImuWriterTask", {}, {}, factory);
+    registry.RegisterTaskFactory("CalibUdpPreviewTask", {}, {}, factory);
+    registry.RegisterTaskFactory("CalibCompletionTask", {}, {}, factory);
+    registry.RegisterTaskFactory("CalibFlushSyncTask", {}, {}, factory);
+    registry.RegisterTaskFactory("NativeCalibMonitorTask", {}, {}, factory);
     return registry;
 }
 
@@ -385,13 +314,13 @@ std::string MinimalValidJson() {
           "name": "source",
           "type": "TestSourceTask",
           "trigger": {"mode": "periodic", "interval_ms": 1},
-          "outputs": {"out": "packets"}
+          "outputs": {"0": "packets"}
         },
         {
           "name": "sink",
           "type": "TestSinkTask",
           "trigger": {"mode": "any_queue_ready", "queues": ["packets"]},
-          "inputs": {"in": "packets"}
+          "inputs": {"0": "packets"}
         }
       ]
     })";
@@ -399,15 +328,15 @@ std::string MinimalValidJson() {
 
 void ExpectConfigureThrows(const std::string& json) {
     auto registry = MakeRegistry();
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
     EXPECT_THROW(graph.ConfigureJson(json), std::runtime_error);
 }
 
-void RunTopology(const smartdrone::runtime_graph::RuntimeGraphConfig& config,
+void RunTopology(const epg::GraphConfig& config,
                  const std::vector<std::string>& queues,
                  const std::vector<std::string>& tasks) {
     auto registry = MakeRegistry();
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
 
     graph.Configure(config);
 
@@ -437,19 +366,20 @@ void RunTopologyFromJsonFile(const std::string& jsonFile,
                              const std::vector<std::string>& queues,
                              const std::vector<std::string>& tasks) {
     RunTopology(
-        smartdrone::runtime_graph::ParseRuntimeGraphConfigJsonFile(
-            std::string(TEST_RUNTIME_GRAPH_DIR) + "/" + jsonFile),
+        epg::ParseGraphConfigJsonFile(
+            std::string(TEST_EPG_DIR) + "/" + jsonFile),
         queues,
         tasks);
 }
 
-void RunTopologyFromMermaidFile(const std::string& mermaidFile,
-                                const std::vector<std::string>& queues,
-                                const std::vector<std::string>& tasks) {
+void RunTopologyFromDotFile(const std::string& dotFile,
+                            const std::vector<std::string>& queues,
+                            const std::vector<std::string>& tasks) {
     auto registry = MakeRegistry();
     RunTopology(
-        smartdrone::runtime_graph::ParseRuntimeGraphConfigMermaidFile(
-            std::string(TEST_RUNTIME_GRAPH_DIR) + "/" + mermaidFile,
+        epg::ParseGraphConfigDotFile(
+            std::string(TEST_EPG_DIR) + "/" + dotFile,
+            "cluster_test_graph",
             registry),
         queues,
         tasks);
@@ -457,7 +387,7 @@ void RunTopologyFromMermaidFile(const std::string& mermaidFile,
 
 } // namespace
 
-TEST(RuntimeGraphQueue, DropNewestKeepsOldItemsAndCountsDrops) {
+TEST(EventPipelineGraphQueue, DropNewestKeepsOldItemsAndCountsDrops) {
     SpscSharedPtrQueue<TestPacket> queue("packets", "TestPacket", 2, OverflowPolicy::DropNewest);
 
     EXPECT_EQ(queue.Name(), "packets");
@@ -482,7 +412,7 @@ TEST(RuntimeGraphQueue, DropNewestKeepsOldItemsAndCountsDrops) {
     EXPECT_EQ(diag.maxDepthObserved, 2u);
 }
 
-TEST(RuntimeGraphQueue, OverwriteOldestKeepsNewestItemsAndCountsOverwrites) {
+TEST(EventPipelineGraphQueue, OverwriteOldestKeepsNewestItemsAndCountsOverwrites) {
     SpscSharedPtrQueue<TestPacket> queue("packets", "TestPacket", 2, OverflowPolicy::OverwriteOldest);
 
     EXPECT_TRUE(queue.Push(std::make_shared<TestPacket>(TestPacket{1})));
@@ -500,7 +430,7 @@ TEST(RuntimeGraphQueue, OverwriteOldestKeepsNewestItemsAndCountsOverwrites) {
     EXPECT_EQ(diag.overwrittenOldest, 1u);
 }
 
-TEST(RuntimeGraphQueue, TryPopLatestDrainsQueueAndReturnsNewestItem) {
+TEST(EventPipelineGraphQueue, TryPopLatestDrainsQueueAndReturnsNewestItem) {
     SpscSharedPtrQueue<TestPacket> queue("packets", "TestPacket", 4, OverflowPolicy::DropNewest);
 
     EXPECT_TRUE(queue.Push(std::make_shared<TestPacket>(TestPacket{1})));
@@ -514,7 +444,7 @@ TEST(RuntimeGraphQueue, TryPopLatestDrainsQueueAndReturnsNewestItem) {
     EXPECT_EQ(queue.Diagnostics().popped, 3u);
 }
 
-TEST(RuntimeGraphQueue, NotifierRunsForAcceptedPushesOnly) {
+TEST(EventPipelineGraphQueue, NotifierRunsForAcceptedPushesOnly) {
     SpscSharedPtrQueue<TestPacket> queue("packets", "TestPacket", 1, OverflowPolicy::DropNewest);
     int notifications = 0;
     queue.SetNotifier([&notifications]() { ++notifications; });
@@ -526,19 +456,19 @@ TEST(RuntimeGraphQueue, NotifierRunsForAcceptedPushesOnly) {
     EXPECT_EQ(queue.Diagnostics().wakeups, 1u);
 }
 
-TEST(RuntimeGraphIngress, ExternalInterruptEventWakesConsumerTask) {
+TEST(EventPipelineGraphIngress, ExternalInterruptEventWakesConsumerTask) {
     Registry registry;
     registry.RegisterMessageType<TestPacket>("TestPacket");
     int packets = 0;
     registry.RegisterTaskFactory(
         "TestCountingSinkTask",
-        {PortSpec{"in", "TestPacket"}},
+        {PortSpec{0, "TestPacket"}},
         {},
         [&packets]() {
             return std::unique_ptr<ITask>(new TestCountingSinkTask(packets));
         });
 
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
     graph.ConfigureJson(R"({
       "queues": [
         {"name": "irq_events", "type": "TestPacket", "depth": 4, "overflow": "drop_newest"}
@@ -548,7 +478,7 @@ TEST(RuntimeGraphIngress, ExternalInterruptEventWakesConsumerTask) {
           "name": "interrupt_consumer",
           "type": "TestCountingSinkTask",
           "trigger": {"mode": "any_queue_ready", "queues": ["irq_events"]},
-          "inputs": {"in": "irq_events"}
+          "inputs": {"0": "irq_events"}
         }
       ]
     })");
@@ -574,11 +504,11 @@ TEST(RuntimeGraphIngress, ExternalInterruptEventWakesConsumerTask) {
     EXPECT_GT(graph.TaskDiagnostics().at("interrupt_consumer").loopCount, 0u);
 }
 
-TEST(RuntimeGraphIngress, RejectsTypeMismatchDuplicateIngressAndTaskProducerConflict) {
+TEST(EventPipelineGraphIngress, RejectsTypeMismatchDuplicateIngressAndTaskProducerConflict) {
     auto registry = MakeRegistry();
 
     {
-        RuntimeGraph graph(registry);
+        EventPipelineGraph graph(registry);
         graph.ConfigureJson(R"({
           "queues": [
             {"name": "irq_events", "type": "TestPacket", "depth": 4, "overflow": "drop_newest"}
@@ -588,7 +518,7 @@ TEST(RuntimeGraphIngress, RejectsTypeMismatchDuplicateIngressAndTaskProducerConf
               "name": "sink",
               "type": "TestSinkTask",
               "trigger": {"mode": "any_queue_ready", "queues": ["irq_events"]},
-              "inputs": {"in": "irq_events"}
+              "inputs": {"0": "irq_events"}
             }
           ]
         })");
@@ -600,18 +530,18 @@ TEST(RuntimeGraphIngress, RejectsTypeMismatchDuplicateIngressAndTaskProducerConf
     }
 
     {
-        RuntimeGraph graph(registry);
+        EventPipelineGraph graph(registry);
         graph.ConfigureJson(MinimalValidJson());
         EXPECT_THROW(graph.CreateExternalIngress<TestPacket>("packets"), std::runtime_error);
     }
 }
 
-TEST(RuntimeGraph, RunsPipelineConfiguredFromJsonFile) {
+TEST(EventPipelineGraph, RunsPipelineConfiguredFromJsonFile) {
     auto registry = MakeRegistry();
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
 
-    graph.Configure(smartdrone::runtime_graph::ParseRuntimeGraphConfigJsonFile(
-        std::string(TEST_RUNTIME_GRAPH_DIR) + "/basic_pipeline.json"));
+    graph.Configure(epg::ParseGraphConfigJsonFile(
+        std::string(TEST_EPG_DIR) + "/basic_pipeline.json"));
 
     graph.Start();
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -631,12 +561,12 @@ TEST(RuntimeGraph, RunsPipelineConfiguredFromJsonFile) {
     EXPECT_EQ(taskDiagnostics.at("sink").errorCount, 0u);
 }
 
-TEST(RuntimeGraph, TaskCanPublishToMultipleQueuesForDifferentConsumers) {
+TEST(EventPipelineGraph, TaskCanPublishToMultipleQueuesForDifferentConsumers) {
     auto registry = MakeRegistry();
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
 
-    graph.Configure(smartdrone::runtime_graph::ParseRuntimeGraphConfigJsonFile(
-        std::string(TEST_RUNTIME_GRAPH_DIR) + "/fanout_pipeline.json"));
+    graph.Configure(epg::ParseGraphConfigJsonFile(
+        std::string(TEST_EPG_DIR) + "/fanout_pipeline.json"));
 
     graph.Start();
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -662,37 +592,37 @@ TEST(RuntimeGraph, TaskCanPublishToMultipleQueuesForDifferentConsumers) {
     EXPECT_EQ(taskDiagnostics.at("right_sink").errorCount, 0u);
 }
 
-TEST(RuntimeGraphTopology, RunsLinearChainTopologyFromJson) {
+TEST(EventPipelineGraphTopology, RunsLinearChainTopologyFromJson) {
     RunTopologyFromJsonFile(
         "chain_pipeline.json",
         {"source_to_forward", "forward_to_sink"},
         {"source", "forward", "sink"});
 }
 
-TEST(RuntimeGraphTopology, RunsParallelIndependentTopologyFromJson) {
+TEST(EventPipelineGraphTopology, RunsParallelIndependentTopologyFromJson) {
     RunTopologyFromJsonFile(
         "parallel_pipeline.json",
         {"left_packets", "right_packets"},
         {"left_source", "left_sink", "right_source", "right_sink"});
 }
 
-TEST(RuntimeGraphTopology, RunsFanInJoinTopologyFromJson) {
+TEST(EventPipelineGraphTopology, RunsFanInJoinTopologyFromJson) {
     RunTopologyFromJsonFile(
         "fanin_pipeline.json",
         {"left_packets", "right_packets"},
         {"left_source", "right_source", "join_sink"});
 }
 
-TEST(RuntimeGraphTopology, RunsDiamondTopologyFromJson) {
+TEST(EventPipelineGraphTopology, RunsDiamondTopologyFromJson) {
     RunTopologyFromJsonFile(
         "diamond_pipeline.json",
         {"left_packets", "right_packets", "forwarded_left_packets"},
         {"fanout_source", "left_forward", "join_sink"});
 }
 
-TEST(RuntimeGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
+TEST(EventPipelineGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
     auto registry = MakeRegistry();
-    const auto config = smartdrone::runtime_graph::ParseRuntimeGraphConfigMermaid(R"(
+    const auto config = epg::ParseGraphConfigMermaid(R"(
       flowchart LR
         source["type=TestSourceTask; trigger=periodic; interval_ms=1"]
         forward["type=TestForwardTask; trigger=any_queue_ready"]
@@ -703,32 +633,32 @@ TEST(RuntimeGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
     )", registry);
 
     ASSERT_EQ(config.queues.size(), 2u);
-    EXPECT_EQ(config.queues[0].name, "source_out_to_forward_in");
+    EXPECT_EQ(config.queues[0].name, "source_0_to_forward_0");
     EXPECT_EQ(config.queues[0].type, "TestPacket");
     EXPECT_EQ(config.queues[0].depth, 8u);
-    EXPECT_EQ(config.queues[1].name, "forward_out_to_sink_in");
+    EXPECT_EQ(config.queues[1].name, "forward_0_to_sink_0");
 
     ASSERT_EQ(config.tasks.size(), 3u);
     EXPECT_EQ(config.tasks[0].name, "source");
-    EXPECT_EQ(config.tasks[0].outputs.at("out"), "source_out_to_forward_in");
-    EXPECT_EQ(config.tasks[1].inputs.at("in"), "source_out_to_forward_in");
-    EXPECT_EQ(config.tasks[1].outputs.at("out"), "forward_out_to_sink_in");
-    EXPECT_EQ(config.tasks[1].trigger.queues, std::vector<std::string>{"source_out_to_forward_in"});
-    EXPECT_EQ(config.tasks[2].inputs.at("in"), "forward_out_to_sink_in");
-    EXPECT_EQ(config.tasks[2].trigger.queues, std::vector<std::string>{"forward_out_to_sink_in"});
+    EXPECT_EQ(config.tasks[0].outputs.at(0), "source_0_to_forward_0");
+    EXPECT_EQ(config.tasks[1].inputs.at(0), "source_0_to_forward_0");
+    EXPECT_EQ(config.tasks[1].outputs.at(0), "forward_0_to_sink_0");
+    EXPECT_EQ(config.tasks[1].trigger.queues, std::vector<std::string>{"source_0_to_forward_0"});
+    EXPECT_EQ(config.tasks[2].inputs.at(0), "forward_0_to_sink_0");
+    EXPECT_EQ(config.tasks[2].trigger.queues, std::vector<std::string>{"forward_0_to_sink_0"});
 }
 
-TEST(RuntimeGraphMermaid, RunsTopologyCompiledFromMermaidFile) {
-    RunTopologyFromMermaidFile(
-        "chain_pipeline.mmd",
-        {"source_out_to_forward_in", "forward_out_to_sink_in"},
+TEST(EventPipelineGraphDot, RunsTopologyCompiledFromDotFile) {
+    RunTopologyFromDotFile(
+        "chain_pipeline.dot",
+        {"source_0_to_forward_0", "forward_0_to_sink_0"},
         {"source", "forward", "sink"});
 }
 
-TEST(RuntimeGraphMermaid, ConvertsMarkdownMermaidBlockToRuntimeConfig) {
+TEST(EventPipelineGraphMermaid, ConvertsMarkdownMermaidBlockToRuntimeConfig) {
     auto registry = MakeRegistry();
-    const auto config = smartdrone::runtime_graph::ParseRuntimeGraphConfigMermaid(R"(
-# Runtime Graph
+    const auto config = epg::ParseGraphConfigMermaid(R"(
+# EventPipelineGraph
 
 ```mermaid
 flowchart LR
@@ -739,26 +669,26 @@ flowchart LR
     )", registry);
 
     ASSERT_EQ(config.queues.size(), 1u);
-    EXPECT_EQ(config.queues[0].name, "source_out_to_sink_in");
+    EXPECT_EQ(config.queues[0].name, "source_0_to_sink_0");
     ASSERT_EQ(config.tasks.size(), 2u);
-    EXPECT_EQ(config.tasks[0].outputs.at("out"), "source_out_to_sink_in");
-    EXPECT_EQ(config.tasks[1].inputs.at("in"), "source_out_to_sink_in");
+    EXPECT_EQ(config.tasks[0].outputs.at(0), "source_0_to_sink_0");
+    EXPECT_EQ(config.tasks[1].inputs.at(0), "source_0_to_sink_0");
 }
 
-TEST(RuntimeGraphMermaid, CompilesNativeSlamSubgraphFromMaintainedTopology) {
+TEST(EventPipelineGraphDot, CompilesNativeSlamSubgraphFromMaintainedTopology) {
     auto registry = MakeNativeSlamShapeRegistry();
-    const auto config = smartdrone::runtime_graph::ParseRuntimeGraphConfigMermaidSubgraphFile(
-        std::string(TEST_RUNTIME_GRAPH_DIR) + "/../../config/runtime_graph/native_runtime_topology.md",
-        "slam_session_graph",
+    const auto config = epg::ParseGraphConfigDotFile(
+        std::string(TEST_EPG_DIR) + "/../../config/epg/native_epg_topology.dot",
+        "cluster_slam_session_graph",
         registry);
 
     ASSERT_EQ(config.tasks.size(), 12u);
     ASSERT_EQ(config.queues.size(), 11u);
 
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));
 
-    auto findTask = [&config](const std::string& name) -> const smartdrone::runtime_graph::TaskConfig* {
+    auto findTask = [&config](const std::string& name) -> const epg::TaskConfig* {
         for (const auto& task : config.tasks) {
             if (task.name == name) {
                 return &task;
@@ -769,51 +699,51 @@ TEST(RuntimeGraphMermaid, CompilesNativeSlamSubgraphFromMaintainedTopology) {
 
     const auto* resource = findTask("NativeSlamResourceTask");
     ASSERT_NE(resource, nullptr);
-    EXPECT_EQ(resource->trigger.mode, smartdrone::runtime_graph::TriggerMode::Periodic);
+    EXPECT_EQ(resource->trigger.mode, epg::TriggerMode::Periodic);
     EXPECT_EQ(resource->trigger.interval, std::chrono::milliseconds(1));
 
     const auto* clock = findTask("NativeSlamClockTask");
     ASSERT_NE(clock, nullptr);
-    EXPECT_EQ(clock->trigger.mode, smartdrone::runtime_graph::TriggerMode::Periodic);
+    EXPECT_EQ(clock->trigger.mode, epg::TriggerMode::Periodic);
     EXPECT_EQ(clock->trigger.interval, std::chrono::milliseconds(1));
 
     const auto* imuGate = findTask("NativeSlamImuGateTask");
     ASSERT_NE(imuGate, nullptr);
-    EXPECT_EQ(imuGate->inputs.at("ready"), "NativeSlamResourceTask_ready_to_NativeSlamImuGateTask_ready");
-    EXPECT_EQ(imuGate->inputs.at("tick"), "NativeSlamClockTask_tick_to_NativeSlamImuGateTask_tick");
+    EXPECT_EQ(imuGate->inputs.at(0), "NativeSlamResourceTask_0_to_NativeSlamImuGateTask_0");
+    EXPECT_EQ(imuGate->inputs.at(1), "NativeSlamClockTask_0_to_NativeSlamImuGateTask_1");
     EXPECT_EQ(imuGate->trigger.queues,
-              (std::vector<std::string>{"NativeSlamResourceTask_ready_to_NativeSlamImuGateTask_ready",
-                                         "NativeSlamClockTask_tick_to_NativeSlamImuGateTask_tick"}));
+              (std::vector<std::string>{"NativeSlamResourceTask_0_to_NativeSlamImuGateTask_0",
+                                         "NativeSlamClockTask_0_to_NativeSlamImuGateTask_1"}));
 
     const auto* acquire = findTask("NativeSlamAcquireTask");
     ASSERT_NE(acquire, nullptr);
-    EXPECT_EQ(acquire->inputs.at("frame_ready"),
-              "NativeSlamImuGateTask_frame_ready_to_NativeSlamAcquireTask_frame_ready");
+    EXPECT_EQ(acquire->inputs.at(0),
+              "NativeSlamImuGateTask_0_to_NativeSlamAcquireTask_0");
     EXPECT_EQ(acquire->trigger.queues,
-              (std::vector<std::string>{"NativeSlamImuGateTask_frame_ready_to_NativeSlamAcquireTask_frame_ready"}));
+              (std::vector<std::string>{"NativeSlamImuGateTask_0_to_NativeSlamAcquireTask_0"}));
 
     const auto* tracking = findTask("NativeSlamTrackingTask");
     ASSERT_NE(tracking, nullptr);
-    EXPECT_EQ(tracking->inputs.at("prepared"),
-              "NativeSlamAcquireTask_prepared_to_NativeSlamTrackingTask_prepared");
+    EXPECT_EQ(tracking->inputs.at(0),
+              "NativeSlamAcquireTask_0_to_NativeSlamTrackingTask_0");
     EXPECT_EQ(tracking->trigger.queues,
-              (std::vector<std::string>{"NativeSlamAcquireTask_prepared_to_NativeSlamTrackingTask_prepared"}));
+              (std::vector<std::string>{"NativeSlamAcquireTask_0_to_NativeSlamTrackingTask_0"}));
 }
 
-TEST(RuntimeGraphMermaid, CompilesNativeCalibSubgraphFromMaintainedTopology) {
+TEST(EventPipelineGraphDot, CompilesNativeCalibSubgraphFromMaintainedTopology) {
     auto registry = MakeNativeCalibShapeRegistry();
-    const auto config = smartdrone::runtime_graph::ParseRuntimeGraphConfigMermaidSubgraphFile(
-        std::string(TEST_RUNTIME_GRAPH_DIR) + "/../../config/runtime_graph/native_runtime_topology.md",
-        "calib_session_graph",
+    const auto config = epg::ParseGraphConfigDotFile(
+        std::string(TEST_EPG_DIR) + "/../../config/epg/native_epg_topology.dot",
+        "cluster_calib_session_graph",
         registry);
 
     ASSERT_EQ(config.tasks.size(), 10u);
     ASSERT_EQ(config.queues.size(), 12u);
 
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));
 
-    auto findTask = [&config](const std::string& name) -> const smartdrone::runtime_graph::TaskConfig* {
+    auto findTask = [&config](const std::string& name) -> const epg::TaskConfig* {
         for (const auto& task : config.tasks) {
             if (task.name == name) {
                 return &task;
@@ -824,85 +754,86 @@ TEST(RuntimeGraphMermaid, CompilesNativeCalibSubgraphFromMaintainedTopology) {
 
     const auto* camera = findTask("CalibCameraAcquireTask");
     ASSERT_NE(camera, nullptr);
-    EXPECT_EQ(camera->inputs.at("ready"), "CalibResourceTask_camera_to_CalibCameraAcquireTask_ready");
-    EXPECT_EQ(camera->inputs.at("tick"), "NativeCalibClockTask_tick_to_CalibCameraAcquireTask_tick");
+    EXPECT_EQ(camera->inputs.at(0), "CalibResourceTask_0_to_CalibCameraAcquireTask_0");
+    EXPECT_EQ(camera->inputs.at(1), "NativeCalibClockTask_0_to_CalibCameraAcquireTask_1");
 
     const auto* pace = findTask("CalibPacingFilterTask");
     ASSERT_NE(pace, nullptr);
-    EXPECT_EQ(pace->inputs.at("stereo"), "CalibCameraAcquireTask_pace_to_CalibPacingFilterTask_stereo");
+    EXPECT_EQ(pace->inputs.at(0), "CalibCameraAcquireTask_0_to_CalibPacingFilterTask_0");
 
     const auto* preview = findTask("CalibUdpPreviewTask");
     ASSERT_NE(preview, nullptr);
-    EXPECT_EQ(preview->inputs.at("stereo"), "CalibCameraAcquireTask_preview_to_CalibUdpPreviewTask_stereo");
+    EXPECT_EQ(preview->inputs.at(0), "CalibCameraAcquireTask_1_to_CalibUdpPreviewTask_0");
 }
 
-TEST(RuntimeGraphMermaidTopology, RunsBasicTopologyFromMermaid) {
-    RunTopologyFromMermaidFile(
-        "basic_pipeline.mmd",
-        {"source_out_to_sink_in"},
+TEST(EventPipelineGraphDotTopology, RunsBasicTopologyFromDot) {
+    RunTopologyFromDotFile(
+        "basic_pipeline.dot",
+        {"source_0_to_sink_0"},
         {"source", "sink"});
 }
 
-TEST(RuntimeGraphMermaidTopology, RunsFanoutTopologyFromMermaid) {
-    RunTopologyFromMermaidFile(
-        "fanout_pipeline.mmd",
-        {"fanout_source_left_to_left_sink_in", "fanout_source_right_to_right_sink_in"},
+TEST(EventPipelineGraphDotTopology, RunsFanoutTopologyFromDot) {
+    RunTopologyFromDotFile(
+        "fanout_pipeline.dot",
+        {"fanout_source_0_to_left_sink_0", "fanout_source_1_to_right_sink_0"},
         {"fanout_source", "left_sink", "right_sink"});
 }
 
-TEST(RuntimeGraphMermaidTopology, RunsLinearChainTopologyFromMermaid) {
-    RunTopologyFromMermaidFile(
-        "chain_pipeline.mmd",
-        {"source_out_to_forward_in", "forward_out_to_sink_in"},
+TEST(EventPipelineGraphDotTopology, RunsLinearChainTopologyFromDot) {
+    RunTopologyFromDotFile(
+        "chain_pipeline.dot",
+        {"source_0_to_forward_0", "forward_0_to_sink_0"},
         {"source", "forward", "sink"});
 }
 
-TEST(RuntimeGraphMermaidTopology, RunsParallelIndependentTopologyFromMermaid) {
-    RunTopologyFromMermaidFile(
-        "parallel_pipeline.mmd",
-        {"left_source_out_to_left_sink_in", "right_source_out_to_right_sink_in"},
+TEST(EventPipelineGraphDotTopology, RunsParallelIndependentTopologyFromDot) {
+    RunTopologyFromDotFile(
+        "parallel_pipeline.dot",
+        {"left_source_0_to_left_sink_0", "right_source_0_to_right_sink_0"},
         {"left_source", "left_sink", "right_source", "right_sink"});
 }
 
-TEST(RuntimeGraphMermaidTopology, RunsFanInJoinTopologyFromMermaid) {
-    RunTopologyFromMermaidFile(
-        "fanin_pipeline.mmd",
-        {"left_source_out_to_join_sink_left", "right_source_out_to_join_sink_right"},
+TEST(EventPipelineGraphDotTopology, RunsFanInJoinTopologyFromDot) {
+    RunTopologyFromDotFile(
+        "fanin_pipeline.dot",
+        {"left_source_0_to_join_sink_0", "right_source_0_to_join_sink_1"},
         {"left_source", "right_source", "join_sink"});
 }
 
-TEST(RuntimeGraphMermaidTopology, RunsDiamondTopologyFromMermaid) {
-    RunTopologyFromMermaidFile(
-        "diamond_pipeline.mmd",
-        {"fanout_source_left_to_left_forward_in",
-         "fanout_source_right_to_join_sink_right",
-         "left_forward_out_to_join_sink_left"},
+TEST(EventPipelineGraphDotTopology, RunsDiamondTopologyFromDot) {
+    RunTopologyFromDotFile(
+        "diamond_pipeline.dot",
+        {"fanout_source_0_to_left_forward_0",
+         "fanout_source_1_to_join_sink_1",
+         "left_forward_0_to_join_sink_0"},
         {"fanout_source", "left_forward", "join_sink"});
 }
 
-TEST(RuntimeGraphMermaid, RejectsInvalidMermaidTopology) {
-    EXPECT_THROW(smartdrone::runtime_graph::ParseRuntimeGraphConfigMermaid(R"(
+TEST(EventPipelineGraphMermaid, RejectsInvalidMermaidTopology) {
+    EXPECT_THROW(epg::ParseGraphConfigMermaid(R"(
       flowchart LR
         source[type=TestSourceTask; trigger=periodic; interval_ms=1]
         source.out -->|type=TestPacket; depth=8; overflow=drop_newest| missing.in
     )"), std::runtime_error);
 
-    EXPECT_THROW(smartdrone::runtime_graph::ParseRuntimeGraphConfigMermaid(R"(
+    EXPECT_THROW(epg::ParseGraphConfigMermaid(R"(
       flowchart LR
         source[type=TestSourceTask; trigger=periodic; interval_ms=1]
         sink[type=TestSinkTask; trigger=any_queue_ready]
         source.out -->|type=TestPacket; overflow=drop_newest| sink.in
     )"), std::runtime_error);
 
-    EXPECT_THROW(smartdrone::runtime_graph::ParseRuntimeGraphConfigMermaid(R"(
+    auto registry = MakeRegistry();
+    EXPECT_THROW(epg::ParseGraphConfigMermaid(R"(
       flowchart LR
         source["type=TestSourceTask; trigger=periodic; interval_ms=1"]
         sink["type=TestSinkTask; trigger=any_queue_ready; trigger_queues=OtherPacket"]
         source -->|"type=TestPacket; depth=1; overflow=drop_newest"| sink
-    )", MakeRegistry()), std::runtime_error);
+    )", registry), std::runtime_error);
 }
 
-TEST(RuntimeGraph, RejectsMultipleConsumersForSpscQueue) {
+TEST(EventPipelineGraph, RejectsMultipleConsumersForSpscQueue) {
     const char* json = R"({
       "queues": [
         {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "drop_newest"}
@@ -912,19 +843,19 @@ TEST(RuntimeGraph, RejectsMultipleConsumersForSpscQueue) {
           "name": "source",
           "type": "TestSourceTask",
           "trigger": {"mode": "periodic", "interval_ms": 1},
-          "outputs": {"out": "packets"}
+          "outputs": {"0": "packets"}
         },
         {
           "name": "sink_a",
           "type": "TestSinkTask",
           "trigger": {"mode": "any_queue_ready", "queues": ["packets"]},
-          "inputs": {"in": "packets"}
+          "inputs": {"0": "packets"}
         },
         {
           "name": "sink_b",
           "type": "TestSinkTask",
           "trigger": {"mode": "any_queue_ready", "queues": ["packets"]},
-          "inputs": {"in": "packets"}
+          "inputs": {"0": "packets"}
         }
       ]
     })";
@@ -932,9 +863,9 @@ TEST(RuntimeGraph, RejectsMultipleConsumersForSpscQueue) {
     ExpectConfigureThrows(json);
 }
 
-TEST(RuntimeGraph, AllQueueReadyWaitsForAllInputs) {
+TEST(EventPipelineGraph, AllQueueReadyWaitsForAllInputs) {
     auto registry = MakeRegistry();
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
 
     graph.ConfigureJson(R"({
       "queues": [
@@ -946,19 +877,19 @@ TEST(RuntimeGraph, AllQueueReadyWaitsForAllInputs) {
           "name": "left_source",
           "type": "TestSourceTask",
           "trigger": {"mode": "periodic", "interval_ms": 1},
-          "outputs": {"out": "left_packets"}
+          "outputs": {"0": "left_packets"}
         },
         {
           "name": "right_source",
           "type": "TestSecondSourceTask",
           "trigger": {"mode": "periodic", "interval_ms": 2},
-          "outputs": {"out": "right_packets"}
+          "outputs": {"0": "right_packets"}
         },
         {
           "name": "all_sink",
           "type": "TestAllInputsSinkTask",
           "trigger": {"mode": "all_queue_ready", "queues": ["left_packets", "right_packets"]},
-          "inputs": {"left": "left_packets", "right": "right_packets"}
+          "inputs": {"0": "left_packets", "1": "right_packets"}
         }
       ]
     })");
@@ -972,9 +903,9 @@ TEST(RuntimeGraph, AllQueueReadyWaitsForAllInputs) {
     EXPECT_EQ(taskDiagnostics.at("all_sink").errorCount, 0u);
 }
 
-TEST(RuntimeGraph, PeriodicOrAnyQueueReadyRunsWithQueueTrigger) {
+TEST(EventPipelineGraph, PeriodicOrAnyQueueReadyRunsWithQueueTrigger) {
     auto registry = MakeRegistry();
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
 
     graph.ConfigureJson(R"({
       "queues": [
@@ -985,13 +916,13 @@ TEST(RuntimeGraph, PeriodicOrAnyQueueReadyRunsWithQueueTrigger) {
           "name": "source",
           "type": "TestSourceTask",
           "trigger": {"mode": "periodic", "interval_ms": 1},
-          "outputs": {"out": "packets"}
+          "outputs": {"0": "packets"}
         },
         {
           "name": "hybrid_sink",
           "type": "TestSinkTask",
           "trigger": {"mode": "periodic_or_any_queue_ready", "interval_ms": 50, "queues": ["packets"]},
-          "inputs": {"in": "packets"}
+          "inputs": {"0": "packets"}
         }
       ]
     })");
@@ -1005,9 +936,9 @@ TEST(RuntimeGraph, PeriodicOrAnyQueueReadyRunsWithQueueTrigger) {
     EXPECT_EQ(taskDiagnostics.at("hybrid_sink").errorCount, 0u);
 }
 
-TEST(RuntimeGraph, PeriodicTaskCanRunWithoutQueues) {
+TEST(EventPipelineGraph, PeriodicTaskCanRunWithoutQueues) {
     auto registry = MakeRegistry();
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
 
     graph.ConfigureJson(R"({
       "queues": [],
@@ -1029,7 +960,7 @@ TEST(RuntimeGraph, PeriodicTaskCanRunWithoutQueues) {
     EXPECT_EQ(taskDiagnostics.at("heartbeat").errorCount, 0u);
 }
 
-TEST(RuntimeGraph, SupportsCapturedTaskFactoryForNativeAdapters) {
+TEST(EventPipelineGraph, SupportsCapturedTaskFactoryForNativeAdapters) {
     int ticks = 0;
     Registry registry;
     registry.RegisterTaskFactory(
@@ -1040,7 +971,7 @@ TEST(RuntimeGraph, SupportsCapturedTaskFactoryForNativeAdapters) {
             return std::unique_ptr<ITask>(new TestCountingTask(ticks));
         });
 
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
     graph.ConfigureJson(R"({
       "queues": [],
       "tasks": [
@@ -1060,9 +991,9 @@ TEST(RuntimeGraph, SupportsCapturedTaskFactoryForNativeAdapters) {
     EXPECT_GT(graph.TaskDiagnostics().at("counter").loopCount, 0u);
 }
 
-TEST(RuntimeGraph, TaskExceptionsAreCountedAndRunnerKeepsAlive) {
+TEST(EventPipelineGraph, TaskExceptionsAreCountedAndRunnerKeepsAlive) {
     auto registry = MakeRegistry();
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
 
     graph.ConfigureJson(R"({
       "queues": [],
@@ -1084,9 +1015,9 @@ TEST(RuntimeGraph, TaskExceptionsAreCountedAndRunnerKeepsAlive) {
     EXPECT_EQ(diag.errorCount, diag.loopCount);
 }
 
-TEST(RuntimeGraph, ContextSlotErrorsAreCountedAsTaskErrors) {
+TEST(EventPipelineGraph, ContextSlotErrorsAreCountedAsTaskErrors) {
     auto registry = MakeRegistry();
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
 
     graph.ConfigureJson(R"({
       "queues": [],
@@ -1107,9 +1038,9 @@ TEST(RuntimeGraph, ContextSlotErrorsAreCountedAsTaskErrors) {
     EXPECT_GT(diag.errorCount, 0u);
 }
 
-TEST(RuntimeGraph, LifecycleStateAndAccessorsBehaveAsExpected) {
+TEST(EventPipelineGraph, LifecycleStateAndAccessorsBehaveAsExpected) {
     auto registry = MakeRegistry();
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
 
     EXPECT_FALSE(graph.Running());
     EXPECT_THROW(graph.Start(), std::runtime_error);
@@ -1129,8 +1060,8 @@ TEST(RuntimeGraph, LifecycleStateAndAccessorsBehaveAsExpected) {
     EXPECT_FALSE(graph.Running());
 }
 
-TEST(RuntimeGraphConfig, ParsesEscapesAndRejectsMissingFile) {
-    const auto config = smartdrone::runtime_graph::ParseRuntimeGraphConfigJson(R"({
+TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile) {
+    const auto config = epg::ParseGraphConfigJson(R"({
       "queues": [
         {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "tail_drop"}
       ],
@@ -1139,7 +1070,7 @@ TEST(RuntimeGraphConfig, ParsesEscapesAndRejectsMissingFile) {
           "name": "source\nname",
           "type": "TestSourceTask",
           "trigger": {"mode": "periodic", "interval_ms": 1},
-          "outputs": {"out": "packets"}
+          "outputs": {"0": "packets"}
         }
       ]
     })");
@@ -1147,19 +1078,19 @@ TEST(RuntimeGraphConfig, ParsesEscapesAndRejectsMissingFile) {
     ASSERT_EQ(config.tasks.size(), 1u);
     EXPECT_EQ(config.tasks.front().name, "source\nname");
     EXPECT_THROW(
-        smartdrone::runtime_graph::ParseRuntimeGraphConfigJsonFile("/tmp/smart_drone_missing_runtime_graph.json"),
+        epg::ParseGraphConfigJsonFile("/tmp/smart_drone_missing_epg.json"),
         std::runtime_error);
 }
 
-TEST(RuntimeGraphConfig, RejectsInvalidJsonAndUnsupportedEnumValues) {
-    EXPECT_THROW(smartdrone::runtime_graph::ParseRuntimeGraphConfigJson("{"), std::runtime_error);
-    EXPECT_THROW(smartdrone::runtime_graph::ParseRuntimeGraphConfigJson(R"({
+TEST(GraphConfig, RejectsInvalidJsonAndUnsupportedEnumValues) {
+    EXPECT_THROW(epg::ParseGraphConfigJson("{"), std::runtime_error);
+    EXPECT_THROW(epg::ParseGraphConfigJson(R"({
       "queues": [
         {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "bad_policy"}
       ],
       "tasks": []
     })"), std::runtime_error);
-    EXPECT_THROW(smartdrone::runtime_graph::ParseRuntimeGraphConfigJson(R"({
+    EXPECT_THROW(epg::ParseGraphConfigJson(R"({
       "queues": [],
       "tasks": [
         {
@@ -1171,10 +1102,10 @@ TEST(RuntimeGraphConfig, RejectsInvalidJsonAndUnsupportedEnumValues) {
     })"), std::runtime_error);
 }
 
-TEST(RuntimeGraphReflection, RegistersMessagesAndTaskPortsFromCatalog) {
+TEST(EventPipelineGraphReflection, RegistersMessagesAndTaskPortsFromCatalog) {
     Registry registry;
-    smartdrone::runtime_graph::RuntimeGraphTypeCatalog::Global().RegisterReflectedMessageTypes(registry);
-    smartdrone::runtime_graph::RuntimeGraphTypeCatalog::Global().RegisterReflectedTaskTypes(
+    epg::TypeCatalog::Global().RegisterReflectedMessageTypes(registry);
+    epg::TypeCatalog::Global().RegisterReflectedTaskTypes(
         registry,
         {"ReflectedSourceTask", "ReflectedSinkTask"},
         [](const std::string& type) {
@@ -1191,7 +1122,7 @@ TEST(RuntimeGraphReflection, RegistersMessagesAndTaskPortsFromCatalog) {
             return Registry::TaskFactory{};
         });
 
-    RuntimeGraph graph(registry);
+    EventPipelineGraph graph(registry);
     graph.ConfigureJson(R"({
       "queues": [
         {"name": "reflected_packets", "type": "ReflectedPacket", "depth": 4, "overflow": "drop_newest"}
@@ -1201,13 +1132,13 @@ TEST(RuntimeGraphReflection, RegistersMessagesAndTaskPortsFromCatalog) {
           "name": "source",
           "type": "ReflectedSourceTask",
           "trigger": {"mode": "periodic", "interval_ms": 1},
-          "outputs": {"out": "reflected_packets"}
+          "outputs": {"0": "reflected_packets"}
         },
         {
           "name": "sink",
           "type": "ReflectedSinkTask",
           "trigger": {"mode": "any_queue_ready", "queues": ["reflected_packets"]},
-          "inputs": {"in": "reflected_packets"}
+          "inputs": {"0": "reflected_packets"}
         }
       ]
     })");
@@ -1220,7 +1151,7 @@ TEST(RuntimeGraphReflection, RegistersMessagesAndTaskPortsFromCatalog) {
     EXPECT_GT(taskDiag.at("sink").loopCount, 0u);
 }
 
-TEST(RuntimeGraphValidation, RejectsInvalidTopologyConfigurations) {
+TEST(EventPipelineGraphValidation, RejectsInvalidTopologyConfigurations) {
     const std::vector<std::string> invalidJsons = {
         R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"},{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[]})",
         R"({"queues":[{"name":"packets","type":"MissingPacket","depth":4,"overflow":"drop_newest"}],"tasks":[]})",
@@ -1228,16 +1159,16 @@ TEST(RuntimeGraphValidation, RejectsInvalidTopologyConfigurations) {
         R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1}},{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1}}]})",
         R"({"queues":[],"tasks":[{"name":"missing","type":"MissingTask","trigger":{"mode":"periodic","interval_ms":1}}]})",
         R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":0}}]})",
-        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":[]},"inputs":{"in":"packets"}}]})",
-        R"({"queues":[],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["missing"]},"inputs":{"in":"missing"}}]})",
-        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["packets"]},"inputs":{"bad":"packets"}}]})",
-        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"source","type":"TestSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs":{"bad":"packets"}}]})",
-        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["packets"]},"inputs":{"in":"missing"}}]})",
-        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"source","type":"TestSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs":{"out":"missing"}}]})",
-        R"({"queues":[{"name":"packets","type":"OtherPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["packets"]},"inputs":{"in":"packets"}}]})",
-        R"({"queues":[{"name":"packets","type":"OtherPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"source","type":"TestSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs":{"out":"packets"}}]})",
-        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"source_a","type":"TestSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs":{"out":"packets"}},{"name":"source_b","type":"TestSecondSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs":{"out":"packets"}}]})",
-        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"},{"name":"other","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["other"]},"inputs":{"in":"packets"}}]})"
+        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":[]},"inputs": {"0":"packets"}}]})",
+        R"({"queues":[],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["missing"]},"inputs": {"0":"missing"}}]})",
+        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["packets"]},"inputs": {"999":"packets"}}]})",
+        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"source","type":"TestSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs": {"999":"packets"}}]})",
+        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["packets"]},"inputs": {"0":"missing"}}]})",
+        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"source","type":"TestSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs": {"0":"missing"}}]})",
+        R"({"queues":[{"name":"packets","type":"OtherPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["packets"]},"inputs": {"0":"packets"}}]})",
+        R"({"queues":[{"name":"packets","type":"OtherPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"source","type":"TestSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs": {"0":"packets"}}]})",
+        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"source_a","type":"TestSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs": {"0":"packets"}},{"name":"source_b","type":"TestSecondSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs": {"0":"packets"}}]})",
+        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"},{"name":"other","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["other"]},"inputs": {"0":"packets"}}]})"
     };
 
     for (const auto& json : invalidJsons) {
