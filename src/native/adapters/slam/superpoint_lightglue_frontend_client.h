@@ -23,6 +23,12 @@ struct ExternalFeatureFrontendStats {
     double inputMs{0.0};
     double forwardMs{0.0};
     double totalMs{0.0};
+    int rawLeftCount{0};
+    int rawRightCount{0};
+    int stereoLeftCount{0};
+    int stereoRightCount{0};
+    bool lightGlueUsed{false};
+    bool descriptorFallbackUsed{false};
     uint32_t imageCount{0};
     uint32_t payloadBytes{0};
 };
@@ -39,6 +45,7 @@ class ExternalFeatureFrontendClient {
     virtual bool DetectAndComputeStereo(const cv::Mat &leftGray, const cv::Mat &rightGray,
                                         SuperPointFeatureSet &leftFeatures, SuperPointFeatureSet &rightFeatures,
                                         std::string *err) = 0;
+    virtual void SetLightGlueEveryNOverride(int everyN) = 0;
     virtual Stats LastStats() const = 0;
 };
 
@@ -59,6 +66,7 @@ class SuperPointLightGlueFrontendClient final : public ExternalFeatureFrontendCl
     bool DetectAndCompute(const cv::Mat &gray, SuperPointFeatureSet &outFeatures, std::string *err) override;
     bool DetectAndComputeStereo(const cv::Mat &leftGray, const cv::Mat &rightGray, SuperPointFeatureSet &leftFeatures,
                                 SuperPointFeatureSet &rightFeatures, std::string *err) override;
+    void SetLightGlueEveryNOverride(int everyN) override;
     Stats LastStats() const override;
 
   private:

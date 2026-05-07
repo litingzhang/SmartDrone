@@ -12,34 +12,34 @@
 
 namespace smartdrone::core::application {
 
-struct NativeSlamResourceReady {
+struct SlamResourceReady {
     bool ready{false};
 };
 
-struct NativeSlamTick {
+struct SlamTick {
     std::uint64_t sequence{0};
 };
 
-struct NativeSlamFrameReady {
+struct SlamFrameReady {
     std::shared_ptr<SlamSessionRuntime> runtime;
 };
 
-struct NativeSlamPreparedFrame {
+struct SlamPreparedFrame {
     std::shared_ptr<SlamSessionRuntime> runtime;
     std::shared_ptr<SlamFrameProcessor::PreparedFrame> frame;
 };
 
-struct NativeSlamTrackedFrame {
+struct SlamTrackedFrame {
     std::shared_ptr<SlamSessionRuntime> runtime;
     std::shared_ptr<SlamFrameProcessor::TrackedFrame> frame;
 };
 
-struct NativeSlamPublishedFrame {
+struct SlamPublishedFrame {
     std::shared_ptr<SlamSessionRuntime> runtime;
     std::shared_ptr<SlamFrameProcessor::PublishedFrame> frame;
 };
 
-struct NativeSlamStatus {
+struct SlamStatus {
     bool sessionOk{true};
     bool abortRequested{false};
 };
@@ -48,7 +48,7 @@ struct CalibResourceReady {
     bool ready{false};
 };
 
-struct NativeCalibTick {
+struct CalibTick {
     std::uint64_t sequence{0};
 };
 
@@ -84,7 +84,7 @@ struct CalibFlushRequest {
     bool sessionOk{true};
 };
 
-struct NativeCalibStatus {
+struct CalibStatus {
     bool sessionOk{true};
     bool completed{false};
 };

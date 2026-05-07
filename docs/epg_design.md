@@ -44,7 +44,7 @@ when a graph is configured.
 
 `epg::TypeCatalog`
 
-Stores reflected registrations emitted by the `EPG_REGISTER_*` macros. Native code
+Stores reflected registrations emitted by the `EPG_REGISTER_*` macros. Session code
 uses this so task declarations can stay near task implementations.
 
 `epg::EventPipelineGraph`
@@ -68,13 +68,13 @@ supports bounded depth with `drop_newest` or `overwrite_oldest` overflow behavio
 Message types are registered with:
 
 ```cpp
-EPG_REGISTER_MESSAGE(NativeSlamTick, "NativeSlamTick")
+EPG_REGISTER_MESSAGE(SlamTick, "SlamTick")
 ```
 
 Task types are registered with:
 
 ```cpp
-EPG_REGISTER_TASK_TYPE(NativeSlamClockTask, "NativeSlamClockTask")
+EPG_REGISTER_TASK_TYPE(SlamClockTask, "SlamClockTask")
 ```
 
 When ports are declared directly in C++, use:
@@ -119,12 +119,77 @@ ingress.Emplace();
 Use this for signals, command-channel events, hardware callbacks, and other events
 that originate outside the graph runner.
 
+## Terminal DFX Panel
+
+`tools/epg_tui.py` is a lightweight terminal DFX panel for field debugging. It is
+modeled after tools such as `jtop`: it refreshes in place, lists queues and tasks,
+and uses colored bars to show pressure.
+
+Run the SLAM graph demo:
+
+```sh
+python3 tools/epg_tui.py --graph cluster_slam_session_graph
+```
+
+Run the calibration graph demo:
+
+```sh
+python3 tools/epg_tui.py --graph cluster_calib_session_graph
+```
+
+The panel currently supports two data modes:
+
+- demo mode: parses `config/epg/epg_topology.dot` and generates simulated live metrics
+- snapshot mode: reads a JSON snapshot file with `--snapshot <path>`
+
+EPG graph sessions write live snapshots every 500 ms:
+
+```sh
+python3 tools/epg_tui.py --graph cluster_slam_session_graph --snapshot /tmp/smartdrone_epg_slam.json
+python3 tools/epg_tui.py --graph cluster_calib_session_graph --snapshot /tmp/smartdrone_epg_calib.json
+```
+
+Queue rows show current size, depth, congestion percentage, and drop/overwrite
+counters. Task rows show last/max loop cost, loop count, and error count.
+
+Color rules:
+
+- green: below 50%
+- yellow: 50% to 80%
+- red: above 80%, or a new drop/overwrite/error since the previous refresh
+
+Snapshot JSON shape:
+
+```json
+{
+  "timestampMs": 12345678,
+  "queues": {
+    "SourceTask_0_to_SinkTask_0": {
+      "size": 1,
+      "pushed": 100,
+      "popped": 99,
+      "droppedNewest": 0,
+      "overwrittenOldest": 0
+    }
+  },
+  "tasks": {
+    "SourceTask": {
+      "lastLoopUs": 900,
+      "maxLoopUs": 1300,
+      "loopCount": 100,
+      "errorCount": 0,
+      "idleWakeups": 0
+    }
+  }
+}
+```
+
 ## Graph Compilation Flow
 
 The native SmartDrone flow is:
 
 1. Business code registers message and task types.
-2. A DOT subgraph is selected from `config/epg/native_epg_topology.dot`.
+2. A DOT subgraph is selected from `config/epg/epg_topology.dot`.
 3. The DOT compiler reads task nodes and edges.
 4. Edges become queues.
 5. Edge endpoint labels become numeric task port bindings.
@@ -139,7 +204,7 @@ source and the compilation source.
 Use one `digraph` with one `subgraph cluster_*` per compilable runtime domain.
 
 ```dot
-digraph NativeEventPipelineGraphTopology {
+digraph EpgTopology {
   graph [rankdir=TB];
 
   subgraph cluster_slam_session_graph {
@@ -179,8 +244,8 @@ Optional fields:
 Example:
 
 ```dot
-NativeSlamAcquireTask [
-  label="{NativeSlamAcquireTask|type=NativeSlamAcquireTask|stage=frame_acquire_and_prepare|trigger=any_queue_ready|trigger_queues=NativeSlamFrameReady}"
+SlamAcquireTask [
+  label="{SlamAcquireTask|type=SlamAcquireTask|stage=frame_acquire_and_prepare|trigger=any_queue_ready|trigger_queues=SlamFrameReady}"
 ];
 ```
 
@@ -195,10 +260,14 @@ Every compilable edge must connect two declared task nodes and include:
 Example:
 
 ```dot
-NativeSlamClockTask -> NativeSlamImuGateTask [
-  taillabel="0", headlabel="1", label="NativeSlamTick\ndepth=1\noverflow=overwrite_oldest"
+SlamClockTask -> SlamImuGateTask [
+  taillabel="0", headlabel="1", label="SlamTick\ndepth=1\noverflow=overwrite_oldest"
 ];
 ```
+
+For SLAM, `SlamClockTask` should represent the configured SLAM input cadence, not a busy polling
+tick. The maintained DOT uses a safe default, and the runtime session overrides the compiled
+interval from the active SLAM input FPS before starting the graph.
 
 Port ids are unsigned integers. Input ports and output ports are separate
 namespaces per task.
@@ -217,13 +286,13 @@ Required metadata lines:
 Recommended format:
 
 ```dot
-label="NativeSlamPreparedFrame\ndepth=1\noverflow=overwrite_oldest"
+label="SlamPreparedFrame\ndepth=1\noverflow=overwrite_oldest"
 ```
 
 The parser also accepts legacy compact metadata:
 
 ```dot
-label="NativeSlamPreparedFrame\ndepth=1 overwrite_oldest"
+label="SlamPreparedFrame\ndepth=1 overwrite_oldest"
 ```
 
 Supported overflow policies:
@@ -245,15 +314,15 @@ The compiler derives queue names automatically:
 Example:
 
 ```dot
-NativeSlamClockTask -> NativeSlamImuGateTask [
-  taillabel="0", headlabel="1", label="NativeSlamTick\ndepth=1\noverflow=overwrite_oldest"
+SlamClockTask -> SlamImuGateTask [
+  taillabel="0", headlabel="1", label="SlamTick\ndepth=1\noverflow=overwrite_oldest"
 ];
 ```
 
 Compiles to:
 
 ```text
-NativeSlamClockTask_0_to_NativeSlamImuGateTask_1
+SlamClockTask_0_to_SlamImuGateTask_1
 ```
 
 ### Trigger Queue Resolution
@@ -266,7 +335,7 @@ For queue-triggered tasks, `trigger_queues` may refer to:
 Prefer message types in hand-written DOT:
 
 ```dot
-label="{NativeSlamImuGateTask|type=NativeSlamImuGateTask|trigger=any_queue_ready|trigger_queues=NativeSlamResourceReady+NativeSlamTick}"
+label="{SlamImuGateTask|type=SlamImuGateTask|trigger=any_queue_ready|trigger_queues=SlamResourceReady+SlamTick}"
 ```
 
 If omitted, all input queues are used as trigger queues.

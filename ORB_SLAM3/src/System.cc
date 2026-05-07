@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
@@ -62,6 +63,13 @@ namespace ORB_SLAM3
 
 namespace
 {
+
+template <typename T>
+T ClampValue(T value, T minValue, T maxValue)
+{
+    return std::max(minValue, std::min(value, maxValue));
+}
+
 #if SMART_DRONE_HAS_VPI
 const char *VpiStatusName(VPIStatus status)
 {
@@ -298,6 +306,51 @@ bool EnvFlagEnabled(const char* name)
     return value && value[0] != '\0' && std::string(value) != "0";
 }
 
+bool EnvFlagEnabled(const char* name, bool fallback)
+{
+    const char* value = std::getenv(name);
+    if(!value || value[0] == '\0')
+        return fallback;
+
+    std::string text(value);
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return !(text == "0" || text == "false" || text == "off" || text == "no");
+}
+
+int EnvIntClamped(const char* name, int fallback, int minValue, int maxValue)
+{
+    const char* value = std::getenv(name);
+    if(!value || value[0] == '\0')
+        return fallback;
+
+    char* end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    if(end == value)
+        return fallback;
+
+    return ClampValue(static_cast<int>(parsed), minValue, maxValue);
+}
+
+void WaitForLocalMappingIdle(LocalMapping* localMapper)
+{
+    if(localMapper == nullptr ||
+       !EnvFlagEnabled("SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE", false))
+        return;
+
+    const int timeoutMs = EnvIntClamped("SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS", 200, 1, 5000);
+    const auto start = std::chrono::steady_clock::now();
+    while(localMapper->KeyframesInQueue() > 0 || !localMapper->AcceptKeyFrames())
+    {
+        usleep(1000);
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        if(elapsedMs >= timeoutMs)
+            break;
+    }
+}
+
 void EnsureDirectory(const std::string& path)
 {
 #ifdef _WIN32
@@ -344,8 +397,12 @@ Verbose::eLevel Verbose::th = Verbose::VERBOSITY_NORMAL;
 
 System::System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor,
                const bool bUseViewer, const int initFr, const string &strSequence):
-    mSensor(sensor), mbReset(false), mbResetActiveMap(false),
-    mbActivateLocalizationMode(false), mbDeactivateLocalizationMode(false), mbShutDown(false)
+    mSensor(sensor),
+    mpVocabulary(nullptr), mpKeyFrameDatabase(nullptr), mpAtlas(nullptr), mpTracker(nullptr),
+    mpLocalMapper(nullptr), mpLoopCloser(nullptr), mptLocalMapping(nullptr), mptLoopClosing(nullptr),
+    mptViewer(nullptr), mbReset(false), mbResetActiveMap(false),
+    mbActivateLocalizationMode(false), mbDeactivateLocalizationMode(false), mbShutDown(false),
+    mTrackingState(Tracking::SYSTEM_NOT_READY), settings_(nullptr)
 {
     // Output welcome message
     cout << endl <<
@@ -643,8 +700,12 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, 
 
     // std::cout << "out grabber" << std::endl;
 
-    unique_lock<mutex> lock2(mMutexState);
-    mTrackingState = mpTracker->mState;
+    {
+        unique_lock<mutex> lock2(mMutexState);
+        mTrackingState = mpTracker->mState;
+    }
+
+    WaitForLocalMappingIdle(mpLocalMapper);
 
     return Tcw;
 }
@@ -724,8 +785,12 @@ Sophus::SE3f System::TrackStereoWithFeatures(const cv::Mat &imLeft, const cv::Ma
 
     Sophus::SE3f Tcw = mpTracker->GrabImageStereoWithFeatures(imLeftToFeed, imRightToFeed, features, timestamp, filename);
 
-    unique_lock<mutex> lock2(mMutexState);
-    mTrackingState = mpTracker->mState;
+    {
+        unique_lock<mutex> lock2(mMutexState);
+        mTrackingState = mpTracker->mState;
+    }
+
+    WaitForLocalMappingIdle(mpLocalMapper);
 
     return Tcw;
 }
@@ -783,8 +848,12 @@ Sophus::SE3f System::TrackStereoPreparedWithFeatures(const cv::Mat &imLeftPrepar
     Sophus::SE3f Tcw =
         mpTracker->GrabImageStereoWithFeatures(imLeftPrepared, imRightPrepared, features, timestamp, filename);
 
-    unique_lock<mutex> lock2(mMutexState);
-    mTrackingState = mpTracker->mState;
+    {
+        unique_lock<mutex> lock2(mMutexState);
+        mTrackingState = mpTracker->mState;
+    }
+
+    WaitForLocalMappingIdle(mpLocalMapper);
 
     return Tcw;
 }
@@ -1732,6 +1801,11 @@ size_t System::GetLocalMapPointCount() const
     return mpTracker ? mpTracker->GetLocalMapPointCount() : 0;
 }
 
+void System::WaitForLocalMappingIdleIfRequested()
+{
+    WaitForLocalMappingIdle(mpLocalMapper);
+}
+
 TrackedVisualData System::ExtractTrackedVisualData(int leftImageWidth,
                                                    int leftImageHeight,
                                                    int rightImageWidth,
@@ -1954,4 +2028,3 @@ string System::CalculateCheckSum(string filename, int type)
 }
 
 } //namespace ORB_SLAM
-

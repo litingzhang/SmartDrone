@@ -52,6 +52,12 @@ void SuperPointLightGlueFrontendClient::CopyNativeStats()
     m_lastStats.inputMs = nativeStats.inputMs;
     m_lastStats.forwardMs = nativeStats.forwardMs;
     m_lastStats.totalMs = nativeStats.totalMs;
+    m_lastStats.rawLeftCount = nativeStats.rawLeftCount;
+    m_lastStats.rawRightCount = nativeStats.rawRightCount;
+    m_lastStats.stereoLeftCount = nativeStats.stereoLeftCount;
+    m_lastStats.stereoRightCount = nativeStats.stereoRightCount;
+    m_lastStats.lightGlueUsed = nativeStats.lightGlueUsed;
+    m_lastStats.descriptorFallbackUsed = nativeStats.descriptorFallbackUsed;
     m_lastStats.imageCount = nativeStats.imageCount;
     m_lastStats.payloadBytes = nativeStats.payloadBytes;
 }
@@ -96,6 +102,13 @@ bool SuperPointLightGlueFrontendClient::DetectAndComputeStereo(const cv::Mat &le
         m_superPointNativeExtractor->DetectAndComputeStereo(leftGray, rightGray, leftFeatures, rightFeatures, err);
     CopyNativeStats();
     return ok;
+}
+
+void SuperPointLightGlueFrontendClient::SetLightGlueEveryNOverride(int everyN)
+{
+    if (m_superPointNativeExtractor) {
+        m_superPointNativeExtractor->SetLightGlueEveryNOverride(everyN);
+    }
 }
 
 } // namespace smartdrone::adapters::slam

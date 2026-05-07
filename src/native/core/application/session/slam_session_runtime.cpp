@@ -65,15 +65,32 @@ void ConfigureSuperPointLightGlueRuntimeDefaults(const std::string &repo, int in
 {
     SetEnvIfUnset("SMART_DRONE_FEATURE_PRECISION", "auto");
     SetEnvIfUnset("SMART_DRONE_LIGHTGLUE_LAYERS", "6");
-    if (EnvVarIsUnsetOrEmpty("SMART_DRONE_SUPERPOINT_TRT_ENGINE") && !repo.empty() &&
-        inputMaxWidth > 0 && inputMaxHeight > 0) {
-        const fs::path engine =
-            fs::path(repo) / "weights" /
-            ("superpoint_dense_" + std::to_string(inputMaxWidth) + "x" + std::to_string(inputMaxHeight) +
-             "_fp16.engine");
+    SetEnvIfUnset("SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT", "1");
+    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES", "200");
+    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO", "0.48");
+    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE", "0.985");
+    if (!EnvVarIsUnsetOrEmpty("SMART_DRONE_SUPERPOINT_TRT_ENGINE") || repo.empty()) {
+        return;
+    }
+
+    std::vector<std::string> engineNames;
+    if (inputMaxWidth > 0 && inputMaxHeight > 0) {
+        engineNames.push_back("superpoint_dense_" + std::to_string(inputMaxWidth) + "x" +
+                              std::to_string(inputMaxHeight) + "_fp16.engine");
+        engineNames.push_back("superpoint_dense_" + std::to_string(inputMaxWidth) + "x" +
+                              std::to_string(inputMaxHeight) + "_fp32.engine");
+    }
+    engineNames.push_back("superpoint_dense_640x409_fp16.engine");
+    engineNames.push_back("superpoint_dense_640x409_fp32.engine");
+    engineNames.push_back("superpoint_dense_640x480_fp16.engine");
+    engineNames.push_back("superpoint_dense_640x480_fp32.engine");
+
+    for (const std::string &engineName : engineNames) {
+        const fs::path engine = fs::path(repo) / "weights" / engineName;
         std::error_code ec;
         if (fs::exists(engine, ec)) {
             SetEnvIfUnset("SMART_DRONE_SUPERPOINT_TRT_ENGINE", engine.string().c_str());
+            return;
         }
     }
 }

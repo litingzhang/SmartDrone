@@ -200,6 +200,7 @@ public:
                                                int rightImageHeight,
                                                bool includePointCloud,
                                                size_t maxPointCloudPoints);
+    void WaitForLocalMappingIdleIfRequested();
 
     // For debugging
     double GetTimeFromIMUInit();

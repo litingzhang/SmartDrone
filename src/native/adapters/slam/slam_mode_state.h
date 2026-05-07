@@ -58,6 +58,8 @@ struct SlamModeSharedState {
     mutable double m_lastSuperPointTotalMs{0.0};
     mutable uint32_t m_lastSuperPointImageCount{0};
     mutable uint32_t m_lastSuperPointPayloadBytes{0};
+    mutable int m_superPointLightGlueOkStreak{0};
+    mutable int m_superPointLightGlueLastEveryN{0};
 
     bool m_lkCalibrationLoaded{false};
     cv::Mat m_lkK1;

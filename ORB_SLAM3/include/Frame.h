@@ -63,6 +63,7 @@ struct ExternalStereoFrameData
     cv::Mat leftDescriptors;
     cv::Mat rightDescriptors;
     bool matchedStereoPairs{false};
+    std::vector<int> leftToRightMatch;
 };
 
 class Frame

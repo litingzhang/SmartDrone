@@ -36,9 +36,9 @@ struct OfflineReplayOptions {
     std::string superpointRepo{"LightGlue"};
     std::string superpointDevice{"auto"};
     int superpointTopK{1024};
-    int superpointMaxPoints{768};
+    int superpointMaxPoints{512};
     int superpointInputMaxWidth{640};
-    int superpointInputMaxHeight{400};
+    int superpointInputMaxHeight{409};
     int cameraFps{60};
     int slamInputFps{20};
     int timeoutMs{1000};
@@ -59,6 +59,28 @@ bool SuperPointLightGlueInjectionEnabled()
     }
     const std::string text(value);
     return !(text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF");
+}
+
+bool EnvVarIsUnsetOrEmpty(const char *name)
+{
+    const char *value = std::getenv(name);
+    return value == nullptr || value[0] == '\0';
+}
+
+void SetEnvIfUnset(const char *name, const char *value)
+{
+    if (!EnvVarIsUnsetOrEmpty(name)) {
+        return;
+    }
+    setenv(name, value, 0);
+}
+
+void ConfigureSuperPointLightGlueReplayDefaults()
+{
+    SetEnvIfUnset("SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT", "1");
+    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES", "200");
+    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO", "0.48");
+    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE", "0.985");
 }
 
 struct LoopClosureCorrectionSummary {
@@ -100,7 +122,7 @@ bool ConvertOrbEuRoCTrajectoryToReplayCsv(const fs::path &trajectoryPath, const 
 
     csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
            "superpoint_used,superpoint_raw_left,superpoint_raw_right,superpoint_stereo,superpoint_injected_left,superpoint_injected_right,"
-           "superpoint_frontend_ms,superpoint_match_ms,superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
+           "superpoint_lg_every_n,superpoint_frontend_ms,superpoint_match_ms,superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
            "input_prepare_ms,frontend_ms,stereo_pair_ms,external_pack_ms,mono_augment_ms,"
            "lk_rectify_ms,lk_disparity_ms,lk_gftt_ms,lk_flow_ms,lk_candidate_ms,lk_pnp_ms,lk_update_ms,"
            "orb_track_ms,orb_extract_ms,orb_stereo_ms,"
@@ -162,9 +184,9 @@ const char *UsageText()
         "  --superpoint-repo <dir>    SuperPoint/LightGlue repo root containing TensorRT engines\n"
         "  --superpoint-device <dev>  TensorRT device auto|cuda, default auto\n"
         "  --superpoint-top-k <n>     SuperPoint top-k candidate count, default 1024\n"
-        "  --superpoint-max-points <n> SuperPoint injected point budget, default 768\n"
+        "  --superpoint-max-points <n> SuperPoint injected point budget, default 512\n"
         "  --superpoint-input-max-width <n>  SuperPoint input width limit, default 640\n"
-        "  --superpoint-input-max-height <n> SuperPoint input height limit, default 400\n"
+        "  --superpoint-input-max-height <n> SuperPoint input height limit, default 409\n"
         "  --slam-mode <mode>    mapping|localization|relocalization|tracking-only|auto\n"
         "  --fps <n>             Camera FPS for replay pacing, default 60\n"
         "  --slam-fps <n>        SLAM input FPS, default 20\n"
@@ -550,6 +572,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     smartdrone::adapters::slam::SuperPointLightGlueFrontendClient superpointFrontendClient;
     std::string superpointErr;
     if (opts.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLightGlueInjectionEnabled()) {
+        ConfigureSuperPointLightGlueReplayDefaults();
         slamEngine.SetExternalFeatureFrontendClient(&superpointFrontendClient);
         if (!superpointFrontendClient.Start(opts.superpointRepo, opts.superpointDevice, opts.superpointTopK, opts.superpointMaxPoints,
                                        &superpointErr)) {
@@ -654,15 +677,47 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     const double orbExtractMsMean = orbExtractMsSum / frameCountForMean;
     const double orbStereoMsMean = orbStereoMsSum / frameCountForMean;
 
-    const bool useOrbOfficialEuRoC =
-        opts.featureFrontend == FeatureFrontend::Orb && !UseImu(opts.sensorMode) && opts.sensorMode == SensorMode::Stereo;
+    const bool useOrbSlamFinalEuRoC =
+        (opts.featureFrontend == FeatureFrontend::Orb || opts.featureFrontend == FeatureFrontend::SuperPointLightGlue) &&
+        !UseImu(opts.sensorMode) && opts.sensorMode == SensorMode::Stereo;
     fs::path orbEuRoCTrajectoryPath;
-    if (useOrbOfficialEuRoC) {
+    if (useOrbSlamFinalEuRoC) {
+        const fs::path liveOutputCsv = opts.outputCsv.string() + ".live.csv";
+        std::ofstream liveCsv(liveOutputCsv);
+        if (liveCsv) {
+            liveCsv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
+                       "superpoint_used,superpoint_raw_left,superpoint_raw_right,superpoint_stereo,superpoint_injected_left,superpoint_injected_right,"
+                       "superpoint_lg_every_n,superpoint_frontend_ms,superpoint_match_ms,superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
+                       "input_prepare_ms,frontend_ms,stereo_pair_ms,external_pack_ms,mono_augment_ms,"
+                       "lk_rectify_ms,lk_disparity_ms,lk_gftt_ms,lk_flow_ms,lk_candidate_ms,lk_pnp_ms,lk_update_ms,"
+                       "orb_track_ms,orb_extract_ms,orb_stereo_ms,"
+                       "inliers,tracked_map,local_map\n";
+            for (const auto &sample : outputs) {
+                liveCsv << sample.frameId << ',' << sample.captureTimestampNs << ',' << sample.trackingState << ','
+                        << sample.mapId << ',' << (sample.poseValid ? 1 : 0) << ',' << sample.pose.x << ','
+                        << sample.pose.y << ',' << sample.pose.z << ',' << sample.pose.qw << ',' << sample.pose.qx
+                        << ',' << sample.pose.qy << ',' << sample.pose.qz << ',' << sample.imuSampleCount << ','
+                        << (sample.usedSuperPointFrontend ? 1 : 0) << ',' << sample.superpointRawLeftCount << ','
+                        << sample.superpointRawRightCount << ',' << sample.superpointMatchedStereoCount << ','
+                        << sample.superpointInjectedLeftCount << ',' << sample.superpointInjectedRightCount << ','
+                        << sample.superpointLightGlueEveryN << ',' << sample.superpointFrontendMs << ','
+                        << sample.superpointStereoMatchMs << ',' << sample.superpointTotalMs << ','
+                        << sample.replayAcquireMs << ',' << sample.replayImuMs << ',' << sample.slamTotalMs << ','
+                        << sample.inputPrepareMs << ',' << sample.frontendMs << ',' << sample.stereoPairMs << ','
+                        << sample.externalPackMs << ',' << sample.monoAugmentMs << ',' << sample.lkRectifyMs << ','
+                        << sample.lkDisparityMs << ',' << sample.lkGfttMs << ',' << sample.lkFlowMs << ','
+                        << sample.lkCandidateMs << ',' << sample.lkPnpMs << ',' << sample.lkUpdateMs << ','
+                        << sample.orbTrackMs << ',' << sample.orbExtractMs << ',' << sample.orbStereoMatchMs << ','
+                        << sample.matchesInliers << ',' << sample.trackedMapPointCount << ','
+                        << sample.localMapPointCount << '\n';
+            }
+            liveCsv.flush();
+        }
         orbEuRoCTrajectoryPath = opts.outputCsv;
         orbEuRoCTrajectoryPath += ".orb_euroc.txt";
         if (!slamEngine.ShutdownAndSaveTrajectoryEuRoC(orbEuRoCTrajectoryPath.string()) ||
             !ConvertOrbEuRoCTrajectoryToReplayCsv(orbEuRoCTrajectoryPath, opts.outputCsv)) {
-            std::cerr << "failed to export ORB official EuRoC trajectory\n";
+            std::cerr << "failed to export ORB-SLAM final EuRoC trajectory\n";
             return 1;
         }
     } else {
@@ -674,7 +729,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
 
         csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
                "superpoint_used,superpoint_raw_left,superpoint_raw_right,superpoint_stereo,superpoint_injected_left,superpoint_injected_right,"
-               "superpoint_frontend_ms,superpoint_match_ms,superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
+               "superpoint_lg_every_n,superpoint_frontend_ms,superpoint_match_ms,superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
                "input_prepare_ms,frontend_ms,stereo_pair_ms,external_pack_ms,mono_augment_ms,"
                "lk_rectify_ms,lk_disparity_ms,lk_gftt_ms,lk_flow_ms,lk_candidate_ms,lk_pnp_ms,lk_update_ms,"
                "orb_track_ms,orb_extract_ms,orb_stereo_ms,"
@@ -686,7 +741,8 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << ',' << sample.pose.qz << ',' << sample.imuSampleCount << ',' << (sample.usedSuperPointFrontend ? 1 : 0)
                 << ',' << sample.superpointRawLeftCount << ',' << sample.superpointRawRightCount << ','
                 << sample.superpointMatchedStereoCount << ',' << sample.superpointInjectedLeftCount << ','
-                << sample.superpointInjectedRightCount << ',' << sample.superpointFrontendMs << ','
+                << sample.superpointInjectedRightCount << ',' << sample.superpointLightGlueEveryN << ','
+                << sample.superpointFrontendMs << ','
                 << sample.superpointStereoMatchMs << ',' << sample.superpointTotalMs << ',' << sample.replayAcquireMs << ','
                 << sample.replayImuMs << ',' << sample.slamTotalMs << ',' << sample.inputPrepareMs << ','
                 << sample.frontendMs << ',' << sample.stereoPairMs << ',' << sample.externalPackMs << ','

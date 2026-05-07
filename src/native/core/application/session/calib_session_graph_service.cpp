@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -24,8 +25,8 @@
 #include "common/tlv/tlv_protocol.h"
 #include "core/application/session/calib_session_service.h"
 #include "core/application/session/calib_storage_helpers.h"
-#include "core/application/session/native_epg_messages.h"
-#include "core/application/session/native_epg_registry.h"
+#include "core/application/session/epg_messages.h"
+#include "core/application/session/epg_registry.h"
 #include "core/application/session/runtime_session_common.h"
 #include "core/application/session/sensor_runtime_helpers.h"
 #include "core/ports/camera_provider.h"
@@ -35,6 +36,27 @@ namespace smartdrone::core::application {
 namespace {
 
 constexpr int kRecommendedMaxCalibSaveFps = 30;
+constexpr const char *kCalibEpgDfxSnapshotPath = "/tmp/smartdrone_epg_calib.json";
+
+std::uint64_t EpgDfxNowMs()
+{
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+}
+
+void WriteEpgDfxSnapshotFile(const std::string &path, const std::string &json)
+{
+    const std::string tmpPath = path + ".tmp";
+    {
+        std::ofstream output(tmpPath, std::ios::out | std::ios::trunc);
+        if (!output) {
+            return;
+        }
+        output << json;
+    }
+    (void)std::rename(tmpPath.c_str(), path.c_str());
+}
 
 int ClampCalibSaveFps(int requestedFps, int cameraFps)
 {
@@ -61,15 +83,15 @@ cv::Mat EnsureGray8(const cv::Mat &src, bool &convertedOut)
     return out;
 }
 
-class NativeCalibRuntimeState final {
+class CalibRuntimeState final {
   public:
-    NativeCalibRuntimeState(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePoseState &livePose,
+    CalibRuntimeState(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePoseState &livePose,
                             std::atomic<bool> &runningFlag)
         : m_cfg(cfg), m_stop(stop), m_livePose(livePose), m_runningFlag(runningFlag)
     {
     }
 
-    ~NativeCalibRuntimeState() { Finalize(false); }
+    ~CalibRuntimeState() { Finalize(false); }
 
     bool EnsureStarted()
     {
@@ -366,7 +388,7 @@ class NativeCalibRuntimeState final {
 
 class CalibResourceTask final : public epg::ITask {
   public:
-    CalibResourceTask(std::shared_ptr<NativeCalibRuntimeState> state, std::atomic<bool> &stop,
+    CalibResourceTask(std::shared_ptr<CalibRuntimeState> state, std::atomic<bool> &stop,
                       std::atomic<bool> &runningFlag)
         : m_state(std::move(state)), m_stop(stop), m_runningFlag(runningFlag)
     {
@@ -397,16 +419,16 @@ class CalibResourceTask final : public epg::ITask {
         context.Push(2, std::move(done));
     }
 
-    std::shared_ptr<NativeCalibRuntimeState> m_state;
+    std::shared_ptr<CalibRuntimeState> m_state;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
     bool m_emitted{false};
 };
 EPG_REGISTER_TASK_TYPE(CalibResourceTask, "CalibResourceTask")
 
-class NativeCalibClockTask final : public epg::ITask {
+class CalibClockTask final : public epg::ITask {
   public:
-    NativeCalibClockTask(std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
+    CalibClockTask(std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
         : m_stop(stop), m_runningFlag(runningFlag)
     {
     }
@@ -416,7 +438,7 @@ class NativeCalibClockTask final : public epg::ITask {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        auto tick = context.Make<NativeCalibTick>();
+        auto tick = context.Make<CalibTick>();
         tick->sequence = ++m_sequence;
         context.Push(0, std::move(tick));
     }
@@ -426,11 +448,11 @@ class NativeCalibClockTask final : public epg::ITask {
     std::atomic<bool> &m_runningFlag;
     std::uint64_t m_sequence{0};
 };
-EPG_REGISTER_TASK_TYPE(NativeCalibClockTask, "NativeCalibClockTask")
+EPG_REGISTER_TASK_TYPE(CalibClockTask, "CalibClockTask")
 
 class CalibCameraAcquireTask final : public epg::ITask {
   public:
-    CalibCameraAcquireTask(std::shared_ptr<NativeCalibRuntimeState> state, std::atomic<bool> &stop,
+    CalibCameraAcquireTask(std::shared_ptr<CalibRuntimeState> state, std::atomic<bool> &stop,
                            std::atomic<bool> &runningFlag)
         : m_state(std::move(state)), m_stop(stop), m_runningFlag(runningFlag)
     {
@@ -441,7 +463,7 @@ class CalibCameraAcquireTask final : public epg::ITask {
         if (auto ready = context.TryPopLatest<CalibResourceReady>(0)) {
             m_ready = ready->ready;
         }
-        const auto tick = context.TryPopLatest<NativeCalibTick>(1);
+        const auto tick = context.TryPopLatest<CalibTick>(1);
         if (!m_ready || !tick || !m_runningFlag.load() || m_stop.load()) {
             return;
         }
@@ -497,7 +519,7 @@ class CalibCameraAcquireTask final : public epg::ITask {
         context.Push(2, std::move(done));
     }
 
-    std::shared_ptr<NativeCalibRuntimeState> m_state;
+    std::shared_ptr<CalibRuntimeState> m_state;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
     bool m_ready{false};
@@ -508,7 +530,7 @@ EPG_REGISTER_TASK_TYPE(CalibCameraAcquireTask, "CalibCameraAcquireTask")
 
 class CalibPacingFilterTask final : public epg::ITask {
   public:
-    explicit CalibPacingFilterTask(std::shared_ptr<NativeCalibRuntimeState> state) : m_state(std::move(state)) {}
+    explicit CalibPacingFilterTask(std::shared_ptr<CalibRuntimeState> state) : m_state(std::move(state)) {}
 
     void OnTick(epg::TaskContext &context) override
     {
@@ -532,13 +554,13 @@ class CalibPacingFilterTask final : public epg::ITask {
     }
 
   private:
-    std::shared_ptr<NativeCalibRuntimeState> m_state;
+    std::shared_ptr<CalibRuntimeState> m_state;
 };
 EPG_REGISTER_TASK_TYPE(CalibPacingFilterTask, "CalibPacingFilterTask")
 
 class CalibStorageWriteTask final : public epg::ITask {
   public:
-    explicit CalibStorageWriteTask(std::shared_ptr<NativeCalibRuntimeState> state) : m_state(std::move(state)) {}
+    explicit CalibStorageWriteTask(std::shared_ptr<CalibRuntimeState> state) : m_state(std::move(state)) {}
 
     void OnTick(epg::TaskContext &context) override
     {
@@ -550,13 +572,13 @@ class CalibStorageWriteTask final : public epg::ITask {
     }
 
   private:
-    std::shared_ptr<NativeCalibRuntimeState> m_state;
+    std::shared_ptr<CalibRuntimeState> m_state;
 };
 EPG_REGISTER_TASK_TYPE(CalibStorageWriteTask, "CalibStorageWriteTask")
 
 class CalibUdpPreviewTask final : public epg::ITask {
   public:
-    explicit CalibUdpPreviewTask(std::shared_ptr<NativeCalibRuntimeState> state) : m_state(std::move(state)) {}
+    explicit CalibUdpPreviewTask(std::shared_ptr<CalibRuntimeState> state) : m_state(std::move(state)) {}
 
     void OnTick(epg::TaskContext &context) override
     {
@@ -569,13 +591,13 @@ class CalibUdpPreviewTask final : public epg::ITask {
     }
 
   private:
-    std::shared_ptr<NativeCalibRuntimeState> m_state;
+    std::shared_ptr<CalibRuntimeState> m_state;
 };
 EPG_REGISTER_TASK_TYPE(CalibUdpPreviewTask, "CalibUdpPreviewTask")
 
 class CalibImuWriterTask final : public epg::ITask {
   public:
-    CalibImuWriterTask(std::shared_ptr<NativeCalibRuntimeState> state, std::atomic<bool> &stop,
+    CalibImuWriterTask(std::shared_ptr<CalibRuntimeState> state, std::atomic<bool> &stop,
                        std::atomic<bool> &runningFlag)
         : m_state(std::move(state)), m_stop(stop), m_runningFlag(runningFlag)
     {
@@ -637,7 +659,7 @@ class CalibImuWriterTask final : public epg::ITask {
         return true;
     }
 
-    std::shared_ptr<NativeCalibRuntimeState> m_state;
+    std::shared_ptr<CalibRuntimeState> m_state;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
     std::unique_ptr<SpiDev> m_spi;
@@ -652,7 +674,7 @@ EPG_REGISTER_TASK_TYPE(CalibImuWriterTask, "CalibImuWriterTask")
 
 class CalibCompletionTask final : public epg::ITask {
   public:
-    explicit CalibCompletionTask(std::shared_ptr<NativeCalibRuntimeState> state) : m_state(std::move(state)) {}
+    explicit CalibCompletionTask(std::shared_ptr<CalibRuntimeState> state) : m_state(std::move(state)) {}
 
     void OnTick(epg::TaskContext &context) override
     {
@@ -687,7 +709,7 @@ class CalibCompletionTask final : public epg::ITask {
         context.Push(0, std::move(flush));
     }
 
-    std::shared_ptr<NativeCalibRuntimeState> m_state;
+    std::shared_ptr<CalibRuntimeState> m_state;
     bool m_sessionOk{true};
     bool m_seenImu{false};
     bool m_flushEmitted{false};
@@ -696,7 +718,7 @@ EPG_REGISTER_TASK_TYPE(CalibCompletionTask, "CalibCompletionTask")
 
 class CalibFlushSyncTask final : public epg::ITask {
   public:
-    CalibFlushSyncTask(std::shared_ptr<NativeCalibRuntimeState> state, std::atomic<bool> &completed,
+    CalibFlushSyncTask(std::shared_ptr<CalibRuntimeState> state, std::atomic<bool> &completed,
                        std::atomic<bool> &sessionOk)
         : m_state(std::move(state)), m_completed(completed), m_sessionOk(sessionOk)
     {
@@ -710,7 +732,7 @@ class CalibFlushSyncTask final : public epg::ITask {
         if (auto flush = context.TryPopLatest<CalibFlushRequest>(0)) {
             m_state->Finalize(flush->sessionOk);
             m_sessionOk.store(flush->sessionOk, std::memory_order_relaxed);
-            auto status = context.Make<NativeCalibStatus>();
+            auto status = context.Make<CalibStatus>();
             status->sessionOk = flush->sessionOk;
             status->completed = true;
             context.Push(0, std::move(status));
@@ -718,22 +740,22 @@ class CalibFlushSyncTask final : public epg::ITask {
     }
 
   private:
-    std::shared_ptr<NativeCalibRuntimeState> m_state;
+    std::shared_ptr<CalibRuntimeState> m_state;
     std::atomic<bool> &m_completed;
     std::atomic<bool> &m_sessionOk;
 };
 EPG_REGISTER_TASK_TYPE(CalibFlushSyncTask, "CalibFlushSyncTask")
 
-class NativeCalibMonitorTask final : public epg::ITask {
+class CalibMonitorTask final : public epg::ITask {
   public:
-    NativeCalibMonitorTask(std::atomic<bool> &sessionOk, std::atomic<bool> &completed)
+    CalibMonitorTask(std::atomic<bool> &sessionOk, std::atomic<bool> &completed)
         : m_sessionOk(sessionOk), m_completed(completed)
     {
     }
 
     void OnTick(epg::TaskContext &context) override
     {
-        while (auto status = context.TryPop<NativeCalibStatus>(0)) {
+        while (auto status = context.TryPop<CalibStatus>(0)) {
             m_sessionOk.store(status->sessionOk, std::memory_order_relaxed);
             if (status->completed) {
                 m_completed.store(true, std::memory_order_relaxed);
@@ -745,10 +767,10 @@ class NativeCalibMonitorTask final : public epg::ITask {
     std::atomic<bool> &m_sessionOk;
     std::atomic<bool> &m_completed;
 };
-EPG_REGISTER_TASK_TYPE(NativeCalibMonitorTask, "NativeCalibMonitorTask")
+EPG_REGISTER_TASK_TYPE(CalibMonitorTask, "CalibMonitorTask")
 
-NativeEventPipelineGraphTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
-    const std::shared_ptr<NativeCalibRuntimeState> &state,
+EpgTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
+    const std::shared_ptr<CalibRuntimeState> &state,
     std::atomic<bool> &stop,
     std::atomic<bool> &runningFlag,
     std::atomic<bool> &sessionOk,
@@ -760,9 +782,9 @@ NativeEventPipelineGraphTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
                 return std::unique_ptr<epg::ITask>(
                     new CalibResourceTask(state, stop, runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<NativeCalibClockTask>([&stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<CalibClockTask>([&stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeCalibClockTask(stop, runningFlag));
+                    new CalibClockTask(stop, runningFlag));
             }),
         catalog.MakeTaskFactoryEntry<CalibCameraAcquireTask>([state, &stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
@@ -792,9 +814,9 @@ NativeEventPipelineGraphTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
                 return std::unique_ptr<epg::ITask>(
                     new CalibFlushSyncTask(state, completed, sessionOk));
             }),
-        catalog.MakeTaskFactoryEntry<NativeCalibMonitorTask>([&sessionOk, &completed]() {
+        catalog.MakeTaskFactoryEntry<CalibMonitorTask>([&sessionOk, &completed]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeCalibMonitorTask(sessionOk, completed));
+                    new CalibMonitorTask(sessionOk, completed));
             }),
     });
 }
@@ -809,18 +831,29 @@ bool RunCalibSessionGraph(const UnifiedConfig &cfg, std::atomic<bool> &stop, Liv
 
     {
         epg::Registry registry;
-        auto state = std::make_shared<NativeCalibRuntimeState>(cfg, stop, livePose, runningFlag);
-        RegisterNativeEventPipelineGraphTypes(
-            registry, NativeEventPipelineGraphDomain::CalibSession,
+        auto state = std::make_shared<CalibRuntimeState>(cfg, stop, livePose, runningFlag);
+        RegisterEpgTypes(
+            registry, EpgDomain::CalibSession,
             MakeCalibGraphTaskFactoryResolver(state, stop, runningFlag, sessionOk, completed));
 
         epg::EventPipelineGraph graph(registry);
-        graph.Configure(CompileNativeEventPipelineGraphConfig(NativeEventPipelineGraphDomain::CalibSession, registry));
+        graph.Configure(CompileEpgConfig(EpgDomain::CalibSession, registry));
         graph.Start();
 
+        auto nextDfxSnapshot = std::chrono::steady_clock::now();
         while (runningFlag.load() && !stop.load() && !completed.load(std::memory_order_relaxed)) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= nextDfxSnapshot) {
+                WriteEpgDfxSnapshotFile(
+                    kCalibEpgDfxSnapshotPath,
+                    graph.DfxSnapshotJson("cluster_calib_session_graph", EpgDfxNowMs()));
+                nextDfxSnapshot = now + std::chrono::milliseconds(500);
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
+        WriteEpgDfxSnapshotFile(
+            kCalibEpgDfxSnapshotPath,
+            graph.DfxSnapshotJson("cluster_calib_session_graph", EpgDfxNowMs()));
         if (!completed.load(std::memory_order_relaxed)) {
             state->Finalize(sessionOk.load(std::memory_order_relaxed));
         }

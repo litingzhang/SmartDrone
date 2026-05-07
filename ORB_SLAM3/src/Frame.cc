@@ -45,6 +45,12 @@ namespace ORB_SLAM3
 namespace
 {
 
+template <typename T>
+T ClampValue(T value, T minValue, T maxValue)
+{
+    return std::max(minValue, std::min(value, maxValue));
+}
+
 inline int PatchL1Distance11x11(const cv::Mat& leftLevel, int leftCenterX, int leftCenterY,
                                 const cv::Mat& rightLevel, int rightCenterX, int rightCenterY)
 {
@@ -120,6 +126,20 @@ bool ForceCudaStereoPatchRefinement()
 {
     const char* value = std::getenv("SMART_DRONE_ORB_CUDA_STEREO_REFINEMENT");
     return value && value[0] != '\0' && std::string(value) != "0";
+}
+
+float ExternalStereoDepthScale()
+{
+    const char* value = std::getenv("SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE");
+    if(!value || value[0] == '\0')
+        return 1.0f;
+
+    char* end = nullptr;
+    const float parsed = std::strtof(value, &end);
+    if(end == value || !std::isfinite(parsed))
+        return 1.0f;
+
+    return ClampValue(parsed, 0.90f, 1.10f);
 }
 
 void LogStereoMatchDebug(int leftCount, int rightCount, int rowLinked, int accepted,
@@ -652,14 +672,24 @@ void Frame::LoadExternalStereoFeatures(const ExternalStereoFrameData &external)
     if(!external.matchedStereoPairs)
         return;
 
-    const size_t pairCount = std::min(mvKeys.size(), mvKeysRight.size());
+    const size_t pairCount = external.leftToRightMatch.empty() ? std::min(mvKeys.size(), mvKeysRight.size())
+                                                               : mvKeys.size();
     for(size_t i = 0; i < pairCount; ++i)
     {
-        const float disparity = mvKeys[i].pt.x - mvKeysRight[i].pt.x;
+        int rightIndex = static_cast<int>(i);
+        if(!external.leftToRightMatch.empty())
+        {
+            if(i >= external.leftToRightMatch.size())
+                continue;
+            rightIndex = external.leftToRightMatch[i];
+        }
+        if(rightIndex < 0 || static_cast<size_t>(rightIndex) >= mvKeysRight.size())
+            continue;
+        const float disparity = mvKeys[i].pt.x - mvKeysRight[static_cast<size_t>(rightIndex)].pt.x;
         if(disparity <= 0.0f)
             continue;
-        mvuRight[i] = mvKeysRight[i].pt.x;
-        mvDepth[i] = mbf / disparity;
+        mvuRight[i] = mvKeysRight[static_cast<size_t>(rightIndex)].pt.x;
+        mvDepth[i] = (mbf / disparity) * ExternalStereoDepthScale();
         if(mvDepth[i] > 0.0f && mvDepth[i] < mThDepth)
             ++mnCloseMPs;
     }

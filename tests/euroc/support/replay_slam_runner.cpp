@@ -93,6 +93,7 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
         sample.superpointMatchedStereoCount = output.superpointMatchedStereoCount;
         sample.superpointInjectedLeftCount = output.superpointInjectedLeftCount;
         sample.superpointInjectedRightCount = output.superpointInjectedRightCount;
+        sample.superpointLightGlueEveryN = output.superpointLightGlueEveryN;
         sample.superpointFrontendMs = output.superpointFrontendMs;
         sample.superpointStereoMatchMs = output.superpointStereoMatchMs;
         sample.superpointTotalMs = output.superpointTotalMs;

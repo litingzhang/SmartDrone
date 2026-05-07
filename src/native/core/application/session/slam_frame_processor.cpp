@@ -55,6 +55,9 @@ int ComputeSuperPointLoadSheddingLevel(int currentLevel, bool superpointEnabled,
     if (!superpointEnabled) {
         return 0;
     }
+    if (!lastTrackingUsable) {
+        return 0;
+    }
 
     if (currentLevel >= 2) {
         if (lastTrackingUsable && smoothedTotalMs < 125.0 && smoothedSlamMs < 120.0) {
@@ -718,6 +721,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::EmitDfx(PublishedFrame &publi
                 "\"track_points\":%u,\"local_points\":%u,\"inliers\":%d,"
                 "\"superpoint_used\":%d,\"superpoint_stereo_weak\":%d,\"superpoint_raw_left\":%d,\"superpoint_raw_right\":%d,"
                 "\"superpoint_match_stereo\":%d,\"superpoint_injected_left\":%d,\"superpoint_injected_right\":%d,"
+                "\"superpoint_lg_every_n\":%d,"
                 "\"superpoint_prepare_ms\":%.3f,\"superpoint_input_ms\":%.3f,\"superpoint_forward_ms\":%.3f,"
                 "\"superpoint_frontend_ms\":%.3f,\"superpoint_match_ms\":%.3f,\"superpoint_total_ms\":%.3f,"
                 "\"orb_track_ms\":%.3f,\"orb_extract_ms\":%.3f,\"orb_stereo_ms\":%.3f,"
@@ -735,7 +739,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::EmitDfx(PublishedFrame &publi
                 slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedSuperPointFrontend ? 1 : 0,
                 superpointStereoWeak ? 1 : 0, slamOutput.superpointRawLeftCount, slamOutput.superpointRawRightCount,
                 slamOutput.superpointMatchedStereoCount, slamOutput.superpointInjectedLeftCount,
-                slamOutput.superpointInjectedRightCount,
+                slamOutput.superpointInjectedRightCount, slamOutput.superpointLightGlueEveryN,
                 slamOutput.superpointPrepareMs, slamOutput.superpointInputMs,
                 slamOutput.superpointForwardMs, slamOutput.superpointFrontendMs, slamOutput.superpointStereoMatchMs,
                 slamOutput.superpointTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
@@ -753,6 +757,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::EmitDfx(PublishedFrame &publi
                 "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
                 "imu=%zu feat=%zu/%zu points=%zu track=%u local=%u inliers=%d "
                 "superpoint=%s stereo_warn=%s raw=%d/%d stereo=%d injected=%d/%d "
+                "lg_every_n=%d "
                 "superpoint_ms=prep %.3f input %.3f forward %.3f frontend %.3f match %.3f total %.3f "
                 "orb_ms=track %.3f extract %.3f stereo %.3f "
                 "superpoint_io=%uimg/%ubytes "
@@ -767,7 +772,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::EmitDfx(PublishedFrame &publi
                 slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedSuperPointFrontend ? "on" : "off",
                 superpointStereoWeak ? "weak" : "ok", slamOutput.superpointRawLeftCount, slamOutput.superpointRawRightCount,
                 slamOutput.superpointMatchedStereoCount, slamOutput.superpointInjectedLeftCount,
-                slamOutput.superpointInjectedRightCount,
+                slamOutput.superpointInjectedRightCount, slamOutput.superpointLightGlueEveryN,
                 slamOutput.superpointPrepareMs, slamOutput.superpointInputMs,
                 slamOutput.superpointForwardMs, slamOutput.superpointFrontendMs, slamOutput.superpointStereoMatchMs,
                 slamOutput.superpointTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,

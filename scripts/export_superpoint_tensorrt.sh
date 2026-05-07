@@ -5,7 +5,8 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./scripts/export_superpoint_tensorrt.sh [--repo PATH] [--onnx PATH] [--engine PATH]
-                                          [--width N] [--height N] [--fp32]
+                                          [--width N] [--height N] [--max-batch N]
+                                          [--fp32] [--fp16-output]
 
 Exports the SuperPoint dense convolutional backbone from LightGlue to ONNX and
 builds a TensorRT engine. The engine outputs dense detector logits and dense
@@ -17,7 +18,9 @@ USAGE
 REPO="${SUPERPOINT_LIGHTGLUE_REPO:-/home/nvidia/LightGlue}"
 WIDTH="${SUPERPOINT_TRT_WIDTH:-640}"
 HEIGHT="${SUPERPOINT_TRT_HEIGHT:-480}"
+MAX_BATCH="${SUPERPOINT_TRT_MAX_BATCH:-2}"
 FP32=0
+FP16_OUTPUT=0
 ONNX=""
 ENGINE=""
 
@@ -43,8 +46,16 @@ while [[ $# -gt 0 ]]; do
       HEIGHT="$2"
       shift 2
       ;;
+    --max-batch)
+      MAX_BATCH="$2"
+      shift 2
+      ;;
     --fp32)
       FP32=1
+      shift
+      ;;
+    --fp16-output)
+      FP16_OUTPUT=1
       shift
       ;;
     -h|--help)
@@ -59,20 +70,26 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$ONNX" ]]; then
-  ONNX="$REPO/weights/superpoint_dense_${WIDTH}x${HEIGHT}.onnx"
-fi
 if [[ -z "$ENGINE" ]]; then
   if [[ "$FP32" -eq 1 ]]; then
     ENGINE="$REPO/weights/superpoint_dense_${WIDTH}x${HEIGHT}_fp32.engine"
+  elif [[ "$FP16_OUTPUT" -eq 1 ]]; then
+    ENGINE="$REPO/weights/superpoint_dense_${WIDTH}x${HEIGHT}_fp16_output.engine"
   else
     ENGINE="$REPO/weights/superpoint_dense_${WIDTH}x${HEIGHT}_fp16.engine"
+  fi
+fi
+if [[ -z "$ONNX" ]]; then
+  if [[ "$FP16_OUTPUT" -eq 1 ]]; then
+    ONNX="$REPO/weights/superpoint_dense_${WIDTH}x${HEIGHT}_fp16_output.onnx"
+  else
+    ONNX="$REPO/weights/superpoint_dense_${WIDTH}x${HEIGHT}.onnx"
   fi
 fi
 
 mkdir -p "$(dirname "$ONNX")" "$(dirname "$ENGINE")"
 
-python3 - "$REPO" "$ONNX" "$WIDTH" "$HEIGHT" <<'PY'
+python3 - "$REPO" "$ONNX" "$WIDTH" "$HEIGHT" "$FP16_OUTPUT" <<'PY'
 import os
 import sys
 import types
@@ -80,7 +97,13 @@ import types
 import torch
 from torch import nn
 
-repo, onnx_path, width, height = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+repo, onnx_path, width, height, fp16_output = (
+    sys.argv[1],
+    sys.argv[2],
+    int(sys.argv[3]),
+    int(sys.argv[4]),
+    sys.argv[5] == "1",
+)
 package_dir = os.path.join(repo, "lightglue")
 if os.path.isdir(package_dir) and "lightglue" not in sys.modules:
     package = types.ModuleType("lightglue")
@@ -112,6 +135,9 @@ class SuperPointDense(nn.Module):
         x = m.relu(m.conv4b(x))
         detector = m.convPb(m.relu(m.convPa(x)))
         descriptors = m.convDb(m.relu(m.convDa(x)))
+        if fp16_output:
+            detector = detector.half()
+            descriptors = descriptors.half()
         return detector, descriptors
 
 
@@ -126,6 +152,11 @@ torch.onnx.export(
     onnx_path,
     input_names=["image"],
     output_names=["detector_logits", "dense_descriptors"],
+    dynamic_axes={
+        "image": {0: "batch"},
+        "detector_logits": {0: "batch"},
+        "dense_descriptors": {0: "batch"},
+    },
     opset_version=13,
     do_constant_folding=True,
 )
@@ -144,7 +175,14 @@ if [[ -z "$TRTEXEC" ]]; then
   fi
 fi
 
-TRT_ARGS=(--onnx="$ONNX" --saveEngine="$ENGINE" --workspace=2048)
+TRT_ARGS=(
+  --onnx="$ONNX"
+  --saveEngine="$ENGINE"
+  --workspace=2048
+  --minShapes="image:1x1x${HEIGHT}x${WIDTH}"
+  --optShapes="image:${MAX_BATCH}x1x${HEIGHT}x${WIDTH}"
+  --maxShapes="image:${MAX_BATCH}x1x${HEIGHT}x${WIDTH}"
+)
 if [[ "$FP32" -eq 0 ]]; then
   TRT_ARGS+=(--fp16)
 fi

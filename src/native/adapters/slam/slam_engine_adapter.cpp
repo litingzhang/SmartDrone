@@ -89,7 +89,7 @@ bool SlamEngineAdapter::ShutdownAndSaveTrajectoryEuRoC(const std::string &path)
     if (!m_system || path.empty()) {
         return false;
     }
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    m_system->Shutdown();
     m_system->SaveTrajectoryEuRoC(path);
     return true;
 }

@@ -89,9 +89,9 @@ struct RuntimeConfig {
     std::string superpointRepo;
     std::string superpointDevice{"auto"};
     int superpointTopK{1024};
-    int superpointMaxPoints{768};
+    int superpointMaxPoints{512};
     int superpointInputMaxWidth{640};
-    int superpointInputMaxHeight{400};
+    int superpointInputMaxHeight{409};
     bool lkLoopClosure{false};
     float lkLoopScale{1.20f};
     float lkLoopRelaxation{1.40f};

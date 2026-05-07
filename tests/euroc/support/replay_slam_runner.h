@@ -37,6 +37,7 @@ struct ReplayPoseSample {
     int superpointMatchedStereoCount{0};
     int superpointInjectedLeftCount{0};
     int superpointInjectedRightCount{0};
+    int superpointLightGlueEveryN{0};
     double superpointFrontendMs{0.0};
     double superpointStereoMatchMs{0.0};
     double superpointTotalMs{0.0};

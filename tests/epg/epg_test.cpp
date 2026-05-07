@@ -32,15 +32,15 @@ struct ReflectedPacket {
 };
 EPG_REGISTER_MESSAGE(ReflectedPacket, "ReflectedPacket")
 
-struct NativeSlamResourceReady {};
-struct NativeSlamTick {};
-struct NativeSlamFrameReady {};
-struct NativeSlamPreparedFrame {};
-struct NativeSlamTrackedFrame {};
-struct NativeSlamPublishedFrame {};
-struct NativeSlamStatus {};
+struct SlamResourceReady {};
+struct SlamTick {};
+struct SlamFrameReady {};
+struct SlamPreparedFrame {};
+struct SlamTrackedFrame {};
+struct SlamPublishedFrame {};
+struct SlamStatus {};
 struct CalibResourceReady {};
-struct NativeCalibTick {};
+struct CalibTick {};
 struct CalibStereoFrame {};
 struct CalibSavePair {};
 struct CalibCaptureDone {};
@@ -48,7 +48,7 @@ struct CalibStorageStatus {};
 struct CalibImuStatus {};
 struct CalibPreviewStatus {};
 struct CalibFlushRequest {};
-struct NativeCalibStatus {};
+struct CalibStatus {};
 
 class TestSourceTask final : public ITask {
 public:
@@ -247,38 +247,38 @@ Registry MakeRegistry() {
     return registry;
 }
 
-Registry MakeNativeSlamShapeRegistry() {
+Registry MakeSlamShapeRegistry() {
     Registry registry;
-    registry.RegisterMessageType<NativeSlamResourceReady>("NativeSlamResourceReady");
-    registry.RegisterMessageType<NativeSlamTick>("NativeSlamTick");
-    registry.RegisterMessageType<NativeSlamFrameReady>("NativeSlamFrameReady");
-    registry.RegisterMessageType<NativeSlamPreparedFrame>("NativeSlamPreparedFrame");
-    registry.RegisterMessageType<NativeSlamTrackedFrame>("NativeSlamTrackedFrame");
-    registry.RegisterMessageType<NativeSlamPublishedFrame>("NativeSlamPublishedFrame");
-    registry.RegisterMessageType<NativeSlamStatus>("NativeSlamStatus");
+    registry.RegisterMessageType<SlamResourceReady>("SlamResourceReady");
+    registry.RegisterMessageType<SlamTick>("SlamTick");
+    registry.RegisterMessageType<SlamFrameReady>("SlamFrameReady");
+    registry.RegisterMessageType<SlamPreparedFrame>("SlamPreparedFrame");
+    registry.RegisterMessageType<SlamTrackedFrame>("SlamTrackedFrame");
+    registry.RegisterMessageType<SlamPublishedFrame>("SlamPublishedFrame");
+    registry.RegisterMessageType<SlamStatus>("SlamStatus");
 
     const auto factory = []() {
         return std::unique_ptr<ITask>(new TestHeartbeatTask());
     };
-    registry.RegisterTaskFactory("NativeSlamResourceTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamClockTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamImuGateTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamAcquireTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamTrackingTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamPosePostprocessTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamPointCloudTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamLivePoseTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamMavlinkTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamUdpTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamDfxTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeSlamMonitorTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamResourceTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamClockTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamImuGateTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamAcquireTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamTrackingTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamPosePostprocessTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamPointCloudTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamLivePoseTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamMavlinkTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamUdpTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamDfxTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamMonitorTask", {}, {}, factory);
     return registry;
 }
 
-Registry MakeNativeCalibShapeRegistry() {
+Registry MakeCalibShapeRegistry() {
     Registry registry;
     registry.RegisterMessageType<CalibResourceReady>("CalibResourceReady");
-    registry.RegisterMessageType<NativeCalibTick>("NativeCalibTick");
+    registry.RegisterMessageType<CalibTick>("CalibTick");
     registry.RegisterMessageType<CalibStereoFrame>("CalibStereoFrame");
     registry.RegisterMessageType<CalibSavePair>("CalibSavePair");
     registry.RegisterMessageType<CalibCaptureDone>("CalibCaptureDone");
@@ -286,13 +286,13 @@ Registry MakeNativeCalibShapeRegistry() {
     registry.RegisterMessageType<CalibImuStatus>("CalibImuStatus");
     registry.RegisterMessageType<CalibPreviewStatus>("CalibPreviewStatus");
     registry.RegisterMessageType<CalibFlushRequest>("CalibFlushRequest");
-    registry.RegisterMessageType<NativeCalibStatus>("NativeCalibStatus");
+    registry.RegisterMessageType<CalibStatus>("CalibStatus");
 
     const auto factory = []() {
         return std::unique_ptr<ITask>(new TestHeartbeatTask());
     };
     registry.RegisterTaskFactory("CalibResourceTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeCalibClockTask", {}, {}, factory);
+    registry.RegisterTaskFactory("CalibClockTask", {}, {}, factory);
     registry.RegisterTaskFactory("CalibCameraAcquireTask", {}, {}, factory);
     registry.RegisterTaskFactory("CalibPacingFilterTask", {}, {}, factory);
     registry.RegisterTaskFactory("CalibStorageWriteTask", {}, {}, factory);
@@ -300,7 +300,7 @@ Registry MakeNativeCalibShapeRegistry() {
     registry.RegisterTaskFactory("CalibUdpPreviewTask", {}, {}, factory);
     registry.RegisterTaskFactory("CalibCompletionTask", {}, {}, factory);
     registry.RegisterTaskFactory("CalibFlushSyncTask", {}, {}, factory);
-    registry.RegisterTaskFactory("NativeCalibMonitorTask", {}, {}, factory);
+    registry.RegisterTaskFactory("CalibMonitorTask", {}, {}, factory);
     return registry;
 }
 
@@ -675,10 +675,10 @@ flowchart LR
     EXPECT_EQ(config.tasks[1].inputs.at(0), "source_0_to_sink_0");
 }
 
-TEST(EventPipelineGraphDot, CompilesNativeSlamSubgraphFromMaintainedTopology) {
-    auto registry = MakeNativeSlamShapeRegistry();
+TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
+    auto registry = MakeSlamShapeRegistry();
     const auto config = epg::ParseGraphConfigDotFile(
-        std::string(TEST_EPG_DIR) + "/../../config/epg/native_epg_topology.dot",
+        std::string(TEST_EPG_DIR) + "/../../config/epg/epg_topology.dot",
         "cluster_slam_session_graph",
         registry);
 
@@ -697,43 +697,43 @@ TEST(EventPipelineGraphDot, CompilesNativeSlamSubgraphFromMaintainedTopology) {
         return nullptr;
     };
 
-    const auto* resource = findTask("NativeSlamResourceTask");
+    const auto* resource = findTask("SlamResourceTask");
     ASSERT_NE(resource, nullptr);
     EXPECT_EQ(resource->trigger.mode, epg::TriggerMode::Periodic);
-    EXPECT_EQ(resource->trigger.interval, std::chrono::milliseconds(1));
+    EXPECT_EQ(resource->trigger.interval, std::chrono::milliseconds(100));
 
-    const auto* clock = findTask("NativeSlamClockTask");
+    const auto* clock = findTask("SlamClockTask");
     ASSERT_NE(clock, nullptr);
     EXPECT_EQ(clock->trigger.mode, epg::TriggerMode::Periodic);
-    EXPECT_EQ(clock->trigger.interval, std::chrono::milliseconds(1));
+    EXPECT_EQ(clock->trigger.interval, std::chrono::milliseconds(50));
 
-    const auto* imuGate = findTask("NativeSlamImuGateTask");
+    const auto* imuGate = findTask("SlamImuGateTask");
     ASSERT_NE(imuGate, nullptr);
-    EXPECT_EQ(imuGate->inputs.at(0), "NativeSlamResourceTask_0_to_NativeSlamImuGateTask_0");
-    EXPECT_EQ(imuGate->inputs.at(1), "NativeSlamClockTask_0_to_NativeSlamImuGateTask_1");
+    EXPECT_EQ(imuGate->inputs.at(0), "SlamResourceTask_0_to_SlamImuGateTask_0");
+    EXPECT_EQ(imuGate->inputs.at(1), "SlamClockTask_0_to_SlamImuGateTask_1");
     EXPECT_EQ(imuGate->trigger.queues,
-              (std::vector<std::string>{"NativeSlamResourceTask_0_to_NativeSlamImuGateTask_0",
-                                         "NativeSlamClockTask_0_to_NativeSlamImuGateTask_1"}));
+              (std::vector<std::string>{"SlamResourceTask_0_to_SlamImuGateTask_0",
+                                         "SlamClockTask_0_to_SlamImuGateTask_1"}));
 
-    const auto* acquire = findTask("NativeSlamAcquireTask");
+    const auto* acquire = findTask("SlamAcquireTask");
     ASSERT_NE(acquire, nullptr);
     EXPECT_EQ(acquire->inputs.at(0),
-              "NativeSlamImuGateTask_0_to_NativeSlamAcquireTask_0");
+              "SlamImuGateTask_0_to_SlamAcquireTask_0");
     EXPECT_EQ(acquire->trigger.queues,
-              (std::vector<std::string>{"NativeSlamImuGateTask_0_to_NativeSlamAcquireTask_0"}));
+              (std::vector<std::string>{"SlamImuGateTask_0_to_SlamAcquireTask_0"}));
 
-    const auto* tracking = findTask("NativeSlamTrackingTask");
+    const auto* tracking = findTask("SlamTrackingTask");
     ASSERT_NE(tracking, nullptr);
     EXPECT_EQ(tracking->inputs.at(0),
-              "NativeSlamAcquireTask_0_to_NativeSlamTrackingTask_0");
+              "SlamAcquireTask_0_to_SlamTrackingTask_0");
     EXPECT_EQ(tracking->trigger.queues,
-              (std::vector<std::string>{"NativeSlamAcquireTask_0_to_NativeSlamTrackingTask_0"}));
+              (std::vector<std::string>{"SlamAcquireTask_0_to_SlamTrackingTask_0"}));
 }
 
-TEST(EventPipelineGraphDot, CompilesNativeCalibSubgraphFromMaintainedTopology) {
-    auto registry = MakeNativeCalibShapeRegistry();
+TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology) {
+    auto registry = MakeCalibShapeRegistry();
     const auto config = epg::ParseGraphConfigDotFile(
-        std::string(TEST_EPG_DIR) + "/../../config/epg/native_epg_topology.dot",
+        std::string(TEST_EPG_DIR) + "/../../config/epg/epg_topology.dot",
         "cluster_calib_session_graph",
         registry);
 
@@ -755,7 +755,7 @@ TEST(EventPipelineGraphDot, CompilesNativeCalibSubgraphFromMaintainedTopology) {
     const auto* camera = findTask("CalibCameraAcquireTask");
     ASSERT_NE(camera, nullptr);
     EXPECT_EQ(camera->inputs.at(0), "CalibResourceTask_0_to_CalibCameraAcquireTask_0");
-    EXPECT_EQ(camera->inputs.at(1), "NativeCalibClockTask_0_to_CalibCameraAcquireTask_1");
+    EXPECT_EQ(camera->inputs.at(1), "CalibClockTask_0_to_CalibCameraAcquireTask_1");
 
     const auto* pace = findTask("CalibPacingFilterTask");
     ASSERT_NE(pace, nullptr);

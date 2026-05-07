@@ -29,11 +29,78 @@
 #include "MLPnPsolver.h"
 #include "GeometricTools.h"
 
+#include <algorithm>
+#include <cstdlib>
 #include <iostream>
+#include <string>
 
 #include <mutex>
 #include <chrono>
 using namespace std;
+
+namespace {
+
+template <typename T>
+T ClampValue(T value, T minValue, T maxValue)
+{
+    return std::max(minValue, std::min(value, maxValue));
+}
+
+int EnvIntClamped(const char *name, int fallback, int minValue, int maxValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return ClampValue(fallback, minValue, maxValue);
+    }
+    char *end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    if (end == value) {
+        return ClampValue(fallback, minValue, maxValue);
+    }
+    return ClampValue(static_cast<int>(parsed), minValue, maxValue);
+}
+
+float EnvFloatClamped(const char *name, float fallback, float minValue, float maxValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return ClampValue(fallback, minValue, maxValue);
+    }
+    char *end = nullptr;
+    const float parsed = std::strtof(value, &end);
+    if (end == value || !std::isfinite(parsed)) {
+        return ClampValue(fallback, minValue, maxValue);
+    }
+    return ClampValue(parsed, minValue, maxValue);
+}
+
+bool EnvFlagEnabled(const char *name, bool fallback)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return fallback;
+    }
+    const std::string text(value);
+    return !(text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF" ||
+             text == "no" || text == "NO");
+}
+
+unsigned long EnvUnsignedLongClamped(const char *name, unsigned long fallback, unsigned long minValue,
+                                     unsigned long maxValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return ClampValue(fallback, minValue, maxValue);
+    }
+    char *end = nullptr;
+    const unsigned long parsed = std::strtoul(value, &end, 10);
+    if (end == value) {
+        return ClampValue(fallback, minValue, maxValue);
+    }
+    return ClampValue(parsed, minValue, maxValue);
+}
+
+} // namespace
 
 namespace ORB_SLAM3
 {
@@ -114,11 +181,49 @@ int CountTrackedMapPoints(const Frame& frame)
     return tracked;
 }
 
-constexpr int kExternalStereoStabilizingFrameWindow = 240;
+constexpr int kExternalStereoStabilizingFrameWindow = 1200;
 constexpr unsigned long kExternalStereoBootstrapKeyframeLimit = 12;
-constexpr unsigned long kExternalStereoStabilizingKeyframeLimit = 40;
+constexpr unsigned long kExternalStereoStabilizingKeyframeLimit = 120;
 constexpr unsigned long kPureStereoBootstrapKeyframeLimit = 6;
 constexpr unsigned long kPureStereoStabilizingKeyframeLimit = 24;
+
+int ExternalStereoStabilizingFrameWindow()
+{
+    return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABILIZING_FRAME_WINDOW",
+                         kExternalStereoStabilizingFrameWindow, 0, 2000);
+}
+
+unsigned long ExternalStereoBootstrapKeyframeLimit()
+{
+    return EnvUnsignedLongClamped("SMART_DRONE_EXTERNAL_STEREO_BOOTSTRAP_KF_LIMIT",
+                                  kExternalStereoBootstrapKeyframeLimit, 0, 1000);
+}
+
+unsigned long ExternalStereoStabilizingKeyframeLimit()
+{
+    return EnvUnsignedLongClamped("SMART_DRONE_EXTERNAL_STEREO_STABILIZING_KF_LIMIT",
+                                  kExternalStereoStabilizingKeyframeLimit, 0, 1000);
+}
+
+int ExternalStereoBootstrapMaxMapPointsPerKeyframe()
+{
+    return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_BOOTSTRAP_MAX_MAPPOINTS_PER_KF", 240, 1, 1000);
+}
+
+int ExternalStereoStabilizingMaxMapPointsPerKeyframe()
+{
+    return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABILIZING_MAX_MAPPOINTS_PER_KF", 180, 1, 1000);
+}
+
+int ExternalStereoStableMaxMapPointsPerKeyframe()
+{
+    return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABLE_MAX_MAPPOINTS_PER_KF", 100, 1, 1000);
+}
+
+int ExternalStereoMinFramesBetweenKeyframes()
+{
+    return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_MIN_FRAMES_BETWEEN_KF", 4, 1, 120);
+}
 
 bool IsExternalStereoStabilizing(const Frame& frame, Atlas* pAtlas, int initFrameId)
 {
@@ -127,14 +232,14 @@ bool IsExternalStereoStabilizing(const Frame& frame, Atlas* pAtlas, int initFram
 
     const int framesSinceInit = frame.mnId - initFrameId;
     const unsigned long keyFramesInMap = pAtlas->KeyFramesInMap();
-    return framesSinceInit <= kExternalStereoStabilizingFrameWindow &&
-           keyFramesInMap <= kExternalStereoStabilizingKeyframeLimit;
+    return framesSinceInit <= ExternalStereoStabilizingFrameWindow() &&
+           keyFramesInMap <= ExternalStereoStabilizingKeyframeLimit();
 }
 
 bool IsExternalStereoBootstrap(const Frame& frame, Atlas* pAtlas, int initFrameId)
 {
     return IsExternalStereoStabilizing(frame, pAtlas, initFrameId) &&
-           pAtlas->KeyFramesInMap() <= kExternalStereoBootstrapKeyframeLimit;
+           pAtlas->KeyFramesInMap() <= ExternalStereoBootstrapKeyframeLimit();
 }
 
 bool IsExternalStereoRecoveryHopeless(const Frame& frame, Atlas* pAtlas, int initFrameId, int matchesInliers)
@@ -148,6 +253,56 @@ bool IsExternalStereoRecoveryHopeless(const Frame& frame, Atlas* pAtlas, int ini
 
     const int trackedMapPoints = CountTrackedMapPoints(frame);
     return pAtlas->KeyFramesInMap() > 1 && matchesInliers <= 2 && trackedMapPoints <= 2;
+}
+
+bool ExternalStereoTrackDfxEnabled()
+{
+    return EnvFlagEnabled("SMART_DRONE_EXTERNAL_STEREO_TRACK_DFX", false);
+}
+
+bool ExternalStereoPoseRescueEnabled()
+{
+    return EnvFlagEnabled("SMART_DRONE_EXTERNAL_STEREO_POSE_RESCUE", true);
+}
+
+int ExternalStereoLeftFeatureCount(const Frame& frame)
+{
+    return frame.Nleft == -1 ? frame.N : frame.Nleft;
+}
+
+bool IsExternalStereoObservationHealthy(const Frame& frame)
+{
+    if(!frame.mbExternalStereoInjected)
+        return false;
+
+    const int featureCount = ExternalStereoLeftFeatureCount(frame);
+    const int minFeatures = EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_RESCUE_MIN_FEATURES", 48, 1, 1000);
+    const int minClose = EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_RESCUE_MIN_CLOSE_POINTS", 24, 0, 1000);
+    const float minCloseRatio = EnvFloatClamped("SMART_DRONE_EXTERNAL_STEREO_RESCUE_MIN_CLOSE_RATIO",
+                                                0.30f, 0.0f, 1.0f);
+    return featureCount >= minFeatures &&
+           frame.mnCloseMPs >= minClose &&
+           static_cast<float>(frame.mnCloseMPs) >= minCloseRatio * static_cast<float>(featureCount);
+}
+
+void LogExternalStereoPoseRescue(const char* reason, const Frame& frame, Atlas* pAtlas, int state,
+                                 int initFrameId, int matchesInliers)
+{
+    if(!ExternalStereoTrackDfxEnabled() || !frame.mbExternalStereoInjected)
+        return;
+
+    cerr << "[external_stereo_pose_rescue] frame=" << frame.mnId
+         << " reason=" << reason
+         << " state=" << state
+         << " features=" << ExternalStereoLeftFeatureCount(frame)
+         << " close=" << frame.mnCloseMPs
+         << " tracked=" << CountTrackedMapPoints(frame)
+         << " inliers=" << matchesInliers
+         << " kfs=" << (pAtlas ? pAtlas->KeyFramesInMap() : 0)
+         << " init_frame=" << initFrameId
+         << " stabilizing=" << (IsExternalStereoStabilizing(frame, pAtlas, initFrameId) ? "Y" : "N")
+         << " bootstrap=" << (IsExternalStereoBootstrap(frame, pAtlas, initFrameId) ? "Y" : "N")
+         << "\n";
 }
 
 bool IsPureStereoStabilizing(int sensor, Atlas* pAtlas)
@@ -2177,6 +2332,20 @@ void Tracking::Track()
 
                 if (!bOK)
                 {
+                    const bool externalStereoStabilizing =
+                        IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+                    if(externalStereoStabilizing && ExternalStereoPoseRescueEnabled() &&
+                       IsExternalStereoObservationHealthy(mCurrentFrame))
+                    {
+                        mCurrentFrame.SetPose(mLastFrame.GetPose());
+                        bOK = true;
+                        LogExternalStereoPoseRescue("ok_pose_seed_last_frame", mCurrentFrame, mpAtlas, mState,
+                                                    mnExternalStereoInitFrameId, mnMatchesInliers);
+                    }
+                }
+
+                if (!bOK)
+                {
                     if ( mCurrentFrame.mnId<=(mnLastRelocFrameId+mnFramesToResetIMU) &&
                          (mSensor==System::IMU_MONOCULAR || mSensor==System::IMU_STEREO || mSensor == System::IMU_RGBD))
                     {
@@ -2232,6 +2401,15 @@ void Tracking::Track()
                                 bOK = TrackWithMotionModel();
                             if(!bOK)
                                 bOK = TrackReferenceKeyFrame();
+                            if(!bOK && ExternalStereoPoseRescueEnabled() &&
+                               IsExternalStereoObservationHealthy(mCurrentFrame))
+                            {
+                                mCurrentFrame.SetPose(mLastFrame.GetPose());
+                                bOK = true;
+                                LogExternalStereoPoseRescue("recently_lost_pose_seed_last_frame", mCurrentFrame,
+                                                            mpAtlas, mState, mnExternalStereoInitFrameId,
+                                                            mnMatchesInliers);
+                            }
                         }
                         else
                         {
@@ -2359,10 +2537,32 @@ void Tracking::Track()
         // If we have an initial estimation of the camera pose and matching. Track the local map.
         if(!mbOnlyTracking)
         {
+            const bool posePredictionOk = bOK;
+            bool localMapOk = false;
             if(bOK)
             {
                 bOK = TrackLocalMap();
+                localMapOk = bOK;
 
+            }
+            if(ExternalStereoTrackDfxEnabled() && mCurrentFrame.mbExternalStereoInjected)
+            {
+                cerr << "[external_stereo_track_state] frame=" << mCurrentFrame.mnId
+                     << " state=" << mState
+                     << " pose_ok=" << (posePredictionOk ? "Y" : "N")
+                     << " local_ok=" << (localMapOk ? "Y" : "N")
+                     << " final_ok=" << (bOK ? "Y" : "N")
+                     << " features=" << ExternalStereoLeftFeatureCount(mCurrentFrame)
+                     << " close=" << mCurrentFrame.mnCloseMPs
+                     << " tracked=" << CountTrackedMapPoints(mCurrentFrame)
+                     << " inliers=" << mnMatchesInliers
+                     << " kfs=" << (mpAtlas ? mpAtlas->KeyFramesInMap() : 0)
+                     << " init_frame=" << mnExternalStereoInitFrameId
+                     << " stabilizing="
+                     << (IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId) ? "Y" : "N")
+                     << " bootstrap="
+                     << (IsExternalStereoBootstrap(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId) ? "Y" : "N")
+                     << "\n";
             }
             if(!bOK)
                 cout << "Fail to track local map!" << endl;
@@ -2555,6 +2755,8 @@ void Tracking::Track()
 
     if(mState==OK || mState==RECENTLY_LOST)
     {
+        const bool lostForTrajectoryExport = (mState != OK);
+
         // Store frame pose information to retrieve the complete camera trajectory afterwards.
         if(mCurrentFrame.isSet())
         {
@@ -2562,7 +2764,7 @@ void Tracking::Track()
             mlRelativeFramePoses.push_back(Tcr_);
             mlpReferences.push_back(mCurrentFrame.mpReferenceKF);
             mlFrameTimes.push_back(mCurrentFrame.mTimeStamp);
-            mlbLost.push_back(mState==LOST);
+            mlbLost.push_back(lostForTrajectoryExport);
         }
         else
         {
@@ -2570,7 +2772,7 @@ void Tracking::Track()
             mlRelativeFramePoses.push_back(mlRelativeFramePoses.back());
             mlpReferences.push_back(mlpReferences.back());
             mlFrameTimes.push_back(mlFrameTimes.back());
-            mlbLost.push_back(mState==LOST);
+            mlbLost.push_back(lostForTrajectoryExport);
         }
 
     }
@@ -2591,21 +2793,38 @@ void Tracking::Track()
 void Tracking::StereoInitialization()
 {
     const bool externalStereoInjected = mCurrentFrame.mbExternalStereoInjected;
-    constexpr int kStereoInitMinFeatures = 56;
-    constexpr int kStereoInitMinClosePoints = 40;
-    constexpr float kStereoInitMinCloseRatio = 0.65f;
+    const int stereoInitMinFeatures =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES", 56, 1, 1000);
+    const int stereoInitMinClosePoints =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_POINTS", 40, 0, 1000);
+    const float stereoInitMinCloseRatio =
+        EnvFloatClamped("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO", 0.50f, 0.0f, 1.0f);
 
     const int stereoFeatureCount = (mCurrentFrame.Nleft == -1) ? mCurrentFrame.N : mCurrentFrame.Nleft;
     const int stereoClosePointCount = mCurrentFrame.mnCloseMPs;
     const bool stereoInitGeometryHealthy =
         stereoFeatureCount > 0 &&
         static_cast<float>(stereoClosePointCount) >=
-            (kStereoInitMinCloseRatio * static_cast<float>(stereoFeatureCount));
+            (stereoInitMinCloseRatio * static_cast<float>(stereoFeatureCount));
     const bool stereoInitReady = externalStereoInjected
-                                     ? (stereoFeatureCount >= kStereoInitMinFeatures &&
-                                        stereoClosePointCount >= kStereoInitMinClosePoints &&
+                                     ? (stereoFeatureCount >= stereoInitMinFeatures &&
+                                        stereoClosePointCount >= stereoInitMinClosePoints &&
                                         stereoInitGeometryHealthy)
                                      : (mCurrentFrame.N > 500);
+    if (externalStereoInjected && EnvFlagEnabled("SMART_DRONE_EXTERNAL_STEREO_INIT_DFX", false)) {
+        const float closeRatio = stereoFeatureCount > 0
+                                     ? static_cast<float>(stereoClosePointCount) /
+                                           static_cast<float>(stereoFeatureCount)
+                                     : 0.0f;
+        cerr << "[external_stereo_init_dfx] features=" << stereoFeatureCount
+             << " close=" << stereoClosePointCount
+             << " close_ratio=" << closeRatio
+             << " min_features=" << stereoInitMinFeatures
+             << " min_close=" << stereoInitMinClosePoints
+             << " min_close_ratio=" << stereoInitMinCloseRatio
+             << " ready=" << (stereoInitReady ? "Y" : "N")
+             << "\n";
+    }
 
     if(stereoInitReady)
     {
@@ -2721,8 +2940,8 @@ void Tracking::StereoInitialization()
     {
         Verbose::PrintMess("Stereo init waiting: features=" + to_string(stereoFeatureCount) +
                                " close=" + to_string(stereoClosePointCount) +
-                               " thresholds=" + to_string(kStereoInitMinFeatures) + "/" +
-                               to_string(kStereoInitMinClosePoints) +
+                               " thresholds=" + to_string(stereoInitMinFeatures) + "/" +
+                               to_string(stereoInitMinClosePoints) +
                                " ratio=" + to_string(stereoFeatureCount > 0
                                                          ? static_cast<float>(stereoClosePointCount) /
                                                                static_cast<float>(stereoFeatureCount)
@@ -3431,42 +3650,84 @@ bool Tracking::TrackLocalMap()
     const int minRecentRelocInliers = stereoBootstrap ? 4 : (stereoStabilizing ? 8 : 50);
     const int minStereoLocalMapInliers = stereoBootstrap ? 4 : (stereoStabilizing ? 8 : 30);
     const int minRecentlyLostInliers = stereoBootstrap ? 3 : (stereoStabilizing ? 6 : 10);
+    auto logDecision = [&](const char* reason, bool accepted)
+    {
+        if(!ExternalStereoTrackDfxEnabled() || !mCurrentFrame.mbExternalStereoInjected)
+            return;
+
+        cerr << "[external_stereo_local_map] frame=" << mCurrentFrame.mnId
+             << " reason=" << reason
+             << " accepted=" << (accepted ? "Y" : "N")
+             << " state=" << mState
+             << " bootstrap=" << (externalStereoBootstrap ? "Y" : "N")
+             << " stabilizing=" << (externalStereoStabilizing ? "Y" : "N")
+             << " features=" << ExternalStereoLeftFeatureCount(mCurrentFrame)
+             << " close=" << bootstrapClosePoints
+             << " tracked=" << trackedMapPoints
+             << " inliers=" << mnMatchesInliers
+             << " effective=" << effectiveLocalMapMatches
+             << " kfs=" << (mpAtlas ? mpAtlas->KeyFramesInMap() : 0)
+             << " init_frame=" << mnExternalStereoInitFrameId
+             << " min_recent=" << minRecentRelocInliers
+             << " min_lost=" << minRecentlyLostInliers
+             << " min_local=" << minStereoLocalMapInliers
+             << "\n";
+    };
 
     mpLocalMapper->mnMatchesInliers=mnMatchesInliers;
     if(mCurrentFrame.mnId<mnLastRelocFrameId+mMaxFrames && effectiveLocalMapMatches < minRecentRelocInliers)
+    {
+        logDecision("recent_reloc_guard", false);
         return false;
+    }
 
     if((effectiveLocalMapMatches >= minRecentlyLostInliers) && (mState==RECENTLY_LOST))
+    {
+        logDecision("recently_lost_inliers", true);
         return true;
+    }
 
     if(bootstrapVisualOdometryHealthy || stabilizingVisualOdometryHealthy)
+    {
+        logDecision("stereo_vo_healthy", true);
         return true;
+    }
 
 
     if (mSensor == System::IMU_MONOCULAR)
     {
         if((mnMatchesInliers<15 && mpAtlas->isImuInitialized())||(mnMatchesInliers<50 && !mpAtlas->isImuInitialized()))
         {
+            logDecision("imu_mono_inliers", false);
             return false;
         }
-        else
+        else {
+            logDecision("imu_mono_inliers", true);
             return true;
+        }
     }
     else if (mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
     {
         if(mnMatchesInliers<15)
         {
+            logDecision("imu_stereo_inliers", false);
             return false;
         }
-        else
+        else {
+            logDecision("imu_stereo_inliers", true);
             return true;
+        }
     }
     else
     {
-        if(effectiveLocalMapMatches < minStereoLocalMapInliers)
+        if(effectiveLocalMapMatches < minStereoLocalMapInliers) {
+            logDecision("stereo_inliers", false);
             return false;
-        else
+        }
+        else {
+            logDecision("stereo_inliers", true);
             return true;
+        }
     }
 }
 
@@ -3537,15 +3798,32 @@ bool Tracking::NeedNewKeyFrame()
         //Verbose::PrintMess("[NEEDNEWKF]-> closed points: " + to_string(nTrackedClose) + "; non tracked closed points: " + to_string(nNonTrackedClose), Verbose::VERBOSITY_NORMAL);// Verbose::VERBOSITY_DEBUG);
     }
 
+    const int insertCloseTrackedMax = EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_INSERT_CLOSE_TRACKED_MAX",
+                                                    100, 0, 1000);
+    const int insertCloseNonTrackedMin = EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_INSERT_CLOSE_NONTRACKED_MIN",
+                                                       70, 0, 1000);
+    const int bootstrapInsertCloseTrackedMax =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_BOOTSTRAP_INSERT_CLOSE_TRACKED_MAX", 40, 0, 1000);
+    const int bootstrapInsertCloseNonTrackedMin =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_BOOTSTRAP_INSERT_CLOSE_NONTRACKED_MIN", 20, 0, 1000);
+    const int stabilizingInsertCloseTrackedMax =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABILIZING_INSERT_CLOSE_TRACKED_MAX", 80, 0, 1000);
+    const int stabilizingInsertCloseNonTrackedMin =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABILIZING_INSERT_CLOSE_NONTRACKED_MIN", 40, 0, 1000);
+
     bool bNeedToInsertClose;
-    bNeedToInsertClose = (nTrackedClose<100) && (nNonTrackedClose>70);
+    bNeedToInsertClose = (nTrackedClose < insertCloseTrackedMax) && (nNonTrackedClose > insertCloseNonTrackedMin);
     if(externalStereoBootstrap)
     {
-        bNeedToInsertClose = bNeedToInsertClose || (nTrackedClose < 40 && nNonTrackedClose > 20);
+        bNeedToInsertClose = bNeedToInsertClose ||
+            (nTrackedClose < bootstrapInsertCloseTrackedMax &&
+             nNonTrackedClose > bootstrapInsertCloseNonTrackedMin);
     }
     if(externalStereoStabilizing)
     {
-        bNeedToInsertClose = bNeedToInsertClose || (nTrackedClose < 80 && nNonTrackedClose > 40);
+        bNeedToInsertClose = bNeedToInsertClose ||
+            (nTrackedClose < stabilizingInsertCloseTrackedMax &&
+             nNonTrackedClose > stabilizingInsertCloseNonTrackedMin);
     }
 
     // Thresholds
@@ -3582,15 +3860,37 @@ bool Tracking::NeedNewKeyFrame()
     const bool c1c = mSensor!=System::MONOCULAR && mSensor!=System::IMU_MONOCULAR && mSensor!=System::IMU_STEREO && mSensor!=System::IMU_RGBD && (mnMatchesInliers<nRefMatches*0.25 || bNeedToInsertClose) ;
     // Condition 2: Few tracked points compared to reference keyframe. Lots of visual odometry compared to map matches.
     const bool c2 = (((mnMatchesInliers<nRefMatches*thRefRatio || bNeedToInsertClose)) && mnMatchesInliers>15);
+    const int externalGrowMinTrack =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_GROW_MIN_TRACK", 6, 0, 1000);
+    const int externalGrowTrackedCloseMin =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_GROW_TRACKED_CLOSE_MIN", 20, 0, 1000);
+    const int externalGrowNonTrackedCloseMin =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_GROW_NONTRACKED_CLOSE_MIN", 20, 0, 1000);
+    const int externalGrowCloseMin =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_GROW_CLOSE_MIN", 24, 0, 1000);
+    const int externalBootstrapGrowTrackedCloseMin =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_BOOTSTRAP_GROW_TRACKED_CLOSE_MIN", 12, 0, 1000);
+    const int externalBootstrapGrowNonTrackedCloseMin =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_BOOTSTRAP_GROW_NONTRACKED_CLOSE_MIN", 12, 0, 1000);
+    const int externalBootstrapGrowCloseMin =
+        EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_BOOTSTRAP_GROW_CLOSE_MIN", 16, 0, 1000);
+    const int externalStereoMinFramesBetweenKf = ExternalStereoMinFramesBetweenKeyframes();
+    const bool externalStereoCanInsertByCadence =
+        !mCurrentFrame.mbExternalStereoInjected ||
+        mCurrentFrame.mnId >= mnLastKeyFrameId + externalStereoMinFramesBetweenKf;
     const bool externalStereoGrowMap =
         externalStereoStabilizing &&
-        mCurrentFrame.mnId >= mnLastKeyFrameId + 1 &&
-        std::max(mnMatchesInliers, trackedCurrent) >= 6 &&
-        (nTrackedClose >= 20 || nNonTrackedClose >= 20 || mCurrentFrame.mnCloseMPs >= 24);
+        externalStereoCanInsertByCadence &&
+        std::max(mnMatchesInliers, trackedCurrent) >= externalGrowMinTrack &&
+        (nTrackedClose >= externalGrowTrackedCloseMin ||
+         nNonTrackedClose >= externalGrowNonTrackedCloseMin ||
+         mCurrentFrame.mnCloseMPs >= externalGrowCloseMin);
     const bool externalStereoBootstrapGrowMap =
         externalStereoBootstrap &&
-        mCurrentFrame.mnId >= mnLastKeyFrameId + 1 &&
-        (nTrackedClose >= 12 || nNonTrackedClose >= 12 || mCurrentFrame.mnCloseMPs >= 16);
+        externalStereoCanInsertByCadence &&
+        (nTrackedClose >= externalBootstrapGrowTrackedCloseMin ||
+         nNonTrackedClose >= externalBootstrapGrowNonTrackedCloseMin ||
+         mCurrentFrame.mnCloseMPs >= externalBootstrapGrowCloseMin);
 
     //std::cout << "NeedNewKF: c1a=" << c1a << "; c1b=" << c1b << "; c1c=" << c1c << "; c2=" << c2 << std::endl;
     // Temporal condition for Inertial cases
@@ -3615,7 +3915,12 @@ bool Tracking::NeedNewKeyFrame()
     else
         c4=false;
 
-    if((((c1a||c1b||c1c) && c2)||c3 ||c4) || externalStereoGrowMap || externalStereoBootstrapGrowMap)
+    const bool regularNeedKeyFrame = (((c1a||c1b||c1c) && c2)||c3 ||c4);
+    const bool shouldInsertKeyFrame =
+        (mCurrentFrame.mbExternalStereoInjected ? (regularNeedKeyFrame && externalStereoCanInsertByCadence)
+                                                : regularNeedKeyFrame) ||
+        externalStereoGrowMap || externalStereoBootstrapGrowMap;
+    if(shouldInsertKeyFrame)
     {
         // If the mapping accepts keyframes, insert keyframe.
         // Otherwise send a signal to interrupt BA
@@ -3682,16 +3987,16 @@ void Tracking::CreateNewKeyFrame()
         // We sort points by the measured depth by the stereo/RGBD sensor.
         // We create all those MapPoints whose depth < mThDepth.
         // If there are less than 100 close points we create the 100 closest.
-        int maxPoint = 100;
+        int maxPoint = ExternalStereoStableMaxMapPointsPerKeyframe();
         if((mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) &&
            !IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId))
         {
             maxPoint = 100;
         }
         if(IsExternalStereoBootstrap(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId))
-            maxPoint = 240;
+            maxPoint = ExternalStereoBootstrapMaxMapPointsPerKeyframe();
         if(IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId))
-            maxPoint = 180;
+            maxPoint = ExternalStereoStabilizingMaxMapPointsPerKeyframe();
 
         vector<pair<float,int> > vDepthIdx;
         int N = (mCurrentFrame.Nleft != -1) ? mCurrentFrame.Nleft : mCurrentFrame.N;
@@ -3705,6 +4010,8 @@ void Tracking::CreateNewKeyFrame()
             }
         }
 
+        int nCreatedPoints = 0;
+        int nCountedPoints = 0;
         if(!vDepthIdx.empty())
         {
             sort(vDepthIdx.begin(),vDepthIdx.end());
@@ -3754,6 +4061,7 @@ void Tracking::CreateNewKeyFrame()
 
                     mCurrentFrame.mvpMapPoints[i]=pNewMP;
                     nPoints++;
+                    nCreatedPoints++;
                 }
                 else
                 {
@@ -3765,7 +4073,22 @@ void Tracking::CreateNewKeyFrame()
                     break;
                 }
             }
+            nCountedPoints = nPoints;
             //Verbose::PrintMess("new mps for stereo KF: " + to_string(nPoints), Verbose::VERBOSITY_NORMAL);
+        }
+        if(mCurrentFrame.mbExternalStereoInjected &&
+           EnvFlagEnabled("SMART_DRONE_EXTERNAL_STEREO_KF_DFX", false))
+        {
+            cerr << "[external_stereo_kf_dfx] frame_id=" << mCurrentFrame.mnId
+                 << " keyframes=" << mpAtlas->KeyFramesInMap()
+                 << " bootstrap=" << (IsExternalStereoBootstrap(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId) ? "Y" : "N")
+                 << " stabilizing=" << (IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId) ? "Y" : "N")
+                 << " max_point=" << maxPoint
+                 << " valid_depth=" << vDepthIdx.size()
+                 << " counted=" << nCountedPoints
+                 << " created=" << nCreatedPoints
+                 << " map_points=" << mpAtlas->MapPointsInMap()
+                 << "\n";
         }
     }
 

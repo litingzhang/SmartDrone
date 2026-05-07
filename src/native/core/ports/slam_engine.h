@@ -42,6 +42,7 @@ struct SlamOutput {
     int superpointMatchedStereoCount{0};
     int superpointInjectedLeftCount{0};
     int superpointInjectedRightCount{0};
+    int superpointLightGlueEveryN{0};
     double superpointPrepareMs{0.0};
     double superpointInputMs{0.0};
     double superpointForwardMs{0.0};

@@ -17,8 +17,24 @@ bool TaskContext::InputReady(PortId port) const {
     return !it->second->Empty();
 }
 
+std::size_t TaskContext::InputSize(PortId port) const {
+    auto it = m_inputs.find(port);
+    if (it == m_inputs.end()) {
+        throw std::runtime_error("missing input port: " + std::to_string(port));
+    }
+    return it->second->Size();
+}
+
 bool TaskContext::OutputExists(PortId port) const {
     return m_outputs.find(port) != m_outputs.end();
+}
+
+std::size_t TaskContext::OutputSize(PortId port) const {
+    auto it = m_outputs.find(port);
+    if (it == m_outputs.end()) {
+        throw std::runtime_error("missing output port: " + std::to_string(port));
+    }
+    return it->second->Size();
 }
 
 void Registry::RegisterTaskFactory(const std::string& name,

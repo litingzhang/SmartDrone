@@ -1,7 +1,11 @@
 #include "core/application/session/slam_session_graph_service.h"
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -10,17 +14,66 @@
 #include <vector>
 
 #include "common/epg/epg.h"
-#include "core/application/session/native_epg_messages.h"
-#include "core/application/session/native_epg_registry.h"
+#include "core/application/session/epg_messages.h"
+#include "core/application/session/epg_registry.h"
+#include "core/application/session/runtime_session_common.h"
 #include "core/application/session/slam_frame_processor.h"
 #include "core/application/session/slam_session_runtime.h"
 
 namespace smartdrone::core::application {
 namespace {
 
-class NativeSlamRuntimeState final {
+constexpr const char *kSlamEpgDfxSnapshotPath = "/tmp/smartdrone_epg_slam.json";
+constexpr std::chrono::milliseconds kSlamResourcePollInterval{100};
+
+std::chrono::milliseconds SlamInputInterval(int slamInputFps, int cameraFps)
+{
+    const int clampedFps = ClampSlamInputFps(slamInputFps, cameraFps);
+    const int intervalMs = std::max(1, (1000 + clampedFps - 1) / clampedFps);
+    return std::chrono::milliseconds(intervalMs);
+}
+
+void OverrideTaskInterval(epg::GraphConfig &config, const std::string &taskName,
+                          std::chrono::milliseconds interval)
+{
+    for (auto &task : config.tasks) {
+        if (task.name == taskName) {
+            task.trigger.interval = interval;
+            return;
+        }
+    }
+}
+
+void ApplySlamRuntimePacing(epg::GraphConfig &config, const UnifiedConfig &cfg)
+{
+    OverrideTaskInterval(config, "SlamResourceTask", kSlamResourcePollInterval);
+    OverrideTaskInterval(config, "SlamClockTask",
+                         SlamInputInterval(cfg.app.runtime.slamInputFps, cfg.app.camera.fps));
+}
+
+std::uint64_t EpgDfxNowMs()
+{
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+}
+
+void WriteEpgDfxSnapshotFile(const std::string &path, const std::string &json)
+{
+    const std::string tmpPath = path + ".tmp";
+    {
+        std::ofstream output(tmpPath, std::ios::out | std::ios::trunc);
+        if (!output) {
+            return;
+        }
+        output << json;
+    }
+    (void)std::rename(tmpPath.c_str(), path.c_str());
+}
+
+class SlamRuntimeState final {
   public:
-    NativeSlamRuntimeState(const UnifiedConfig &cfg, LiveRuntimeTuning &tuning, Px4MavlinkGateway &mav,
+    SlamRuntimeState(const UnifiedConfig &cfg, LiveRuntimeTuning &tuning, Px4MavlinkGateway &mav,
                            std::atomic<bool> &stop, LivePoseState &livePose, std::atomic<bool> &runningFlag)
         : m_cfg(cfg), m_tuning(tuning), m_mav(mav), m_stop(stop), m_livePose(livePose), m_runningFlag(runningFlag)
     {
@@ -84,15 +137,15 @@ class NativeSlamRuntimeState final {
     bool m_startFailed{false};
 };
 
-class NativeSlamResourceTask final : public epg::ITask {
+class SlamResourceTask final : public epg::ITask {
   public:
-    NativeSlamResourceTask(std::shared_ptr<NativeSlamRuntimeState> state, std::atomic<bool> &stop,
+    SlamResourceTask(std::shared_ptr<SlamRuntimeState> state, std::atomic<bool> &stop,
                            std::atomic<bool> &runningFlag)
         : m_state(std::move(state)), m_stop(stop), m_runningFlag(runningFlag)
     {
     }
 
-    ~NativeSlamResourceTask() override { m_state->Stop(); }
+    ~SlamResourceTask() override { m_state->Stop(); }
 
     void OnTick(epg::TaskContext &context) override
     {
@@ -103,7 +156,7 @@ class NativeSlamResourceTask final : public epg::ITask {
             m_stop.store(true);
             return;
         }
-        auto ready = context.Make<NativeSlamResourceReady>();
+        auto ready = context.Make<SlamResourceReady>();
         ready->ready = true;
         if (context.Push(0, std::move(ready))) {
             m_readyEmitted = true;
@@ -111,16 +164,16 @@ class NativeSlamResourceTask final : public epg::ITask {
     }
 
   private:
-    std::shared_ptr<NativeSlamRuntimeState> m_state;
+    std::shared_ptr<SlamRuntimeState> m_state;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
     bool m_readyEmitted{false};
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamResourceTask, "NativeSlamResourceTask")
+EPG_REGISTER_TASK_TYPE(SlamResourceTask, "SlamResourceTask")
 
-class NativeSlamClockTask final : public epg::ITask {
+class SlamClockTask final : public epg::ITask {
   public:
-    NativeSlamClockTask(std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
+    SlamClockTask(std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
         : m_stop(stop), m_runningFlag(runningFlag)
     {
     }
@@ -130,7 +183,7 @@ class NativeSlamClockTask final : public epg::ITask {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        auto tick = context.Make<NativeSlamTick>();
+        auto tick = context.Make<SlamTick>();
         tick->sequence = ++m_sequence;
         context.Push(0, std::move(tick));
     }
@@ -140,22 +193,22 @@ class NativeSlamClockTask final : public epg::ITask {
     std::atomic<bool> &m_runningFlag;
     std::uint64_t m_sequence{0};
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamClockTask, "NativeSlamClockTask")
+EPG_REGISTER_TASK_TYPE(SlamClockTask, "SlamClockTask")
 
-class NativeSlamImuGateTask final : public epg::ITask {
+class SlamImuGateTask final : public epg::ITask {
   public:
-    NativeSlamImuGateTask(std::shared_ptr<NativeSlamRuntimeState> state, std::atomic<bool> &stop,
-                          std::atomic<bool> &runningFlag)
-        : m_state(std::move(state)), m_stop(stop), m_runningFlag(runningFlag)
+    SlamImuGateTask(std::shared_ptr<SlamRuntimeState> state, std::atomic<bool> &stop,
+                          std::atomic<bool> &runningFlag, LiveRuntimeTuning &tuning, int cameraFps)
+        : m_state(std::move(state)), m_stop(stop), m_runningFlag(runningFlag), m_tuning(tuning), m_cameraFps(cameraFps)
     {
     }
 
     void OnTick(epg::TaskContext &context) override
     {
-        if (auto ready = context.TryPopLatest<NativeSlamResourceReady>(0)) {
+        if (auto ready = context.TryPopLatest<SlamResourceReady>(0)) {
             m_resourceReady = ready->ready;
         }
-        const auto tick = context.TryPopLatest<NativeSlamTick>(1);
+        const auto tick = context.TryPopLatest<SlamTick>(1);
         if (m_state->StartFailed()) {
             PushStatus(context, false, true);
             return;
@@ -169,6 +222,16 @@ class NativeSlamImuGateTask final : public epg::ITask {
         if (!tick) {
             return;
         }
+        if (context.OutputSize(0) > 0) {
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        const auto minInterval =
+            SlamInputInterval(m_tuning.slamInputFps.load(std::memory_order_relaxed), m_cameraFps);
+        if (m_lastFrameReadyTime.time_since_epoch().count() != 0 &&
+            now - m_lastFrameReadyTime < minInterval) {
+            return;
+        }
 
         auto runtime = m_state->Runtime();
         if (!runtime) {
@@ -178,30 +241,35 @@ class NativeSlamImuGateTask final : public epg::ITask {
             return;
         }
 
-        auto frameReady = context.Make<NativeSlamFrameReady>();
+        auto frameReady = context.Make<SlamFrameReady>();
         frameReady->runtime = std::move(runtime);
-        context.Push(0, std::move(frameReady));
+        if (context.Push(0, std::move(frameReady))) {
+            m_lastFrameReadyTime = now;
+        }
     }
 
   private:
     void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
-        auto status = context.Make<NativeSlamStatus>();
+        auto status = context.Make<SlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
         context.Push(1, std::move(status));
     }
 
-    std::shared_ptr<NativeSlamRuntimeState> m_state;
+    std::shared_ptr<SlamRuntimeState> m_state;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
+    LiveRuntimeTuning &m_tuning;
+    int m_cameraFps{};
+    std::chrono::steady_clock::time_point m_lastFrameReadyTime{};
     bool m_resourceReady{false};
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamImuGateTask, "NativeSlamImuGateTask")
+EPG_REGISTER_TASK_TYPE(SlamImuGateTask, "SlamImuGateTask")
 
-class NativeSlamAcquireTask final : public epg::ITask {
+class SlamAcquireTask final : public epg::ITask {
   public:
-    NativeSlamAcquireTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
+    SlamAcquireTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                           std::atomic<bool> &runningFlag)
         : m_processorMu(std::move(processorMu)), m_stop(stop), m_runningFlag(runningFlag)
     {
@@ -212,8 +280,11 @@ class NativeSlamAcquireTask final : public epg::ITask {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto frameReady = context.TryPopLatest<NativeSlamFrameReady>(0);
+        const auto frameReady = context.TryPopLatest<SlamFrameReady>(0);
         if (!frameReady || !frameReady->runtime) {
+            return;
+        }
+        if (context.OutputSize(0) > 0) {
             return;
         }
 
@@ -230,7 +301,7 @@ class NativeSlamAcquireTask final : public epg::ITask {
             return;
         }
 
-        auto prepared = context.Make<NativeSlamPreparedFrame>();
+        auto prepared = context.Make<SlamPreparedFrame>();
         prepared->runtime = frameReady->runtime;
         prepared->frame = std::move(preparedFrame);
         context.Push(0, std::move(prepared));
@@ -239,7 +310,7 @@ class NativeSlamAcquireTask final : public epg::ITask {
   private:
     void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
-        auto status = context.Make<NativeSlamStatus>();
+        auto status = context.Make<SlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
         context.Push(1, std::move(status));
@@ -249,11 +320,11 @@ class NativeSlamAcquireTask final : public epg::ITask {
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamAcquireTask, "NativeSlamAcquireTask")
+EPG_REGISTER_TASK_TYPE(SlamAcquireTask, "SlamAcquireTask")
 
-class NativeSlamTrackingTask final : public epg::ITask {
+class SlamTrackingTask final : public epg::ITask {
   public:
-    NativeSlamTrackingTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
+    SlamTrackingTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                            std::atomic<bool> &runningFlag)
         : m_processorMu(std::move(processorMu)), m_stop(stop), m_runningFlag(runningFlag)
     {
@@ -264,7 +335,7 @@ class NativeSlamTrackingTask final : public epg::ITask {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto prepared = context.TryPopLatest<NativeSlamPreparedFrame>(0);
+        const auto prepared = context.TryPopLatest<SlamPreparedFrame>(0);
         if (!prepared || !prepared->runtime || !prepared->frame) {
             return;
         }
@@ -282,7 +353,7 @@ class NativeSlamTrackingTask final : public epg::ITask {
             return;
         }
 
-        auto tracked = context.Make<NativeSlamTrackedFrame>();
+        auto tracked = context.Make<SlamTrackedFrame>();
         tracked->runtime = prepared->runtime;
         tracked->frame = std::move(trackedFrame);
         context.Push(0, std::move(tracked));
@@ -291,7 +362,7 @@ class NativeSlamTrackingTask final : public epg::ITask {
   private:
     void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
-        auto status = context.Make<NativeSlamStatus>();
+        auto status = context.Make<SlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
         context.Push(1, std::move(status));
@@ -301,11 +372,11 @@ class NativeSlamTrackingTask final : public epg::ITask {
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamTrackingTask, "NativeSlamTrackingTask")
+EPG_REGISTER_TASK_TYPE(SlamTrackingTask, "SlamTrackingTask")
 
-class NativeSlamPosePostprocessTask final : public epg::ITask {
+class SlamPosePostprocessTask final : public epg::ITask {
   public:
-    NativeSlamPosePostprocessTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
+    SlamPosePostprocessTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                           std::atomic<bool> &runningFlag)
         : m_processorMu(std::move(processorMu)), m_stop(stop), m_runningFlag(runningFlag)
     {
@@ -316,7 +387,7 @@ class NativeSlamPosePostprocessTask final : public epg::ITask {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto tracked = context.TryPopLatest<NativeSlamTrackedFrame>(0);
+        const auto tracked = context.TryPopLatest<SlamTrackedFrame>(0);
         if (!tracked || !tracked->runtime || !tracked->frame) {
             return;
         }
@@ -334,7 +405,7 @@ class NativeSlamPosePostprocessTask final : public epg::ITask {
             return;
         }
 
-        auto published = context.Make<NativeSlamPublishedFrame>();
+        auto published = context.Make<SlamPublishedFrame>();
         published->runtime = tracked->runtime;
         published->frame = std::move(publishedFrame);
         context.Push(0, std::move(published));
@@ -343,7 +414,7 @@ class NativeSlamPosePostprocessTask final : public epg::ITask {
   private:
     void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
-        auto status = context.Make<NativeSlamStatus>();
+        auto status = context.Make<SlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
         context.Push(1, std::move(status));
@@ -353,11 +424,11 @@ class NativeSlamPosePostprocessTask final : public epg::ITask {
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamPosePostprocessTask, "NativeSlamPosePostprocessTask")
+EPG_REGISTER_TASK_TYPE(SlamPosePostprocessTask, "SlamPosePostprocessTask")
 
-class NativeSlamPointCloudTask final : public epg::ITask {
+class SlamPointCloudTask final : public epg::ITask {
   public:
-    NativeSlamPointCloudTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
+    SlamPointCloudTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                              std::atomic<bool> &runningFlag)
         : m_processorMu(std::move(processorMu)), m_stop(stop), m_runningFlag(runningFlag)
     {
@@ -368,7 +439,7 @@ class NativeSlamPointCloudTask final : public epg::ITask {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>(0);
+        const auto published = context.TryPopLatest<SlamPublishedFrame>(0);
         if (!published || !published->runtime || !published->frame) {
             return;
         }
@@ -389,7 +460,7 @@ class NativeSlamPointCloudTask final : public epg::ITask {
   private:
     void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
-        auto status = context.Make<NativeSlamStatus>();
+        auto status = context.Make<SlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
         context.Push(1, std::move(status));
@@ -399,11 +470,11 @@ class NativeSlamPointCloudTask final : public epg::ITask {
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamPointCloudTask, "NativeSlamPointCloudTask")
+EPG_REGISTER_TASK_TYPE(SlamPointCloudTask, "SlamPointCloudTask")
 
-class NativeSlamDfxTask final : public epg::ITask {
+class SlamDfxTask final : public epg::ITask {
   public:
-    NativeSlamDfxTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
+    SlamDfxTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
                       std::atomic<bool> &runningFlag)
         : m_processorMu(std::move(processorMu)), m_stop(stop), m_runningFlag(runningFlag)
     {
@@ -414,7 +485,7 @@ class NativeSlamDfxTask final : public epg::ITask {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>(0);
+        const auto published = context.TryPopLatest<SlamPublishedFrame>(0);
         if (!published || !published->runtime || !published->frame) {
             return;
         }
@@ -432,7 +503,7 @@ class NativeSlamDfxTask final : public epg::ITask {
   private:
     void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
-        auto status = context.Make<NativeSlamStatus>();
+        auto status = context.Make<SlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
         context.Push(1, std::move(status));
@@ -442,13 +513,12 @@ class NativeSlamDfxTask final : public epg::ITask {
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamDfxTask, "NativeSlamDfxTask")
+EPG_REGISTER_TASK_TYPE(SlamDfxTask, "SlamDfxTask")
 
-class NativeSlamUdpTask final : public epg::ITask {
+class SlamUdpTask final : public epg::ITask {
   public:
-    NativeSlamUdpTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
-                      std::atomic<bool> &runningFlag)
-        : m_processorMu(std::move(processorMu)), m_stop(stop), m_runningFlag(runningFlag)
+    SlamUdpTask(std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
+        : m_stop(stop), m_runningFlag(runningFlag)
     {
     }
 
@@ -457,19 +527,16 @@ class NativeSlamUdpTask final : public epg::ITask {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>(0);
+        const auto published = context.TryPopLatest<SlamPublishedFrame>(0);
         if (!published || !published->runtime || !published->frame) {
             return;
         }
 
         auto &runtime = *published->runtime;
-        {
-            std::lock_guard<std::mutex> lock(*m_processorMu);
-            SlamFrameProcessor &frameProcessor = runtime.FrameProcessor();
-            if (frameProcessor.EmitUdp(*published->frame) == SlamFrameProcessor::StepResult::SessionAbort) {
-                PushStatus(context, runtime.sessionOk, true);
-                return;
-            }
+        SlamFrameProcessor &frameProcessor = runtime.FrameProcessor();
+        if (frameProcessor.EmitUdp(*published->frame) == SlamFrameProcessor::StepResult::SessionAbort) {
+            PushStatus(context, runtime.sessionOk, true);
+            return;
         }
 
         context.Push(0, published);
@@ -478,23 +545,21 @@ class NativeSlamUdpTask final : public epg::ITask {
   private:
     void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
-        auto status = context.Make<NativeSlamStatus>();
+        auto status = context.Make<SlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
         context.Push(1, std::move(status));
     }
 
-    std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamUdpTask, "NativeSlamUdpTask")
+EPG_REGISTER_TASK_TYPE(SlamUdpTask, "SlamUdpTask")
 
-class NativeSlamMavlinkTask final : public epg::ITask {
+class SlamMavlinkTask final : public epg::ITask {
   public:
-    NativeSlamMavlinkTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
-                          std::atomic<bool> &runningFlag)
-        : m_processorMu(std::move(processorMu)), m_stop(stop), m_runningFlag(runningFlag)
+    SlamMavlinkTask(std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
+        : m_stop(stop), m_runningFlag(runningFlag)
     {
     }
 
@@ -503,19 +568,16 @@ class NativeSlamMavlinkTask final : public epg::ITask {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>(0);
+        const auto published = context.TryPopLatest<SlamPublishedFrame>(0);
         if (!published || !published->runtime || !published->frame) {
             return;
         }
 
         auto &runtime = *published->runtime;
-        {
-            std::lock_guard<std::mutex> lock(*m_processorMu);
-            SlamFrameProcessor &frameProcessor = runtime.FrameProcessor();
-            if (frameProcessor.EmitMavlink(*published->frame) == SlamFrameProcessor::StepResult::SessionAbort) {
-                PushStatus(context, runtime.sessionOk, true);
-                return;
-            }
+        SlamFrameProcessor &frameProcessor = runtime.FrameProcessor();
+        if (frameProcessor.EmitMavlink(*published->frame) == SlamFrameProcessor::StepResult::SessionAbort) {
+            PushStatus(context, runtime.sessionOk, true);
+            return;
         }
 
         context.Push(0, published);
@@ -524,23 +586,21 @@ class NativeSlamMavlinkTask final : public epg::ITask {
   private:
     void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
-        auto status = context.Make<NativeSlamStatus>();
+        auto status = context.Make<SlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
         context.Push(1, std::move(status));
     }
 
-    std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamMavlinkTask, "NativeSlamMavlinkTask")
+EPG_REGISTER_TASK_TYPE(SlamMavlinkTask, "SlamMavlinkTask")
 
-class NativeSlamLivePoseTask final : public epg::ITask {
+class SlamLivePoseTask final : public epg::ITask {
   public:
-    NativeSlamLivePoseTask(std::shared_ptr<std::mutex> processorMu, std::atomic<bool> &stop,
-                           std::atomic<bool> &runningFlag)
-        : m_processorMu(std::move(processorMu)), m_stop(stop), m_runningFlag(runningFlag)
+    SlamLivePoseTask(std::atomic<bool> &stop, std::atomic<bool> &runningFlag)
+        : m_stop(stop), m_runningFlag(runningFlag)
     {
     }
 
@@ -549,19 +609,16 @@ class NativeSlamLivePoseTask final : public epg::ITask {
         if (!m_runningFlag.load() || m_stop.load()) {
             return;
         }
-        const auto published = context.TryPopLatest<NativeSlamPublishedFrame>(0);
+        const auto published = context.TryPopLatest<SlamPublishedFrame>(0);
         if (!published || !published->runtime || !published->frame) {
             return;
         }
 
         auto &runtime = *published->runtime;
-        {
-            std::lock_guard<std::mutex> lock(*m_processorMu);
-            SlamFrameProcessor &frameProcessor = runtime.FrameProcessor();
-            if (frameProcessor.EmitLivePose(*published->frame) == SlamFrameProcessor::StepResult::SessionAbort) {
-                PushStatus(context, runtime.sessionOk, true);
-                return;
-            }
+        SlamFrameProcessor &frameProcessor = runtime.FrameProcessor();
+        if (frameProcessor.EmitLivePose(*published->frame) == SlamFrameProcessor::StepResult::SessionAbort) {
+            PushStatus(context, runtime.sessionOk, true);
+            return;
         }
 
         context.Push(0, published);
@@ -570,27 +627,26 @@ class NativeSlamLivePoseTask final : public epg::ITask {
   private:
     void PushStatus(epg::TaskContext &context, bool sessionOk, bool abortRequested)
     {
-        auto status = context.Make<NativeSlamStatus>();
+        auto status = context.Make<SlamStatus>();
         status->sessionOk = sessionOk;
         status->abortRequested = abortRequested;
         context.Push(1, std::move(status));
     }
 
-    std::shared_ptr<std::mutex> m_processorMu;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamLivePoseTask, "NativeSlamLivePoseTask")
+EPG_REGISTER_TASK_TYPE(SlamLivePoseTask, "SlamLivePoseTask")
 
-class NativeSlamMonitorTask final : public epg::ITask {
+class SlamMonitorTask final : public epg::ITask {
   public:
-    NativeSlamMonitorTask(std::atomic<bool> &stop, std::atomic<bool> &sessionOk) : m_stop(stop), m_sessionOk(sessionOk)
+    SlamMonitorTask(std::atomic<bool> &stop, std::atomic<bool> &sessionOk) : m_stop(stop), m_sessionOk(sessionOk)
     {
     }
 
     void OnTick(epg::TaskContext &context) override
     {
-        while (auto status = context.TryPop<NativeSlamStatus>(0)) {
+        while (auto status = context.TryPop<SlamStatus>(0)) {
             m_sessionOk.store(status->sessionOk, std::memory_order_relaxed);
             if (status->abortRequested) {
                 m_stop.store(true);
@@ -602,64 +658,66 @@ class NativeSlamMonitorTask final : public epg::ITask {
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_sessionOk;
 };
-EPG_REGISTER_TASK_TYPE(NativeSlamMonitorTask, "NativeSlamMonitorTask")
+EPG_REGISTER_TASK_TYPE(SlamMonitorTask, "SlamMonitorTask")
 
-NativeEventPipelineGraphTaskFactoryResolver MakeSlamGraphTaskFactoryResolver(
-    const std::shared_ptr<NativeSlamRuntimeState> &runtimeState,
+EpgTaskFactoryResolver MakeSlamGraphTaskFactoryResolver(
+    const std::shared_ptr<SlamRuntimeState> &runtimeState,
     const std::shared_ptr<std::mutex> &processorMu,
     std::atomic<bool> &stop,
     std::atomic<bool> &runningFlag,
-    std::atomic<bool> &sessionOk)
+    std::atomic<bool> &sessionOk,
+    LiveRuntimeTuning &tuning,
+    int cameraFps)
 {
     auto &catalog = epg::TypeCatalog::Global();
     return epg::TypeCatalog::MakeTaskFactoryResolver({
-        catalog.MakeTaskFactoryEntry<NativeSlamResourceTask>([runtimeState, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamResourceTask>([runtimeState, &stop, &runningFlag]() {
                     return std::unique_ptr<epg::ITask>(
-                        new NativeSlamResourceTask(runtimeState, stop, runningFlag));
+                        new SlamResourceTask(runtimeState, stop, runningFlag));
                 }),
-        catalog.MakeTaskFactoryEntry<NativeSlamClockTask>([&stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamClockTask>([&stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeSlamClockTask(stop, runningFlag));
+                    new SlamClockTask(stop, runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<NativeSlamImuGateTask>([runtimeState, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamImuGateTask>([runtimeState, &stop, &runningFlag, &tuning, cameraFps]() {
                     return std::unique_ptr<epg::ITask>(
-                        new NativeSlamImuGateTask(runtimeState, stop, runningFlag));
+                        new SlamImuGateTask(runtimeState, stop, runningFlag, tuning, cameraFps));
                 }),
-        catalog.MakeTaskFactoryEntry<NativeSlamAcquireTask>([processorMu, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamAcquireTask>([processorMu, &stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeSlamAcquireTask(processorMu, stop, runningFlag));
+                    new SlamAcquireTask(processorMu, stop, runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<NativeSlamTrackingTask>([processorMu, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamTrackingTask>([processorMu, &stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeSlamTrackingTask(processorMu, stop, runningFlag));
+                    new SlamTrackingTask(processorMu, stop, runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<NativeSlamPosePostprocessTask>([processorMu, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamPosePostprocessTask>([processorMu, &stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeSlamPosePostprocessTask(processorMu, stop, runningFlag));
+                    new SlamPosePostprocessTask(processorMu, stop, runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<NativeSlamPointCloudTask>([processorMu, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamPointCloudTask>([processorMu, &stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeSlamPointCloudTask(processorMu, stop, runningFlag));
+                    new SlamPointCloudTask(processorMu, stop, runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<NativeSlamLivePoseTask>([processorMu, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamLivePoseTask>([&stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeSlamLivePoseTask(processorMu, stop, runningFlag));
+                    new SlamLivePoseTask(stop, runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<NativeSlamMavlinkTask>([processorMu, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamMavlinkTask>([&stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeSlamMavlinkTask(processorMu, stop, runningFlag));
+                    new SlamMavlinkTask(stop, runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<NativeSlamUdpTask>([processorMu, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamUdpTask>([&stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeSlamUdpTask(processorMu, stop, runningFlag));
+                    new SlamUdpTask(stop, runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<NativeSlamDfxTask>([processorMu, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<SlamDfxTask>([processorMu, &stop, &runningFlag]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeSlamDfxTask(processorMu, stop, runningFlag));
+                    new SlamDfxTask(processorMu, stop, runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<NativeSlamMonitorTask>([&stop, &sessionOk]() {
+        catalog.MakeTaskFactoryEntry<SlamMonitorTask>([&stop, &sessionOk]() {
                 return std::unique_ptr<epg::ITask>(
-                    new NativeSlamMonitorTask(stop, sessionOk));
+                    new SlamMonitorTask(stop, sessionOk));
             }),
     });
 }
@@ -674,19 +732,33 @@ bool RunSlamSessionGraph(const UnifiedConfig &cfg, LiveRuntimeTuning &tuning, Px
     {
         epg::Registry registry;
         auto runtimeState =
-            std::make_shared<NativeSlamRuntimeState>(cfg, tuning, mav, stop, livePose, runningFlag);
+            std::make_shared<SlamRuntimeState>(cfg, tuning, mav, stop, livePose, runningFlag);
         auto processorMu = std::make_shared<std::mutex>();
-        RegisterNativeEventPipelineGraphTypes(
-            registry, NativeEventPipelineGraphDomain::SlamSession,
-            MakeSlamGraphTaskFactoryResolver(runtimeState, processorMu, stop, runningFlag, sessionOk));
+        RegisterEpgTypes(
+            registry, EpgDomain::SlamSession,
+            MakeSlamGraphTaskFactoryResolver(runtimeState, processorMu, stop, runningFlag, sessionOk,
+                                             tuning, cfg.app.camera.fps));
 
         epg::EventPipelineGraph graph(registry);
-        graph.Configure(CompileNativeEventPipelineGraphConfig(NativeEventPipelineGraphDomain::SlamSession, registry));
+        auto graphConfig = CompileEpgConfig(EpgDomain::SlamSession, registry);
+        ApplySlamRuntimePacing(graphConfig, cfg);
+        graph.Configure(graphConfig);
         graph.Start();
 
+        auto nextDfxSnapshot = std::chrono::steady_clock::now();
         while (runningFlag.load() && !stop.load()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= nextDfxSnapshot) {
+                WriteEpgDfxSnapshotFile(
+                    kSlamEpgDfxSnapshotPath,
+                    graph.DfxSnapshotJson("cluster_slam_session_graph", EpgDfxNowMs()));
+                nextDfxSnapshot = now + std::chrono::milliseconds(500);
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
+        WriteEpgDfxSnapshotFile(
+            kSlamEpgDfxSnapshotPath,
+            graph.DfxSnapshotJson("cluster_slam_session_graph", EpgDfxNowMs()));
         graph.Stop();
     }
 

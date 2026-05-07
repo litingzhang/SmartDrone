@@ -10,7 +10,8 @@ SuperPoint + LightGlue mode (`--feature-frontend superpoint_lightglue`) uses a l
 4. SmartDrone filters stereo pairs and converts them into ORB-SLAM3-compatible external feature packets.
 5. ORB-SLAM3 tracks using `TrackStereoPreparedWithFeatures(...)`.
 
-The current code also has a deliberate fallback: if external feature injection does not succeed, the frame falls back to native ORB tracking.
+SP+LG mode does not fall back to native ORB tracking. If the learned frontend cannot produce a valid external feature packet,
+the frame is reported without a valid SP+LG tracking update so the failure is visible in DFX.
 
 ## Main Flow
 
@@ -23,7 +24,7 @@ flowchart TD
     E --> F[OrbSlam3Engine::Process]
     F --> F2[SuperPointLightGlueModeStrategy]
     F2 --> G{SP+LG gate passes?}
-    G -- no --> Z[Fallback native ORB TrackStereo]
+    G -- no --> Z[SP+LG frame failure output]
     G -- yes --> H[Prepare images<br/>gray8, rectify, resize/budget]
     H --> I[DetectAndComputeStereo]
     I --> J[SuperPoint TensorRT batch inference]
@@ -38,7 +39,7 @@ flowchart TD
     O -- yes --> P[Finalize ExternalStereoFrameData<br/>ORB descriptors at SP/LG points]
     P --> Q{External packet valid?}
     Q -- no --> Z
-    Q -- yes --> R[Optional left-only ORB augmentation]
+    Q -- yes --> R{Optional left-only ORB augmentation enabled?}
     R --> S[ORB-SLAM3 TrackStereoPreparedWithFeatures]
     Z --> T[SlamOutput]
     S --> T
@@ -54,8 +55,8 @@ flowchart TD
 | Live frame loop | `src/native/core/application/session/slam_frame_processor.cpp` | Applies frontend mode, load shedding, input size budget, and calls SLAM engine. |
 | Frontend client | `src/native/adapters/slam/superpoint_lightglue_frontend_client.cpp` | Owns frontend lifetime and delegates native extraction/matching to `SuperPointNativeExtractor`. |
 | TensorRT frontend | `src/native/adapters/slam/superpoint_native_extractor.cpp` | Loads engines, runs SuperPoint batch inference, attempts LightGlue matching, applies descriptor-match fallback, records stats. |
-| Mode strategy | `src/native/adapters/slam/orbslam3_mode_strategy.cpp`, `src/native/adapters/slam/orbslam3_superpoint_lightglue_mode_strategy.cpp` | Maps `FeatureFrontend::SuperPointLightGlue` to the SP+LG strategy and enables external feature injection. |
-| ORB backend adapter | `src/native/adapters/slam/orbslam3_orb_mode_strategy.cpp` | Runs the shared ORB-SLAM3 backend path and fallback output conversion. |
+| Mode strategy | `src/native/adapters/slam/superpoint_lightglue_mode_strategy.cpp` | Maps `FeatureFrontend::SuperPointLightGlue` to the learned frontend and external-feature tracking path. |
+| Tracking backend | `src/native/adapters/slam/slam_tracking_backend.cpp` | Calls ORB-SLAM3 prepared stereo tracking with the SP+LG external feature packet. |
 
 ## Startup and Engine Loading
 
@@ -78,8 +79,8 @@ if (opts.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLi
 
 The engine resolution logic prefers names such as:
 
-- `superpoint_dense_640x480_fp16.engine`
-- `lightglue_superpoint_768_fp16.engine`
+- `superpoint_dense_640x409_fp16.engine`
+- `lightglue_superpoint_512_fp16.engine`
 
 Runtime parameters are controlled by CLI flags and environment variables:
 
@@ -89,7 +90,16 @@ Runtime parameters are controlled by CLI flags and environment variables:
 - `--superpoint-max-points`
 - `--superpoint-input-max-width`
 - `--superpoint-input-max-height`
+- `SMART_DRONE_SUPERPOINT_MAX_POINTS` in the Jetson regression script
+- `SMART_DRONE_SUPERPOINT_STEREO_EXTRACTION_BUDGET`
+- `SMART_DRONE_SUPERPOINT_DESCRIPTOR_LIMIT`
+- `SMART_DRONE_SUPERPOINT_DESCRIPTOR_NEAREST`
+- `SMART_DRONE_TRT_PINNED_HOST_OUTPUT`
+- `SMART_DRONE_SUPERPOINT_PARALLEL_POST`
+- `SMART_DRONE_DESCRIPTOR_SUPPLEMENT_CANDIDATES`
 - `SMART_DRONE_LIGHTGLUE_POINTS`
+- `SMART_DRONE_LIGHTGLUE_EVERY_N`
+- `SMART_DRONE_LIGHTGLUE_SCORE_ORIENTATION`
 - `SMART_DRONE_LIGHTGLUE_MIN_SCORE`
 - `SMART_DRONE_LIGHTGLUE_MAX_Y_DIFF_PX`
 - `SMART_DRONE_LIGHTGLUE_MIN_DISPARITY_PX`
@@ -116,7 +126,7 @@ Live runtime also applies adaptive input-size budgeting. `SlamFrameProcessor` co
 m_ctx.slamEngine.SetSuperPointInputSizeLimit(superpointBudgetWidth, superpointBudgetHeight);
 ```
 
-This means SP+LG may run at a lower input size under load, while ORB backend tracking continues to receive the prepared stereo frame.
+This means SP+LG may run at a lower input size under load, while ORB-SLAM3 prepared stereo tracking continues to receive the prepared stereo frame and the external feature packet.
 
 ## Image Preparation
 
@@ -161,7 +171,7 @@ m_impl->MatchWithLightGlue(rawOutputs[0], rawOutputs[1], maxPoints, width, heigh
                            leftFeatures, rightFeatures, &lightGlueMatchMs, err)
 ```
 
-4. If LightGlue fails, fallback descriptor matching:
+4. If LightGlue is skipped by `SMART_DRONE_LIGHTGLUE_EVERY_N` or fails, fallback descriptor matching:
 
 ```cpp
 MatchStereoPairs(rawOutputs[0], rawOutputs[1], maxPoints, leftFeatures, rightFeatures);
@@ -182,10 +192,88 @@ The replay log prints:
 
 ```text
 [superpoint_trt_perf] batch=2 input_ms=... gpu_forward_ms=... cpu_post_ms=...
-lightglue=Y lightglue_ms=... total_ms=... left_pts=... right_pts=...
+sp_desc_sample_ms=... sp_descriptor_rows=... lg_decode_ms=... lg_orientation=...
+lightglue=Y skipped_lightglue=N lg_every_n=... lg_skip_reason=none
+lg_requested_pts=... lg_input_pts=... lg_static_shape_fallback=... lightglue_ms=... total_ms=...
 ```
 
 The adapter exposes native frontend time through both the generic `frontend_ms` path-level field and the SuperPoint-specific `superpoint_frontend_ms` aggregate used in replay summaries.
+
+Stereo SuperPoint extraction is budgeted to the maximum needed by the downstream consumers rather than blindly using
+`--superpoint-top-k`. The default budget is derived from:
+
+- `--superpoint-max-points`
+- `SMART_DRONE_LIGHTGLUE_POINTS`
+- `SMART_DRONE_DESCRIPTOR_SUPPLEMENT_CANDIDATES`
+
+`SMART_DRONE_SUPERPOINT_STEREO_EXTRACTION_BUDGET` can override that derived value for experiments.
+
+Descriptor sampling can be capped independently with `SMART_DRONE_SUPERPOINT_DESCRIPTOR_LIMIT`. This preserves the raw
+candidate budget while avoiding descriptor interpolation for tail candidates that are not consumed by LightGlue or the
+descriptor fallback path. The `[superpoint_trt_perf]` log reports `sp_descriptor_rows` alongside `sp_selected`.
+
+`SMART_DRONE_SUPERPOINT_DESCRIPTOR_NEAREST=1` switches descriptor sampling to nearest descriptor-grid lookup. The current
+Jetson MH01 validation kept ATE/RPE stable and reduced `sp_desc_sample_ms` from roughly `3.1 ms` to `1.9 ms`.
+
+`SMART_DRONE_LIGHTGLUE_SCORE_ORIENTATION` controls how LightGlue score tensors are decoded:
+
+- unset or `auto`: try direct and transpose layouts and keep the better accepted match set.
+- `direct`: decode only the direct layout.
+- `transpose`: decode only the transposed layout.
+
+The `direct` setting is the current runtime recommendation for the exported
+`lightglue_superpoint_512_fp16.engine`; it reduced `lg_decode_ms` from roughly `0.61 ms` to `0.34 ms` on MH01. Use `auto`
+when validating a newly exported LightGlue engine.
+
+`SMART_DRONE_TRT_PINNED_HOST_OUTPUT=1` uses pinned host buffers for TensorRT output copies, and
+`SMART_DRONE_SUPERPOINT_PARALLEL_POST=1` lets the two stereo SuperPoint post-processing jobs run in parallel. Both are
+enabled in the Jetson service and regression script defaults.
+
+`SMART_DRONE_SP_LG_ADAPTIVE_CADENCE=1` enables an experimental state-aware LightGlue cadence. The base cadence still
+comes from `SMART_DRONE_LIGHTGLUE_EVERY_N`; after a stable OK streak and enough tracked map points, the frontend can use
+`SMART_DRONE_SP_LG_STABLE_LIGHTGLUE_EVERY_N`. This is intentionally opt-in because MH04 adaptive `4 -> 5` trials
+increased trajectory error more than the small throughput gain justified. The replay CSV and `slam_dfx` log expose the
+selected cadence as `superpoint_lg_every_n`.
+
+`SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO` controls how many injected stereo points must be close points before
+ORB-SLAM3 accepts the first SP+LG stereo map. The default is `0.48`. MH04 validation showed `0.55` kept the system in
+`NOT_INITIALIZED` for 513 frames, while the lower bootstrap threshold keeps initialization early enough for the filtered
+SP+LG path.
+
+`SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES=200` is the current SP+LG initialization floor. MH04 is sensitive to the
+second map bootstrap: accepting a weak reinitialization around 150 injected stereo points produced ATE above `0.1 m`,
+while waiting for roughly 200+ injected stereo points kept the second map much closer to the good trajectory family.
+
+`SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT=1` is the default stereo injection path. It injects the ZNCC, epipolar,
+disparity, and grid-balanced stereo pairs from `BuildAlignedStereoPairs(...)` instead of blindly using every frontend
+pair. On MH04 it reduced the final-trajectory ATE from about `0.113 m` to below `0.1 m` when paired with the SP+LG
+depth scale below.
+
+`SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE` defaults to `0.985` for SP+LG runs. The value compensates the external stereo
+depth produced from SuperPoint/LightGlue keypoints before ORB-SLAM3 map optimization. Leave it environment-overridable
+when validating a new camera model or dataset.
+
+`SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1` is an opt-in offline diagnostic. It waits briefly after each ORB-SLAM3 stereo
+tracking call for LocalMapping to drain its keyframe queue. MH04 validation showed the stronger initialization gate above
+is more useful than enabling this wait by default, so runtime sessions and regression defaults leave it unset.
+
+Keep the current stable runtime at SuperPoint `640x409`, LightGlue `512`, and injected SuperPoint max points `512`.
+MH04 validation showed `640x409` gives materially better trajectory accuracy than `480x360` while still fitting the
+current Jetson budget.
+
+Do not use `superpoint_dense_480x360_fp16_output.engine` as the default SuperPoint engine. MH01 validation showed it is
+both slower and less accurate in this runtime because dense descriptors are converted back to FP32 on the host before
+post-processing and matching. The recommended default engine is `superpoint_dense_640x409_fp16.engine`.
+
+`SMART_DRONE_SP_LG_NATIVE_DESCRIPTOR_INJECT=1` is an opt-in speed experiment. It bypasses ORB descriptor recomputation
+inside `FinalizeStereoExternalFromPairs(...)` and builds `ExternalStereoFrameData` with SuperPoint `CV_32F` descriptors.
+This cuts `external_pack_ms`, but it also changes backend descriptor semantics, disables BoW for those frames/keyframes,
+and showed slightly worse MH01 trajectory metrics than the default ORB-descriptor pack path. Leave it disabled unless
+the caller accepts that accuracy tradeoff.
+
+Fixed-point remap maps and parallel ORB descriptor packing were tested on MH01 and rejected. They either degraded
+trajectory quality or failed to reduce the target stage enough to justify the extra runtime switch. Filtered stereo
+injection is no longer part of that rejected set; MH04 accuracy validation now uses it by default.
 
 ## Stereo Pair Construction
 
@@ -224,7 +312,7 @@ flowchart TD
     A[matched left/right points] --> B[Border safety check]
     B --> C[Compute ORB descriptors at supplied points]
     C --> D{Descriptor/keypoint counts valid?}
-    D -- no --> E[packet invalid<br/>fallback to ORB]
+    D -- no --> E[packet invalid<br/>frame failure output]
     D -- yes --> F[ExternalStereoFrameData]
     F --> G[matchedStereoPairs=true]
 ```
@@ -241,14 +329,16 @@ Profiling field:
 
 ## Optional Mono Augmentation
 
-If ORB-SLAM3 has already initialized, the adapter can append left-only ORB features:
+If ORB-SLAM3 has already initialized, the adapter can append left-only ORB features when explicitly enabled:
 
 ```cpp
 AppendOrbLeftOnlyFeatures(tracker->GetLeftORBExtractor(), leftPrepared, externalData, maxLeftFeatures);
 ```
 
-This improves left-image feature availability while preserving the pre-matched stereo pairs. The cap is controlled by:
+This improves left-image feature availability while preserving the pre-matched stereo pairs, but it costs another ORB
+extraction pass. It is disabled by default. The controls are:
 
+- `SMART_DRONE_SP_LG_ORB_LEFT_AUGMENT=1`
 - `SMART_DRONE_EXTERNAL_STEREO_MAX_LEFT_FEATURES`
 
 Profiling field:
@@ -284,14 +374,14 @@ Profiling fields:
 
 `superpoint_total_ms` is set only when external tracking succeeds and covers the external frontend path through backend tracking.
 
-## Fallback Path
+## Failure Path
 
-Fallback is deliberate and frame-local:
+SP+LG failures are deliberate and visible:
 
 ```mermaid
 flowchart TD
     A[SP+LG branch started] --> B{DetectAndComputeStereo ok?}
-    B -- no --> F[Native ORB TrackStereo]
+    B -- no --> F[Frame failure output]
     B -- yes --> C{Stereo matches nonempty?}
     C -- no --> F
     C -- yes --> D{ExternalStereoFrameData valid?}
@@ -301,14 +391,14 @@ flowchart TD
     F --> G
 ```
 
-This matters for interpreting results. A run may show:
+This matters for interpreting results. A failed frame may show:
 
 - nonzero `frontend_ms`
 - zero `external_pack_ms`
 - zero `superpoint_total_ms`
-- ORB-like `orb_track_ms`
+- zero `orb_track_ms`
 
-That means TensorRT frontend ran, but external injection did not drive tracking for that frame.
+That means TensorRT frontend ran, but the frame was not tracked by the SP+LG external-feature path.
 
 ## Output and Artifacts
 
@@ -348,6 +438,9 @@ Offline replay writes these to `euroc_pose.csv`, aggregates means/maxes into `eu
 | `superpoint_input_ms` | Native TensorRT input upload/preparation time inside `SuperPointNativeExtractor`. |
 | `superpoint_forward_ms` | SuperPoint network forward time. |
 | `superpoint_frontend_ms` | SuperPoint-specific native frontend total reported by the extractor/client. |
+| `sp_desc_sample_ms` | Descriptor sampling time inside SuperPoint CPU post-processing. |
+| `lg_decode_ms` | LightGlue score tensor decode and filtering time after TensorRT forward. |
+| `lg_orientation` | LightGlue score-layout choice: `direct`, `transpose`, or `none`. |
 | `stereo_pair_ms` | SmartDrone stereo pair filtering after frontend keypoint output. |
 | `external_pack_ms` | ORB descriptor computation and `ExternalStereoFrameData` creation. |
 | `mono_augment_ms` | Optional left-only ORB augmentation. |
@@ -356,7 +449,7 @@ Offline replay writes these to `euroc_pose.csv`, aggregates means/maxes into `eu
 
 ## Current Jetson Finding
 
-Latest archived run:
+Historical archived run:
 
 `docs/jetson_euroc_key_profile_20260503_080401.md`
 
@@ -370,7 +463,7 @@ Important caveat:
 
 - The run showed nonzero `frontend_ms` but zero `external_pack_ms`, zero `stereo_pair_ms`, and zero `superpoint_total_ms`.
 - Smoke logs showed TensorRT lines with `left_pts=0 right_pts=0`.
-- Therefore this run should be interpreted as frontend-on/fallback behavior, not confirmed successful SP+LG external feature injection.
+- Therefore this old run should be interpreted as frontend-on/failure behavior, not confirmed successful SP+LG external feature injection.
 
 ## Engineering Interpretation
 
@@ -382,4 +475,6 @@ SP+LG is architecturally a learned frontend plus ORB-SLAM3 backend. The decisive
 - `external_pack_ms`
 - `superpoint_total_ms`
 
-If those remain zero, the backend is effectively ORB-SLAM3 fallback after paying TensorRT frontend cost. The next engineering target should be verifying TensorRT output decoding and LightGlue matched point emission before optimizing performance.
+If those remain zero, the TensorRT frontend ran but did not produce a valid external-feature tracking update. The next
+engineering target should be verifying TensorRT output decoding and LightGlue matched point emission before optimizing
+performance.

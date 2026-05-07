@@ -19,6 +19,12 @@ class SuperPointNativeExtractor {
         double postMs{0.0};
         double inferMs{0.0};
         double totalMs{0.0};
+        int rawLeftCount{0};
+        int rawRightCount{0};
+        int stereoLeftCount{0};
+        int stereoRightCount{0};
+        bool lightGlueUsed{false};
+        bool descriptorFallbackUsed{false};
         uint32_t imageCount{0};
         uint32_t payloadBytes{0};
     };
@@ -33,6 +39,7 @@ class SuperPointNativeExtractor {
     bool DetectAndCompute(const cv::Mat &gray, SuperPointFeatureSet &outFeatures, std::string *err);
     bool DetectAndComputeStereo(const cv::Mat &leftGray, const cv::Mat &rightGray, SuperPointFeatureSet &leftFeatures,
                                 SuperPointFeatureSet &rightFeatures, std::string *err);
+    void SetLightGlueEveryNOverride(int everyN);
     Stats LastStats() const;
 
   private:
@@ -43,6 +50,7 @@ class SuperPointNativeExtractor {
     bool m_running{false};
     int m_topK{0};
     int m_maxPoints{0};
+    int m_lightGlueEveryNOverride{0};
     Stats m_lastStats{};
     std::unique_ptr<Impl> m_impl;
 };

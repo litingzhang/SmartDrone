@@ -1,8 +1,39 @@
 #include "common/epg/epg_internal.h"
 
+#include <sstream>
 #include <set>
 
 namespace epg {
+namespace {
+
+std::string JsonEscape(const std::string& value) {
+    std::ostringstream out;
+    for (const char ch : value) {
+        switch (ch) {
+        case '\\':
+            out << "\\\\";
+            break;
+        case '"':
+            out << "\\\"";
+            break;
+        case '\n':
+            out << "\\n";
+            break;
+        case '\r':
+            out << "\\r";
+            break;
+        case '\t':
+            out << "\\t";
+            break;
+        default:
+            out << ch;
+            break;
+        }
+    }
+    return out.str();
+}
+
+} // namespace
 
 EventPipelineGraph::EventPipelineGraph(const Registry& registry) : m_registry(registry) {
 }
@@ -234,6 +265,54 @@ std::map<std::string, TaskDiagnosticsSnapshot> EventPipelineGraph::TaskDiagnosti
         result[runner->Name()] = runner->Diagnostics();
     }
     return result;
+}
+
+std::string EventPipelineGraph::DfxSnapshotJson(const std::string& graphName,
+                                                std::uint64_t timestampMs) const {
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"graph\": \"" << JsonEscape(graphName) << "\",\n";
+    out << "  \"timestampMs\": " << timestampMs << ",\n";
+    out << "  \"queues\": {\n";
+    bool first = true;
+    for (const auto& queue : m_queues) {
+        const auto diag = queue.second->Diagnostics();
+        if (!first) {
+            out << ",\n";
+        }
+        first = false;
+        out << "    \"" << JsonEscape(queue.first) << "\": {";
+        out << "\"type\": \"" << JsonEscape(queue.second->TypeName()) << "\", ";
+        out << "\"size\": " << queue.second->Size() << ", ";
+        out << "\"depth\": " << queue.second->Depth() << ", ";
+        out << "\"pushed\": " << diag.pushed << ", ";
+        out << "\"popped\": " << diag.popped << ", ";
+        out << "\"droppedNewest\": " << diag.droppedNewest << ", ";
+        out << "\"overwrittenOldest\": " << diag.overwrittenOldest << ", ";
+        out << "\"wakeups\": " << diag.wakeups << ", ";
+        out << "\"maxDepthObserved\": " << diag.maxDepthObserved;
+        out << "}";
+    }
+    out << "\n  },\n";
+    out << "  \"tasks\": {\n";
+    first = true;
+    for (const auto& runner : m_runners) {
+        const auto diag = runner->Diagnostics();
+        if (!first) {
+            out << ",\n";
+        }
+        first = false;
+        out << "    \"" << JsonEscape(runner->Name()) << "\": {";
+        out << "\"lastLoopUs\": " << diag.lastLoopUs << ", ";
+        out << "\"maxLoopUs\": " << diag.maxLoopUs << ", ";
+        out << "\"loopCount\": " << diag.loopCount << ", ";
+        out << "\"errorCount\": " << diag.errorCount << ", ";
+        out << "\"idleWakeups\": " << diag.idleWakeups;
+        out << "}";
+    }
+    out << "\n  }\n";
+    out << "}\n";
+    return out.str();
 }
 
 } // namespace epg

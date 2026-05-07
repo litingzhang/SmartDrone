@@ -246,6 +246,15 @@ inline int EnvIntValueClamped(const char *name, int defaultValue, int minValue, 
     return std::clamp(static_cast<int>(parsed), minValue, maxValue);
 }
 
+inline float EnvFloatValueClamped(const char *name, float defaultValue, float minValue, float maxValue)
+{
+    const float parsed = EnvFloatValue(name, defaultValue);
+    if (!std::isfinite(parsed)) {
+        return std::clamp(defaultValue, minValue, maxValue);
+    }
+    return std::clamp(parsed, minValue, maxValue);
+}
+
 constexpr int kOrbDescriptorBorder = 19;
 constexpr float kStereoMaxEpipolarDeltaPx = 1.5f;
 constexpr float kStereoMinDisparityPx = 0.75f;
@@ -278,6 +287,12 @@ constexpr int kWeakTrackingMinTrackedMapPoints = 24;
 constexpr size_t kWeakTrackingTemporalCarryBudget = 8;
 constexpr size_t kWeakTrackingInjectedPairBudget = 56;
 constexpr int kStableOrbTrackMinInliers = 50;
+
+float ExternalStereoMinDisparityPx()
+{
+    return EnvFloatValueClamped("SMART_DRONE_EXTERNAL_STEREO_MIN_DISPARITY_PX",
+                                kStereoMinDisparityPx, 0.05f, kStereoMaxDisparityPx);
+}
 constexpr size_t kStableOrbTrackMinTrackedMapPoints = 80;
 constexpr double kPoseStabilizerDefaultDtSec = 1.0 / 20.0;
 constexpr double kPoseStabilizerMinDtSec = 1.0 / 120.0;
@@ -582,7 +597,7 @@ bool IsStereoPairGeometricallyValid(const cv::Point2f &leftPt, const cv::Point2f
 {
     const float yDelta = std::fabs(leftPt.y - rightPt.y);
     const float disparity = leftPt.x - rightPt.x;
-    return yDelta <= kStereoMaxEpipolarDeltaPx && disparity >= kStereoMinDisparityPx &&
+    return yDelta <= kStereoMaxEpipolarDeltaPx && disparity >= ExternalStereoMinDisparityPx() &&
            disparity <= kStereoMaxDisparityPx;
 }
 
@@ -597,7 +612,7 @@ bool RefineRightPointByStereoZncc(const cv::Mat &leftGray32f, const cv::Point2f 
     }
 
     const float minRightX = std::max(static_cast<float>(kStereoPatchRadiusPx), leftPt.x - kStereoMaxDisparityPx);
-    const float maxRightX = std::min(leftPt.x - kStereoMinDisparityPx,
+    const float maxRightX = std::min(leftPt.x - ExternalStereoMinDisparityPx(),
                                      static_cast<float>(rightGray32f.cols - kStereoPatchRadiusPx - 1));
     if (minRightX > maxRightX) {
         return false;
@@ -644,7 +659,7 @@ bool FindRightPointByStereoZncc(const cv::Mat &leftGray32f, const cv::Point2f &l
 
     const int minRightX =
         static_cast<int>(std::ceil(std::max(static_cast<float>(kStereoPatchRadiusPx), leftPt.x - kStereoMaxDisparityPx)));
-    const int maxRightX = static_cast<int>(std::floor(std::min(leftPt.x - kStereoMinDisparityPx,
+    const int maxRightX = static_cast<int>(std::floor(std::min(leftPt.x - ExternalStereoMinDisparityPx(),
                                                                static_cast<float>(rightGray32f.cols -
                                                                                   kStereoPatchRadiusPx - 1))));
     if (minRightX > maxRightX) {
@@ -684,7 +699,7 @@ bool FindRightPointByStereoZnccAroundDisparity(const cv::Mat &leftGray32f, const
         {static_cast<float>(kStereoPatchRadiusPx), leftPt.x - kStereoMaxDisparityPx,
          centerRightX - kLkGfttStereoSearchRadiusPx})));
     const int maxRightX = static_cast<int>(std::floor(std::min(
-        {leftPt.x - kStereoMinDisparityPx, static_cast<float>(rightGray32f.cols - kStereoPatchRadiusPx - 1),
+        {leftPt.x - ExternalStereoMinDisparityPx(), static_cast<float>(rightGray32f.cols - kStereoPatchRadiusPx - 1),
          centerRightX + kLkGfttStereoSearchRadiusPx})));
     if (minRightX > maxRightX) {
         return FindRightPointByStereoZncc(leftGray32f, leftPt, rightGray32f, rightPt, bestScore);
@@ -1013,6 +1028,111 @@ bool FinalizeStereoExternalFromPairs(ORB_SLAM3::ORBextractor *leftExtractor,
     outData.leftDescriptors = std::move(leftDescriptors);
     outData.rightDescriptors = std::move(rightDescriptors);
     outData.matchedStereoPairs = true;
+    outData.leftToRightMatch.resize(outData.leftKeypoints.size());
+    for (size_t i = 0; i < outData.leftToRightMatch.size(); ++i) {
+        outData.leftToRightMatch[i] = static_cast<int>(i);
+    }
+    return true;
+}
+
+bool FinalizeStereoExternalFromPairsWithAllLeft(ORB_SLAM3::ORBextractor *leftExtractor,
+                                                ORB_SLAM3::ORBextractor *rightExtractor, const cv::Mat &leftGray,
+                                                const cv::Mat &rightGray,
+                                                const std::vector<cv::Point2f> &allLeftPoints,
+                                                const std::vector<StereoMatchPair> &stereoMatches,
+                                                const SuperPointFeatureSet &leftFeatures,
+                                                const SuperPointFeatureSet &rightFeatures,
+                                                ORB_SLAM3::ExternalStereoFrameData &outData)
+{
+    if (leftExtractor == nullptr || rightExtractor == nullptr || leftGray.empty() || rightGray.empty() ||
+        allLeftPoints.empty()) {
+        return false;
+    }
+
+    std::vector<cv::Point2f> safeLeftPoints;
+    safeLeftPoints.reserve(allLeftPoints.size());
+    for (const cv::Point2f &point : allLeftPoints) {
+        if (IsPointSafeForOrbDescriptor(point, leftGray)) {
+            safeLeftPoints.push_back(point);
+        }
+    }
+    if (safeLeftPoints.empty()) {
+        return false;
+    }
+
+    std::vector<cv::KeyPoint> leftKeypoints;
+    cv::Mat leftDescriptors;
+    if (!ComputeOrbDescriptorsAtPoints(leftExtractor, leftGray, safeLeftPoints, leftKeypoints, leftDescriptors)) {
+        return false;
+    }
+
+    std::vector<cv::Point2f> stereoLeftPoints;
+    std::vector<cv::Point2f> stereoRightPoints;
+    stereoLeftPoints.reserve(stereoMatches.size());
+    stereoRightPoints.reserve(stereoMatches.size());
+    for (const StereoMatchPair &match : stereoMatches) {
+        if (match.leftIndex < 0 || match.rightIndex < 0 ||
+            static_cast<size_t>(match.leftIndex) >= leftFeatures.keypoints.size() ||
+            static_cast<size_t>(match.rightIndex) >= rightFeatures.keypoints.size()) {
+            continue;
+        }
+        const cv::Point2f &leftPoint = leftFeatures.keypoints[static_cast<size_t>(match.leftIndex)];
+        const cv::Point2f &rightPoint = rightFeatures.keypoints[static_cast<size_t>(match.rightIndex)];
+        if (!IsPointSafeForOrbDescriptor(leftPoint, leftGray) ||
+            !IsPointSafeForOrbDescriptor(rightPoint, rightGray) ||
+            !IsStereoPairGeometricallyValid(leftPoint, rightPoint)) {
+            continue;
+        }
+        stereoLeftPoints.push_back(leftPoint);
+        stereoRightPoints.push_back(rightPoint);
+    }
+    if (stereoLeftPoints.empty()) {
+        return false;
+    }
+
+    std::vector<cv::KeyPoint> stereoLeftKeypoints;
+    std::vector<cv::KeyPoint> rightKeypoints;
+    cv::Mat stereoLeftDescriptors;
+    cv::Mat rightDescriptors;
+    if (!ComputeOrbDescriptorsAtPoints(leftExtractor, leftGray, stereoLeftPoints, stereoLeftKeypoints,
+                                       stereoLeftDescriptors) ||
+        !ComputeOrbDescriptorsAtPoints(rightExtractor, rightGray, stereoRightPoints, rightKeypoints, rightDescriptors)) {
+        return false;
+    }
+    if (stereoLeftKeypoints.size() != rightKeypoints.size() ||
+        stereoLeftDescriptors.rows != rightDescriptors.rows ||
+        stereoLeftDescriptors.rows != static_cast<int>(stereoLeftKeypoints.size())) {
+        return false;
+    }
+
+    std::vector<int> leftToRight(leftKeypoints.size(), -1);
+    cv::Mat mergedRightDescriptors;
+    mergedRightDescriptors.create(0, rightDescriptors.cols, rightDescriptors.type());
+    std::vector<cv::KeyPoint> mergedRightKeypoints;
+    mergedRightKeypoints.reserve(rightKeypoints.size());
+    for (size_t li = 0; li < leftKeypoints.size(); ++li) {
+        for (size_t si = 0; si < stereoLeftKeypoints.size(); ++si) {
+            const cv::Point2f delta = leftKeypoints[li].pt - stereoLeftKeypoints[si].pt;
+            if (delta.x * delta.x + delta.y * delta.y > 1.0f) {
+                continue;
+            }
+            leftToRight[li] = static_cast<int>(mergedRightKeypoints.size());
+            mergedRightKeypoints.push_back(rightKeypoints[si]);
+            mergedRightDescriptors.push_back(rightDescriptors.row(static_cast<int>(si)));
+            break;
+        }
+    }
+
+    if (mergedRightKeypoints.empty()) {
+        return false;
+    }
+
+    outData.leftKeypoints = std::move(leftKeypoints);
+    outData.rightKeypoints = std::move(mergedRightKeypoints);
+    outData.leftDescriptors = std::move(leftDescriptors);
+    outData.rightDescriptors = std::move(mergedRightDescriptors);
+    outData.matchedStereoPairs = true;
+    outData.leftToRightMatch = std::move(leftToRight);
     return true;
 }
 
@@ -1057,6 +1177,9 @@ void AppendOrbLeftOnlyFeatures(ORB_SLAM3::ORBextractor *leftExtractor, const cv:
         mergedDescriptors.push_back(orbDescriptors.row(row));
     }
     externalData.leftDescriptors = std::move(mergedDescriptors);
+    if (!externalData.leftToRightMatch.empty()) {
+        externalData.leftToRightMatch.resize(externalData.leftKeypoints.size(), -1);
+    }
 }
 
 bool FinalizeStereoExternalFromTemporalCarry(const std::vector<TemporalStereoPair> &trackedPairs,
@@ -1141,7 +1264,7 @@ std::vector<StereoMatchPair> MatchStereoPairs(const SuperPointFeatureSet &left, 
             const cv::Point2f &rightPt = right.keypoints[static_cast<size_t>(ri)];
             const float yDelta = std::fabs(leftPt.y - rightPt.y);
             const float disparity = leftPt.x - rightPt.x;
-            if (yDelta > kStereoMaxEpipolarDeltaPx || disparity < kStereoMinDisparityPx ||
+            if (yDelta > kStereoMaxEpipolarDeltaPx || disparity < ExternalStereoMinDisparityPx() ||
                 disparity > kStereoMaxDisparityPx) {
                 continue;
             }
@@ -1237,7 +1360,7 @@ std::vector<StereoMatchPair> BuildAlignedStereoPairs(const SuperPointFeatureSet 
         const cv::Point2f &rightPt = right.keypoints[i];
         const float yDelta = std::fabs(leftPt.y - rightPt.y);
         const float disparity = leftPt.x - rightPt.x;
-        if (yDelta > kStereoMaxEpipolarDeltaPx || disparity < kStereoMinDisparityPx ||
+        if (yDelta > kStereoMaxEpipolarDeltaPx || disparity < ExternalStereoMinDisparityPx() ||
             disparity > kStereoMaxDisparityPx) {
             continue;
         }
@@ -2183,7 +2306,7 @@ std::vector<LkStereoTrack> BuildLkGfttStereoSeeds(const cv::Mat &leftGray, const
             continue;
         }
         const float expectedDisparity = disp32f.at<float>(iy, ix);
-        if (!(expectedDisparity >= kStereoMinDisparityPx) || expectedDisparity > kStereoMaxDisparityPx ||
+        if (!(expectedDisparity >= ExternalStereoMinDisparityPx()) || expectedDisparity > kStereoMaxDisparityPx ||
             !std::isfinite(expectedDisparity)) {
             continue;
         }

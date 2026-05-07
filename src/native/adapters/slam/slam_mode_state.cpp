@@ -89,8 +89,9 @@ void SlamModeSharedState::EnsureStereoRectifier(const cv::Size &inputSize)
     if (!m_lkTc1c2.empty()) {
         cv::Mat T64;
         m_lkTc1c2.convertTo(T64, CV_64F);
-        R = T64(cv::Rect(0, 0, 3, 3)).clone();
-        t = T64(cv::Rect(3, 0, 1, 3)).clone();
+        cv::Mat Tlr = T64.inv();
+        R = Tlr(cv::Rect(0, 0, 3, 3)).clone();
+        t = Tlr(cv::Rect(3, 0, 1, 3)).clone();
     }
 
     cv::Mat R1, R2, P1, P2, Q;
@@ -147,6 +148,7 @@ void SlamModeSharedState::CopyExternalFeatureStatsToOutput(core::ports::SlamOutp
     out.superpointMatchedStereoCount = m_lastSuperPointMatchedStereoCount;
     out.superpointInjectedLeftCount = m_lastSuperPointInjectedLeftCount;
     out.superpointInjectedRightCount = m_lastSuperPointInjectedRightCount;
+    out.superpointLightGlueEveryN = m_superPointLightGlueLastEveryN;
     out.superpointPrepareMs = m_lastSuperPointPrepareMs;
     out.superpointInputMs = m_lastSuperPointInputMs;
     out.superpointForwardMs = m_lastSuperPointForwardMs;

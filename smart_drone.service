@@ -13,12 +13,34 @@ Environment=SMART_DRONE_MAVLINK_DEV=/dev/ttyTHS0
 Environment=SMART_DRONE_MAVLINK_BAUD=921600
 Environment=SMART_DRONE_STEREO_MATCH_DEBUG=1
 Environment=SMART_DRONE_DUMP_STEREO_DEBUG=1
-Environment=SMART_DRONE_LIGHTGLUE_POINTS=768
+Environment=SMART_DRONE_LIGHTGLUE_POINTS=512
+Environment=SMART_DRONE_LIGHTGLUE_EVERY_N=4
+Environment=SMART_DRONE_LIGHTGLUE_SCORE_ORIENTATION=direct
 Environment=SMART_DRONE_LIGHTGLUE_MIN_SCORE=0.02
 Environment=SMART_DRONE_LIGHTGLUE_MAX_Y_DIFF_PX=1.5
 Environment=SMART_DRONE_LIGHTGLUE_MIN_DISPARITY_PX=0.8
+Environment=SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO=0.48
+Environment=SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES=72
+Environment=SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE=0.985
+Environment=SMART_DRONE_EXTERNAL_STEREO_STABILIZING_FRAME_WINDOW=1200
+Environment=SMART_DRONE_EXTERNAL_STEREO_STABILIZING_KF_LIMIT=120
+Environment=SMART_DRONE_EXTERNAL_STEREO_MIN_FRAMES_BETWEEN_KF=4
+Environment=SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT=1
+Environment=SMART_DRONE_SP_LG_INIT_TRUST_FRONTEND_PAIRS=1
+Environment=SMART_DRONE_SP_LG_RECOVERY_TRUST_FRONTEND_PAIRS=1
+Environment=SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_FRONTEND_PAIRS=1
+Environment=SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK=120
+Environment=SMART_DRONE_SP_LG_INJECT_DFX=1
+Environment=SMART_DRONE_SP_LG_TRACK_DFX=0
+Environment=SMART_DRONE_EXTERNAL_STEREO_TRACK_DFX=0
+Environment=SMART_DRONE_EXTERNAL_STEREO_POSE_RESCUE=1
+Environment=SMART_DRONE_SUPERPOINT_TRT_ENGINE=/home/nvidia/LightGlue/weights/superpoint_dense_640x409_fp16.engine
+Environment=SMART_DRONE_LIGHTGLUE_TRT_ENGINE=/home/nvidia/LightGlue/weights/lightglue_superpoint_512_fp16.engine
+Environment=SMART_DRONE_TRT_PINNED_HOST_OUTPUT=1
+Environment=SMART_DRONE_SUPERPOINT_PARALLEL_POST=1
+Environment=SMART_DRONE_SUPERPOINT_DESCRIPTOR_NEAREST=1
 Environment=LD_LIBRARY_PATH=/home/nvidia:/home/nvidia/vpi_root/opt/nvidia/vpi2/lib/aarch64-linux-gnu:/home/nvidia/vpi_root/opt/nvidia/cupva-2.3/lib/aarch64-linux-gnu:/usr/local/cuda-11.4/targets/aarch64-linux/lib:/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu
-ExecStart=/home/nvidia/smart_drone --auto-mode idle --settings /home/nvidia/config/stereo.yaml --vocab /home/nvidia/ORBvoc.txt --w 640 --h 480 --fps 60 --slam-fps 20 --uvc-device-index 0 --uvc-eye-width 640 --uvc-eye-height 480 --uvc-swap-eyes --feature-frontend lk --lk-loop-closure --lk-loop-scale 1.20 --lk-loop-relax 1.40 --superpoint-device cuda --superpoint-repo /home/nvidia/LightGlue --superpoint-top-k 1024 --superpoint-max-points 768 --superpoint-input-max-width 640 --superpoint-input-max-height 480 --udp --udp-ip 127.0.0.1 --udp-port 5000
+ExecStart=/home/nvidia/smart_drone --auto-mode idle --settings /home/nvidia/config/stereo.yaml --vocab /home/nvidia/ORBvoc.txt --w 640 --h 480 --fps 60 --slam-fps 20 --uvc-device-index 0 --uvc-eye-width 640 --uvc-eye-height 480 --uvc-swap-eyes --feature-frontend superpoint_lightglue --superpoint-device cuda --superpoint-repo /home/nvidia/LightGlue --superpoint-top-k 1024 --superpoint-max-points 512 --superpoint-input-max-width 640 --superpoint-input-max-height 409 --udp --udp-ip 127.0.0.1 --udp-port 5000
 Restart=always
 RestartSec=2
 

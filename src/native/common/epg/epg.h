@@ -326,7 +326,9 @@ public:
     }
 
     bool InputReady(PortId port) const;
+    std::size_t InputSize(PortId port) const;
     bool OutputExists(PortId port) const;
+    std::size_t OutputSize(PortId port) const;
 
 private:
     template <class T>
@@ -592,6 +594,8 @@ public:
     const IQueue* Queue(const std::string& name) const;
     std::map<std::string, QueueDiagnosticsSnapshot> QueueDiagnostics() const;
     std::map<std::string, TaskDiagnosticsSnapshot> TaskDiagnostics() const;
+    std::string DfxSnapshotJson(const std::string& graphName,
+                                std::uint64_t timestampMs) const;
 
 private:
     class TaskRunner;

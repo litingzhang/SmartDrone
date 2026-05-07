@@ -49,9 +49,9 @@ struct RemoteRuntimeConfig {
     int orbIniThFAST{0};
     int orbMinThFAST{0};
     int superpointTopK{512};
-    int superpointMaxPoints{320};
+    int superpointMaxPoints{512};
     int superpointInputMaxWidth{640};
-    int superpointInputMaxHeight{400};
+    int superpointInputMaxHeight{409};
     std::string lkPerFrameAcceleration{"vpi-cuda"};
     std::string orbAcceleration{"cpu"};
     bool lkLoopClosure{false};

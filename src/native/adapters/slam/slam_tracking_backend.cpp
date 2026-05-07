@@ -2,6 +2,10 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <string>
 #include <utility>
 
 #include <sophus/se3.hpp>
@@ -11,6 +15,66 @@
 #include "adapters/slam/slam_mode_common.h"
 
 namespace smartdrone::adapters::slam {
+
+namespace {
+
+bool EnvFlag(const char *name, bool fallback)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return fallback;
+    }
+    const std::string text(value);
+    return !(text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF" ||
+             text == "no" || text == "NO");
+}
+
+void LogExternalStereoDfx(uint64_t frameId, const ORB_SLAM3::ExternalStereoFrameData &externalData,
+                          ORB_SLAM3::System &system)
+{
+    if (!EnvFlag("SMART_DRONE_SP_LG_TRACK_DFX", false)) {
+        return;
+    }
+
+    int validDisparityCount = 0;
+    double disparitySum = 0.0;
+    double minDisparity = std::numeric_limits<double>::infinity();
+    double maxDisparity = 0.0;
+    const size_t pairCount = std::min(externalData.leftKeypoints.size(), externalData.rightKeypoints.size());
+    for (size_t i = 0; i < pairCount; ++i) {
+        const double disparity =
+            static_cast<double>(externalData.leftKeypoints[i].pt.x - externalData.rightKeypoints[i].pt.x);
+        if (!(disparity > 0.0) || !std::isfinite(disparity)) {
+            continue;
+        }
+        ++validDisparityCount;
+        disparitySum += disparity;
+        minDisparity = std::min(minDisparity, disparity);
+        maxDisparity = std::max(maxDisparity, disparity);
+    }
+    const double meanDisparity = validDisparityCount > 0 ? disparitySum / static_cast<double>(validDisparityCount) : 0.0;
+    const ORB_SLAM3::Tracking *tracker = system.GetTracker();
+    const ORB_SLAM3::Frame *frame = tracker != nullptr ? &tracker->mCurrentFrame : nullptr;
+    std::cerr << "[sp_lg_track_dfx] frame_id=" << frameId
+              << " injected_left=" << externalData.leftKeypoints.size()
+              << " injected_right=" << externalData.rightKeypoints.size()
+              << " descriptor_rows=" << externalData.leftDescriptors.rows
+              << "/" << externalData.rightDescriptors.rows
+              << " valid_disparity=" << validDisparityCount
+              << " disparity_mean=" << meanDisparity
+              << " disparity_min=" << (validDisparityCount > 0 ? minDisparity : 0.0)
+              << " disparity_max=" << maxDisparity
+              << " frame_N=" << (frame != nullptr ? frame->N : 0)
+              << " close_mps=" << (frame != nullptr ? frame->mnCloseMPs : 0)
+              << " state=" << system.GetTrackingState()
+              << " matches_inliers=" << system.GetMatchesInliers()
+              << " tracked_map_points=" << system.GetTrackedMapPointCount()
+              << " local_map_points=" << system.GetLocalMapPointCount()
+              << " map_id=" << system.GetCurrentMapId()
+              << "\n";
+}
+
+} // namespace
 
 core::ports::SlamOutput RunSlamTrackingBackend(SlamEngineAdapter &engine,
                                                   const core::ports::SlamInputBatch &input,
@@ -33,7 +97,7 @@ core::ports::SlamOutput RunSlamTrackingBackend(SlamEngineAdapter &engine,
     const bool trackWithExternalStereo =
         externalRequest != nullptr && externalRequest->enabled && !monoMode && !externalRequest->leftPrepared.empty() &&
         !externalRequest->rightPrepared.empty();
-    if (!trackWithExternalStereo) {
+    if (!trackWithExternalStereo && state.m_lastSuperPointImageCount == 0) {
         state.ResetExternalFeatureStats();
     }
 
@@ -60,6 +124,7 @@ core::ports::SlamOutput RunSlamTrackingBackend(SlamEngineAdapter &engine,
                                                           externalRequest->externalData, input.frameTimeSec);
         }
         const auto trackEndTp = std::chrono::steady_clock::now();
+        LogExternalStereoDfx(input.frameId, externalRequest->externalData, *system);
         if (externalRequest->recordTotalMs) {
             state.m_lastSuperPointTotalMs =
                 std::chrono::duration<double, std::milli>(trackEndTp - externalRequest->totalStartTp).count();

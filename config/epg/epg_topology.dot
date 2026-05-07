@@ -1,0 +1,190 @@
+digraph EpgTopology {
+  graph [
+    rankdir=TB,
+    compound=true,
+    labelloc=t,
+    label="EPG Topology",
+    fontsize=18,
+    fontname="Helvetica",
+    nodesep=0.35,
+    ranksep=0.65
+  ];
+
+  node [
+    shape=record,
+    style="rounded,filled",
+    fillcolor="#f7f9fb",
+    color="#7d8896",
+    fontname="Helvetica",
+    fontsize=10
+  ];
+
+  edge [
+    color="#4b5563",
+    fontname="Helvetica",
+    fontsize=9,
+    arrowsize=0.8,
+    labeldistance=1.7,
+    labelangle=25
+  ];
+
+  subgraph cluster_supervisor_graph {
+    label="Runtime Supervisor Graph";
+    color="#a7b0bd";
+    style="rounded,dashed";
+    RuntimeSupervisorTask [
+      label="{RuntimeSupervisorTask|type=RuntimeSupervisorTask|trigger=periodic|interval_ms=100}"
+    ];
+  }
+
+  subgraph cluster_slam_session_graph {
+    label="SLAM Session Graph";
+    color="#a7b0bd";
+    style="rounded";
+
+    SlamResourceTask [
+      label="{SlamResourceTask|type=SlamResourceTask|trigger=periodic|interval_ms=100}"
+    ];
+    SlamClockTask [
+      label="{SlamClockTask|type=SlamClockTask|trigger=periodic|interval_ms=50}"
+    ];
+    SlamImuGateTask [
+      label="{SlamImuGateTask|type=SlamImuGateTask|trigger=any_queue_ready|trigger_queues=SlamResourceReady+SlamTick}"
+    ];
+    SlamAcquireTask [
+      label="{SlamAcquireTask|type=SlamAcquireTask|stage=frame_acquire_and_prepare|trigger=any_queue_ready|trigger_queues=SlamFrameReady}"
+    ];
+    SlamTrackingTask [
+      label="{SlamTrackingTask|type=SlamTrackingTask|trigger=any_queue_ready|trigger_queues=SlamPreparedFrame}"
+    ];
+    SlamPosePostprocessTask [
+      label="{SlamPosePostprocessTask|type=SlamPosePostprocessTask|trigger=any_queue_ready|trigger_queues=SlamTrackedFrame}"
+    ];
+    SlamPointCloudTask [
+      label="{SlamPointCloudTask|type=SlamPointCloudTask|trigger=any_queue_ready|trigger_queues=SlamPublishedFrame}"
+    ];
+    SlamLivePoseTask [
+      label="{SlamLivePoseTask|type=SlamLivePoseTask|trigger=any_queue_ready|trigger_queues=SlamPublishedFrame}"
+    ];
+    SlamMavlinkTask [
+      label="{SlamMavlinkTask|type=SlamMavlinkTask|trigger=any_queue_ready|trigger_queues=SlamPublishedFrame}"
+    ];
+    SlamUdpTask [
+      label="{SlamUdpTask|type=SlamUdpTask|trigger=any_queue_ready|trigger_queues=SlamPublishedFrame}"
+    ];
+    SlamDfxTask [
+      label="{SlamDfxTask|type=SlamDfxTask|trigger=any_queue_ready|trigger_queues=SlamPublishedFrame}"
+    ];
+    SlamMonitorTask [
+      label="{SlamMonitorTask|type=SlamMonitorTask|trigger=any_queue_ready|trigger_queues=SlamStatus}"
+    ];
+
+    SlamResourceTask -> SlamImuGateTask [
+      taillabel="0", headlabel="0", label="SlamResourceReady\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamClockTask -> SlamImuGateTask [
+      taillabel="0", headlabel="1", label="SlamTick\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamImuGateTask -> SlamAcquireTask [
+      taillabel="0", headlabel="0", label="SlamFrameReady\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamAcquireTask -> SlamTrackingTask [
+      taillabel="0", headlabel="0", label="SlamPreparedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamTrackingTask -> SlamPosePostprocessTask [
+      taillabel="0", headlabel="0", label="SlamTrackedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamPosePostprocessTask -> SlamPointCloudTask [
+      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamPointCloudTask -> SlamLivePoseTask [
+      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamLivePoseTask -> SlamMavlinkTask [
+      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamMavlinkTask -> SlamUdpTask [
+      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamUdpTask -> SlamDfxTask [
+      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamDfxTask -> SlamMonitorTask [
+      taillabel="1", headlabel="0", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+  }
+
+  subgraph cluster_calib_session_graph {
+    label="Calibration Session Graph";
+    color="#a7b0bd";
+    style="rounded";
+
+    CalibResourceTask [
+      label="{CalibResourceTask|type=CalibResourceTask|trigger=periodic|interval_ms=1}"
+    ];
+    CalibClockTask [
+      label="{CalibClockTask|type=CalibClockTask|trigger=periodic|interval_ms=1}"
+    ];
+    CalibCameraAcquireTask [
+      label="{CalibCameraAcquireTask|type=CalibCameraAcquireTask|trigger=any_queue_ready|trigger_queues=CalibResourceReady+CalibTick}"
+    ];
+    CalibPacingFilterTask [
+      label="{CalibPacingFilterTask|type=CalibPacingFilterTask|trigger=any_queue_ready|trigger_queues=CalibStereoFrame}"
+    ];
+    CalibStorageWriteTask [
+      label="{CalibStorageWriteTask|type=CalibStorageWriteTask|trigger=any_queue_ready|trigger_queues=CalibSavePair}"
+    ];
+    CalibImuWriterTask [
+      label="{CalibImuWriterTask|type=CalibImuWriterTask|trigger=periodic_or_any_queue_ready|interval_ms=1|trigger_queues=CalibResourceReady}"
+    ];
+    CalibUdpPreviewTask [
+      label="{CalibUdpPreviewTask|type=CalibUdpPreviewTask|trigger=any_queue_ready|trigger_queues=CalibStereoFrame}"
+    ];
+    CalibCompletionTask [
+      label="{CalibCompletionTask|type=CalibCompletionTask|trigger=any_queue_ready|trigger_queues=CalibCaptureDone+CalibStorageStatus+CalibImuStatus+CalibPreviewStatus}"
+    ];
+    CalibFlushSyncTask [
+      label="{CalibFlushSyncTask|type=CalibFlushSyncTask|trigger=any_queue_ready|trigger_queues=CalibFlushRequest}"
+    ];
+    CalibMonitorTask [
+      label="{CalibMonitorTask|type=CalibMonitorTask|trigger=any_queue_ready|trigger_queues=CalibStatus}"
+    ];
+
+    CalibResourceTask -> CalibCameraAcquireTask [
+      taillabel="0", headlabel="0", label="CalibResourceReady\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    CalibResourceTask -> CalibImuWriterTask [
+      taillabel="1", headlabel="0", label="CalibResourceReady\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    CalibClockTask -> CalibCameraAcquireTask [
+      taillabel="0", headlabel="1", label="CalibTick\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    CalibCameraAcquireTask -> CalibPacingFilterTask [
+      taillabel="0", headlabel="0", label="CalibStereoFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    CalibCameraAcquireTask -> CalibUdpPreviewTask [
+      taillabel="1", headlabel="0", label="CalibStereoFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    CalibCameraAcquireTask -> CalibCompletionTask [
+      taillabel="2", headlabel="0", label="CalibCaptureDone\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    CalibPacingFilterTask -> CalibStorageWriteTask [
+      taillabel="0", headlabel="0", label="CalibSavePair\ndepth=2\noverflow=drop_newest"
+    ];
+    CalibStorageWriteTask -> CalibCompletionTask [
+      taillabel="0", headlabel="1", label="CalibStorageStatus\ndepth=8\noverflow=overwrite_oldest"
+    ];
+    CalibImuWriterTask -> CalibCompletionTask [
+      taillabel="0", headlabel="2", label="CalibImuStatus\ndepth=8\noverflow=overwrite_oldest"
+    ];
+    CalibUdpPreviewTask -> CalibCompletionTask [
+      taillabel="0", headlabel="3", label="CalibPreviewStatus\ndepth=8\noverflow=overwrite_oldest"
+    ];
+    CalibCompletionTask -> CalibFlushSyncTask [
+      taillabel="0", headlabel="0", label="CalibFlushRequest\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    CalibFlushSyncTask -> CalibMonitorTask [
+      taillabel="0", headlabel="0", label="CalibStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+  }
+}
