@@ -21,6 +21,7 @@ struct ExternalStereoTrackRequest {
     ORB_SLAM3::ExternalStereoFrameData externalData;
     std::vector<cv::Point2f> leftFeaturePoints;
     std::vector<cv::Point2f> rightFeaturePoints;
+    uint64_t externalHash{0};
     double inputPrepareMs{0.0};
     double frontendMs{0.0};
     double stereoPairMs{0.0};

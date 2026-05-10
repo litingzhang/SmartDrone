@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include "ImuTypes.h"
@@ -37,6 +38,7 @@ struct ReplayPoseSample {
     int superpointMatchedStereoCount{0};
     int superpointInjectedLeftCount{0};
     int superpointInjectedRightCount{0};
+    uint64_t superpointExternalHash{0};
     int superpointLightGlueEveryN{0};
     double superpointFrontendMs{0.0};
     double superpointStereoMatchMs{0.0};
@@ -59,10 +61,36 @@ struct ReplayPoseSample {
     double orbTrackMs{0.0};
     double orbExtractMs{0.0};
     double orbStereoMatchMs{0.0};
+    double localMappingWaitMs{0.0};
+    int localMappingWaitQueueBefore{0};
+    int localMappingWaitQueueAfter{0};
+    int localMappingWaitTimeoutMs{0};
+    bool localMappingWaitRequested{false};
+    bool localMappingWaitTimedOut{false};
+    bool localMappingAcceptingBefore{false};
+    bool localMappingAcceptingAfter{false};
     int matchesInliers{0};
     uint32_t trackedMapPointCount{0};
     uint32_t localMapPointCount{0};
+    uint64_t localMapPointHash{0};
+    uint64_t matchedMapPointHashBeforePoseOptimization{0};
+    uint64_t trackedMapPointHash{0};
+    uint32_t closeMapPointCount{0};
+    uint64_t orbFrameId{0};
+    int64_t referenceKeyFrameId{-1};
+    int64_t lastKeyFrameId{-1};
+    int64_t lastKeyFrameFrameId{-1};
+    uint32_t keyFramesInMap{0};
+    int externalStereoInitFrameId{-1};
+    bool externalStereoInjected{false};
+    bool externalStereoBootstrap{false};
+    bool externalStereoStabilizing{false};
+    bool realtimePoseQualityGate{false};
+    float rawPoseStepMeters{0.0f};
+    float gatedPoseStepMeters{0.0f};
 };
+
+using ReplayPoseSampleCallback = std::function<void(const ReplayPoseSample &)>;
 
 class ReplaySlamRunner {
   public:
@@ -70,7 +98,8 @@ class ReplaySlamRunner {
                      smartdrone::core::ports::ISlamEngine &slamEngine, ReplaySlamRunnerConfig cfg);
 
     std::vector<ReplayPoseSample> Run(size_t maxFrames,
-                                      smartdrone::core::application::FrameTimingTracker *timingTracker = nullptr);
+                                      smartdrone::core::application::FrameTimingTracker *timingTracker = nullptr,
+                                      const ReplayPoseSampleCallback &sampleCallback = {});
 
   private:
     static std::vector<ORB_SLAM3::IMU::Point> ToOrbImuPoints(

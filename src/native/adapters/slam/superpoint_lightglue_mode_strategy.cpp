@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -58,6 +59,267 @@ void UpdateLightGlueCadenceState(SlamModeSharedState &state, const core::ports::
     } else {
         state.m_superPointLightGlueOkStreak = 0;
     }
+}
+
+void UpdateBootstrapTrustState(SlamModeSharedState &state, bool usedBootstrapTrust, int trustFrontendOkStreak)
+{
+    if (!EnvFlagEnabled("SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_ONCE", false)) {
+        return;
+    }
+    if (trustFrontendOkStreak <= 0) {
+        state.m_superPointLightGlueBootstrapTrustClosed = true;
+        return;
+    }
+    if (usedBootstrapTrust) {
+        ++state.m_superPointLightGlueBootstrapTrustFrames;
+    }
+    if (state.m_superPointLightGlueOkStreak >= trustFrontendOkStreak ||
+        state.m_superPointLightGlueBootstrapTrustFrames >= trustFrontendOkStreak) {
+        state.m_superPointLightGlueBootstrapTrustClosed = true;
+    }
+}
+
+bool PreviousFrameWasWeak(const SlamModeSharedState &state)
+{
+    const int minInliers = EnvIntValueClamped("SMART_DRONE_SP_LG_WEAK_FRAME_MIN_INLIERS", 90, 1, 100000);
+    const int minTrackedMap = EnvIntValueClamped("SMART_DRONE_SP_LG_WEAK_FRAME_MIN_TRACKED_MAP", 120, 1, 100000);
+    return state.m_lastSlamMatchesInliers > 0 &&
+           (state.m_lastSlamMatchesInliers < minInliers || state.m_lastSlamTrackedMapPoints < minTrackedMap);
+}
+
+void LimitStereoPairsForWeakTracking(std::vector<cv::Point2f> &leftPoints, std::vector<cv::Point2f> &rightPoints,
+                                     const SlamModeSharedState &state, bool initializing, bool recovering)
+{
+    if (initializing || recovering || !EnvFlagEnabled("SMART_DRONE_SP_LG_WEAK_FRAME_PAIR_LIMIT", false) ||
+        !PreviousFrameWasWeak(state)) {
+        return;
+    }
+
+    const size_t maxPairs = EnvSizeValueClamped("SMART_DRONE_SP_LG_WEAK_FRAME_MAX_PAIRS", 192, 48, 1200);
+    LimitStereoPairsInPlace(leftPoints, rightPoints, maxPairs);
+}
+
+std::vector<StereoMatchPair> SelectInitializationTrustedPairs(const SuperPointFeatureSet &leftFeatures,
+                                                              const SuperPointFeatureSet &rightFeatures,
+                                                              const cv::Mat &leftPrepared,
+                                                              const cv::Mat &rightPrepared)
+{
+    std::vector<StereoMatchPair> matches =
+        BuildAlignedStereoPairs(leftFeatures, rightFeatures, leftPrepared, rightPrepared);
+    if (matches.empty()) {
+        return matches;
+    }
+
+    const float closeDisparity =
+        EnvFloatValue("SMART_DRONE_SP_LG_INIT_CLOSE_DISPARITY", 4.0f);
+    std::stable_sort(matches.begin(), matches.end(),
+                     [closeDisparity](const StereoMatchPair &lhs, const StereoMatchPair &rhs) {
+                         const bool lhsClose = lhs.disparity >= closeDisparity;
+                         const bool rhsClose = rhs.disparity >= closeDisparity;
+                         if (lhsClose != rhsClose) {
+                             return lhsClose;
+                         }
+                         if (std::abs(lhs.quality - rhs.quality) > 1.0e-6f) {
+                             return lhs.quality > rhs.quality;
+                         }
+                         if (std::abs(lhs.zncc - rhs.zncc) > 1.0e-6f) {
+                             return lhs.zncc > rhs.zncc;
+                         }
+                         return lhs.disparity > rhs.disparity;
+                     });
+
+    const size_t maxPairs = EnvSizeValueClamped("SMART_DRONE_SP_LG_INIT_TRUST_MAX_PAIRS", 256, 48, 1200);
+    if (matches.size() > maxPairs) {
+        matches.resize(maxPairs);
+    }
+    return matches;
+}
+
+size_t TemporalCarryBudget(const SlamModeSharedState &state)
+{
+    const size_t stableBudget = EnvSizeValueClamped("SMART_DRONE_SP_LG_TEMPORAL_CARRY_BUDGET",
+                                                    kTemporalCarryMinBudget, 0, kTemporalCarryMaxBudget);
+    if (!PreviousFrameWasWeak(state)) {
+        return stableBudget;
+    }
+    return EnvSizeValueClamped("SMART_DRONE_SP_LG_WEAK_TEMPORAL_CARRY_BUDGET",
+                               kWeakTrackingTemporalCarryBudget, 0, kTemporalCarryMaxBudget);
+}
+
+size_t AppendTemporalCarryPairs(SlamModeSharedState &state, const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
+                                std::vector<cv::Point2f> &matchedLeftPoints,
+                                std::vector<cv::Point2f> &matchedRightPoints,
+                                bool initializing, bool recovering)
+{
+    if (!EnvFlagEnabled("SMART_DRONE_SP_LG_TEMPORAL_CARRY", false) || initializing || recovering ||
+        !state.m_spLgHavePrevStereo || state.m_spLgPrevLeft.empty() || state.m_spLgPrevRight.empty() ||
+        state.m_spLgPrevLeftPoints.empty() || state.m_spLgPrevLeftPoints.size() != state.m_spLgPrevRightPoints.size()) {
+        return 0;
+    }
+
+    const size_t budget = TemporalCarryBudget(state);
+    if (budget == 0) {
+        return 0;
+    }
+
+    std::vector<TemporalStereoPair> trackedPairs = TrackStereoPairsTemporally(
+        state.m_spLgPrevLeft, state.m_spLgPrevRight, state.m_spLgPrevLeftPoints, state.m_spLgPrevRightPoints,
+        leftPrepared, rightPrepared);
+    trackedPairs = FilterTemporalPairsWithMotionRansac(trackedPairs, state.m_spLgPrevLeftPoints);
+    trackedPairs = LimitTemporalPairs(trackedPairs, budget);
+
+    std::vector<cv::Point2f> carryLeftPoints;
+    std::vector<cv::Point2f> carryRightPoints;
+    carryLeftPoints.reserve(trackedPairs.size());
+    carryRightPoints.reserve(trackedPairs.size());
+    for (const TemporalStereoPair &pair : trackedPairs) {
+        if (IsStereoPairNearExisting(pair.leftPt, pair.rightPt, matchedLeftPoints, matchedRightPoints)) {
+            continue;
+        }
+        carryLeftPoints.push_back(pair.leftPt);
+        carryRightPoints.push_back(pair.rightPt);
+    }
+    if (carryLeftPoints.empty()) {
+        return 0;
+    }
+
+    const size_t before = matchedLeftPoints.size();
+    size_t inserted = 0;
+    std::vector<cv::Point2f> mergedLeftPoints;
+    std::vector<cv::Point2f> mergedRightPoints;
+    const size_t maxMergedPairs = EnvSizeValueClamped("SMART_DRONE_SP_LG_TEMPORAL_CARRY_MAX_PAIRS",
+                                                      std::max(before, kTemporalMaxInjectedPairs),
+                                                      kTemporalMaxInjectedPairs, 1200);
+    mergedLeftPoints.reserve(std::min(maxMergedPairs, before + carryLeftPoints.size()));
+    mergedRightPoints.reserve(std::min(maxMergedPairs, before + carryRightPoints.size()));
+    auto appendUnique = [&](const std::vector<cv::Point2f> &sourceLeft, const std::vector<cv::Point2f> &sourceRight,
+                            bool countInserted) {
+        for (size_t i = 0; i < sourceLeft.size() && i < sourceRight.size(); ++i) {
+            if (mergedLeftPoints.size() >= maxMergedPairs) {
+                return;
+            }
+            if (IsStereoPairNearExisting(sourceLeft[i], sourceRight[i], mergedLeftPoints, mergedRightPoints)) {
+                continue;
+            }
+            mergedLeftPoints.push_back(sourceLeft[i]);
+            mergedRightPoints.push_back(sourceRight[i]);
+            if (countInserted) {
+                ++inserted;
+            }
+        }
+    };
+    appendUnique(carryLeftPoints, carryRightPoints, true);
+    appendUnique(matchedLeftPoints, matchedRightPoints, false);
+    matchedLeftPoints = std::move(mergedLeftPoints);
+    matchedRightPoints = std::move(mergedRightPoints);
+    return inserted;
+}
+
+void StoreTemporalCarrySource(SlamModeSharedState &state, const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
+                              const ORB_SLAM3::ExternalStereoFrameData &externalData)
+{
+    if (!EnvFlagEnabled("SMART_DRONE_SP_LG_TEMPORAL_CARRY", false)) {
+        return;
+    }
+
+    const size_t pairCount = std::min(externalData.leftKeypoints.size(), externalData.leftToRightMatch.size());
+    std::vector<cv::Point2f> leftPoints;
+    std::vector<cv::Point2f> rightPoints;
+    leftPoints.reserve(pairCount);
+    rightPoints.reserve(pairCount);
+    for (size_t leftIndex = 0; leftIndex < pairCount; ++leftIndex) {
+        const int rightIndex = externalData.leftToRightMatch[leftIndex];
+        if (rightIndex < 0 || static_cast<size_t>(rightIndex) >= externalData.rightKeypoints.size()) {
+            continue;
+        }
+        leftPoints.push_back(externalData.leftKeypoints[leftIndex].pt);
+        rightPoints.push_back(externalData.rightKeypoints[static_cast<size_t>(rightIndex)].pt);
+    }
+
+    if (leftPoints.empty() || leftPoints.size() != rightPoints.size()) {
+        state.m_spLgHavePrevStereo = false;
+        state.m_spLgPrevLeftPoints.clear();
+        state.m_spLgPrevRightPoints.clear();
+        return;
+    }
+
+    state.m_spLgPrevLeft = leftPrepared.clone();
+    state.m_spLgPrevRight = rightPrepared.clone();
+    state.m_spLgPrevLeftPoints = std::move(leftPoints);
+    state.m_spLgPrevRightPoints = std::move(rightPoints);
+    state.m_spLgHavePrevStereo = true;
+}
+
+uint64_t HashFloatValue(uint64_t hash, float value)
+{
+    uint32_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value), "unexpected float size");
+    std::memcpy(&bits, &value, sizeof(bits));
+    hash ^= static_cast<uint64_t>(bits);
+    hash *= 1099511628211ULL;
+    return hash;
+}
+
+uint64_t HashIntValue(uint64_t hash, int value)
+{
+    hash ^= static_cast<uint64_t>(static_cast<uint32_t>(value));
+    hash *= 1099511628211ULL;
+    return hash;
+}
+
+uint64_t HashMatSample(uint64_t hash, const cv::Mat &mat)
+{
+    hash = HashIntValue(hash, mat.rows);
+    hash = HashIntValue(hash, mat.cols);
+    hash = HashIntValue(hash, mat.type());
+    if (mat.empty()) {
+        return hash;
+    }
+    const int rowStride = std::max(1, mat.rows / 16);
+    if (mat.type() == CV_32F) {
+        const int colStride = std::max(1, mat.cols / 16);
+        for (int row = 0; row < mat.rows; row += rowStride) {
+            const float *data = mat.ptr<float>(row);
+            for (int col = 0; col < mat.cols; col += colStride) {
+                hash = HashFloatValue(hash, data[col]);
+            }
+        }
+    } else if (mat.type() == CV_8U) {
+        const int colStride = std::max(1, mat.cols / 32);
+        for (int row = 0; row < mat.rows; row += rowStride) {
+            const uint8_t *data = mat.ptr<uint8_t>(row);
+            for (int col = 0; col < mat.cols; col += colStride) {
+                hash ^= static_cast<uint64_t>(data[col]);
+                hash *= 1099511628211ULL;
+            }
+        }
+    }
+    return hash;
+}
+
+uint64_t HashExternalStereoData(const ORB_SLAM3::ExternalStereoFrameData &data)
+{
+    uint64_t hash = 1469598103934665603ULL;
+    hash = HashIntValue(hash, static_cast<int>(data.leftKeypoints.size()));
+    hash = HashIntValue(hash, static_cast<int>(data.rightKeypoints.size()));
+    hash = HashIntValue(hash, data.matchedStereoPairs ? 1 : 0);
+    const size_t leftCount = std::min<size_t>(data.leftKeypoints.size(), 512);
+    for (size_t i = 0; i < leftCount; ++i) {
+        hash = HashFloatValue(hash, data.leftKeypoints[i].pt.x);
+        hash = HashFloatValue(hash, data.leftKeypoints[i].pt.y);
+    }
+    const size_t rightCount = std::min<size_t>(data.rightKeypoints.size(), 512);
+    for (size_t i = 0; i < rightCount; ++i) {
+        hash = HashFloatValue(hash, data.rightKeypoints[i].pt.x);
+        hash = HashFloatValue(hash, data.rightKeypoints[i].pt.y);
+    }
+    const size_t matchCount = std::min<size_t>(data.leftToRightMatch.size(), 512);
+    for (size_t i = 0; i < matchCount; ++i) {
+        hash = HashIntValue(hash, data.leftToRightMatch[i]);
+    }
+    hash = HashMatSample(hash, data.leftDescriptors);
+    hash = HashMatSample(hash, data.rightDescriptors);
+    return hash;
 }
 
 } // namespace
@@ -158,13 +420,28 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
         EnvIntValueClamped("SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK", 0, 0, 100000);
     const bool trustFrontendBootstrapPairs =
         trustFrontendOkStreak > 0 &&
+        (!EnvFlagEnabled("SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_ONCE", false) ||
+         !state.m_superPointLightGlueBootstrapTrustClosed) &&
         state.m_superPointLightGlueOkStreak < trustFrontendOkStreak &&
+        (!EnvFlagEnabled("SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_ONCE", false) ||
+         state.m_superPointLightGlueBootstrapTrustFrames < trustFrontendOkStreak) &&
         EnvFlagEnabled("SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_FRONTEND_PAIRS", false);
     const bool trustFrontendPairs =
         pairedFeatureCount > 0 &&
         (trustFrontendInitPairs || trustFrontendRecoveryPairs || trustFrontendBootstrapPairs);
+    const bool initializationTrustedPairSelection =
+        initializingExternalStereo &&
+        trustFrontendPairs &&
+        EnvFlagEnabled("SMART_DRONE_SP_LG_INIT_TRUST_SELECT_CLOSE_PAIRS", false);
+    std::vector<StereoMatchPair> initializationTrustedMatches;
     std::vector<StereoMatchPair> rawMatches;
-    if (!trustFrontendPairs) {
+    if (initializationTrustedPairSelection) {
+        initializationTrustedMatches =
+            SelectInitializationTrustedPairs(leftFeatures, rightFeatures, leftPrepared, rightPrepared);
+        if (initializationTrustedMatches.empty()) {
+            rawMatches = BuildAlignedStereoPairs(leftFeatures, rightFeatures, leftPrepared, rightPrepared);
+        }
+    } else if (!trustFrontendPairs) {
         rawMatches = BuildAlignedStereoPairs(leftFeatures, rightFeatures, leftPrepared, rightPrepared);
     }
     const bool initializationStereoBias =
@@ -207,7 +484,9 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
             matchedRightPoints.push_back(rightFeatures.keypoints[static_cast<size_t>(match.rightIndex)]);
         }
     };
-    if (trustFrontendPairs) {
+    if (initializationTrustedPairSelection && !initializationTrustedMatches.empty()) {
+        appendMatchedPairs(initializationTrustedMatches);
+    } else if (trustFrontendPairs) {
         matchedLeftPoints.reserve(pairedFeatureCount);
         matchedRightPoints.reserve(pairedFeatureCount);
         for (size_t i = 0; i < pairedFeatureCount; ++i) {
@@ -226,6 +505,11 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
             matchedRightPoints.push_back(rightFeatures.keypoints[i]);
         }
     }
+    LimitStereoPairsForWeakTracking(matchedLeftPoints, matchedRightPoints, state, initializingExternalStereo,
+                                    recoveringExternalStereo);
+    const size_t temporalCarryPairs =
+        AppendTemporalCarryPairs(state, leftPrepared, rightPrepared, matchedLeftPoints, matchedRightPoints,
+                                 initializingExternalStereo, recoveringExternalStereo);
     const double stereoPairMs =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - matchStartTp).count();
     state.m_lastSuperPointStereoMatchMs = stereoPairMs;
@@ -289,18 +573,28 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
 
     state.m_lastSuperPointInjectedLeftCount = static_cast<int>(externalData.leftKeypoints.size());
     state.m_lastSuperPointInjectedRightCount = static_cast<int>(externalData.rightKeypoints.size());
+    state.m_lastSuperPointExternalHash = HashExternalStereoData(externalData);
     if (EnvFlagEnabled("SMART_DRONE_SP_LG_INJECT_DFX", false)) {
         std::cerr << "[sp_lg_inject_dfx] frame_id=" << input.frameId
                   << " initializing=" << (initializingExternalStereo ? "Y" : "N")
                   << " recovering=" << (recoveringExternalStereo ? "Y" : "N")
                   << " trust_frontend_pairs=" << (trustFrontendPairs ? "Y" : "N")
+                  << " init_trust_selected=" << (initializationTrustedPairSelection ? "Y" : "N")
+                  << " bootstrap_trust=" << (trustFrontendBootstrapPairs ? "Y" : "N")
+                  << " bootstrap_closed=" << (state.m_superPointLightGlueBootstrapTrustClosed ? "Y" : "N")
+                  << " bootstrap_frames=" << state.m_superPointLightGlueBootstrapTrustFrames
                   << " ok_streak=" << state.m_superPointLightGlueOkStreak
+                  << " prev_inliers=" << state.m_lastSlamMatchesInliers
+                  << " prev_tracked=" << state.m_lastSlamTrackedMapPoints
                   << " frontend_pairs=" << pairedFeatureCount
+                  << " init_trust_matches=" << initializationTrustedMatches.size()
                   << " raw_matches=" << rawMatches.size()
                   << " filtered_matches=" << matches.size()
                   << " selected_pairs=" << matchedLeftPoints.size()
+                  << " temporal_carry=" << temporalCarryPairs
                   << " injected=" << externalData.leftKeypoints.size()
                   << "/" << externalData.rightKeypoints.size()
+                  << " hash=" << state.m_lastSuperPointExternalHash
                   << " scale=" << leftScaleX << "x" << leftScaleY
                   << "\n";
     }
@@ -317,6 +611,7 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
     request.stereoPairMs = stereoPairMs;
     request.externalPackMs = std::chrono::duration<double, std::milli>(packEndTp - packStartTp).count();
     request.monoAugmentMs = monoAugmentMs;
+    request.externalHash = state.m_lastSuperPointExternalHash;
     request.leftFeaturePoints.reserve(request.externalData.leftKeypoints.size());
     request.rightFeaturePoints.reserve(request.externalData.rightKeypoints.size());
     for (const cv::KeyPoint &kp : request.externalData.leftKeypoints) {
@@ -325,9 +620,13 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
     for (const cv::KeyPoint &kp : request.externalData.rightKeypoints) {
         request.rightFeaturePoints.push_back(kp.pt);
     }
+    StoreTemporalCarrySource(state, request.leftPrepared, request.rightPrepared, request.externalData);
 
     core::ports::SlamOutput out = RunSlamTrackingBackend(engine, input, extractFeatures, extractPointCloud, &request);
     UpdateLightGlueCadenceState(state, out);
+    UpdateBootstrapTrustState(state, trustFrontendBootstrapPairs && trustFrontendPairs, trustFrontendOkStreak);
+    state.m_lastSlamMatchesInliers = out.matchesInliers;
+    state.m_lastSlamTrackedMapPoints = static_cast<int>(out.trackedMapPointCount);
     return out;
 }
 

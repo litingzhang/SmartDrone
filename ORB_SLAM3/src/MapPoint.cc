@@ -19,10 +19,31 @@
 #include "MapPoint.h"
 #include "ORBmatcher.h"
 
+#include <algorithm>
+#include <cstdlib>
 #include<mutex>
+#include <string>
 
 namespace ORB_SLAM3
 {
+namespace
+{
+bool EnvFlagEnabled(const char *name, bool fallback)
+{
+    const char *value = std::getenv(name);
+    if(value == nullptr || value[0] == '\0')
+        return fallback;
+
+    const std::string text(value);
+    return !(text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF" ||
+             text == "no" || text == "NO");
+}
+
+bool StableMapPointObservationOrderEnabled()
+{
+    return EnvFlagEnabled("SMART_DRONE_ORB_STABLE_MAPPOINT_OBSERVATION_ORDER", false);
+}
+}
 
 long unsigned int MapPoint::nNextId=0;
 mutex MapPoint::mGlobalMutex;
@@ -344,8 +365,18 @@ void MapPoint::ComputeDistinctiveDescriptors()
         return;
 
     vDescriptors.reserve(observations.size());
+    vector<pair<KeyFrame*, tuple<int,int>>> orderedObservations(observations.begin(), observations.end());
+    if(StableMapPointObservationOrderEnabled())
+    {
+        sort(orderedObservations.begin(), orderedObservations.end(),
+             [](const pair<KeyFrame*, tuple<int,int>> &lhs, const pair<KeyFrame*, tuple<int,int>> &rhs) {
+                 const unsigned long lhsId = lhs.first ? lhs.first->mnId : 0;
+                 const unsigned long rhsId = rhs.first ? rhs.first->mnId : 0;
+                 return lhsId < rhsId;
+             });
+    }
 
-    for(map<KeyFrame*,tuple<int,int>>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
+    for(vector<pair<KeyFrame*, tuple<int,int>>>::iterator mit=orderedObservations.begin(), mend=orderedObservations.end(); mit!=mend; mit++)
     {
         KeyFrame* pKF = mit->first;
 
@@ -444,7 +475,17 @@ void MapPoint::UpdateNormalAndDepth()
     Eigen::Vector3f normal;
     normal.setZero();
     int n=0;
-    for(map<KeyFrame*,tuple<int,int>>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
+    vector<pair<KeyFrame*, tuple<int,int>>> orderedObservations(observations.begin(), observations.end());
+    if(StableMapPointObservationOrderEnabled())
+    {
+        sort(orderedObservations.begin(), orderedObservations.end(),
+             [](const pair<KeyFrame*, tuple<int,int>> &lhs, const pair<KeyFrame*, tuple<int,int>> &rhs) {
+                 const unsigned long lhsId = lhs.first ? lhs.first->mnId : 0;
+                 const unsigned long rhsId = rhs.first ? rhs.first->mnId : 0;
+                 return lhsId < rhsId;
+             });
+    }
+    for(vector<pair<KeyFrame*, tuple<int,int>>>::iterator mit=orderedObservations.begin(), mend=orderedObservations.end(); mit!=mend; mit++)
     {
         KeyFrame* pKF = mit->first;
 

@@ -26,6 +26,8 @@
 #include <Eigen/Dense>
 #include <unsupported/Eigen/MatrixFunctions>
 
+#include <algorithm>
+#include <cstdlib>
 #include "Thirdparty/g2o/g2o/core/sparse_block_matrix.h"
 #include "Thirdparty/g2o/g2o/core/block_solver.h"
 #include "Thirdparty/g2o/g2o/core/optimization_algorithm_levenberg.h"
@@ -44,9 +46,70 @@
 
 namespace ORB_SLAM3
 {
+namespace
+{
+bool KeyFrameIdLess(const KeyFrame* lhs, const KeyFrame* rhs)
+{
+    if(lhs == nullptr)
+        return false;
+    if(rhs == nullptr)
+        return true;
+    return lhs->mnId < rhs->mnId;
+}
+
+bool MapPointIdLess(const MapPoint* lhs, const MapPoint* rhs)
+{
+    if(lhs == nullptr)
+        return false;
+    if(rhs == nullptr)
+        return true;
+    return lhs->mnId < rhs->mnId;
+}
+
+bool StableLocalBundleAdjustmentOrderEnabled();
+
+vector<pair<KeyFrame*, tuple<int,int>>> OrderedObservations(const map<KeyFrame*, tuple<int,int>> &observations)
+{
+    vector<pair<KeyFrame*, tuple<int,int>>> ordered(observations.begin(), observations.end());
+    sort(ordered.begin(), ordered.end(),
+         [](const pair<KeyFrame*, tuple<int,int>> &lhs, const pair<KeyFrame*, tuple<int,int>> &rhs) {
+             return KeyFrameIdLess(lhs.first, rhs.first);
+         });
+    return ordered;
+}
+
+vector<pair<KeyFrame*, tuple<int,int>>> LocalBundleAdjustmentObservations(
+    const map<KeyFrame*, tuple<int,int>> &observations)
+{
+    vector<pair<KeyFrame*, tuple<int,int>>> ordered(observations.begin(), observations.end());
+    if(StableLocalBundleAdjustmentOrderEnabled())
+    {
+        sort(ordered.begin(), ordered.end(),
+             [](const pair<KeyFrame*, tuple<int,int>> &lhs, const pair<KeyFrame*, tuple<int,int>> &rhs) {
+                 return KeyFrameIdLess(lhs.first, rhs.first);
+             });
+    }
+    return ordered;
+}
+
+bool StableLocalBundleAdjustmentOrderEnabled()
+{
+    static const bool enabled = []() {
+        const char *value = std::getenv("SMART_DRONE_ORB_STABLE_LBA_ORDER");
+        if(value == nullptr || value[0] == '\0')
+            return false;
+        return !(value[0] == '0' || value[0] == 'f' || value[0] == 'F' ||
+                 value[0] == 'n' || value[0] == 'N');
+    }();
+    return enabled;
+}
+}
+
 bool sortByVal(const pair<MapPoint*, int> &a, const pair<MapPoint*, int> &b)
 {
-    return (a.second < b.second);
+    if(a.second != b.second)
+        return (a.second < b.second);
+    return StableLocalBundleAdjustmentOrderEnabled() && MapPointIdLess(a.first, b.first);
 }
 
 void Optimizer::GlobalBundleAdjustemnt(Map* pMap, int nIterations, bool* pbStopFlag, const unsigned long nLoopKF, const bool bRobust)
@@ -1164,7 +1227,8 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
     {
         map<KeyFrame*,tuple<int,int>> observations = (*lit)->GetObservations();
-        for(map<KeyFrame*,tuple<int,int>>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
+        vector<pair<KeyFrame*, tuple<int,int>>> orderedObservations = LocalBundleAdjustmentObservations(observations);
+        for(vector<pair<KeyFrame*, tuple<int,int>>>::iterator mit=orderedObservations.begin(), mend=orderedObservations.end(); mit!=mend; mit++)
         {
             KeyFrame* pKFi = mit->first;
 
@@ -1177,6 +1241,12 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         }
     }
     num_fixedKF = lFixedCameras.size() + num_fixedKF;
+    if(StableLocalBundleAdjustmentOrderEnabled())
+    {
+        lLocalKeyFrames.sort(KeyFrameIdLess);
+        lLocalMapPoints.sort(MapPointIdLess);
+        lFixedCameras.sort(KeyFrameIdLess);
+    }
 
 
     if(num_fixedKF == 0)
@@ -1291,9 +1361,11 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         nPoints++;
 
         const map<KeyFrame*,tuple<int,int>> observations = pMP->GetObservations();
+        const vector<pair<KeyFrame*, tuple<int,int>>> orderedObservations =
+            LocalBundleAdjustmentObservations(observations);
 
         //Set edges
-        for(map<KeyFrame*,tuple<int,int>>::const_iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
+        for(vector<pair<KeyFrame*, tuple<int,int>>>::const_iterator mit=orderedObservations.begin(), mend=orderedObservations.end(); mit!=mend; mit++)
         {
             KeyFrame* pKFi = mit->first;
 
@@ -1465,6 +1537,15 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
 
     if(!vToErase.empty())
     {
+        if(StableLocalBundleAdjustmentOrderEnabled())
+        {
+            sort(vToErase.begin(), vToErase.end(),
+                 [](const pair<KeyFrame*, MapPoint*> &lhs, const pair<KeyFrame*, MapPoint*> &rhs) {
+                     if(lhs.first != rhs.first)
+                         return KeyFrameIdLess(lhs.first, rhs.first);
+                     return MapPointIdLess(lhs.second, rhs.second);
+                 });
+        }
         for(size_t i=0;i<vToErase.size();i++)
         {
             KeyFrame* pKFi = vToErase[i].first;

@@ -23,7 +23,8 @@ ReplaySlamRunner::ReplaySlamRunner(smartdrone::core::ports::ICameraProvider &cam
 }
 
 std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
-    size_t maxFrames, smartdrone::core::application::FrameTimingTracker *timingTracker)
+    size_t maxFrames, smartdrone::core::application::FrameTimingTracker *timingTracker,
+    const ReplayPoseSampleCallback &sampleCallback)
 {
     std::vector<ReplayPoseSample> outputs;
     if (maxFrames > 0) {
@@ -93,6 +94,7 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
         sample.superpointMatchedStereoCount = output.superpointMatchedStereoCount;
         sample.superpointInjectedLeftCount = output.superpointInjectedLeftCount;
         sample.superpointInjectedRightCount = output.superpointInjectedRightCount;
+        sample.superpointExternalHash = output.superpointExternalHash;
         sample.superpointLightGlueEveryN = output.superpointLightGlueEveryN;
         sample.superpointFrontendMs = output.superpointFrontendMs;
         sample.superpointStereoMatchMs = output.superpointStereoMatchMs;
@@ -115,9 +117,36 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
         sample.orbTrackMs = output.orbTrackMs;
         sample.orbExtractMs = output.orbExtractMs;
         sample.orbStereoMatchMs = output.orbStereoMatchMs;
+        sample.localMappingWaitMs = output.localMappingWaitMs;
+        sample.localMappingWaitQueueBefore = output.localMappingWaitQueueBefore;
+        sample.localMappingWaitQueueAfter = output.localMappingWaitQueueAfter;
+        sample.localMappingWaitTimeoutMs = output.localMappingWaitTimeoutMs;
+        sample.localMappingWaitRequested = output.localMappingWaitRequested;
+        sample.localMappingWaitTimedOut = output.localMappingWaitTimedOut;
+        sample.localMappingAcceptingBefore = output.localMappingAcceptingBefore;
+        sample.localMappingAcceptingAfter = output.localMappingAcceptingAfter;
         sample.matchesInliers = output.matchesInliers;
         sample.trackedMapPointCount = output.trackedMapPointCount;
         sample.localMapPointCount = output.localMapPointCount;
+        sample.localMapPointHash = output.localMapPointHash;
+        sample.matchedMapPointHashBeforePoseOptimization = output.matchedMapPointHashBeforePoseOptimization;
+        sample.trackedMapPointHash = output.trackedMapPointHash;
+        sample.closeMapPointCount = output.closeMapPointCount;
+        sample.orbFrameId = output.orbFrameId;
+        sample.referenceKeyFrameId = output.referenceKeyFrameId;
+        sample.lastKeyFrameId = output.lastKeyFrameId;
+        sample.lastKeyFrameFrameId = output.lastKeyFrameFrameId;
+        sample.keyFramesInMap = output.keyFramesInMap;
+        sample.externalStereoInitFrameId = output.externalStereoInitFrameId;
+        sample.externalStereoInjected = output.externalStereoInjected;
+        sample.externalStereoBootstrap = output.externalStereoBootstrap;
+        sample.externalStereoStabilizing = output.externalStereoStabilizing;
+        sample.realtimePoseQualityGate = output.realtimePoseQualityGate;
+        sample.rawPoseStepMeters = output.rawPoseStepMeters;
+        sample.gatedPoseStepMeters = output.gatedPoseStepMeters;
+        if (sampleCallback) {
+            sampleCallback(sample);
+        }
         outputs.push_back(sample);
     }
 

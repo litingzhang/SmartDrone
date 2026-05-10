@@ -94,6 +94,168 @@ bool SlamEngineAdapter::ShutdownAndSaveTrajectoryEuRoC(const std::string &path)
     return true;
 }
 
+void SlamEngineAdapter::MaintainRealtimePoseContinuity(core::ports::PoseEstimate &pose, bool &poseValid,
+                                                    double timestampSec, int trackingState)
+{
+    pose.valid = poseValid && IsFinitePose(pose);
+    if (pose.valid) {
+        NormalizePoseQuaternion(pose);
+    }
+
+    double dt = kPoseStabilizerDefaultDtSec;
+    if (m_haveLastStablePose && timestampSec > m_lastStableTimestampSec) {
+        dt = std::clamp(timestampSec - m_lastStableTimestampSec, kPoseStabilizerMinDtSec, kPoseStabilizerMaxDtSec);
+    }
+
+    if (pose.valid && trackingState == ORB_SLAM3::Tracking::OK) {
+        if (m_haveLastStablePose) {
+            float measuredVelX = (pose.x - m_lastStablePose.x) / static_cast<float>(dt);
+            float measuredVelY = (pose.y - m_lastStablePose.y) / static_cast<float>(dt);
+            float measuredVelZ = (pose.z - m_lastStablePose.z) / static_cast<float>(dt);
+            ClampVelocityVector(measuredVelX, measuredVelY, measuredVelZ);
+            m_stableVelX = (1.0f - kPoseStabilizerVelocityAlpha) * m_stableVelX +
+                           kPoseStabilizerVelocityAlpha * measuredVelX;
+            m_stableVelY = (1.0f - kPoseStabilizerVelocityAlpha) * m_stableVelY +
+                           kPoseStabilizerVelocityAlpha * measuredVelY;
+            m_stableVelZ = (1.0f - kPoseStabilizerVelocityAlpha) * m_stableVelZ +
+                           kPoseStabilizerVelocityAlpha * measuredVelZ;
+        }
+        poseValid = true;
+        m_lastStablePose = pose;
+        m_haveLastStablePose = true;
+        m_lastStableTimestampSec = timestampSec;
+        return;
+    }
+
+    const bool rawIdentity = pose.x == 0.0f && pose.y == 0.0f && pose.z == 0.0f && pose.qw == 1.0f &&
+                             pose.qx == 0.0f && pose.qy == 0.0f && pose.qz == 0.0f;
+    const bool bootstrapFrame =
+        !m_haveLastStablePose && trackingState == ORB_SLAM3::Tracking::NOT_INITIALIZED &&
+        IsFinitePose(pose) && rawIdentity;
+    if (bootstrapFrame) {
+        pose.valid = true;
+        poseValid = true;
+        m_lastStablePose = pose;
+        m_haveLastStablePose = true;
+        m_lastStableTimestampSec = timestampSec;
+        return;
+    }
+
+    if (!m_haveLastStablePose) {
+        poseValid = pose.valid;
+        return;
+    }
+
+    const bool canPredict =
+        !pose.valid || trackingState == ORB_SLAM3::Tracking::RECENTLY_LOST || trackingState == ORB_SLAM3::Tracking::OK_KLT;
+    if (!canPredict) {
+        poseValid = pose.valid;
+        return;
+    }
+
+    ClampVelocityVector(m_stableVelX, m_stableVelY, m_stableVelZ);
+    core::ports::PoseEstimate predicted = m_lastStablePose;
+    predicted.x += m_stableVelX * static_cast<float>(dt);
+    predicted.y += m_stableVelY * static_cast<float>(dt);
+    predicted.z += m_stableVelZ * static_cast<float>(dt);
+    predicted.valid = true;
+    pose = predicted;
+    poseValid = true;
+    m_lastStablePose = pose;
+    m_lastStableTimestampSec = timestampSec;
+    m_stableVelX *= kPoseStabilizerPredictedVelocityDecay;
+    m_stableVelY *= kPoseStabilizerPredictedVelocityDecay;
+    m_stableVelZ *= kPoseStabilizerPredictedVelocityDecay;
+}
+
+void SlamEngineAdapter::GateRealtimePoseQuality(core::ports::SlamOutput &out, double timestampSec)
+{
+    const bool canMeasurePoseStep = out.poseValid && out.pose.valid && IsFinitePose(out.pose) && m_haveLastStablePose;
+    if (canMeasurePoseStep) {
+        out.rawPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+        out.gatedPoseStepMeters = out.rawPoseStepMeters;
+    }
+    if (!EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_QUALITY_GATE", false)) {
+        return;
+    }
+    if (!canMeasurePoseStep) {
+        return;
+    }
+    if (!out.usedSuperPointFrontend || !out.externalStereoInjected || out.externalStereoStabilizing ||
+        out.trackingState != ORB_SLAM3::Tracking::OK) {
+        return;
+    }
+
+    const int minInliers = EnvIntValueClamped("SMART_DRONE_SP_LG_REALTIME_GATE_MIN_INLIERS", 120, 1, 100000);
+    const int minTracked = EnvIntValueClamped("SMART_DRONE_SP_LG_REALTIME_GATE_MIN_TRACKED_MAP", 140, 1, 100000);
+    const float maxStep =
+        EnvFloatValueClamped("SMART_DRONE_SP_LG_REALTIME_GATE_MAX_STEP_M", kPoseStabilizerMaxStepMeters,
+                             0.005f, 0.25f);
+    const bool weakTracking = out.matchesInliers < minInliers || static_cast<int>(out.trackedMapPointCount) < minTracked;
+    const float rawStep = out.rawPoseStepMeters;
+    if (!weakTracking) {
+        return;
+    }
+
+    core::ports::PoseEstimate gated = out.pose;
+    const std::string gateMode = EnvStringValue("SMART_DRONE_SP_LG_REALTIME_GATE_MODE", "step");
+    if (gateMode == "innovation" || gateMode == "predict" || gateMode == "prediction") {
+        double dt = kPoseStabilizerDefaultDtSec;
+        if (timestampSec > m_lastStableTimestampSec) {
+            dt = std::clamp(timestampSec - m_lastStableTimestampSec, kPoseStabilizerMinDtSec, kPoseStabilizerMaxDtSec);
+        }
+
+        float vx = m_stableVelX;
+        float vy = m_stableVelY;
+        float vz = m_stableVelZ;
+        ClampVelocityVector(vx, vy, vz);
+
+        core::ports::PoseEstimate predicted = m_lastStablePose;
+        predicted.x += vx * static_cast<float>(dt);
+        predicted.y += vy * static_cast<float>(dt);
+        predicted.z += vz * static_cast<float>(dt);
+        predicted.valid = true;
+
+        const float maxInnovation =
+            EnvFloatValueClamped("SMART_DRONE_SP_LG_REALTIME_GATE_MAX_INNOVATION_M", maxStep, 0.005f, 0.50f);
+        const float innovation = PoseTranslationDistance(out.pose, predicted);
+        if (innovation <= maxInnovation) {
+            return;
+        }
+
+        const float scale = maxInnovation / std::max(innovation, 1.0e-6f);
+        gated.x = predicted.x + (out.pose.x - predicted.x) * scale;
+        gated.y = predicted.y + (out.pose.y - predicted.y) * scale;
+        gated.z = predicted.z + (out.pose.z - predicted.z) * scale;
+        if (EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_GATE_LIMIT_ROTATION", false)) {
+            LimitPoseRotationStep(predicted, gated);
+        }
+        gated.valid = true;
+
+        out.pose = gated;
+        out.poseValid = true;
+        out.realtimePoseQualityGate = true;
+        out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+        return;
+    }
+
+    if (rawStep <= maxStep) {
+        return;
+    }
+
+    const float scale = maxStep / std::max(rawStep, 1.0e-6f);
+    gated.x = m_lastStablePose.x + (out.pose.x - m_lastStablePose.x) * scale;
+    gated.y = m_lastStablePose.y + (out.pose.y - m_lastStablePose.y) * scale;
+    gated.z = m_lastStablePose.z + (out.pose.z - m_lastStablePose.z) * scale;
+    LimitPoseRotationStep(m_lastStablePose, gated);
+    gated.valid = true;
+
+    out.pose = gated;
+    out.poseValid = true;
+    out.realtimePoseQualityGate = true;
+    out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+}
+
 void SlamEngineAdapter::StabilizeOutputPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
                                          int trackingState)
 {

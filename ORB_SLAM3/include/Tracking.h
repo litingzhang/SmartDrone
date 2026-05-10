@@ -115,6 +115,9 @@ public:
     int GetMatchesInliers();
     size_t GetTrackedMapPointCount() const;
     size_t GetLocalMapPointCount() const;
+    uint64_t GetLocalMapPointHash() const;
+    uint64_t GetMatchedMapPointHashBeforePoseOptimization() const;
+    uint64_t GetTrackedMapPointHash() const;
     ORBextractor* GetLeftORBExtractor() const { return mpORBextractorLeft; }
     ORBextractor* GetRightORBExtractor() const { return mpORBextractorRight; }
     ORBextractor* GetInitORBExtractor() const { return mpIniORBextractor; }
@@ -332,6 +335,9 @@ protected:
 
     //Current matches in frame
     int mnMatchesInliers;
+    uint64_t mLocalMapPointHash{0};
+    uint64_t mMatchedMapPointHashBeforePoseOptimization{0};
+    uint64_t mTrackedMapPointHash{0};
 
     //Last Frame, KeyFrame and Relocalisation Info
     KeyFrame* mpLastKeyFrame;

@@ -13,6 +13,7 @@
 #define __D_RANDOM__
 
 #include <cstdlib>
+#include <mutex>
 #include <vector>
 
 namespace DUtils {
@@ -54,6 +55,7 @@ public:
 	 */
 	template <class T>
 	static T RandomValue(){
+		std::lock_guard<std::mutex> lock(Random::Mutex());
 		return (T)rand()/(T)RAND_MAX;
 	}
 
@@ -103,6 +105,8 @@ private:
 
   /// If SeedRandOnce() or SeedRandOnce(int) have already been called
   static bool m_already_seeded;
+
+  static std::mutex& Mutex();
   
 };
 
@@ -181,4 +185,3 @@ protected:
 }
 
 #endif
-

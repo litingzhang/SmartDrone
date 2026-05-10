@@ -26,6 +26,7 @@
 #include "Thirdparty/DBoW2/DBoW2/FeatureVector.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include<stdint-gcc.h>
 #include<array>
@@ -60,6 +61,25 @@ namespace ORB_SLAM3
         {
             return !pKF->mDescriptors.empty() && !F.mDescriptors.empty() && pKF->mDescriptors.type() == CV_8U &&
                    F.mDescriptors.type() == CV_8U && !pKF->mFeatVec.empty() && !F.mFeatVec.empty();
+        }
+
+        bool StableMatchTieBreaksEnabled()
+        {
+            static const bool enabled = []() {
+                const char *value = std::getenv("SMART_DRONE_ORB_STABLE_MATCH_TIE_BREAKS");
+                if(value == nullptr || value[0] == '\0')
+                    return false;
+                return !(value[0] == '0' || value[0] == 'f' || value[0] == 'F' ||
+                         value[0] == 'n' || value[0] == 'N');
+            }();
+            return enabled;
+        }
+
+        bool BetterCandidate(const int dist, const int idx, const int bestDist, const int bestIdx)
+        {
+            if(dist != bestDist)
+                return dist < bestDist;
+            return StableMatchTieBreaksEnabled() && (bestIdx < 0 || idx < bestIdx);
         }
 
         void ComputeThreeMaximaLocal(std::vector<int>* histo, const int L, int &ind1, int &ind2, int &ind3)
@@ -141,7 +161,7 @@ namespace ORB_SLAM3
 
                     const cv::Mat dF = F.mDescriptors.row(idxF);
                     const int dist = ORBmatcher::DescriptorDistance(dKF, dF);
-                    if(dist < bestDist1)
+                    if(BetterCandidate(dist, idxF, bestDist1, bestIdxF))
                     {
                         bestDist2 = bestDist1;
                         bestDist1 = dist;
@@ -239,7 +259,7 @@ namespace ORB_SLAM3
 
                     const cv::Mat d2 = pKF2->mDescriptors.row(static_cast<int>(idx2));
                     const int dist = ORBmatcher::DescriptorDistance(d1, d2);
-                    if(dist < bestDist1)
+                    if(BetterCandidate(dist, static_cast<int>(idx2), bestDist1, bestIdx2))
                     {
                         bestDist2 = bestDist1;
                         bestDist1 = dist;
@@ -366,7 +386,7 @@ namespace ORB_SLAM3
 
                         const int dist = DescriptorDistance(MPdescriptor,d);
 
-                        if(dist<bestDist)
+                        if(BetterCandidate(dist, static_cast<int>(idx), bestDist, bestIdx))
                         {
                             bestDist2=bestDist;
                             bestDist=dist;
@@ -438,7 +458,7 @@ namespace ORB_SLAM3
 
                         const int dist = DescriptorDistance(MPdescriptor,d);
 
-                        if(dist<bestDist)
+                        if(BetterCandidate(dist, static_cast<int>(idx), bestDist, bestIdx))
                         {
                             bestDist2=bestDist;
                             bestDist=dist;
@@ -550,7 +570,7 @@ namespace ORB_SLAM3
 
                             const int dist =  DescriptorDistance(dKF,dF);
 
-                            if(dist<bestDist1)
+                            if(BetterCandidate(dist, static_cast<int>(realIdxF), bestDist1, bestIdxF))
                             {
                                 bestDist2=bestDist1;
                                 bestDist1=dist;
@@ -571,7 +591,7 @@ namespace ORB_SLAM3
 
                             const int dist =  DescriptorDistance(dKF,dF);
 
-                            if(realIdxF < F.Nleft && dist<bestDist1){
+                            if(realIdxF < F.Nleft && BetterCandidate(dist, static_cast<int>(realIdxF), bestDist1, bestIdxF)){
                                 bestDist2=bestDist1;
                                 bestDist1=dist;
                                 bestIdxF=realIdxF;
@@ -580,7 +600,7 @@ namespace ORB_SLAM3
                                 bestDist2=dist;
                             }
 
-                            if(realIdxF >= F.Nleft && dist<bestDist1R){
+                            if(realIdxF >= F.Nleft && BetterCandidate(dist, static_cast<int>(realIdxF), bestDist1R, bestIdxFR)){
                                 bestDist2R=bestDist1R;
                                 bestDist1R=dist;
                                 bestIdxFR=realIdxF;
@@ -781,7 +801,7 @@ namespace ORB_SLAM3
 
                 const int dist = DescriptorDistance(dMP,dKF);
 
-                if(dist<bestDist)
+                if(BetterCandidate(dist, static_cast<int>(idx), bestDist, bestIdx))
                 {
                     bestDist = dist;
                     bestIdx = idx;
@@ -894,7 +914,7 @@ namespace ORB_SLAM3
 
                 const int dist = DescriptorDistance(dMP,dKF);
 
-                if(dist<bestDist)
+                if(BetterCandidate(dist, static_cast<int>(idx), bestDist, bestIdx))
                 {
                     bestDist = dist;
                     bestIdx = idx;
@@ -954,7 +974,7 @@ namespace ORB_SLAM3
                 if(vMatchedDistance[i2]<=dist)
                     continue;
 
-                if(dist<bestDist)
+                if(BetterCandidate(dist, static_cast<int>(i2), bestDist, bestIdx2))
                 {
                     bestDist2=bestDist;
                     bestDist=dist;
@@ -1105,7 +1125,7 @@ namespace ORB_SLAM3
 
                         int dist = DescriptorDistance(d1,d2);
 
-                        if(dist<bestDist1)
+                        if(BetterCandidate(dist, static_cast<int>(idx2), bestDist1, bestIdx2))
                         {
                             bestDist2=bestDist1;
                             bestDist1=dist;
@@ -1285,7 +1305,8 @@ namespace ORB_SLAM3
 
                         const int dist = DescriptorDistance(d1,d2);
 
-                        if(dist>TH_LOW || dist>bestDist)
+                        if(dist>TH_LOW || dist>bestDist ||
+                           (StableMatchTieBreaksEnabled() && dist == bestDist && bestIdx2 >= 0 && static_cast<int>(idx2) > bestIdx2))
                             continue;
 
                         const cv::KeyPoint &kp2 = (pKF2 -> NLeft == -1) ? pKF2->mvKeysUn[idx2]
@@ -1572,7 +1593,7 @@ namespace ORB_SLAM3
 
                 const int dist = DescriptorDistance(dMP,dKF);
 
-                if(dist<bestDist)
+                if(BetterCandidate(dist, static_cast<int>(idx), bestDist, bestIdx))
                 {
                     bestDist = dist;
                     bestIdx = idx;
@@ -1697,7 +1718,7 @@ namespace ORB_SLAM3
 
                 int dist = DescriptorDistance(dMP,dKF);
 
-                if(dist<bestDist)
+                if(BetterCandidate(dist, static_cast<int>(idx), bestDist, bestIdx))
                 {
                     bestDist = dist;
                     bestIdx = idx;
@@ -1830,7 +1851,7 @@ namespace ORB_SLAM3
 
                 const int dist = DescriptorDistance(dMP,dKF);
 
-                if(dist<bestDist)
+                if(BetterCandidate(dist, static_cast<int>(idx), bestDist, bestIdx))
                 {
                     bestDist = dist;
                     bestIdx = idx;
@@ -1910,7 +1931,7 @@ namespace ORB_SLAM3
 
                 const int dist = DescriptorDistance(dMP,dKF);
 
-                if(dist<bestDist)
+                if(BetterCandidate(dist, static_cast<int>(idx), bestDist, bestIdx))
                 {
                     bestDist = dist;
                     bestIdx = idx;
@@ -2036,7 +2057,7 @@ namespace ORB_SLAM3
                                                                      : (i2 < CurrentFrame.Nleft) ? CurrentFrame.mvKeys[i2].octave
                                                                                                  : CurrentFrame.mvKeysRight[i2 - CurrentFrame.Nleft].octave;
 
-                        if(dist<bestDist)
+                        if(BetterCandidate(dist, static_cast<int>(i2), bestDist, bestIdx2))
                         {
                             bestDist2=bestDist;
                             bestDist=dist;
@@ -2117,7 +2138,7 @@ namespace ORB_SLAM3
                             const int dist = DescriptorDistance(dMP,d);
                             const int level = CurrentFrame.mvKeysRight[i2].octave;
 
-                            if(dist<bestDist)
+                            if(BetterCandidate(dist, static_cast<int>(i2), bestDist, bestIdx2))
                             {
                                 bestDist2=bestDist;
                                 bestDist=dist;
@@ -2261,7 +2282,7 @@ namespace ORB_SLAM3
                         const int dist = DescriptorDistance(dMP,d);
                         const int level = CurrentFrame.mvKeysUn[i2].octave;
 
-                        if(dist<bestDist)
+                        if(BetterCandidate(dist, static_cast<int>(i2), bestDist, bestIdx2))
                         {
                             bestDist2=bestDist;
                             bestDist=dist;

@@ -20,6 +20,7 @@
 
 #include "System.h"
 #include "Converter.h"
+#include "Thirdparty/DBoW2/DUtils/Random.h"
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -34,6 +35,7 @@
 #include <thread>
 // #include <pangolin/pangolin.h>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <opencv2/imgcodecs.hpp>
@@ -333,13 +335,24 @@ int EnvIntClamped(const char* name, int fallback, int minValue, int maxValue)
     return ClampValue(static_cast<int>(parsed), minValue, maxValue);
 }
 
-void WaitForLocalMappingIdle(LocalMapping* localMapper)
+LocalMappingWaitStats WaitForLocalMappingIdle(LocalMapping* localMapper)
 {
-    if(localMapper == nullptr ||
-       !EnvFlagEnabled("SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE", false))
-        return;
+    LocalMappingWaitStats stats;
+    if(localMapper == nullptr)
+        return stats;
 
     const int timeoutMs = EnvIntClamped("SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS", 200, 1, 5000);
+    stats.timeoutMs = timeoutMs;
+    stats.queueBefore = localMapper->KeyframesInQueue();
+    stats.acceptingBefore = localMapper->AcceptKeyFrames();
+    if(!EnvFlagEnabled("SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE", false))
+    {
+        stats.queueAfter = stats.queueBefore;
+        stats.acceptingAfter = stats.acceptingBefore;
+        return stats;
+    }
+
+    stats.requested = true;
     const auto start = std::chrono::steady_clock::now();
     while(localMapper->KeyframesInQueue() > 0 || !localMapper->AcceptKeyFrames())
     {
@@ -347,8 +360,16 @@ void WaitForLocalMappingIdle(LocalMapping* localMapper)
         const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count();
         if(elapsedMs >= timeoutMs)
+        {
+            stats.timedOut = true;
             break;
+        }
     }
+    const auto end = std::chrono::steady_clock::now();
+    stats.waitMs = std::chrono::duration<double, std::milli>(end - start).count();
+    stats.queueAfter = localMapper->KeyframesInQueue();
+    stats.acceptingAfter = localMapper->AcceptKeyFrames();
+    return stats;
 }
 
 void EnsureDirectory(const std::string& path)
@@ -413,6 +434,9 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     "under certain conditions. See LICENSE.txt." << endl << endl;
 
     cout << "Input sensor was set to: ";
+
+    if(EnvFlagEnabled("SMART_DRONE_ORB_DETERMINISTIC_RANDOM", false))
+        DUtils::Random::SeedRandOnce(0);
 
     if(mSensor==MONOCULAR)
         cout << "Monocular" << endl;
@@ -705,7 +729,7 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, 
         mTrackingState = mpTracker->mState;
     }
 
-    WaitForLocalMappingIdle(mpLocalMapper);
+    StoreLocalMappingWaitStats(WaitForLocalMappingIdle(mpLocalMapper));
 
     return Tcw;
 }
@@ -790,7 +814,7 @@ Sophus::SE3f System::TrackStereoWithFeatures(const cv::Mat &imLeft, const cv::Ma
         mTrackingState = mpTracker->mState;
     }
 
-    WaitForLocalMappingIdle(mpLocalMapper);
+    StoreLocalMappingWaitStats(WaitForLocalMappingIdle(mpLocalMapper));
 
     return Tcw;
 }
@@ -853,7 +877,7 @@ Sophus::SE3f System::TrackStereoPreparedWithFeatures(const cv::Mat &imLeftPrepar
         mTrackingState = mpTracker->mState;
     }
 
-    WaitForLocalMappingIdle(mpLocalMapper);
+    StoreLocalMappingWaitStats(WaitForLocalMappingIdle(mpLocalMapper));
 
     return Tcw;
 }
@@ -1505,6 +1529,74 @@ void System::SaveTrajectoryEuRoC(const string &filename, Map* pMap)
     cout << endl << "End of saving trajectory to " << filename << " ..." << endl;
 }
 
+bool System::GetLatestFrameTrajectoryPoseEuRoC(Sophus::SE3f &twc, double *timestamp, bool *lost) const
+{
+    if (!mpTracker || !mpAtlas) {
+        return false;
+    }
+    if (mpTracker->mlRelativeFramePoses.empty() || mpTracker->mlpReferences.empty() ||
+        mpTracker->mlFrameTimes.empty() || mpTracker->mlbLost.empty()) {
+        return false;
+    }
+
+    const auto relativeIt = std::prev(mpTracker->mlRelativeFramePoses.end());
+    const auto referenceIt = std::prev(mpTracker->mlpReferences.end());
+    const auto timestampIt = std::prev(mpTracker->mlFrameTimes.end());
+    const auto lostIt = std::prev(mpTracker->mlbLost.end());
+    if (timestamp) {
+        *timestamp = *timestampIt;
+    }
+    if (lost) {
+        *lost = *lostIt;
+    }
+    if (*lostIt) {
+        return false;
+    }
+
+    KeyFrame *pKF = *referenceIt;
+    if (!pKF) {
+        return false;
+    }
+
+    Map *pMap = pKF->GetMap();
+    if (!pMap) {
+        return false;
+    }
+
+    vector<KeyFrame*> vpKFs = pMap->GetAllKeyFrames();
+    if (vpKFs.empty()) {
+        return false;
+    }
+    sort(vpKFs.begin(), vpKFs.end(), KeyFrame::lId);
+
+    Sophus::SE3f Twb;
+    if (mSensor == IMU_MONOCULAR || mSensor == IMU_STEREO || mSensor == IMU_RGBD) {
+        Twb = vpKFs[0]->GetImuPose();
+    } else {
+        Twb = vpKFs[0]->GetPoseInverse();
+    }
+
+    Sophus::SE3f Trw;
+    while (pKF->isBad()) {
+        Trw = Trw * pKF->mTcp;
+        pKF = pKF->GetParent();
+        if (!pKF) {
+            return false;
+        }
+    }
+    if (pKF->GetMap() != pMap) {
+        return false;
+    }
+
+    Trw = Trw * pKF->GetPose() * Twb;
+    if (mSensor == IMU_MONOCULAR || mSensor == IMU_STEREO || mSensor == IMU_RGBD) {
+        twc = (pKF->mImuCalib.mTbc * (*relativeIt) * Trw).inverse();
+    } else {
+        twc = ((*relativeIt) * Trw).inverse();
+    }
+    return true;
+}
+
 void System::SaveKeyFrameTrajectoryEuRoC(const string &filename)
 {
     cout << endl << "Saving keyframe trajectory to " << filename << " ..." << endl;
@@ -1801,9 +1893,36 @@ size_t System::GetLocalMapPointCount() const
     return mpTracker ? mpTracker->GetLocalMapPointCount() : 0;
 }
 
+uint64_t System::GetLocalMapPointHash() const
+{
+    return mpTracker ? mpTracker->GetLocalMapPointHash() : 0;
+}
+
+uint64_t System::GetMatchedMapPointHashBeforePoseOptimization() const
+{
+    return mpTracker ? mpTracker->GetMatchedMapPointHashBeforePoseOptimization() : 0;
+}
+
+uint64_t System::GetTrackedMapPointHash() const
+{
+    return mpTracker ? mpTracker->GetTrackedMapPointHash() : 0;
+}
+
+LocalMappingWaitStats System::GetLastLocalMappingWaitStats() const
+{
+    unique_lock<mutex> lock(mMutexLocalMappingWaitStats);
+    return mLastLocalMappingWaitStats;
+}
+
 void System::WaitForLocalMappingIdleIfRequested()
 {
-    WaitForLocalMappingIdle(mpLocalMapper);
+    StoreLocalMappingWaitStats(WaitForLocalMappingIdle(mpLocalMapper));
+}
+
+void System::StoreLocalMappingWaitStats(const LocalMappingWaitStats &stats)
+{
+    unique_lock<mutex> lock(mMutexLocalMappingWaitStats);
+    mLastLocalMappingWaitStats = stats;
 }
 
 TrackedVisualData System::ExtractTrackedVisualData(int leftImageWidth,

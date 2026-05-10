@@ -19,7 +19,7 @@ flowchart TD
     H --> I[ORB_SLAM3::System::TrackStereo<br/>or TrackStereo with IMU]
     I --> J[ORB-SLAM3 internal pipeline<br/>ORB extract, stereo match, tracking, mapping]
     J --> K[Read tracker/system telemetry]
-    K --> L[Invert Tcw to Twc<br/>fill PoseEstimate]
+    K --> L[Fill realtime PoseEstimate]
     L --> M[SlamOutput]
     M --> N[ReplayPoseSample / live telemetry]
     N --> O[euroc_pose.csv<br/>euroc_summary.json<br/>profile_summary.md]
@@ -137,7 +137,10 @@ The adapter reads ORB-SLAM3 telemetry after tracking:
 
 ## Pose Conversion
 
-ORB-SLAM3 returns `Tcw`. The adapter converts it to world-camera pose:
+ORB-SLAM3 returns `Tcw`. By default the adapter converts the current `Tcw` to world-camera pose for realtime output.
+The EuRoC-style reference-keyframe trajectory pose can still be enabled with
+`SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=1` for diagnostics, but it is not the strict realtime output path because
+LocalMapping can update the reference pose asynchronously:
 
 ```cpp
 const Sophus::SE3f twc = tcw.inverse();
@@ -145,7 +148,9 @@ const Eigen::Vector3f t = twc.translation();
 const Eigen::Quaternionf q(twc.so3().unit_quaternion());
 ```
 
-Then it validates every translation/quaternion component with `std::isfinite(...)`. Valid poses are copied into `PoseEstimate` and marked with `poseValid=true`.
+Then it validates every translation/quaternion component with `std::isfinite(...)`. Valid poses are copied into
+`PoseEstimate` and marked with `poseValid=true`. When `SMART_DRONE_REALTIME_POSE_CONTINUITY=1`, transient current-frame
+lost outputs can be filled from the last realtime stable pose, but previous rows are never rewritten.
 
 ## Output Artifacts
 
@@ -161,13 +166,9 @@ flowchart TD
     G --> H[profile_summary.md]
 ```
 
-For ORB stereo-only EuRoC regression, `RunOfflineReplay(...)` uses the official ORB-SLAM3 EuRoC trajectory export:
-
-1. `ShutdownAndSaveOrbTrajectoryEuRoC(...)`
-2. `ConvertOrbEuRoCTrajectoryToReplayCsv(...)`
-3. `evaluate_euroc_regression.py`
-
-This keeps the ORB reference comparable to ORB-SLAM3's native evaluation convention while still producing SmartDrone CSV/JSON artifacts.
+`RunOfflineReplay(...)` writes `euroc_pose.csv` from the replay frame callback and flushes each row immediately. The
+official CSV is the realtime stream; shutdown trajectory export is not allowed to overwrite or backfill it. Evaluation
+therefore checks the same per-frame pose path used by live runtime telemetry.
 
 ## Profiling Design
 

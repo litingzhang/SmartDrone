@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include<stdio.h>
 #include<stdlib.h>
+#include<mutex>
 #include<string>
 #include<thread>
 #include<vector>
@@ -81,6 +82,18 @@ class Tracking;
 class LocalMapping;
 class LoopClosing;
 class Settings;
+
+struct LocalMappingWaitStats
+{
+    bool requested = false;
+    bool timedOut = false;
+    bool acceptingBefore = false;
+    bool acceptingAfter = false;
+    int queueBefore = 0;
+    int queueAfter = 0;
+    int timeoutMs = 0;
+    double waitMs = 0.0;
+};
 
 class System
 {
@@ -171,6 +184,8 @@ public:
 
     void SaveTrajectoryEuRoC(const string &filename, Map* pMap);
     void SaveKeyFrameTrajectoryEuRoC(const string &filename, Map* pMap);
+    bool GetLatestFrameTrajectoryPoseEuRoC(Sophus::SE3f &twc, double *timestamp = nullptr,
+                                           bool *lost = nullptr) const;
 
     // Save data used for initialization debug
     void SaveDebugData(const int &iniIdx);
@@ -194,6 +209,10 @@ public:
     int GetMatchesInliers() const;
     size_t GetTrackedMapPointCount() const;
     size_t GetLocalMapPointCount() const;
+    uint64_t GetLocalMapPointHash() const;
+    uint64_t GetMatchedMapPointHashBeforePoseOptimization() const;
+    uint64_t GetTrackedMapPointHash() const;
+    LocalMappingWaitStats GetLastLocalMappingWaitStats() const;
     TrackedVisualData ExtractTrackedVisualData(int leftImageWidth,
                                                int leftImageHeight,
                                                int rightImageWidth,
@@ -221,6 +240,7 @@ private:
 
     void SaveAtlas(int type);
     bool LoadAtlas(int type);
+    void StoreLocalMappingWaitStats(const LocalMappingWaitStats &stats);
 
     string CalculateCheckSum(string filename, int type);
 
@@ -277,6 +297,8 @@ private:
     // Tracking state
     int mTrackingState;
     std::mutex mMutexState;
+    LocalMappingWaitStats mLastLocalMappingWaitStats;
+    mutable std::mutex mMutexLocalMappingWaitStats;
 
     //
     string mStrLoadAtlasFromFile;

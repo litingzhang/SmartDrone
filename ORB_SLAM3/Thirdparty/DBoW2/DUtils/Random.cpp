@@ -11,40 +11,69 @@
 #include "Random.h"
 #include "Timestamp.h"
 #include <cstdlib>
+#include <mutex>
 using namespace std;
 
 bool DUtils::Random::m_already_seeded = false;
 
+namespace {
+int ResolveSeed(int fallback)
+{
+  const char* seedText = std::getenv("SMART_DRONE_ORB_RANDOM_SEED");
+  if(seedText == nullptr || *seedText == '\0')
+    return fallback;
+
+  char* end = nullptr;
+  const long value = std::strtol(seedText, &end, 10);
+  if(end == seedText)
+    return fallback;
+  return static_cast<int>(value);
+}
+}
+
+std::mutex& DUtils::Random::Mutex()
+{
+  static std::mutex mutex;
+  return mutex;
+}
+
 void DUtils::Random::SeedRand(){
+  std::lock_guard<std::mutex> lock(DUtils::Random::Mutex());
 	Timestamp time;
 	time.setToCurrentTime();
-	srand((unsigned)time.getFloatTime()); 
+	srand(ResolveSeed((unsigned)time.getFloatTime()));
 }
 
 void DUtils::Random::SeedRandOnce()
 {
+  std::lock_guard<std::mutex> lock(DUtils::Random::Mutex());
   if(!m_already_seeded)
   {
-    DUtils::Random::SeedRand();
+    Timestamp time;
+    time.setToCurrentTime();
+    srand(ResolveSeed((unsigned)time.getFloatTime()));
     m_already_seeded = true;
   }
 }
 
 void DUtils::Random::SeedRand(int seed)
 {
-	srand(seed); 
+  std::lock_guard<std::mutex> lock(DUtils::Random::Mutex());
+	srand(ResolveSeed(seed));
 }
 
 void DUtils::Random::SeedRandOnce(int seed)
 {
+  std::lock_guard<std::mutex> lock(DUtils::Random::Mutex());
   if(!m_already_seeded)
   {
-    DUtils::Random::SeedRand(seed);
+    srand(ResolveSeed(seed));
     m_already_seeded = true;
   }
 }
 
 int DUtils::Random::RandomInt(int min, int max){
+  std::lock_guard<std::mutex> lock(DUtils::Random::Mutex());
 	int d = max - min + 1;
 	return int(((double)rand()/((double)RAND_MAX + 1.0)) * d) + min;
 }
@@ -125,5 +154,3 @@ DUtils::Random::UnrepeatedRandomizer::operator=
 }
 
 // ---------------------------------------------------------------------------
-
-

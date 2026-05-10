@@ -44,6 +44,9 @@ class SlamEngineAdapter final : public core::ports::ISlamEngine {
     friend class SlamEngineAccess;
 
     void StabilizeOutputPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec, int trackingState);
+    void MaintainRealtimePoseContinuity(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+                                        int trackingState);
+    void GateRealtimePoseQuality(core::ports::SlamOutput &out, double timestampSec);
 
     std::unique_ptr<ORB_SLAM3::System> m_system;
     std::unique_ptr<SlamModeSharedState> m_modeState;

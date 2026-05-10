@@ -26,9 +26,55 @@
 
 #include<mutex>
 #include<chrono>
+#include<algorithm>
+#include<cstdlib>
 
 namespace ORB_SLAM3
 {
+namespace
+{
+bool KeyFrameIdLess(const KeyFrame* lhs, const KeyFrame* rhs)
+{
+    if(lhs == nullptr)
+        return false;
+    if(rhs == nullptr)
+        return true;
+    return lhs->mnId < rhs->mnId;
+}
+
+bool MapPointIdLess(const MapPoint* lhs, const MapPoint* rhs)
+{
+    if(lhs == nullptr)
+        return false;
+    if(rhs == nullptr)
+        return true;
+    return lhs->mnId < rhs->mnId;
+}
+
+bool StableLocalMappingOrderEnabled()
+{
+    static const bool enabled = []() {
+        const char *value = std::getenv("SMART_DRONE_ORB_STABLE_LOCAL_MAPPING_ORDER");
+        if(value == nullptr || value[0] == '\0')
+            return false;
+        return !(value[0] == '0' || value[0] == 'f' || value[0] == 'F' ||
+                 value[0] == 'n' || value[0] == 'N');
+    }();
+    return enabled;
+}
+
+bool RelaxLocalMappingAcceptKeyFramesEnabled()
+{
+    static const bool enabled = []() {
+        const char *value = std::getenv("SMART_DRONE_ORB_RELAX_LOCAL_MAPPING_ACCEPT_KF");
+        if(value == nullptr || value[0] == '\0')
+            return false;
+        return !(value[0] == '0' || value[0] == 'f' || value[0] == 'F' ||
+                 value[0] == 'n' || value[0] == 'N');
+    }();
+    return enabled;
+}
+}
 
 LocalMapping::LocalMapping(System* pSys, Atlas *pAtlas, const float bMonocular, bool bInertial, const string &_strSeqName):
     mpSystem(pSys), mbMonocular(bMonocular), mbInertial(bInertial), mbResetRequested(false), mbResetRequestedActiveMap(false), mbFinishRequested(false), mbFinished(true), mpAtlas(pAtlas), bInitializing(false),
@@ -67,12 +113,16 @@ void LocalMapping::Run()
 
     while(1)
     {
-        // Tracking will see that Local Mapping is busy
-        SetAcceptKeyFrames(false);
+        const bool relaxAcceptKeyFrames = RelaxLocalMappingAcceptKeyFramesEnabled();
+        if(!relaxAcceptKeyFrames)
+            SetAcceptKeyFrames(false);
 
         // Check if there are keyframes in the queue
         if(CheckNewKeyFrames() && !mbBadImu)
         {
+            if(relaxAcceptKeyFrames)
+                SetAcceptKeyFrames(false);
+
 #ifdef REGISTER_TIMES
             double timeLBA_ms = 0;
             double timeKFCulling_ms = 0;
@@ -744,6 +794,8 @@ void LocalMapping::SearchInNeighbors()
         if (mbAbortBA)
             break;
     }
+    if(StableLocalMappingOrderEnabled())
+        sort(vpTargetKFs.begin(), vpTargetKFs.end(), KeyFrameIdLess);
 
     // Extend to temporal neighbors
     if(mbInertial)
@@ -798,6 +850,8 @@ void LocalMapping::SearchInNeighbors()
             vpFuseCandidates.push_back(pMP);
         }
     }
+    if(StableLocalMappingOrderEnabled())
+        sort(vpFuseCandidates.begin(), vpFuseCandidates.end(), MapPointIdLess);
 
     matcher.Fuse(mpCurrentKeyFrame,vpFuseCandidates);
     if(mpCurrentKeyFrame->NLeft != -1) matcher.Fuse(mpCurrentKeyFrame,vpFuseCandidates,true);

@@ -236,26 +236,29 @@ increased trajectory error more than the small throughput gain justified. The re
 selected cadence as `superpoint_lg_every_n`.
 
 `SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO` controls how many injected stereo points must be close points before
-ORB-SLAM3 accepts the first SP+LG stereo map. The default is `0.48`. MH04 validation showed `0.55` kept the system in
-`NOT_INITIALIZED` for 513 frames, while the lower bootstrap threshold keeps initialization early enough for the filtered
-SP+LG path.
+ORB-SLAM3 accepts the first SP+LG stereo map. The default is `0.30`, with
+`SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_POINTS=24`. MH04/MH05 validation showed the stricter `0.48` ratio can leave
+hundreds of frames in `NOT_INITIALIZED`, while an overly loose `0.08` bootstrap hurts MH04 accuracy. The selected
+threshold keeps initialization early enough without accepting the weakest first-frame geometry.
 
-`SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES=200` is the current SP+LG initialization floor. MH04 is sensitive to the
-second map bootstrap: accepting a weak reinitialization around 150 injected stereo points produced ATE above `0.1 m`,
-while waiting for roughly 200+ injected stereo points kept the second map much closer to the good trajectory family.
+`SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES=72` is the current SP+LG initialization floor for the filtered stereo
+path. It accepts the early SuperPoint/LightGlue frames in EuRoC MH04/MH05 and still rejects very sparse bootstrap
+attempts.
 
 `SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT=1` is the default stereo injection path. It injects the ZNCC, epipolar,
 disparity, and grid-balanced stereo pairs from `BuildAlignedStereoPairs(...)` instead of blindly using every frontend
-pair. On MH04 it reduced the final-trajectory ATE from about `0.113 m` to below `0.1 m` when paired with the SP+LG
-depth scale below.
+pair. Current MH04/MH05 validation uses this path for strict realtime replay output.
 
-`SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE` defaults to `0.985` for SP+LG runs. The value compensates the external stereo
+`SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE` defaults to `0.965` for SP+LG runs. The value compensates the external stereo
 depth produced from SuperPoint/LightGlue keypoints before ORB-SLAM3 map optimization. Leave it environment-overridable
 when validating a new camera model or dataset.
 
-`SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1` is an opt-in offline diagnostic. It waits briefly after each ORB-SLAM3 stereo
-tracking call for LocalMapping to drain its keyframe queue. MH04 validation showed the stronger initialization gate above
-is more useful than enabling this wait by default, so runtime sessions and regression defaults leave it unset.
+`SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1` is enabled by default for the current SP+LG realtime pose profile. It waits
+up to `SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35` after each ORB-SLAM3 stereo tracking call so the pose
+published for that replay frame can see the latest LocalMapping update. This is a deliberate latency/accuracy tradeoff:
+the strict MH04/MH05 Jetson run averaged about `55-56 ms/frame`.
+
+`SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0` keeps realtime output on the current pose returned by `Track()`. The EuRoC-style reference-keyframe trajectory pose remains an opt-in diagnostic path because it can include LocalMapping reference updates and is not the strict current-frame output contract. `SMART_DRONE_REALTIME_POSE_CONTINUITY=1` handles only current-frame bootstrap/transient lost outputs so the frame still emits a finite pose. It does not rewrite older CSV rows and does not use future frames to post-fill missing poses.
 
 Keep the current stable runtime at SuperPoint `640x409`, LightGlue `512`, and injected SuperPoint max points `512`.
 MH04 validation showed `640x409` gives materially better trajectory accuracy than `480x360` while still fitting the
@@ -363,7 +366,7 @@ ORB-SLAM3 still owns:
 - tracking state
 - inlier counts
 - local/tracked map point counts
-- trajectory export
+- reference-keyframe pose history
 
 Profiling fields:
 
@@ -427,7 +430,14 @@ That means TensorRT frontend ran, but the frame was not tracked by the SP+LG ext
   - `orbStereoMatchMs`
 - pose, map, and tracking telemetry
 
-Offline replay writes these to `euroc_pose.csv`, aggregates means/maxes into `euroc_summary.json`, evaluates trajectory metrics into `euroc_metrics.json`, and the run script rolls them into `profile_summary.md`.
+Offline replay writes each row to `euroc_pose.csv` from the replay frame callback and flushes it immediately. The CSV is
+therefore the realtime output stream, not a shutdown trajectory export. `euroc_summary.json` aggregates means/maxes,
+`euroc_metrics.json` evaluates the CSV, and the run script rolls them into `profile_summary.md`.
+
+Strict realtime regression uses `evaluate_euroc_regression.py --require-realtime-pose`. The gate requires every output
+row to have a valid pose; the only allowed identity pose is the first bootstrap row before tracking has initialized. A
+pose that appears only after replay shutdown is considered a failure, even if a final ORB-SLAM3 trajectory export could
+recover it later.
 
 ## Profiling Interpretation
 
@@ -448,6 +458,15 @@ Offline replay writes these to `euroc_pose.csv`, aggregates means/maxes into `eu
 | `orb_track_ms` | ORB-SLAM3 backend tracking call, with or without external features. |
 
 ## Current Jetson Finding
+
+Strict realtime run:
+
+`/home/nvidia/euroc_eval/results/mh04_mh05_splg_realtime_wait35_strict_20260507_184710`
+
+Summary:
+
+- MH04: `2032/2032` pose-valid rows, `ATE RMSE=0.0970 m`, `RPE RMSE=0.0258 m`, `slam_total_ms_mean/max=56.20/97.48`.
+- MH05: `2273/2273` pose-valid rows, `ATE RMSE=0.0686 m`, `RPE RMSE=0.0246 m`, `slam_total_ms_mean/max=54.98/102.16`.
 
 Historical archived run:
 

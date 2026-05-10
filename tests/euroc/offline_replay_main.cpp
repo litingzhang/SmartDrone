@@ -1,6 +1,9 @@
 #include <cstdlib>
 #include <algorithm>
+#include <cerrno>
+#include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -8,9 +11,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-
-#include <opencv2/features2d.hpp>
-#include <opencv2/imgcodecs.hpp>
 
 #include "System.h"
 #include "adapters/slam/slam_engine_adapter.h"
@@ -28,6 +28,7 @@ struct OfflineReplayOptions {
     fs::path datasetRoot{fs::path(TESTS_SOURCE_DIR) / "data"};
     fs::path outputCsv{"build/offline_replay_pose.csv"};
     fs::path summaryJson{};
+    fs::path finalEurocTrajectory{};
     std::string vocab{"ORB_SLAM3/Vocabulary/ORBvoc.txt"};
     std::string settings{"config/stereo.yaml"};
     SensorMode sensorMode{SensorMode::StereoImu};
@@ -67,6 +68,58 @@ bool EnvVarIsUnsetOrEmpty(const char *name)
     return value == nullptr || value[0] == '\0';
 }
 
+double EnvDoubleValue(const char *name, double fallback)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return fallback;
+    }
+    char *end = nullptr;
+    errno = 0;
+    const double parsed = std::strtod(value, &end);
+    if (errno != 0 || end == value || !std::isfinite(parsed)) {
+        return fallback;
+    }
+    return parsed;
+}
+
+int64_t EnvTimestampOffsetNs()
+{
+    const double offsetMs = EnvDoubleValue("SMART_DRONE_EUROC_OUTPUT_TIMESTAMP_OFFSET_MS", 0.0);
+    return static_cast<int64_t>(std::llround(offsetMs * 1000000.0));
+}
+
+double EnvOutputPositionScale()
+{
+    return EnvDoubleValue("SMART_DRONE_EUROC_OUTPUT_POSITION_SCALE", 1.0);
+}
+
+int64_t SaturatingTimestampAdd(int64_t timestampNs, int64_t offsetNs)
+{
+    if (offsetNs > 0 && timestampNs > std::numeric_limits<int64_t>::max() - offsetNs) {
+        return std::numeric_limits<int64_t>::max();
+    }
+    if (offsetNs < 0 && timestampNs < std::numeric_limits<int64_t>::min() - offsetNs) {
+        return std::numeric_limits<int64_t>::min();
+    }
+    return timestampNs + offsetNs;
+}
+
+smartdrone::tests::ReplayPoseSample AdjustReplayOutputSample(smartdrone::tests::ReplayPoseSample sample,
+                                                             int64_t timestampOffsetNs,
+                                                             double positionScale)
+{
+    if (timestampOffsetNs != 0) {
+        sample.captureTimestampNs = SaturatingTimestampAdd(sample.captureTimestampNs, timestampOffsetNs);
+    }
+    if (positionScale != 1.0) {
+        sample.pose.x *= positionScale;
+        sample.pose.y *= positionScale;
+        sample.pose.z *= positionScale;
+    }
+    return sample;
+}
+
 void SetEnvIfUnset(const char *name, const char *value)
 {
     if (!EnvVarIsUnsetOrEmpty(name)) {
@@ -78,20 +131,19 @@ void SetEnvIfUnset(const char *name, const char *value)
 void ConfigureSuperPointLightGlueReplayDefaults()
 {
     SetEnvIfUnset("SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT", "1");
-    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES", "200");
-    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO", "0.48");
-    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE", "0.985");
+    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES", "72");
+    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_POINTS", "24");
+    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO", "0.30");
+    SetEnvIfUnset("SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE", "0.965");
+    SetEnvIfUnset("SMART_DRONE_SP_LG_INIT_TRUST_FRONTEND_PAIRS", "1");
+    SetEnvIfUnset("SMART_DRONE_SP_LG_RECOVERY_TRUST_FRONTEND_PAIRS", "1");
+    SetEnvIfUnset("SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_FRONTEND_PAIRS", "1");
+    SetEnvIfUnset("SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK", "120");
+    SetEnvIfUnset("SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE", "1");
+    SetEnvIfUnset("SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS", "35");
+    SetEnvIfUnset("SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE", "0");
+    SetEnvIfUnset("SMART_DRONE_REALTIME_POSE_CONTINUITY", "1");
 }
-
-struct LoopClosureCorrectionSummary {
-    bool enabled{false};
-    size_t anchors{0};
-    size_t visualLoopEdges{0};
-    float pathLengthMeters{0.0f};
-    float terminalDriftMeters{0.0f};
-    float scale{1.0f};
-    float relaxation{1.0f};
-};
 
 struct MetricAccumulator {
     double sum{0.0};
@@ -106,68 +158,53 @@ struct MetricAccumulator {
     double Mean(size_t count) const { return sum / static_cast<double>(std::max<size_t>(1, count)); }
 };
 
-bool ConvertOrbEuRoCTrajectoryToReplayCsv(const fs::path &trajectoryPath, const fs::path &csvPath)
+void WriteReplayCsvHeader(std::ostream &csv)
 {
-    std::ifstream input(trajectoryPath);
-    if (!input) {
-        std::cerr << "failed to open ORB EuRoC trajectory: " << trajectoryPath << "\n";
-        return false;
-    }
-
-    std::ofstream csv(csvPath);
-    if (!csv) {
-        std::cerr << "failed to open output csv: " << csvPath << "\n";
-        return false;
-    }
-
     csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
-           "superpoint_used,superpoint_raw_left,superpoint_raw_right,superpoint_stereo,superpoint_injected_left,superpoint_injected_right,"
+           "superpoint_used,superpoint_raw_left,superpoint_raw_right,superpoint_stereo,superpoint_injected_left,superpoint_injected_right,superpoint_external_hash,"
            "superpoint_lg_every_n,superpoint_frontend_ms,superpoint_match_ms,superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
            "input_prepare_ms,frontend_ms,stereo_pair_ms,external_pack_ms,mono_augment_ms,"
            "lk_rectify_ms,lk_disparity_ms,lk_gftt_ms,lk_flow_ms,lk_candidate_ms,lk_pnp_ms,lk_update_ms,"
-           "orb_track_ms,orb_extract_ms,orb_stereo_ms,"
-           "inliers,tracked_map,local_map\n";
-
-    size_t frameId = 0;
-    std::string line;
-    while (std::getline(input, line)) {
-        if (line.empty() || line[0] == '#') {
-            continue;
-        }
-        std::stringstream ss(line);
-        double timestampNs = 0.0;
-        double x = 0.0;
-        double y = 0.0;
-        double z = 0.0;
-        double qx = 0.0;
-        double qy = 0.0;
-        double qz = 0.0;
-        double qw = 1.0;
-        if (!(ss >> timestampNs >> x >> y >> z >> qx >> qy >> qz >> qw)) {
-            continue;
-        }
-        csv << frameId++ << ',' << static_cast<uint64_t>(std::llround(timestampNs)) << ",2,0,1," << x << ',' << y
-            << ',' << z << ',' << qw << ',' << qx << ',' << qy << ',' << qz;
-        for (int i = 0; i < 31; ++i) {
-            csv << ",0";
-        }
-        csv << '\n';
-    }
-
-    return frameId > 0;
+           "orb_track_ms,orb_extract_ms,orb_stereo_ms,local_mapping_wait_ms,local_mapping_wait_timeout_ms,"
+           "local_mapping_queue_before,local_mapping_queue_after,local_mapping_accept_before,"
+           "local_mapping_accept_after,local_mapping_wait_requested,local_mapping_wait_timeout,"
+           "inliers,tracked_map,local_map,local_map_hash,matched_map_hash_before_po,tracked_map_hash,close_map,orb_frame_id,ref_kf,last_kf,last_kf_frame,keyframes_in_map,"
+           "external_init_frame,external_injected,external_bootstrap,external_stabilizing,"
+           "realtime_pose_gate,raw_pose_step_m,gated_pose_step_m\n";
 }
 
-struct Vec3f {
-    float x{0.0f};
-    float y{0.0f};
-    float z{0.0f};
-};
-
-struct VisualLoopEdge {
-    size_t from{0};
-    size_t to{0};
-    int matches{0};
-};
+void WriteReplayCsvSample(std::ostream &csv, const smartdrone::tests::ReplayPoseSample &sample)
+{
+    csv << sample.frameId << ',' << sample.captureTimestampNs << ',' << sample.trackingState << ','
+        << sample.mapId << ',' << (sample.poseValid ? 1 : 0) << ',' << sample.pose.x << ',' << sample.pose.y
+        << ',' << sample.pose.z << ',' << sample.pose.qw << ',' << sample.pose.qx << ',' << sample.pose.qy
+        << ',' << sample.pose.qz << ',' << sample.imuSampleCount << ',' << (sample.usedSuperPointFrontend ? 1 : 0)
+        << ',' << sample.superpointRawLeftCount << ',' << sample.superpointRawRightCount << ','
+        << sample.superpointMatchedStereoCount << ',' << sample.superpointInjectedLeftCount << ','
+        << sample.superpointInjectedRightCount << ',' << sample.superpointExternalHash << ','
+        << sample.superpointLightGlueEveryN << ','
+        << sample.superpointFrontendMs << ','
+        << sample.superpointStereoMatchMs << ',' << sample.superpointTotalMs << ',' << sample.replayAcquireMs << ','
+        << sample.replayImuMs << ',' << sample.slamTotalMs << ',' << sample.inputPrepareMs << ','
+        << sample.frontendMs << ',' << sample.stereoPairMs << ',' << sample.externalPackMs << ','
+        << sample.monoAugmentMs << ',' << sample.lkRectifyMs << ',' << sample.lkDisparityMs << ','
+        << sample.lkGfttMs << ',' << sample.lkFlowMs << ',' << sample.lkCandidateMs << ','
+        << sample.lkPnpMs << ',' << sample.lkUpdateMs << ',' << sample.orbTrackMs << ','
+        << sample.orbExtractMs << ',' << sample.orbStereoMatchMs << ',' << sample.localMappingWaitMs << ','
+        << sample.localMappingWaitTimeoutMs << ',' << sample.localMappingWaitQueueBefore << ','
+        << sample.localMappingWaitQueueAfter << ',' << (sample.localMappingAcceptingBefore ? 1 : 0) << ','
+        << (sample.localMappingAcceptingAfter ? 1 : 0) << ',' << (sample.localMappingWaitRequested ? 1 : 0)
+        << ',' << (sample.localMappingWaitTimedOut ? 1 : 0) << ',' << sample.matchesInliers << ','
+        << sample.trackedMapPointCount << ',' << sample.localMapPointCount << ',' << sample.localMapPointHash
+        << ',' << sample.matchedMapPointHashBeforePoseOptimization << ',' << sample.trackedMapPointHash
+        << ',' << sample.closeMapPointCount
+        << ',' << sample.orbFrameId << ',' << sample.referenceKeyFrameId << ',' << sample.lastKeyFrameId << ','
+        << sample.lastKeyFrameFrameId << ',' << sample.keyFramesInMap << ',' << sample.externalStereoInitFrameId
+        << ',' << (sample.externalStereoInjected ? 1 : 0) << ',' << (sample.externalStereoBootstrap ? 1 : 0)
+        << ',' << (sample.externalStereoStabilizing ? 1 : 0) << ','
+        << (sample.realtimePoseQualityGate ? 1 : 0) << ',' << sample.rawPoseStepMeters << ','
+        << sample.gatedPoseStepMeters << '\n';
+}
 
 const char *UsageText()
 {
@@ -176,6 +213,7 @@ const char *UsageText()
         "  --dataset <dir>       Replay dataset root, default tests/data; accepts tests/data or EuRoC mav0 layout\n"
         "  --out <file>          Output CSV path, default build/offline_replay_pose.csv\n"
         "  --summary-json <file> Optional summary JSON output path\n"
+        "  --final-euroc-trajectory <file> Optional final ORB-SLAM3 EuRoC trajectory after shutdown\n"
         "  --vocab <file>        ORB vocabulary path\n"
         "  --settings <file>     ORB settings YAML path\n"
         "  --sensor-mode <mode>  stereo|stereo-imu|mono|mono-imu\n"
@@ -192,7 +230,7 @@ const char *UsageText()
         "  --slam-fps <n>        SLAM input FPS, default 20\n"
         "  --timeout-ms <n>      Batch acquire timeout, default 1000\n"
         "  --max-frames <n>      Maximum output frames, default 0(all)\n"
-        "  --lk-loop-closure     Apply offline LK pose-graph loop-closure smoothing\n"
+        "  --lk-loop-closure     Compatibility flag; disabled for realtime CSV output\n"
         "  --lk-runtime-loop-closure Enable image-based LK keyframe loop closure during replay\n"
         "  --lk-loop-scale <f>   Sim3 scale used by LK loop closure, default 1.20\n"
         "  --lk-loop-relax <f>   Loop residual relaxation factor, default 1.40\n"
@@ -294,6 +332,7 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     opts.datasetRoot = fs::path(GetOptionValue(argc, argv, "--dataset", opts.datasetRoot.string()));
     opts.outputCsv = fs::path(GetOptionValue(argc, argv, "--out", opts.outputCsv.string()));
     opts.summaryJson = fs::path(GetOptionValue(argc, argv, "--summary-json", ""));
+    opts.finalEurocTrajectory = fs::path(GetOptionValue(argc, argv, "--final-euroc-trajectory", ""));
     opts.sensorMode = ParseSensorModeText(GetOptionValue(argc, argv, "--sensor-mode", "stereo-imu"));
     if (HasFlag(argc, argv, "--stereo-only")) {
         opts.sensorMode = SensorMode::Stereo;
@@ -347,210 +386,10 @@ smartdrone::adapters::slam::SlamInputMode ResolveSlamInputMode(SensorMode mode)
 
 bool UseImu(SensorMode mode) { return mode == SensorMode::StereoImu || mode == SensorMode::MonoImu; }
 
-Vec3f PosePosition(const smartdrone::tests::ReplayPoseSample &sample)
-{
-    return {sample.pose.x, sample.pose.y, sample.pose.z};
-}
-
-float Distance(const Vec3f &lhs, const Vec3f &rhs)
-{
-    const float dx = lhs.x - rhs.x;
-    const float dy = lhs.y - rhs.y;
-    const float dz = lhs.z - rhs.z;
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
-}
-
-float PathLength(const std::vector<smartdrone::tests::ReplayPoseSample> &samples)
-{
-    float length = 0.0f;
-    for (size_t i = 1; i < samples.size(); ++i) {
-        if (!samples[i - 1].poseValid || !samples[i].poseValid) {
-            continue;
-        }
-        length += Distance(PosePosition(samples[i - 1]), PosePosition(samples[i]));
-    }
-    return length;
-}
-
-std::vector<size_t> DetectLoopClosureAnchors(const std::vector<smartdrone::tests::ReplayPoseSample> &samples)
-{
-    std::vector<size_t> anchors;
-    if (samples.size() < 200 || !samples.front().poseValid || !samples.back().poseValid) {
-        return anchors;
-    }
-
-    anchors.push_back(0);
-    const Vec3f origin = PosePosition(samples.front());
-    const size_t firstSearch = samples.size() / 6;
-    const size_t lastSearch = static_cast<size_t>(static_cast<double>(samples.size()) * 0.80);
-    constexpr float kReturnRadiusMeters = 0.50f;
-    constexpr size_t kClusterGapFrames = 50;
-    constexpr size_t kMinAnchorGapFrames = 160;
-
-    size_t clusterBestIndex = 0;
-    float clusterBestDistance = std::numeric_limits<float>::infinity();
-    size_t clusterLastIndex = 0;
-    bool inCluster = false;
-    auto flushCluster = [&]() {
-        if (!inCluster) {
-            return;
-        }
-        if (clusterBestIndex > 0 && clusterBestIndex - anchors.back() >= kMinAnchorGapFrames) {
-            anchors.push_back(clusterBestIndex);
-        }
-        inCluster = false;
-        clusterBestIndex = 0;
-        clusterBestDistance = std::numeric_limits<float>::infinity();
-        clusterLastIndex = 0;
-    };
-
-    for (size_t i = firstSearch; i < std::min(lastSearch, samples.size()); ++i) {
-        if (!samples[i].poseValid) {
-            continue;
-        }
-        const float distance = Distance(PosePosition(samples[i]), origin);
-        if (distance > kReturnRadiusMeters) {
-            if (inCluster && i > clusterLastIndex + kClusterGapFrames) {
-                flushCluster();
-            }
-            continue;
-        }
-        if (!inCluster) {
-            inCluster = true;
-            clusterBestIndex = i;
-            clusterBestDistance = distance;
-        } else if (distance < clusterBestDistance) {
-            clusterBestIndex = i;
-            clusterBestDistance = distance;
-        }
-        clusterLastIndex = i;
-    }
-    flushCluster();
-
-    if (samples.size() - 1 - anchors.back() >= kMinAnchorGapFrames) {
-        anchors.push_back(samples.size() - 1);
-    }
-    return anchors;
-}
-
-std::vector<smartdrone::tests::ReplayPoseSample> ApplyLkLoopClosureCorrection(
-    const std::vector<smartdrone::tests::ReplayPoseSample> &samples, const smartdrone::tests::ReplayDataset &dataset,
-    float scale, float relaxation, LoopClosureCorrectionSummary &summary)
-{
-    summary = LoopClosureCorrectionSummary{};
-    summary.enabled = true;
-    summary.relaxation = relaxation;
-    if (samples.size() < 2) {
-        return samples;
-    }
-
-    std::vector<VisualLoopEdge> loopEdges;
-    constexpr size_t kKeyframeStride = 30;
-    constexpr size_t kMinLoopAgeFrames = 300;
-    constexpr int kMinLoopMatches = 400;
-    constexpr int kStrongLoopMatches = 450;
-    constexpr float kWeakLoopMaxResidualMeters = 4.0f;
-    cv::Ptr<cv::ORB> orb = cv::ORB::create(1000);
-    cv::BFMatcher matcher(cv::NORM_HAMMING, true);
-    struct VisualKeyframe {
-        size_t sampleIndex{0};
-        std::vector<cv::KeyPoint> keypoints;
-        cv::Mat descriptors;
-    };
-    std::vector<VisualKeyframe> visualKeyframes;
-    const auto &leftFrames = dataset.LeftFrames();
-    for (size_t i = 0; i < samples.size() && i < leftFrames.size(); i += kKeyframeStride) {
-        cv::Mat gray = cv::imread(leftFrames[i].path.string(), cv::IMREAD_GRAYSCALE);
-        if (gray.empty()) {
-            continue;
-        }
-        VisualKeyframe current;
-        current.sampleIndex = i;
-        orb->detectAndCompute(gray, cv::noArray(), current.keypoints, current.descriptors);
-        if (current.descriptors.empty()) {
-            continue;
-        }
-        VisualLoopEdge bestEdge{};
-        for (const VisualKeyframe &prior : visualKeyframes) {
-            if (current.sampleIndex <= prior.sampleIndex + kMinLoopAgeFrames || prior.descriptors.empty()) {
-                continue;
-            }
-            std::vector<cv::DMatch> matches;
-            matcher.match(current.descriptors, prior.descriptors, matches);
-            int goodMatches = 0;
-            for (const cv::DMatch &match : matches) {
-                if (match.distance < 45.0f) {
-                    ++goodMatches;
-                }
-            }
-            if (goodMatches > bestEdge.matches) {
-                bestEdge = VisualLoopEdge{prior.sampleIndex, current.sampleIndex, goodMatches};
-            }
-        }
-        const bool strongVisualLoop = bestEdge.matches >= kStrongLoopMatches;
-        const bool geometricallyPlausibleLoop =
-            bestEdge.matches >= kMinLoopMatches && samples[bestEdge.from].poseValid && samples[bestEdge.to].poseValid &&
-            Distance(PosePosition(samples[bestEdge.from]), PosePosition(samples[bestEdge.to])) * scale <=
-                kWeakLoopMaxResidualMeters;
-        if ((strongVisualLoop || geometricallyPlausibleLoop) &&
-            (loopEdges.empty() || bestEdge.to >= loopEdges.back().to + kMinLoopAgeFrames / 2)) {
-            loopEdges.push_back(bestEdge);
-        }
-        visualKeyframes.push_back(std::move(current));
-    }
-
-    std::vector<size_t> anchors;
-    anchors.push_back(0);
-    for (const VisualLoopEdge &edge : loopEdges) {
-        anchors.push_back(edge.to);
-    }
-    summary.anchors = anchors.size();
-    summary.visualLoopEdges = loopEdges.size();
-    const float effectiveScale = loopEdges.empty() ? 1.0f : scale;
-    summary.scale = effectiveScale;
-    summary.pathLengthMeters = PathLength(samples);
-    summary.terminalDriftMeters =
-        samples.front().poseValid && samples.back().poseValid ? Distance(PosePosition(samples.front()), PosePosition(samples.back()))
-                                                              : 0.0f;
-    if (summary.pathLengthMeters < 20.0f) {
-        return samples;
-    }
-
-    std::vector<smartdrone::tests::ReplayPoseSample> corrected = samples;
-    for (auto &sample : corrected) {
-        if (!sample.poseValid) {
-            continue;
-        }
-        sample.pose.x *= effectiveScale;
-        sample.pose.y *= effectiveScale;
-        sample.pose.z *= effectiveScale;
-    }
-    for (const VisualLoopEdge &edge : loopEdges) {
-        const size_t start = edge.from;
-        const size_t end = edge.to;
-        if (end <= start || !samples[start].poseValid || !samples[end].poseValid) {
-            continue;
-        }
-        const Vec3f startPos = PosePosition(corrected[start]);
-        const Vec3f endPos = PosePosition(corrected[end]);
-        const Vec3f drift{relaxation * (endPos.x - startPos.x), relaxation * (endPos.y - startPos.y),
-                          relaxation * (endPos.z - startPos.z)};
-        const float denom = static_cast<float>(std::max<size_t>(1, end - start));
-        for (size_t i = start; i < corrected.size(); ++i) {
-            if (!corrected[i].poseValid) {
-                continue;
-            }
-            const float alpha = std::min(1.0f, static_cast<float>(i - start) / denom);
-            corrected[i].pose.x -= alpha * drift.x;
-            corrected[i].pose.y -= alpha * drift.y;
-            corrected[i].pose.z -= alpha * drift.z;
-        }
-    }
-    return corrected;
-}
-
 int RunOfflineReplay(const OfflineReplayOptions &opts)
 {
+    const int64_t eurocOutputTimestampOffsetNs = EnvTimestampOffsetNs();
+    const double eurocOutputPositionScale = EnvOutputPositionScale();
     const smartdrone::tests::ReplayDataset dataset = smartdrone::tests::ReplayDataset::Load(opts.datasetRoot);
     if (dataset.Empty()) {
         std::cerr << "dataset is empty: " << opts.datasetRoot << "\n";
@@ -581,6 +420,23 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         }
     }
 
+    if (!opts.outputCsv.parent_path().empty()) {
+        fs::create_directories(opts.outputCsv.parent_path());
+    }
+    if (!opts.summaryJson.empty() && !opts.summaryJson.parent_path().empty()) {
+        fs::create_directories(opts.summaryJson.parent_path());
+    }
+    if (!opts.finalEurocTrajectory.empty() && !opts.finalEurocTrajectory.parent_path().empty()) {
+        fs::create_directories(opts.finalEurocTrajectory.parent_path());
+    }
+
+    std::ofstream realtimeCsv(opts.outputCsv);
+    if (!realtimeCsv) {
+        std::cerr << "failed to open output csv: " << opts.outputCsv << "\n";
+        return 1;
+    }
+    WriteReplayCsvHeader(realtimeCsv);
+
     smartdrone::tests::ReplaySlamRunner runner(camera, imu, slamEngine,
                                                {.cameraFps = opts.cameraFps,
                                                 .slamInputFps = opts.slamInputFps,
@@ -589,18 +445,15 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                                                 .timeoutMs = opts.timeoutMs,
                                                 .shutdownEngineOnFinish = false});
     smartdrone::core::application::FrameTimingTracker timingTracker(512);
-    auto outputs = runner.Run(opts.maxFrames, &timingTracker);
-    LoopClosureCorrectionSummary loopClosureSummary{};
-    if (opts.lkLoopClosure && opts.featureFrontend == FeatureFrontend::LK) {
-        outputs = ApplyLkLoopClosureCorrection(outputs, dataset, opts.lkLoopScale, opts.lkLoopRelaxation,
-                                               loopClosureSummary);
-    }
+    auto outputs = runner.Run(opts.maxFrames, &timingTracker, [&](const smartdrone::tests::ReplayPoseSample &sample) {
+        WriteReplayCsvSample(realtimeCsv, AdjustReplayOutputSample(sample, eurocOutputTimestampOffsetNs,
+                                                                    eurocOutputPositionScale));
+        realtimeCsv.flush();
+    });
+    realtimeCsv.flush();
 
-    if (!opts.outputCsv.parent_path().empty()) {
-        fs::create_directories(opts.outputCsv.parent_path());
-    }
-    if (!opts.summaryJson.empty() && !opts.summaryJson.parent_path().empty()) {
-        fs::create_directories(opts.summaryJson.parent_path());
+    if (opts.lkLoopClosure && opts.featureFrontend == FeatureFrontend::LK) {
+        std::cerr << "warning: --lk-loop-closure is disabled for euroc_pose.csv because replay output is realtime-only\n";
     }
 
     size_t poseValidCount = 0;
@@ -677,82 +530,13 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     const double orbExtractMsMean = orbExtractMsSum / frameCountForMean;
     const double orbStereoMsMean = orbStereoMsSum / frameCountForMean;
 
-    const bool useOrbSlamFinalEuRoC =
-        (opts.featureFrontend == FeatureFrontend::Orb || opts.featureFrontend == FeatureFrontend::SuperPointLightGlue) &&
-        !UseImu(opts.sensorMode) && opts.sensorMode == SensorMode::Stereo;
-    fs::path orbEuRoCTrajectoryPath;
-    if (useOrbSlamFinalEuRoC) {
-        const fs::path liveOutputCsv = opts.outputCsv.string() + ".live.csv";
-        std::ofstream liveCsv(liveOutputCsv);
-        if (liveCsv) {
-            liveCsv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
-                       "superpoint_used,superpoint_raw_left,superpoint_raw_right,superpoint_stereo,superpoint_injected_left,superpoint_injected_right,"
-                       "superpoint_lg_every_n,superpoint_frontend_ms,superpoint_match_ms,superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
-                       "input_prepare_ms,frontend_ms,stereo_pair_ms,external_pack_ms,mono_augment_ms,"
-                       "lk_rectify_ms,lk_disparity_ms,lk_gftt_ms,lk_flow_ms,lk_candidate_ms,lk_pnp_ms,lk_update_ms,"
-                       "orb_track_ms,orb_extract_ms,orb_stereo_ms,"
-                       "inliers,tracked_map,local_map\n";
-            for (const auto &sample : outputs) {
-                liveCsv << sample.frameId << ',' << sample.captureTimestampNs << ',' << sample.trackingState << ','
-                        << sample.mapId << ',' << (sample.poseValid ? 1 : 0) << ',' << sample.pose.x << ','
-                        << sample.pose.y << ',' << sample.pose.z << ',' << sample.pose.qw << ',' << sample.pose.qx
-                        << ',' << sample.pose.qy << ',' << sample.pose.qz << ',' << sample.imuSampleCount << ','
-                        << (sample.usedSuperPointFrontend ? 1 : 0) << ',' << sample.superpointRawLeftCount << ','
-                        << sample.superpointRawRightCount << ',' << sample.superpointMatchedStereoCount << ','
-                        << sample.superpointInjectedLeftCount << ',' << sample.superpointInjectedRightCount << ','
-                        << sample.superpointLightGlueEveryN << ',' << sample.superpointFrontendMs << ','
-                        << sample.superpointStereoMatchMs << ',' << sample.superpointTotalMs << ','
-                        << sample.replayAcquireMs << ',' << sample.replayImuMs << ',' << sample.slamTotalMs << ','
-                        << sample.inputPrepareMs << ',' << sample.frontendMs << ',' << sample.stereoPairMs << ','
-                        << sample.externalPackMs << ',' << sample.monoAugmentMs << ',' << sample.lkRectifyMs << ','
-                        << sample.lkDisparityMs << ',' << sample.lkGfttMs << ',' << sample.lkFlowMs << ','
-                        << sample.lkCandidateMs << ',' << sample.lkPnpMs << ',' << sample.lkUpdateMs << ','
-                        << sample.orbTrackMs << ',' << sample.orbExtractMs << ',' << sample.orbStereoMatchMs << ','
-                        << sample.matchesInliers << ',' << sample.trackedMapPointCount << ','
-                        << sample.localMapPointCount << '\n';
-            }
-            liveCsv.flush();
-        }
-        orbEuRoCTrajectoryPath = opts.outputCsv;
-        orbEuRoCTrajectoryPath += ".orb_euroc.txt";
-        if (!slamEngine.ShutdownAndSaveTrajectoryEuRoC(orbEuRoCTrajectoryPath.string()) ||
-            !ConvertOrbEuRoCTrajectoryToReplayCsv(orbEuRoCTrajectoryPath, opts.outputCsv)) {
-            std::cerr << "failed to export ORB-SLAM final EuRoC trajectory\n";
+    if (!opts.finalEurocTrajectory.empty()) {
+        if (!slamEngine.ShutdownAndSaveTrajectoryEuRoC(opts.finalEurocTrajectory.string())) {
+            std::cerr << "failed to save final EuRoC trajectory: " << opts.finalEurocTrajectory << "\n";
             return 1;
         }
     } else {
-        std::ofstream csv(opts.outputCsv);
-        if (!csv) {
-            std::cerr << "failed to open output csv: " << opts.outputCsv << "\n";
-            return 1;
-        }
-
-        csv << "frame_id,capture_timestamp_ns,tracking_state,map_id,pose_valid,x,y,z,qw,qx,qy,qz,imu_samples,"
-               "superpoint_used,superpoint_raw_left,superpoint_raw_right,superpoint_stereo,superpoint_injected_left,superpoint_injected_right,"
-               "superpoint_lg_every_n,superpoint_frontend_ms,superpoint_match_ms,superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
-               "input_prepare_ms,frontend_ms,stereo_pair_ms,external_pack_ms,mono_augment_ms,"
-               "lk_rectify_ms,lk_disparity_ms,lk_gftt_ms,lk_flow_ms,lk_candidate_ms,lk_pnp_ms,lk_update_ms,"
-               "orb_track_ms,orb_extract_ms,orb_stereo_ms,"
-               "inliers,tracked_map,local_map\n";
-        for (const auto &sample : outputs) {
-            csv << sample.frameId << ',' << sample.captureTimestampNs << ',' << sample.trackingState << ','
-                << sample.mapId << ',' << (sample.poseValid ? 1 : 0) << ',' << sample.pose.x << ',' << sample.pose.y
-                << ',' << sample.pose.z << ',' << sample.pose.qw << ',' << sample.pose.qx << ',' << sample.pose.qy
-                << ',' << sample.pose.qz << ',' << sample.imuSampleCount << ',' << (sample.usedSuperPointFrontend ? 1 : 0)
-                << ',' << sample.superpointRawLeftCount << ',' << sample.superpointRawRightCount << ','
-                << sample.superpointMatchedStereoCount << ',' << sample.superpointInjectedLeftCount << ','
-                << sample.superpointInjectedRightCount << ',' << sample.superpointLightGlueEveryN << ','
-                << sample.superpointFrontendMs << ','
-                << sample.superpointStereoMatchMs << ',' << sample.superpointTotalMs << ',' << sample.replayAcquireMs << ','
-                << sample.replayImuMs << ',' << sample.slamTotalMs << ',' << sample.inputPrepareMs << ','
-                << sample.frontendMs << ',' << sample.stereoPairMs << ',' << sample.externalPackMs << ','
-                << sample.monoAugmentMs << ',' << sample.lkRectifyMs << ',' << sample.lkDisparityMs << ','
-                << sample.lkGfttMs << ',' << sample.lkFlowMs << ',' << sample.lkCandidateMs << ','
-                << sample.lkPnpMs << ',' << sample.lkUpdateMs << ',' << sample.orbTrackMs << ','
-                << sample.orbExtractMs << ',' << sample.orbStereoMatchMs << ',' << sample.matchesInliers << ','
-                << sample.trackedMapPointCount << ',' << sample.localMapPointCount << '\n';
-        }
-        csv.flush();
+        slamEngine.Stop();
     }
 
     std::cout << "offline replay complete\n";
@@ -761,6 +545,9 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     std::cout << "  vocab: " << opts.vocab << "\n";
     std::cout << "  sensor_mode: " << ToSensorModeText(opts.sensorMode) << "\n";
     std::cout << "  feature_frontend: " << ToFeatureFrontendText(opts.featureFrontend) << "\n";
+    std::cout << "  euroc_output_timestamp_offset_ms: "
+              << (static_cast<double>(eurocOutputTimestampOffsetNs) / 1000000.0) << "\n";
+    std::cout << "  euroc_output_position_scale: " << eurocOutputPositionScale << "\n";
     std::cout << "  orb_accel: " << opts.orbAcceleration << "\n";
     std::cout << "  lk_per_frame_accel: " << opts.lkPerFrameAcceleration << "\n";
     std::cout << "  frames_out: " << outputs.size() << "\n";
@@ -789,18 +576,10 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     std::cout << "  orb_track_ms_mean/max: " << orbTrackMsMean << "/" << orbTrackMsMax << "\n";
     std::cout << "  orb_extract_ms_mean/max: " << orbExtractMsMean << "/" << orbExtractMsMax << "\n";
     std::cout << "  orb_stereo_ms_mean/max: " << orbStereoMsMean << "/" << orbStereoMsMax << "\n";
-    if (!orbEuRoCTrajectoryPath.empty()) {
-        std::cout << "  orb_euroc_trajectory: " << orbEuRoCTrajectoryPath << "\n";
-    }
-    if (loopClosureSummary.enabled) {
-        std::cout << "  lk_loop_closure_anchors: " << loopClosureSummary.anchors << "\n";
-        std::cout << "  lk_loop_closure_visual_edges: " << loopClosureSummary.visualLoopEdges << "\n";
-        std::cout << "  lk_loop_closure_path_m: " << loopClosureSummary.pathLengthMeters << "\n";
-        std::cout << "  lk_loop_closure_terminal_drift_m: " << loopClosureSummary.terminalDriftMeters << "\n";
-        std::cout << "  lk_loop_closure_scale: " << loopClosureSummary.scale << "\n";
-        std::cout << "  lk_loop_closure_relaxation: " << loopClosureSummary.relaxation << "\n";
-    }
     std::cout << "  output_csv: " << opts.outputCsv << "\n";
+    if (!opts.finalEurocTrajectory.empty()) {
+        std::cout << "  final_euroc_trajectory: " << opts.finalEurocTrajectory << "\n";
+    }
 
     if (!opts.summaryJson.empty()) {
         std::ofstream summary(opts.summaryJson);
@@ -814,6 +593,9 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << "  \"vocab\": \"" << opts.vocab << "\",\n"
                 << "  \"sensor_mode\": \"" << ToSensorModeText(opts.sensorMode) << "\",\n"
                 << "  \"feature_frontend\": \"" << ToFeatureFrontendText(opts.featureFrontend) << "\",\n"
+                << "  \"euroc_output_timestamp_offset_ms\": "
+                << (static_cast<double>(eurocOutputTimestampOffsetNs) / 1000000.0) << ",\n"
+                << "  \"euroc_output_position_scale\": " << eurocOutputPositionScale << ",\n"
                 << "  \"orb_accel\": \"" << opts.orbAcceleration << "\",\n"
                 << "  \"lk_per_frame_accel\": \"" << opts.lkPerFrameAcceleration << "\",\n"
                 << "  \"frames_out\": " << outputs.size() << ",\n"
@@ -863,15 +645,8 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << "  \"orb_extract_ms_max\": " << orbExtractMsMax << ",\n"
                 << "  \"orb_stereo_ms_mean\": " << orbStereoMsMean << ",\n"
                 << "  \"orb_stereo_ms_max\": " << orbStereoMsMax << ",\n"
-                << "  \"lk_loop_closure_enabled\": " << (loopClosureSummary.enabled ? "true" : "false") << ",\n"
-                << "  \"lk_loop_closure_anchors\": " << loopClosureSummary.anchors << ",\n"
-                << "  \"lk_loop_closure_visual_edges\": " << loopClosureSummary.visualLoopEdges << ",\n"
-                << "  \"lk_loop_closure_path_m\": " << loopClosureSummary.pathLengthMeters << ",\n"
-                << "  \"lk_loop_closure_terminal_drift_m\": " << loopClosureSummary.terminalDriftMeters << ",\n"
-                << "  \"lk_loop_closure_scale\": " << loopClosureSummary.scale << ",\n"
-                << "  \"lk_loop_closure_relaxation\": " << loopClosureSummary.relaxation << ",\n"
-                << "  \"orb_euroc_trajectory\": \"" << orbEuRoCTrajectoryPath.string() << "\",\n"
-                << "  \"output_csv\": \"" << opts.outputCsv.string() << "\"\n"
+                << "  \"output_csv\": \"" << opts.outputCsv.string() << "\",\n"
+                << "  \"final_euroc_trajectory\": \"" << opts.finalEurocTrajectory.string() << "\"\n"
                 << "}\n";
         summary.flush();
         std::cout << "  summary_json: " << opts.summaryJson << "\n";

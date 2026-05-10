@@ -50,6 +50,7 @@ struct SlamModeSharedState {
     mutable int m_lastSuperPointMatchedStereoCount{0};
     mutable int m_lastSuperPointInjectedLeftCount{0};
     mutable int m_lastSuperPointInjectedRightCount{0};
+    mutable uint64_t m_lastSuperPointExternalHash{0};
     mutable double m_lastSuperPointPrepareMs{0.0};
     mutable double m_lastSuperPointInputMs{0.0};
     mutable double m_lastSuperPointForwardMs{0.0};
@@ -60,6 +61,15 @@ struct SlamModeSharedState {
     mutable uint32_t m_lastSuperPointPayloadBytes{0};
     mutable int m_superPointLightGlueOkStreak{0};
     mutable int m_superPointLightGlueLastEveryN{0};
+    mutable int m_superPointLightGlueBootstrapTrustFrames{0};
+    mutable bool m_superPointLightGlueBootstrapTrustClosed{false};
+    mutable int m_lastSlamMatchesInliers{0};
+    mutable int m_lastSlamTrackedMapPoints{0};
+    mutable cv::Mat m_spLgPrevLeft;
+    mutable cv::Mat m_spLgPrevRight;
+    mutable std::vector<cv::Point2f> m_spLgPrevLeftPoints;
+    mutable std::vector<cv::Point2f> m_spLgPrevRightPoints;
+    mutable bool m_spLgHavePrevStereo{false};
 
     bool m_lkCalibrationLoaded{false};
     cv::Mat m_lkK1;

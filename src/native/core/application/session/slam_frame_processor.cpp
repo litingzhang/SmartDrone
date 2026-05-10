@@ -711,20 +711,28 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::EmitDfx(PublishedFrame &publi
                                  slamOutput.leftFeatures.empty() || slamOutput.rightFeatures.empty() ||
                                  superpointStereoWeak;
     if (slamDfxPeriodic || slamDfxAbnormal) {
-        char dfxLine[1408];
+        char dfxLine[2300];
         if (m_ctx.aliases.jsonDiagnostics) {
             std::snprintf(
                 dfxLine, sizeof(dfxLine),
                 "{\"tag\":\"slam_dfx\",\"frame\":%llu,\"state\":%d,\"quality\":%d,\"pose_valid\":%d,"
                 "\"reset_counter\":%u,\"reset_map_count\":%u,"
                 "\"imu_count\":%zu,\"feat_left\":%zu,\"feat_right\":%zu,\"points\":%zu,"
-                "\"track_points\":%u,\"local_points\":%u,\"inliers\":%d,"
+                "\"track_points\":%u,\"local_points\":%u,\"close_points\":%u,\"inliers\":%d,"
+                "\"orb_frame_id\":%llu,\"ref_kf\":%lld,\"last_kf\":%lld,\"last_kf_frame\":%lld,"
+                "\"keyframes_in_map\":%u,\"external_init_frame\":%d,\"external_injected\":%d,"
+                "\"external_bootstrap\":%d,\"external_stabilizing\":%d,"
+                "\"realtime_pose_gate\":%d,\"raw_pose_step_m\":%.4f,\"gated_pose_step_m\":%.4f,"
                 "\"superpoint_used\":%d,\"superpoint_stereo_weak\":%d,\"superpoint_raw_left\":%d,\"superpoint_raw_right\":%d,"
                 "\"superpoint_match_stereo\":%d,\"superpoint_injected_left\":%d,\"superpoint_injected_right\":%d,"
                 "\"superpoint_lg_every_n\":%d,"
                 "\"superpoint_prepare_ms\":%.3f,\"superpoint_input_ms\":%.3f,\"superpoint_forward_ms\":%.3f,"
                 "\"superpoint_frontend_ms\":%.3f,\"superpoint_match_ms\":%.3f,\"superpoint_total_ms\":%.3f,"
                 "\"orb_track_ms\":%.3f,\"orb_extract_ms\":%.3f,\"orb_stereo_ms\":%.3f,"
+                "\"local_mapping_wait_ms\":%.3f,\"local_mapping_wait_timeout_ms\":%d,"
+                "\"local_mapping_queue_before\":%d,\"local_mapping_queue_after\":%d,"
+                "\"local_mapping_accept_before\":%d,\"local_mapping_accept_after\":%d,"
+                "\"local_mapping_wait_requested\":%d,\"local_mapping_wait_timeout\":%d,"
                 "\"superpoint_image_count\":%u,\"superpoint_payload_bytes\":%u,"
                 "\"pair_dt_ms\":%.3f,\"reject_dt_ms\":%.3f,\"pending_left\":%zu,\"pending_right\":%zu,"
                 "\"drop_left\":%llu,\"drop_right\":%llu,\"rate_drop\":%llu,"
@@ -736,14 +744,27 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::EmitDfx(PublishedFrame &publi
                 poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
                 slamOutput.rightFeatures.size(), pointCount, slamOutput.trackedMapPointCount,
-                slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedSuperPointFrontend ? 1 : 0,
+                slamOutput.localMapPointCount, slamOutput.closeMapPointCount, slamOutput.matchesInliers,
+                static_cast<unsigned long long>(slamOutput.orbFrameId),
+                static_cast<long long>(slamOutput.referenceKeyFrameId),
+                static_cast<long long>(slamOutput.lastKeyFrameId),
+                static_cast<long long>(slamOutput.lastKeyFrameFrameId), slamOutput.keyFramesInMap,
+                slamOutput.externalStereoInitFrameId, slamOutput.externalStereoInjected ? 1 : 0,
+                slamOutput.externalStereoBootstrap ? 1 : 0, slamOutput.externalStereoStabilizing ? 1 : 0,
+                slamOutput.realtimePoseQualityGate ? 1 : 0, slamOutput.rawPoseStepMeters,
+                slamOutput.gatedPoseStepMeters,
+                slamOutput.usedSuperPointFrontend ? 1 : 0,
                 superpointStereoWeak ? 1 : 0, slamOutput.superpointRawLeftCount, slamOutput.superpointRawRightCount,
                 slamOutput.superpointMatchedStereoCount, slamOutput.superpointInjectedLeftCount,
                 slamOutput.superpointInjectedRightCount, slamOutput.superpointLightGlueEveryN,
                 slamOutput.superpointPrepareMs, slamOutput.superpointInputMs,
                 slamOutput.superpointForwardMs, slamOutput.superpointFrontendMs, slamOutput.superpointStereoMatchMs,
                 slamOutput.superpointTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
-                slamOutput.orbStereoMatchMs, slamOutput.superpointImageCount, slamOutput.superpointPayloadBytes,
+                slamOutput.orbStereoMatchMs, slamOutput.localMappingWaitMs, slamOutput.localMappingWaitTimeoutMs,
+                slamOutput.localMappingWaitQueueBefore, slamOutput.localMappingWaitQueueAfter,
+                slamOutput.localMappingAcceptingBefore ? 1 : 0, slamOutput.localMappingAcceptingAfter ? 1 : 0,
+                slamOutput.localMappingWaitRequested ? 1 : 0, slamOutput.localMappingWaitTimedOut ? 1 : 0,
+                slamOutput.superpointImageCount, slamOutput.superpointPayloadBytes,
                 static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
                 static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,
@@ -755,11 +776,15 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::EmitDfx(PublishedFrame &publi
             std::snprintf(
                 dfxLine, sizeof(dfxLine),
                 "[slam_dfx] frame=%llu state=%d quality=%d pose_valid=%d reset=%u/%u "
-                "imu=%zu feat=%zu/%zu points=%zu track=%u local=%u inliers=%d "
+                "imu=%zu feat=%zu/%zu points=%zu track=%u local=%u close=%u inliers=%d "
+                "orb_frame=%llu ref_kf=%lld last_kf=%lld last_kf_frame=%lld kfs=%u "
+                "external=init:%d injected:%d bootstrap:%d stabilizing:%d "
+                "pose_gate=%d raw_step=%.4f gated_step=%.4f "
                 "superpoint=%s stereo_warn=%s raw=%d/%d stereo=%d injected=%d/%d "
                 "lg_every_n=%d "
                 "superpoint_ms=prep %.3f input %.3f forward %.3f frontend %.3f match %.3f total %.3f "
                 "orb_ms=track %.3f extract %.3f stereo %.3f "
+                "local_mapping_wait=%.3fms timeout_ms=%d queue=%d/%d accept=%d/%d requested=%d timeout=%d "
                 "superpoint_io=%uimg/%ubytes "
                 "pair_dt=%.3f reject_dt=%.3f pend=%zu/%zu drop=%llu/%llu rate_drop=%llu "
                 "img_std=%.2f/%.2f sharp=%.2f/%.2f "
@@ -769,14 +794,27 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::EmitDfx(PublishedFrame &publi
                 poseResult.poseEstimate.valid ? 1 : 0, static_cast<unsigned>(effectiveResetCounter),
                 static_cast<unsigned>(effectiveResetMapCount), slamInput.imu.size(), slamOutput.leftFeatures.size(),
                 slamOutput.rightFeatures.size(), pointCount, slamOutput.trackedMapPointCount,
-                slamOutput.localMapPointCount, slamOutput.matchesInliers, slamOutput.usedSuperPointFrontend ? "on" : "off",
+                slamOutput.localMapPointCount, slamOutput.closeMapPointCount, slamOutput.matchesInliers,
+                static_cast<unsigned long long>(slamOutput.orbFrameId),
+                static_cast<long long>(slamOutput.referenceKeyFrameId),
+                static_cast<long long>(slamOutput.lastKeyFrameId),
+                static_cast<long long>(slamOutput.lastKeyFrameFrameId), slamOutput.keyFramesInMap,
+                slamOutput.externalStereoInitFrameId, slamOutput.externalStereoInjected ? 1 : 0,
+                slamOutput.externalStereoBootstrap ? 1 : 0, slamOutput.externalStereoStabilizing ? 1 : 0,
+                slamOutput.realtimePoseQualityGate ? 1 : 0, slamOutput.rawPoseStepMeters,
+                slamOutput.gatedPoseStepMeters,
+                slamOutput.usedSuperPointFrontend ? "on" : "off",
                 superpointStereoWeak ? "weak" : "ok", slamOutput.superpointRawLeftCount, slamOutput.superpointRawRightCount,
                 slamOutput.superpointMatchedStereoCount, slamOutput.superpointInjectedLeftCount,
                 slamOutput.superpointInjectedRightCount, slamOutput.superpointLightGlueEveryN,
                 slamOutput.superpointPrepareMs, slamOutput.superpointInputMs,
                 slamOutput.superpointForwardMs, slamOutput.superpointFrontendMs, slamOutput.superpointStereoMatchMs,
                 slamOutput.superpointTotalMs, slamOutput.orbTrackMs, slamOutput.orbExtractMs,
-                slamOutput.orbStereoMatchMs, slamOutput.superpointImageCount, slamOutput.superpointPayloadBytes,
+                slamOutput.orbStereoMatchMs, slamOutput.localMappingWaitMs, slamOutput.localMappingWaitTimeoutMs,
+                slamOutput.localMappingWaitQueueBefore, slamOutput.localMappingWaitQueueAfter,
+                slamOutput.localMappingAcceptingBefore ? 1 : 0, slamOutput.localMappingAcceptingAfter ? 1 : 0,
+                slamOutput.localMappingWaitRequested ? 1 : 0, slamOutput.localMappingWaitTimedOut ? 1 : 0,
+                slamOutput.superpointImageCount, slamOutput.superpointPayloadBytes,
                 static_cast<double>(pairDtMs), rejectDtMs, pendingL, pendingR,
                 static_cast<unsigned long long>(dropUnpairedL), static_cast<unsigned long long>(dropUnpairedR),
                 static_cast<unsigned long long>(m_state.rateLimitedDrops), stdL, stdR, sharpL, sharpR, frameGapMs,

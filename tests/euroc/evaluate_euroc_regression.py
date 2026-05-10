@@ -18,6 +18,15 @@ Vec3 = Tuple[float, float, float]
 Mat3 = Tuple[Vec3, Vec3, Vec3]
 
 
+class EstimateValidation:
+    def __init__(self) -> None:
+        self.total_rows = 0
+        self.invalid_pose_rows = 0
+        self.unusable_tracking_rows = 0
+        self.stale_identity_rows = 0
+        self.bootstrap_identity_rows = 0
+
+
 def _resolve_mav0(dataset: Path) -> Path:
     if (dataset / "mav0").is_dir():
         return dataset / "mav0"
@@ -41,9 +50,10 @@ def _read_ground_truth(dataset: Path) -> tuple[list[int], list[Vec3]]:
     return timestamps, positions
 
 
-def _read_estimate(path: Path) -> tuple[list[int], list[Vec3]]:
+def _read_estimate(path: Path, require_realtime_pose: bool) -> tuple[list[int], list[Vec3], EstimateValidation]:
     timestamps: list[int] = []
     positions: list[Vec3] = []
+    validation = EstimateValidation()
     with path.open(newline="") as fp:
         reader = csv.DictReader(fp)
         required = {"capture_timestamp_ns", "pose_valid", "x", "y", "z"}
@@ -51,11 +61,25 @@ def _read_estimate(path: Path) -> tuple[list[int], list[Vec3]]:
         if missing:
             raise ValueError(f"estimate CSV missing columns: {sorted(missing)}")
         for row in reader:
+            validation.total_rows += 1
             if row["pose_valid"] != "1":
+                validation.invalid_pose_rows += 1
                 continue
+            tracking_state = row.get("tracking_state", "")
+            pose = tuple(float(row[key]) for key in ("x", "y", "z", "qw", "qx", "qy", "qz"))
+            is_identity_pose = pose == (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0)
+            is_first_row = validation.total_rows == 1
+            if require_realtime_pose and tracking_state not in {"2", "3"}:
+                if tracking_state == "1" and is_first_row and is_identity_pose:
+                    validation.bootstrap_identity_rows += 1
+                else:
+                    validation.unusable_tracking_rows += 1
+            if require_realtime_pose and tracking_state == "3":
+                if is_identity_pose:
+                    validation.stale_identity_rows += 1
             timestamps.append(int(row["capture_timestamp_ns"]))
             positions.append((float(row["x"]), float(row["y"]), float(row["z"])))
-    return timestamps, positions
+    return timestamps, positions, validation
 
 
 def _associate_by_nearest(
@@ -182,10 +206,32 @@ def main() -> int:
     parser.add_argument("--rpe-delta-frames", type=int, default=10)
     parser.add_argument("--max-ate-rmse", type=float, default=2.5)
     parser.add_argument("--max-rpe-trans-rmse", type=float, default=1.0)
+    parser.add_argument(
+        "--require-realtime-pose",
+        action="store_true",
+        help="Require every output row to have a realtime pose; only the first pre-initialization identity row is allowed.",
+    )
     args = parser.parse_args()
 
     gt_ts, gt_pos = _read_ground_truth(args.dataset)
-    estimate_ts, estimate_pos = _read_estimate(args.estimate)
+    estimate_ts, estimate_pos, validation = _read_estimate(args.estimate, args.require_realtime_pose)
+    if args.require_realtime_pose:
+        if validation.total_rows == 0:
+            raise RuntimeError("estimate CSV contains no output rows")
+        if validation.invalid_pose_rows:
+            raise RuntimeError(
+                f"realtime pose missing: {validation.invalid_pose_rows}/{validation.total_rows} output rows have pose_valid!=1"
+            )
+        if validation.unusable_tracking_rows:
+            raise RuntimeError(
+                "realtime tracking unusable: "
+                f"{validation.unusable_tracking_rows}/{validation.total_rows} valid pose rows are not tracking_state 2/3"
+            )
+        if validation.stale_identity_rows:
+            raise RuntimeError(
+                "realtime pose stale: "
+                f"{validation.stale_identity_rows}/{validation.total_rows} RECENTLY_LOST rows still output identity pose"
+            )
     matched_est, matched_gt = _associate_by_nearest(
         estimate_ts,
         estimate_pos,
@@ -198,6 +244,11 @@ def main() -> int:
 
     aligned_est = _align_se3(matched_est, matched_gt)
     metrics = _trajectory_metrics(aligned_est, matched_gt, max(1, args.rpe_delta_frames))
+    metrics["estimate_rows"] = validation.total_rows
+    metrics["invalid_pose_rows"] = validation.invalid_pose_rows
+    metrics["unusable_tracking_rows"] = validation.unusable_tracking_rows
+    metrics["stale_identity_rows"] = validation.stale_identity_rows
+    metrics["bootstrap_identity_rows"] = validation.bootstrap_identity_rows
     metrics["max_association_dt_ms"] = float(args.max_association_dt_ms)
     metrics["threshold_max_ate_rmse_m"] = float(args.max_ate_rmse)
     metrics["threshold_max_rpe_trans_rmse_m"] = float(args.max_rpe_trans_rmse)

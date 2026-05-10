@@ -511,6 +511,10 @@ if [ "$BUILD_REPLAY" -eq 1 ]; then
         copy_artifact "$REPLAY_BUILD_DIR/tests/smart_drone_offline_replay" \
             "$REPLAY_ARTIFACTS_DIR/smart_drone_offline_replay"
     fi
+    if [ "$JETSON_ORIN_NX" -eq 1 ] && [ -f "$REPLAY_BUILD_DIR/orb_host/lib/libORB_SLAM3.so" ]; then
+        copy_artifact "$REPLAY_BUILD_DIR/orb_host/lib/libORB_SLAM3.so" \
+            "$NATIVE_ARTIFACTS_DIR/lib/libORB_SLAM3.so"
+    fi
     echo "offline replay tool built:"
     echo "  $REPLAY_ARTIFACTS_DIR/smart_drone_offline_replay"
 fi

@@ -109,6 +109,17 @@ void SlamModeSharedState::EnsureStereoRectifier(const cv::Size &inputSize)
 
 void SlamModeSharedState::ResetTrackingState()
 {
+    m_superPointLightGlueOkStreak = 0;
+    m_superPointLightGlueLastEveryN = 0;
+    m_superPointLightGlueBootstrapTrustFrames = 0;
+    m_superPointLightGlueBootstrapTrustClosed = false;
+    m_lastSlamMatchesInliers = 0;
+    m_lastSlamTrackedMapPoints = 0;
+    m_spLgPrevLeft.release();
+    m_spLgPrevRight.release();
+    m_spLgPrevLeftPoints.clear();
+    m_spLgPrevRightPoints.clear();
+    m_spLgHavePrevStereo = false;
     m_lkPrevLeft.release();
     m_lkPrevRight.release();
     m_lkPerFrameSgbm = nullptr;
@@ -131,6 +142,7 @@ void SlamModeSharedState::ResetExternalFeatureStats()
     m_lastSuperPointMatchedStereoCount = 0;
     m_lastSuperPointInjectedLeftCount = 0;
     m_lastSuperPointInjectedRightCount = 0;
+    m_lastSuperPointExternalHash = 0;
     m_lastSuperPointPrepareMs = 0.0;
     m_lastSuperPointInputMs = 0.0;
     m_lastSuperPointForwardMs = 0.0;
@@ -148,6 +160,7 @@ void SlamModeSharedState::CopyExternalFeatureStatsToOutput(core::ports::SlamOutp
     out.superpointMatchedStereoCount = m_lastSuperPointMatchedStereoCount;
     out.superpointInjectedLeftCount = m_lastSuperPointInjectedLeftCount;
     out.superpointInjectedRightCount = m_lastSuperPointInjectedRightCount;
+    out.superpointExternalHash = m_lastSuperPointExternalHash;
     out.superpointLightGlueEveryN = m_superPointLightGlueLastEveryN;
     out.superpointPrepareMs = m_lastSuperPointPrepareMs;
     out.superpointInputMs = m_lastSuperPointInputMs;

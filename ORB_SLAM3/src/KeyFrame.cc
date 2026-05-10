@@ -19,10 +19,31 @@
 #include "KeyFrame.h"
 #include "Converter.h"
 #include "ImuTypes.h"
+#include <algorithm>
+#include <cstdlib>
 #include<mutex>
+#include <string>
 
 namespace ORB_SLAM3
 {
+namespace
+{
+bool EnvFlagEnabled(const char *name, bool fallback)
+{
+    const char *value = std::getenv(name);
+    if(value == nullptr || value[0] == '\0')
+        return fallback;
+
+    const std::string text(value);
+    return !(text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF" ||
+             text == "no" || text == "NO");
+}
+
+bool StableCovisibilityOrderEnabled()
+{
+    return EnvFlagEnabled("SMART_DRONE_ORB_STABLE_COVISIBILITY_ORDER", false);
+}
+}
 
 long unsigned int KeyFrame::nNextId=0;
 
@@ -216,15 +237,38 @@ void KeyFrame::UpdateBestCovisibles()
     for(map<KeyFrame*,int>::iterator mit=mConnectedKeyFrameWeights.begin(), mend=mConnectedKeyFrameWeights.end(); mit!=mend; mit++)
        vPairs.push_back(make_pair(mit->second,mit->first));
 
-    sort(vPairs.begin(),vPairs.end());
+    const bool stableOrder = StableCovisibilityOrderEnabled();
+    if(stableOrder)
+    {
+        sort(vPairs.begin(), vPairs.end(), [](const pair<int, KeyFrame*> &lhs, const pair<int, KeyFrame*> &rhs) {
+            if(lhs.first != rhs.first)
+                return lhs.first > rhs.first;
+            const unsigned long lhsId = lhs.second ? lhs.second->mnId : 0;
+            const unsigned long rhsId = rhs.second ? rhs.second->mnId : 0;
+            return lhsId < rhsId;
+        });
+    }
+    else
+    {
+        sort(vPairs.begin(), vPairs.end());
+    }
+
     list<KeyFrame*> lKFs;
     list<int> lWs;
     for(size_t i=0, iend=vPairs.size(); i<iend;i++)
     {
         if(!vPairs[i].second->isBad())
         {
-            lKFs.push_front(vPairs[i].second);
-            lWs.push_front(vPairs[i].first);
+            if(stableOrder)
+            {
+                lKFs.push_back(vPairs[i].second);
+                lWs.push_back(vPairs[i].first);
+            }
+            else
+            {
+                lKFs.push_front(vPairs[i].second);
+                lWs.push_front(vPairs[i].first);
+            }
         }
     }
 
@@ -426,6 +470,7 @@ void KeyFrame::UpdateConnections(bool upParent)
     int nmax=0;
     KeyFrame* pKFmax=NULL;
     int th = 15;
+    const bool stableOrder = StableCovisibilityOrderEnabled();
 
     vector<pair<int,KeyFrame*> > vPairs;
     vPairs.reserve(KFcounter.size());
@@ -435,7 +480,8 @@ void KeyFrame::UpdateConnections(bool upParent)
     {
         if(!upParent)
             cout << "  UPDATE_CONN: KF " << mit->first->mnId << " ; num matches: " << mit->second << endl;
-        if(mit->second>nmax)
+        if(mit->second>nmax ||
+           (stableOrder && mit->second == nmax && pKFmax != nullptr && mit->first->mnId < pKFmax->mnId))
         {
             nmax=mit->second;
             pKFmax=mit->first;
@@ -453,13 +499,35 @@ void KeyFrame::UpdateConnections(bool upParent)
         pKFmax->AddConnection(this,nmax);
     }
 
-    sort(vPairs.begin(),vPairs.end());
+    if(stableOrder)
+    {
+        sort(vPairs.begin(), vPairs.end(), [](const pair<int, KeyFrame*> &lhs, const pair<int, KeyFrame*> &rhs) {
+            if(lhs.first != rhs.first)
+                return lhs.first > rhs.first;
+            const unsigned long lhsId = lhs.second ? lhs.second->mnId : 0;
+            const unsigned long rhsId = rhs.second ? rhs.second->mnId : 0;
+            return lhsId < rhsId;
+        });
+    }
+    else
+    {
+        sort(vPairs.begin(), vPairs.end());
+    }
+
     list<KeyFrame*> lKFs;
     list<int> lWs;
     for(size_t i=0; i<vPairs.size();i++)
     {
-        lKFs.push_front(vPairs[i].second);
-        lWs.push_front(vPairs[i].first);
+        if(stableOrder)
+        {
+            lKFs.push_back(vPairs[i].second);
+            lWs.push_back(vPairs[i].first);
+        }
+        else
+        {
+            lKFs.push_front(vPairs[i].second);
+            lWs.push_front(vPairs[i].first);
+        }
     }
 
     {

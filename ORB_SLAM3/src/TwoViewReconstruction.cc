@@ -23,12 +23,28 @@
 
 #include "Thirdparty/DBoW2/DUtils/Random.h"
 
+#include <cstdlib>
+#include <string>
 #include<thread>
 
 
 using namespace std;
 namespace ORB_SLAM3
 {
+    namespace
+    {
+        bool EnvFlagEnabled(const char *name, bool fallback)
+        {
+            const char *value = std::getenv(name);
+            if(value == nullptr || value[0] == '\0')
+                return fallback;
+
+            const std::string text(value);
+            return !(text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF" ||
+                     text == "no" || text == "NO");
+        }
+    }
+
     TwoViewReconstruction::TwoViewReconstruction(const Eigen::Matrix3f& k, float sigma, int iterations)
     {
         mK = k;
@@ -78,7 +94,10 @@ namespace ORB_SLAM3
         // Generate sets of 8 points for each RANSAC iteration
         mvSets = vector< vector<size_t> >(mMaxIterations,vector<size_t>(8,0));
 
-        DUtils::Random::SeedRandOnce(0);
+        if(EnvFlagEnabled("SMART_DRONE_ORB_DETERMINISTIC_RANDOM", false))
+            DUtils::Random::SeedRandOnce(0);
+        else
+            DUtils::Random::SeedRandOnce();
 
         for(int it=0; it<mMaxIterations; it++)
         {

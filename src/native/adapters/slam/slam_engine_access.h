@@ -16,6 +16,17 @@ class SlamEngineAccess final {
     {
         engine.StabilizeOutputPose(pose, poseValid, timestampSec, trackingState);
     }
+
+    static void MaintainRealtimePoseContinuity(SlamEngineAdapter &engine, core::ports::PoseEstimate &pose,
+                                               bool &poseValid, double timestampSec, int trackingState)
+    {
+        engine.MaintainRealtimePoseContinuity(pose, poseValid, timestampSec, trackingState);
+    }
+
+    static void GateRealtimePoseQuality(SlamEngineAdapter &engine, core::ports::SlamOutput &out, double timestampSec)
+    {
+        engine.GateRealtimePoseQuality(out, timestampSec);
+    }
 };
 
 } // namespace smartdrone::adapters::slam

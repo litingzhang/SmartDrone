@@ -64,10 +64,19 @@ SMART_DRONE_SUPERPOINT_PARALLEL_POST=1
 SMART_DRONE_LIGHTGLUE_MIN_SCORE=0.02
 SMART_DRONE_LIGHTGLUE_MAX_Y_DIFF_PX=1.5
 SMART_DRONE_LIGHTGLUE_MIN_DISPARITY_PX=0.8
-SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES=200
-SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO=0.48
+SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES=72
+SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_POINTS=24
+SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO=0.30
+SMART_DRONE_SP_LG_INIT_TRUST_FRONTEND_PAIRS=1
+SMART_DRONE_SP_LG_RECOVERY_TRUST_FRONTEND_PAIRS=1
+SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_FRONTEND_PAIRS=1
+SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK=120
 SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT=1
-SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE=0.985
+SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE=0.965
+SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1
+SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35
+SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0
+SMART_DRONE_REALTIME_POSE_CONTINUITY=1
 SMART_DRONE_SUPERPOINT_INPUT_MAX_WIDTH=640
 SMART_DRONE_SUPERPOINT_INPUT_MAX_HEIGHT=409
 SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=10
@@ -77,8 +86,8 @@ SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=10
 initialization. It is disabled by default because it adds another ORB extraction pass.
 
 `SMART_DRONE_LIGHTGLUE_EVERY_N=4` runs LightGlue once every four stereo frames and uses descriptor stereo matching on
-the skipped frames. MH04 regression kept the stable trajectory range while improving throughput
-(`ATE RMSE=0.9302 m`, `RPE RMSE=0.0938 m`, `Replay FPS=26.80`). `EVERY_N=5` was faster but failed MH04 badly
+the skipped frames. In the strict realtime MH04/MH05 replay run below, cadence 4 passed the no-missing-pose gate with
+`ATE RMSE < 0.1 m` on both sequences. `EVERY_N=5` was faster in older trials but failed MH04 badly
 (`ATE RMSE=5.2553 m`, `RPE RMSE=1.6089 m`), so keep 4 as the current runtime setting.
 
 `SMART_DRONE_SP_LG_ADAPTIVE_CADENCE=1` is an experimental mode that can switch from the base cadence to
@@ -87,13 +96,13 @@ adaptive `4 -> 5` were rejected because they did not provide a useful speed/accu
 `tracked_mps>=96` gave `ATE RMSE=0.9757 m`, `RPE RMSE=0.0979 m`, and `Replay FPS=26.91`; `tracked_mps>=128` gave
 `ATE RMSE=0.9441 m`, `RPE RMSE=0.1765 m`, and `Replay FPS=26.79`.
 
-`SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO=0.48` is the current SP+LG stereo bootstrap threshold. MH04 showed
-that the older `0.55` threshold delayed initialization until frame 513. The lower threshold keeps initialization early
-enough for the filtered stereo injection path while the final trajectory optimizer removes most of the initial transient.
+`SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO=0.30` and
+`SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_POINTS=24` are the current SP+LG stereo bootstrap thresholds. MH04/MH05
+regression showed `0.48` can leave hundreds of frames in `NOT_INITIALIZED`, while `0.08` accepts first-frame geometry
+that degrades MH04 ATE. The selected threshold keeps initialization early without taking the weakest bootstrap.
 
-`SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES=200` prevents weak SP+LG reinitialization. MH04 failed repeats accepted a
-second-map bootstrap around 150 injected stereo points and drifted above `0.1 m` ATE; good repeats waited until roughly
-200+ injected points before the second map was initialized.
+`SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_FEATURES=72` is the current SP+LG initialization floor. It accepts the early
+SuperPoint/LightGlue frames in EuRoC MH04/MH05 while still blocking very sparse bootstrap attempts.
 
 Keep SuperPoint input at `640x409` for the current EuRoC-oriented runtime. MH04 validation showed it is noticeably
 more accurate than `480x360` while still staying within the current Jetson budget.
@@ -135,12 +144,19 @@ descriptors directly into ORB-SLAM3. On MH01 it reduced `external_pack_ms` from 
 `RPE RMSE=0.0116 m`, identity frames `19` vs `4`). Keep it as an explicit speed experiment rather than the default.
 
 `SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT=1` is now the default SP+LG stereo injection path. It only injects stereo
-pairs that pass the ZNCC, epipolar, disparity, and grid-balance checks, and MH04 final-trajectory validation improved
-from about `0.113 m` ATE to below `0.1 m` with the SP+LG external depth scale set to `0.985`.
+pairs that pass the ZNCC, epipolar, disparity, and grid-balance checks. Strict realtime validation on MH04/MH05 uses
+this path with the SP+LG external depth scale set to `0.965`.
 
-`SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1` remains available as an offline diagnostic knob, but it is not a default.
-MH04 testing showed that waiting for LocalMapping alone did not prevent weak second-map initialization and increased
-replay cost.
+`SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1` is part of the current SP+LG realtime pose profile. It waits up to
+`SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35` after each stereo tracking call so the pose published for the
+current replay frame can see the latest LocalMapping update. This is intentionally a latency/accuracy tradeoff: the
+strict MH04/MH05 run below averaged about `55-56 ms/frame` on Jetson.
+
+`SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0` publishes the current pose returned by ORB-SLAM3 `Track()`. The
+EuRoC-style reference-keyframe trajectory pose is kept as an opt-in diagnostic path, not the strict realtime output
+contract. `SMART_DRONE_REALTIME_POSE_CONTINUITY=1` fills only the current frame when tracking has a transient
+lost/recently-lost output; it never rewrites earlier CSV rows and does not use future frames as a post-processing补点
+step.
 
 Two additional pack/prepare experiments were rejected. Fixed-point OpenCV remap maps for SP+LG preparation raised
 `input_prepare_ms` from `3.20 ms` to `3.54 ms` and increased identity frames from `4` to `17`. Parallel ORB descriptor
@@ -167,6 +183,9 @@ Python is used only for offline ONNX export. Runtime inference does not depend o
 - ATE alignment: SE3 rigid alignment, no Sim3 scale correction
 - RPE delta: 10 frames
 - Timestamp association window: 50 ms
+- Strict realtime gate: `evaluate_euroc_regression.py --require-realtime-pose`
+- Replay pose output: `euroc_pose.csv` is written and flushed during each replay frame callback; shutdown trajectory
+  export is not allowed to overwrite or backfill the official CSV.
 
 Three-mode Jetson profiling command:
 
@@ -184,6 +203,10 @@ SMART_DRONE_LIGHTGLUE_MIN_SCORE=0.02 \
 SMART_DRONE_LIGHTGLUE_MAX_Y_DIFF_PX=1.5 \
 SMART_DRONE_LIGHTGLUE_MIN_DISPARITY_PX=0.8 \
 SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=10 \
+SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1 \
+SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35 \
+SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0 \
+SMART_DRONE_REALTIME_POSE_CONTINUITY=1 \
 EUROC_SEQUENCES="MH_01_easy MH_02_easy MH_03_medium MH_04_difficult MH_05_difficult" \
 EUROC_MODES="orb klt_tracking superpoint_lightglue" \
 EUROC_OUT=/home/nvidia/euroc_eval/results/mh_three_modes_profile_YYYYMMDD_HHMMSS \
@@ -208,6 +231,10 @@ SMART_DRONE_LIGHTGLUE_MIN_SCORE=0.02 \
 SMART_DRONE_LIGHTGLUE_MAX_Y_DIFF_PX=1.5 \
 SMART_DRONE_LIGHTGLUE_MIN_DISPARITY_PX=0.8 \
 SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=10 \
+SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1 \
+SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35 \
+SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0 \
+SMART_DRONE_REALTIME_POSE_CONTINUITY=1 \
 EUROC_SEQUENCES="MH_01_easy MH_02_easy MH_03_medium MH_04_difficult MH_05_difficult" \
 EUROC_MODES=superpoint_lightglue \
 EUROC_OUT=/home/nvidia/euroc_eval/results/sp_lg_512_all_mh_YYYYMMDD_HHMMSS \
@@ -224,6 +251,17 @@ SuperPoint + LightGlue 768-point directory:
 
 KLT Tracking CPU directory:
 `/home/nvidia/euroc_eval/results/klt_tracking_fixed_all_mh_20260430_105409`
+
+Strict realtime SP+LG directory:
+`/home/nvidia/euroc_eval/results/mh04_mh05_splg_realtime_wait35_strict_20260507_184710`
+
+The strict realtime run wrote each `euroc_pose.csv` row during replay and passed `--require-realtime-pose`; no final
+trajectory export or post-run fill was used.
+
+| Mode | Sequence | Output rows | Pose-valid rows | ATE RMSE (m) | ATE Max (m) | RPE RMSE (m) | SLAM mean/max (ms) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SuperPoint + LightGlue realtime | MH_04_difficult | 2032 | 2032 | 0.0970 | 0.2118 | 0.0258 | 56.20 / 97.48 |
+| SuperPoint + LightGlue realtime | MH_05_difficult | 2273 | 2273 | 0.0686 | 0.2152 | 0.0246 | 54.98 / 102.16 |
 
 | Mode | Sequence | Matched frames | ATE RMSE (m) | ATE Max (m) | RPE RMSE (m) |
 | --- | --- | ---: | ---: | ---: | ---: |

@@ -104,6 +104,55 @@ unsigned long EnvUnsignedLongClamped(const char *name, unsigned long fallback, u
 
 namespace ORB_SLAM3
 {
+namespace
+{
+uint64_t MixTrackHash(uint64_t hash, uint64_t value)
+{
+    value += 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+    hash ^= value;
+    hash *= 1099511628211ULL;
+    return hash;
+}
+
+uint64_t HashMapPointSequence(const std::vector<MapPoint*> &points, const std::vector<bool> *outliers = nullptr)
+{
+    uint64_t hash = 1469598103934665603ULL;
+    for(size_t i = 0; i < points.size(); ++i)
+    {
+        MapPoint* point = points[i];
+        if(point == nullptr || point->isBad())
+            continue;
+        if(outliers != nullptr && i < outliers->size() && (*outliers)[i])
+            continue;
+        hash = MixTrackHash(hash, static_cast<uint64_t>(i));
+        hash = MixTrackHash(hash, static_cast<uint64_t>(point->mnId));
+    }
+    return hash;
+}
+
+bool StableTrackingLocalOrderEnabled()
+{
+    return EnvFlagEnabled("SMART_DRONE_ORB_STABLE_TRACKING_LOCAL_ORDER", false);
+}
+
+bool KeyFrameIdLess(const KeyFrame* lhs, const KeyFrame* rhs)
+{
+    if(lhs == nullptr)
+        return false;
+    if(rhs == nullptr)
+        return true;
+    return lhs->mnId < rhs->mnId;
+}
+
+bool MapPointIdLess(const MapPoint* lhs, const MapPoint* rhs)
+{
+    if(lhs == nullptr)
+        return false;
+    if(rhs == nullptr)
+        return true;
+    return lhs->mnId < rhs->mnId;
+}
+}
 
 TrackedVisualData Tracking::ExtractTrackedVisualData(int leftImageWidth,
                                                      int leftImageHeight,
@@ -116,6 +165,9 @@ TrackedVisualData Tracking::ExtractTrackedVisualData(int leftImageWidth,
     out.trackedMapPointCount = GetTrackedMapPointCount();
     out.localMapPointCount = GetLocalMapPointCount();
     out.matchesInliers = mnMatchesInliers;
+    out.localMapPointHash = mLocalMapPointHash;
+    out.matchedMapPointHashBeforePoseOptimization = mMatchedMapPointHashBeforePoseOptimization;
+    out.trackedMapPointHash = mTrackedMapPointHash;
     const size_t leftCount = std::min(mCurrentFrame.mvpMapPoints.size(), mCurrentFrame.mvKeysUn.size());
     const size_t rightCount = std::min(leftCount, mCurrentFrame.mvuRight.size());
     out.leftFeatures.reserve(leftCount);
@@ -190,7 +242,7 @@ constexpr unsigned long kPureStereoStabilizingKeyframeLimit = 24;
 int ExternalStereoStabilizingFrameWindow()
 {
     return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABILIZING_FRAME_WINDOW",
-                         kExternalStereoStabilizingFrameWindow, 0, 2000);
+                         kExternalStereoStabilizingFrameWindow, 0, 100000);
 }
 
 unsigned long ExternalStereoBootstrapKeyframeLimit()
@@ -218,6 +270,11 @@ int ExternalStereoStabilizingMaxMapPointsPerKeyframe()
 int ExternalStereoStableMaxMapPointsPerKeyframe()
 {
     return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABLE_MAX_MAPPOINTS_PER_KF", 100, 1, 1000);
+}
+
+int ExternalStereoStableLocalSearchTh()
+{
+    return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABLE_LOCAL_SEARCH_TH", 1, 1, 15);
 }
 
 int ExternalStereoMinFramesBetweenKeyframes()
@@ -283,6 +340,36 @@ bool IsExternalStereoObservationHealthy(const Frame& frame)
     return featureCount >= minFeatures &&
            frame.mnCloseMPs >= minClose &&
            static_cast<float>(frame.mnCloseMPs) >= minCloseRatio * static_cast<float>(featureCount);
+}
+
+bool ExternalStereoStableJumpGuardEnabled()
+{
+    return EnvFlagEnabled("SMART_DRONE_EXTERNAL_STEREO_STABLE_JUMP_GUARD", false);
+}
+
+int ExternalStereoStableJumpGuardMinInliers()
+{
+    return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABLE_JUMP_GUARD_MIN_INLIERS", 110, 1, 2000);
+}
+
+int ExternalStereoStableJumpGuardMinTrackedMapPoints()
+{
+    return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABLE_JUMP_GUARD_MIN_TRACKED_MAP", 90, 1, 2000);
+}
+
+float ExternalStereoStableJumpGuardMaxStepMeters()
+{
+    return EnvFloatClamped("SMART_DRONE_EXTERNAL_STEREO_STABLE_JUMP_GUARD_MAX_STEP_M", 0.09f, 0.01f, 0.50f);
+}
+
+float PoseStepMetersBetweenFrames(const Frame& currentFrame, const Frame& lastFrame)
+{
+    if(!currentFrame.isSet() || !lastFrame.isSet())
+        return 0.0f;
+
+    const Eigen::Vector3f currentTwc = currentFrame.GetPose().inverse().translation();
+    const Eigen::Vector3f lastTwc = lastFrame.GetPose().inverse().translation();
+    return (currentTwc - lastTwc).norm();
 }
 
 void LogExternalStereoPoseRescue(const char* reason, const Frame& frame, Atlas* pAtlas, int state,
@@ -3570,6 +3657,7 @@ bool Tracking::TrackLocalMap()
             if(mCurrentFrame.mvbOutlier[i])
                 aux2++;
         }
+    mMatchedMapPointHashBeforePoseOptimization = HashMapPointSequence(mCurrentFrame.mvpMapPoints);
 
     int inliers;
     if (!mpAtlas->isImuInitialized())
@@ -3607,6 +3695,7 @@ bool Tracking::TrackLocalMap()
         }
 
     mnMatchesInliers = 0;
+    mTrackedMapPointHash = 1469598103934665603ULL;
 
     // Update MapPoints Statistics
     for(int i=0; i<mCurrentFrame.N; i++)
@@ -3619,10 +3708,20 @@ bool Tracking::TrackLocalMap()
                 if(!mbOnlyTracking)
                 {
                     if(mCurrentFrame.mvpMapPoints[i]->Observations()>0)
+                    {
                         mnMatchesInliers++;
+                        mTrackedMapPointHash = MixTrackHash(mTrackedMapPointHash, static_cast<uint64_t>(i));
+                        mTrackedMapPointHash = MixTrackHash(mTrackedMapPointHash,
+                                                            static_cast<uint64_t>(mCurrentFrame.mvpMapPoints[i]->mnId));
+                    }
                 }
                 else
+                {
                     mnMatchesInliers++;
+                    mTrackedMapPointHash = MixTrackHash(mTrackedMapPointHash, static_cast<uint64_t>(i));
+                    mTrackedMapPointHash = MixTrackHash(mTrackedMapPointHash,
+                                                        static_cast<uint64_t>(mCurrentFrame.mvpMapPoints[i]->mnId));
+                }
             }
             else if(mSensor==System::STEREO)
                 mCurrentFrame.mvpMapPoints[i] = static_cast<MapPoint*>(NULL);
@@ -3639,6 +3738,8 @@ bool Tracking::TrackLocalMap()
     const bool pureStereoStabilizing = IsPureStereoStabilizing(mSensor, mpAtlas);
     const bool stereoBootstrap = externalStereoBootstrap || pureStereoBootstrap;
     const bool stereoStabilizing = externalStereoStabilizing || pureStereoStabilizing;
+    const bool externalStereoStablePhase =
+        mCurrentFrame.mbExternalStereoInjected && !externalStereoBootstrap && !externalStereoStabilizing;
     const int trackedMapPoints = CountTrackedMapPoints(mCurrentFrame);
     const int effectiveLocalMapMatches =
         stereoStabilizing ? std::max(trackedMapPoints, mnMatchesInliers) : mnMatchesInliers;
@@ -3647,6 +3748,15 @@ bool Tracking::TrackLocalMap()
         stereoBootstrap && (trackedMapPoints >= 2 || bootstrapClosePoints >= 24);
     const bool stabilizingVisualOdometryHealthy =
         stereoStabilizing && (trackedMapPoints >= 4 || bootstrapClosePoints >= 32);
+    const int stableJumpGuardMinInliers = ExternalStereoStableJumpGuardMinInliers();
+    const int stableJumpGuardMinTracked = ExternalStereoStableJumpGuardMinTrackedMapPoints();
+    const float stableJumpGuardMaxStepM = ExternalStereoStableJumpGuardMaxStepMeters();
+    const float stablePoseStepM = externalStereoStablePhase ? PoseStepMetersBetweenFrames(mCurrentFrame, mLastFrame) : 0.0f;
+    const bool stableJumpGuardWeakObservation =
+        mnMatchesInliers < stableJumpGuardMinInliers || trackedMapPoints < stableJumpGuardMinTracked;
+    const bool stableJumpGuardReject =
+        externalStereoStablePhase && ExternalStereoStableJumpGuardEnabled() && stableJumpGuardWeakObservation &&
+        stablePoseStepM > stableJumpGuardMaxStepM;
     const int minRecentRelocInliers = stereoBootstrap ? 4 : (stereoStabilizing ? 8 : 50);
     const int minStereoLocalMapInliers = stereoBootstrap ? 4 : (stereoStabilizing ? 8 : 30);
     const int minRecentlyLostInliers = stereoBootstrap ? 3 : (stereoStabilizing ? 6 : 10);
@@ -3668,6 +3778,11 @@ bool Tracking::TrackLocalMap()
              << " effective=" << effectiveLocalMapMatches
              << " kfs=" << (mpAtlas ? mpAtlas->KeyFramesInMap() : 0)
              << " init_frame=" << mnExternalStereoInitFrameId
+             << " step_m=" << stablePoseStepM
+             << " stable_guard=" << (stableJumpGuardReject ? "Y" : "N")
+             << " guard_max_step=" << stableJumpGuardMaxStepM
+             << " guard_min_inliers=" << stableJumpGuardMinInliers
+             << " guard_min_tracked=" << stableJumpGuardMinTracked
              << " min_recent=" << minRecentRelocInliers
              << " min_lost=" << minRecentlyLostInliers
              << " min_local=" << minStereoLocalMapInliers
@@ -3691,6 +3806,12 @@ bool Tracking::TrackLocalMap()
     {
         logDecision("stereo_vo_healthy", true);
         return true;
+    }
+
+    if(stableJumpGuardReject)
+    {
+        logDecision("stable_jump_guard", false);
+        return false;
     }
 
 
@@ -4153,6 +4274,8 @@ void Tracking::SearchLocalPoints()
             IsExternalStereoBootstrap(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
         const bool externalStereoStabilizing =
             IsExternalStereoStabilizing(mCurrentFrame, mpAtlas, mnExternalStereoInitFrameId);
+        const bool externalStereoStablePhase =
+            mCurrentFrame.mbExternalStereoInjected && !externalStereoBootstrap && !externalStereoStabilizing;
         if(mSensor==System::RGBD || mSensor==System::IMU_RGBD)
             th=3;
         if(mpAtlas->isImuInitialized())
@@ -4177,6 +4300,8 @@ void Tracking::SearchLocalPoints()
             th = std::max(th, 7);
         else if(externalStereoBootstrap)
             th = std::max(th, 5);
+        else if(externalStereoStablePhase)
+            th = std::max(th, ExternalStereoStableLocalSearchTh());
 
         matcher.SearchByProjection(mCurrentFrame, mvpLocalMapPoints, th, mpLocalMapper->mbFarPoints, mpLocalMapper->mThFarPoints);
     }
@@ -4196,12 +4321,10 @@ void Tracking::UpdateLocalPoints()
 {
     mvpLocalMapPoints.clear();
     mvpLocalMapPoints.reserve(mvpLocalKeyFrames.size() * 200);
-
     int count_pts = 0;
 
-    for(vector<KeyFrame*>::const_reverse_iterator itKF=mvpLocalKeyFrames.rbegin(), itEndKF=mvpLocalKeyFrames.rend(); itKF!=itEndKF; ++itKF)
+    auto appendMapPointsFromKeyFrame = [this, &count_pts](KeyFrame* pKF)
     {
-        KeyFrame* pKF = *itKF;
         const vector<MapPoint*> vpMPs = pKF->GetMapPointMatches();
 
         for(vector<MapPoint*>::const_iterator itMP=vpMPs.begin(), itEndMP=vpMPs.end(); itMP!=itEndMP; itMP++)
@@ -4219,7 +4342,23 @@ void Tracking::UpdateLocalPoints()
                 pMP->mnTrackReferenceForFrame=mCurrentFrame.mnId;
             }
         }
+    };
+
+    const bool stableLocalOrder = StableTrackingLocalOrderEnabled();
+    if(stableLocalOrder)
+    {
+        std::sort(mvpLocalKeyFrames.begin(), mvpLocalKeyFrames.end(), KeyFrameIdLess);
+        for(vector<KeyFrame*>::const_iterator itKF=mvpLocalKeyFrames.begin(), itEndKF=mvpLocalKeyFrames.end(); itKF!=itEndKF; ++itKF)
+            appendMapPointsFromKeyFrame(*itKF);
     }
+    else
+    {
+        for(vector<KeyFrame*>::const_reverse_iterator itKF=mvpLocalKeyFrames.rbegin(), itEndKF=mvpLocalKeyFrames.rend(); itKF!=itEndKF; ++itKF)
+            appendMapPointsFromKeyFrame(*itKF);
+    }
+    if(stableLocalOrder)
+        std::sort(mvpLocalMapPoints.begin(), mvpLocalMapPoints.end(), MapPointIdLess);
+    mLocalMapPointHash = HashMapPointSequence(mvpLocalMapPoints);
 }
 
 
@@ -4286,7 +4425,8 @@ void Tracking::UpdateLocalKeyFrames()
         if(pKF->isBad())
             continue;
 
-        if(it->second>max)
+        if(it->second>max ||
+           (StableTrackingLocalOrderEnabled() && it->second == max && pKFmax != nullptr && pKF->mnId < pKFmax->mnId))
         {
             max=it->second;
             pKFmax=pKF;
@@ -4295,6 +4435,9 @@ void Tracking::UpdateLocalKeyFrames()
         mvpLocalKeyFrames.push_back(pKF);
         pKF->mnTrackReferenceForFrame = mCurrentFrame.mnId;
     }
+    const bool stableLocalOrder = StableTrackingLocalOrderEnabled();
+    if(stableLocalOrder)
+        std::sort(mvpLocalKeyFrames.begin(), mvpLocalKeyFrames.end(), KeyFrameIdLess);
 
     // Include also some not-already-included keyframes that are neighbors to already-included keyframes
     for(vector<KeyFrame*>::const_iterator itKF=mvpLocalKeyFrames.begin(), itEndKF=mvpLocalKeyFrames.end(); itKF!=itEndKF; itKF++)
@@ -4323,7 +4466,10 @@ void Tracking::UpdateLocalKeyFrames()
         }
 
         const set<KeyFrame*> spChilds = pKF->GetChilds();
-        for(set<KeyFrame*>::const_iterator sit=spChilds.begin(), send=spChilds.end(); sit!=send; sit++)
+        vector<KeyFrame*> vChilds(spChilds.begin(), spChilds.end());
+        if(stableLocalOrder)
+            std::sort(vChilds.begin(), vChilds.end(), KeyFrameIdLess);
+        for(vector<KeyFrame*>::const_iterator sit=vChilds.begin(), send=vChilds.end(); sit!=send; sit++)
         {
             KeyFrame* pChildKF = *sit;
             if(!pChildKF->isBad())
@@ -4348,6 +4494,8 @@ void Tracking::UpdateLocalKeyFrames()
             }
         }
     }
+    if(stableLocalOrder)
+        std::sort(mvpLocalKeyFrames.begin(), mvpLocalKeyFrames.end(), KeyFrameIdLess);
 
     // Add 10 last temporal KFs (mainly for IMU)
     if((mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) &&mvpLocalKeyFrames.size()<80)
@@ -4828,6 +4976,21 @@ size_t Tracking::GetLocalMapPointCount() const
             ++count;
     }
     return count;
+}
+
+uint64_t Tracking::GetLocalMapPointHash() const
+{
+    return mLocalMapPointHash;
+}
+
+uint64_t Tracking::GetMatchedMapPointHashBeforePoseOptimization() const
+{
+    return mMatchedMapPointHashBeforePoseOptimization;
+}
+
+uint64_t Tracking::GetTrackedMapPointHash() const
+{
+    return mTrackedMapPointHash;
 }
 
 void Tracking::SaveSubTrajectory(string strNameFile_frames, string strNameFile_kf, string strFolder)
