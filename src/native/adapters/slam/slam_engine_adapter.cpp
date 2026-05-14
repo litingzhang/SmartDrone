@@ -16,6 +16,33 @@
 
 namespace smartdrone::adapters::slam {
 
+namespace {
+
+Sophus::SE3f PoseEstimateToSe3(const core::ports::PoseEstimate &pose)
+{
+    Eigen::Quaternionf q(pose.qw, pose.qx, pose.qy, pose.qz);
+    q.normalize();
+    return Sophus::SE3f(Sophus::SO3f(q), Eigen::Vector3f(pose.x, pose.y, pose.z));
+}
+
+core::ports::PoseEstimate Se3ToPoseEstimate(const Sophus::SE3f &pose)
+{
+    const Eigen::Vector3f t = pose.translation();
+    const Eigen::Quaternionf q(pose.so3().unit_quaternion());
+    core::ports::PoseEstimate out{};
+    out.valid = true;
+    out.x = t.x();
+    out.y = t.y();
+    out.z = t.z();
+    out.qw = q.w();
+    out.qx = q.x();
+    out.qy = q.y();
+    out.qz = q.z();
+    return out;
+}
+
+} // namespace
+
 SlamEngineAdapter::SlamEngineAdapter(std::unique_ptr<ORB_SLAM3::System> system, SlamInputMode inputMode, bool useImu,
                                std::string settingsPath)
     : m_system(std::move(system)), m_modeState(std::make_unique<SlamModeSharedState>()), m_inputMode(inputMode),
@@ -32,6 +59,7 @@ bool SlamEngineAdapter::Start()
     m_lastStablePose = core::ports::PoseEstimate{};
     m_haveLastStablePose = false;
     m_lastStableTimestampSec = 0.0;
+    ResetRealtimeOutputAlignment();
     m_modeState->ResetTrackingState();
     m_stableVelX = 0.0f;
     m_stableVelY = 0.0f;
@@ -75,6 +103,7 @@ void SlamEngineAdapter::Stop()
     m_lastStablePose = core::ports::PoseEstimate{};
     m_haveLastStablePose = false;
     m_lastStableTimestampSec = 0.0;
+    ResetRealtimeOutputAlignment();
     m_modeState->ResetTrackingState();
     m_stableVelX = 0.0f;
     m_stableVelY = 0.0f;
@@ -92,6 +121,13 @@ bool SlamEngineAdapter::ShutdownAndSaveTrajectoryEuRoC(const std::string &path)
     m_system->Shutdown();
     m_system->SaveTrajectoryEuRoC(path);
     return true;
+}
+
+void SlamEngineAdapter::ResetRealtimeOutputAlignment()
+{
+    m_realtimeOutputFromRawPose = Sophus::SE3f();
+    m_realtimeOutputMapContinuityActive = false;
+    m_realtimeOutputMapContinuityMapId = 0;
 }
 
 void SlamEngineAdapter::MaintainRealtimePoseContinuity(core::ports::PoseEstimate &pose, bool &poseValid,
@@ -170,10 +206,48 @@ void SlamEngineAdapter::MaintainRealtimePoseContinuity(core::ports::PoseEstimate
 
 void SlamEngineAdapter::GateRealtimePoseQuality(core::ports::SlamOutput &out, double timestampSec)
 {
+    if (m_realtimeOutputMapContinuityActive && out.mapId != m_realtimeOutputMapContinuityMapId) {
+        ResetRealtimeOutputAlignment();
+    }
+
+    if (m_realtimeOutputMapContinuityActive && out.poseValid && out.pose.valid && IsFinitePose(out.pose)) {
+        const core::ports::PoseEstimate rawPose = out.pose;
+        out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose * PoseEstimateToSe3(rawPose));
+        out.poseValid = true;
+        out.pose.valid = true;
+        if (m_haveLastStablePose) {
+            out.rawPoseStepMeters = PoseTranslationDistance(rawPose, m_lastStablePose);
+            out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+        }
+        if (out.trackingState != ORB_SLAM3::Tracking::OK) {
+            out.trackingState = ORB_SLAM3::Tracking::RECENTLY_LOST;
+        }
+        out.realtimePoseQualityGate = true;
+        return;
+    }
+
     const bool canMeasurePoseStep = out.poseValid && out.pose.valid && IsFinitePose(out.pose) && m_haveLastStablePose;
     if (canMeasurePoseStep) {
         out.rawPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
         out.gatedPoseStepMeters = out.rawPoseStepMeters;
+    }
+    if (canMeasurePoseStep && out.usedSuperPointFrontend && out.trackingState == ORB_SLAM3::Tracking::OK &&
+        EnvFlagEnabled("SMART_DRONE_REALTIME_POSE_RESET_GUARD", false)) {
+        const float resetJumpMax =
+            EnvFloatValueClamped("SMART_DRONE_REALTIME_POSE_RESET_GUARD_MAX_STEP_M", 0.75f, 0.05f, 10.0f);
+        if (out.rawPoseStepMeters > resetJumpMax) {
+            const Sophus::SE3f rawPose = PoseEstimateToSe3(out.pose);
+            const Sophus::SE3f outputPose = PoseEstimateToSe3(m_lastStablePose);
+            m_realtimeOutputFromRawPose = outputPose * rawPose.inverse();
+            m_realtimeOutputMapContinuityActive = true;
+            m_realtimeOutputMapContinuityMapId = out.mapId;
+            out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose * rawPose);
+            out.poseValid = true;
+            out.trackingState = ORB_SLAM3::Tracking::RECENTLY_LOST;
+            out.realtimePoseQualityGate = true;
+            out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+            return;
+        }
     }
     if (!EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_QUALITY_GATE", false)) {
         return;
@@ -181,7 +255,10 @@ void SlamEngineAdapter::GateRealtimePoseQuality(core::ports::SlamOutput &out, do
     if (!canMeasurePoseStep) {
         return;
     }
-    if (!out.usedSuperPointFrontend || !out.externalStereoInjected || out.externalStereoStabilizing ||
+    const bool gateDuringStabilizing =
+        EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_GATE_STABILIZING", false);
+    if (!out.usedSuperPointFrontend || !out.externalStereoInjected ||
+        (!gateDuringStabilizing && out.externalStereoStabilizing) ||
         out.trackingState != ORB_SLAM3::Tracking::OK) {
         return;
     }
@@ -193,7 +270,9 @@ void SlamEngineAdapter::GateRealtimePoseQuality(core::ports::SlamOutput &out, do
                              0.005f, 0.25f);
     const bool weakTracking = out.matchesInliers < minInliers || static_cast<int>(out.trackedMapPointCount) < minTracked;
     const float rawStep = out.rawPoseStepMeters;
-    if (!weakTracking) {
+    const bool gateAllSuperPointLightGlue =
+        EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_GATE_ALL", false);
+    if (!gateAllSuperPointLightGlue && !weakTracking) {
         return;
     }
 

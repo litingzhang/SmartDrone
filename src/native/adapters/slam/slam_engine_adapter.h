@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 
+#include <sophus/se3.hpp>
+
 #include "System.h"
 #include "adapters/slam/slam_mode_state.h"
 #include "core/application/config/app_args.h"
@@ -47,6 +49,7 @@ class SlamEngineAdapter final : public core::ports::ISlamEngine {
     void MaintainRealtimePoseContinuity(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
                                         int trackingState);
     void GateRealtimePoseQuality(core::ports::SlamOutput &out, double timestampSec);
+    void ResetRealtimeOutputAlignment();
 
     std::unique_ptr<ORB_SLAM3::System> m_system;
     std::unique_ptr<SlamModeSharedState> m_modeState;
@@ -61,6 +64,9 @@ class SlamEngineAdapter final : public core::ports::ISlamEngine {
     float m_stableVelX{0.0f};
     float m_stableVelY{0.0f};
     float m_stableVelZ{0.0f};
+    Sophus::SE3f m_realtimeOutputFromRawPose{};
+    bool m_realtimeOutputMapContinuityActive{false};
+    unsigned long m_realtimeOutputMapContinuityMapId{0};
 
     std::string m_settingsPath;
 };

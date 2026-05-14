@@ -83,6 +83,17 @@ bool TrackingStateCanPublishPose(int trackingState)
            trackingState == ORB_SLAM3::Tracking::OK_KLT;
 }
 
+void NormalizeRealtimePublishState(core::ports::SlamOutput &out)
+{
+    if (!out.poseValid || !out.pose.valid || IsIdentityPose(out.pose) ||
+        !EnvFlag("SMART_DRONE_REALTIME_POSE_CONTINUITY_MARK_RECENTLY_LOST", true)) {
+        return;
+    }
+    if (out.trackingState != ORB_SLAM3::Tracking::OK && out.trackingState != ORB_SLAM3::Tracking::RECENTLY_LOST) {
+        out.trackingState = ORB_SLAM3::Tracking::RECENTLY_LOST;
+    }
+}
+
 bool ExternalStereoStateDfxEnabled()
 {
     return EnvFlag("SMART_DRONE_SP_LG_STATE_DFX", false) ||
@@ -297,7 +308,9 @@ core::ports::SlamOutput RunSlamTrackingBackend(SlamEngineAdapter &engine,
     if (EnvFlagEnabled("SMART_DRONE_POSE_STABILIZER", false)) {
         SlamEngineAccess::StabilizeOutputPose(engine, out.pose, out.poseValid, input.frameTimeSec,
                                                   out.trackingState);
+        NormalizeRealtimePublishState(out);
     }
+    NormalizeRealtimePublishState(out);
 
     const bool needVisualExtraction = extractPointCloud || extractFeatures;
     if (!needVisualExtraction) {

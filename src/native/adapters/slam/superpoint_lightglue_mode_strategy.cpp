@@ -16,13 +16,28 @@ namespace smartdrone::adapters::slam {
 
 namespace {
 
-core::ports::SlamOutput MakeExternalFeatureFailureOutput(SlamModeSharedState &state,
+core::ports::SlamOutput MakeExternalFeatureFailureOutput(SlamEngineAdapter &engine, SlamModeSharedState &state,
                                                          const core::ports::SlamInputBatch &input)
 {
     core::ports::SlamOutput out{};
     out.frameId = input.frameId;
     out.captureTimestampNs = input.captureTimestampNs;
+    out.trackingState = ORB_SLAM3::Tracking::RECENTLY_LOST;
+    if (ORB_SLAM3::System *system = SlamEngineAccess::System(engine)) {
+        out.mapId = system->GetCurrentMapId();
+        out.matchesInliers = system->GetMatchesInliers();
+        out.trackedMapPointCount = static_cast<uint32_t>(system->GetTrackedMapPointCount());
+        out.localMapPointCount = static_cast<uint32_t>(system->GetLocalMapPointCount());
+        out.localMapPointHash = system->GetLocalMapPointHash();
+        out.matchedMapPointHashBeforePoseOptimization = system->GetMatchedMapPointHashBeforePoseOptimization();
+        out.trackedMapPointHash = system->GetTrackedMapPointHash();
+    }
     state.CopyExternalFeatureStatsToOutput(out);
+    if (EnvFlagEnabled("SMART_DRONE_REALTIME_POSE_CONTINUITY", true)) {
+        SlamEngineAccess::MaintainRealtimePoseContinuity(engine, out.pose, out.poseValid, input.frameTimeSec,
+                                                         out.trackingState);
+        out.pose.valid = out.poseValid;
+    }
     return out;
 }
 
@@ -53,8 +68,18 @@ int ChooseLightGlueCadence(const SlamModeSharedState &state, ORB_SLAM3::System &
 void UpdateLightGlueCadenceState(SlamModeSharedState &state, const core::ports::SlamOutput &out)
 {
     const int trackedMapPointMin = EnvIntValueClamped("SMART_DRONE_SP_LG_STABLE_TRACKED_MPS", 96, 1, 100000);
+    const int trustFrontendOkStreak =
+        EnvIntValueClamped("SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK", 0, 0, 100000);
+    const int bootstrapTrustHoldTrackedMapMin =
+        EnvIntValueClamped("SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_HOLD_TRACKED_MPS",
+                           trackedMapPointMin, 1, 100000);
+    const int trackedMapPoints = static_cast<int>(out.trackedMapPointCount);
+    const bool bootstrapTrustAlreadyMature =
+        trustFrontendOkStreak > 0 && state.m_superPointLightGlueOkStreak >= trustFrontendOkStreak;
+    const bool holdMatureBootstrapTrust =
+        bootstrapTrustAlreadyMature && trackedMapPoints >= bootstrapTrustHoldTrackedMapMin;
     if (out.trackingState == ORB_SLAM3::Tracking::OK &&
-        static_cast<int>(out.trackedMapPointCount) >= trackedMapPointMin) {
+        (trackedMapPoints >= trackedMapPointMin || holdMatureBootstrapTrust)) {
         ++state.m_superPointLightGlueOkStreak;
     } else {
         state.m_superPointLightGlueOkStreak = 0;
@@ -338,7 +363,7 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
     SlamModeSharedState &state = SlamEngineAccess::ModeState(engine);
     const bool monoMode = SlamEngineAccess::InputMode(engine) != SlamInputMode::Stereo;
     if (monoMode || state.m_externalFeatureFrontendClient == nullptr || !state.m_externalFeatureFrontendClient->Running()) {
-        return MakeExternalFeatureFailureOutput(state, input);
+        return MakeExternalFeatureFailureOutput(engine, state, input);
     }
 
     const int lightGlueEveryN = ChooseLightGlueCadence(state, *system);
@@ -351,7 +376,7 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
     cv::Mat leftPrepared = EnsureGray8(input.stereo.left.gray);
     cv::Mat rightPrepared = EnsureGray8(input.stereo.right.gray);
     if (leftPrepared.empty() || rightPrepared.empty()) {
-        return MakeExternalFeatureFailureOutput(state, input);
+        return MakeExternalFeatureFailureOutput(engine, state, input);
     }
 
     if (state.m_lkCalibrationLoaded) {
@@ -384,7 +409,7 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
                                                                        &featureErr)) {
         std::cerr << "[superpoint_lightglue] frontend_failed frame_id=" << input.frameId
                   << " err=" << featureErr << "\n";
-        return MakeExternalFeatureFailureOutput(state, input);
+        return MakeExternalFeatureFailureOutput(engine, state, input);
     }
 
     const auto frontendEndTp = std::chrono::steady_clock::now();
@@ -551,7 +576,7 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
                                              tracker != nullptr ? tracker->GetRightORBExtractor() : nullptr,
                                              leftPrepared, rightPrepared, matchedLeftPoints, matchedRightPoints,
                                              externalData)) {
-            return MakeExternalFeatureFailureOutput(state, input);
+            return MakeExternalFeatureFailureOutput(engine, state, input);
         }
     }
 

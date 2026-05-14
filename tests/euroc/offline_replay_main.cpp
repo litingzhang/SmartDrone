@@ -9,6 +9,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,9 @@
 #include "core/domain/runtime_mode.h"
 #include "support/replay_dataset.h"
 #include "support/replay_slam_runner.h"
+#include <Eigen/Core>
+#include <opencv2/core.hpp>
+#include <sophus/se3.hpp>
 
 namespace fs = std::filesystem;
 
@@ -94,6 +98,74 @@ double EnvOutputPositionScale()
     return EnvDoubleValue("SMART_DRONE_EUROC_OUTPUT_POSITION_SCALE", 1.0);
 }
 
+bool EnvFlagEnabled(const char *name, bool fallback)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return fallback;
+    }
+    const std::string text(value);
+    return text == "1" || text == "true" || text == "TRUE" || text == "on" || text == "ON" ||
+           text == "yes" || text == "YES";
+}
+
+std::optional<Sophus::SE3f> ReadSe3Node(const cv::FileNode &node)
+{
+    if (node.empty()) {
+        return std::nullopt;
+    }
+
+    cv::Mat mat;
+    node >> mat;
+    if (mat.empty() || mat.rows != 4 || mat.cols != 4) {
+        return std::nullopt;
+    }
+
+    cv::Mat mat32f;
+    mat.convertTo(mat32f, CV_32F);
+    Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+    for (int row = 0; row < 4; ++row) {
+        for (int col = 0; col < 4; ++col) {
+            transform(row, col) = mat32f.at<float>(row, col);
+        }
+    }
+    return Sophus::SE3f(transform);
+}
+
+std::optional<Sophus::SE3f> LoadBodyToCameraExtrinsics(const std::string &settingsPath)
+{
+    cv::FileStorage fs(settingsPath, cv::FileStorage::READ);
+    if (!fs.isOpened()) {
+        return std::nullopt;
+    }
+
+    if (auto tbc = ReadSe3Node(fs["T_b_c1"])) {
+        return tbc;
+    }
+    return ReadSe3Node(fs["IMU.T_b_c1"]);
+}
+
+void ApplyBodyOutputExtrinsics(smartdrone::tests::ReplayPoseSample &sample, const Sophus::SE3f &tbc)
+{
+    if (!sample.poseValid || !sample.pose.valid) {
+        return;
+    }
+
+    const Eigen::Quaternionf qwc(sample.pose.qw, sample.pose.qx, sample.pose.qy, sample.pose.qz);
+    const Sophus::SE3f twc(Sophus::SO3f(qwc.normalized()),
+                           Eigen::Vector3f(sample.pose.x, sample.pose.y, sample.pose.z));
+    const Sophus::SE3f twb = twc * tbc.inverse();
+    const Eigen::Vector3f t = twb.translation();
+    const Eigen::Quaternionf q(twb.so3().unit_quaternion());
+    sample.pose.x = t.x();
+    sample.pose.y = t.y();
+    sample.pose.z = t.z();
+    sample.pose.qw = q.w();
+    sample.pose.qx = q.x();
+    sample.pose.qy = q.y();
+    sample.pose.qz = q.z();
+}
+
 int64_t SaturatingTimestampAdd(int64_t timestampNs, int64_t offsetNs)
 {
     if (offsetNs > 0 && timestampNs > std::numeric_limits<int64_t>::max() - offsetNs) {
@@ -105,10 +177,13 @@ int64_t SaturatingTimestampAdd(int64_t timestampNs, int64_t offsetNs)
     return timestampNs + offsetNs;
 }
 
-smartdrone::tests::ReplayPoseSample AdjustReplayOutputSample(smartdrone::tests::ReplayPoseSample sample,
-                                                             int64_t timestampOffsetNs,
-                                                             double positionScale)
+smartdrone::tests::ReplayPoseSample AdjustReplayOutputSample(
+    smartdrone::tests::ReplayPoseSample sample, int64_t timestampOffsetNs, double positionScale,
+    const std::optional<Sophus::SE3f> &bodyFromCameraExtrinsics)
 {
+    if (bodyFromCameraExtrinsics.has_value()) {
+        ApplyBodyOutputExtrinsics(sample, *bodyFromCameraExtrinsics);
+    }
     if (timestampOffsetNs != 0) {
         sample.captureTimestampNs = SaturatingTimestampAdd(sample.captureTimestampNs, timestampOffsetNs);
     }
@@ -138,7 +213,7 @@ void ConfigureSuperPointLightGlueReplayDefaults()
     SetEnvIfUnset("SMART_DRONE_SP_LG_INIT_TRUST_FRONTEND_PAIRS", "1");
     SetEnvIfUnset("SMART_DRONE_SP_LG_RECOVERY_TRUST_FRONTEND_PAIRS", "1");
     SetEnvIfUnset("SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_FRONTEND_PAIRS", "1");
-    SetEnvIfUnset("SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK", "120");
+    SetEnvIfUnset("SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK", "20");
     SetEnvIfUnset("SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE", "1");
     SetEnvIfUnset("SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS", "35");
     SetEnvIfUnset("SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE", "0");
@@ -437,6 +512,17 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     }
     WriteReplayCsvHeader(realtimeCsv);
 
+    std::optional<Sophus::SE3f> bodyFromCameraExtrinsics;
+    if (!UseImu(opts.sensorMode) && opts.sensorMode == SensorMode::Stereo &&
+        EnvFlagEnabled("SMART_DRONE_EUROC_OUTPUT_BODY_FRAME", false)) {
+        bodyFromCameraExtrinsics = LoadBodyToCameraExtrinsics(opts.settings);
+        if (bodyFromCameraExtrinsics.has_value()) {
+            const Eigen::Vector3f t = bodyFromCameraExtrinsics->translation();
+            std::cerr << "[offline_replay] pure stereo realtime CSV uses body frame via T_b_c1"
+                      << " tx=" << t.x() << " ty=" << t.y() << " tz=" << t.z() << "\n";
+        }
+    }
+
     smartdrone::tests::ReplaySlamRunner runner(camera, imu, slamEngine,
                                                {.cameraFps = opts.cameraFps,
                                                 .slamInputFps = opts.slamInputFps,
@@ -447,7 +533,8 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     smartdrone::core::application::FrameTimingTracker timingTracker(512);
     auto outputs = runner.Run(opts.maxFrames, &timingTracker, [&](const smartdrone::tests::ReplayPoseSample &sample) {
         WriteReplayCsvSample(realtimeCsv, AdjustReplayOutputSample(sample, eurocOutputTimestampOffsetNs,
-                                                                    eurocOutputPositionScale));
+                                                                    eurocOutputPositionScale,
+                                                                    bodyFromCameraExtrinsics));
         realtimeCsv.flush();
     });
     realtimeCsv.flush();

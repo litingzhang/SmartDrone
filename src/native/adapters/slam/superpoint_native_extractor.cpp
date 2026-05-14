@@ -1540,6 +1540,29 @@ class TensorRtLightGlueEngine {
         return true;
     }
 
+    int FixedPointCount() const
+    {
+        if (!m_engine || m_kpts0Index < 0) {
+            return 0;
+        }
+        nvinfer1::Dims dims = m_engine->getBindingDimensions(m_kpts0Index);
+        if (dims.nbDims == 3 && dims.d[1] > 0) {
+            return dims.d[1];
+        }
+        const int profiles = m_engine->getNbOptimizationProfiles();
+        for (int profile = 0; profile < profiles; ++profile) {
+            const nvinfer1::Dims minDims =
+                m_engine->getProfileDimensions(m_kpts0Index, profile, nvinfer1::OptProfileSelector::kMIN);
+            const nvinfer1::Dims maxDims =
+                m_engine->getProfileDimensions(m_kpts0Index, profile, nvinfer1::OptProfileSelector::kMAX);
+            if (minDims.nbDims == 3 && maxDims.nbDims == 3 && minDims.d[1] > 0 &&
+                minDims.d[1] == maxDims.d[1]) {
+                return minDims.d[1];
+            }
+        }
+        return 0;
+    }
+
     bool Forward(const std::vector<float> &keypoints0, const std::vector<float> &keypoints1,
                  const std::vector<float> &descriptors0, const std::vector<float> &descriptors1,
                  const std::array<float, 2> &imageSize0, const std::array<float, 2> &imageSize1, int pointCount,
@@ -2026,8 +2049,10 @@ struct SuperPointNativeExtractor::Impl {
             auto matcher = std::make_unique<TensorRtLightGlueEngine>();
             std::string lgErr;
             if (matcher->Load(lightGluePath, &lgErr)) {
+                const int fixedPointCount = matcher->FixedPointCount();
                 lightGlueEngine = std::move(matcher);
-                lightGluePointCount = maxPointsForLightGlue();
+                lightGluePointCount = fixedPointCount > 0 ? fixedPointCount : maxPointsForLightGlue();
+                lightGlueDynamicPointCountDisabled = fixedPointCount > 0;
                 lightGlueMinScore = EnvFloat("SMART_DRONE_LIGHTGLUE_MIN_SCORE", 0.02f);
                 lightGlueMaxYDiffPx = EnvFloat("SMART_DRONE_LIGHTGLUE_MAX_Y_DIFF_PX", 1.5f);
                 lightGlueMinDisparityPx = EnvFloat("SMART_DRONE_LIGHTGLUE_MIN_DISPARITY_PX", 0.8f);
@@ -2039,6 +2064,7 @@ struct SuperPointNativeExtractor::Impl {
                 lightGlueEmptyCooldownFrames = EnvInt("SMART_DRONE_LIGHTGLUE_EMPTY_COOLDOWN_FRAMES", 120);
                 std::cerr << "[lightglue_trt] loaded engine=" << lightGluePath.string()
                           << " points=" << lightGluePointCount
+                          << " fixed_points=" << (fixedPointCount > 0 ? "Y" : "N")
                           << " min_score=" << lightGlueMinScore
                           << " max_y_diff_px=" << lightGlueMaxYDiffPx
                           << " min_disparity_px=" << lightGlueMinDisparityPx
