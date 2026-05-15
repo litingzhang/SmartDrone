@@ -908,3 +908,77 @@ offline replay failed: no output frames; check dataset, camera provider, or SLAM
 ATE/RPE were not computed. This run is recorded as infrastructure validation only; it proves the DPVO mode path is
 reachable from MH04 replay, but the native DPVO inference/state implementation is still blocked on engine export and CUDA
 correlation/BA/SE3 porting.
+
+## 2026-05-15 DPVO TensorRT Engine Export and MH04 Replay
+
+The next pass created the DPVO TensorRT neural engines directly on Jetson while keeping Python/PyTorch out of the
+`smart_drone` runtime. Python is used only for offline ONNX export.
+
+Export script added:
+
+```text
+scripts/export_dpvo_tensorrt.sh
+```
+
+Jetson export command:
+
+```bash
+/home/nvidia/euroc_eval/scripts/export_dpvo_tensorrt.sh \
+  --repo /home/nvidia/DPVO \
+  --weights /home/nvidia/DPVO/dpvo.pth \
+  --width 640 \
+  --height 400 \
+  --max-edges 4096 \
+  --skip-download
+```
+
+Export artifact directory:
+
+```text
+/home/nvidia/euroc_eval/results/dpvo_trt_export_20260515_043023
+```
+
+Generated engines:
+
+| Engine | Result | TensorRT GPU compute mean |
+| --- | --- | ---: |
+| `/home/nvidia/DPVO/weights/dpvo_patchifier_fp16.engine` | Passed | `10.9057 ms` |
+| `/home/nvidia/DPVO/weights/dpvo_update_fp16.engine` | Passed | `2.12103 ms` |
+
+Important export detail: the first update-engine build failed because TensorRT 8.5 did not have an importer/plugin for
+ONNX `LayerNormalization`. The script was updated to emit equivalent primitive operations (`ReduceMean`, `Sub`, `Mul`,
+`Sqrt`, etc.) and the second export passed.
+
+MH04 replay after engine export:
+
+```text
+/home/nvidia/euroc_eval/results/mh04_dpvo_tensorrt_20260515_043949
+```
+
+Result:
+
+| Field | Value |
+| --- | ---: |
+| `REPLAY_STATUS` | `0` |
+| `EVAL_STATUS` | `1` |
+| `frames_out` | `2032` |
+| `pose_valid_frames` | `0` |
+| `tracking_ok_frames` | `2032` |
+| `slam_total_ms_mean/max` | `1.62426 / 3.05263 ms` |
+
+Replay loaded both DPVO engines correctly:
+
+```text
+[dpvo_trt] ready patch_engine=/home/nvidia/DPVO/weights/dpvo_patchifier_fp16.engine update_engine=/home/nvidia/DPVO/weights/dpvo_update_fp16.engine input=640x400 patches=48 opt_window=7
+```
+
+ATE/RPE were still not computed because the evaluator rejected all rows as missing realtime pose:
+
+```text
+RuntimeError: realtime pose missing: 2032/2032 output rows have pose_valid!=1
+```
+
+Interpretation: the missing-engine blocker is resolved. The remaining blocker is not TensorRT engine loading; it is the
+native DPVO state implementation. DPVO cannot be an interface-only swap to a single pose network. Full pose output still
+requires native equivalents for DPVO patch selection/sampling, correlation, scatter aggregation, bundle adjustment,
+keyframe/patch graph management, and SE3 pose integration.
