@@ -60,6 +60,8 @@ bool SlamEngineAdapter::Start()
     m_haveLastStablePose = false;
     m_lastStableTimestampSec = 0.0;
     ResetRealtimeOutputAlignment();
+    m_realtimeOutputHaveLastMapId = false;
+    m_realtimeOutputLastMapId = 0;
     ResetOutputSmoother();
     m_modeState->ResetTrackingState();
     m_stableVelX = 0.0f;
@@ -105,6 +107,8 @@ void SlamEngineAdapter::Stop()
     m_haveLastStablePose = false;
     m_lastStableTimestampSec = 0.0;
     ResetRealtimeOutputAlignment();
+    m_realtimeOutputHaveLastMapId = false;
+    m_realtimeOutputLastMapId = 0;
     ResetOutputSmoother();
     m_modeState->ResetTrackingState();
     m_stableVelX = 0.0f;
@@ -155,7 +159,10 @@ void SlamEngineAdapter::MaintainRealtimePoseContinuity(core::ports::PoseEstimate
         dt = std::clamp(timestampSec - m_lastStableTimestampSec, kPoseStabilizerMinDtSec, kPoseStabilizerMaxDtSec);
     }
 
-    if (pose.valid && trackingState == ORB_SLAM3::Tracking::OK) {
+    const bool rawIdentity = pose.x == 0.0f && pose.y == 0.0f && pose.z == 0.0f && pose.qw == 1.0f &&
+                             pose.qx == 0.0f && pose.qy == 0.0f && pose.qz == 0.0f;
+
+    if (pose.valid && !rawIdentity && trackingState == ORB_SLAM3::Tracking::OK) {
         if (m_haveLastStablePose) {
             float measuredVelX = (pose.x - m_lastStablePose.x) / static_cast<float>(dt);
             float measuredVelY = (pose.y - m_lastStablePose.y) / static_cast<float>(dt);
@@ -175,8 +182,6 @@ void SlamEngineAdapter::MaintainRealtimePoseContinuity(core::ports::PoseEstimate
         return;
     }
 
-    const bool rawIdentity = pose.x == 0.0f && pose.y == 0.0f && pose.z == 0.0f && pose.qw == 1.0f &&
-                             pose.qx == 0.0f && pose.qy == 0.0f && pose.qz == 0.0f;
     const bool bootstrapFrame =
         !m_haveLastStablePose && trackingState == ORB_SLAM3::Tracking::NOT_INITIALIZED &&
         IsFinitePose(pose) && rawIdentity;
@@ -195,7 +200,8 @@ void SlamEngineAdapter::MaintainRealtimePoseContinuity(core::ports::PoseEstimate
     }
 
     const bool canPredict =
-        !pose.valid || trackingState == ORB_SLAM3::Tracking::RECENTLY_LOST || trackingState == ORB_SLAM3::Tracking::OK_KLT;
+        !pose.valid || rawIdentity || trackingState == ORB_SLAM3::Tracking::RECENTLY_LOST ||
+        trackingState == ORB_SLAM3::Tracking::OK_KLT;
     if (!canPredict) {
         poseValid = pose.valid;
         return;
@@ -218,8 +224,35 @@ void SlamEngineAdapter::MaintainRealtimePoseContinuity(core::ports::PoseEstimate
 
 void SlamEngineAdapter::GateRealtimePoseQuality(core::ports::SlamOutput &out, double timestampSec)
 {
-    if (m_realtimeOutputMapContinuityActive && out.mapId != m_realtimeOutputMapContinuityMapId) {
-        ResetRealtimeOutputAlignment();
+    const bool canBridgeMapReset = out.poseValid && out.pose.valid && IsFinitePose(out.pose);
+    if (canBridgeMapReset) {
+        const bool mapChanged = m_realtimeOutputHaveLastMapId && out.mapId != m_realtimeOutputLastMapId;
+        if (mapChanged) {
+            ResetRealtimeOutputAlignment();
+            if (out.usedSuperPointFrontend && m_haveLastStablePose &&
+                EnvFlagEnabled("SMART_DRONE_REALTIME_POSE_MAP_BRIDGE", true)) {
+                const Sophus::SE3f rawPose = PoseEstimateToSe3(out.pose);
+                const Sophus::SE3f outputPose = PoseEstimateToSe3(m_lastStablePose);
+                m_realtimeOutputFromRawPose = outputPose * rawPose.inverse();
+                m_realtimeOutputMapContinuityActive = true;
+                m_realtimeOutputMapContinuityMapId = out.mapId;
+                out.rawPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+                out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose * rawPose);
+                out.poseValid = true;
+                out.pose.valid = true;
+                out.trackingState = ORB_SLAM3::Tracking::RECENTLY_LOST;
+                out.realtimePoseQualityGate = true;
+                out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+                m_realtimeOutputHaveLastMapId = true;
+                m_realtimeOutputLastMapId = out.mapId;
+                return;
+            }
+        }
+        m_realtimeOutputHaveLastMapId = true;
+        m_realtimeOutputLastMapId = out.mapId;
+    } else if (!m_realtimeOutputHaveLastMapId) {
+        m_realtimeOutputHaveLastMapId = true;
+        m_realtimeOutputLastMapId = out.mapId;
     }
 
     if (m_realtimeOutputMapContinuityActive && out.poseValid && out.pose.valid && IsFinitePose(out.pose)) {

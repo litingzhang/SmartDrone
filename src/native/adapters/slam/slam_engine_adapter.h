@@ -74,6 +74,8 @@ class SlamEngineAdapter final : public core::ports::ISlamEngine {
     Sophus::SE3f m_realtimeOutputFromRawPose{};
     bool m_realtimeOutputMapContinuityActive{false};
     unsigned long m_realtimeOutputMapContinuityMapId{0};
+    bool m_realtimeOutputHaveLastMapId{false};
+    unsigned long m_realtimeOutputLastMapId{0};
 
     std::string m_settingsPath;
 };

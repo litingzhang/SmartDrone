@@ -736,3 +736,71 @@ Updated status:
 Current engineering conclusion: the remaining error is backend estimation drift under external SP+LG observations, not a
 publish-layer smoothness issue. The publish layer should use continuity plus optional no-lag guard for safety; the accuracy
 target requires a deeper change in how learned SP+LG observations are weighted, associated, or fused inside ORB-SLAM3.
+
+## 2026-05-15 RPE/ATE <= 0.04 Pass
+
+The latest target was tightened to both `RPE RMSE <= 0.04 m` and `ATE RMSE <= 0.04 m`, while preserving realtime pose
+output and avoiding pose jumps. RPE is not the current bottleneck: every complete pure-stereo run in this pass stayed
+below `0.04 m`. ATE remains the blocker.
+
+Two realtime-output protections were added:
+
+- Identity poses after an established stable pose are treated as missing measurements and replaced with the continuity
+  prediction instead of publishing a reset to the origin.
+- `SMART_DRONE_REALTIME_POSE_MAP_BRIDGE=1` bridges SP+LG map-id changes by aligning the new raw map pose to the last
+  published stable pose. This is causal and uses no future frames or ground truth.
+
+Focused pure-stereo result root: `/home/nvidia/euroc_eval/results/codex_ate04_post_identity_mh04_20260514_233020`
+
+| Profile | Main setting | Rows / nonzero poses | ATE RMSE (m) | RPE RMSE (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `left1200_depth0962_out10025_guard` | left augment `1200`, depth `0.962`, output guard | 2032 / 2030 | 0.0668 | 0.0227 | 0.171 | 0 | Reject for ATE. Realtime output is stable, but not below `0.04 m`. |
+
+Stereo-inertial bridge diagnostic root: `/home/nvidia/euroc_eval/results/codex_splg_imu_bridge_mh04_20260514_233801`
+
+| Run | Rows / nonzero poses | Strict realtime eval | ATE RMSE (m) | RPE RMSE (m) | Max step (m) | Maps | Decision |
+| --- | ---: | --- | ---: | ---: | ---: | --- | --- |
+| `splg_stereo_imu_bridge` | 2032 / 2000 | Fails: 31 bootstrap rows still `tracking_state=1` | not emitted | not emitted | 0.0685 | `0:1253, 1:779` | Reject for accuracy route. Map bridge removed the huge map-switch jump, but not the inertial trajectory error. |
+| bootstrap-state-only diagnostic | same CSV, only non-2/3 states relabeled for evaluation | Diagnostic only | 6.8060 | 0.5683 | 0.0685 | same | Reject. The path is smooth after bridging, but metrically wrong. |
+
+This confirms that IMU plus SP+LG is not a viable shortcut in the current configuration. The new map bridge is useful for
+no-jump realtime output, but the underlying stereo-inertial trajectory is still wrong.
+
+An opt-in backend experiment was added to test whether SP+LG bootstrap/stabilizing frames were being accepted too easily:
+
+- `SMART_DRONE_EXTERNAL_STEREO_REQUIRE_MAP_INLIERS=1`
+- `SMART_DRONE_EXTERNAL_STEREO_BOOTSTRAP_MIN_LOCAL_MAP_INLIERS`
+- `SMART_DRONE_EXTERNAL_STEREO_STABILIZING_MIN_LOCAL_MAP_INLIERS`
+- `SMART_DRONE_EXTERNAL_STEREO_STABLE_MIN_LOCAL_MAP_INLIERS`
+
+Default behavior is unchanged unless the switch is enabled.
+
+Map-inlier gate result root: `/home/nvidia/euroc_eval/results/codex_require_map_inliers_mh04_20260514_234154`
+
+| Profile | Main setting | Rows / nonzero poses | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Gate hits | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `require_map_loose` | min local-map inliers `8/16/30` | 2032 / 2030 | 0.1559 | 0.0226 | 0.3299 | 0.170 | 0 | 455 | Reject. Stable output, but much worse ATE. |
+| `require_map_mid` | min local-map inliers `16/32/45` | 2032 / 2030 | 0.0635 | 0.0237 | 0.1621 | 0.171 | 0 | 0 | Reject for target. Stable, but still above `0.04 m`. |
+
+Timestamp/position-scale scan on the latest complete trajectories found no hidden evaluator alignment gain:
+
+| Trajectory | Base ATE / RPE (m) | Best scanned ATE / RPE (m) | Best offset / scale | Interpretation |
+| --- | ---: | ---: | --- | --- |
+| `left1200_depth0962_out10025_guard` | 0.0668 / 0.0227 | 0.0668 / 0.0227 | `0 ms`, `1.0` | Publishing parameters are already locally optimal for this trajectory. |
+| `require_map_mid` | 0.0635 / 0.0237 | 0.0635 / 0.0237 | `0 ms`, `1.0` | No timestamp or scalar fix. |
+| historical favorable `depth0962` | 0.0475 / 0.0222 | 0.0443 / 0.0222 | `0 ms`, `1.0025` | Even the favorable non-reproduced run stays above `0.04 m` after a scalar scan. |
+
+Current status for the tightened target:
+
+| Requirement | Status |
+| --- | --- |
+| Full MH04 realtime rows | Pass: latest complete pure-stereo runs write `2032` rows from the callback. |
+| No dropped/invalid pose output | Pass: 0 invalid rows in the latest pure-stereo runs. |
+| No abnormal jumps | Pass for the latest pure-stereo guarded/map-inlier runs: max adjacent step about `0.17 m`, no steps above `0.2 m`. |
+| `RPE RMSE <= 0.04 m` | Pass in latest pure-stereo runs: `0.0226-0.0237 m`. |
+| `ATE RMSE <= 0.04 m` | Not achieved. Best latest complete stable run is `0.0635 m`; best historical complete SP+LG run found remains `0.0475 m` raw and `0.0443 m` after an offline scalar scan. |
+
+Conclusion: for MH04, realtime continuity and no-jump output are now controlled, and RPE is within target. The remaining
+gap is global ATE drift inside the SP+LG + ORB-SLAM3 fusion path. Further progress likely requires changing observation
+weighting, stereo-depth uncertainty, keyframe/map-point selection, or camera calibration assumptions rather than adding
+more output smoothing.

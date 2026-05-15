@@ -347,6 +347,11 @@ bool ExternalStereoStableJumpGuardEnabled()
     return EnvFlagEnabled("SMART_DRONE_EXTERNAL_STEREO_STABLE_JUMP_GUARD", false);
 }
 
+bool ExternalStereoRequireMapInliers()
+{
+    return EnvFlagEnabled("SMART_DRONE_EXTERNAL_STEREO_REQUIRE_MAP_INLIERS", false);
+}
+
 int ExternalStereoStableJumpGuardMinInliers()
 {
     return EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABLE_JUMP_GUARD_MIN_INLIERS", 110, 1, 2000);
@@ -3758,7 +3763,18 @@ bool Tracking::TrackLocalMap()
         externalStereoStablePhase && ExternalStereoStableJumpGuardEnabled() && stableJumpGuardWeakObservation &&
         stablePoseStepM > stableJumpGuardMaxStepM;
     const int minRecentRelocInliers = stereoBootstrap ? 4 : (stereoStabilizing ? 8 : 50);
-    const int minStereoLocalMapInliers = stereoBootstrap ? 4 : (stereoStabilizing ? 8 : 30);
+    const int defaultMinStereoLocalMapInliers = stereoBootstrap ? 4 : (stereoStabilizing ? 8 : 30);
+    const int minStereoLocalMapInliers =
+        externalStereoBootstrap
+            ? EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_BOOTSTRAP_MIN_LOCAL_MAP_INLIERS",
+                            defaultMinStereoLocalMapInliers, 0, 2000)
+            : (externalStereoStabilizing
+                   ? EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABILIZING_MIN_LOCAL_MAP_INLIERS",
+                                   defaultMinStereoLocalMapInliers, 0, 2000)
+                   : EnvIntClamped("SMART_DRONE_EXTERNAL_STEREO_STABLE_MIN_LOCAL_MAP_INLIERS",
+                                   defaultMinStereoLocalMapInliers, 0, 2000));
+    const bool requireExternalStereoMapInliers =
+        mCurrentFrame.mbExternalStereoInjected && ExternalStereoRequireMapInliers();
     const int minRecentlyLostInliers = stereoBootstrap ? 3 : (stereoStabilizing ? 6 : 10);
     auto logDecision = [&](const char* reason, bool accepted)
     {
@@ -3804,6 +3820,11 @@ bool Tracking::TrackLocalMap()
 
     if(bootstrapVisualOdometryHealthy || stabilizingVisualOdometryHealthy)
     {
+        if(requireExternalStereoMapInliers && effectiveLocalMapMatches < minStereoLocalMapInliers)
+        {
+            logDecision("stereo_vo_require_map_inliers", false);
+            return false;
+        }
         logDecision("stereo_vo_healthy", true);
         return true;
     }

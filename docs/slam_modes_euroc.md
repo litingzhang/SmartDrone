@@ -158,6 +158,16 @@ contract. `SMART_DRONE_REALTIME_POSE_CONTINUITY=1` fills only the current frame 
 lost/recently-lost output; it never rewrites earlier CSV rows and does not use future frames as a post-processing补点
 step.
 
+`SMART_DRONE_REALTIME_POSE_MAP_BRIDGE=1` is enabled by default for SP+LG realtime output. When ORB-SLAM3 switches to a
+new map, the output path aligns the new raw map pose to the last published stable pose before writing the current frame.
+This is a causal continuity bridge for no-jump output; it does not use future frames or ground truth. A 2026-05-15 MH04
+diagnostic showed it can remove map-switch jumps, but it does not by itself reduce global ATE drift.
+
+`SMART_DRONE_EXTERNAL_STEREO_REQUIRE_MAP_INLIERS=1` is an opt-in experiment that forces external-stereo
+bootstrap/stabilizing frames to meet local-map inlier floors before ORB-SLAM3 accepts the frame as tracked. It is off by
+default because MH04 tests with local-map floors `8/16/30` and `16/32/45` kept realtime output stable but did not reach
+the `ATE <= 0.04 m` target.
+
 Two additional pack/prepare experiments were rejected. Fixed-point OpenCV remap maps for SP+LG preparation raised
 `input_prepare_ms` from `3.20 ms` to `3.54 ms` and increased identity frames from `4` to `17`. Parallel ORB descriptor
 packing did not help either: `external_pack_ms` increased from `2.75 ms` to `2.90 ms`.
