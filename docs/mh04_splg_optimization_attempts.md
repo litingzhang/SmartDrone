@@ -877,3 +877,34 @@ correlation, CUDA BA, and SE3 graph state. The runtime therefore refuses to publ
 native CUDA/state pieces are ported.
 
 Documentation: see `docs/dpvo_tensorrt_backend.md`.
+
+## 2026-05-15 DPVO TensorRT MH04 Replay Attempt
+
+The DPVO backend was wired into `smart_drone_offline_replay` so the EuRoC replay tool can be launched with
+`--slam-backend dpvo`.
+
+Jetson command path:
+
+```text
+/home/nvidia/euroc_eval/bin/smart_drone_offline_replay_dpvo_trt
+```
+
+MH04 artifact directory:
+
+```text
+/home/nvidia/euroc_eval/results/mh04_dpvo_tensorrt_20260515_040901
+```
+
+Result: replay selected `slam_backend=dpvo_tensorrt` and failed fast with `REPLAY_STATUS=3` because `/home/nvidia/DPVO`
+and the expected DPVO TensorRT engines were not present on the Jetson:
+
+```text
+[offline_replay] slam_backend=dpvo_tensorrt feature_frontend=orb
+[offline_replay] dpvo_repo=/home/nvidia/DPVO patch_engine= update_engine=
+[dpvo_trt] missing engine(s): patch='' update='' repo='/home/nvidia/DPVO'
+offline replay failed: no output frames; check dataset, camera provider, or SLAM backend startup
+```
+
+ATE/RPE were not computed. This run is recorded as infrastructure validation only; it proves the DPVO mode path is
+reachable from MH04 replay, but the native DPVO inference/state implementation is still blocked on engine export and CUDA
+correlation/BA/SE3 porting.

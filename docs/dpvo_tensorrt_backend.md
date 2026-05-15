@@ -35,3 +35,38 @@ Next native steps:
 2. Port or wrap DPVO `altcorr` and `fastba` CUDA kernels without Python/Torch dependencies.
 3. Implement the C++ DPVO state machine: patch memory, graph edges, motion model, keyframe removal, and SE3 pose output.
 4. Run MH04/MH05 replay and a live rotation test before enabling `--slam-backend dpvo` in the service.
+
+## MH04 Replay Status
+
+2026-05-15 Jetson run:
+
+```bash
+/home/nvidia/euroc_eval/bin/smart_drone_offline_replay_dpvo_trt \
+  --dataset /home/nvidia/euroc/machine_hall/MH_04_difficult/mav0 \
+  --settings /home/nvidia/euroc_eval/config/euroc/stereo_orb2500.yaml \
+  --vocab /home/nvidia/ORBvoc.txt \
+  --stereo-only \
+  --fps 20 \
+  --slam-fps 20 \
+  --slam-backend dpvo \
+  --dpvo-repo /home/nvidia/DPVO
+```
+
+Artifact directory:
+
+```text
+/home/nvidia/euroc_eval/results/mh04_dpvo_tensorrt_20260515_040901
+```
+
+Result: no ATE/RPE metric was produced because the Jetson does not currently have DPVO TensorRT engine files. The final
+replay run exited with status `3`, before evaluation, and reported:
+
+```text
+[offline_replay] slam_backend=dpvo_tensorrt feature_frontend=orb
+[offline_replay] dpvo_repo=/home/nvidia/DPVO patch_engine= update_engine=
+[dpvo_trt] missing engine(s): patch='' update='' repo='/home/nvidia/DPVO'
+offline replay failed: no output frames; check dataset, camera provider, or SLAM backend startup
+```
+
+This is a backend readiness failure, not an accuracy result. The zero-output path now returns failure so it cannot be
+mistaken for a completed replay.

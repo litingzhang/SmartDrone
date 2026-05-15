@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "System.h"
+#include "adapters/slam/dpvo_tensorrt_engine.h"
 #include "adapters/slam/slam_engine_adapter.h"
 #include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "core/application/config/app_args.h"
@@ -36,6 +37,7 @@ struct OfflineReplayOptions {
     std::string vocab{"ORB_SLAM3/Vocabulary/ORBvoc.txt"};
     std::string settings{"config/stereo.yaml"};
     SensorMode sensorMode{SensorMode::StereoImu};
+    SlamBackend slamBackend{SlamBackend::OrbSlam3};
     FeatureFrontend featureFrontend{FeatureFrontend::Orb};
     smartdrone::core::domain::SlamOperationMode slamMode{smartdrone::core::domain::SlamOperationMode::Mapping};
     std::string superpointRepo{"LightGlue"};
@@ -54,6 +56,13 @@ struct OfflineReplayOptions {
     float lkLoopRelaxation{1.40f};
     std::string lkPerFrameAcceleration{"cpu"};
     std::string orbAcceleration{"cpu"};
+    std::string dpvoRepo{};
+    std::string dpvoPatchEngine{};
+    std::string dpvoUpdateEngine{};
+    int dpvoInputWidth{640};
+    int dpvoInputHeight{400};
+    int dpvoPatchesPerFrame{48};
+    int dpvoOptimizationWindow{7};
 };
 
 bool SuperPointLightGlueInjectionEnabled()
@@ -293,6 +302,7 @@ const char *UsageText()
         "  --settings <file>     ORB settings YAML path\n"
         "  --sensor-mode <mode>  stereo|stereo-imu|mono|mono-imu\n"
         "  --stereo-only         Shortcut for --sensor-mode stereo\n"
+        "  --slam-backend <mode> orbslam3|dpvo, default orbslam3\n"
         "  --feature-frontend <mode> orb|superpoint_lightglue|lk|lk_gftt_per_frame, default orb\n"
         "  --superpoint-repo <dir>    SuperPoint/LightGlue repo root containing TensorRT engines\n"
         "  --superpoint-device <dev>  TensorRT device auto|cuda, default auto\n"
@@ -310,7 +320,14 @@ const char *UsageText()
         "  --lk-loop-scale <f>   Sim3 scale used by LK loop closure, default 1.20\n"
         "  --lk-loop-relax <f>   Loop residual relaxation factor, default 1.40\n"
         "  --lk-per-frame-accel <auto|cpu|vpi-cuda>  Per-frame LK GFTT stereo backend, default cpu\n"
-        "  --orb-accel <cpu|cuda|vpi-remap>  ORB acceleration/preprocess mode, default cpu\n";
+        "  --orb-accel <cpu|cuda|vpi-remap>  ORB acceleration/preprocess mode, default cpu\n"
+        "  --dpvo-repo <dir>     DPVO repo root used to locate TensorRT engines under weights/\n"
+        "  --dpvo-patch-engine <file>  Explicit DPVO patchifier TensorRT engine\n"
+        "  --dpvo-update-engine <file> Explicit DPVO update TensorRT engine\n"
+        "  --dpvo-input-width <n>      DPVO TensorRT input width, default 640\n"
+        "  --dpvo-input-height <n>     DPVO TensorRT input height, default 400\n"
+        "  --dpvo-patches-per-frame <n> DPVO patch budget, default 48\n"
+        "  --dpvo-optimization-window <n> DPVO optimization window, default 7\n";
 }
 
 std::string NormalizeOrbAccelerationText(std::string value)
@@ -412,6 +429,7 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     if (HasFlag(argc, argv, "--stereo-only")) {
         opts.sensorMode = SensorMode::Stereo;
     }
+    opts.slamBackend = ParseSlamBackendText(GetOptionValue(argc, argv, "--slam-backend", "orbslam3"));
     opts.featureFrontend = ParseFeatureFrontendText(GetOptionValue(argc, argv, "--feature-frontend", "orb"));
     opts.slamMode = ParseSlamOperationModeText(GetOptionValue(argc, argv, "--slam-mode", "mapping"));
     opts.cameraFps = GetOptionInt(argc, argv, "--fps", opts.cameraFps);
@@ -431,6 +449,15 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     opts.lkLoopRelaxation = GetOptionFloat(argc, argv, "--lk-loop-relax", opts.lkLoopRelaxation);
     opts.lkPerFrameAcceleration = GetOptionValue(argc, argv, "--lk-per-frame-accel", "cpu");
     opts.orbAcceleration = NormalizeOrbAccelerationText(GetOptionValue(argc, argv, "--orb-accel", "cpu"));
+    opts.dpvoRepo = ResolveRuntimePath(GetOptionValue(argc, argv, "--dpvo-repo", ""), argc > 0 ? argv[0] : nullptr);
+    opts.dpvoPatchEngine =
+        ResolveRuntimePath(GetOptionValue(argc, argv, "--dpvo-patch-engine", ""), argc > 0 ? argv[0] : nullptr);
+    opts.dpvoUpdateEngine =
+        ResolveRuntimePath(GetOptionValue(argc, argv, "--dpvo-update-engine", ""), argc > 0 ? argv[0] : nullptr);
+    opts.dpvoInputWidth = GetOptionInt(argc, argv, "--dpvo-input-width", opts.dpvoInputWidth);
+    opts.dpvoInputHeight = GetOptionInt(argc, argv, "--dpvo-input-height", opts.dpvoInputHeight);
+    opts.dpvoPatchesPerFrame = GetOptionInt(argc, argv, "--dpvo-patches-per-frame", opts.dpvoPatchesPerFrame);
+    opts.dpvoOptimizationWindow = GetOptionInt(argc, argv, "--dpvo-optimization-window", opts.dpvoOptimizationWindow);
     opts.vocab = ResolveRuntimePath(GetOptionValue(argc, argv, "--vocab", opts.vocab), argc > 0 ? argv[0] : nullptr);
     opts.settings =
         ResolveRuntimePath(GetOptionValue(argc, argv, "--settings", DefaultSettingsForSensorMode(opts.sensorMode)),
@@ -461,6 +488,19 @@ smartdrone::adapters::slam::SlamInputMode ResolveSlamInputMode(SensorMode mode)
 
 bool UseImu(SensorMode mode) { return mode == SensorMode::StereoImu || mode == SensorMode::MonoImu; }
 
+smartdrone::adapters::slam::DpvoTensorRtConfig MakeOfflineDpvoConfig(const OfflineReplayOptions &opts)
+{
+    smartdrone::adapters::slam::DpvoTensorRtConfig cfg{};
+    cfg.repoPath = opts.dpvoRepo;
+    cfg.patchEnginePath = opts.dpvoPatchEngine;
+    cfg.updateEnginePath = opts.dpvoUpdateEngine;
+    cfg.inputWidth = std::clamp(opts.dpvoInputWidth, 160, 1280);
+    cfg.inputHeight = std::clamp(opts.dpvoInputHeight, 120, 960);
+    cfg.patchesPerFrame = std::clamp(opts.dpvoPatchesPerFrame, 16, 256);
+    cfg.optimizationWindow = std::clamp(opts.dpvoOptimizationWindow, 4, 32);
+    return cfg;
+}
+
 int RunOfflineReplay(const OfflineReplayOptions &opts)
 {
     const int64_t eurocOutputTimestampOffsetNs = EnvTimestampOffsetNs();
@@ -470,24 +510,42 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         std::cerr << "dataset is empty: " << opts.datasetRoot << "\n";
         return 1;
     }
+    std::cerr << "[offline_replay] slam_backend=" << ToSlamBackendText(opts.slamBackend)
+              << " feature_frontend=" << ToFeatureFrontendText(opts.featureFrontend) << "\n";
+    if (opts.slamBackend == SlamBackend::DpvoTensorRt) {
+        std::cerr << "[offline_replay] dpvo_repo=" << opts.dpvoRepo
+                  << " patch_engine=" << opts.dpvoPatchEngine
+                  << " update_engine=" << opts.dpvoUpdateEngine << "\n";
+    }
 
     smartdrone::tests::ReplayCameraProvider camera(dataset);
     smartdrone::tests::ReplayImuProvider imu(dataset);
-    const auto sensor = ResolveOrbSensor(opts.sensorMode);
-    ApplyOrbAccelerationEnvironment(opts.orbAcceleration);
-    auto orbSystem = std::make_unique<ORB_SLAM3::System>(opts.vocab, opts.settings, sensor, false);
-    smartdrone::adapters::slam::SlamEngineAdapter slamEngine(std::move(orbSystem), ResolveSlamInputMode(opts.sensorMode),
-                                                          UseImu(opts.sensorMode), opts.settings);
-    slamEngine.SetOperationMode(opts.slamMode);
-    slamEngine.SetFeatureFrontend(opts.featureFrontend);
-    slamEngine.SetExternalFeatureInputSizeLimit(opts.superpointInputMaxWidth, opts.superpointInputMaxHeight);
-    slamEngine.SetStereoVoLoopClosure(opts.lkRuntimeLoopClosure, opts.lkLoopScale, opts.lkLoopRelaxation);
-    slamEngine.SetStereoVoPerFrameAcceleration(opts.lkPerFrameAcceleration);
+    std::unique_ptr<smartdrone::core::ports::ISlamEngine> slamEngine;
+    smartdrone::adapters::slam::SlamEngineAdapter *orbSlamEngine = nullptr;
+
+    if (opts.slamBackend == SlamBackend::DpvoTensorRt) {
+        slamEngine = std::make_unique<smartdrone::adapters::slam::DpvoTensorRtEngine>(MakeOfflineDpvoConfig(opts));
+    } else {
+        const auto sensor = ResolveOrbSensor(opts.sensorMode);
+        ApplyOrbAccelerationEnvironment(opts.orbAcceleration);
+        auto orbSystem = std::make_unique<ORB_SLAM3::System>(opts.vocab, opts.settings, sensor, false);
+        auto orbEngine = std::make_unique<smartdrone::adapters::slam::SlamEngineAdapter>(
+            std::move(orbSystem), ResolveSlamInputMode(opts.sensorMode), UseImu(opts.sensorMode), opts.settings);
+        orbSlamEngine = orbEngine.get();
+        orbSlamEngine->SetOperationMode(opts.slamMode);
+        orbSlamEngine->SetFeatureFrontend(opts.featureFrontend);
+        orbSlamEngine->SetExternalFeatureInputSizeLimit(opts.superpointInputMaxWidth, opts.superpointInputMaxHeight);
+        orbSlamEngine->SetStereoVoLoopClosure(opts.lkRuntimeLoopClosure, opts.lkLoopScale, opts.lkLoopRelaxation);
+        orbSlamEngine->SetStereoVoPerFrameAcceleration(opts.lkPerFrameAcceleration);
+        slamEngine = std::move(orbEngine);
+    }
+
     smartdrone::adapters::slam::SuperPointLightGlueFrontendClient superpointFrontendClient;
     std::string superpointErr;
-    if (opts.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLightGlueInjectionEnabled()) {
+    if (orbSlamEngine != nullptr && opts.featureFrontend == FeatureFrontend::SuperPointLightGlue &&
+        SuperPointLightGlueInjectionEnabled()) {
         ConfigureSuperPointLightGlueReplayDefaults();
-        slamEngine.SetExternalFeatureFrontendClient(&superpointFrontendClient);
+        orbSlamEngine->SetExternalFeatureFrontendClient(&superpointFrontendClient);
         if (!superpointFrontendClient.Start(opts.superpointRepo, opts.superpointDevice, opts.superpointTopK, opts.superpointMaxPoints,
                                        &superpointErr)) {
             std::cerr << "error: superpoint_lightglue TensorRT start failed: " << superpointErr << "\n";
@@ -523,7 +581,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         }
     }
 
-    smartdrone::tests::ReplaySlamRunner runner(camera, imu, slamEngine,
+    smartdrone::tests::ReplaySlamRunner runner(camera, imu, *slamEngine,
                                                {.cameraFps = opts.cameraFps,
                                                 .slamInputFps = opts.slamInputFps,
                                                 .useImu = UseImu(opts.sensorMode),
@@ -538,6 +596,13 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         realtimeCsv.flush();
     });
     realtimeCsv.flush();
+
+    if (outputs.empty()) {
+        slamEngine->Stop();
+        superpointFrontendClient.Stop();
+        std::cerr << "offline replay failed: no output frames; check dataset, camera provider, or SLAM backend startup\n";
+        return 3;
+    }
 
     if (opts.lkLoopClosure && opts.featureFrontend == FeatureFrontend::LK) {
         std::cerr << "warning: --lk-loop-closure is disabled for euroc_pose.csv because replay output is realtime-only\n";
@@ -618,12 +683,16 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     const double orbStereoMsMean = orbStereoMsSum / frameCountForMean;
 
     if (!opts.finalEurocTrajectory.empty()) {
-        if (!slamEngine.ShutdownAndSaveTrajectoryEuRoC(opts.finalEurocTrajectory.string())) {
+        if (orbSlamEngine == nullptr) {
+            std::cerr << "failed to save final EuRoC trajectory: final trajectory export is ORB-SLAM3 only\n";
+            return 1;
+        }
+        if (!orbSlamEngine->ShutdownAndSaveTrajectoryEuRoC(opts.finalEurocTrajectory.string())) {
             std::cerr << "failed to save final EuRoC trajectory: " << opts.finalEurocTrajectory << "\n";
             return 1;
         }
     } else {
-        slamEngine.Stop();
+        slamEngine->Stop();
     }
 
     std::cout << "offline replay complete\n";
@@ -631,12 +700,20 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     std::cout << "  settings: " << opts.settings << "\n";
     std::cout << "  vocab: " << opts.vocab << "\n";
     std::cout << "  sensor_mode: " << ToSensorModeText(opts.sensorMode) << "\n";
+    std::cout << "  slam_backend: " << ToSlamBackendText(opts.slamBackend) << "\n";
     std::cout << "  feature_frontend: " << ToFeatureFrontendText(opts.featureFrontend) << "\n";
     std::cout << "  euroc_output_timestamp_offset_ms: "
               << (static_cast<double>(eurocOutputTimestampOffsetNs) / 1000000.0) << "\n";
     std::cout << "  euroc_output_position_scale: " << eurocOutputPositionScale << "\n";
     std::cout << "  orb_accel: " << opts.orbAcceleration << "\n";
     std::cout << "  lk_per_frame_accel: " << opts.lkPerFrameAcceleration << "\n";
+    if (opts.slamBackend == SlamBackend::DpvoTensorRt) {
+        std::cout << "  dpvo_repo: " << opts.dpvoRepo << "\n";
+        std::cout << "  dpvo_patch_engine: " << opts.dpvoPatchEngine << "\n";
+        std::cout << "  dpvo_update_engine: " << opts.dpvoUpdateEngine << "\n";
+        std::cout << "  dpvo_input: " << std::clamp(opts.dpvoInputWidth, 160, 1280) << "x"
+                  << std::clamp(opts.dpvoInputHeight, 120, 960) << "\n";
+    }
     std::cout << "  frames_out: " << outputs.size() << "\n";
     std::cout << "  pose_valid_frames: " << poseValidCount << "\n";
     std::cout << "  tracking_ok_frames: " << trackingOkCount << "\n";
@@ -679,11 +756,19 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
                 << "  \"settings\": \"" << opts.settings << "\",\n"
                 << "  \"vocab\": \"" << opts.vocab << "\",\n"
                 << "  \"sensor_mode\": \"" << ToSensorModeText(opts.sensorMode) << "\",\n"
+                << "  \"slam_backend\": \"" << ToSlamBackendText(opts.slamBackend) << "\",\n"
                 << "  \"feature_frontend\": \"" << ToFeatureFrontendText(opts.featureFrontend) << "\",\n"
                 << "  \"euroc_output_timestamp_offset_ms\": "
                 << (static_cast<double>(eurocOutputTimestampOffsetNs) / 1000000.0) << ",\n"
                 << "  \"euroc_output_position_scale\": " << eurocOutputPositionScale << ",\n"
                 << "  \"orb_accel\": \"" << opts.orbAcceleration << "\",\n"
+                << "  \"dpvo_repo\": \"" << opts.dpvoRepo << "\",\n"
+                << "  \"dpvo_patch_engine\": \"" << opts.dpvoPatchEngine << "\",\n"
+                << "  \"dpvo_update_engine\": \"" << opts.dpvoUpdateEngine << "\",\n"
+                << "  \"dpvo_input_width\": " << std::clamp(opts.dpvoInputWidth, 160, 1280) << ",\n"
+                << "  \"dpvo_input_height\": " << std::clamp(opts.dpvoInputHeight, 120, 960) << ",\n"
+                << "  \"dpvo_patches_per_frame\": " << std::clamp(opts.dpvoPatchesPerFrame, 16, 256) << ",\n"
+                << "  \"dpvo_optimization_window\": " << std::clamp(opts.dpvoOptimizationWindow, 4, 32) << ",\n"
                 << "  \"lk_per_frame_accel\": \"" << opts.lkPerFrameAcceleration << "\",\n"
                 << "  \"frames_out\": " << outputs.size() << ",\n"
                 << "  \"pose_valid_frames\": " << poseValidCount << ",\n"

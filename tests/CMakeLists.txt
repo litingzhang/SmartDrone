@@ -38,6 +38,7 @@ if(ENABLE_OFFLINE_REPLAY)
     euroc/offline_replay_main.cpp
     euroc/support/replay_dataset.cpp
     euroc/support/replay_slam_runner.cpp
+    ../src/native/adapters/slam/dpvo_tensorrt_engine.cpp
     ../src/native/adapters/slam/slam_engine_adapter.cpp
     ../src/native/adapters/slam/slam_mode_state.cpp
     ../src/native/adapters/slam/slam_mode_strategy.cpp
