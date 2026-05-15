@@ -25,8 +25,11 @@ class PosePostprocessor {
             float localX{0.0f};
             float localY{0.0f};
             float localZ{0.0f};
+            float outputGuardRawStepM{0.0f};
+            float outputGuardMaxStepM{0.0f};
             bool stereoExtrinsicsApplied{false};
             bool referenceApplied{false};
+            bool outputGuardApplied{false};
         };
 
         Px4MavlinkGateway::Pose alignedPose{};
@@ -60,6 +63,7 @@ class PosePostprocessor {
     struct StartupAligner {
         Px4MavlinkGateway::Pose AlignPose(const Px4MavlinkGateway::Pose &poseNed, bool trackingUsable,
                                           Px4MavlinkGateway &mavlink, PoseQuality &outQuality);
+        void SetPublishedPose(const Px4MavlinkGateway::Pose &pose);
 
       private:
         void RefreshRangeSensor(Px4MavlinkGateway &mavlink);
@@ -80,6 +84,22 @@ class PosePostprocessor {
         bool haveLatestRange{false};
         Px4MavlinkGateway::Pose holdPose{};
         Px4MavlinkGateway::DownwardDistanceSensor latestRange{};
+    };
+
+    struct OutputGuard {
+        Px4MavlinkGateway::Pose GuardPose(const Px4MavlinkGateway::Pose &pose, int64_t frameNs, bool trackingUsable,
+                                          PoseQuality &quality, bool &guardApplied, float &rawStepM,
+                                          float &maxStepM);
+
+      private:
+        float ComputeAllowedStep(int64_t frameNs) const;
+        void CommitPose(const Px4MavlinkGateway::Pose &pose, int64_t frameNs);
+
+        Px4MavlinkGateway::Pose lastPose{};
+        int64_t lastFrameNs{0};
+        int64_t lastLogFrameNs{0};
+        uint64_t guardHitCount{0};
+        bool haveLastPose{false};
     };
 
     struct VelocityTracker {
@@ -112,6 +132,7 @@ class PosePostprocessor {
   private:
     ContinuityMapper m_continuity{};
     StartupAligner m_aligner{};
+    OutputGuard m_outputGuard{};
     VelocityTracker m_velocity{};
 };
 

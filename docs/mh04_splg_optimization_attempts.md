@@ -804,3 +804,37 @@ Conclusion: for MH04, realtime continuity and no-jump output are now controlled,
 gap is global ATE drift inside the SP+LG + ORB-SLAM3 fusion path. Further progress likely requires changing observation
 weighting, stereo-depth uncertainty, keyframe/map-point selection, or camera calibration assumptions rather than adding
 more output smoothing.
+
+## 2026-05-15 Live Rotation Jump Fix
+
+Field feedback after deploying the previous build: replay output looked stable, but actual live use still produced large
+pose jumps when the camera view was rotated. The cause is that the deployed runtime publishes through
+`PosePostprocessor`, while the earlier no-jump guards mainly protected `SlamEngineAdapter` replay/CSV output. In live
+use, a frame can remain `trackingUsable=true` while the backend emits a short-lived bad translation during a viewpoint
+rotation; `StartupAligner` only held pose when tracking was not usable, so this bad translation could still reach UDP and
+MAVLink.
+
+Change added in this pass:
+
+- `PosePostprocessor::OutputGuard` now runs after startup alignment and before velocity estimation/publication.
+- It is causal: it only uses the previous published pose and current frame timestamp, with no future frames or ground
+  truth.
+- Normal pose steps pass through unchanged. If translation exceeds the configured step/speed envelope, only translation
+  is clamped toward the previous published pose; the current quaternion is preserved so turn-in-place rotation can still
+  update in realtime.
+- Guarded frames are marked `PoseQuality::Weak`, which suppresses velocity reuse and makes the event visible in telemetry.
+- `StartupAligner` is updated with the guarded published pose so later temporary tracking loss holds the safe output, not
+  the rejected raw jump.
+
+Jetson service defaults for the live build:
+
+| Variable | Value | Purpose |
+| --- | ---: | --- |
+| `SMART_DRONE_ONLINE_POSE_STEP_GUARD` | `1` | Enable live publish-layer abnormal-step guard. |
+| `SMART_DRONE_ONLINE_POSE_GUARD_MAX_STEP_M` | `0.18` | Per-frame hard cap for published translation change. |
+| `SMART_DRONE_ONLINE_POSE_GUARD_MAX_SPEED_MPS` | `3.0` | Timestamp-based speed envelope; at 20 Hz this caps normal steps near `0.15 m`. |
+| `SMART_DRONE_ONLINE_POSE_GUARD_DFX` | `1` | Log guard hits as `[pose_guard]` for field debugging. |
+
+Expected effect: this does not solve MH04 global ATE drift, but it directly targets the live safety issue. Rotating the
+camera should no longer publish a sudden large translation jump; if the backend gives an outlier, the published pose moves
+only within the configured envelope and the frame quality becomes weak.
