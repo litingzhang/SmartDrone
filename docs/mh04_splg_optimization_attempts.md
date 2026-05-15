@@ -1035,3 +1035,72 @@ Interpretation: the requested "output pose" failure is fixed. DPVO mode now prod
 MH04 sequence. Accuracy is not fixed; the temporary stereo VO bridge drifts badly and is only a stepping stone toward the
 real DPVO C++/CUDA state machine. The next accuracy work must replace this bridge with DPVO patch selection/sampling,
 correlation, scatter aggregation, bundle adjustment, keyframe/patch graph management, and SE3 integration.
+
+## 2026-05-15 DPVO Runtime State Shell and TensorRT Execution
+
+The next pass started replacing the bridge-only DPVO backend with the actual DPVO runtime structure. The official DPVO
+tracking loop was mapped to C++ as:
+
+```text
+frame -> patchifier -> patch memory -> forward/back graph edges
+      -> reproject -> correlation -> update aggregation/GRU
+      -> BA -> SE3 pose + patch-depth retraction
+```
+
+Implemented in `DpvoTensorRtEngine`:
+
+- Added CUDA stream and device-buffer management for DPVO TensorRT inference.
+- Added TensorRT binding helpers for dynamic input shapes and output shape validation.
+- The patchifier engine is now executed per frame. Jetson confirms `fmap=[1x128x100x160]` and
+  `imap=[1x384x100x160]`.
+- The exported update engine is initialized and warmed up at startup.
+- Added a C++ DPVO-shaped graph state: frame memory, patch slots, forward/back edges, 8-frame initialization state, and
+  removal-window pruning.
+- Realtime pose output is still kept alive through the existing stereo VO bridge until native correlation/BA/SE3 is
+  available.
+
+Build/deploy validation:
+
+```text
+./scripts/build.sh replay --jobs $(nproc)
+./scripts/build.sh replay --jetson-orin-nx --jobs 16
+./scripts/build.sh smart_drone --jetson-orin-nx --jobs 16
+```
+
+Updated Jetson binaries:
+
+```text
+/home/nvidia/euroc_eval/bin/smart_drone
+/home/nvidia/euroc_eval/bin/smart_drone_offline_replay_dpvo_trt
+```
+
+MH04 artifact directory:
+
+```text
+/home/nvidia/euroc_eval/results/mh04_dpvo_state_machine_20260515_051248
+```
+
+Startup evidence:
+
+```text
+[dpvo_trt] ready patch_engine=/home/nvidia/DPVO/weights/dpvo_patchifier_fp16.engine update_engine=/home/nvidia/DPVO/weights/dpvo_update_fp16.engine input=640x400 patches=48 opt_window=7 update_warmup_ms=4.28805
+[dpvo_trt] patchifier active fmap=[1x128x100x160] imap=[1x384x100x160] ms=106.551
+```
+
+Result:
+
+| Field | Value |
+| --- | ---: |
+| `frames_out` | `2032` |
+| `pose_valid_frames` | `2032` |
+| `tracking_ok_frames` | `2032` |
+| `tracking_lost_frames` | `0` |
+| `matched_pairs` | `1978` |
+| `ATE RMSE` | `6.2422 m` |
+| `RPE RMSE` | `0.5566 m` |
+| `slam_total_ms_mean/max` | `87.0494 / 181.515 ms` |
+
+Interpretation: TensorRT execution and DPVO state bookkeeping are now real, and the no-drop realtime pose contract still
+passes. Accuracy did not improve because pose is still coming from the temporary stereo VO bridge. The remaining
+mandatory work is the actual DPVO solver path: native `altcorr` patch correlation, SoftAgg/scatter aggregation around the
+update core, `fastba` bundle adjustment, and SE3/patch-depth retraction.
