@@ -142,6 +142,30 @@ float ExternalStereoDepthScale()
     return ClampValue(parsed, 0.90f, 1.10f);
 }
 
+bool ExternalStereoIgnoreProjectionScaleLevels()
+{
+    const char* value = std::getenv("SMART_DRONE_EXTERNAL_STEREO_IGNORE_PROJECTION_SCALE_LEVELS");
+    if(!value || value[0] == '\0')
+        return false;
+    const std::string text(value);
+    return !(text == "0" || text == "false" || text == "FALSE" || text == "off" || text == "OFF" ||
+             text == "no" || text == "NO");
+}
+
+int ExternalStereoKeypointOctave()
+{
+    const char* value = std::getenv("SMART_DRONE_EXTERNAL_STEREO_KEYPOINT_OCTAVE");
+    if(!value || value[0] == '\0')
+        return 0;
+
+    char* end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    if(end == value)
+        return 0;
+
+    return ClampValue(static_cast<int>(parsed), 0, 7);
+}
+
 void LogStereoMatchDebug(int leftCount, int rightCount, int rowLinked, int accepted,
                          int uniqueMatches, int finalMatches, float median, float threshold)
 {
@@ -657,6 +681,12 @@ void Frame::LoadExternalStereoFeatures(const ExternalStereoFrameData &external)
     if(mDescriptorsRight.rows < static_cast<int>(mvKeysRight.size()))
         mvKeysRight.resize(static_cast<size_t>(mDescriptorsRight.rows));
 
+    const int externalOctave = ClampValue(ExternalStereoKeypointOctave(), 0, std::max(0, mnScaleLevels - 1));
+    for(cv::KeyPoint& keypoint : mvKeys)
+        keypoint.octave = externalOctave;
+    for(cv::KeyPoint& keypoint : mvKeysRight)
+        keypoint.octave = externalOctave;
+
     N = static_cast<int>(mvKeys.size());
     mvuRight = vector<float>(static_cast<size_t>(N), -1.0f);
     mvDepth = vector<float>(static_cast<size_t>(N), -1.0f);
@@ -1045,6 +1075,11 @@ vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const f
     }
 
     return vIndices;
+}
+
+bool Frame::ShouldIgnoreScaleLevelsForProjection() const
+{
+    return mbExternalStereoInjected && ExternalStereoIgnoreProjectionScaleLevels();
 }
 
 bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)

@@ -124,6 +124,42 @@ void LimitStereoPairsForWeakTracking(std::vector<cv::Point2f> &leftPoints, std::
     LimitStereoPairsInPlace(leftPoints, rightPoints, maxPairs);
 }
 
+size_t RefineSelectedRightPointsByZncc(const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
+                                       std::vector<cv::Point2f> &leftPoints,
+                                       std::vector<cv::Point2f> &rightPoints)
+{
+    if (!EnvFlagEnabled("SMART_DRONE_SP_LG_REFINE_RIGHT_ZNCC", false) || leftPrepared.empty() ||
+        rightPrepared.empty() || leftPoints.empty() || leftPoints.size() != rightPoints.size()) {
+        return 0;
+    }
+
+    cv::Mat left32f;
+    cv::Mat right32f;
+    leftPrepared.convertTo(left32f, CV_32F);
+    rightPrepared.convertTo(right32f, CV_32F);
+
+    const float maxShiftPx =
+        EnvFloatValueClamped("SMART_DRONE_SP_LG_REFINE_RIGHT_ZNCC_MAX_SHIFT_PX", 4.0f, 0.25f, 16.0f);
+    size_t refinedCount = 0;
+    for (size_t i = 0; i < leftPoints.size(); ++i) {
+        cv::Point2f refinedRight = rightPoints[i];
+        float zncc = -1.0f;
+        if (!RefineRightPointByStereoZncc(left32f, leftPoints[i], right32f, rightPoints[i], refinedRight, zncc)) {
+            continue;
+        }
+        if (std::fabs(refinedRight.x - rightPoints[i].x) > maxShiftPx ||
+            std::fabs(refinedRight.y - rightPoints[i].y) > 1.0e-3f) {
+            continue;
+        }
+        if (!IsStereoPairGeometricallyValid(leftPoints[i], refinedRight)) {
+            continue;
+        }
+        rightPoints[i] = refinedRight;
+        ++refinedCount;
+    }
+    return refinedCount;
+}
+
 std::vector<StereoMatchPair> SelectInitializationTrustedPairs(const SuperPointFeatureSet &leftFeatures,
                                                               const SuperPointFeatureSet &rightFeatures,
                                                               const cv::Mat &leftPrepared,
@@ -379,7 +415,17 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
         return MakeExternalFeatureFailureOutput(engine, state, input);
     }
 
-    if (state.m_lkCalibrationLoaded) {
+    if (EnvFlagEnabled("SMART_DRONE_SP_LG_USE_ORB_PREPARED_IMAGES", false)) {
+        if (!system->PrepareStereoImagesForTracking(input.stereo.left.gray, input.stereo.right.gray, leftPrepared,
+                                                    rightPrepared)) {
+            return MakeExternalFeatureFailureOutput(engine, state, input);
+        }
+        leftPrepared = EnsureGray8(leftPrepared);
+        rightPrepared = EnsureGray8(rightPrepared);
+        if (leftPrepared.empty() || rightPrepared.empty()) {
+            return MakeExternalFeatureFailureOutput(engine, state, input);
+        }
+    } else if (state.m_lkCalibrationLoaded) {
         state.EnsureStereoRectifier(leftPrepared.size());
         if (!state.m_lkMap1x.empty() && !state.m_lkMap2x.empty()) {
             cv::Mat leftRect;
@@ -532,6 +578,8 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
     }
     LimitStereoPairsForWeakTracking(matchedLeftPoints, matchedRightPoints, state, initializingExternalStereo,
                                     recoveringExternalStereo);
+    const size_t znccRefinedPairs =
+        RefineSelectedRightPointsByZncc(leftPrepared, rightPrepared, matchedLeftPoints, matchedRightPoints);
     const size_t temporalCarryPairs =
         AppendTemporalCarryPairs(state, leftPrepared, rightPrepared, matchedLeftPoints, matchedRightPoints,
                                  initializingExternalStereo, recoveringExternalStereo);
@@ -585,7 +633,10 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
     const bool initializedForMonoAugmentation =
         tracker != nullptr && tracker->mState != ORB_SLAM3::Tracking::NO_IMAGES_YET &&
         tracker->mState != ORB_SLAM3::Tracking::NOT_INITIALIZED;
+    const int monoAugmentMinOkStreak =
+        EnvIntValueClamped("SMART_DRONE_SP_LG_ORB_LEFT_AUGMENT_MIN_OK_STREAK", 0, 0, 100000);
     if (initializedForMonoAugmentation &&
+        state.m_superPointLightGlueOkStreak >= monoAugmentMinOkStreak &&
         EnvFlagEnabled("SMART_DRONE_SP_LG_ORB_LEFT_AUGMENT", false)) {
         const auto augmentStartTp = std::chrono::steady_clock::now();
         const size_t maxLeftFeatures =
@@ -616,6 +667,7 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
                   << " raw_matches=" << rawMatches.size()
                   << " filtered_matches=" << matches.size()
                   << " selected_pairs=" << matchedLeftPoints.size()
+                  << " zncc_refined=" << znccRefinedPairs
                   << " temporal_carry=" << temporalCarryPairs
                   << " injected=" << externalData.leftKeypoints.size()
                   << "/" << externalData.rightKeypoints.size()

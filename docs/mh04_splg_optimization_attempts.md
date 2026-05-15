@@ -391,10 +391,10 @@ Result root: `/home/nvidia/euroc_eval/results/codex_injection_quality_mh04_20260
 | `temporal_carry` | carry temporally tracked stereo pairs | 1 | 3.1297 | 0.5132 | 8.761 | 62 | maps `0/1` | Reject. Reusing old descriptors at new positions polluted backend matching. |
 | `lg_every3` | `SMART_DRONE_LIGHTGLUE_EVERY_N=3` | 1 | 0.0846 | 0.0229 | 0.353 | 1 | map `0` | Reject. RPE improved slightly, but ATE and jump risk worsened. |
 | `grid6` | `SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=6` | 1 | 0.1359 | 0.0301 | 0.276 | 3 | map `0` | Reject. Too sparse; map support degraded. |
-| `grid12` | `SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=12` | 1 | 0.0622 | 0.0258 | 0.272 | 4 | map `0` | Keep only as an experiment. ATE slightly better than current run, but violates no-jump target. |
+| `grid12` | `SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=12` | 1 | 0.0622 | 0.0258 | 0.166 | 0 | map `0` | Keep only as an experiment. ATE slightly better in this run, but repeatability was not proven. |
 | `strict_lg_score` | `SMART_DRONE_LIGHTGLUE_MIN_SCORE=0.04`, `MAX_Y_DIFF=1.0` | 1 | 0.1014 | 0.0236 | 0.294 | 5 | map `0` | Reject. Stricter stereo matches reduced pose consistency. |
 
-Interpretation: MH04 SP+LG needs enough fresh, same-frame stereo observations to keep ORB-SLAM3's local map alive. Weak-frame pair limiting and temporal carry both made the tracker less stable. A denser grid (`12` per cell) can slightly reduce ATE in one run, but it introduced adjacent steps above `0.2 m`, so it cannot be the no-jump baseline.
+Interpretation: MH04 SP+LG needs enough fresh, same-frame stereo observations to keep ORB-SLAM3's local map alive. Weak-frame pair limiting and temporal carry both made the tracker less stable. A denser grid (`12` per cell) can slightly reduce ATE in one run, but it needed repeat validation before becoming a recommendation.
 
 ## 2026-05-14 Backend-Stability Sweep
 
@@ -430,3 +430,239 @@ The best no-jump full MH04 run in the current code remains:
 | 2032 / 2032 | 0.0657 | 0.0244 | 0.178 | 0 | all map `0` |
 
 The best full strict MH04 result found historically is still about `0.0578 m`; the requested full-sequence `0.03 m` target was not reached in any valid complete realtime run.
+
+## 2026-05-14 Candidate-Budget Sweep
+
+The next check tested whether MH04 was limited by too few SP/LG candidates or descriptor-supplement candidates.
+
+Result root: `/home/nvidia/euroc_eval/results/codex_candidate_budget_mh04_20260514_181954`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `max768_grid10` | 768 SP points, 768 descriptor candidates | 2032 / 2032 | 0.0987 | 0.0238 | 0.2108 | 0.173 | 0 | Reject. More candidates worsened ATE. |
+| `max768_supp256_grid10` | 768 SP points plus low-yield supplement to 256 | 2032 / 2032 | 0.0974 | 0.0307 | 0.3939 | 0.355 | 2 | Reject. Introduced visible pose jumps. |
+| `max768_grid12` | 768 SP points, grid cap 12 | 2032 / 2032 | 0.0930 | 0.0238 | 0.2014 | 0.175 | 0 | Reject. Still worse than the no-jump baseline. |
+| `max1024_grid10` | 1024 SP points/candidates | 2032 / 2032 | 0.1120 | 0.0226 | 0.2307 | 0.173 | 0 | Reject. Denser candidates increased global drift. |
+
+Interpretation: the current gap is not a simple "more SP points" problem. Extra candidates increase backend ambiguity more than they improve observability.
+
+## 2026-05-14 IMU Control
+
+Stereo-IMU was tested as a control to see whether EuRoC IMU constraints could close the remaining MH04 drift.
+
+Result root: `/home/nvidia/euroc_eval/results/codex_stereo_imu_control_mh04_20260514_183449`
+
+| Profile | Result | Decision |
+| --- | --- | --- |
+| `orb` stereo-IMU | 2032 rows and no jumps, but 31 non-bootstrap rows were not strict tracking states `2/3`; strict realtime evaluation failed. | Reject. It does not satisfy the realtime tracking-state contract. |
+| `superpoint_lightglue` stereo-IMU | Failed to initialize: 2032 identity/lost rows. Logs repeatedly reported stereo init waiting. | Reject. SP+LG stereo-IMU is currently worse than pure stereo. |
+
+Interpretation: IMU is not a shortcut for the current SP+LG target. The pure-stereo SP+LG path is still the valid baseline for strict realtime output.
+
+## 2026-05-14 Trajectory And Calibration Diagnostics
+
+Several offline diagnostics checked whether the remaining ATE was an evaluation artifact:
+
+| Check | Result | Interpretation |
+| --- | --- | --- |
+| Timestamp/scale scan on current best | Best nearby adjustment was effectively unchanged: about `0.0656 m`. | Timestamp offset and scalar output scale are not the main error. |
+| Timestamp/scale scan on historical best | Best nearby adjustment was about `0.0568 m`, only a small improvement. | Historical best is still far above `0.03 m`. |
+| Camera/body lever-arm transform | Best offline variant improved current run from `0.0657` to about `0.0639 m`; historical best from `0.0578` to about `0.0571 m`. | Body-frame output is not enough to reach the target. |
+| Final trajectory export | `/home/nvidia/euroc_eval/results/codex_finaltraj_diag_mh04_20260514_180225` realtime ATE `0.1234`; final shutdown trajectory raw ATE about `0.0891`. | Shutdown/final trajectory does not reveal hidden `<0.03 m` performance, and it would not satisfy realtime output anyway. |
+| Historical sub-`0.03 m` runs | Found only truncated fragments of 429, 653, and 788 rows. | Invalid for the 2032-frame realtime contract. |
+
+Per-frame error analysis still points to backend drift concentrated around frames `900-999`, `1200-1299`, and `1400-1599`. Local displacement scale was near 1.0, so the error is not a simple global or rolling scale factor.
+
+## 2026-05-14 Backend-Consistency Sweep
+
+This sweep tested LocalMapping acceptance and map-point count limits without changing frontend output.
+
+Result root: `/home/nvidia/euroc_eval/results/codex_backend_consistency_mh04_20260514_184442`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `relax_lm` | `SMART_DRONE_ORB_RELAX_LOCAL_MAPPING_ACCEPT_KF=1` | 2032 / 2032 | 0.0993 | 0.0294 | 0.2602 | 0.266 | 1 | Reject. Worse ATE and one jump above `0.2 m`. |
+| `stable_mps80` | `SMART_DRONE_EXTERNAL_STEREO_STABLE_MAX_MAPPOINTS_PER_KF=80` | 2032 / 2032 | 0.0678 | 0.0240 | 0.1723 | 0.161 | 0 | Reject. No jump, but slightly worse than the current no-jump baseline. |
+| `stabilizing_mps120` | `SMART_DRONE_EXTERNAL_STEREO_STABILIZING_MAX_MAPPOINTS_PER_KF=120` | 2032 / 2032 | 0.1301 | 0.0251 | 0.2706 | 0.160 | 0 | Reject. Early/mid map support degraded. |
+| `stable_mps60` | `SMART_DRONE_EXTERNAL_STEREO_STABLE_MAX_MAPPOINTS_PER_KF=60` | 2032 / 2032 | 0.1674 | 0.0371 | 0.2717 | 0.418 | 1 | Reject. Too sparse and introduced a large jump. |
+
+Interpretation: reducing map-point creation or loosening LocalMapping scheduling does not reduce MH04 drift. The backend is sensitive to both queue timing and map-point support density.
+
+## 2026-05-14 External Stereo Scale-Level Experiments
+
+SP+LG keypoints are injected into ORB-SLAM3 as external stereo observations. Since these learned keypoints are not native ORB pyramid detections, two controlled experiments were added:
+
+- `SMART_DRONE_EXTERNAL_STEREO_IGNORE_PROJECTION_SCALE_LEVELS=1` skips octave filtering only for external-stereo projection matching.
+- `SMART_DRONE_EXTERNAL_STEREO_KEYPOINT_OCTAVE=N` assigns injected external-stereo keypoints to a fixed ORB pyramid octave.
+
+Both default to off/current behavior.
+
+Projection-gate result root: `/home/nvidia/euroc_eval/results/codex_scale_level_gate_mh04_20260514_185600`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `default_newlib` | New library, default scale behavior | 2032 / 2032 | 0.1035 | 0.0250 | 0.2195 | 0.177 | 0 | Control run. Shows normal MH04 run-to-run variance; no default behavior change intended. |
+| `ignore_scale_levels` | Ignore projection octave gates for external stereo | 2032 / 2032 | 0.1399 | 0.0216 | 0.2671 | 0.160 | 0 | Reject. RPE improved but global drift worsened. |
+
+Fixed-octave result root: `/home/nvidia/euroc_eval/results/codex_external_octave_mh04_20260514_190302`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `octave1` | `SMART_DRONE_EXTERNAL_STEREO_KEYPOINT_OCTAVE=1` | 2032 / 2032 | 0.0690 | 0.0239 | 0.1599 | 0.172 | 0 | Reject for target. Stable, but not better than historical best. |
+| `octave2` | `SMART_DRONE_EXTERNAL_STEREO_KEYPOINT_OCTAVE=2` | 2032 / 2032 | 0.1205 | 0.0251 | 0.2645 | 0.171 | 0 | Reject. |
+| `octave3` | `SMART_DRONE_EXTERNAL_STEREO_KEYPOINT_OCTAVE=3` | 2032 / 2032 | 0.1358 | 0.0279 | 0.2788 | 0.163 | 0 | Reject. |
+
+Interpretation: ORB-SLAM3's scale-level assumptions do matter, but adjusting them alone does not recover MH04 below `0.03 m`. These switches are useful diagnostic controls and should remain opt-in.
+
+## 2026-05-14 All-Left Geometric-Depth Sweep
+
+SP+LG normally injects only selected stereo pairs into ORB-SLAM3. This sweep tested the opt-in `SMART_DRONE_SP_LG_ALL_LEFT_GEOMETRIC_DEPTH=1` path, which keeps all safe left SP keypoints as left-image observations while assigning stereo depth only to geometrically valid left/right pairs.
+
+Result root: `/home/nvidia/euroc_eval/results/codex_all_left_geom_mh04_20260514_191258`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `all_left_filtered` | all-left observations, filtered stereo pairs for depth | 2032 / 2032 | 0.0670 | 0.0243 | 0.1811 | 0.198 | 0 | Reject for target. Stable, but not better than the current baseline. |
+| `all_left_trust` | all-left plus `SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT=0` | 2032 / 2032 | 0.1126 | 0.0227 | 0.1980 | 0.163 | 0 | Reject. Trusting frontend pair order improves local RPE slightly but worsens global drift. |
+| `all_left_trust_octave1` | trust frontend pair order plus `SMART_DRONE_EXTERNAL_STEREO_KEYPOINT_OCTAVE=1` | 2032 / 2032 | 0.1131 | 0.0266 | 0.2247 | 0.167 | 0 | Reject. |
+| `all_left_trust_depthfilter` | trust frontend pair order plus disparity consistency for depth matches | 2032 / 2032 | 0.1178 | 0.0255 | 0.2203 | 0.172 | 0 | Reject. |
+
+Interpretation: adding left-only learned observations does not solve the MH04 drift. Fully trusting frontend pair order is actively worse for ATE, even though it can reduce local relative error in one run. The current filtered stereo injection path remains the safer SP+LG baseline.
+
+## 2026-05-14 Native SuperPoint Descriptor Sweep
+
+The next hypothesis was that recomputing ORB descriptors at SP/LG keypoint locations might be the remaining mismatch. The existing opt-in `SMART_DRONE_SP_LG_NATIVE_DESCRIPTOR_INJECT=1` path injects SuperPoint `CV_32F` descriptors directly into ORB-SLAM3, whose matcher has a cosine-distance fallback for float descriptors.
+
+Result root: `/home/nvidia/euroc_eval/results/codex_native_spdesc_mh04_20260514_192452`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Maps | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `native_spdesc` | `SMART_DRONE_SP_LG_NATIVE_DESCRIPTOR_INJECT=1` | 2032 / 2032 | 8.4184 | 0.9071 | 13.8246 | 12.418 | maps `0/1` | Reject. Severe drift, map switch, and large jumps. |
+| `native_spdesc_octave1` | native descriptors plus `SMART_DRONE_EXTERNAL_STEREO_KEYPOINT_OCTAVE=1` | 2032 / 2032 | 8.4773 | 0.9614 | 13.8424 | 13.270 | maps `0/1` | Reject. |
+| `native_spdesc_all_left` | native descriptors plus all-left geometric depth | 2032 / 2032 | 4.9997 | 0.8935 | 10.4736 | 11.087 | maps `0/1/2` | Reject. Still catastrophic. |
+
+Interpretation: direct SuperPoint descriptor injection is not a safe accuracy path for the current ORB-SLAM3 backend. It would require a full backend matcher/threshold/BoW redesign. The default ORB descriptor recomputation at SP/LG points remains the only stable descriptor path.
+
+## 2026-05-14 Stereo Configuration And Prepared-Image Checks
+
+Two additional checks targeted calibration/rectification consistency, because SP+LG relies on learned stereo matches but ORB-SLAM3 still owns the camera model, baseline, and projection backend.
+
+Configuration result root: `/home/nvidia/euroc_eval/results/codex_config_geometry_mh04_20260514_193523`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Maps | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `official` | `stereo_orb_official.yaml` | 2032 / 2030 | 0.1306 | 0.0265 | 0.2473 | 0.161 | 0 | map `0` | Control only. No jump, but worse than the no-jump baseline. |
+| `orb2500` | `stereo_orb2500.yaml` | 2032 / 2029 | 8.2917 | 1.1835 | 15.6131 | 7.612 | 37 | maps `0/1/2` | Reject. Severe map churn and jumps. |
+| `inertial` | `stereo_inertial.yaml` without IMU mode | 2032 / 2029 | 6.2486 | 0.7760 | 12.1024 | 7.197 | 23 | maps `0/1/2` | Reject. Severe map churn and jumps. |
+
+Prepared-image result root: `/home/nvidia/euroc_eval/results/codex_unified_prepare_mh04_20260514_194624`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `default` | SP+LG frontend forced to reuse ORB-SLAM3 `PrepareStereoImagesForTracking()` | 2032 / 2030 | 0.1433 | 0.0322 | 0.2788 | 0.363 | 1 | Reject. It worsened ATE and introduced a `>0.3 m` jump. |
+
+Code note: `SMART_DRONE_SP_LG_USE_ORB_PREPARED_IMAGES=1` was added as an opt-in diagnostic switch only. Default behavior remains the prior SP+LG rectifier path because the unified prepared-image path failed the no-jump requirement and moved farther from the `0.03 m` target.
+
+Interpretation: switching EuRoC stereo settings or unifying SP+LG image preparation with ORB-SLAM3's prepared-image helper is not the missing accuracy lever. The `official` stereo settings remain the only non-catastrophic SP+LG configuration in this test set.
+
+## 2026-05-14 Grid12 Repeat Check
+
+The single `grid12` run above was rechecked because it was one of the few complete, no-jump runs with a small ATE improvement over the current baseline.
+
+Result root: `/home/nvidia/euroc_eval/results/codex_grid12_repeat_mh04_20260514_195338`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `grid12_repeat` | grid cap 12, depth scale `0.965` | 2032 / 2030 | 0.0854 | 0.0234 | 0.2023 | 0.169 | 0 | Reject as default. Repeat did not reproduce the `0.0622 m` run. |
+| `grid12_depth0962` | grid cap 12, depth scale `0.962` | 2032 / 2030 | 0.0842 | 0.0261 | 0.2146 | 0.215 | 1 | Reject. Worse ATE and one step above `0.2 m`. |
+| `grid12_depth0968` | grid cap 12, depth scale `0.968` | 2032 / 2030 | 0.0899 | 0.0233 | 0.1903 | 0.167 | 0 | Reject. Stable output, but worse ATE. |
+
+Interpretation: `SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=12` is not a reproducible path toward the `0.03 m` target. Keep the default grid cap at `10`.
+
+## 2026-05-15 ZNCC Right-Point Refinement
+
+The next hypothesis was that LightGlue's right-image keypoint location might be locally suboptimal for ORB-SLAM3 stereo depth. An opt-in switch was added:
+
+- `SMART_DRONE_SP_LG_REFINE_RIGHT_ZNCC=1`
+- `SMART_DRONE_SP_LG_REFINE_RIGHT_ZNCC_MAX_SHIFT_PX=N`
+
+It refines selected right points with the existing stereo ZNCC patch search, then keeps the refined point only when the shift is bounded and the pair remains geometrically valid. The switch is off by default.
+
+Result root: `/home/nvidia/euroc_eval/results/codex_zncc_refine_mh04_20260514_200528`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `zncc_shift4` | max right-point shift `4 px` | 2032 / 2030 | 0.1411 | 0.0262 | 0.3758 | 0.334 | 2 | Reject. Worse drift and two large realtime steps. |
+| `zncc_shift2` | max right-point shift `2 px` | 2032 / 2030 | 0.0870 | 0.0235 | 0.1934 | 0.169 | 0 | Reject for target. Stable output, but worse than baseline. |
+
+Interpretation: direct right-point ZNCC refinement breaks the learned SP+LG stereo pairing more often than it helps. Keep this as an off-by-default diagnostic only.
+
+## 2026-05-15 ORB Left-Augment And Depth-Scale Search
+
+SP+LG's strong side is robust learned stereo association; ORB-SLAM3's backend still benefits from many left-image observations for local map tracking and projection search. This sweep tested `SMART_DRONE_SP_LG_ORB_LEFT_AUGMENT=1`, which appends native ORB left-only features after initialization while preserving SP+LG stereo-pair depth.
+
+Left-feature budget result root: `/home/nvidia/euroc_eval/results/codex_orb_left_aug_mh04_20260514_201238`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `orb_left1200` | augment to `1200` left features | 2032 / 2030 | 0.0577 | 0.0257 | 0.2425 | 0.189 | 0 | Candidate only. Good single-run ATE and no `>0.2 m` step, but not below target. |
+| `orb_left1600` | augment to `1600` left features | 2032 / 2030 | 0.0662 | 0.0333 | 0.3228 | 0.393 | 1 | Reject. Worse and introduced a jump. |
+| `orb_left2000` | augment to `2000` left features | 2032 / 2030 | 0.0835 | 0.0331 | 0.4508 | 0.285 | 1 | Reject. Too many left-only points destabilize the backend. |
+
+Depth-scale result root: `/home/nvidia/euroc_eval/results/codex_orb_left1200_depth_mh04_20260514_202328`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `depth0958` | left augment `1200`, depth scale `0.958` | 2032 / 2030 | 0.1199 | 0.0318 | 0.3782 | 0.360 | 2 | Reject. |
+| `depth0962` | left augment `1200`, depth scale `0.962` | 2032 / 2030 | 0.0475 | 0.0222 | 0.1239 | 0.175 | 0 | Best single complete no-jump run in this pass, but not reproduced below. |
+| `depth0968` | left augment `1200`, depth scale `0.968` | 2032 / 2030 | 0.0698 | 0.0279 | 0.2375 | 0.287 | 1 | Reject. |
+| `depth0972` | left augment `1200`, depth scale `0.972` | 2032 / 2030 | 0.1091 | 0.0272 | 0.2294 | 0.237 | 1 | Reject. |
+
+Offline output-scale scan on the single `depth0962` trajectory found a best nearby ATE of about `0.0443 m` at output scale `1.0025`. This confirms the remaining error is not just the CSV output scale; even the favorable run stays above `0.03 m`.
+
+Refinement result root: `/home/nvidia/euroc_eval/results/codex_orb_left1200_refine_mh04_20260514_203633`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `d0962_out10025_l1200` | repeat `0.962`, left `1200`, output scale `1.0025` | 2032 / 2030 | 0.0902 | 0.0252 | 0.2072 | 0.173 | 0 | Reject. Did not reproduce the `0.0475 m` run. |
+| `d0961_out10025_l1200` | depth `0.961`, left `1200`, output scale `1.0025` | 2032 / 2030 | 0.0697 | 0.0316 | 0.2705 | 0.283 | 1 | Reject. |
+| `d0963_out10025_l1200` | depth `0.963`, left `1200`, output scale `1.0025` | 2032 / 2030 | 0.0916 | 0.0397 | 0.3722 | 0.318 | 3 | Reject. |
+| `d0962_out10025_l1000` | depth `0.962`, left `1000`, output scale `1.0025` | 2032 / 2030 | 0.0681 | 0.0243 | 0.1527 | 0.159 | 0 | Reject for target. Stable, but not better than current accepted baseline. |
+
+Interpretation: ORB left augmentation can occasionally improve the full MH04 ATE, but it is not a reproducible route to `<0.03 m` in the current backend. The behavior matches the SP+LG/ORB-SLAM3 coupling: learned stereo matches improve front-end association, while extra ORB-only left points alter local-map tracking and BA weighting. Above about `1200` left features the map becomes unstable; even at `1200`, favorable backend scheduling is not repeatable.
+
+## 2026-05-15 Determinism And Delayed-Augment Controls
+
+The `depth0962 + left1200` candidate was tested with deterministic random seeding and stable LocalMapping ordering to see whether run-to-run variance was mainly from random BoW/DBoW2 or unordered fusion.
+
+Result root: `/home/nvidia/euroc_eval/results/codex_deterministic_candidate_mh04_20260514_204915`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `det_seed0` | deterministic seed `0` | 2032 / 2030 | 0.0627 | 0.0274 | 0.3298 | 0.304 | 2 | Reject. |
+| `det_seed3` | deterministic seed `3` | 2032 / 2030 | 0.1139 | 0.0309 | 0.4114 | 0.344 | 4 | Reject. |
+| `det_stable_order` | seed `0` plus stable LocalMapping order | 2032 / 2030 | 0.0917 | 0.0238 | 0.3613 | 0.350 | 2 | Reject. |
+
+A second opt-in control was added to delay ORB left augmentation until SP+LG has maintained an OK streak:
+
+- `SMART_DRONE_SP_LG_ORB_LEFT_AUGMENT_MIN_OK_STREAK=N`
+
+Default is `0`, preserving existing behavior.
+
+Delayed-augment result root: `/home/nvidia/euroc_eval/results/codex_aug_delay_mh04_20260514_210620`
+
+| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `delay20` | enable left augment after OK streak `20` | 2032 / 2030 | 0.1071 | 0.0977 | 1.1087 | 1.214 | 4 | Reject. Severe jump. |
+| `delay60` | enable left augment after OK streak `60` | 2032 / 2030 | 0.0674 | 0.0263 | 0.1647 | 0.182 | 0 | Reject for target. Stable, but not better than current no-jump baseline. |
+
+Interpretation: deterministic random seeding, sorted LocalMapping fusion order, and delayed ORB left augmentation do not make the `0.0475 m` candidate reproducible. The remaining gap appears to be a real front-end/backend modeling issue, not just CSV alignment, random seed, or start-up timing.
+
+Current status after these attempts:
+
+| Requirement | Status |
+| --- | --- |
+| Full MH04 realtime rows | Still pass in all complete accepted-control runs: `2032/2032`. |
+| No dropped pose output | Pass for the current no-jump baseline and most diagnostic sweeps. |
+| No pose jumps | Current baseline passes; several rejected sweeps violate this. |
+| Average/full MH04 ATE below `0.03 m` | Not achieved. Best single complete no-jump result found in this pass was `0.0475 m`, but it did not reproduce; best stable accepted baseline remains around `0.06-0.07 m`. |

@@ -355,8 +355,10 @@ namespace ORB_SLAM3
                 if(bFactor)
                     r*=th;
 
+                const int minLevel = F.ShouldIgnoreScaleLevelsForProjection() ? -1 : nPredictedLevel - 1;
+                const int maxLevel = F.ShouldIgnoreScaleLevelsForProjection() ? -1 : nPredictedLevel;
                 const vector<size_t> vIndices =
-                        F.GetFeaturesInArea(pMP->mTrackProjX,pMP->mTrackProjY,r*F.mvScaleFactors[nPredictedLevel],nPredictedLevel-1,nPredictedLevel);
+                        F.GetFeaturesInArea(pMP->mTrackProjX,pMP->mTrackProjY,r*F.mvScaleFactors[nPredictedLevel],minLevel,maxLevel);
 
                 if(!vIndices.empty()){
 
@@ -432,8 +434,10 @@ namespace ORB_SLAM3
                 if(nPredictedLevel != -1){
                     float r = RadiusByViewingCos(pMP->mTrackViewCosR);
 
+                    const int minLevel = F.ShouldIgnoreScaleLevelsForProjection() ? -1 : nPredictedLevel - 1;
+                    const int maxLevel = F.ShouldIgnoreScaleLevelsForProjection() ? -1 : nPredictedLevel;
                     const vector<size_t> vIndices =
-                            F.GetFeaturesInArea(pMP->mTrackProjXR,pMP->mTrackProjYR,r*F.mvScaleFactors[nPredictedLevel],nPredictedLevel-1,nPredictedLevel,true);
+                            F.GetFeaturesInArea(pMP->mTrackProjXR,pMP->mTrackProjYR,r*F.mvScaleFactors[nPredictedLevel],minLevel,maxLevel,true);
 
                     if(vIndices.empty())
                         continue;
@@ -2016,7 +2020,9 @@ namespace ORB_SLAM3
 
                     vector<size_t> vIndices2;
 
-                    if(bForward)
+                    if(CurrentFrame.ShouldIgnoreScaleLevelsForProjection())
+                        vIndices2 = CurrentFrame.GetFeaturesInArea(uv(0),uv(1), radius, -1, -1);
+                    else if(bForward)
                         vIndices2 = CurrentFrame.GetFeaturesInArea(uv(0),uv(1), radius, nLastOctave);
                     else if(bBackward)
                         vIndices2 = CurrentFrame.GetFeaturesInArea(uv(0),uv(1), radius, 0, nLastOctave);
@@ -2111,7 +2117,9 @@ namespace ORB_SLAM3
 
                         vector<size_t> vIndices2;
 
-                        if(bForward)
+                        if(CurrentFrame.ShouldIgnoreScaleLevelsForProjection())
+                            vIndices2 = CurrentFrame.GetFeaturesInArea(uv(0),uv(1), radius, -1, -1,true);
+                        else if(bForward)
                             vIndices2 = CurrentFrame.GetFeaturesInArea(uv(0),uv(1), radius, nLastOctave, -1,true);
                         else if(bBackward)
                             vIndices2 = CurrentFrame.GetFeaturesInArea(uv(0),uv(1), radius, 0, nLastOctave, true);
@@ -2258,7 +2266,9 @@ namespace ORB_SLAM3
                     // Search in a window
                     const float radius = th*CurrentFrame.mvScaleFactors[nPredictedLevel];
 
-                    const vector<size_t> vIndices2 = CurrentFrame.GetFeaturesInArea(uv(0), uv(1), radius, nPredictedLevel-1, nPredictedLevel+1);
+                    const int minLevel = CurrentFrame.ShouldIgnoreScaleLevelsForProjection() ? -1 : nPredictedLevel - 1;
+                    const int maxLevel = CurrentFrame.ShouldIgnoreScaleLevelsForProjection() ? -1 : nPredictedLevel + 1;
+                    const vector<size_t> vIndices2 = CurrentFrame.GetFeaturesInArea(uv(0), uv(1), radius, minLevel, maxLevel);
 
                     if(vIndices2.empty())
                         continue;
