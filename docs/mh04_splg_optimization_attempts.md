@@ -838,3 +838,42 @@ Jetson service defaults for the live build:
 Expected effect: this does not solve MH04 global ATE drift, but it directly targets the live safety issue. Rotating the
 camera should no longer publish a sudden large translation jump; if the backend gives an outlier, the published pose moves
 only within the configured envelope and the frame quality becomes weak.
+
+Follow-up field feedback: the effect was still not good enough. Jetson logs during a rotation test showed ORB-SLAM3 +
+SP/LG raw pose steps around `1.3 m`, with the output guard repeatedly clamping. This confirms the failure is inside the
+backend estimate, not only the publish layer.
+
+## 2026-05-15 DPVO TensorRT Backend Bring-up
+
+The next direction is to adapt DPVO as a backend-level replacement. The requested constraint is native TensorRT only:
+no Python worker and no PyTorch in the runtime process.
+
+Changes made in this pass:
+
+- Added a backend selector: `--slam-backend orbslam3|dpvo`.
+- Added `--slam-backend dpvo` aliases: `dpvo_tensorrt`, `dpvo-trt`, and `dpvo_trt`.
+- Added DPVO runtime options:
+  - `--dpvo-repo`
+  - `--dpvo-patch-engine`
+  - `--dpvo-update-engine`
+  - `--dpvo-input-width`
+  - `--dpvo-input-height`
+  - `--dpvo-patches-per-frame`
+  - `--dpvo-optimization-window`
+- Added `DpvoTensorRtEngine` as a native `ISlamEngine` implementation.
+- The DPVO backend loads TensorRT engines directly with `NvInfer` and fails closed if they are missing or invalid.
+- The existing ORB-SLAM3 path remains the default and is still the only service-enabled production path.
+
+Build result:
+
+```text
+./scripts/build.sh smart_drone --jetson-orin-nx --jobs 16
+[100%] Built target smart_drone
+```
+
+Status: backend selection and native TensorRT engine loading are now compiled into `smart_drone`. Full DPVO pose output is
+not enabled yet. Original DPVO is not a single pose network; it combines patchifier/update networks with CUDA
+correlation, CUDA BA, and SE3 graph state. The runtime therefore refuses to publish placeholder DPVO poses until those
+native CUDA/state pieces are ported.
+
+Documentation: see `docs/dpvo_tensorrt_backend.md`.

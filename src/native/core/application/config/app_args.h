@@ -22,11 +22,18 @@ enum class FeatureFrontend {
     SuperPointLightGlue = 5,
 };
 
+enum class SlamBackend {
+    OrbSlam3,
+    DpvoTensorRt,
+};
+
 const char *DefaultSettingsForSensorMode(SensorMode mode);
 SensorMode ParseSensorModeText(const std::string &text);
 const char *ToSensorModeText(SensorMode mode);
 FeatureFrontend ParseFeatureFrontendText(const std::string &text);
 const char *ToFeatureFrontendText(FeatureFrontend frontend);
+SlamBackend ParseSlamBackendText(const std::string &text);
+const char *ToSlamBackendText(SlamBackend backend);
 smartdrone::core::domain::SlamOperationMode ParseSlamOperationModeText(const std::string &text);
 std::string ResolveRuntimePath(const std::string &path, const char *argv0);
 std::string ResolveSettingsForSensorMode(SensorMode mode, const std::string &currentSettingsPath);
@@ -85,7 +92,15 @@ struct RuntimeConfig {
     bool allowEmptyImu{false};
     int slamInputFps{30};
     smartdrone::core::domain::SlamOperationMode slamOperationMode{smartdrone::core::domain::SlamOperationMode::Mapping};
+    SlamBackend slamBackend{SlamBackend::OrbSlam3};
     FeatureFrontend featureFrontend{FeatureFrontend::Orb};
+    std::string dpvoRepo;
+    std::string dpvoPatchEngine;
+    std::string dpvoUpdateEngine;
+    int dpvoInputWidth{640};
+    int dpvoInputHeight{400};
+    int dpvoPatchesPerFrame{48};
+    int dpvoOptimizationWindow{7};
     std::string superpointRepo;
     std::string superpointDevice{"auto"};
     int superpointTopK{1024};

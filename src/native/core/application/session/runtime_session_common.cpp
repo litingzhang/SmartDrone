@@ -188,6 +188,7 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &c)
     MainRuntimeAliases a{};
     a.sensorMode = c.sensorMode;
     a.slamOperationMode = c.runtime.slamOperationMode;
+    a.slamBackend = c.runtime.slamBackend;
     a.featureFrontend = c.runtime.featureFrontend;
     a.width = c.camera.width;
     a.height = c.camera.height;
@@ -265,7 +266,16 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
     std::cerr << "slam_input_fps=" << a.slamInputFps << " camera_fps=" << a.fps
               << " frame_drop=" << (a.slamInputFps < a.fps ? "Y" : "N") << "\n";
     std::cerr << "slam_mode=" << smartdrone::core::domain::ToString(a.slamOperationMode) << "\n";
+    std::cerr << "slam_backend=" << ToSlamBackendText(a.slamBackend) << "\n";
     std::cerr << "feature_frontend=" << ToFeatureFrontendText(a.featureFrontend) << "\n";
+    if (a.slamBackend == SlamBackend::DpvoTensorRt) {
+        std::cerr << "dpvo_tensorrt repo=" << app.runtime.dpvoRepo
+                  << " patch_engine=" << app.runtime.dpvoPatchEngine
+                  << " update_engine=" << app.runtime.dpvoUpdateEngine
+                  << " input=" << app.runtime.dpvoInputWidth << "x" << app.runtime.dpvoInputHeight
+                  << " patches=" << app.runtime.dpvoPatchesPerFrame
+                  << " opt_window=" << app.runtime.dpvoOptimizationWindow << "\n";
+    }
     std::cerr << "superpoint_trt repo=" << app.runtime.superpointRepo
               << " device=" << app.runtime.superpointDevice
               << " top_k=" << app.runtime.superpointTopK

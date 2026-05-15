@@ -7,6 +7,7 @@
 
 #include "System.h"
 #include "adapters/imu/icm42688_imu_provider.h"
+#include "adapters/slam/dpvo_tensorrt_engine.h"
 #include "adapters/slam/slam_engine_adapter.h"
 #include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "adapters/stream/udp_image_sender.h"
@@ -21,6 +22,7 @@
 #include "core/application/state/perception_pipeline.h"
 #include "core/application/state/pose_postprocessor.h"
 #include "core/ports/camera_provider.h"
+#include "core/ports/slam_engine.h"
 
 namespace smartdrone::core::application {
 
@@ -52,7 +54,8 @@ class SlamSessionRuntime {
     std::string m_effectiveSettingsPath;
 
     std::unique_ptr<ORB_SLAM3::System> m_slamSystem;
-    smartdrone::adapters::slam::SlamEngineAdapter m_slamEngine;
+    std::unique_ptr<smartdrone::core::ports::ISlamEngine> m_slamEngine;
+    smartdrone::adapters::slam::SlamEngineAdapter *m_orbSlamEngine{nullptr};
     smartdrone::adapters::slam::SuperPointLightGlueFrontendClient m_superpointFrontendClient;
     AutoSlamModeController m_autoSlamModeController{};
     StereoBodyExtrinsics m_stereoBodyExtrinsics{};

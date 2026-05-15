@@ -186,7 +186,9 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::AcquireAndPrepareFrame(bool &
         m_state.effectiveSlamMode = m_state.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto
                                         ? smartdrone::core::domain::SlamOperationMode::Mapping
                                         : m_state.requestedSlamMode;
-        m_ctx.slamEngine.SetOperationMode(m_state.effectiveSlamMode);
+        if (m_ctx.orbSlamEngine != nullptr) {
+            m_ctx.orbSlamEngine->SetOperationMode(m_state.effectiveSlamMode);
+        }
         std::cerr << "[slam] operation_mode -> " << smartdrone::core::domain::ToString(m_state.requestedSlamMode);
         if (m_state.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
             std::cerr << " effective_mode=" << smartdrone::core::domain::ToString(m_state.effectiveSlamMode);
@@ -215,8 +217,10 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::AcquireAndPrepareFrame(bool &
     const auto [superpointBudgetWidth, superpointBudgetHeight] =
         ComputeSuperPointInputBudget(m_ctx.aliases.superpointInputMaxWidth, m_ctx.aliases.superpointInputMaxHeight,
                                 superpointLoadSheddingLevel);
-    m_ctx.slamEngine.SetExternalFeatureInputSizeLimit(superpointBudgetWidth, superpointBudgetHeight);
-    m_ctx.slamEngine.SetFeatureFrontend(effectiveFrontend);
+    if (m_ctx.orbSlamEngine != nullptr) {
+        m_ctx.orbSlamEngine->SetExternalFeatureInputSizeLimit(superpointBudgetWidth, superpointBudgetHeight);
+        m_ctx.orbSlamEngine->SetFeatureFrontend(effectiveFrontend);
+    }
     if (effectiveFrontend != m_state.lastAppliedFeatureFrontend) {
         std::cerr << "[slam] effective_feature_frontend=" << FeatureFrontendName(effectiveFrontend)
                   << " requested_value=" << static_cast<unsigned>(configuredFrontendValue)
@@ -517,7 +521,9 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::PostprocessTrackedFrame(std::
                                                  slamOutput.leftFeatures.size(), slamOutput.rightFeatures.size());
         if (autoEffectiveMode != m_state.effectiveSlamMode) {
             m_state.effectiveSlamMode = autoEffectiveMode;
-            m_ctx.slamEngine.SetOperationMode(m_state.effectiveSlamMode);
+            if (m_ctx.orbSlamEngine != nullptr) {
+                m_ctx.orbSlamEngine->SetOperationMode(m_state.effectiveSlamMode);
+            }
             m_ctx.livePose.SetSlamMode(ToRuntimeSlamModeValue(m_state.effectiveSlamMode));
             std::cerr << "[slam_auto] effective_mode -> "
                       << smartdrone::core::domain::ToString(m_state.effectiveSlamMode)

@@ -149,6 +149,29 @@ const char *ToFeatureFrontendText(FeatureFrontend frontend)
     }
 }
 
+SlamBackend ParseSlamBackendText(const std::string &text)
+{
+    std::string normalized = text;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (normalized == "dpvo" || normalized == "dpvo_tensorrt" || normalized == "dpvo-tensorrt" ||
+        normalized == "dpvo_trt" || normalized == "dpvo-trt") {
+        return SlamBackend::DpvoTensorRt;
+    }
+    return SlamBackend::OrbSlam3;
+}
+
+const char *ToSlamBackendText(SlamBackend backend)
+{
+    switch (backend) {
+    case SlamBackend::DpvoTensorRt:
+        return "dpvo_tensorrt";
+    case SlamBackend::OrbSlam3:
+    default:
+        return "orbslam3";
+    }
+}
+
 smartdrone::core::domain::SlamOperationMode ParseSlamOperationModeText(const std::string &text)
 {
     using smartdrone::core::domain::SlamOperationMode;
@@ -372,6 +395,16 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.allowEmptyImu = argReader.HasFlag("--allow-empty-imu");
     config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 30);
     config.runtime.slamOperationMode = ParseSlamOperationModeText(argReader.GetString("--slam-mode", "mapping"));
+    config.runtime.slamBackend = ParseSlamBackendText(argReader.GetString("--slam-backend", "orbslam3"));
+    config.runtime.dpvoRepo = ResolveRuntimePath(argReader.GetString("--dpvo-repo", ""), argc > 0 ? argv[0] : nullptr);
+    config.runtime.dpvoPatchEngine =
+        ResolveRuntimePath(argReader.GetString("--dpvo-patch-engine", ""), argc > 0 ? argv[0] : nullptr);
+    config.runtime.dpvoUpdateEngine =
+        ResolveRuntimePath(argReader.GetString("--dpvo-update-engine", ""), argc > 0 ? argv[0] : nullptr);
+    config.runtime.dpvoInputWidth = argReader.GetInt("--dpvo-input-width", 640);
+    config.runtime.dpvoInputHeight = argReader.GetInt("--dpvo-input-height", 400);
+    config.runtime.dpvoPatchesPerFrame = argReader.GetInt("--dpvo-patches-per-frame", 48);
+    config.runtime.dpvoOptimizationWindow = argReader.GetInt("--dpvo-optimization-window", 7);
     config.runtime.featureFrontend = ParseFeatureFrontendText(argReader.GetString("--feature-frontend", "orb"));
     {
         const char *home = std::getenv("HOME");

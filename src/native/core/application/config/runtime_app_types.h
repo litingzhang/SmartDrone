@@ -62,6 +62,7 @@ struct RemoteRuntimeConfig {
 struct MainRuntimeAliases {
     SensorMode sensorMode{SensorMode::Stereo};
     domain::SlamOperationMode slamOperationMode{domain::SlamOperationMode::Mapping};
+    SlamBackend slamBackend{SlamBackend::OrbSlam3};
     FeatureFrontend featureFrontend{FeatureFrontend::Orb};
     int width{}, height{}, fps{}, slamInputFps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{},
         pairQueue{};

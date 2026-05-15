@@ -46,6 +46,7 @@ set(SMART_DRONE_ADAPTER_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688/icm42688_imu.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688_imu_provider.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_engine_adapter.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo_tensorrt_engine.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_mode_state.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_mode_strategy.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_tracking_backend.cpp"

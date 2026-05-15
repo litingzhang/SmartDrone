@@ -74,6 +74,7 @@ std::vector<uint8_t> BuildConfigPayload(const UnifiedConfig &cfg, smartdrone::co
     oss << "camera.uvc_eye_height=" << cfg.app.camera.uvcEyeHeight << "\n";
     oss << "camera.uvc_packed_stereo=" << (cfg.app.camera.uvcPackedStereo ? "true" : "false") << "\n";
     oss << "slam.input_fps=" << cfg.app.runtime.slamInputFps << "\n";
+    oss << "slam.backend=" << ToSlamBackendText(cfg.app.runtime.slamBackend) << "\n";
     oss << "slam.feature_frontend=" << ToFeatureFrontendText(cfg.app.runtime.featureFrontend) << "\n";
     oss << "slam.perception_mode=" << ToSensorModeText(cfg.app.sensorMode) << "\n";
     oss << "slam.operation_mode=" << smartdrone::core::domain::ToString(cfg.app.runtime.slamOperationMode) << "\n";
