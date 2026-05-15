@@ -15,6 +15,8 @@ Current status:
 - `dpvo_tensorrt` is native C++/TensorRT only. It does not start Python or PyTorch.
 - The backend loads the DPVO patchifier and update TensorRT engines directly in process.
 - Jetson now has generated FP16 engines under `/home/nvidia/DPVO/weights/`.
+- The backend now publishes realtime pose rows through a native stereo VO pose core while the full DPVO graph solver is
+  still being ported.
 - It fails closed if the engines are missing or invalid, instead of silently falling back to ORB-SLAM3.
 - It is not enabled in `smart_drone.service`; production still uses `orbslam3 + superpoint_lightglue`.
 
@@ -26,14 +28,15 @@ Important implementation note: original DPVO is not a single network that direct
 - CUDA bundle adjustment
 - SE3 graph/state management
 
-Only the runtime backend slot and TensorRT engine loading are wired in this pass. Pose publication remains disabled inside
-the DPVO backend until the native CUDA correlation/BA/state path is ported. This is deliberate: the flight stack must not
-receive placeholder VO poses.
+The current pose output is a native stereo LK/PnP bridge inside the DPVO backend, not full DPVO yet. It is useful for
+keeping the backend interface alive and proving realtime pose publication, but accuracy is expected to trail true DPVO
+until correlation, BA, patch graph state, and SE3 pose integration are implemented.
 
 Next native steps:
 
 1. Port or wrap DPVO `altcorr` and `fastba` CUDA kernels without Python/Torch dependencies.
-2. Implement the C++ DPVO state machine: patch memory, graph edges, motion model, keyframe removal, and SE3 pose output.
+2. Replace the temporary stereo VO bridge with the C++ DPVO state machine: patch memory, graph edges, motion model,
+   keyframe removal, and SE3 pose output.
 3. Run MH04/MH05 replay and a live rotation test before enabling `--slam-backend dpvo` in the service.
 
 ## TensorRT Engine Export
@@ -78,6 +81,30 @@ TensorRT results:
 | `dpvo_update_fp16.engine` | 301.362 s | 470.826 qps | 2.12103 ms |
 
 ## MH04 Replay Status
+
+2026-05-15 Jetson run after adding native stereo VO pose output:
+
+```text
+/home/nvidia/euroc_eval/results/mh04_dpvo_tensorrt_pose_20260515_045517
+```
+
+Result:
+
+| Metric | Value |
+| --- | ---: |
+| `REPLAY_STATUS` | `0` |
+| `EVAL_STATUS` | `0` |
+| `frames_out` | `2032` |
+| `pose_valid_frames` | `2032` |
+| `tracking_ok_frames` | `2032` |
+| `identity_pose_frames` | `1` |
+| `ATE RMSE` | `6.2211 m` |
+| `RPE RMSE` | `0.5563 m` |
+| `slam_total_ms_mean/max` | `48.5 / 126.618 ms` |
+
+This resolves the immediate "no pose output" blocker: DPVO mode now emits a realtime pose for every MH04 replay row and
+passes the strict realtime-pose evaluator gate. It does not solve accuracy. The current output is produced by a native
+stereo VO bridge while the DPVO TensorRT engines are loaded; it is not the final DPVO patch/correlation/BA trajectory.
 
 2026-05-15 Jetson run after engine export:
 

@@ -12,6 +12,7 @@ struct DpvoTensorRtConfig {
     std::string repoPath;
     std::string patchEnginePath;
     std::string updateEnginePath;
+    std::string settingsPath;
     int inputWidth{640};
     int inputHeight{400};
     int patchesPerFrame{48};
@@ -33,6 +34,7 @@ class DpvoTensorRtEngine final : public core::ports::ISlamEngine {
     std::unique_ptr<Impl> m_impl;
 };
 
-DpvoTensorRtConfig MakeDpvoTensorRtConfig(const RuntimeConfig &runtime);
+DpvoTensorRtConfig MakeDpvoTensorRtConfig(const RuntimeConfig &runtime,
+                                          const std::string &settingsPath = std::string{});
 
 } // namespace smartdrone::adapters::slam

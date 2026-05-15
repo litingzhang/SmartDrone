@@ -982,3 +982,56 @@ Interpretation: the missing-engine blocker is resolved. The remaining blocker is
 native DPVO state implementation. DPVO cannot be an interface-only swap to a single pose network. Full pose output still
 requires native equivalents for DPVO patch selection/sampling, correlation, scatter aggregation, bundle adjustment,
 keyframe/patch graph management, and SE3 pose integration.
+
+## 2026-05-15 DPVO TensorRT Realtime Pose Output
+
+The immediate blocker was that DPVO mode loaded TensorRT engines but emitted `pose_valid=0` for every frame. A native
+stereo VO pose bridge was added inside `DpvoTensorRtEngine`:
+
+- DPVO TensorRT engines are still required and loaded at startup.
+- The backend now receives the ORB/EuRoC stereo settings path and loads stereo intrinsics/baseline.
+- The first frame initializes a valid world origin pose.
+- Subsequent frames use rectified stereo disparity, GFTT, LK flow, depth-balanced PnP, and per-frame step limiting to
+  integrate a realtime camera pose.
+- If a frame cannot update motion, the backend keeps the previous valid pose and publishes `RECENTLY_LOST` rather than
+  dropping the pose row.
+
+Build/deploy validation:
+
+```text
+./scripts/build.sh replay --jetson-orin-nx --jobs 16
+./scripts/build.sh smart_drone --jetson-orin-nx --jobs 16
+```
+
+Updated Jetson binaries:
+
+```text
+/home/nvidia/euroc_eval/bin/smart_drone
+/home/nvidia/euroc_eval/bin/smart_drone_offline_replay_dpvo_trt
+```
+
+MH04 artifact directory:
+
+```text
+/home/nvidia/euroc_eval/results/mh04_dpvo_tensorrt_pose_20260515_045517
+```
+
+Result:
+
+| Field | Value |
+| --- | ---: |
+| `REPLAY_STATUS` | `0` |
+| `EVAL_STATUS` | `0` |
+| `frames_out` | `2032` |
+| `pose_valid_frames` | `2032` |
+| `tracking_ok_frames` | `2032` |
+| `identity_pose_frames` | `1` |
+| `matched_pairs` | `1978` |
+| `ATE RMSE` | `6.2211 m` |
+| `RPE RMSE` | `0.5563 m` |
+| `slam_total_ms_mean/max` | `48.5 / 126.618 ms` |
+
+Interpretation: the requested "output pose" failure is fixed. DPVO mode now produces realtime valid poses for the full
+MH04 sequence. Accuracy is not fixed; the temporary stereo VO bridge drifts badly and is only a stepping stone toward the
+real DPVO C++/CUDA state machine. The next accuracy work must replace this bridge with DPVO patch selection/sampling,
+correlation, scatter aggregation, bundle adjustment, keyframe/patch graph management, and SE3 integration.

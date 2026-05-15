@@ -340,8 +340,9 @@ SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg, LiveRuntimeTuni
       m_frameProcessorState(MakeInitialFrameProcessorState(m_aliases))
 {
     if (m_aliases.slamBackend == SlamBackend::DpvoTensorRt) {
+        auto dpvoConfig = smartdrone::adapters::slam::MakeDpvoTensorRtConfig(cfg.app.runtime, m_effectiveSettingsPath);
         m_slamEngine = std::make_unique<smartdrone::adapters::slam::DpvoTensorRtEngine>(
-            smartdrone::adapters::slam::MakeDpvoTensorRtConfig(cfg.app.runtime));
+            std::move(dpvoConfig));
     } else {
         ApplyOrbAccelerationEnvironment(cfg.app.runtime.orbAcceleration);
         m_slamSystem = std::make_unique<ORB_SLAM3::System>(cfg.app.vocab, m_effectiveSettingsPath, m_orbSensor, false);

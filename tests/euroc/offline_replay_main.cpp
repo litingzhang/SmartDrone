@@ -494,6 +494,7 @@ smartdrone::adapters::slam::DpvoTensorRtConfig MakeOfflineDpvoConfig(const Offli
     cfg.repoPath = opts.dpvoRepo;
     cfg.patchEnginePath = opts.dpvoPatchEngine;
     cfg.updateEnginePath = opts.dpvoUpdateEngine;
+    cfg.settingsPath = opts.settings;
     cfg.inputWidth = std::clamp(opts.dpvoInputWidth, 160, 1280);
     cfg.inputHeight = std::clamp(opts.dpvoInputHeight, 120, 960);
     cfg.patchesPerFrame = std::clamp(opts.dpvoPatchesPerFrame, 16, 256);
