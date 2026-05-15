@@ -633,6 +633,18 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
     const bool initializedForMonoAugmentation =
         tracker != nullptr && tracker->mState != ORB_SLAM3::Tracking::NO_IMAGES_YET &&
         tracker->mState != ORB_SLAM3::Tracking::NOT_INITIALIZED;
+    size_t orbStereoAugmentPairs = 0;
+    if (initializedForMonoAugmentation &&
+        EnvFlagEnabled("SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT", false)) {
+        const auto augmentStartTp = std::chrono::steady_clock::now();
+        const size_t maxExtraPairs =
+            EnvSizeValueClamped("SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_MAX_PAIRS", 96, 1, 512);
+        orbStereoAugmentPairs =
+            AppendOrbStereoAugmentFeatures(tracker->GetLeftORBExtractor(), tracker->GetRightORBExtractor(),
+                                           leftPrepared, rightPrepared, externalData, maxExtraPairs);
+        monoAugmentMs +=
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - augmentStartTp).count();
+    }
     const int monoAugmentMinOkStreak =
         EnvIntValueClamped("SMART_DRONE_SP_LG_ORB_LEFT_AUGMENT_MIN_OK_STREAK", 0, 0, 100000);
     if (initializedForMonoAugmentation &&
@@ -669,6 +681,7 @@ core::ports::SlamOutput SuperPointLightGlueModeStrategy::Process(SlamEngineAdapt
                   << " selected_pairs=" << matchedLeftPoints.size()
                   << " zncc_refined=" << znccRefinedPairs
                   << " temporal_carry=" << temporalCarryPairs
+                  << " orb_stereo_aug=" << orbStereoAugmentPairs
                   << " injected=" << externalData.leftKeypoints.size()
                   << "/" << externalData.rightKeypoints.size()
                   << " hash=" << state.m_lastSuperPointExternalHash

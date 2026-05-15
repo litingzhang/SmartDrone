@@ -50,6 +50,7 @@ class SlamEngineAdapter final : public core::ports::ISlamEngine {
                                         int trackingState);
     void GateRealtimePoseQuality(core::ports::SlamOutput &out, double timestampSec);
     void ResetRealtimeOutputAlignment();
+    void ResetOutputSmoother();
 
     std::unique_ptr<ORB_SLAM3::System> m_system;
     std::unique_ptr<SlamModeSharedState> m_modeState;
@@ -64,6 +65,12 @@ class SlamEngineAdapter final : public core::ports::ISlamEngine {
     float m_stableVelX{0.0f};
     float m_stableVelY{0.0f};
     float m_stableVelZ{0.0f};
+    core::ports::PoseEstimate m_smoothedOutputPose{};
+    bool m_haveSmoothedOutputPose{false};
+    double m_smoothedOutputTimestampSec{0.0};
+    float m_smoothVelX{0.0f};
+    float m_smoothVelY{0.0f};
+    float m_smoothVelZ{0.0f};
     Sophus::SE3f m_realtimeOutputFromRawPose{};
     bool m_realtimeOutputMapContinuityActive{false};
     unsigned long m_realtimeOutputMapContinuityMapId{0};

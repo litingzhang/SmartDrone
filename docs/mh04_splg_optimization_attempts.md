@@ -666,3 +666,73 @@ Current status after these attempts:
 | No dropped pose output | Pass for the current no-jump baseline and most diagnostic sweeps. |
 | No pose jumps | Current baseline passes; several rejected sweeps violate this. |
 | Average/full MH04 ATE below `0.03 m` | Not achieved. Best single complete no-jump result found in this pass was `0.0475 m`, but it did not reproduce; best stable accepted baseline remains around `0.06-0.07 m`. |
+
+## 2026-05-15 Realtime Output Stabilizer And ORB Stereo Supplement
+
+The next request focused on making realtime pose output smoother and eliminating jumps while still targeting full-sequence
+`ATE RMSE < 0.03 m`. Two output-layer modes were added behind `SMART_DRONE_POSE_STABILIZER=1`:
+
+- `SMART_DRONE_POSE_STABILIZER_MODE=alpha_beta`: causal alpha-beta translation smoothing with bounded innovation.
+- `SMART_DRONE_POSE_STABILIZER_MODE=guard`: no-lag abnormal-step guard. Normal valid poses pass through unchanged; invalid,
+  identity, stuck, or very large-step frames reuse a velocity prediction from the previous published pose.
+
+Important implementation note: the stabilizer now has its own output state instead of reusing the realtime continuity
+state. This avoids cross-coupling `MaintainRealtimePoseContinuity()` with the optional publish-layer smoother. Identity
+poses are treated as missing measurements after initialization, not as a valid reset to the world origin.
+
+Before compiling the runtime change, a causal smoothing simulation was run on existing full MH04 trajectories. It did not
+use future frames or ground truth feedback. The best observed alpha-beta settings only changed ATE marginally:
+
+| Source trajectory | Raw ATE RMSE (m) | Best causal smoothed ATE RMSE (m) | Interpretation |
+| --- | ---: | ---: | --- |
+| single favorable `depth0962` run | about `0.0475` | `0.0471` | Smoothing slightly reduces local jitter but cannot cross `0.03 m`. |
+| current `streak20` run | `0.0657` | `0.0655` | Essentially unchanged. |
+| historical `0.0578` run | `0.0578` | `0.0578` | No useful global ATE improvement. |
+
+Alpha-beta runtime result root: `/home/nvidia/euroc_eval/results/codex_pose_smoother_mh04_20260514_220859`
+
+| Profile | Main setting | Rows / nonzero poses | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `smooth_baseline` | alpha-beta, default SP+LG | 2032 / 2030 | 0.0989 | 0.0275 | 0.2007 | 0.160 | 0 | Reject for accuracy. It smooths output but adds lag/drift. |
+| `smooth_left1200_depth0962` | alpha-beta plus left augment `1200`, depth `0.962` | 2032 / 2030 | 0.0688 | 0.0295 | 0.3024 | 0.158 | 0 | Reject for accuracy. Still above target and worse than the single favorable raw run. |
+
+Guard runtime result root: `/home/nvidia/euroc_eval/results/codex_pose_guard_mh04_20260514_221956`
+
+| Profile | Main setting | Rows / nonzero poses | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Gate hits | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `guard_baseline` | no-lag guard, max step `0.22 m` | 2032 / 2030 | 0.1224 | 0.0263 | 0.2260 | 0.170 | 0 | 0 | Keep as optional safety guard only. No jump occurred, so it did not alter the trajectory. |
+| `guard_left1200_depth0962` | guard plus left augment `1200`, depth `0.962` | 2032 / 2030 | 0.1283 | 0.0251 | 0.2560 | 0.174 | 0 | 0 | Reject for accuracy. No drops or jumps, but backend drift was large. |
+
+Interpretation: output smoothing and guarding can keep published poses continuous, but they do not reduce the full MH04
+global drift to `0.03 m`. Continuous low-pass filtering is actively harmful for ATE because it introduces time lag.
+The safer publish-layer behavior is the `guard` mode, which only handles invalid/identity/abnormal-step frames.
+
+To test whether SP+LG's remaining drift came from replacing too much of ORB-SLAM3's native stereo observation model, an
+opt-in ORB stereo supplement was added:
+
+- `SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT=1`
+- `SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_MAX_PAIRS=N`
+
+It appends bounded native ORB stereo pairs after SP+LG initialization while preserving the original SP+LG stereo pairs and
+left-to-right match mapping. This is different from the earlier left-only augment because the appended ORB points have
+right-image stereo depth.
+
+ORB stereo supplement result root: `/home/nvidia/euroc_eval/results/codex_orb_stereo_aug_mh04_20260514_223113`
+
+| Profile | Main setting | Rows / nonzero poses | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | SLAM mean ms | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `orb_stereo48` | append up to 48 ORB stereo pairs | 2032 / 2030 | 0.1556 | 0.0289 | 0.2867 | 0.202 | 1 | 106.67 | Reject. Worse accuracy, one large step, and too slow. |
+| `orb_stereo96` | append up to 96 ORB stereo pairs | 2032 / 2030 | 0.0772 | 0.0241 | 0.1771 | 0.165 | 0 | 106.90 | Reject for target. No jump, but still above target and much slower. |
+
+Updated status:
+
+| Requirement | Status |
+| --- | --- |
+| Realtime pose rows | Pass in the latest tests: `2032/2032` rows written from the replay callback. |
+| No dropped/invalid pose output | Pass in the latest tests: 0 invalid rows. |
+| No abnormal jumps | Pass for guard and `orb_stereo96`; `orb_stereo48` violated the `>0.2 m` step criterion once. |
+| Full MH04 average ATE below `0.03 m` | Not achieved. Output-layer smoothing is not enough; ORB stereo supplement also failed. |
+
+Current engineering conclusion: the remaining error is backend estimation drift under external SP+LG observations, not a
+publish-layer smoothness issue. The publish layer should use continuity plus optional no-lag guard for safety; the accuracy
+target requires a deeper change in how learned SP+LG observations are weighted, associated, or fused inside ORB-SLAM3.
