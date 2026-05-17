@@ -29,7 +29,8 @@ struct RemoteRuntimeConfig {
     bool autoExposureEnabled{true};
     int slamInputFps{30};
     domain::SlamOperationMode slamOperationMode{domain::SlamOperationMode::Mapping};
-    FeatureFrontend featureFrontend{FeatureFrontend::Orb};
+    SlamBackend slamBackend{SlamBackend::Klt};
+    FeatureFrontend featureFrontend{FeatureFrontend::LkGfttPerFrame};
     std::string udpIp;
     bool udpEnabled{false};
     SensorMode sensorMode{SensorMode::Stereo};
@@ -62,8 +63,8 @@ struct RemoteRuntimeConfig {
 struct MainRuntimeAliases {
     SensorMode sensorMode{SensorMode::Stereo};
     domain::SlamOperationMode slamOperationMode{domain::SlamOperationMode::Mapping};
-    SlamBackend slamBackend{SlamBackend::OrbSlam3};
-    FeatureFrontend featureFrontend{FeatureFrontend::Orb};
+    SlamBackend slamBackend{SlamBackend::Klt};
+    FeatureFrontend featureFrontend{FeatureFrontend::LkGfttPerFrame};
     int width{}, height{}, fps{}, slamInputFps{}, leftCamIndex{}, rightCamIndex{}, exposureUs{}, pairMs{}, keepMs{},
         pairQueue{};
     int uvcDeviceIndex{}, uvcEyeWidth{}, uvcEyeHeight{};
@@ -86,7 +87,7 @@ struct MainRuntimeAliases {
 struct LiveRuntimeTuning {
     std::atomic<int> slamInputFps{30};
     std::atomic<uint8_t> slamOperationMode{static_cast<uint8_t>(domain::SlamOperationMode::Mapping)};
-    std::atomic<uint8_t> featureFrontend{static_cast<uint8_t>(FeatureFrontend::Orb)};
+    std::atomic<uint8_t> featureFrontend{static_cast<uint8_t>(FeatureFrontend::LkGfttPerFrame)};
     std::atomic<bool> sendImage{true};
     std::atomic<bool> sendFeature{true};
     std::atomic<bool> sendMap{false};

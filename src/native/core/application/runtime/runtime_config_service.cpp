@@ -65,35 +65,8 @@ void ApplyOrbAccelerationEnvironment(const std::string &acceleration)
     }
 }
 
-} // namespace
-
-RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTuning &tuning, std::mutex &configMutex,
-                                           RestartFn requestRestart)
-    : m_config(config), m_tuning(tuning), m_configMutex(configMutex), m_requestRestart(std::move(requestRestart))
+bool ValidateOrbExtractorConfig(const RemoteRuntimeConfig &remote, std::string *err)
 {
-}
-
-bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::string *err)
-{
-    remote.orbAcceleration = NormalizeOrbAcceleration(remote.orbAcceleration);
-    if (remote.featureFrontend != FeatureFrontend::Orb) {
-        remote.orbAcceleration = "cpu";
-    }
-    if (remote.exposureUs <= 0 || !std::isfinite(remote.gain) || remote.gain < 0.0f || remote.pairMs <= 0 ||
-        remote.slamInputFps < 0 ||
-        remote.uvcDeviceIndex < 0 || remote.uvcEyeWidth <= 0 || remote.uvcEyeHeight <= 0) {
-        if (err) {
-            *err = "bad runtime config";
-        }
-        return false;
-    }
-    if (!std::isfinite(remote.tbcTx) || !std::isfinite(remote.tbcTy) || !std::isfinite(remote.tbcTz) ||
-        !std::isfinite(remote.tbcRollDeg) || !std::isfinite(remote.tbcPitchDeg) || !std::isfinite(remote.tbcYawDeg)) {
-        if (err) {
-            *err = "bad tbc override config";
-        }
-        return false;
-    }
     if (remote.orbNFeatures <= 0 || !(remote.orbScaleFactor > 0.0f) || remote.orbNLevels <= 0 ||
         remote.orbIniThFAST <= 0 || remote.orbMinThFAST <= 0) {
         if (err) {
@@ -114,6 +87,65 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
             *err = "orb extractor config out of range";
         }
         return false;
+    }
+    return true;
+}
+
+void SetDefaultOrbExtractorConfig(RemoteRuntimeConfig &remote)
+{
+    remote.orbNFeatures = 1200;
+    remote.orbScaleFactor = 1.2f;
+    remote.orbNLevels = 8;
+    remote.orbIniThFAST = 16;
+    remote.orbMinThFAST = 6;
+}
+
+} // namespace
+
+RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config, LiveRuntimeTuning &tuning, std::mutex &configMutex,
+                                           RestartFn requestRestart)
+    : m_config(config), m_tuning(tuning), m_configMutex(configMutex), m_requestRestart(std::move(requestRestart))
+{
+}
+
+bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::string *err)
+{
+    remote.orbAcceleration = NormalizeOrbAcceleration(remote.orbAcceleration);
+    remote.slamBackend = NormalizeSlamBackendForBuild(remote.slamBackend);
+    const bool usesOrbBackend = remote.slamBackend == SlamBackend::OrbSlam3;
+    if (remote.slamBackend == SlamBackend::DpvoTensorRt) {
+        remote.featureFrontend = FeatureFrontend::LkGfttPerFrame;
+        remote.lkPerFrameAcceleration = "cpu";
+    }
+    if (remote.slamBackend == SlamBackend::Klt &&
+        remote.featureFrontend != FeatureFrontend::LK &&
+        remote.featureFrontend != FeatureFrontend::LkGfttPerFrame) {
+        remote.featureFrontend = FeatureFrontend::LkGfttPerFrame;
+    }
+    if (remote.slamBackend != SlamBackend::OrbSlam3 || remote.featureFrontend != FeatureFrontend::Orb) {
+        remote.orbAcceleration = "cpu";
+    }
+    if (remote.exposureUs <= 0 || !std::isfinite(remote.gain) || remote.gain < 0.0f || remote.pairMs <= 0 ||
+        remote.slamInputFps < 0 ||
+        remote.uvcDeviceIndex < 0 || remote.uvcEyeWidth <= 0 || remote.uvcEyeHeight <= 0) {
+        if (err) {
+            *err = "bad runtime config";
+        }
+        return false;
+    }
+    if (!std::isfinite(remote.tbcTx) || !std::isfinite(remote.tbcTy) || !std::isfinite(remote.tbcTz) ||
+        !std::isfinite(remote.tbcRollDeg) || !std::isfinite(remote.tbcPitchDeg) || !std::isfinite(remote.tbcYawDeg)) {
+        if (err) {
+            *err = "bad tbc override config";
+        }
+        return false;
+    }
+    if (usesOrbBackend) {
+        if (!ValidateOrbExtractorConfig(remote, err)) {
+            return false;
+        }
+    } else if (!ValidateOrbExtractorConfig(remote, nullptr)) {
+        SetDefaultOrbExtractorConfig(remote);
     }
     if (remote.superpointTopK < 1 || remote.superpointTopK > 4096 || remote.superpointMaxPoints < 1 ||
         remote.superpointMaxPoints > 4096 || remote.superpointMaxPoints > remote.superpointTopK) {
@@ -155,24 +187,29 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         std::lock_guard<std::mutex> lock(m_configMutex);
         CameraConfig &cam = m_config.app.camera;
         const bool sensorModeChanged = m_config.app.sensorMode != remote.sensorMode;
+        const bool backendChanged = m_config.app.runtime.slamBackend != remote.slamBackend;
         const bool frontendChanged = m_config.app.runtime.featureFrontend != remote.featureFrontend;
         const bool aeModeChanged = cam.aeDisable != (!remote.autoExposureEnabled);
         const bool uvcConfigChanged = cam.uvcDeviceIndex != remote.uvcDeviceIndex ||
                                       cam.uvcEyeWidth != remote.uvcEyeWidth ||
                                       cam.uvcEyeHeight != remote.uvcEyeHeight ||
                                       cam.uvcPackedStereo != remote.uvcPackedStereo;
-        const bool orbChanged = m_config.app.runtime.orbNFeatures != remote.orbNFeatures ||
-                                std::abs(m_config.app.runtime.orbScaleFactor - remote.orbScaleFactor) > 1e-6f ||
-                                m_config.app.runtime.orbNLevels != remote.orbNLevels ||
-                                m_config.app.runtime.orbIniThFAST != remote.orbIniThFAST ||
-                                m_config.app.runtime.orbMinThFAST != remote.orbMinThFAST;
+        const bool orbParamsAffectPipeline =
+            m_config.app.runtime.slamBackend == SlamBackend::OrbSlam3 || remote.slamBackend == SlamBackend::OrbSlam3;
+        const bool orbChanged = orbParamsAffectPipeline &&
+                                (m_config.app.runtime.orbNFeatures != remote.orbNFeatures ||
+                                 std::abs(m_config.app.runtime.orbScaleFactor - remote.orbScaleFactor) > 1e-6f ||
+                                 m_config.app.runtime.orbNLevels != remote.orbNLevels ||
+                                 m_config.app.runtime.orbIniThFAST != remote.orbIniThFAST ||
+                                 m_config.app.runtime.orbMinThFAST != remote.orbMinThFAST);
         const bool superpointChanged = m_config.app.runtime.superpointTopK != remote.superpointTopK ||
                                   m_config.app.runtime.superpointMaxPoints != remote.superpointMaxPoints ||
                                   m_config.app.runtime.superpointInputMaxWidth != remote.superpointInputMaxWidth ||
                                   m_config.app.runtime.superpointInputMaxHeight != remote.superpointInputMaxHeight;
         const bool lkPerFrameAccelChanged =
             m_config.app.runtime.lkPerFrameAcceleration != remote.lkPerFrameAcceleration;
-        const bool orbAccelChanged = m_config.app.runtime.orbAcceleration != remote.orbAcceleration;
+        const bool orbAccelChanged =
+            orbParamsAffectPipeline && m_config.app.runtime.orbAcceleration != remote.orbAcceleration;
         cam.exposureUs = remote.exposureUs;
         cam.gain = remote.gain;
         cam.aeDisable = !remote.autoExposureEnabled;
@@ -183,6 +220,7 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         cam.uvcPackedStereo = remote.uvcPackedStereo;
         m_config.app.runtime.slamInputFps = remote.slamInputFps;
         m_config.app.runtime.slamOperationMode = remote.slamOperationMode;
+        m_config.app.runtime.slamBackend = remote.slamBackend;
         m_config.app.runtime.featureFrontend = remote.featureFrontend;
         m_config.app.runtime.orbNFeatures = remote.orbNFeatures;
         m_config.app.runtime.orbScaleFactor = remote.orbScaleFactor;
@@ -238,11 +276,13 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote, std::s
         effectiveTbcPitchDeg = m_config.app.runtime.tbcPitchDeg;
         effectiveTbcYawDeg = m_config.app.runtime.tbcYawDeg;
         restartNeeded =
-            sensorModeChanged || frontendChanged || aeModeChanged || uvcConfigChanged || orbChanged || superpointChanged ||
-            lkPerFrameAccelChanged || orbAccelChanged;
+            sensorModeChanged || backendChanged || frontendChanged || aeModeChanged || uvcConfigChanged || orbChanged ||
+            superpointChanged || lkPerFrameAccelChanged || orbAccelChanged;
     }
 
-    ApplyOrbAccelerationEnvironment(remote.orbAcceleration);
+    if (remote.slamBackend == SlamBackend::OrbSlam3) {
+        ApplyOrbAccelerationEnvironment(remote.orbAcceleration);
+    }
 
     m_tuning.slamInputFps.store(remote.slamInputFps, std::memory_order_relaxed);
     m_tuning.slamOperationMode.store(static_cast<uint8_t>(remote.slamOperationMode), std::memory_order_relaxed);
@@ -324,6 +364,12 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
                 remote.slamInputFps = static_cast<int>(*v);
             } else {
                 return {false, "slam.input_fps type mismatch"};
+            }
+        } else if (key == ConfigRegistry::kSlamBackend) {
+            if (const auto *v = std::get_if<std::string>(&value)) {
+                remote.slamBackend = NormalizeSlamBackendForBuild(ParseSlamBackendText(*v));
+            } else {
+                return {false, "slam.backend type mismatch"};
             }
         } else if (key == ConfigRegistry::kSlamFeatureFrontend) {
             if (const auto *v = std::get_if<std::string>(&value)) {
@@ -528,6 +574,7 @@ CommandResult RuntimeConfigService::ApplyConfig(const ConfigUpdate &update, cons
     const int cameraFps = currentConfig.app.camera.fps > 0 ? currentConfig.app.camera.fps : 1;
     const int clampedSlamFps = remote.slamInputFps <= 0 ? cameraFps : std::min(cameraFps, remote.slamInputFps);
     std::string message = "runtime cfg updated sensor=" + std::string(ToSensorModeText(remote.sensorMode)) +
+                          " backend=" + std::string(ToSlamBackendText(remote.slamBackend)) +
                           " frontend=" + std::string(ToFeatureFrontendText(remote.featureFrontend)) +
                           " slam_mode=" + std::string(smartdrone::core::domain::ToString(remote.slamOperationMode)) +
                           " slam_fps=" + std::to_string(clampedSlamFps) + " pair_ms=" +
@@ -554,6 +601,7 @@ RemoteRuntimeConfig RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig 
     remote.uvcPackedStereo = currentConfig.app.camera.uvcPackedStereo;
     remote.slamInputFps = currentConfig.app.runtime.slamInputFps;
     remote.slamOperationMode = currentConfig.app.runtime.slamOperationMode;
+    remote.slamBackend = currentConfig.app.runtime.slamBackend;
     remote.featureFrontend = currentConfig.app.runtime.featureFrontend;
     remote.sensorMode = currentConfig.app.sensorMode;
     remote.udpIp = currentConfig.app.udp.ip;

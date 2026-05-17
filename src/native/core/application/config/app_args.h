@@ -20,9 +20,11 @@ enum class FeatureFrontend {
     LK = 3,
     LkGfttPerFrame = 4,
     SuperPointLightGlue = 5,
+    XFeatLightGlue = 6,
 };
 
 enum class SlamBackend {
+    Klt,
     OrbSlam3,
     DpvoTensorRt,
 };
@@ -32,7 +34,9 @@ SensorMode ParseSensorModeText(const std::string &text);
 const char *ToSensorModeText(SensorMode mode);
 FeatureFrontend ParseFeatureFrontendText(const std::string &text);
 const char *ToFeatureFrontendText(FeatureFrontend frontend);
+bool IsExternalFeatureLightGlueFrontend(FeatureFrontend frontend);
 SlamBackend ParseSlamBackendText(const std::string &text);
+SlamBackend NormalizeSlamBackendForBuild(SlamBackend backend);
 const char *ToSlamBackendText(SlamBackend backend);
 smartdrone::core::domain::SlamOperationMode ParseSlamOperationModeText(const std::string &text);
 std::string ResolveRuntimePath(const std::string &path, const char *argv0);
@@ -92,8 +96,8 @@ struct RuntimeConfig {
     bool allowEmptyImu{false};
     int slamInputFps{30};
     smartdrone::core::domain::SlamOperationMode slamOperationMode{smartdrone::core::domain::SlamOperationMode::Mapping};
-    SlamBackend slamBackend{SlamBackend::OrbSlam3};
-    FeatureFrontend featureFrontend{FeatureFrontend::Orb};
+    SlamBackend slamBackend{SlamBackend::Klt};
+    FeatureFrontend featureFrontend{FeatureFrontend::LkGfttPerFrame};
     std::string dpvoRepo;
     std::string dpvoPatchEngine;
     std::string dpvoUpdateEngine;
@@ -130,7 +134,7 @@ struct RuntimeConfig {
 };
 
 struct AppConfig {
-    std::string vocab{"ORBvoc.txt"};
+    std::string vocab{};
     std::string settings{"config/stereo.yaml"};
     SensorMode sensorMode{SensorMode::Stereo};
     CameraConfig camera;

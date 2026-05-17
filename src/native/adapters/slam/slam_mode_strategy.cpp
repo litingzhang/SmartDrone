@@ -7,12 +7,10 @@ namespace smartdrone::adapters::slam {
 std::unique_ptr<SlamModeStrategy> CreateSlamModeStrategy(FeatureFrontend frontend)
 {
     switch (frontend) {
-    case FeatureFrontend::LK:
-        return CreateKltModeStrategy();
-    case FeatureFrontend::LkGfttPerFrame:
-        return CreateKltPerFrameModeStrategy();
     case FeatureFrontend::SuperPointLightGlue:
         return CreateSuperPointLightGlueModeStrategy();
+    case FeatureFrontend::XFeatLightGlue:
+        return CreateXFeatLightGlueModeStrategy();
     case FeatureFrontend::Orb:
     default:
         return CreateOrbModeStrategy();

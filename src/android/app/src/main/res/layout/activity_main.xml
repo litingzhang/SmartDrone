@@ -972,7 +972,7 @@
                             <TextView
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="Feature Frontend"
+                                android:text="Tracking Mode"
                                 android:textColor="#183247"
                                 android:textSize="11sp"
                                 android:textStyle="bold" />

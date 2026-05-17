@@ -13,9 +13,9 @@
 #include <string>
 #include <vector>
 
-#include "System.h"
 #include "adapters/slam/dpvo_tensorrt_engine.h"
-#include "adapters/slam/slam_engine_adapter.h"
+#include "adapters/slam/klt_slam_engine.h"
+#include "adapters/slam/slam_engine_factory.h"
 #include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "core/application/config/app_args.h"
 #include "core/domain/runtime_mode.h"
@@ -34,11 +34,11 @@ struct OfflineReplayOptions {
     fs::path outputCsv{"build/offline_replay_pose.csv"};
     fs::path summaryJson{};
     fs::path finalEurocTrajectory{};
-    std::string vocab{"ORB_SLAM3/Vocabulary/ORBvoc.txt"};
+    std::string vocab{};
     std::string settings{"config/stereo.yaml"};
     SensorMode sensorMode{SensorMode::StereoImu};
-    SlamBackend slamBackend{SlamBackend::OrbSlam3};
-    FeatureFrontend featureFrontend{FeatureFrontend::Orb};
+    SlamBackend slamBackend{SlamBackend::Klt};
+    FeatureFrontend featureFrontend{FeatureFrontend::LkGfttPerFrame};
     smartdrone::core::domain::SlamOperationMode slamMode{smartdrone::core::domain::SlamOperationMode::Mapping};
     std::string superpointRepo{"LightGlue"};
     std::string superpointDevice{"auto"};
@@ -298,12 +298,12 @@ const char *UsageText()
         "  --out <file>          Output CSV path, default build/offline_replay_pose.csv\n"
         "  --summary-json <file> Optional summary JSON output path\n"
         "  --final-euroc-trajectory <file> Optional final ORB-SLAM3 EuRoC trajectory after shutdown\n"
-        "  --vocab <file>        ORB vocabulary path\n"
-        "  --settings <file>     ORB settings YAML path\n"
+        "  --vocab <file>        ORB vocabulary path, used only with --slam-backend orbslam3\n"
+        "  --settings <file>     Camera/SLAM settings YAML path\n"
         "  --sensor-mode <mode>  stereo|stereo-imu|mono|mono-imu\n"
         "  --stereo-only         Shortcut for --sensor-mode stereo\n"
-        "  --slam-backend <mode> orbslam3|dpvo, default orbslam3\n"
-        "  --feature-frontend <mode> orb|superpoint_lightglue|lk|lk_gftt_per_frame, default orb\n"
+        "  --slam-backend <mode> klt|dpvo|orbslam3, default klt\n"
+        "  --feature-frontend <mode> orb|superpoint_lightglue|lk|lk_gftt_per_frame, default lk_gftt_per_frame\n"
         "  --superpoint-repo <dir>    SuperPoint/LightGlue repo root containing TensorRT engines\n"
         "  --superpoint-device <dev>  TensorRT device auto|cuda, default auto\n"
         "  --superpoint-top-k <n>     SuperPoint top-k candidate count, default 1024\n"
@@ -429,8 +429,10 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     if (HasFlag(argc, argv, "--stereo-only")) {
         opts.sensorMode = SensorMode::Stereo;
     }
-    opts.slamBackend = ParseSlamBackendText(GetOptionValue(argc, argv, "--slam-backend", "orbslam3"));
-    opts.featureFrontend = ParseFeatureFrontendText(GetOptionValue(argc, argv, "--feature-frontend", "orb"));
+    opts.slamBackend = NormalizeSlamBackendForBuild(
+        ParseSlamBackendText(GetOptionValue(argc, argv, "--slam-backend", "klt")));
+    opts.featureFrontend =
+        ParseFeatureFrontendText(GetOptionValue(argc, argv, "--feature-frontend", "lk_gftt_per_frame"));
     opts.slamMode = ParseSlamOperationModeText(GetOptionValue(argc, argv, "--slam-mode", "mapping"));
     opts.cameraFps = GetOptionInt(argc, argv, "--fps", opts.cameraFps);
     opts.slamInputFps = GetOptionInt(argc, argv, "--slam-fps", opts.slamInputFps);
@@ -458,35 +460,23 @@ OfflineReplayOptions ParseOptions(int argc, char **argv)
     opts.dpvoInputHeight = GetOptionInt(argc, argv, "--dpvo-input-height", opts.dpvoInputHeight);
     opts.dpvoPatchesPerFrame = GetOptionInt(argc, argv, "--dpvo-patches-per-frame", opts.dpvoPatchesPerFrame);
     opts.dpvoOptimizationWindow = GetOptionInt(argc, argv, "--dpvo-optimization-window", opts.dpvoOptimizationWindow);
-    opts.vocab = ResolveRuntimePath(GetOptionValue(argc, argv, "--vocab", opts.vocab), argc > 0 ? argv[0] : nullptr);
+    opts.vocab =
+        ResolveRuntimePath(GetOptionValue(argc, argv, "--vocab",
+                                          opts.slamBackend == SlamBackend::OrbSlam3 ? "ORBvoc.txt" : ""),
+                           argc > 0 ? argv[0] : nullptr);
     opts.settings =
         ResolveRuntimePath(GetOptionValue(argc, argv, "--settings", DefaultSettingsForSensorMode(opts.sensorMode)),
                            argc > 0 ? argv[0] : nullptr);
     return opts;
 }
 
-ORB_SLAM3::System::eSensor ResolveOrbSensor(SensorMode mode)
-{
-    switch (mode) {
-    case SensorMode::MonoImu:
-        return ORB_SLAM3::System::IMU_MONOCULAR;
-    case SensorMode::Mono:
-        return ORB_SLAM3::System::MONOCULAR;
-    case SensorMode::StereoImu:
-        return ORB_SLAM3::System::IMU_STEREO;
-    case SensorMode::Stereo:
-    default:
-        return ORB_SLAM3::System::STEREO;
-    }
-}
+bool UseImu(SensorMode mode) { return mode == SensorMode::StereoImu || mode == SensorMode::MonoImu; }
 
 smartdrone::adapters::slam::SlamInputMode ResolveSlamInputMode(SensorMode mode)
 {
     return (mode == SensorMode::Mono || mode == SensorMode::MonoImu) ? smartdrone::adapters::slam::SlamInputMode::MonoRight
                                                                      : smartdrone::adapters::slam::SlamInputMode::Stereo;
 }
-
-bool UseImu(SensorMode mode) { return mode == SensorMode::StereoImu || mode == SensorMode::MonoImu; }
 
 smartdrone::adapters::slam::DpvoTensorRtConfig MakeOfflineDpvoConfig(const OfflineReplayOptions &opts)
 {
@@ -522,31 +512,52 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     smartdrone::tests::ReplayCameraProvider camera(dataset);
     smartdrone::tests::ReplayImuProvider imu(dataset);
     std::unique_ptr<smartdrone::core::ports::ISlamEngine> slamEngine;
-    smartdrone::adapters::slam::SlamEngineAdapter *orbSlamEngine = nullptr;
+    smartdrone::adapters::slam::ISlamRuntimeControl *slamControl = nullptr;
 
     if (opts.slamBackend == SlamBackend::DpvoTensorRt) {
         slamEngine = std::make_unique<smartdrone::adapters::slam::DpvoTensorRtEngine>(MakeOfflineDpvoConfig(opts));
+    } else if (opts.slamBackend == SlamBackend::Klt) {
+        auto kltEngine = std::make_unique<smartdrone::adapters::slam::KltSlamEngine>(opts.settings);
+        slamControl = kltEngine.get();
+        slamEngine = std::move(kltEngine);
     } else {
-        const auto sensor = ResolveOrbSensor(opts.sensorMode);
+#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
         ApplyOrbAccelerationEnvironment(opts.orbAcceleration);
-        auto orbSystem = std::make_unique<ORB_SLAM3::System>(opts.vocab, opts.settings, sensor, false);
-        auto orbEngine = std::make_unique<smartdrone::adapters::slam::SlamEngineAdapter>(
-            std::move(orbSystem), ResolveSlamInputMode(opts.sensorMode), UseImu(opts.sensorMode), opts.settings);
-        orbSlamEngine = orbEngine.get();
-        orbSlamEngine->SetOperationMode(opts.slamMode);
-        orbSlamEngine->SetFeatureFrontend(opts.featureFrontend);
-        orbSlamEngine->SetExternalFeatureInputSizeLimit(opts.superpointInputMaxWidth, opts.superpointInputMaxHeight);
-        orbSlamEngine->SetStereoVoLoopClosure(opts.lkRuntimeLoopClosure, opts.lkLoopScale, opts.lkLoopRelaxation);
-        orbSlamEngine->SetStereoVoPerFrameAcceleration(opts.lkPerFrameAcceleration);
-        slamEngine = std::move(orbEngine);
+        smartdrone::adapters::slam::OrbSlam3EngineConfig orbConfig{};
+        orbConfig.vocabularyPath = opts.vocab;
+        orbConfig.settingsPath = opts.settings;
+        orbConfig.sensorMode = opts.sensorMode;
+        orbConfig.useViewer = false;
+        orbConfig.useImu = UseImu(opts.sensorMode);
+        orbConfig.inputMode = ResolveSlamInputMode(opts.sensorMode);
+        smartdrone::adapters::slam::ControlledSlamEngine controlled =
+            smartdrone::adapters::slam::CreateOrbSlam3Engine(orbConfig);
+        if (controlled.engine == nullptr) {
+            std::cerr << "error: ORB-SLAM3 backend failed to initialize\n";
+            return 2;
+        }
+        slamControl = controlled.control;
+        slamEngine = std::move(controlled.engine);
+#else
+        std::cerr << "error: ORB-SLAM3 backend is not compiled into this offline replay target\n";
+        return 2;
+#endif
+    }
+
+    if (slamControl != nullptr) {
+        slamControl->SetOperationMode(opts.slamMode);
+        slamControl->SetFeatureFrontend(opts.featureFrontend);
+        slamControl->SetExternalFeatureInputSizeLimit(opts.superpointInputMaxWidth, opts.superpointInputMaxHeight);
+        slamControl->SetStereoVoLoopClosure(opts.lkRuntimeLoopClosure, opts.lkLoopScale, opts.lkLoopRelaxation);
+        slamControl->SetStereoVoPerFrameAcceleration(opts.lkPerFrameAcceleration);
     }
 
     smartdrone::adapters::slam::SuperPointLightGlueFrontendClient superpointFrontendClient;
     std::string superpointErr;
-    if (orbSlamEngine != nullptr && opts.featureFrontend == FeatureFrontend::SuperPointLightGlue &&
+    if (slamControl != nullptr && opts.featureFrontend == FeatureFrontend::SuperPointLightGlue &&
         SuperPointLightGlueInjectionEnabled()) {
         ConfigureSuperPointLightGlueReplayDefaults();
-        orbSlamEngine->SetExternalFeatureFrontendClient(&superpointFrontendClient);
+        slamControl->SetExternalFeatureFrontendClient(&superpointFrontendClient);
         if (!superpointFrontendClient.Start(opts.superpointRepo, opts.superpointDevice, opts.superpointTopK, opts.superpointMaxPoints,
                                        &superpointErr)) {
             std::cerr << "error: superpoint_lightglue TensorRT start failed: " << superpointErr << "\n";
@@ -684,11 +695,11 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     const double orbStereoMsMean = orbStereoMsSum / frameCountForMean;
 
     if (!opts.finalEurocTrajectory.empty()) {
-        if (orbSlamEngine == nullptr) {
+        if (slamControl == nullptr) {
             std::cerr << "failed to save final EuRoC trajectory: final trajectory export is ORB-SLAM3 only\n";
             return 1;
         }
-        if (!orbSlamEngine->ShutdownAndSaveTrajectoryEuRoC(opts.finalEurocTrajectory.string())) {
+        if (!slamControl->ShutdownAndSaveTrajectoryEuRoC(opts.finalEurocTrajectory.string())) {
             std::cerr << "failed to save final EuRoC trajectory: " << opts.finalEurocTrajectory << "\n";
             return 1;
         }
@@ -699,7 +710,9 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
     std::cout << "offline replay complete\n";
     std::cout << "  dataset: " << opts.datasetRoot << "\n";
     std::cout << "  settings: " << opts.settings << "\n";
-    std::cout << "  vocab: " << opts.vocab << "\n";
+    if (opts.slamBackend == SlamBackend::OrbSlam3) {
+        std::cout << "  vocab: " << opts.vocab << "\n";
+    }
     std::cout << "  sensor_mode: " << ToSensorModeText(opts.sensorMode) << "\n";
     std::cout << "  slam_backend: " << ToSlamBackendText(opts.slamBackend) << "\n";
     std::cout << "  feature_frontend: " << ToFeatureFrontendText(opts.featureFrontend) << "\n";
@@ -755,7 +768,7 @@ int RunOfflineReplay(const OfflineReplayOptions &opts)
         summary << "{\n"
                 << "  \"dataset\": \"" << opts.datasetRoot.string() << "\",\n"
                 << "  \"settings\": \"" << opts.settings << "\",\n"
-                << "  \"vocab\": \"" << opts.vocab << "\",\n"
+                << "  \"vocab\": \"" << (opts.slamBackend == SlamBackend::OrbSlam3 ? opts.vocab : "") << "\",\n"
                 << "  \"sensor_mode\": \"" << ToSensorModeText(opts.sensorMode) << "\",\n"
                 << "  \"slam_backend\": \"" << ToSlamBackendText(opts.slamBackend) << "\",\n"
                 << "  \"feature_frontend\": \"" << ToFeatureFrontendText(opts.featureFrontend) << "\",\n"

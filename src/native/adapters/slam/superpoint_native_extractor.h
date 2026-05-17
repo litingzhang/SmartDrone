@@ -6,9 +6,9 @@
 
 #include <opencv2/core.hpp>
 
-namespace smartdrone::adapters::slam {
+#include "adapters/slam/superpoint_lightglue_frontend_client.h"
 
-struct SuperPointFeatureSet;
+namespace smartdrone::adapters::slam {
 
 class SuperPointNativeExtractor {
   public:

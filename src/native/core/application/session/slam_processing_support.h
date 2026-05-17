@@ -6,12 +6,12 @@
 
 #include <opencv2/core.hpp>
 
-#include "System.h"
 #include "common/tlv/tlv_protocol.h"
 #include "core/domain/runtime_mode.h"
 #include "core/ports/camera_provider.h"
 #include "core/ports/imu_provider.h"
 #include "core/ports/pose_publisher.h"
+#include "core/ports/slam_engine.h"
 
 namespace smartdrone::core::application {
 
@@ -23,7 +23,6 @@ bool ShouldEnhanceLowLightFrame(double mean, double stddev);
 cv::Mat EnhanceLowLightGrayForSlam(const cv::Mat &gray);
 void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, double meanL, double stdL, double meanR, double stdR,
                               double sharpL, double sharpR, bool enableLowLightEnhance, ports::StereoFrame &out);
-bool IsTrackingPoseUsable(int trackingState);
 uint8_t ToRuntimeSlamModeValue(smartdrone::core::domain::SlamOperationMode mode);
 
 class AutoSlamModeController {
@@ -49,7 +48,5 @@ class AutoSlamModeController {
     int m_stableFrames{0};
     int m_weakFrames{0};
 };
-
-std::vector<ORB_SLAM3::IMU::Point> ToOrbImuPoints(const std::vector<smartdrone::core::ports::ImuReading> &readings);
 
 } // namespace smartdrone::core::application

@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -13,10 +15,14 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <random>
 #include <sstream>
 #include <string>
+#include <system_error>
+#include <thread>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 
@@ -26,9 +32,11 @@
 #include <opencv2/video/tracking.hpp>
 #include <sophus/se3.hpp>
 
-#include "Tracking.h"
-#include "adapters/slam/slam_mode_common.h"
+#include "adapters/slam/slam_env.h"
+#include "adapters/slam/slam_image_utils.h"
 #include "adapters/slam/slam_mode_state.h"
+#include "adapters/slam/slam_pose_utils.h"
+#include "core/ports/slam_tracking_state.h"
 
 #if defined(SMART_DRONE_DPVO_TENSORRT_AVAILABLE)
 #include <NvInfer.h>
@@ -62,33 +70,62 @@ std::filesystem::path ResolveEnginePath(const std::string &explicitPath, const s
     return {};
 }
 
+bool DpvoRepoHasDefaultEngines(const std::filesystem::path &repo)
+{
+    if (repo.empty()) {
+        return false;
+    }
+    std::error_code ec;
+    return std::filesystem::exists(repo / "weights" / "dpvo_patchifier_fp16.engine", ec) &&
+           std::filesystem::exists(repo / "weights" / "dpvo_update_fp16.engine", ec);
+}
+
+std::filesystem::path ResolveDpvoRepoPath(const std::string &configuredRepo)
+{
+    std::vector<std::filesystem::path> candidates;
+    auto addCandidate = [&candidates](const std::filesystem::path &path) {
+        if (!path.empty()) {
+            candidates.emplace_back(path);
+        }
+    };
+
+    addCandidate(configuredRepo);
+    if (const char *envRepo = std::getenv("SMART_DRONE_DPVO_REPO"); envRepo != nullptr && envRepo[0] != '\0') {
+        addCandidate(envRepo);
+    }
+    if (const char *home = std::getenv("HOME"); home != nullptr && home[0] != '\0') {
+        addCandidate(std::filesystem::path(home) / "DPVO");
+    }
+    addCandidate("/home/nvidia/DPVO");
+    addCandidate("/home/ltz/DPVO");
+    addCandidate(std::filesystem::current_path() / "DPVO");
+
+    for (const std::filesystem::path &candidate : candidates) {
+        const std::filesystem::path normalized = candidate.lexically_normal();
+        if (DpvoRepoHasDefaultEngines(normalized)) {
+            return normalized;
+        }
+    }
+    if (!configuredRepo.empty()) {
+        return std::filesystem::path(configuredRepo).lexically_normal();
+    }
+    if (const char *envRepo = std::getenv("SMART_DRONE_DPVO_REPO"); envRepo != nullptr && envRepo[0] != '\0') {
+        return std::filesystem::path(envRepo).lexically_normal();
+    }
+    return {};
+}
+
 double ElapsedMs(const std::chrono::steady_clock::time_point &start,
                  const std::chrono::steady_clock::time_point &end)
 {
     return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
-bool TrackingStateCanPublishPose(int trackingState)
+int64_t SteadyNowNs()
 {
-    return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::RECENTLY_LOST ||
-           trackingState == ORB_SLAM3::Tracking::OK_KLT;
-}
-
-core::ports::PoseEstimate PoseFromTwc(const Sophus::SE3f &twc)
-{
-    core::ports::PoseEstimate pose{};
-    const Eigen::Vector3f t = twc.translation();
-    const Eigen::Quaternionf q(twc.so3().unit_quaternion());
-    pose.valid = std::isfinite(t.x()) && std::isfinite(t.y()) && std::isfinite(t.z()) &&
-                 std::isfinite(q.w()) && std::isfinite(q.x()) && std::isfinite(q.y()) && std::isfinite(q.z());
-    pose.x = t.x();
-    pose.y = t.y();
-    pose.z = t.z();
-    pose.qw = q.w();
-    pose.qx = q.x();
-    pose.qy = q.y();
-    pose.qz = q.z();
-    return pose;
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
 }
 
 } // namespace
@@ -397,6 +434,174 @@ class DpvoCudaKernelRuntime {
         return true;
     }
 
+    bool ComputeSoftAggExpand(const std::vector<float> &f, const std::vector<float> &g,
+                              const std::vector<int> &groupIds, int edgeCount, int dim,
+                              cudaStream_t stream, std::vector<float> *out,
+                              std::string *err)
+    {
+        if (!m_ready || m_softAggKernel == nullptr) {
+            if (err != nullptr) {
+                *err = "DPVO CUDA SoftAgg kernel is not ready";
+            }
+            return false;
+        }
+        if (edgeCount <= 0 || dim <= 0 || stream == nullptr || out == nullptr ||
+            f.size() != static_cast<size_t>(edgeCount) * static_cast<size_t>(dim) ||
+            g.size() != static_cast<size_t>(edgeCount) * static_cast<size_t>(dim) ||
+            groupIds.size() != static_cast<size_t>(edgeCount)) {
+            if (err != nullptr) {
+                *err = "invalid DPVO CUDA SoftAgg input";
+            }
+            return false;
+        }
+
+        std::unordered_map<int, int> groupToDense;
+        groupToDense.reserve(static_cast<size_t>(edgeCount));
+        std::vector<std::vector<int>> groups;
+        groups.reserve(static_cast<size_t>(edgeCount));
+        for (int e = 0; e < edgeCount; ++e) {
+            const int id = groupIds[static_cast<size_t>(e)];
+            auto it = groupToDense.find(id);
+            if (it == groupToDense.end()) {
+                const int dense = static_cast<int>(groups.size());
+                it = groupToDense.emplace(id, dense).first;
+                groups.emplace_back();
+            }
+            groups[static_cast<size_t>(it->second)].push_back(e);
+        }
+        if (groups.empty()) {
+            if (err != nullptr) {
+                *err = "DPVO CUDA SoftAgg has no groups";
+            }
+            return false;
+        }
+
+        std::vector<int> groupStarts(groups.size() + 1U, 0);
+        std::vector<int> groupIndices;
+        groupIndices.reserve(static_cast<size_t>(edgeCount));
+        for (size_t i = 0; i < groups.size(); ++i) {
+            groupStarts[i] = static_cast<int>(groupIndices.size());
+            groupIndices.insert(groupIndices.end(), groups[i].begin(), groups[i].end());
+        }
+        groupStarts[groups.size()] = static_cast<int>(groupIndices.size());
+
+        const size_t values = static_cast<size_t>(edgeCount) * static_cast<size_t>(dim);
+        if (!CopyVectorToDevice(f, m_softAggFBuffer, stream, "softagg f", err) ||
+            !CopyVectorToDevice(g, m_softAggGBuffer, stream, "softagg g", err) ||
+            !CopyVectorToDevice(groupIndices, m_softAggGroupIndexBuffer, stream, "softagg group indices", err) ||
+            !CopyVectorToDevice(groupStarts, m_softAggGroupStartBuffer, stream, "softagg group starts", err) ||
+            !m_softAggOutBuffer.Ensure(values * sizeof(float), err)) {
+            return false;
+        }
+
+        CUdeviceptr fArg = reinterpret_cast<CUdeviceptr>(m_softAggFBuffer.Data());
+        CUdeviceptr gArg = reinterpret_cast<CUdeviceptr>(m_softAggGBuffer.Data());
+        CUdeviceptr groupIndexArg = reinterpret_cast<CUdeviceptr>(m_softAggGroupIndexBuffer.Data());
+        CUdeviceptr groupStartArg = reinterpret_cast<CUdeviceptr>(m_softAggGroupStartBuffer.Data());
+        CUdeviceptr outArg = reinterpret_cast<CUdeviceptr>(m_softAggOutBuffer.Data());
+        int groupCountArg = static_cast<int>(groups.size());
+        int dimArg = dim;
+        void *args[] = {&fArg, &gArg, &groupIndexArg, &groupStartArg, &outArg, &groupCountArg, &dimArg};
+        const unsigned int threads = 128;
+        const size_t workItems = groups.size() * static_cast<size_t>(dim);
+        const unsigned int blocks =
+            static_cast<unsigned int>((workItems + static_cast<size_t>(threads) - 1U) /
+                                      static_cast<size_t>(threads));
+        if (!CheckDriver(m_cuLaunchKernel(m_softAggKernel, blocks, 1, 1, threads, 1, 1, 0,
+                                          reinterpret_cast<CUstream>(stream), args, nullptr),
+                         "cuLaunchKernel(dpvo_softagg_expand)", err)) {
+            return false;
+        }
+        out->assign(values, 0.0f);
+        cudaError_t rc = cudaMemcpyAsync(out->data(), m_softAggOutBuffer.Data(), values * sizeof(float),
+                                         cudaMemcpyDeviceToHost, stream);
+        if (rc == cudaSuccess) {
+            rc = cudaStreamSynchronize(stream);
+        }
+        if (rc != cudaSuccess) {
+            if (err != nullptr) {
+                *err = std::string("DPVO CUDA SoftAgg copy/sync failed: ") + cudaGetErrorString(rc);
+            }
+            return false;
+        }
+        return true;
+    }
+
+    bool ComputeSoftAggExpandDevice(const CudaDeviceBuffer &fDevice, const CudaDeviceBuffer &gDevice,
+                                    const std::vector<int> &groupIds, int edgeCount, int dim,
+                                    cudaStream_t stream, CudaDeviceBuffer &outDevice,
+                                    std::string *err)
+    {
+        if (!m_ready || m_softAggKernel == nullptr) {
+            if (err != nullptr) {
+                *err = "DPVO CUDA SoftAgg kernel is not ready";
+            }
+            return false;
+        }
+        const size_t values = static_cast<size_t>(std::max(0, edgeCount)) * static_cast<size_t>(std::max(0, dim));
+        if (edgeCount <= 0 || dim <= 0 || stream == nullptr ||
+            fDevice.Bytes() < values * sizeof(float) || gDevice.Bytes() < values * sizeof(float) ||
+            groupIds.size() != static_cast<size_t>(edgeCount)) {
+            if (err != nullptr) {
+                *err = "invalid DPVO CUDA SoftAgg device input";
+            }
+            return false;
+        }
+
+        std::unordered_map<int, int> groupToDense;
+        groupToDense.reserve(static_cast<size_t>(edgeCount));
+        std::vector<std::vector<int>> groups;
+        groups.reserve(static_cast<size_t>(edgeCount));
+        for (int e = 0; e < edgeCount; ++e) {
+            const int id = groupIds[static_cast<size_t>(e)];
+            auto it = groupToDense.find(id);
+            if (it == groupToDense.end()) {
+                const int dense = static_cast<int>(groups.size());
+                it = groupToDense.emplace(id, dense).first;
+                groups.emplace_back();
+            }
+            groups[static_cast<size_t>(it->second)].push_back(e);
+        }
+        if (groups.empty()) {
+            if (err != nullptr) {
+                *err = "DPVO CUDA SoftAgg device path has no groups";
+            }
+            return false;
+        }
+
+        std::vector<int> groupStarts(groups.size() + 1U, 0);
+        std::vector<int> groupIndices;
+        groupIndices.reserve(static_cast<size_t>(edgeCount));
+        for (size_t i = 0; i < groups.size(); ++i) {
+            groupStarts[i] = static_cast<int>(groupIndices.size());
+            groupIndices.insert(groupIndices.end(), groups[i].begin(), groups[i].end());
+        }
+        groupStarts[groups.size()] = static_cast<int>(groupIndices.size());
+
+        if (!CopyVectorToDevice(groupIndices, m_softAggGroupIndexBuffer, stream, "softagg group indices", err) ||
+            !CopyVectorToDevice(groupStarts, m_softAggGroupStartBuffer, stream, "softagg group starts", err) ||
+            !outDevice.Ensure(values * sizeof(float), err)) {
+            return false;
+        }
+
+        CUdeviceptr fArg = reinterpret_cast<CUdeviceptr>(fDevice.Data());
+        CUdeviceptr gArg = reinterpret_cast<CUdeviceptr>(gDevice.Data());
+        CUdeviceptr groupIndexArg = reinterpret_cast<CUdeviceptr>(m_softAggGroupIndexBuffer.Data());
+        CUdeviceptr groupStartArg = reinterpret_cast<CUdeviceptr>(m_softAggGroupStartBuffer.Data());
+        CUdeviceptr outArg = reinterpret_cast<CUdeviceptr>(outDevice.Data());
+        int groupCountArg = static_cast<int>(groups.size());
+        int dimArg = dim;
+        void *args[] = {&fArg, &gArg, &groupIndexArg, &groupStartArg, &outArg, &groupCountArg, &dimArg};
+        const unsigned int threads = 128;
+        const size_t workItems = groups.size() * static_cast<size_t>(dim);
+        const unsigned int blocks =
+            static_cast<unsigned int>((workItems + static_cast<size_t>(threads) - 1U) /
+                                      static_cast<size_t>(threads));
+        return CheckDriver(m_cuLaunchKernel(m_softAggKernel, blocks, 1, 1, threads, 1, 1, 0,
+                                            reinterpret_cast<CUstream>(stream), args, nullptr),
+                           "cuLaunchKernel(dpvo_softagg_expand device)", err);
+    }
+
   private:
     template <typename T>
     bool LoadSymbol(void *handle, const char *name, T *out, std::string *err)
@@ -678,6 +883,48 @@ extern "C" __global__ void dpvo_corr_batch(
     }
     out[linear] = dot;
 }
+
+extern "C" __global__ void dpvo_softagg_expand(
+    const float *f,
+    const float *g,
+    const int *group_indices,
+    const int *group_starts,
+    float *out,
+    int group_count,
+    int dim)
+{
+    const int linear = blockIdx.x * blockDim.x + threadIdx.x;
+    const int total = group_count * dim;
+    if (linear >= total) {
+        return;
+    }
+    const int c = linear % dim;
+    const int group = linear / dim;
+    const int start = group_starts[group];
+    const int end = group_starts[group + 1];
+    if (start >= end) {
+        return;
+    }
+    float max_logit = -3.4028234663852886e38f;
+    for (int i = start; i < end; ++i) {
+        const int edge = group_indices[i];
+        const float logit = g[edge * dim + c];
+        max_logit = fmaxf(max_logit, logit);
+    }
+    float denom = 0.0f;
+    float accum = 0.0f;
+    for (int i = start; i < end; ++i) {
+        const int edge = group_indices[i];
+        const float w = expf(g[edge * dim + c] - max_logit);
+        denom += w;
+        accum += f[edge * dim + c] * w;
+    }
+    const float value = denom > 0.0f ? accum / denom : 0.0f;
+    for (int i = start; i < end; ++i) {
+        const int edge = group_indices[i];
+        out[edge * dim + c] = value;
+    }
+}
 )CUDA";
 
         nvrtcProgram program = nullptr;
@@ -720,6 +967,8 @@ extern "C" __global__ void dpvo_corr_batch(
             !CheckDriver(m_cuModuleGetFunction(&m_corrSmokeKernel, m_module, "dpvo_corr_patch3_smoke"),
                          "cuModuleGetFunction", err) ||
             !CheckDriver(m_cuModuleGetFunction(&m_corrBatchKernel, m_module, "dpvo_corr_batch"),
+                         "cuModuleGetFunction", err) ||
+            !CheckDriver(m_cuModuleGetFunction(&m_softAggKernel, m_module, "dpvo_softagg_expand"),
                          "cuModuleGetFunction", err)) {
             return false;
         }
@@ -863,6 +1112,7 @@ extern "C" __global__ void dpvo_corr_batch(
         m_module = nullptr;
         m_corrSmokeKernel = nullptr;
         m_corrBatchKernel = nullptr;
+        m_softAggKernel = nullptr;
         m_ready = false;
         m_ownsContext = false;
         m_context = nullptr;
@@ -899,6 +1149,7 @@ extern "C" __global__ void dpvo_corr_batch(
     CUmodule m_module{nullptr};
     CUfunction m_corrSmokeKernel{nullptr};
     CUfunction m_corrBatchKernel{nullptr};
+    CUfunction m_softAggKernel{nullptr};
     bool m_ready{false};
     bool m_ownsContext{false};
     float m_smokeExpected{0.0f};
@@ -937,6 +1188,11 @@ extern "C" __global__ void dpvo_corr_batch(
     CudaDeviceBuffer m_level4HeightsBuffer;
     CudaDeviceBuffer m_level4WidthsBuffer;
     CudaDeviceBuffer m_corrBuffer;
+    CudaDeviceBuffer m_softAggFBuffer;
+    CudaDeviceBuffer m_softAggGBuffer;
+    CudaDeviceBuffer m_softAggGroupIndexBuffer;
+    CudaDeviceBuffer m_softAggGroupStartBuffer;
+    CudaDeviceBuffer m_softAggOutBuffer;
 };
 
 size_t TensorRtDataTypeSize(nvinfer1::DataType type)
@@ -1197,6 +1453,36 @@ bool EnsureBindingBuffer(const TensorRtEngineHandle &handle, int bindingIndex, C
     return BindingBytes(handle, bindingIndex, &bytes, nullptr, err) && device.Ensure(bytes, err);
 }
 
+bool BindingIsFloat(const TensorRtEngineHandle &handle, int bindingIndex)
+{
+    return handle.Engine() != nullptr && bindingIndex >= 0 &&
+           handle.Engine()->getBindingDataType(bindingIndex) == nvinfer1::DataType::kFLOAT;
+}
+
+bool CopyFloatDeviceBufferToHost(const CudaDeviceBuffer &device, size_t valueCount, cudaStream_t stream,
+                                 std::vector<float> &dst, std::string *err)
+{
+    if (device.Bytes() < valueCount * sizeof(float) || stream == nullptr) {
+        if (err != nullptr) {
+            *err = "invalid float D2H buffer copy input";
+        }
+        return false;
+    }
+    dst.assign(valueCount, 0.0f);
+    cudaError_t rc = cudaMemcpyAsync(dst.data(), device.Data(), valueCount * sizeof(float),
+                                     cudaMemcpyDeviceToHost, stream);
+    if (rc == cudaSuccess) {
+        rc = cudaStreamSynchronize(stream);
+    }
+    if (rc != cudaSuccess) {
+        if (err != nullptr) {
+            *err = std::string("float D2H buffer copy failed: ") + cudaGetErrorString(rc);
+        }
+        return false;
+    }
+    return true;
+}
+
 struct DpvoPatchifierRun {
     nvinfer1::Dims fmapDims{};
     nvinfer1::Dims imapDims{};
@@ -1377,6 +1663,11 @@ struct DpvoUpdatePreAggRun {
     std::vector<float> aggKkG;
     std::vector<float> aggIjF;
     std::vector<float> aggIjG;
+    double elapsedMs{0.0};
+    bool ok{false};
+};
+
+struct DpvoUpdatePreAggDeviceRun {
     double elapsedMs{0.0};
     bool ok{false};
 };
@@ -1672,6 +1963,106 @@ class DpvoUpdatePreAggRuntime {
         return result;
     }
 
+    DpvoUpdatePreAggDeviceRun RunDevice(TensorRtEngineHandle &engine, cudaStream_t stream, int edges,
+                                        const std::vector<float> &net, const std::vector<float> &inp,
+                                        const std::vector<float> &corr, const std::vector<float> &prevNet,
+                                        const std::vector<float> &nextNet, const std::vector<float> &prevMask,
+                                        const std::vector<float> &nextMask, std::string *err)
+    {
+        DpvoUpdatePreAggDeviceRun result{};
+        edges = std::clamp(edges, 1, 4096);
+        nvinfer1::IExecutionContext *context = engine.Context();
+        if (context == nullptr || stream == nullptr) {
+            if (err != nullptr) {
+                *err = "update-preagg device TensorRT context or CUDA stream is not initialized";
+            }
+            return result;
+        }
+        if (!SetBindingShape(*context, m_netIndex, nvinfer1::Dims3{1, edges, kDim}, err) ||
+            !SetBindingShape(*context, m_inpIndex, nvinfer1::Dims3{1, edges, kDim}, err) ||
+            !SetBindingShape(*context, m_corrIndex, nvinfer1::Dims3{1, edges, kCorrDim}, err) ||
+            !SetBindingShape(*context, m_prevNetIndex, nvinfer1::Dims3{1, edges, kDim}, err) ||
+            !SetBindingShape(*context, m_nextNetIndex, nvinfer1::Dims3{1, edges, kDim}, err) ||
+            !SetBindingShape(*context, m_prevMaskIndex, nvinfer1::Dims3{1, edges, 1}, err) ||
+            !SetBindingShape(*context, m_nextMaskIndex, nvinfer1::Dims3{1, edges, 1}, err)) {
+            return result;
+        }
+        if (!BindingIsFloat(engine, m_baseNetIndex) || !BindingIsFloat(engine, m_kkFIndex) ||
+            !BindingIsFloat(engine, m_kkGIndex) || !BindingIsFloat(engine, m_ijFIndex) ||
+            !BindingIsFloat(engine, m_ijGIndex)) {
+            if (err != nullptr) {
+                *err = "update-preagg device path requires FP32 output bindings";
+            }
+            return result;
+        }
+
+        const size_t dimValues = static_cast<size_t>(edges) * kDim;
+        const size_t corrValues = static_cast<size_t>(edges) * kCorrDim;
+        const size_t maskValues = static_cast<size_t>(edges);
+        if (net.size() != dimValues || inp.size() != dimValues || corr.size() != corrValues ||
+            prevNet.size() != dimValues || nextNet.size() != dimValues || prevMask.size() != maskValues ||
+            nextMask.size() != maskValues) {
+            if (err != nullptr) {
+                *err = "update-preagg device input vector size mismatch edges=" + std::to_string(edges);
+            }
+            return result;
+        }
+
+        if (!EnsureBindingBuffer(engine, m_baseNetIndex, m_buffers[static_cast<size_t>(m_baseNetIndex)], err) ||
+            !EnsureBindingBuffer(engine, m_kkFIndex, m_buffers[static_cast<size_t>(m_kkFIndex)], err) ||
+            !EnsureBindingBuffer(engine, m_kkGIndex, m_buffers[static_cast<size_t>(m_kkGIndex)], err) ||
+            !EnsureBindingBuffer(engine, m_ijFIndex, m_buffers[static_cast<size_t>(m_ijFIndex)], err) ||
+            !EnsureBindingBuffer(engine, m_ijGIndex, m_buffers[static_cast<size_t>(m_ijGIndex)], err)) {
+            return result;
+        }
+        if (!CopyFloatHostToBindingDevice(engine, m_netIndex, net.data(), dimValues,
+                                          m_buffers[static_cast<size_t>(m_netIndex)], stream, m_halfScratch, err) ||
+            !CopyFloatHostToBindingDevice(engine, m_inpIndex, inp.data(), dimValues,
+                                          m_buffers[static_cast<size_t>(m_inpIndex)], stream, m_halfScratch, err) ||
+            !CopyFloatHostToBindingDevice(engine, m_corrIndex, corr.data(), corrValues,
+                                          m_buffers[static_cast<size_t>(m_corrIndex)], stream, m_halfScratch, err) ||
+            !CopyFloatHostToBindingDevice(engine, m_prevNetIndex, prevNet.data(), dimValues,
+                                          m_buffers[static_cast<size_t>(m_prevNetIndex)], stream, m_halfScratch, err) ||
+            !CopyFloatHostToBindingDevice(engine, m_nextNetIndex, nextNet.data(), dimValues,
+                                          m_buffers[static_cast<size_t>(m_nextNetIndex)], stream, m_halfScratch, err) ||
+            !CopyFloatHostToBindingDevice(engine, m_prevMaskIndex, prevMask.data(), maskValues,
+                                          m_buffers[static_cast<size_t>(m_prevMaskIndex)], stream, m_halfScratch, err) ||
+            !CopyFloatHostToBindingDevice(engine, m_nextMaskIndex, nextMask.data(), maskValues,
+                                          m_buffers[static_cast<size_t>(m_nextMaskIndex)], stream, m_halfScratch, err)) {
+            return result;
+        }
+
+        std::array<void *, 16> bindings{};
+        const int nbBindings = engine.Engine() != nullptr ? engine.Engine()->getNbBindings() : 0;
+        for (int i = 0; i < nbBindings; ++i) {
+            bindings[static_cast<size_t>(i)] = m_buffers[static_cast<size_t>(i)].Data();
+        }
+
+        const auto t0 = std::chrono::steady_clock::now();
+        if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
+            if (err != nullptr) {
+                *err = "update-preagg device enqueueV2 failed";
+            }
+            return result;
+        }
+        const cudaError_t rc = cudaStreamSynchronize(stream);
+        if (rc != cudaSuccess) {
+            if (err != nullptr) {
+                *err = std::string("update-preagg device synchronize failed: ") + cudaGetErrorString(rc);
+            }
+            return result;
+        }
+        result.elapsedMs = ElapsedMs(t0, std::chrono::steady_clock::now());
+        result.ok = true;
+        return result;
+    }
+
+    const CudaDeviceBuffer &BaseNetDevice() const { return m_buffers[static_cast<size_t>(m_baseNetIndex)]; }
+    const CudaDeviceBuffer &AggKkFDevice() const { return m_buffers[static_cast<size_t>(m_kkFIndex)]; }
+    const CudaDeviceBuffer &AggKkGDevice() const { return m_buffers[static_cast<size_t>(m_kkGIndex)]; }
+    const CudaDeviceBuffer &AggIjFDevice() const { return m_buffers[static_cast<size_t>(m_ijFIndex)]; }
+    const CudaDeviceBuffer &AggIjGDevice() const { return m_buffers[static_cast<size_t>(m_ijGIndex)]; }
+
   private:
     static constexpr int kDim = 384;
     static constexpr int kCorrDim = 882;
@@ -1803,6 +2194,84 @@ class DpvoUpdatePostAggRuntime {
         return result;
     }
 
+    DpvoUpdatePostAggRun RunDevice(TensorRtEngineHandle &engine, cudaStream_t stream, int edges,
+                                   const CudaDeviceBuffer &baseNetDevice,
+                                   const CudaDeviceBuffer &aggKkYDevice,
+                                   const CudaDeviceBuffer &aggIjYDevice,
+                                   std::string *err)
+    {
+        DpvoUpdatePostAggRun result{};
+        edges = std::clamp(edges, 1, 4096);
+        nvinfer1::IExecutionContext *context = engine.Context();
+        if (context == nullptr || stream == nullptr) {
+            if (err != nullptr) {
+                *err = "update-postagg device TensorRT context or CUDA stream is not initialized";
+            }
+            return result;
+        }
+        if (!SetBindingShape(*context, m_baseNetIndex, nvinfer1::Dims3{1, edges, kDim}, err) ||
+            !SetBindingShape(*context, m_kkYIndex, nvinfer1::Dims3{1, edges, kDim}, err) ||
+            !SetBindingShape(*context, m_ijYIndex, nvinfer1::Dims3{1, edges, kDim}, err)) {
+            return result;
+        }
+        if (!BindingIsFloat(engine, m_baseNetIndex) || !BindingIsFloat(engine, m_kkYIndex) ||
+            !BindingIsFloat(engine, m_ijYIndex)) {
+            if (err != nullptr) {
+                *err = "update-postagg device path requires FP32 input bindings";
+            }
+            return result;
+        }
+        const size_t dimBytes = static_cast<size_t>(edges) * kDim * sizeof(float);
+        if (baseNetDevice.Bytes() < dimBytes || aggKkYDevice.Bytes() < dimBytes || aggIjYDevice.Bytes() < dimBytes) {
+            if (err != nullptr) {
+                *err = "update-postagg device input buffer size mismatch edges=" + std::to_string(edges);
+            }
+            return result;
+        }
+
+        if (!EnsureBindingBuffer(engine, m_updatedNetIndex, m_buffers[static_cast<size_t>(m_updatedNetIndex)], err) ||
+            !EnsureBindingBuffer(engine, m_deltaIndex, m_buffers[static_cast<size_t>(m_deltaIndex)], err) ||
+            !EnsureBindingBuffer(engine, m_weightIndex, m_buffers[static_cast<size_t>(m_weightIndex)], err)) {
+            return result;
+        }
+
+        std::array<void *, 16> bindings{};
+        const int nbBindings = engine.Engine() != nullptr ? engine.Engine()->getNbBindings() : 0;
+        for (int i = 0; i < nbBindings; ++i) {
+            bindings[static_cast<size_t>(i)] = m_buffers[static_cast<size_t>(i)].Data();
+        }
+        bindings[static_cast<size_t>(m_baseNetIndex)] = const_cast<void *>(baseNetDevice.Data());
+        bindings[static_cast<size_t>(m_kkYIndex)] = const_cast<void *>(aggKkYDevice.Data());
+        bindings[static_cast<size_t>(m_ijYIndex)] = const_cast<void *>(aggIjYDevice.Data());
+
+        const auto t0 = std::chrono::steady_clock::now();
+        if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
+            if (err != nullptr) {
+                *err = "update-postagg device enqueueV2 failed";
+            }
+            return result;
+        }
+        cudaError_t rc = cudaStreamSynchronize(stream);
+        if (rc != cudaSuccess) {
+            if (err != nullptr) {
+                *err = std::string("update-postagg device synchronize failed: ") + cudaGetErrorString(rc);
+            }
+            return result;
+        }
+        if (!CopyBindingDeviceToFloatHost(engine, m_updatedNetIndex,
+                                          m_buffers[static_cast<size_t>(m_updatedNetIndex)], stream,
+                                          result.updatedNet, m_halfScratch, nullptr, err) ||
+            !CopyBindingDeviceToFloatHost(engine, m_deltaIndex, m_buffers[static_cast<size_t>(m_deltaIndex)],
+                                          stream, result.delta, m_halfScratch, nullptr, err) ||
+            !CopyBindingDeviceToFloatHost(engine, m_weightIndex, m_buffers[static_cast<size_t>(m_weightIndex)],
+                                          stream, result.weight, m_halfScratch, nullptr, err)) {
+            return result;
+        }
+        result.elapsedMs = ElapsedMs(t0, std::chrono::steady_clock::now());
+        result.ok = true;
+        return result;
+    }
+
   private:
     static constexpr int kDim = 384;
     int m_baseNetIndex{-1};
@@ -1870,7 +2339,7 @@ class DpvoGraphState {
         m_keyframeRemovals = 0;
         m_persistentEdges = EnvFlagEnabled("SMART_DRONE_DPVO_PERSISTENT_EDGES", false);
         m_keyframeRemovalEnabled = EnvFlagEnabled("SMART_DRONE_DPVO_KEYFRAME", false);
-        m_maxActiveEdges = std::clamp(EnvIntValue("SMART_DRONE_DPVO_MAX_EDGES", 1024), 512, 4096);
+        m_maxActiveEdges = std::clamp(EnvIntValue("SMART_DRONE_DPVO_MAX_EDGES", 1024), 128, 4096);
     }
 
     void PushFrame(uint64_t frameId, int64_t timestampNs, const cv::Mat &gray, const Sophus::SE3f &initialPose,
@@ -1934,7 +2403,7 @@ class DpvoGraphState {
         }
         AppendEdgesForNewest();
         PruneOldEdges();
-        if (m_persistentEdges) {
+        if (m_persistentEdges || EnvFlagEnabled("SMART_DRONE_DPVO_CAP_REBUILT_EDGES", false)) {
             CapActiveEdges();
         }
         PruneFrames();
@@ -2326,7 +2795,9 @@ class DpvoGraphState {
 
     void CapActiveEdges()
     {
-        if (!m_persistentEdges || m_maxActiveEdges <= 0 || static_cast<int>(m_edges.size()) <= m_maxActiveEdges) {
+        const bool capRebuiltEdges = EnvFlagEnabled("SMART_DRONE_DPVO_CAP_REBUILT_EDGES", false);
+        if ((!m_persistentEdges && !capRebuiltEdges) || m_maxActiveEdges <= 0 ||
+            static_cast<int>(m_edges.size()) <= m_maxActiveEdges) {
             return;
         }
         const int removeCount = static_cast<int>(m_edges.size()) - m_maxActiveEdges;
@@ -2442,6 +2913,10 @@ class DpvoNativeSolver {
         m_bootstrapComplete = false;
         m_loggedCudaCorr = false;
         m_loggedCudaCorrFailure = false;
+        m_loggedCudaSoftAgg = false;
+        m_loggedCudaSoftAggFailure = false;
+        m_loggedCudaDeviceUpdateChain = false;
+        m_loggedCudaDeviceUpdateChainFailure = false;
     }
 
     bool HasPose() const { return m_hasPose; }
@@ -2480,7 +2955,10 @@ class DpvoNativeSolver {
             return false;
         }
 
-        const int updateIterations = m_bootstrapComplete ? 1 : 12;
+        const int bootstrapIterations =
+            std::clamp(EnvIntValue("SMART_DRONE_DPVO_BOOTSTRAP_UPDATE_ITERS", 12), 1, 12);
+        const int steadyIterations = std::clamp(EnvIntValue("SMART_DRONE_DPVO_UPDATE_ITERS", 1), 1, 4);
+        const int updateIterations = m_bootstrapComplete ? steadyIterations : bootstrapIterations;
         for (int updateIteration = 0; updateIteration < updateIterations; ++updateIteration) {
             const int edgeCount = static_cast<int>(edges.size());
             std::vector<int> prevEdge;
@@ -2605,12 +3083,6 @@ class DpvoNativeSolver {
                 }
             }
 
-            DpvoUpdatePreAggRun preAgg =
-                preAggRuntime.Run(preAggEngine, stream, edgeCount, net, inp, corr, prevNet, nextNet, prevMask, nextMask, err);
-            if (!preAgg.ok) {
-                return false;
-            }
-
             std::vector<int> groupKk(static_cast<size_t>(edgeCount), 0);
             std::vector<int> groupIj(static_cast<size_t>(edgeCount), 0);
             for (int e = 0; e < edgeCount; ++e) {
@@ -2618,13 +3090,145 @@ class DpvoNativeSolver {
                 groupKk[static_cast<size_t>(e)] = edge.patchGlobal;
                 groupIj[static_cast<size_t>(e)] = edge.sourceFrame * 12345 + edge.targetFrame;
             }
-            std::vector<float> aggKkY;
-            std::vector<float> aggIjY;
-            SoftAggExpand(preAgg.aggKkF, preAgg.aggKkG, groupKk, edgeCount, kDim, &aggKkY);
-            SoftAggExpand(preAgg.aggIjF, preAgg.aggIjG, groupIj, edgeCount, kDim, &aggIjY);
 
-            DpvoUpdatePostAggRun postAgg =
-                postAggRuntime.Run(postAggEngine, stream, edgeCount, preAgg.baseNet, aggKkY, aggIjY, err);
+            DpvoUpdatePostAggRun postAgg{};
+            bool usedDeviceUpdateChain = false;
+            if (cudaKernelRuntime != nullptr && cudaKernelRuntime->Ready() &&
+                EnvFlagEnabled("SMART_DRONE_DPVO_CUDA_DEVICE_UPDATE_CHAIN", true) &&
+                EnvFlagEnabled("SMART_DRONE_DPVO_CUDA_SOFTAGG", true)) {
+                std::string deviceErr;
+                DpvoUpdatePreAggDeviceRun preAggDevice =
+                    preAggRuntime.RunDevice(preAggEngine, stream, edgeCount, net, inp, corr, prevNet, nextNet,
+                                            prevMask, nextMask, &deviceErr);
+                CudaDeviceBuffer aggKkYDevice;
+                CudaDeviceBuffer aggIjYDevice;
+                if (preAggDevice.ok &&
+                    cudaKernelRuntime->ComputeSoftAggExpandDevice(preAggRuntime.AggKkFDevice(),
+                                                                  preAggRuntime.AggKkGDevice(), groupKk,
+                                                                  edgeCount, kDim, stream, aggKkYDevice,
+                                                                  &deviceErr) &&
+                    cudaKernelRuntime->ComputeSoftAggExpandDevice(preAggRuntime.AggIjFDevice(),
+                                                                  preAggRuntime.AggIjGDevice(), groupIj,
+                                                                  edgeCount, kDim, stream, aggIjYDevice,
+                                                                  &deviceErr)) {
+                    if (!m_loggedCudaDeviceUpdateChain &&
+                        EnvFlagEnabled("SMART_DRONE_DPVO_CUDA_DEVICE_UPDATE_CHAIN_VALIDATE", true)) {
+                        std::vector<float> kkF;
+                        std::vector<float> kkG;
+                        std::vector<float> ijF;
+                        std::vector<float> ijG;
+                        std::vector<float> cudaAggKkY;
+                        std::vector<float> cudaAggIjY;
+                        std::vector<float> cpuAggKkY;
+                        std::vector<float> cpuAggIjY;
+                        const size_t dimValues = static_cast<size_t>(edgeCount) * kDim;
+                        bool validationOk =
+                            CopyFloatDeviceBufferToHost(preAggRuntime.AggKkFDevice(), dimValues, stream, kkF,
+                                                        &deviceErr) &&
+                            CopyFloatDeviceBufferToHost(preAggRuntime.AggKkGDevice(), dimValues, stream, kkG,
+                                                        &deviceErr) &&
+                            CopyFloatDeviceBufferToHost(preAggRuntime.AggIjFDevice(), dimValues, stream, ijF,
+                                                        &deviceErr) &&
+                            CopyFloatDeviceBufferToHost(preAggRuntime.AggIjGDevice(), dimValues, stream, ijG,
+                                                        &deviceErr) &&
+                            CopyFloatDeviceBufferToHost(aggKkYDevice, dimValues, stream, cudaAggKkY, &deviceErr) &&
+                            CopyFloatDeviceBufferToHost(aggIjYDevice, dimValues, stream, cudaAggIjY, &deviceErr);
+                        if (validationOk) {
+                            SoftAggExpand(kkF, kkG, groupKk, edgeCount, kDim, &cpuAggKkY);
+                            SoftAggExpand(ijF, ijG, groupIj, edgeCount, kDim, &cpuAggIjY);
+                            const ErrorStats kkStats = CompareVectors(cpuAggKkY, cudaAggKkY);
+                            const ErrorStats ijStats = CompareVectors(cpuAggIjY, cudaAggIjY);
+                            std::cerr << "[dpvo_cuda] device update chain softagg ready edges=" << edgeCount
+                                      << " dim=" << kDim
+                                      << " kk_max_abs=" << kkStats.maxAbs
+                                      << " kk_rmse=" << kkStats.rmse
+                                      << " ij_max_abs=" << ijStats.maxAbs
+                                      << " ij_rmse=" << ijStats.rmse << "\n";
+                            m_loggedCudaDeviceUpdateChain = true;
+                            validationOk =
+                                (kkStats.maxAbs <= 1e-3f && ijStats.maxAbs <= 1e-3f) ||
+                                !EnvFlagEnabled("SMART_DRONE_DPVO_CUDA_DEVICE_UPDATE_CHAIN_STRICT_VALIDATE", true);
+                        }
+                        if (!validationOk) {
+                            deviceErr = "device update chain validation failed";
+                        }
+                    }
+                    if (deviceErr.empty()) {
+                        postAgg = postAggRuntime.RunDevice(postAggEngine, stream, edgeCount,
+                                                           preAggRuntime.BaseNetDevice(), aggKkYDevice,
+                                                           aggIjYDevice, err);
+                        usedDeviceUpdateChain = postAgg.ok;
+                    }
+                }
+                if (!usedDeviceUpdateChain && !m_loggedCudaDeviceUpdateChainFailure) {
+                    std::cerr << "[dpvo_cuda] device update chain unavailable: " << deviceErr
+                              << "; falling back to host update chain\n";
+                    m_loggedCudaDeviceUpdateChainFailure = true;
+                }
+            }
+
+            if (!usedDeviceUpdateChain) {
+                DpvoUpdatePreAggRun preAgg =
+                    preAggRuntime.Run(preAggEngine, stream, edgeCount, net, inp, corr, prevNet, nextNet,
+                                      prevMask, nextMask, err);
+                if (!preAgg.ok) {
+                    return false;
+                }
+                std::vector<float> aggKkY;
+                std::vector<float> aggIjY;
+                bool usedCudaSoftAgg = false;
+                if (cudaKernelRuntime != nullptr && cudaKernelRuntime->Ready() &&
+                    EnvFlagEnabled("SMART_DRONE_DPVO_CUDA_SOFTAGG", true)) {
+                    std::vector<float> cudaAggKkY;
+                    std::vector<float> cudaAggIjY;
+                    std::string cudaSoftAggErr;
+                    if (cudaKernelRuntime->ComputeSoftAggExpand(preAgg.aggKkF, preAgg.aggKkG, groupKk,
+                                                                edgeCount, kDim, stream, &cudaAggKkY,
+                                                                &cudaSoftAggErr) &&
+                        cudaKernelRuntime->ComputeSoftAggExpand(preAgg.aggIjF, preAgg.aggIjG, groupIj,
+                                                                edgeCount, kDim, stream, &cudaAggIjY,
+                                                                &cudaSoftAggErr)) {
+                        if (!m_loggedCudaSoftAgg ||
+                            EnvFlagEnabled("SMART_DRONE_DPVO_CUDA_SOFTAGG_VALIDATE_EVERY_STEP", false)) {
+                            std::vector<float> cpuAggKkY;
+                            std::vector<float> cpuAggIjY;
+                            SoftAggExpand(preAgg.aggKkF, preAgg.aggKkG, groupKk, edgeCount, kDim, &cpuAggKkY);
+                            SoftAggExpand(preAgg.aggIjF, preAgg.aggIjG, groupIj, edgeCount, kDim, &cpuAggIjY);
+                            const ErrorStats kkStats = CompareVectors(cpuAggKkY, cudaAggKkY);
+                            const ErrorStats ijStats = CompareVectors(cpuAggIjY, cudaAggIjY);
+                            std::cerr << "[dpvo_cuda] softagg ready edges=" << edgeCount
+                                      << " dim=" << kDim
+                                      << " kk_max_abs=" << kkStats.maxAbs
+                                      << " kk_rmse=" << kkStats.rmse
+                                      << " ij_max_abs=" << ijStats.maxAbs
+                                      << " ij_rmse=" << ijStats.rmse << "\n";
+                            m_loggedCudaSoftAgg = true;
+                            if ((kkStats.maxAbs > 1e-3f || ijStats.maxAbs > 1e-3f) &&
+                                EnvFlagEnabled("SMART_DRONE_DPVO_CUDA_SOFTAGG_STRICT_VALIDATE", true)) {
+                                cudaAggKkY = std::move(cpuAggKkY);
+                                cudaAggIjY = std::move(cpuAggIjY);
+                                std::cerr << "[dpvo_cuda] softagg validation exceeded threshold; using CPU SoftAgg for this step\n";
+                            }
+                        }
+                        if (cudaAggKkY.size() == static_cast<size_t>(edgeCount) * kDim &&
+                            cudaAggIjY.size() == static_cast<size_t>(edgeCount) * kDim) {
+                            aggKkY.swap(cudaAggKkY);
+                            aggIjY.swap(cudaAggIjY);
+                            usedCudaSoftAgg = true;
+                        }
+                    } else if (!m_loggedCudaSoftAggFailure) {
+                        std::cerr << "[dpvo_cuda] softagg unavailable: " << cudaSoftAggErr
+                                  << "; falling back to CPU SoftAgg\n";
+                        m_loggedCudaSoftAggFailure = true;
+                    }
+                }
+                if (!usedCudaSoftAgg) {
+                    SoftAggExpand(preAgg.aggKkF, preAgg.aggKkG, groupKk, edgeCount, kDim, &aggKkY);
+                    SoftAggExpand(preAgg.aggIjF, preAgg.aggIjG, groupIj, edgeCount, kDim, &aggIjY);
+                }
+
+                postAgg = postAggRuntime.Run(postAggEngine, stream, edgeCount, preAgg.baseNet, aggKkY, aggIjY, err);
+            }
             if (!postAgg.ok) {
                 return false;
             }
@@ -2983,6 +3587,28 @@ class DpvoNativeSolver {
         }
     }
 
+    struct ErrorStats {
+        float maxAbs{0.0f};
+        double rmse{0.0};
+    };
+
+    static ErrorStats CompareVectors(const std::vector<float> &a, const std::vector<float> &b)
+    {
+        ErrorStats stats{};
+        const size_t n = std::min(a.size(), b.size());
+        if (n == 0U) {
+            return stats;
+        }
+        double sq = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            const float d = std::fabs(a[i] - b[i]);
+            stats.maxAbs = std::max(stats.maxAbs, d);
+            sq += static_cast<double>(d) * static_cast<double>(d);
+        }
+        stats.rmse = std::sqrt(sq / static_cast<double>(n));
+        return stats;
+    }
+
     static void AdjSE3(const Eigen::Vector3f &t, const Eigen::Matrix3f &R, const Eigen::Matrix<float, 6, 1> &x,
                        Eigen::Matrix<float, 6, 1> *y)
     {
@@ -3262,15 +3888,39 @@ class DpvoNativeSolver {
     bool m_bootstrapComplete{false};
     bool m_loggedCudaCorr{false};
     bool m_loggedCudaCorrFailure{false};
+    bool m_loggedCudaSoftAgg{false};
+    bool m_loggedCudaSoftAggFailure{false};
+    bool m_loggedCudaDeviceUpdateChain{false};
+    bool m_loggedCudaDeviceUpdateChainFailure{false};
 };
 
 } // namespace
 
 struct DpvoTensorRtEngine::Impl {
     explicit Impl(DpvoTensorRtConfig cfg) : config(std::move(cfg)) {}
+    ~Impl() { Stop(); }
+
+    struct CachedTrackingSnapshot {
+        bool havePose{false};
+        int frameCount{0};
+        int edgeCount{0};
+        int patchCount{0};
+        int stereoDepthUpdates{0};
+    };
+
+    struct AsyncUpdateJob {
+        uint64_t frameId{0};
+        int64_t timestampNs{0};
+        cv::Mat leftGray;
+        cv::Mat rightGray;
+        float scaleX{1.0f};
+        float scaleY{1.0f};
+        bool runRight{true};
+    };
 
     bool Start()
     {
+        StopAsyncWorker();
         const std::filesystem::path patchPath =
             ResolveEnginePath(config.patchEnginePath, config.repoPath,
                               {"dpvo_patchifier_fp16.engine", "dpvo_patchifier.engine", "dpvo_patch.engine"});
@@ -3373,10 +4023,36 @@ struct DpvoTensorRtEngine::Impl {
             }
         }
         nativeSolver.Reset();
-        haveLastPose = false;
-        lastPose = core::ports::PoseEstimate{};
+        {
+            std::lock_guard<std::mutex> lock(cacheMutex);
+            haveLastPose = false;
+            lastPose = core::ports::PoseEstimate{};
+            haveAsyncPublishPose = false;
+            asyncPublishPose = core::ports::PoseEstimate{};
+            cachedFrameCount = 0;
+            cachedEdgeCount = 0;
+            cachedPatchCount = 0;
+            cachedStereoDepthUpdates = 0;
+            cachedLeftFeatures.clear();
+        }
         loggedKeyframeRemovals = 0;
-        running = true;
+        processedFrameCount = 0;
+        asyncUpdateEnabled = EnvFlagEnabled("SMART_DRONE_DPVO_ASYNC_UPDATE",
+                                            EnvFlagEnabled("SMART_DRONE_DPVO_EPG_PACING", false));
+        const int defaultHeavyEveryN = EnvFlagEnabled("SMART_DRONE_DPVO_EPG_PACING", false) ? 3 : 1;
+        heavyEveryN = std::clamp(
+            EnvIntValue("SMART_DRONE_DPVO_EPG_HEAVY_EVERY_N",
+                        EnvIntValue("SMART_DRONE_DPVO_HEAVY_EVERY_N", defaultHeavyEveryN)),
+            1, 30);
+        rightEveryN = std::clamp(EnvIntValue("SMART_DRONE_DPVO_RIGHT_EVERY_N", heavyEveryN), 1, 30);
+        heavyIntervalMs = std::clamp(EnvIntValue("SMART_DRONE_DPVO_EPG_HEAVY_INTERVAL_MS", 0), 0, 1000);
+        warmupFullFrames = std::clamp(EnvIntValue("SMART_DRONE_DPVO_WARMUP_FULL_FRAMES",
+                                                  std::max(8, config.optimizationWindow + 1)),
+                                      1, 60);
+        loggedEpgPacing = false;
+        loggedAsyncUpdate = false;
+        lastHeavyUpdateEndNs.store(0, std::memory_order_relaxed);
+        running.store(true, std::memory_order_release);
         std::cerr << "[dpvo_trt] ready patch_engine=" << patchEngine.Path()
                   << " update_engine=" << updateEngine.Path()
                   << " update_preagg_engine=" << (softAggSplitReady ? updatePreAggEngine.Path() : std::string{"none"})
@@ -3389,22 +4065,369 @@ struct DpvoTensorRtEngine::Impl {
                   << " postagg_warmup_ms=" << postAggWarmup.elapsedMs
                   << " native_cuda_kernels=" << (cudaKernelReady ? 1 : 0)
                   << " native_dpvo=1\n";
+        if (!loggedEpgPacing) {
+            std::cerr << "[dpvo_trt] epg pacing heavy_every_n=" << heavyEveryN
+                      << " heavy_interval_ms=" << heavyIntervalMs
+                      << " right_every_n=" << rightEveryN
+                      << " warmup_full_frames=" << warmupFullFrames << "\n";
+            loggedEpgPacing = true;
+        }
+        if (asyncUpdateEnabled && !loggedAsyncUpdate) {
+            std::cerr << "[dpvo_trt] async update enabled: foreground publishes cached pose, worker runs patch/corr/BA\n";
+            loggedAsyncUpdate = true;
+        }
         if (!voState.LoadStereoCalibration(config.settingsPath)) {
             std::cerr << "[dpvo_trt] DPVO calibration unavailable settings='" << config.settingsPath
                       << "'; pose output disabled\n";
-            running = false;
+            running.store(false, std::memory_order_release);
             return false;
         }
         voState.ResetTrackingState();
+        if (asyncUpdateEnabled) {
+            StartAsyncWorker();
+        }
         return true;
     }
 
     void Stop()
     {
-        running = false;
-        nativeSolver.Reset();
+        running.store(false, std::memory_order_release);
+        StopAsyncWorker();
+        {
+            std::lock_guard<std::mutex> lock(graphMutex);
+            nativeSolver.Reset();
+        }
         cudaKernelReady = false;
         cudaStream.Reset();
+    }
+
+    CachedTrackingSnapshot CopyCachedTracking(core::ports::PoseEstimate *pose,
+                                              std::vector<cv::Point2f> *features = nullptr)
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (pose != nullptr) {
+            *pose = lastPose;
+        }
+        if (features != nullptr) {
+            *features = cachedLeftFeatures;
+        }
+        CachedTrackingSnapshot snapshot{};
+        snapshot.havePose = haveLastPose;
+        snapshot.frameCount = cachedFrameCount;
+        snapshot.edgeCount = cachedEdgeCount;
+        snapshot.patchCount = cachedPatchCount;
+        snapshot.stereoDepthUpdates = cachedStereoDepthUpdates;
+        return snapshot;
+    }
+
+    void FillOutputFromCache(core::ports::SlamOutput &out, const CachedTrackingSnapshot &snapshot,
+                             const core::ports::PoseEstimate &pose,
+                             const std::vector<cv::Point2f> *features,
+                             const std::chrono::steady_clock::time_point &start)
+    {
+        out.superpointRawLeftCount = snapshot.patchCount;
+        out.superpointRawRightCount = snapshot.stereoDepthUpdates;
+        out.superpointMatchedStereoCount = snapshot.edgeCount;
+        out.matchesInliers = snapshot.edgeCount;
+        out.trackedMapPointCount = static_cast<uint32_t>(snapshot.edgeCount);
+        out.localMapPointCount = static_cast<uint32_t>(snapshot.patchCount);
+        out.frontendMs = 0.0;
+        out.lkUpdateMs = 0.0;
+        if (snapshot.havePose) {
+            const core::ports::PoseEstimate publishPose = SmoothAsyncPublishPose(pose);
+            out.trackingState = core::ports::kSlamTrackingOk;
+            out.poseValid = true;
+            out.pose = publishPose;
+            out.pose.valid = true;
+        } else {
+            out.trackingState = core::ports::kSlamTrackingLost;
+            out.poseValid = false;
+        }
+        if (features != nullptr) {
+            out.leftFeatures = *features;
+        }
+        out.orbTrackMs = ElapsedMs(start, std::chrono::steady_clock::now());
+    }
+
+    core::ports::PoseEstimate SmoothAsyncPublishPose(const core::ports::PoseEstimate &target)
+    {
+        if (!EnvFlagEnabled("SMART_DRONE_DPVO_ASYNC_PUBLISH_SMOOTH", true) || !target.valid) {
+            asyncPublishPose = target;
+            haveAsyncPublishPose = target.valid;
+            return target;
+        }
+        if (!haveAsyncPublishPose || !asyncPublishPose.valid) {
+            asyncPublishPose = target;
+            haveAsyncPublishPose = true;
+            return target;
+        }
+
+        const float maxStep =
+            std::max(0.0f, EnvFloatValue("SMART_DRONE_DPVO_ASYNC_PUBLISH_MAX_STEP_M", 0.025f));
+        const float maxRot =
+            std::max(0.0f, EnvFloatValue("SMART_DRONE_DPVO_ASYNC_PUBLISH_MAX_ROT_RAD", 0.035f));
+        const float dx = target.x - asyncPublishPose.x;
+        const float dy = target.y - asyncPublishPose.y;
+        const float dz = target.z - asyncPublishPose.z;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (maxStep > 0.0f && std::isfinite(dist) && dist > maxStep) {
+            const float scale = maxStep / std::max(dist, 1.0e-6f);
+            asyncPublishPose.x += dx * scale;
+            asyncPublishPose.y += dy * scale;
+            asyncPublishPose.z += dz * scale;
+        } else {
+            asyncPublishPose.x = target.x;
+            asyncPublishPose.y = target.y;
+            asyncPublishPose.z = target.z;
+        }
+
+        float tw = target.qw;
+        float tx = target.qx;
+        float ty = target.qy;
+        float tz = target.qz;
+        float dot = asyncPublishPose.qw * tw + asyncPublishPose.qx * tx +
+                    asyncPublishPose.qy * ty + asyncPublishPose.qz * tz;
+        if (dot < 0.0f) {
+            tw = -tw;
+            tx = -tx;
+            ty = -ty;
+            tz = -tz;
+            dot = -dot;
+        }
+        dot = std::clamp(dot, 0.0f, 1.0f);
+        const float angle = 2.0f * std::acos(dot);
+        const float rotAlpha =
+            (maxRot > 0.0f && std::isfinite(angle) && angle > maxRot) ? maxRot / std::max(angle, 1.0e-6f) : 1.0f;
+        asyncPublishPose.qw += (tw - asyncPublishPose.qw) * rotAlpha;
+        asyncPublishPose.qx += (tx - asyncPublishPose.qx) * rotAlpha;
+        asyncPublishPose.qy += (ty - asyncPublishPose.qy) * rotAlpha;
+        asyncPublishPose.qz += (tz - asyncPublishPose.qz) * rotAlpha;
+        const float qn = std::sqrt(asyncPublishPose.qw * asyncPublishPose.qw +
+                                   asyncPublishPose.qx * asyncPublishPose.qx +
+                                   asyncPublishPose.qy * asyncPublishPose.qy +
+                                   asyncPublishPose.qz * asyncPublishPose.qz);
+        if (qn > 1.0e-9f) {
+            asyncPublishPose.qw /= qn;
+            asyncPublishPose.qx /= qn;
+            asyncPublishPose.qy /= qn;
+            asyncPublishPose.qz /= qn;
+        } else {
+            asyncPublishPose.qw = 1.0f;
+            asyncPublishPose.qx = 0.0f;
+            asyncPublishPose.qy = 0.0f;
+            asyncPublishPose.qz = 0.0f;
+        }
+        asyncPublishPose.valid = true;
+        return asyncPublishPose;
+    }
+
+    bool AsyncWorkerIdle()
+    {
+        std::lock_guard<std::mutex> lock(workerMutex);
+        return !workerHasJob && !workerRunning;
+    }
+
+    bool QueueAsyncUpdateJob(AsyncUpdateJob job)
+    {
+        if (!running.load(std::memory_order_acquire)) {
+            return false;
+        }
+        std::lock_guard<std::mutex> lock(workerMutex);
+        if (workerStopRequested || workerHasJob || workerRunning) {
+            return false;
+        }
+        pendingWorkerJob = std::move(job);
+        workerHasJob = true;
+        workerCv.notify_one();
+        return true;
+    }
+
+    void StartAsyncWorker()
+    {
+        StopAsyncWorker();
+        {
+            std::lock_guard<std::mutex> lock(workerMutex);
+            workerStopRequested = false;
+            workerHasJob = false;
+            workerRunning = false;
+        }
+        workerThread = std::thread([this]() { AsyncWorkerLoop(); });
+    }
+
+    void StopAsyncWorker()
+    {
+        {
+            std::lock_guard<std::mutex> lock(workerMutex);
+            workerStopRequested = true;
+            workerHasJob = false;
+            pendingWorkerJob = AsyncUpdateJob{};
+        }
+        workerCv.notify_all();
+        if (workerThread.joinable()) {
+            workerThread.join();
+        }
+        {
+            std::lock_guard<std::mutex> lock(workerMutex);
+            workerStopRequested = false;
+            workerHasJob = false;
+            workerRunning = false;
+        }
+    }
+
+    void AsyncWorkerLoop()
+    {
+        for (;;) {
+            AsyncUpdateJob job{};
+            {
+                std::unique_lock<std::mutex> lock(workerMutex);
+                workerCv.wait(lock, [this]() { return workerStopRequested || workerHasJob; });
+                if (workerStopRequested) {
+                    break;
+                }
+                job = std::move(pendingWorkerJob);
+                pendingWorkerJob = AsyncUpdateJob{};
+                workerHasJob = false;
+                workerRunning = true;
+            }
+
+            ProcessAsyncUpdateJob(job);
+
+            {
+                std::lock_guard<std::mutex> lock(workerMutex);
+                workerRunning = false;
+            }
+            workerCv.notify_all();
+        }
+    }
+
+    void ProcessAsyncUpdateJob(const AsyncUpdateJob &job)
+    {
+        if (job.leftGray.empty() || !running.load(std::memory_order_acquire)) {
+            return;
+        }
+
+        const auto workerStart = std::chrono::steady_clock::now();
+        std::string dpvoErr;
+        std::string rightDpvoErr;
+        const DpvoPatchifierRun patchRun =
+            patchifierRuntime.Run(job.leftGray, patchEngine, cudaStream.stream, true, true, &dpvoErr);
+        const DpvoPatchifierRun rightPatchRun =
+            job.runRight && !job.rightGray.empty()
+                ? patchifierRightRuntime.Run(job.rightGray, patchEngine, cudaStream.stream, true, false,
+                                             &rightDpvoErr)
+                : DpvoPatchifierRun{};
+
+        if (patchRun.ok) {
+            if (!loggedPatchifierShape) {
+                std::cerr << "[dpvo_trt] patchifier active fmap=" << DimsToString(patchRun.fmapDims)
+                          << " imap=" << DimsToString(patchRun.imapDims)
+                          << " ms=" << patchRun.elapsedMs << "\n";
+                loggedPatchifierShape = true;
+            }
+        } else if (!loggedPatchifierError) {
+            std::cerr << "[dpvo_trt] patchifier inference disabled for async frame: " << dpvoErr << "\n";
+            loggedPatchifierError = true;
+        }
+        if (job.runRight && !rightPatchRun.ok && !loggedRightPatchifierError) {
+            std::cerr << "[dpvo_trt] right patchifier inference disabled for async frame: " << rightDpvoErr << "\n";
+            loggedRightPatchifierError = true;
+        }
+
+        const DpvoIntrinsics intrinsics{voState.m_lkFx * job.scaleX * 0.25f,
+                                        voState.m_lkFy * job.scaleY * 0.25f,
+                                        voState.m_lkCx * job.scaleX * 0.25f,
+                                        voState.m_lkCy * job.scaleY * 0.25f};
+
+        bool poseUpdated = false;
+        double nativeUpdateMs = 0.0;
+        int frameCount = 0;
+        int edgeCount = 0;
+        int patchCount = 0;
+        int stereoDepthUpdates = 0;
+        bool havePose = false;
+        core::ports::PoseEstimate publishPose{};
+        std::vector<cv::Point2f> publishFeatures;
+        int keyframeRemovalsBefore = 0;
+
+        {
+            std::lock_guard<std::mutex> lock(graphMutex);
+            if (!running.load(std::memory_order_acquire)) {
+                return;
+            }
+            graphState.PushFrame(job.frameId, job.timestampNs, job.leftGray,
+                                 nativeSolver.HasPose() ? nativeSolver.LastTcw() : Sophus::SE3f{}, patchRun);
+            if (rightPatchRun.ok) {
+                graphState.ApplyStereoDepthFromRightFmap(rightPatchRun, intrinsics.fx, voState.m_lkBaseline);
+                if (!loggedStereoDepthInit && graphState.LastStereoDepthUpdates() > 0) {
+                    std::cerr << "[dpvo_trt] stereo fmap depth init updates="
+                              << graphState.LastStereoDepthUpdates()
+                              << " fx_feature=" << intrinsics.fx
+                              << " baseline=" << voState.m_lkBaseline << "\n";
+                    loggedStereoDepthInit = true;
+                }
+            }
+
+            keyframeRemovalsBefore = graphState.KeyframeRemovals();
+            if (patchRun.ok && softAggSplitReady) {
+                poseUpdated =
+                    nativeSolver.Step(graphState, updatePreAggRuntime, updatePreAggEngine,
+                                      updatePostAggRuntime, updatePostAggEngine,
+                                      cudaKernelReady ? &cudaKernelRuntime : nullptr, cudaStream.stream,
+                                      intrinsics, &nativeUpdateMs, &dpvoErr);
+            }
+            lastHeavyUpdateEndNs.store(SteadyNowNs(), std::memory_order_release);
+
+            frameCount = graphState.FrameCount();
+            edgeCount = graphState.EdgeCount();
+            patchCount = graphState.PatchCount();
+            stereoDepthUpdates = graphState.LastStereoDepthUpdates();
+            if (graphState.KeyframeRemovals() != keyframeRemovalsBefore &&
+                graphState.KeyframeRemovals() != loggedKeyframeRemovals) {
+                loggedKeyframeRemovals = graphState.KeyframeRemovals();
+                std::cerr << "[dpvo_trt] keyframe removal count=" << loggedKeyframeRemovals
+                          << " active_edges=" << graphState.EdgeCount()
+                          << " active_frames=" << graphState.FrameCount() << "\n";
+            }
+            if (poseUpdated || nativeSolver.HasPose() || graphState.FrameCount() > 0) {
+                const Sophus::SE3f publishTcw = nativeSolver.HasPose() ? nativeSolver.LastTcw() : Sophus::SE3f{};
+                publishPose = PoseFromTwc(publishTcw.inverse());
+                havePose = publishPose.valid;
+            }
+            const DpvoFrameState *newest = graphState.NewestFrame();
+            if (newest != nullptr) {
+                publishFeatures.reserve(newest->patches.size());
+                for (const DpvoPatchState &patch : newest->patches) {
+                    publishFeatures.emplace_back(patch.x * 4.0f / std::max(job.scaleX, 1e-6f),
+                                                 patch.y * 4.0f / std::max(job.scaleY, 1e-6f));
+                }
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(cacheMutex);
+            cachedFrameCount = frameCount;
+            cachedEdgeCount = edgeCount;
+            cachedPatchCount = patchCount;
+            cachedStereoDepthUpdates = stereoDepthUpdates;
+            cachedLeftFeatures = std::move(publishFeatures);
+            if (havePose) {
+                lastPose = publishPose;
+                haveLastPose = true;
+            }
+        }
+
+        if (!poseUpdated && !dpvoErr.empty() && !loggedNativeSolverWait) {
+            std::cerr << "[dpvo_trt] native solver waiting: " << dpvoErr << "\n";
+            loggedNativeSolverWait = true;
+        }
+        std::cerr << "[dpvo_async] update frame=" << job.frameId
+                  << " patch_ms=" << patchRun.elapsedMs
+                  << " right_ms=" << (rightPatchRun.ok ? rightPatchRun.elapsedMs : 0.0)
+                  << " update_ms=" << nativeUpdateMs
+                  << " total_ms=" << ElapsedMs(workerStart, std::chrono::steady_clock::now())
+                  << " frames=" << frameCount
+                  << " edges=" << edgeCount
+                  << " pose=" << (havePose ? 1 : 0) << "\n";
     }
 
     core::ports::SlamOutput Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
@@ -3418,8 +4441,8 @@ struct DpvoTensorRtEngine::Impl {
         out.mapId = 1;
         out.usedSuperPointFrontend = false;
 
-        if (!running) {
-            out.trackingState = ORB_SLAM3::Tracking::LOST;
+        if (!running.load(std::memory_order_acquire)) {
+            out.trackingState = core::ports::kSlamTrackingLost;
             return out;
         }
 
@@ -3427,7 +4450,7 @@ struct DpvoTensorRtEngine::Impl {
         cv::Mat leftGray = EnsureGray8(input.stereo.left.gray);
         cv::Mat rightGray = EnsureGray8(input.stereo.right.gray);
         if (leftGray.empty() || rightGray.empty()) {
-            out.trackingState = ORB_SLAM3::Tracking::LOST;
+            out.trackingState = core::ports::kSlamTrackingLost;
             return out;
         }
         cv::Mat leftRect = leftGray;
@@ -3454,12 +4477,76 @@ struct DpvoTensorRtEngine::Impl {
             resizedRightGray = rightRect;
         }
 
+        ++processedFrameCount;
+        if (asyncUpdateEnabled) {
+            core::ports::PoseEstimate cachedPose{};
+            std::vector<cv::Point2f> cachedFeatures;
+            const CachedTrackingSnapshot snapshot =
+                CopyCachedTracking(&cachedPose, extractFeatures ? &cachedFeatures : nullptr);
+            const bool warmupFrame = !snapshot.havePose || snapshot.frameCount < warmupFullFrames;
+            const int64_t lastUpdateNs = lastHeavyUpdateEndNs.load(std::memory_order_acquire);
+            const int64_t nowNs = SteadyNowNs();
+            const bool intervalReady =
+                heavyIntervalMs <= 0 || lastUpdateNs == 0 ||
+                nowNs - lastUpdateNs >= static_cast<int64_t>(heavyIntervalMs) * 1000000LL;
+            const bool cadenceReady = heavyEveryN <= 1 ||
+                                      ((processedFrameCount - 1U) % static_cast<uint64_t>(heavyEveryN)) == 0U;
+            const bool heavyFrame = warmupFrame || (intervalReady && cadenceReady);
+            const bool rightFrame = heavyFrame &&
+                                    (warmupFrame || rightEveryN <= 1 ||
+                                     ((processedFrameCount - 1U) % static_cast<uint64_t>(rightEveryN)) == 0U);
+            if (heavyFrame && AsyncWorkerIdle()) {
+                AsyncUpdateJob job{};
+                job.frameId = input.frameId;
+                job.timestampNs = input.captureTimestampNs;
+                job.leftGray = resizedGray.clone();
+                job.rightGray = rightFrame ? resizedRightGray.clone() : cv::Mat{};
+                job.scaleX = static_cast<float>(config.inputWidth) / std::max(1, leftRect.cols);
+                job.scaleY = static_cast<float>(config.inputHeight) / std::max(1, leftRect.rows);
+                job.runRight = rightFrame;
+                (void)QueueAsyncUpdateJob(std::move(job));
+            }
+            FillOutputFromCache(out, snapshot, cachedPose, extractFeatures ? &cachedFeatures : nullptr, start);
+            return out;
+        }
+
+        const bool warmupFrame = !nativeSolver.HasPose() || graphState.FrameCount() < warmupFullFrames;
+        const int64_t lastUpdateNs = lastHeavyUpdateEndNs.load(std::memory_order_acquire);
+        const int64_t nowNs = SteadyNowNs();
+        const bool intervalReady =
+            heavyIntervalMs <= 0 || lastUpdateNs == 0 ||
+            nowNs - lastUpdateNs >= static_cast<int64_t>(heavyIntervalMs) * 1000000LL;
+        const bool cadenceReady = heavyEveryN <= 1 ||
+                                  ((processedFrameCount - 1U) % static_cast<uint64_t>(heavyEveryN)) == 0U;
+        const bool heavyFrame = warmupFrame || (intervalReady && cadenceReady);
+        const bool rightFrame = heavyFrame &&
+                                (warmupFrame || rightEveryN <= 1 ||
+                                 ((processedFrameCount - 1U) % static_cast<uint64_t>(rightEveryN)) == 0U);
+        if (!heavyFrame && haveLastPose) {
+            out.superpointRawLeftCount = graphState.PatchCount();
+            out.superpointRawRightCount = graphState.LastStereoDepthUpdates();
+            out.superpointMatchedStereoCount = graphState.EdgeCount();
+            out.matchesInliers = graphState.EdgeCount();
+            out.trackedMapPointCount = static_cast<uint32_t>(graphState.EdgeCount());
+            out.localMapPointCount = static_cast<uint32_t>(graphState.PatchCount());
+            out.trackingState = core::ports::kSlamTrackingOk;
+            out.poseValid = true;
+            out.pose = lastPose;
+            out.pose.valid = true;
+            out.orbTrackMs = ElapsedMs(start, std::chrono::steady_clock::now());
+            out.frontendMs = 0.0;
+            out.lkUpdateMs = 0.0;
+            return out;
+        }
+
         std::string dpvoErr;
         std::string rightDpvoErr;
         const DpvoPatchifierRun patchRun =
             patchifierRuntime.Run(resizedGray, patchEngine, cudaStream.stream, true, true, &dpvoErr);
         const DpvoPatchifierRun rightPatchRun =
-            patchifierRightRuntime.Run(resizedRightGray, patchEngine, cudaStream.stream, true, false, &rightDpvoErr);
+            rightFrame ? patchifierRightRuntime.Run(resizedRightGray, patchEngine, cudaStream.stream, true, false,
+                                                    &rightDpvoErr)
+                       : DpvoPatchifierRun{};
         if (patchRun.ok) {
             out.superpointForwardMs = patchRun.elapsedMs;
             out.superpointStereoMatchMs = rightPatchRun.ok ? rightPatchRun.elapsedMs : 0.0;
@@ -3473,7 +4560,7 @@ struct DpvoTensorRtEngine::Impl {
             std::cerr << "[dpvo_trt] patchifier inference disabled for this frame: " << dpvoErr << "\n";
             loggedPatchifierError = true;
         }
-        if (!rightPatchRun.ok && !loggedRightPatchifierError) {
+        if (rightFrame && !rightPatchRun.ok && !loggedRightPatchifierError) {
             std::cerr << "[dpvo_trt] right patchifier inference disabled for this frame: " << rightDpvoErr << "\n";
             loggedRightPatchifierError = true;
         }
@@ -3504,6 +4591,7 @@ struct DpvoTensorRtEngine::Impl {
                                                    updatePostAggRuntime, updatePostAggEngine,
                                                    cudaKernelReady ? &cudaKernelRuntime : nullptr,
                                                    cudaStream.stream, intrinsics, &nativeUpdateMs, &dpvoErr);
+        lastHeavyUpdateEndNs.store(SteadyNowNs(), std::memory_order_release);
         out.lkUpdateMs = nativeUpdateMs;
         out.frontendMs = out.superpointForwardMs + out.superpointStereoMatchMs + nativeUpdateMs;
         if (graphState.KeyframeRemovals() != keyframeRemovalsBefore &&
@@ -3524,13 +4612,14 @@ struct DpvoTensorRtEngine::Impl {
         }
 
         if (poseUpdated) {
-            out.trackingState = ORB_SLAM3::Tracking::OK;
+            out.trackingState = core::ports::kSlamTrackingOk;
         } else {
             if (!dpvoErr.empty() && !loggedNativeSolverWait) {
                 std::cerr << "[dpvo_trt] native solver waiting: " << dpvoErr << "\n";
                 loggedNativeSolverWait = true;
             }
-            out.trackingState = haveLastPose ? ORB_SLAM3::Tracking::RECENTLY_LOST : ORB_SLAM3::Tracking::LOST;
+            out.trackingState = haveLastPose ? core::ports::kSlamTrackingRecentlyLost
+                                             : core::ports::kSlamTrackingLost;
         }
 
         out.poseValid = haveLastPose && TrackingStateCanPublishPose(out.trackingState);
@@ -3567,11 +4656,36 @@ struct DpvoTensorRtEngine::Impl {
     SlamModeSharedState voState;
     cv::Mat resizedGray;
     cv::Mat resizedRightGray;
+    std::mutex cacheMutex;
+    std::mutex graphMutex;
+    std::mutex workerMutex;
+    std::condition_variable workerCv;
+    std::thread workerThread;
+    AsyncUpdateJob pendingWorkerJob;
     core::ports::PoseEstimate lastPose{};
+    core::ports::PoseEstimate asyncPublishPose{};
+    std::vector<cv::Point2f> cachedLeftFeatures;
+    uint64_t processedFrameCount{0};
+    int heavyEveryN{1};
+    int rightEveryN{1};
+    int heavyIntervalMs{0};
+    int warmupFullFrames{8};
+    std::atomic<int64_t> lastHeavyUpdateEndNs{0};
+    int cachedFrameCount{0};
+    int cachedEdgeCount{0};
+    int cachedPatchCount{0};
+    int cachedStereoDepthUpdates{0};
     bool haveLastPose{false};
-    bool running{false};
+    bool haveAsyncPublishPose{false};
+    std::atomic<bool> running{false};
+    bool asyncUpdateEnabled{false};
+    bool workerStopRequested{false};
+    bool workerHasJob{false};
+    bool workerRunning{false};
     bool softAggSplitReady{false};
     bool cudaKernelReady{false};
+    bool loggedEpgPacing{false};
+    bool loggedAsyncUpdate{false};
     bool loggedPatchifierShape{false};
     bool loggedPatchifierError{false};
     bool loggedRightPatchifierError{false};
@@ -3598,7 +4712,7 @@ struct DpvoTensorRtEngine::Impl {
         core::ports::SlamOutput out{};
         out.frameId = input.frameId;
         out.captureTimestampNs = input.captureTimestampNs;
-        out.trackingState = ORB_SLAM3::Tracking::LOST;
+        out.trackingState = core::ports::kSlamTrackingLost;
         return out;
     }
 
@@ -3631,7 +4745,7 @@ core::ports::SlamOutput DpvoTensorRtEngine::Process(const core::ports::SlamInput
 DpvoTensorRtConfig MakeDpvoTensorRtConfig(const RuntimeConfig &runtime, const std::string &settingsPath)
 {
     DpvoTensorRtConfig out{};
-    out.repoPath = runtime.dpvoRepo;
+    out.repoPath = ResolveDpvoRepoPath(runtime.dpvoRepo).string();
     out.patchEnginePath = runtime.dpvoPatchEngine;
     out.updateEnginePath = runtime.dpvoUpdateEngine;
     out.settingsPath = settingsPath;

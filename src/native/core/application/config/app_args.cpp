@@ -121,6 +121,11 @@ FeatureFrontend ParseFeatureFrontendText(const std::string &text)
         normalized == "sp_lightglue" || normalized == "sp-lg" || normalized == "splg") {
         return FeatureFrontend::SuperPointLightGlue;
     }
+    if (normalized == "xfeat-lightglue" || normalized == "xfeat_lightglue" ||
+        normalized == "xfeat+lightglue" || normalized == "xfeat-lg" ||
+        normalized == "xfeat_lg" || normalized == "xfeatlg") {
+        return FeatureFrontend::XFeatLightGlue;
+    }
     if (normalized == "lk-gftt-per-frame" || normalized == "lk_gftt_per_frame" ||
         normalized == "lk-gftt-every-frame" || normalized == "lk_gftt_every_frame" ||
         normalized == "per-frame-gftt" || normalized == "per_frame_gftt" ||
@@ -143,10 +148,18 @@ const char *ToFeatureFrontendText(FeatureFrontend frontend)
         return "lk";
     case FeatureFrontend::SuperPointLightGlue:
         return "superpoint_lightglue";
+    case FeatureFrontend::XFeatLightGlue:
+        return "xfeat_lightglue";
     case FeatureFrontend::Orb:
     default:
         return "orb";
     }
+}
+
+bool IsExternalFeatureLightGlueFrontend(FeatureFrontend frontend)
+{
+    return frontend == FeatureFrontend::SuperPointLightGlue ||
+           frontend == FeatureFrontend::XFeatLightGlue;
 }
 
 SlamBackend ParseSlamBackendText(const std::string &text)
@@ -154,16 +167,36 @@ SlamBackend ParseSlamBackendText(const std::string &text)
     std::string normalized = text;
     std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (normalized == "klt" || normalized == "lk" || normalized == "stereo-klt" ||
+        normalized == "stereo_klt" || normalized == "klt_pnp" || normalized == "lk_gftt_per_frame") {
+        return SlamBackend::Klt;
+    }
     if (normalized == "dpvo" || normalized == "dpvo_tensorrt" || normalized == "dpvo-tensorrt" ||
         normalized == "dpvo_trt" || normalized == "dpvo-trt") {
         return SlamBackend::DpvoTensorRt;
     }
-    return SlamBackend::OrbSlam3;
+    if (normalized == "orbslam3" || normalized == "orb-slam3" || normalized == "orb_slam3" ||
+        normalized == "orb") {
+        return SlamBackend::OrbSlam3;
+    }
+    return SlamBackend::Klt;
+}
+
+SlamBackend NormalizeSlamBackendForBuild(SlamBackend backend)
+{
+#if !defined(SMART_DRONE_ENABLE_ORB_SLAM3)
+    if (backend == SlamBackend::OrbSlam3) {
+        return SlamBackend::Klt;
+    }
+#endif
+    return backend;
 }
 
 const char *ToSlamBackendText(SlamBackend backend)
 {
     switch (backend) {
+    case SlamBackend::Klt:
+        return "klt";
     case SlamBackend::DpvoTensorRt:
         return "dpvo_tensorrt";
     case SlamBackend::OrbSlam3:
@@ -330,7 +363,6 @@ AppConfig ParseAppConfig(int argc, char **argv)
     ArgReader argReader(argc, argv);
     AppConfig config;
 
-    config.vocab = ResolveRuntimePath(argReader.GetString("--vocab", "ORBvoc.txt"), argc > 0 ? argv[0] : nullptr);
     config.sensorMode = ParseSensorModeText(argReader.GetString("--sensor-mode", "stereo"));
     const char *defaultSettings = DefaultSettingsForSensorMode(config.sensorMode);
     config.settings =
@@ -395,7 +427,11 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.allowEmptyImu = argReader.HasFlag("--allow-empty-imu");
     config.runtime.slamInputFps = argReader.GetInt("--slam-fps", 30);
     config.runtime.slamOperationMode = ParseSlamOperationModeText(argReader.GetString("--slam-mode", "mapping"));
-    config.runtime.slamBackend = ParseSlamBackendText(argReader.GetString("--slam-backend", "orbslam3"));
+    config.runtime.slamBackend =
+        NormalizeSlamBackendForBuild(ParseSlamBackendText(argReader.GetString("--slam-backend", "klt")));
+    const std::string vocabArg =
+        argReader.GetString("--vocab", config.runtime.slamBackend == SlamBackend::OrbSlam3 ? "ORBvoc.txt" : "");
+    config.vocab = ResolveRuntimePath(vocabArg, argc > 0 ? argv[0] : nullptr);
     config.runtime.dpvoRepo = ResolveRuntimePath(argReader.GetString("--dpvo-repo", ""), argc > 0 ? argv[0] : nullptr);
     config.runtime.dpvoPatchEngine =
         ResolveRuntimePath(argReader.GetString("--dpvo-patch-engine", ""), argc > 0 ? argv[0] : nullptr);
@@ -405,7 +441,8 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.dpvoInputHeight = argReader.GetInt("--dpvo-input-height", 400);
     config.runtime.dpvoPatchesPerFrame = argReader.GetInt("--dpvo-patches-per-frame", 48);
     config.runtime.dpvoOptimizationWindow = argReader.GetInt("--dpvo-optimization-window", 7);
-    config.runtime.featureFrontend = ParseFeatureFrontendText(argReader.GetString("--feature-frontend", "orb"));
+    config.runtime.featureFrontend =
+        ParseFeatureFrontendText(argReader.GetString("--feature-frontend", "lk_gftt_per_frame"));
     {
         const char *home = std::getenv("HOME");
         const std::string explicitRepo = argReader.GetString("--superpoint-repo", "");
@@ -438,7 +475,9 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.runtime.lkLoopRelaxation = argReader.GetFloat("--lk-loop-relax", 1.40f);
     config.runtime.lkPerFrameAcceleration = argReader.GetString("--lk-per-frame-accel", "vpi-cuda");
     config.runtime.orbAcceleration = NormalizeAccelerationText(argReader.GetString("--orb-accel", "cpu"));
-    ApplyOrbAccelerationEnvironment(config.runtime.orbAcceleration);
+    if (config.runtime.slamBackend == SlamBackend::OrbSlam3) {
+        ApplyOrbAccelerationEnvironment(config.runtime.orbAcceleration);
+    }
     config.runtime.debugRightOnlyFeatures = argReader.HasFlag("--debug-right-only-features");
     config.runtime.slamLowLightEnhance = argReader.HasFlag("--slam-lowlight-enhance");
     config.runtime.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");

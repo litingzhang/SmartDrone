@@ -57,8 +57,8 @@ struct ImuWindowValidation {
     const char *failureReason{nullptr};
 };
 
-bool IsFiniteImuPoint(const ORB_SLAM3::IMU::Point &p);
-bool SanitizeImuWindow(std::vector<ORB_SLAM3::IMU::Point> &vImu, double prevFrameTime, double frameTime,
+bool IsFiniteImuReading(const smartdrone::core::ports::ImuReading &reading);
+bool SanitizeImuWindow(std::vector<smartdrone::core::ports::ImuReading> &vImu, double prevFrameTime, double frameTime,
                        double expectedImuDtSec, ImuWindowValidation &stats);
 std::optional<Sophus::SE3f> ReadSe3Node(const cv::FileNode &node);
 StereoBodyExtrinsics LoadStereoBodyExtrinsics(const std::string &settingsPath);

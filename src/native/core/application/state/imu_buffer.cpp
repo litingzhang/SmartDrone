@@ -1,7 +1,5 @@
 #include "core/application/state/imu_buffer.h"
 
-#include <opencv2/core/types.hpp>
-
 #include <algorithm>
 #include <limits>
 #include <mutex>
@@ -20,10 +18,11 @@ void ImuBuffer::Push(const ImuSample &sample)
     }
 }
 
-std::vector<ORB_SLAM3::IMU::Point> ImuBuffer::PopBetweenNs(int64_t t0Ns, int64_t t1Ns, int64_t slackBeforeNs,
-                                                           int64_t slackAfterNs)
+std::vector<smartdrone::core::ports::ImuReading> ImuBuffer::PopBetweenNs(int64_t t0Ns, int64_t t1Ns,
+                                                                         int64_t slackBeforeNs,
+                                                                         int64_t slackAfterNs)
 {
-    std::vector<ORB_SLAM3::IMU::Point> out;
+    std::vector<smartdrone::core::ports::ImuReading> out;
     std::lock_guard<std::mutex> lock(m_mutex);
 
     if (m_queue.empty() || t1Ns < t0Ns) {
@@ -39,9 +38,15 @@ std::vector<ORB_SLAM3::IMU::Point> ImuBuffer::PopBetweenNs(int64_t t0Ns, int64_t
     }
 
     auto appendSample = [&out](const ImuSample &sample) {
-        const double ts = static_cast<double>(sample.tNs) * 1e-9;
-        out.emplace_back(cv::Point3f(sample.ax, sample.ay, sample.az), cv::Point3f(sample.gx, sample.gy, sample.gz),
-                         ts);
+        smartdrone::core::ports::ImuReading reading{};
+        reading.timestampNs = sample.tNs;
+        reading.ax = sample.ax;
+        reading.ay = sample.ay;
+        reading.az = sample.az;
+        reading.gx = sample.gx;
+        reading.gy = sample.gy;
+        reading.gz = sample.gz;
+        out.push_back(reading);
     };
 
     auto appendInterpolatedSample = [&appendSample](const ImuSample &a, const ImuSample &b, int64_t targetNs) {

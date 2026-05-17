@@ -136,6 +136,21 @@ std::string ResolveSuperPointLightGlueRepoForRuntime(const std::string &configur
     return FirstExistingPathOrFallback(candidates, configuredRepo);
 }
 
+smartdrone::adapters::slam::ExternalFeatureFrontendClient *ResolveExternalFeatureFrontendClient(
+    FeatureFrontend frontend, smartdrone::adapters::slam::SuperPointLightGlueFrontendClient &superpointClient)
+{
+    switch (frontend) {
+    case FeatureFrontend::SuperPointLightGlue:
+        return &superpointClient;
+    case FeatureFrontend::XFeatLightGlue:
+    case FeatureFrontend::LkGfttPerFrame:
+    case FeatureFrontend::LK:
+    case FeatureFrontend::Orb:
+    default:
+        return nullptr;
+    }
+}
+
 bool IsYamlKeyLine(const std::string &line, const std::string &key)
 {
     const std::string trimmed = TrimCopy(line);
@@ -189,6 +204,9 @@ void ReplaceOrInsertYamlScalar(std::string &text, const std::string &key, const 
 
 std::string BuildEffectiveSlamSettingsPath(const UnifiedConfig &cfg)
 {
+    if (cfg.app.runtime.slamBackend != SlamBackend::OrbSlam3) {
+        return cfg.app.settings;
+    }
     if (cfg.app.runtime.orbNFeatures <= 0 || !(cfg.app.runtime.orbScaleFactor > 0.0f) ||
         cfg.app.runtime.orbNLevels <= 0 || cfg.app.runtime.orbIniThFAST <= 0 || cfg.app.runtime.orbMinThFAST <= 0) {
         return cfg.app.settings;
@@ -244,19 +262,6 @@ std::string BuildEffectiveSlamSettingsPath(const UnifiedConfig &cfg)
 
 std::atomic<uint32_t> g_slamSessionResetCounter{0};
 std::atomic<uint32_t> g_slamSessionResetMapCount{0};
-
-ORB_SLAM3::System::eSensor ResolveOrbSensor(const MainRuntimeAliases &aliases)
-{
-    const bool monoMode = aliases.sensorMode == SensorMode::Mono || aliases.sensorMode == SensorMode::MonoImu;
-    const bool monoImuMode = aliases.sensorMode == SensorMode::MonoImu;
-    if (monoImuMode)
-        return ORB_SLAM3::System::IMU_MONOCULAR;
-    if (monoMode)
-        return ORB_SLAM3::System::MONOCULAR;
-    if (aliases.sensorMode == SensorMode::StereoImu)
-        return ORB_SLAM3::System::IMU_STEREO;
-    return ORB_SLAM3::System::STEREO;
-}
 
 smartdrone::adapters::imu::Icm42688ImuProviderConfig MakeImuProviderConfig(const MainRuntimeAliases &aliases)
 {
@@ -330,7 +335,6 @@ SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg, LiveRuntimeTuni
       m_aliases(BuildRuntimeAliases(cfg.app)),
       m_monoMode(m_aliases.sensorMode == SensorMode::Mono || m_aliases.sensorMode == SensorMode::MonoImu),
       m_useImu(m_aliases.sensorMode == SensorMode::StereoImu || m_aliases.sensorMode == SensorMode::MonoImu),
-      m_orbSensor(ResolveOrbSensor(m_aliases)),
       m_slamInputMode(m_monoMode ? smartdrone::adapters::slam::SlamInputMode::MonoRight
                                   : smartdrone::adapters::slam::SlamInputMode::Stereo),
       m_effectiveSettingsPath(BuildEffectiveSlamSettingsPath(cfg)),
@@ -339,18 +343,22 @@ SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg, LiveRuntimeTuni
       m_perceptionPipeline(PerceptionPipelineConfig{m_aliases.fps, true}),
       m_frameProcessorState(MakeInitialFrameProcessorState(m_aliases))
 {
-    if (m_aliases.slamBackend == SlamBackend::DpvoTensorRt) {
-        auto dpvoConfig = smartdrone::adapters::slam::MakeDpvoTensorRtConfig(cfg.app.runtime, m_effectiveSettingsPath);
-        m_slamEngine = std::make_unique<smartdrone::adapters::slam::DpvoTensorRtEngine>(
-            std::move(dpvoConfig));
-    } else {
+    if (m_aliases.slamBackend == SlamBackend::OrbSlam3) {
         ApplyOrbAccelerationEnvironment(cfg.app.runtime.orbAcceleration);
-        m_slamSystem = std::make_unique<ORB_SLAM3::System>(cfg.app.vocab, m_effectiveSettingsPath, m_orbSensor, false);
-        auto orbEngine = std::make_unique<smartdrone::adapters::slam::SlamEngineAdapter>(
-            std::move(m_slamSystem), m_slamInputMode, m_useImu, m_effectiveSettingsPath);
-        m_orbSlamEngine = orbEngine.get();
-        m_slamEngine = std::move(orbEngine);
     }
+    smartdrone::adapters::slam::SlamEngineFactoryConfig engineConfig{};
+    engineConfig.backend = m_aliases.slamBackend;
+    engineConfig.vocabularyPath = cfg.app.vocab;
+    engineConfig.settingsPath = m_effectiveSettingsPath;
+    engineConfig.sensorMode = m_aliases.sensorMode;
+    engineConfig.useViewer = false;
+    engineConfig.useImu = m_useImu;
+    engineConfig.inputMode = m_slamInputMode;
+    engineConfig.runtime = cfg.app.runtime;
+    smartdrone::adapters::slam::ControlledSlamEngine slamEngine =
+        smartdrone::adapters::slam::CreateSlamEngine(engineConfig);
+    m_slamControl = slamEngine.control;
+    m_slamEngine = std::move(slamEngine.engine);
 }
 
 bool SlamSessionRuntime::Start()
@@ -365,15 +373,17 @@ bool SlamSessionRuntime::Start()
     }
     m_slamStarted = true;
 
-    if (m_orbSlamEngine != nullptr) {
-        m_orbSlamEngine->SetOperationMode(m_frameProcessorState.effectiveSlamMode);
-        m_orbSlamEngine->SetFeatureFrontend(m_aliases.featureFrontend);
-        m_orbSlamEngine->SetExternalFeatureFrontendClient(&m_superpointFrontendClient);
-        m_orbSlamEngine->SetExternalFeatureInputSizeLimit(m_cfg.app.runtime.superpointInputMaxWidth,
+    if (m_slamControl != nullptr) {
+        m_externalFeatureFrontendClient =
+            ResolveExternalFeatureFrontendClient(m_aliases.featureFrontend, m_superpointFrontendClient);
+        m_slamControl->SetOperationMode(m_frameProcessorState.effectiveSlamMode);
+        m_slamControl->SetFeatureFrontend(m_aliases.featureFrontend);
+        m_slamControl->SetExternalFeatureFrontendClient(m_externalFeatureFrontendClient);
+        m_slamControl->SetExternalFeatureInputSizeLimit(m_cfg.app.runtime.superpointInputMaxWidth,
                                                           m_cfg.app.runtime.superpointInputMaxHeight);
-        m_orbSlamEngine->SetStereoVoLoopClosure(m_cfg.app.runtime.lkLoopClosure, m_cfg.app.runtime.lkLoopScale,
+        m_slamControl->SetStereoVoLoopClosure(m_cfg.app.runtime.lkLoopClosure, m_cfg.app.runtime.lkLoopScale,
                                                 m_cfg.app.runtime.lkLoopRelaxation);
-        m_orbSlamEngine->SetStereoVoPerFrameAcceleration(m_cfg.app.runtime.lkPerFrameAcceleration);
+        m_slamControl->SetStereoVoPerFrameAcceleration(m_cfg.app.runtime.lkPerFrameAcceleration);
     }
     if (m_frameProcessorState.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
         std::cerr << "[slam] operation_mode=auto effective_mode=mapping\n";
@@ -382,7 +392,7 @@ bool SlamSessionRuntime::Start()
     if (m_frameProcessorState.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Relocalization ||
         m_frameProcessorState.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::TrackingOnly) {
         std::cerr << "[slam] note: slam_mode=" << smartdrone::core::domain::ToString(m_aliases.slamOperationMode)
-                  << " currently maps to ORB-SLAM3 localization-only mode\n";
+                  << " currently maps to backend localization-only mode\n";
     }
 
     if (m_aliases.sensorMode == SensorMode::Stereo) {
@@ -397,6 +407,9 @@ bool SlamSessionRuntime::Start()
         ConfigureSuperPointLightGlueRuntimeDefaults(featureRepo,
                                                     m_cfg.app.runtime.superpointInputMaxWidth,
                                                     m_cfg.app.runtime.superpointInputMaxHeight);
+    }
+    if (m_aliases.featureFrontend == FeatureFrontend::XFeatLightGlue) {
+        std::cerr << "[slam] warning: xfeat_lightglue frontend route is available, but no native XFeat client is linked yet\n";
     }
     if (needsSuperPointTensorRt) {
         std::string featureErr;
@@ -491,8 +504,8 @@ SlamFrameProcessor &SlamSessionRuntime::FrameProcessor()
 {
     if (!m_frameProcessorContext) {
         m_frameProcessorContext = std::make_unique<SlamFrameProcessor::Context>(SlamFrameProcessor::Context{
-            m_aliases, m_monoMode, m_useImu, m_tuning, m_livePose, m_mav, *m_slamEngine, m_orbSlamEngine,
-            &m_superpointFrontendClient, *m_cameraProvider, m_imuProvider, m_posePublisher, m_udp,
+            m_aliases, m_monoMode, m_useImu, m_tuning, m_livePose, m_mav, *m_slamEngine, m_slamControl,
+            m_externalFeatureFrontendClient, *m_cameraProvider, m_imuProvider, m_posePublisher, m_udp,
             m_frameTimingTracker, m_perceptionPipeline, m_posePostprocessor, m_autoSlamModeController,
             m_stereoBodyExtrinsics});
     }

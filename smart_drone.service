@@ -36,9 +36,12 @@ Environment=SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35
 Environment=SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0
 Environment=SMART_DRONE_REALTIME_POSE_CONTINUITY=1
 Environment=SMART_DRONE_ONLINE_POSE_STEP_GUARD=1
-Environment=SMART_DRONE_ONLINE_POSE_GUARD_MAX_STEP_M=0.18
-Environment=SMART_DRONE_ONLINE_POSE_GUARD_MAX_SPEED_MPS=3.0
+Environment=SMART_DRONE_ONLINE_POSE_GUARD_MAX_STEP_M=0.08
+Environment=SMART_DRONE_ONLINE_POSE_GUARD_MAX_SPEED_MPS=1.6
+Environment=SMART_DRONE_ONLINE_POSE_GUARD_MAX_ROT_RAD=0.10
+Environment=SMART_DRONE_ONLINE_POSE_GUARD_MAX_ROT_RPS=2.0
 Environment=SMART_DRONE_ONLINE_POSE_GUARD_DFX=1
+Environment=SMART_DRONE_UDP_STATE_PERIOD_MS=50
 Environment=SMART_DRONE_SP_LG_INJECT_DFX=1
 Environment=SMART_DRONE_SP_LG_TRACK_DFX=0
 Environment=SMART_DRONE_EXTERNAL_STEREO_TRACK_DFX=0
@@ -48,8 +51,24 @@ Environment=SMART_DRONE_LIGHTGLUE_TRT_ENGINE=/home/nvidia/LightGlue/weights/ligh
 Environment=SMART_DRONE_TRT_PINNED_HOST_OUTPUT=1
 Environment=SMART_DRONE_SUPERPOINT_PARALLEL_POST=1
 Environment=SMART_DRONE_SUPERPOINT_DESCRIPTOR_NEAREST=1
+Environment=SMART_DRONE_DPVO_REPO=/home/nvidia/DPVO
+Environment=SMART_DRONE_DPVO_EPG_PACING=1
+Environment=SMART_DRONE_DPVO_ASYNC_UPDATE=1
+Environment=SMART_DRONE_DPVO_ASYNC_PUBLISH_SMOOTH=1
+Environment=SMART_DRONE_DPVO_ASYNC_PUBLISH_MAX_STEP_M=0.010
+Environment=SMART_DRONE_DPVO_ASYNC_PUBLISH_MAX_ROT_RAD=0.018
+Environment=SMART_DRONE_DPVO_EPG_HEAVY_EVERY_N=3
+Environment=SMART_DRONE_DPVO_EPG_HEAVY_INTERVAL_MS=150
+Environment=SMART_DRONE_DPVO_RIGHT_EVERY_N=3
+Environment=SMART_DRONE_DPVO_WARMUP_FULL_FRAMES=4
+Environment=SMART_DRONE_DPVO_BOOTSTRAP_UPDATE_ITERS=2
+Environment=SMART_DRONE_DPVO_UPDATE_ITERS=1
+Environment=SMART_DRONE_DPVO_MAX_EDGES=256
+Environment=SMART_DRONE_DPVO_CAP_REBUILT_EDGES=1
+Environment=SMART_DRONE_DPVO_CUDA_CORR_STRICT_VALIDATE=0
+Environment=SMART_DRONE_DPVO_CUDA_DEVICE_UPDATE_CHAIN_VALIDATE=0
 Environment=LD_LIBRARY_PATH=/home/nvidia:/home/nvidia/vpi_root/opt/nvidia/vpi2/lib/aarch64-linux-gnu:/home/nvidia/vpi_root/opt/nvidia/cupva-2.3/lib/aarch64-linux-gnu:/usr/local/cuda-11.4/targets/aarch64-linux/lib:/usr/local/cuda/lib64:/usr/lib/aarch64-linux-gnu
-ExecStart=/home/nvidia/smart_drone --auto-mode idle --settings /home/nvidia/config/stereo.yaml --vocab /home/nvidia/ORBvoc.txt --w 640 --h 480 --fps 60 --slam-fps 20 --uvc-device-index 0 --uvc-eye-width 640 --uvc-eye-height 480 --uvc-swap-eyes --feature-frontend superpoint_lightglue --superpoint-device cuda --superpoint-repo /home/nvidia/LightGlue --superpoint-top-k 1024 --superpoint-max-points 512 --superpoint-input-max-width 640 --superpoint-input-max-height 409 --udp --udp-ip 127.0.0.1 --udp-port 5000
+ExecStart=/home/nvidia/smart_drone --auto-mode idle --settings /home/nvidia/config/stereo.yaml --w 640 --h 480 --fps 60 --slam-fps 20 --uvc-device-index 0 --uvc-eye-width 640 --uvc-eye-height 480 --uvc-swap-eyes --slam-backend klt --feature-frontend lk_gftt_per_frame --dpvo-repo /home/nvidia/DPVO --udp --udp-ip 127.0.0.1 --udp-port 5000
 Restart=always
 RestartSec=2
 

@@ -1,6 +1,8 @@
 package com.example.smartdrone;
 
 import android.app.Activity;
+import android.app.KeyguardManager;
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -9,6 +11,7 @@ import android.graphics.Paint;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
@@ -72,6 +75,11 @@ public class MainActivity extends Activity {
     private static final int FEATURE_FRONTEND_LK = 3;
     private static final int FEATURE_FRONTEND_LK_GFTT_PER_FRAME = 4;
     private static final int FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE = 5;
+    private static final int FEATURE_FRONTEND_XFEAT_LIGHTGLUE = 6;
+    private static final int SLAM_BACKEND_ORBSLAM3 = 0;
+    private static final int SLAM_BACKEND_DPVO_TENSORRT = 1;
+    private static final int SLAM_BACKEND_KLT = 2;
+    private static final int TRACKING_OPTION_DPVO_TENSORRT = 1001;
     private static final int LK_PER_FRAME_ACCEL_CPU = 0;
     private static final int LK_PER_FRAME_ACCEL_VPI_CUDA = 1;
     private static final int ORB_ACCEL_CPU = 0;
@@ -107,6 +115,8 @@ public class MainActivity extends Activity {
     private static final int EXPOSURE_MIN_US = 100;
     private static final int EXPOSURE_MAX_US = 30000;
     private static final int EXPOSURE_STEP_US = 100;
+    private static final int DPVO_EXPOSURE_US = 30000;
+    private static final int DPVO_GAIN = 32;
     private static final int GAIN_MIN = 0;
     private static final int GAIN_MAX = 255;
     private static final int PAIR_MS_MIN = 1;
@@ -280,7 +290,8 @@ public class MainActivity extends Activity {
     private int m_px4MainMode = 0;
     private int m_px4SubMode = 0;
     private int m_sensorMode = SENSOR_STEREO;
-    private int m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
+    private int m_cfgSlamBackend = SLAM_BACKEND_KLT;
+    private int m_cfgFeatureFrontend = FEATURE_FRONTEND_LK_GFTT_PER_FRAME;
     private int m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_VPI_CUDA;
     private int m_cfgOrbAcceleration = ORB_ACCEL_CPU;
     private int m_cfgExposureUs = 3000;
@@ -332,10 +343,14 @@ public class MainActivity extends Activity {
     private boolean m_supportsMono = true;
     private boolean m_supportsMonoImu = true;
     private boolean m_supportsSuperPointLightGlue = true;
+    private boolean m_supportsXFeatLightGlue = false;
     private boolean m_supportsLK = true;
+    private boolean m_supportsOrbSlam3 = false;
+    private boolean m_supportsDpvoTensorRt = true;
     private boolean m_isPackedStereoUvc = false;
     private boolean m_pairWindowRequired = true;
     private boolean m_cfgUvcPackedStereo = false;
+    private PowerManager.WakeLock m_screenWakeLock;
     private String m_lastCapabilitiesText = "";
     private String m_lastConfigText = "";
     private int[] m_availableSensorModes = new int[] {SENSOR_STEREO, SENSOR_STEREO_IMU, SENSOR_MONO, SENSOR_MONO_IMU};
@@ -402,6 +417,34 @@ public class MainActivity extends Activity {
         String vehicleIp = "";
         int cmdPort = DEFAULT_CMD_PORT;
         int videoPort = DEFAULT_PHONE_VIDEO_PORT;
+    }
+
+    private void applyRuntimeWindowFlags()
+    {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
+                             WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
+                             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+                             WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+            setTurnScreenOn(true);
+            setShowWhenLocked(true);
+            KeyguardManager keyguardManager = (KeyguardManager)getSystemService(Context.KEYGUARD_SERVICE);
+            if (keyguardManager != null) {
+                keyguardManager.requestDismissKeyguard(this, null);
+            }
+        }
+        if (m_screenWakeLock == null) {
+            PowerManager powerManager = (PowerManager)getSystemService(Context.POWER_SERVICE);
+            if (powerManager != null) {
+                m_screenWakeLock = powerManager.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK |
+                                                            PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                                                            "SmartDrone:Screen");
+                m_screenWakeLock.setReferenceCounted(false);
+            }
+        }
+        if (m_screenWakeLock != null && !m_screenWakeLock.isHeld()) {
+            m_screenWakeLock.acquire(10 * 60 * 1000L);
+        }
     }
 
     private final Runnable m_joystickLoop = new Runnable() {
@@ -581,6 +624,21 @@ public class MainActivity extends Activity {
     private static int quantizePairMs(int pairMs) { return clampInt(pairMs, PAIR_MS_MIN, PAIR_MS_MAX); }
 
     private static int quantizeSlamFps(int slamFps) { return clampInt(slamFps, SLAM_FPS_MIN, SLAM_FPS_MAX); }
+
+    private static int exposureForTrackingMode(int trackingOption, int currentExposureUs)
+    {
+        return trackingOption == TRACKING_OPTION_DPVO_TENSORRT ? DPVO_EXPOSURE_US : currentExposureUs;
+    }
+
+    private static int gainForTrackingMode(int trackingOption, int currentGain)
+    {
+        return trackingOption == TRACKING_OPTION_DPVO_TENSORRT ? Math.max(currentGain, DPVO_GAIN) : currentGain;
+    }
+
+    private static boolean autoExposureForTrackingMode(int trackingOption, boolean currentAutoExposure)
+    {
+        return trackingOption == TRACKING_OPTION_DPVO_TENSORRT || currentAutoExposure;
+    }
 
     private static boolean containsBehaviorNote(String notes, String keyPrefix)
     {
@@ -1367,18 +1425,36 @@ public class MainActivity extends Activity {
                                   int superpointTopK, int superpointMaxPoints, int superpointInputMaxWidth,
                                   int superpointInputMaxHeight, int lkPerFrameAcceleration, int orbAcceleration)
     {
+        return sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, m_cfgSlamBackend,
+                                 featureFrontend, sendImage, sendFeature, sendMap, autoExposure, useCustomTbc,
+                                 tbcTx, tbcTy, tbcTz, tbcRollDeg, tbcPitchDeg, tbcYawDeg, orbNFeatures,
+                                 orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast, superpointTopK,
+                                 superpointMaxPoints, superpointInputMaxWidth, superpointInputMaxHeight,
+                                 lkPerFrameAcceleration, orbAcceleration);
+    }
+
+    private int sendRuntimeConfig(int exposureUs, float gain, int pairMs, int slamFps, int slamMode, int sensorMode,
+                                  int slamBackend, int featureFrontend, boolean sendImage, boolean sendFeature,
+                                  boolean sendMap, boolean autoExposure, boolean useCustomTbc, float tbcTx,
+                                  float tbcTy, float tbcTz, float tbcRollDeg, float tbcPitchDeg, float tbcYawDeg,
+                                  int orbNFeatures, float orbScaleFactor, int orbNLevels, int orbIniThFast,
+                                  int orbMinThFast, int superpointTopK, int superpointMaxPoints,
+                                  int superpointInputMaxWidth, int superpointInputMaxHeight,
+                                  int lkPerFrameAcceleration, int orbAcceleration)
+    {
         try {
             int seq = NativeUdp.sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
                                                   sendFeature, sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy,
                                                   tbcTz, tbcRollDeg, tbcPitchDeg, tbcYawDeg, orbNFeatures,
                                                   orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast,
                                                   featureFrontend, superpointTopK, superpointMaxPoints, superpointInputMaxWidth,
-                                                  superpointInputMaxHeight, lkPerFrameAcceleration, orbAcceleration);
+                                                  superpointInputMaxHeight, lkPerFrameAcceleration, orbAcceleration,
+                                                  slamBackend);
             m_tvStatus.setText(String.format(
                 Locale.US,
-                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s frontend=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d orbAccel=%s sp=%d/%d/%d/%d lkAccel=%s",
+                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s tracking=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d orbAccel=%s sp=%d/%d/%d/%d lkAccel=%s",
                 seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
-                runtimeFeatureFrontendToText(featureFrontend, lkPerFrameAcceleration, orbAcceleration),
+                runtimeTrackingModeToText(slamBackend, featureFrontend, lkPerFrameAcceleration, orbAcceleration),
                 sendImage ? "on" : "off", sendFeature ? "on" : "off",
                 sendMap ? "on" : "off", autoExposure ? "on" : "off",
                 useCustomTbc
@@ -1398,7 +1474,7 @@ public class MainActivity extends Activity {
     private int sendRuntimeConfig()
     {
         return sendRuntimeConfig(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                 m_sensorMode, m_cfgFeatureFrontend, m_sendImage, m_sendFeature, m_sendMap,
+                                 m_sensorMode, m_cfgSlamBackend, m_cfgFeatureFrontend, m_sendImage, m_sendFeature, m_sendMap,
                                  m_cfgAutoExposure,
                                  m_cfgUseCustomTbc, m_cfgTbcTx, m_cfgTbcTy, m_cfgTbcTz, m_cfgTbcRollDeg,
                                  m_cfgTbcPitchDeg, m_cfgTbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor,
@@ -1429,12 +1505,12 @@ public class MainActivity extends Activity {
         if (isPending(pendingKey)) {
             return;
         }
-        int seq = sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, featureFrontend, sendImage, sendFeature,
-                                    sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy, tbcTz, tbcRollDeg, tbcPitchDeg,
-                                    tbcYawDeg, m_cfgOrbNFeatures, m_cfgOrbScaleFactor, m_cfgOrbNLevels,
-                                    m_cfgOrbIniThFast, m_cfgOrbMinThFast, m_cfgSuperPointTopK, m_cfgSuperPointMaxPoints,
-                                    m_cfgSuperPointInputMaxWidth, m_cfgSuperPointInputMaxHeight, m_cfgLkPerFrameAcceleration,
-                                    m_cfgOrbAcceleration);
+        int seq = sendRuntimeConfig(exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, m_cfgSlamBackend,
+                                    featureFrontend, sendImage, sendFeature, sendMap, autoExposure, useCustomTbc,
+                                    tbcTx, tbcTy, tbcTz, tbcRollDeg, tbcPitchDeg, tbcYawDeg, m_cfgOrbNFeatures,
+                                    m_cfgOrbScaleFactor, m_cfgOrbNLevels, m_cfgOrbIniThFast, m_cfgOrbMinThFast,
+                                    m_cfgSuperPointTopK, m_cfgSuperPointMaxPoints, m_cfgSuperPointInputMaxWidth,
+                                    m_cfgSuperPointInputMaxHeight, m_cfgLkPerFrameAcceleration, m_cfgOrbAcceleration);
         if (seq < 0) {
             return;
         }
@@ -1610,7 +1686,7 @@ public class MainActivity extends Activity {
             m_spinnerSensorMode.setAlpha(enabled ? 1.0f : 0.35f);
         }
         if (m_spinnerFeatureFrontend != null) {
-            boolean enabled = !runtimeActive && !sensorPending && getSupportedFeatureFrontends().length > 1;
+            boolean enabled = !runtimeActive && !sensorPending && getSupportedTrackingOptions().length > 1;
             m_spinnerFeatureFrontend.setEnabled(enabled);
             m_spinnerFeatureFrontend.setAlpha(enabled ? 1.0f : 0.35f);
         }
@@ -1637,19 +1713,30 @@ public class MainActivity extends Activity {
         if (m_spinnerFeatureFrontend == null) {
             return;
         }
-        final int[] supportedFrontends = getSupportedFeatureFrontends();
-        if (m_spinnerFeatureFrontend.getAdapter() == null || m_spinnerFeatureFrontend.getCount() != supportedFrontends.length) {
-            String[] labels = new String[supportedFrontends.length];
-            for (int i = 0; i < supportedFrontends.length; ++i) {
-                labels[i] = featureFrontendToText(supportedFrontends[i]);
+        final int[] supportedOptions = getSupportedTrackingOptions();
+        String[] labels = new String[supportedOptions.length];
+        for (int i = 0; i < supportedOptions.length; ++i) {
+            labels[i] = trackingOptionToText(supportedOptions[i]);
+        }
+        boolean rebuildAdapter =
+            m_spinnerFeatureFrontend.getAdapter() == null || m_spinnerFeatureFrontend.getCount() != labels.length;
+        if (!rebuildAdapter) {
+            for (int i = 0; i < labels.length; ++i) {
+                Object item = m_spinnerFeatureFrontend.getItemAtPosition(i);
+                if (item == null || !labels[i].contentEquals(item.toString())) {
+                    rebuildAdapter = true;
+                    break;
+                }
             }
+        }
+        if (rebuildAdapter) {
             ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
             adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             m_spinnerFeatureFrontend.setAdapter(adapter);
         }
         int targetIndex = 0;
-        for (int i = 0; i < supportedFrontends.length; ++i) {
-            if (supportedFrontends[i] == currentFeatureFrontendOption()) {
+        for (int i = 0; i < supportedOptions.length; ++i) {
+            if (supportedOptions[i] == currentTrackingOption()) {
                 targetIndex = i;
                 break;
             }
@@ -1659,23 +1746,43 @@ public class MainActivity extends Activity {
         }
     }
 
-    private int[] getSupportedFeatureFrontends()
+    private int[] getSupportedTrackingOptions()
     {
-        if (m_supportsLK && m_supportsSuperPointLightGlue) {
-            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK_GFTT_PER_FRAME,
-                              FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE};
+        int count = (m_supportsLK ? 1 : 0) + (m_supportsOrbSlam3 ? 1 : 0) +
+                    (m_supportsOrbSlam3 && m_supportsSuperPointLightGlue ? 1 : 0) +
+                    (m_supportsOrbSlam3 && m_supportsXFeatLightGlue ? 1 : 0) +
+                    (m_supportsDpvoTensorRt ? 1 : 0);
+        if (count <= 0) {
+            count = 1;
         }
+        int[] out = new int[count];
+        int pos = 0;
         if (m_supportsLK) {
-            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_LK_GFTT_PER_FRAME};
+            out[pos++] = FEATURE_FRONTEND_LK_GFTT_PER_FRAME;
         }
-        if (m_supportsSuperPointLightGlue) {
-            return new int[] {FEATURE_FRONTEND_ORB, FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE};
+        if (m_supportsOrbSlam3) {
+            out[pos++] = FEATURE_FRONTEND_ORB;
         }
-        return new int[] {FEATURE_FRONTEND_ORB};
+        if (m_supportsOrbSlam3 && m_supportsSuperPointLightGlue) {
+            out[pos++] = FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE;
+        }
+        if (m_supportsOrbSlam3 && m_supportsXFeatLightGlue) {
+            out[pos++] = FEATURE_FRONTEND_XFEAT_LIGHTGLUE;
+        }
+        if (m_supportsDpvoTensorRt) {
+            out[pos++] = TRACKING_OPTION_DPVO_TENSORRT;
+        }
+        if (pos == 0) {
+            out[pos++] = FEATURE_FRONTEND_LK_GFTT_PER_FRAME;
+        }
+        return out;
     }
 
-    private int currentFeatureFrontendOption()
+    private int currentTrackingOption()
     {
+        if (m_cfgSlamBackend == SLAM_BACKEND_DPVO_TENSORRT) {
+            return TRACKING_OPTION_DPVO_TENSORRT;
+        }
         return m_cfgFeatureFrontend;
     }
 
@@ -2031,6 +2138,11 @@ public class MainActivity extends Activity {
             "sp_lightglue".equals(normalized) || "sp-lg".equals(normalized) || "splg".equals(normalized)) {
             return FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE;
         }
+        if ("xfeat-lightglue".equals(normalized) || "xfeat_lightglue".equals(normalized) ||
+            "xfeat+lightglue".equals(normalized) || "xfeat-lg".equals(normalized) ||
+            "xfeat_lg".equals(normalized) || "xfeatlg".equals(normalized)) {
+            return FEATURE_FRONTEND_XFEAT_LIGHTGLUE;
+        }
         if ("lk-gftt-per-frame".equals(normalized) || "lk_gftt_per_frame".equals(normalized) ||
             "lk-gftt-every-frame".equals(normalized) || "lk_gftt_every_frame".equals(normalized) ||
             "per-frame-gftt".equals(normalized) || "per_frame_gftt".equals(normalized)) {
@@ -2042,6 +2154,30 @@ public class MainActivity extends Activity {
         }
         if ("orb".equals(normalized)) {
             return FEATURE_FRONTEND_ORB;
+        }
+        return defaultValue;
+    }
+
+    private static int parseSlamBackendText(String value, int defaultValue)
+    {
+        if (value == null) {
+            return defaultValue;
+        }
+        String normalized = value.trim().toLowerCase(Locale.US);
+        if ("dpvo".equals(normalized) || "dpv".equals(normalized) || "dpvo_tensorrt".equals(normalized) ||
+            "dpvo-tensorrt".equals(normalized) || "dpvo_trt".equals(normalized) ||
+            "dpvo-trt".equals(normalized)) {
+            return SLAM_BACKEND_DPVO_TENSORRT;
+        }
+        if ("klt".equals(normalized) || "lk".equals(normalized) || "stereo-klt".equals(normalized) ||
+            "stereo_klt".equals(normalized) || "lk-gftt".equals(normalized) ||
+            "lk_gftt".equals(normalized) || "lk-gftt-per-frame".equals(normalized) ||
+            "lk_gftt_per_frame".equals(normalized)) {
+            return SLAM_BACKEND_KLT;
+        }
+        if ("orbslam3".equals(normalized) || "orb_slam3".equals(normalized) ||
+            "orb-slam3".equals(normalized) || "orb".equals(normalized)) {
+            return SLAM_BACKEND_ORBSLAM3;
         }
         return defaultValue;
     }
@@ -2216,18 +2352,34 @@ public class MainActivity extends Activity {
         m_supportsSuperPointLightGlue = spLgCapability == null
                                             ? true
                                             : !"disabled_at_build_time".equalsIgnoreCase(spLgCapability);
+        final String xfeatLgCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.xfeat_lightglue=");
+        m_supportsXFeatLightGlue = xfeatLgCapability != null &&
+                                   !"disabled_at_build_time".equalsIgnoreCase(xfeatLgCapability) &&
+                                   !"external_feature_lightglue_slot_pending_native_client".equalsIgnoreCase(xfeatLgCapability);
         final String lkCapability = behaviorNoteValue(behaviorNotes, "slam.feature_frontend.lk=");
         m_supportsLK = lkCapability != null && !"disabled_at_build_time".equalsIgnoreCase(lkCapability);
+        final String orbCapability = behaviorNoteValue(behaviorNotes, "slam.backend.orbslam3=");
+        m_supportsOrbSlam3 = containsTokenList(values.get("slam_engines"), "orbslam3") ||
+                              (orbCapability != null &&
+                               !"disabled_at_build_time".equalsIgnoreCase(orbCapability));
+        final String dpvoCapability = behaviorNoteValue(behaviorNotes, "slam.backend.dpvo_tensorrt=");
+        m_supportsDpvoTensorRt = containsTokenList(values.get("slam_engines"), "dpvo_tensorrt") ||
+                                  containsTokenList(values.get("slam_engines"), "dpvo") ||
+                                  (dpvoCapability != null &&
+                                   !"disabled_at_build_time".equalsIgnoreCase(dpvoCapability));
         m_isPackedStereoUvc = containsTokenList(cameraProviders, "uvc_stereo_opencv") &&
                               containsBehaviorNote(behaviorNotes, "camera.uvc_pairing=not_required_single_capture_provides_both_eyes");
         m_pairWindowRequired = !m_isPackedStereoUvc;
         updateRuntimeButtons();
         m_tvStatus.setText(String.format(Locale.US,
-                                         "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s uvc=%s lk=%s sp_lg=%s",
+                                         "Capabilities synced calib=%s stereo_imu=%s mono=%s mono_imu=%s uvc=%s klt=%s orb=%s sp_lg=%s xfeat_lg=%s dpvo=%s",
                                          m_supportsCalib ? "yes" : "no", m_supportsStereoImu ? "yes" : "no",
                                          m_supportsMono ? "yes" : "no", m_supportsMonoImu ? "yes" : "no",
                                          m_isPackedStereoUvc ? "packed" : "no", m_supportsLK ? "yes" : "no",
-                                         m_supportsSuperPointLightGlue ? "yes" : "no"));
+                                         m_supportsOrbSlam3 ? "yes" : "no",
+                                         m_supportsSuperPointLightGlue ? "yes" : "no",
+                                         m_supportsXFeatLightGlue ? "yes" : "no",
+                                         m_supportsDpvoTensorRt ? "yes" : "no"));
         return true;
     }
 
@@ -2253,17 +2405,45 @@ public class MainActivity extends Activity {
         }
         m_cfgSlamFps = quantizeSlamFps(parsedSlamFps);
         m_cfgSlamMode = parseSlamModeText(values.get("slam.operation_mode"), m_cfgSlamMode);
+        m_cfgSlamBackend = parseSlamBackendText(values.get("slam.backend"), m_cfgSlamBackend);
+        if (!m_supportsDpvoTensorRt && m_cfgSlamBackend == SLAM_BACKEND_DPVO_TENSORRT) {
+            m_cfgSlamBackend = SLAM_BACKEND_KLT;
+        }
+        if (!m_supportsOrbSlam3 && m_cfgSlamBackend == SLAM_BACKEND_ORBSLAM3) {
+            m_cfgSlamBackend = SLAM_BACKEND_KLT;
+        }
         m_cfgFeatureFrontend = parseFeatureFrontendText(values.get("slam.feature_frontend"), m_cfgFeatureFrontend);
-        if (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK) {
+        if (m_cfgSlamBackend == SLAM_BACKEND_DPVO_TENSORRT) {
+            m_cfgFeatureFrontend = FEATURE_FRONTEND_LK_GFTT_PER_FRAME;
+        }
+        if (m_cfgSlamBackend == SLAM_BACKEND_KLT) {
+            if (m_cfgFeatureFrontend != FEATURE_FRONTEND_LK &&
+                m_cfgFeatureFrontend != FEATURE_FRONTEND_LK_GFTT_PER_FRAME) {
+                m_cfgFeatureFrontend = FEATURE_FRONTEND_LK_GFTT_PER_FRAME;
+            }
+        }
+        if (m_cfgSlamBackend == SLAM_BACKEND_ORBSLAM3 &&
+            !m_supportsOrbSlam3) {
+            m_cfgSlamBackend = SLAM_BACKEND_KLT;
+            m_cfgFeatureFrontend = FEATURE_FRONTEND_LK_GFTT_PER_FRAME;
+        }
+        if (m_cfgSlamBackend == SLAM_BACKEND_ORBSLAM3 &&
+            !m_supportsSuperPointLightGlue && m_cfgFeatureFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE) {
             m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
         }
-        if (!m_supportsSuperPointLightGlue && m_cfgFeatureFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE) {
+        if (m_cfgSlamBackend == SLAM_BACKEND_ORBSLAM3 &&
+            !m_supportsXFeatLightGlue && m_cfgFeatureFrontend == FEATURE_FRONTEND_XFEAT_LIGHTGLUE) {
             m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
         }
         if (!m_supportsLK &&
             (m_cfgFeatureFrontend == FEATURE_FRONTEND_LK ||
              m_cfgFeatureFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME)) {
-            m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
+            if (m_supportsOrbSlam3) {
+                m_cfgSlamBackend = SLAM_BACKEND_ORBSLAM3;
+                m_cfgFeatureFrontend = FEATURE_FRONTEND_ORB;
+            } else {
+                m_cfgFeatureFrontend = FEATURE_FRONTEND_LK_GFTT_PER_FRAME;
+            }
         }
         m_cfgLkPerFrameAcceleration =
             parseLkPerFrameAccelerationText(values.get("slam.lk_per_frame_accel"), m_cfgLkPerFrameAcceleration);
@@ -2271,7 +2451,7 @@ public class MainActivity extends Activity {
             m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_CPU;
         }
         m_cfgOrbAcceleration = parseOrbAccelerationText(values.get("slam.orb_accel"), m_cfgOrbAcceleration);
-        if (m_cfgFeatureFrontend != FEATURE_FRONTEND_ORB) {
+        if (m_cfgSlamBackend != SLAM_BACKEND_ORBSLAM3 || m_cfgFeatureFrontend != FEATURE_FRONTEND_ORB) {
             m_cfgOrbAcceleration = ORB_ACCEL_CPU;
         }
         m_cfgUseCustomTbc = parseBooleanText(values.get("slam.tbc_override_enabled"), m_cfgUseCustomTbc);
@@ -2327,9 +2507,12 @@ public class MainActivity extends Activity {
         updateStreamToggleButtons();
         updateFeatureToggleButton();
         m_tvStatus.setText(String.format(Locale.US,
-                                         "Config synced mode=%s sensor=%s frontend=%s slam_mode=%s slam=%dfps ae=%s tbc=%s orb=%d/%.2f/%d sp=%d/%d/%d/%d",
+                                         "Config synced mode=%s sensor=%s backend=%s tracking=%s slam_mode=%s slam=%dfps ae=%s tbc=%s orb=%d/%.2f/%d sp=%d/%d/%d/%d",
                                          runtimeModeToText(m_runtimeMode), sensorModeToText(m_sensorMode),
-                                         featureFrontendToText(m_cfgFeatureFrontend),
+                                         slamBackendToText(m_cfgSlamBackend),
+                                         runtimeTrackingModeToText(m_cfgSlamBackend, m_cfgFeatureFrontend,
+                                                                   m_cfgLkPerFrameAcceleration,
+                                                                   m_cfgOrbAcceleration),
                                          slamModeToText(m_cfgSlamMode), m_cfgSlamFps, m_cfgAutoExposure ? "on" : "off",
                                          m_cfgUseCustomTbc ? "override" : "yaml", m_cfgOrbNFeatures,
                                          m_cfgOrbScaleFactor, m_cfgOrbNLevels, m_cfgSuperPointTopK, m_cfgSuperPointMaxPoints,
@@ -2389,10 +2572,31 @@ public class MainActivity extends Activity {
             return "LK GFTT";
         case FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE:
             return "SuperPoint + LightGlue";
+        case FEATURE_FRONTEND_XFEAT_LIGHTGLUE:
+            return "XFeat + LightGlue";
         case FEATURE_FRONTEND_ORB:
         default:
             return "ORB";
         }
+    }
+
+    private String slamBackendToText(int slamBackend)
+    {
+        if (slamBackend == SLAM_BACKEND_DPVO_TENSORRT) {
+            return "DPVO TensorRT";
+        }
+        if (slamBackend == SLAM_BACKEND_ORBSLAM3) {
+            return "ORB-SLAM3";
+        }
+        return "KLT";
+    }
+
+    private String trackingOptionToText(int option)
+    {
+        if (option == TRACKING_OPTION_DPVO_TENSORRT) {
+            return "DPV (DPVO)";
+        }
+        return featureFrontendToText(option);
     }
 
     private String runtimeFeatureFrontendToText(int featureFrontend, int lkPerFrameAcceleration, int orbAcceleration)
@@ -2405,6 +2609,15 @@ public class MainActivity extends Activity {
             return "KLT Tracking";
         }
         return featureFrontendToText(featureFrontend);
+    }
+
+    private String runtimeTrackingModeToText(int slamBackend, int featureFrontend, int lkPerFrameAcceleration,
+                                             int orbAcceleration)
+    {
+        if (slamBackend == SLAM_BACKEND_DPVO_TENSORRT) {
+            return "DPVO TensorRT";
+        }
+        return runtimeFeatureFrontendToText(featureFrontend, lkPerFrameAcceleration, orbAcceleration);
     }
 
     private String lkPerFrameAccelerationToText(int acceleration)
@@ -2974,6 +3187,7 @@ public class MainActivity extends Activity {
     {
         super.onCreate(savedInstanceState);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        applyRuntimeWindowFlags();
         setContentView(R.layout.activity_main);
         View decorView = getWindow().getDecorView();
         decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
@@ -3749,13 +3963,23 @@ public class MainActivity extends Activity {
                     if (m_updatingToggleUi || position < 0) {
                         return;
                     }
-                    final int[] supportedFrontends = getSupportedFeatureFrontends();
+                    final int[] supportedFrontends = getSupportedTrackingOptions();
                     final int nextOption =
-                        position < supportedFrontends.length ? supportedFrontends[position] : FEATURE_FRONTEND_ORB;
-                    final int nextFrontend = nextOption;
+                        position < supportedFrontends.length ? supportedFrontends[position]
+                                                             : FEATURE_FRONTEND_LK_GFTT_PER_FRAME;
+                    final boolean nextDpvo = nextOption == TRACKING_OPTION_DPVO_TENSORRT;
+                    final boolean nextOrbFamily =
+                        nextOption == FEATURE_FRONTEND_ORB ||
+                        nextOption == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE ||
+                        nextOption == FEATURE_FRONTEND_XFEAT_LIGHTGLUE;
+                    final int nextSlamBackend =
+                        nextDpvo ? SLAM_BACKEND_DPVO_TENSORRT : (nextOrbFamily ? SLAM_BACKEND_ORBSLAM3
+                                                                               : SLAM_BACKEND_KLT);
+                    final int nextFrontend = nextDpvo ? FEATURE_FRONTEND_LK_GFTT_PER_FRAME : nextOption;
                     final int nextLkPerFrameAcceleration =
-                        nextFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME ? LK_PER_FRAME_ACCEL_VPI_CUDA
-                                                                           : LK_PER_FRAME_ACCEL_CPU;
+                        nextDpvo ? LK_PER_FRAME_ACCEL_CPU
+                                 : (nextFrontend == FEATURE_FRONTEND_LK_GFTT_PER_FRAME ? LK_PER_FRAME_ACCEL_VPI_CUDA
+                                                                                       : LK_PER_FRAME_ACCEL_CPU);
                     final int nextOrbAcceleration = ORB_ACCEL_CPU;
                     final int nextSuperPointInputMaxWidth =
                         nextFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE ? SUPERPOINT_LIGHTGLUE_INPUT_MAX_WIDTH
@@ -3763,35 +3987,56 @@ public class MainActivity extends Activity {
                     final int nextSuperPointInputMaxHeight =
                         nextFrontend == FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE ? SUPERPOINT_LIGHTGLUE_INPUT_MAX_HEIGHT
                                                                                : m_cfgSuperPointInputMaxHeight;
-                    if (nextFrontend == m_cfgFeatureFrontend && nextLkPerFrameAcceleration == m_cfgLkPerFrameAcceleration &&
+                    if (nextSlamBackend == m_cfgSlamBackend &&
+                        nextFrontend == m_cfgFeatureFrontend && nextLkPerFrameAcceleration == m_cfgLkPerFrameAcceleration &&
                         nextOrbAcceleration == m_cfgOrbAcceleration &&
                         nextSuperPointInputMaxWidth == m_cfgSuperPointInputMaxWidth &&
                         nextSuperPointInputMaxHeight == m_cfgSuperPointInputMaxHeight) {
                         return;
                     }
+                    final int previousSlamBackend = m_cfgSlamBackend;
                     final int previousLkPerFrameAcceleration = m_cfgLkPerFrameAcceleration;
                     final int previousOrbAcceleration = m_cfgOrbAcceleration;
                     final int previousSuperPointInputMaxWidth = m_cfgSuperPointInputMaxWidth;
                     final int previousSuperPointInputMaxHeight = m_cfgSuperPointInputMaxHeight;
+                    final int previousExposureUs = m_cfgExposureUs;
+                    final int previousGain = m_cfgGain;
+                    final boolean previousAutoExposure = m_cfgAutoExposure;
+                    final int nextExposureUs = exposureForTrackingMode(nextOption, m_cfgExposureUs);
+                    final int nextGain = gainForTrackingMode(nextOption, m_cfgGain);
+                    final boolean nextAutoExposure = autoExposureForTrackingMode(nextOption, m_cfgAutoExposure);
+                    m_cfgSlamBackend = nextSlamBackend;
                     m_cfgLkPerFrameAcceleration = nextLkPerFrameAcceleration;
                     m_cfgOrbAcceleration = nextOrbAcceleration;
                     m_cfgSuperPointInputMaxWidth = nextSuperPointInputMaxWidth;
                     m_cfgSuperPointInputMaxHeight = nextSuperPointInputMaxHeight;
-                    sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs, m_cfgSlamFps, m_cfgSlamMode,
-                                              m_sensorMode, nextFrontend, m_sendImage, m_sendFeature, m_sendMap, m_cfgAutoExposure,
-                                              effectiveConfigLabel("Feature frontend", true), PENDING_CONFIG, () -> {
+                    m_cfgExposureUs = nextExposureUs;
+                    m_cfgGain = nextGain;
+                    m_cfgAutoExposure = nextAutoExposure;
+                    sendRuntimeConfigAwaitAck(nextExposureUs, (float)nextGain, m_cfgPairMs, m_cfgSlamFps,
+                                              m_cfgSlamMode, m_sensorMode, nextFrontend, m_sendImage, m_sendFeature,
+                                              m_sendMap, nextAutoExposure,
+                                              effectiveConfigLabel("Tracking mode", true), PENDING_CONFIG, () -> {
+                                                  m_cfgSlamBackend = nextSlamBackend;
                                                   m_cfgFeatureFrontend = nextFrontend;
                                                   m_cfgLkPerFrameAcceleration = nextLkPerFrameAcceleration;
                                                   m_cfgOrbAcceleration = nextOrbAcceleration;
                                                   m_cfgSuperPointInputMaxWidth = nextSuperPointInputMaxWidth;
                                                   m_cfgSuperPointInputMaxHeight = nextSuperPointInputMaxHeight;
+                                                  m_cfgExposureUs = nextExposureUs;
+                                                  m_cfgGain = nextGain;
+                                                  m_cfgAutoExposure = nextAutoExposure;
                                                   updateRuntimeButtons();
                                               });
                     if (!isPending(PENDING_CONFIG)) {
+                        m_cfgSlamBackend = previousSlamBackend;
                         m_cfgLkPerFrameAcceleration = previousLkPerFrameAcceleration;
                         m_cfgOrbAcceleration = previousOrbAcceleration;
                         m_cfgSuperPointInputMaxWidth = previousSuperPointInputMaxWidth;
                         m_cfgSuperPointInputMaxHeight = previousSuperPointInputMaxHeight;
+                        m_cfgExposureUs = previousExposureUs;
+                        m_cfgGain = previousGain;
+                        m_cfgAutoExposure = previousAutoExposure;
                     }
                 }
 
@@ -3863,6 +4108,7 @@ public class MainActivity extends Activity {
     @Override protected void onResume()
     {
         super.onResume();
+        applyRuntimeWindowFlags();
         View decorView = getWindow().getDecorView();
         decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
                                         View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
@@ -3874,6 +4120,9 @@ public class MainActivity extends Activity {
         stopRxLoop();
         stopJoystickLoop();
         stopHeartbeatLoop();
+        if (m_screenWakeLock != null && m_screenWakeLock.isHeld()) {
+            m_screenWakeLock.release();
+        }
         super.onDestroy();
         try {
             NativeUdp.close();

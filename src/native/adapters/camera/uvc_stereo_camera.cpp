@@ -28,6 +28,8 @@ namespace {
 
 constexpr size_t kDefaultBufferCount = 4;
 constexpr int kCapturePollTimeoutMs = 250;
+constexpr int32_t kFallbackExposureAbsoluteMax = 10000;
+constexpr int32_t kAutoExposureGainFloor = 32;
 
 uint32_t YuyvFourcc() { return v4l2_fourcc('Y', 'U', 'Y', 'V'); }
 
@@ -90,7 +92,13 @@ bool QueryUvcControl(int fd, uint32_t id, UvcControlInfo &out)
     out.step = std::max<int32_t>(1, query.step);
     out.def = query.default_value;
     if (out.max < out.min) {
-        out.max = out.min;
+        if (id == V4L2_CID_EXPOSURE_ABSOLUTE) {
+            out.max = std::max<int32_t>(out.min, kFallbackExposureAbsoluteMax);
+            std::cerr << "[uvc] warning: exposure_absolute reports invalid range min=" << query.minimum
+                      << " max=" << query.maximum << "; using fallback max=" << out.max << "\n";
+        } else {
+            out.max = out.min;
+        }
     }
     return true;
 }
@@ -134,7 +142,8 @@ void ConfigureUvcControls(int fd, int deviceIndex, bool aeDisable, int exposureU
 
     if (haveGain) {
         const int requestedGain = std::max(0, static_cast<int>(std::lround(gain)));
-        const int32_t clampedGain = std::clamp<int32_t>(requestedGain, gainInfo.min, gainInfo.max);
+        const int effectiveGain = aeDisable ? requestedGain : std::max(requestedGain, kAutoExposureGainFloor);
+        const int32_t clampedGain = std::clamp<int32_t>(effectiveGain, gainInfo.min, gainInfo.max);
         SetUvcControl(fd, V4L2_CID_GAIN, clampedGain, "gain");
         std::cerr << "[uvc] control device=" << deviceIndex << " gain=" << clampedGain << "\n";
     }

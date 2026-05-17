@@ -6,7 +6,7 @@ DATA="${EUROC_MACHINE_HALL_ROOT:-/home/nvidia/euroc/machine_hall}"
 BIN="${EUROC_REPLAY_BIN:-$ROOT/bin/smart_drone_offline_replay}"
 SETTINGS="${EUROC_SETTINGS:-$ROOT/config/euroc/stereo_orb2500.yaml}"
 ORB_SETTINGS="${EUROC_ORB_SETTINGS:-$ROOT/config/euroc/stereo_orb_official.yaml}"
-VOCAB="${EUROC_VOCAB:-/home/nvidia/ORBvoc.txt}"
+VOCAB="${EUROC_VOCAB:-}"
 EVAL="${EUROC_EVAL_SCRIPT:-$ROOT/tests/euroc/evaluate_euroc_regression.py}"
 OUT="${EUROC_OUT:-$ROOT/results/mh_feature_modes_$(date +%Y%m%d_%H%M%S)}"
 SUPERPOINT_LIGHTGLUE_REPO="${SUPERPOINT_LIGHTGLUE_REPO:-/home/nvidia/LightGlue}"
@@ -64,13 +64,24 @@ TEGRASTATS_INTERVAL_MS="${TEGRASTATS_INTERVAL_MS:-1000}"
 export LD_LIBRARY_PATH="$BIN_DIR:/home/nvidia/opencv_cuda_orb/lib:/home/nvidia/vpi_root/opt/nvidia/vpi2/lib/aarch64-linux-gnu:/home/nvidia/vpi_root/opt/nvidia/cupva-2.3/lib/aarch64-linux-gnu:/home/nvidia:/home/nvidia/SmartDrone_cross:/home/nvidia/sd_replay_pkg_jetson/lib:/usr/local/cuda-11.4/targets/aarch64-linux/lib:/usr/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH:-}"
 
 SEQUENCES=( ${EUROC_SEQUENCES:-MH_01_easy MH_02_easy MH_03_medium MH_04_difficult MH_05_difficult} )
-MODES=( ${EUROC_MODES:-orb klt_tracking superpoint_lightglue} )
+MODES=( ${EUROC_MODES:-klt_tracking} )
 
 for seq in "${SEQUENCES[@]}"; do
   if [[ ! -d "$DATA/$seq/mav0" ]]; then
     echo "missing EuRoC sequence: $DATA/$seq/mav0" >&2
     exit 2
   fi
+done
+
+for mode in "${MODES[@]}"; do
+  case "$mode" in
+    orb|orb_vpi_remap|orb_cuda|superpoint_lightglue)
+      if [[ -z "$VOCAB" ]]; then
+        echo "mode $mode requires EUROC_VOCAB=/path/to/ORBvoc.txt and an ORB-enabled replay build" >&2
+        exit 2
+      fi
+      ;;
+  esac
 done
 
 mkdir -p "$OUT"
@@ -172,7 +183,6 @@ for mode in "${MODES[@]}"; do
       "$BIN"
       --dataset "$DATA/$seq/mav0"
       --settings "$SETTINGS"
-      --vocab "$VOCAB"
       --stereo-only
       --fps 20
       --slam-fps 20
@@ -196,6 +206,7 @@ for mode in "${MODES[@]}"; do
           --slam-fps 20 \
           --out "$seq_out/euroc_pose.csv" \
           --summary-json "$seq_out/euroc_summary.json" \
+          --slam-backend orbslam3 \
           --orb-accel cpu \
           --feature-frontend orb
         ;;
@@ -212,6 +223,7 @@ for mode in "${MODES[@]}"; do
           --slam-fps 20 \
           --out "$seq_out/euroc_pose.csv" \
           --summary-json "$seq_out/euroc_summary.json" \
+          --slam-backend orbslam3 \
           --orb-accel vpi-remap \
           --feature-frontend orb
         ;;
@@ -228,6 +240,7 @@ for mode in "${MODES[@]}"; do
           --slam-fps 20 \
           --out "$seq_out/euroc_pose.csv" \
           --summary-json "$seq_out/euroc_summary.json" \
+          --slam-backend orbslam3 \
           --orb-accel cuda \
           --feature-frontend orb
         ;;
@@ -296,6 +309,7 @@ for mode in "${MODES[@]}"; do
           --slam-fps 20 \
           --out "$seq_out/euroc_pose.csv" \
           --summary-json "$seq_out/euroc_summary.json" \
+          --slam-backend orbslam3 \
           --feature-frontend superpoint_lightglue \
           --superpoint-repo "$SUPERPOINT_LIGHTGLUE_REPO" \
           --superpoint-device "$FEATURE_DEVICE" \

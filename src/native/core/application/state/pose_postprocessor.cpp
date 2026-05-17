@@ -55,6 +55,35 @@ float TranslationDistance(const Px4MavlinkGateway::Pose &a, const Px4MavlinkGate
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+float QuaternionAngularDistanceRad(const Px4MavlinkGateway::Pose &a, const Px4MavlinkGateway::Pose &b)
+{
+    float dot = a.qw * b.qw + a.qx * b.qx + a.qy * b.qy + a.qz * b.qz;
+    dot = std::clamp(std::fabs(dot), 0.0f, 1.0f);
+    return 2.0f * std::acos(dot);
+}
+
+void BlendQuatToward(const Px4MavlinkGateway::Pose &from, const Px4MavlinkGateway::Pose &to, float scale,
+                     Px4MavlinkGateway::Pose &out)
+{
+    float tw = to.qw;
+    float tx = to.qx;
+    float ty = to.qy;
+    float tz = to.qz;
+    const float dot = from.qw * tw + from.qx * tx + from.qy * ty + from.qz * tz;
+    if (dot < 0.0f) {
+        tw = -tw;
+        tx = -tx;
+        ty = -ty;
+        tz = -tz;
+    }
+    const float a = std::clamp(scale, 0.0f, 1.0f);
+    out.qw = from.qw + (tw - from.qw) * a;
+    out.qx = from.qx + (tx - from.qx) * a;
+    out.qy = from.qy + (ty - from.qy) * a;
+    out.qz = from.qz + (tz - from.qz) * a;
+    Px4MavlinkGateway::NormalizeQuat(out.qw, out.qx, out.qy, out.qz);
+}
+
 } // namespace
 
 Sophus::SE3f PosePostprocessor::ContinuityMapper::MapPose(unsigned long mapId, bool trackingUsable,
@@ -223,17 +252,27 @@ Px4MavlinkGateway::Pose PosePostprocessor::OutputGuard::GuardPose(const Px4Mavli
 
     rawStepM = TranslationDistance(pose, lastPose);
     maxStepM = ComputeAllowedStep(frameNs);
-    if (std::isfinite(rawStepM) && rawStepM <= maxStepM) {
+    const float rawRotRad = QuaternionAngularDistanceRad(pose, lastPose);
+    const float maxRotRad = ComputeAllowedRotation(frameNs);
+    if (std::isfinite(rawStepM) && rawStepM <= maxStepM &&
+        std::isfinite(rawRotRad) && rawRotRad <= maxRotRad) {
         CommitPose(pose, frameNs);
         return pose;
     }
 
     Px4MavlinkGateway::Pose guarded = pose;
-    const float scale = maxStepM / std::max(rawStepM, 1.0e-6f);
-    guarded.x = lastPose.x + (pose.x - lastPose.x) * scale;
-    guarded.y = lastPose.y + (pose.y - lastPose.y) * scale;
-    guarded.z = lastPose.z + (pose.z - lastPose.z) * scale;
-    Px4MavlinkGateway::NormalizeQuat(guarded.qw, guarded.qx, guarded.qy, guarded.qz);
+    if (std::isfinite(rawStepM) && rawStepM > maxStepM) {
+        const float scale = maxStepM / std::max(rawStepM, 1.0e-6f);
+        guarded.x = lastPose.x + (pose.x - lastPose.x) * scale;
+        guarded.y = lastPose.y + (pose.y - lastPose.y) * scale;
+        guarded.z = lastPose.z + (pose.z - lastPose.z) * scale;
+    }
+    if (std::isfinite(rawRotRad) && rawRotRad > maxRotRad) {
+        const float scale = maxRotRad / std::max(rawRotRad, 1.0e-6f);
+        BlendQuatToward(lastPose, pose, scale, guarded);
+    } else {
+        Px4MavlinkGateway::NormalizeQuat(guarded.qw, guarded.qx, guarded.qy, guarded.qz);
+    }
 
     guardApplied = true;
     quality = PoseQuality::Weak;
@@ -242,6 +281,7 @@ Px4MavlinkGateway::Pose PosePostprocessor::OutputGuard::GuardPose(const Px4Mavli
         const bool timeToLog = frameNs <= 0 || lastLogFrameNs <= 0 || frameNs - lastLogFrameNs > 500000000LL;
         if (guardHitCount <= 10 || (guardHitCount % 20ULL) == 0ULL || timeToLog) {
             std::cerr << "[pose_guard] clamped online pose step raw_m=" << rawStepM << " max_m=" << maxStepM
+                      << " raw_rot_rad=" << rawRotRad << " max_rot_rad=" << maxRotRad
                       << " frame_ns=" << frameNs << " hits=" << guardHitCount << "\n";
             lastLogFrameNs = frameNs;
         }
@@ -266,6 +306,23 @@ float PosePostprocessor::OutputGuard::ComputeAllowedStep(int64_t frameNs) const
         return maxFrameStep;
     }
     return std::max(0.02f, std::min(maxFrameStep, maxSpeed * dt));
+}
+
+float PosePostprocessor::OutputGuard::ComputeAllowedRotation(int64_t frameNs) const
+{
+    const float maxFrameRot =
+        EnvFloatValueClamped("SMART_DRONE_ONLINE_POSE_GUARD_MAX_ROT_RAD", 0.12f, 0.01f, 1.5f);
+    const float maxRotSpeed =
+        EnvFloatValueClamped("SMART_DRONE_ONLINE_POSE_GUARD_MAX_ROT_RPS", 2.5f, 0.1f, 20.0f);
+    if (!haveLastPose || frameNs <= lastFrameNs) {
+        return maxFrameRot;
+    }
+
+    const float dt = static_cast<float>(frameNs - lastFrameNs) * 1.0e-9f;
+    if (!std::isfinite(dt) || dt < 0.005f || dt > 0.25f) {
+        return maxFrameRot;
+    }
+    return std::max(0.01f, std::min(maxFrameRot, maxRotSpeed * dt));
 }
 
 void PosePostprocessor::OutputGuard::CommitPose(const Px4MavlinkGateway::Pose &pose, int64_t frameNs)

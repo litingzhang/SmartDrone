@@ -5,7 +5,7 @@
 #include <mutex>
 #include <vector>
 
-#include "ImuTypes.h"
+#include "core/ports/imu_provider.h"
 
 struct ImuSample {
     int64_t tNs{};
@@ -21,8 +21,8 @@ struct ImuScale {
 class ImuBuffer {
   public:
     void Push(const ImuSample &sample);
-    std::vector<ORB_SLAM3::IMU::Point> PopBetweenNs(int64_t t0Ns, int64_t t1Ns, int64_t slackBeforeNs,
-                                                    int64_t slackAfterNs);
+    std::vector<smartdrone::core::ports::ImuReading> PopBetweenNs(int64_t t0Ns, int64_t t1Ns,
+                                                                  int64_t slackBeforeNs, int64_t slackAfterNs);
     size_t Size() const;
     bool PeekFirstLast(int64_t &tFirst, int64_t &tLast) const;
 

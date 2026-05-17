@@ -7,7 +7,6 @@
 #include <string>
 #include <thread>
 
-#include "System.h"
 #include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "common/tlv/mavlink_hooks.h"
 #include "core/application/state/live_pose_state.h"

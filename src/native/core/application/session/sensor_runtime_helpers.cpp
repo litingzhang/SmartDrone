@@ -6,8 +6,6 @@
 #include <iostream>
 #include <thread>
 
-#include "ImuTypes.h"
-#include "System.h"
 #include "adapters/imu/icm42688/icm42688_imu.h"
 #include "common/thread_launch.h"
 #include "common/time_utils.h"

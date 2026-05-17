@@ -95,7 +95,7 @@ These are present in the working tree on 2026-05-14 and still need Jetson valida
 
 | Attempt | Files | Status |
 | --- | --- | --- |
-| Keep mature bootstrap trust from resetting too easily | `src/native/adapters/slam/superpoint_lightglue_mode_strategy.cpp` | Existing working-tree change. `UpdateLightGlueCadenceState()` now allows the OK streak to continue after trust maturity when tracked map points stay above `SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_HOLD_TRACKED_MPS`. Needs MH04 strict replay validation. |
+| Keep mature bootstrap trust from resetting too easily | `src/native/adapters/slam/external_feature_lightglue_mode_strategy.cpp` | Existing working-tree change. `UpdateLightGlueCadenceState()` now allows the OK streak to continue after trust maturity when tracked map points stay above `SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_HOLD_TRACKED_MPS`. Needs MH04 strict replay validation. |
 | Realtime quality gate passthrough in feature-compare script | `scripts/run_jetson_euroc_mh_feature_compare.sh` | Added env capture and export for `SMART_DRONE_SP_LG_REALTIME_QUALITY_GATE`, gate mode, inlier/tracked-map thresholds, max step, max innovation, and rotation limit. Defaults keep the gate disabled, so baseline behavior is unchanged unless enabled. |
 | MH04 strict realtime sweep script | `scripts/run_jetson_mh04_splg_realtime_accuracy_sweep.sh` | Added executable sweep entry point. Runs only `MH_04_difficult` + `superpoint_lightglue`, uses `--require-realtime-pose` through the existing evaluator, writes `sweep_summary.md`, and saves `best_profile.env` when a strict profile passes. |
 
@@ -242,9 +242,9 @@ Code changes validated in this pass:
 
 | Change | File | Status |
 | --- | --- | --- |
-| On SP+LG frontend/finalize failure, return a realtime continuity pose and mark `RECENTLY_LOST`; do not call ORB fallback or mutate backend. | `src/native/adapters/slam/superpoint_lightglue_mode_strategy.cpp` | Accepted. Removed new-map churn and large realtime jumps. |
+| On SP+LG frontend/finalize failure, return a realtime continuity pose and mark `RECENTLY_LOST`; do not call ORB fallback or mutate backend. | `src/native/adapters/slam/external_feature_lightglue_mode_strategy.cpp` | Accepted. Removed new-map churn and large realtime jumps. |
 | Detect fixed-point-count LightGlue TensorRT engines from binding/profile dimensions and force `SMART_DRONE_LIGHTGLUE_POINTS` to that fixed count. | `src/native/adapters/slam/superpoint_native_extractor.cpp` | Accepted. Prevents dynamic-shape mismatches such as `[1,495,2]` against a fixed 512-point engine. |
-| Keep mature bootstrap trust after the frontend OK streak is satisfied while tracked map points remain healthy. | `src/native/adapters/slam/superpoint_lightglue_mode_strategy.cpp` | Accepted as current working-tree behavior; default OK streak lowered from `120` to `20`. |
+| Keep mature bootstrap trust after the frontend OK streak is satisfied while tracked map points remain healthy. | `src/native/adapters/slam/external_feature_lightglue_mode_strategy.cpp` | Accepted as current working-tree behavior; default OK streak lowered from `120` to `20`. |
 | Lower default `SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK` from `120` to `20` in replay/script defaults. | `tests/euroc/offline_replay_main.cpp`, `scripts/run_jetson_euroc_mh_feature_compare.sh`, `scripts/run_jetson_mh04_splg_realtime_accuracy_sweep.sh`, `docs/slam_modes_euroc.md` | Accepted. Matches the historical best complete MH04 SP+LG run configuration. |
 
 Key validation runs:
@@ -850,7 +850,7 @@ no Python worker and no PyTorch in the runtime process.
 
 Changes made in this pass:
 
-- Added a backend selector: `--slam-backend orbslam3|dpvo`.
+- Added a backend selector: `--slam-backend klt|dpvo|orbslam3`.
 - Added `--slam-backend dpvo` aliases: `dpvo_tensorrt`, `dpvo-trt`, and `dpvo_trt`.
 - Added DPVO runtime options:
   - `--dpvo-repo`
@@ -862,7 +862,7 @@ Changes made in this pass:
   - `--dpvo-optimization-window`
 - Added `DpvoTensorRtEngine` as a native `ISlamEngine` implementation.
 - The DPVO backend loads TensorRT engines directly with `NvInfer` and fails closed if they are missing or invalid.
-- The existing ORB-SLAM3 path remains the default and is still the only service-enabled production path.
+- Current architecture now defaults to native KLT/PnP, supports DPVO TensorRT as a backend route, and keeps ORB-SLAM3 as an optional external legacy backend.
 
 Build result:
 
@@ -899,7 +899,7 @@ Result: replay selected `slam_backend=dpvo_tensorrt` and failed fast with `REPLA
 and the expected DPVO TensorRT engines were not present on the Jetson:
 
 ```text
-[offline_replay] slam_backend=dpvo_tensorrt feature_frontend=orb
+[offline_replay] slam_backend=dpvo_tensorrt feature_frontend=lk_gftt_per_frame
 [offline_replay] dpvo_repo=/home/nvidia/DPVO patch_engine= update_engine=
 [dpvo_trt] missing engine(s): patch='' update='' repo='/home/nvidia/DPVO'
 offline replay failed: no output frames; check dataset, camera provider, or SLAM backend startup

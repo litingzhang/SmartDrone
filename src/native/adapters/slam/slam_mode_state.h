@@ -10,11 +10,11 @@
 #include <opencv2/core.hpp>
 #include <sophus/se3.hpp>
 
+#include "adapters/slam/external_feature_frontend_client.h"
+#include "adapters/slam/stereo_calibration.h"
 #include "core/ports/slam_engine.h"
 
 namespace smartdrone::adapters::slam {
-
-class ExternalFeatureFrontendClient;
 
 struct LkStereoTrack {
     cv::Point2f left;
@@ -38,6 +38,8 @@ struct SlamModeSharedState {
 
     bool LoadStereoCalibration(const std::string &settingsPath);
     void EnsureStereoRectifier(const cv::Size &inputSize);
+    bool PrepareRectifiedStereoCpu(const cv::Mat &leftImage, const cv::Mat &rightImage,
+                                   cv::Mat &leftRect, cv::Mat &rightRect);
     void ResetTrackingState();
     void ResetExternalFeatureStats();
     void CopyExternalFeatureStatsToOutput(core::ports::SlamOutput &out) const;
@@ -72,6 +74,7 @@ struct SlamModeSharedState {
     mutable bool m_spLgHavePrevStereo{false};
 
     bool m_lkCalibrationLoaded{false};
+    StereoCalibration m_stereoCalibration;
     cv::Mat m_lkK1;
     cv::Mat m_lkD1;
     cv::Mat m_lkK2;

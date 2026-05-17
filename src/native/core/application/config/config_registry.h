@@ -18,6 +18,7 @@ class ConfigRegistry {
     static constexpr std::string_view kCameraUvcEyeHeight = "camera.uvc_eye_height";
     static constexpr std::string_view kCameraUvcPackedStereo = "camera.uvc_packed_stereo";
     static constexpr std::string_view kSlamInputFps = "slam.input_fps";
+    static constexpr std::string_view kSlamBackend = "slam.backend";
     static constexpr std::string_view kSlamFeatureFrontend = "slam.feature_frontend";
     static constexpr std::string_view kSlamPerceptionMode = "slam.perception_mode";
     static constexpr std::string_view kSlamOperationMode = "slam.operation_mode";

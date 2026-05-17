@@ -1,8 +1,13 @@
-# SuperPoint + LightGlue Mode Technical Flow
+# SuperPoint + LightGlue Legacy ORB Adapter Flow
 
 ## Purpose
 
-SuperPoint + LightGlue mode (`--feature-frontend superpoint_lightglue`) uses a learned stereo frontend while keeping ORB-SLAM3 as the backend tracker and map manager. The current runtime architecture is:
+SuperPoint + LightGlue mode is now a learned-feature frontend for the optional legacy ORB adapter. Select it with
+`--slam-backend orbslam3 --feature-frontend superpoint_lightglue` in a build compiled with
+`SMART_DRONE_ENABLE_ORB_SLAM3=ON` and an external `ORB_SLAM3_ROOT`.
+
+It is not the default production path. The default runtime backend is native KLT/PnP, and DPVO TensorRT is a separate
+backend-level route. The SP+LG legacy adapter architecture is:
 
 1. TensorRT SuperPoint detects/describes features.
 2. LightGlue matching is attempted when the TensorRT LightGlue engine is available.
@@ -17,12 +22,12 @@ the frame is reported without a valid SP+LG tracking update so the failure is vi
 
 ```mermaid
 flowchart TD
-    A[CLI/runtime config<br/>feature_frontend=superpoint_lightglue] --> B[FeatureFrontend::SuperPointLightGlue]
+    A[CLI/runtime config<br/>slam_backend=orbslam3<br/>feature_frontend=superpoint_lightglue] --> B[FeatureFrontend::SuperPointLightGlue]
     B --> C[Start SuperPointLightGlueFrontendClient<br/>wraps SuperPointNativeExtractor]
     C --> D[Load TensorRT engines<br/>SuperPoint + LightGlue]
     D --> E[Acquire stereo frame]
-    E --> F[OrbSlam3Engine::Process]
-    F --> F2[SuperPointLightGlueModeStrategy]
+    E --> F[SlamEngineAdapter::Process<br/>legacy ORB adapter]
+    F --> F2[ExternalFeatureLightGlueModeStrategy]
     F2 --> G{SP+LG gate passes?}
     G -- no --> Z[SP+LG frame failure output]
     G -- yes --> H[Prepare images<br/>gray8, rectify, resize/budget]
@@ -55,8 +60,8 @@ flowchart TD
 | Live frame loop | `src/native/core/application/session/slam_frame_processor.cpp` | Applies frontend mode, load shedding, input size budget, and calls SLAM engine. |
 | Frontend client | `src/native/adapters/slam/superpoint_lightglue_frontend_client.cpp` | Owns frontend lifetime and delegates native extraction/matching to `SuperPointNativeExtractor`. |
 | TensorRT frontend | `src/native/adapters/slam/superpoint_native_extractor.cpp` | Loads engines, runs SuperPoint batch inference, attempts LightGlue matching, applies descriptor-match fallback, records stats. |
-| Mode strategy | `src/native/adapters/slam/superpoint_lightglue_mode_strategy.cpp` | Maps `FeatureFrontend::SuperPointLightGlue` to the learned frontend and external-feature tracking path. |
-| Tracking backend | `src/native/adapters/slam/slam_tracking_backend.cpp` | Calls ORB-SLAM3 prepared stereo tracking with the SP+LG external feature packet. |
+| Mode strategy | `src/native/adapters/slam/external_feature_lightglue_mode_strategy.cpp` | Maps LightGlue-style external feature frontends to the ORB-SLAM3 external-feature tracking path. |
+| Tracking backend | `src/native/adapters/slam/orb_slam3_backend.cpp`, `src/native/adapters/slam/slam_tracking_backend.cpp` | Calls ORB-SLAM3 prepared stereo tracking with the SP+LG external feature packet. |
 
 ## Startup and Engine Loading
 
@@ -64,7 +69,7 @@ Offline replay starts the frontend only in SP+LG mode:
 
 ```cpp
 if (opts.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLightGlueInjectionEnabled()) {
-    slamEngine.SetSuperPointLightGlueFrontendClient(&superpointFrontendClient);
+    slamControl->SetExternalFeatureFrontendClient(&superpointFrontendClient);
     superpointFrontendClient.Start(opts.superpointRepo, opts.superpointDevice,
                               opts.superpointTopK, opts.superpointMaxPoints, &superpointErr);
 }
@@ -106,27 +111,27 @@ Runtime parameters are controlled by CLI flags and environment variables:
 
 ## Runtime Gate and Load Budget
 
-`OrbSlam3Engine::Process(...)` delegates frontend dispatch to `SlamModeStrategy`. The SP+LG strategy enables the shared ORB backend path with external stereo feature injection:
+`SlamEngineAdapter::Process(...)` delegates frontend dispatch to `SlamModeStrategy`. The SP+LG strategy enables the shared legacy ORB backend path with external stereo feature injection:
 
 ```cpp
-OrbModeStrategy::ProcessOrbSlamBackend(..., true)
+RunSlamTrackingBackend(..., &externalStereoTrackRequest)
 ```
 
 The external stereo frontend gate then requires:
 
 ```cpp
 !monoMode &&
-m_superpointFrontendClient != nullptr &&
-m_superpointFrontendClient->Running()
+state.m_externalFeatureFrontendClient != nullptr &&
+state.m_externalFeatureFrontendClient->Running()
 ```
 
 Live runtime also applies adaptive input-size budgeting. `SlamFrameProcessor` computes `superpointLoadSheddingLevel`, derives a budget, and calls:
 
 ```cpp
-m_ctx.slamEngine.SetSuperPointInputSizeLimit(superpointBudgetWidth, superpointBudgetHeight);
+m_ctx.slamControl->SetExternalFeatureInputSizeLimit(superpointBudgetWidth, superpointBudgetHeight);
 ```
 
-This means SP+LG may run at a lower input size under load, while ORB-SLAM3 prepared stereo tracking continues to receive the prepared stereo frame and the external feature packet.
+This means SP+LG may run at a lower input size under load, while the legacy ORB prepared-stereo path continues to receive the prepared stereo frame and the external feature packet.
 
 ## Image Preparation
 
@@ -236,7 +241,7 @@ increased trajectory error more than the small throughput gain justified. The re
 selected cadence as `superpoint_lg_every_n`.
 
 `SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO` controls how many injected stereo points must be close points before
-ORB-SLAM3 accepts the first SP+LG stereo map. The default is `0.30`, with
+the legacy ORB adapter accepts the first SP+LG stereo map. The default is `0.30`, with
 `SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_POINTS=24`. MH04/MH05 validation showed the stricter `0.48` ratio can leave
 hundreds of frames in `NOT_INITIALIZED`, while an overly loose `0.08` bootstrap hurts MH04 accuracy. The selected
 threshold keeps initialization early enough without accepting the weakest first-frame geometry.
@@ -250,7 +255,7 @@ disparity, and grid-balanced stereo pairs from `BuildAlignedStereoPairs(...)` in
 pair. Current MH04/MH05 validation uses this path for strict realtime replay output.
 
 `SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE` defaults to `0.965` for SP+LG runs. The value compensates the external stereo
-depth produced from SuperPoint/LightGlue keypoints before ORB-SLAM3 map optimization. Leave it environment-overridable
+depth produced from SuperPoint/LightGlue keypoints before legacy ORB map optimization. Leave it environment-overridable
 when validating a new camera model or dataset.
 
 `SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1` is enabled by default for the current SP+LG realtime pose profile. It waits
@@ -308,7 +313,7 @@ Profiling fields:
 
 ## External Feature Packet
 
-`FinalizeStereoExternalFromPairs(...)` converts filtered SP/LG points into ORB-SLAM3 external feature data.
+`FinalizeStereoExternalFromPairs(...)` converts filtered SP/LG points into the legacy ORB adapter's external feature data.
 
 ```mermaid
 flowchart TD
@@ -332,7 +337,7 @@ Profiling field:
 
 ## Optional Mono Augmentation
 
-If ORB-SLAM3 has already initialized, the adapter can append left-only ORB features when explicitly enabled:
+If the legacy ORB backend has already initialized, the adapter can append left-only ORB features when explicitly enabled:
 
 ```cpp
 AppendOrbLeftOnlyFeatures(tracker->GetLeftORBExtractor(), leftPrepared, externalData, maxLeftFeatures);
@@ -486,7 +491,8 @@ Important caveat:
 
 ## Engineering Interpretation
 
-SP+LG is architecturally a learned frontend plus ORB-SLAM3 backend. The decisive health indicators are not only accuracy and frontend timing, but also the injection counters:
+SP+LG in this repository is currently a learned frontend plus optional legacy ORB backend path. The decisive health
+indicators are not only accuracy and frontend timing, but also the injection counters:
 
 - `superpointRawLeftCount/right`
 - `superpointMatchedStereoCount`

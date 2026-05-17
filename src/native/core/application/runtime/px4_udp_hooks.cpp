@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "common/thread_launch.h"
+#include "core/ports/slam_tracking_state.h"
 
 namespace smartdrone::core::application {
 
@@ -26,7 +27,7 @@ float Px4UdpHooks::ClampSignedUnit(float value) { return std::max(-1.0f, std::mi
 
 bool Px4UdpHooks::IsTrackingPoseUsable(int trackingState)
 {
-    return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::OK_KLT;
+    return ports::IsSlamTrackingPoseUsable(trackingState);
 }
 
 bool Px4UdpHooks::IsOdomQualityUsable(OdomQualityMode quality) { return quality != OdomQualityMode::LOST; }

@@ -31,19 +31,30 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault()
     };
     capabilities.cameraProviders = {std::string(compiledCameraProvider)};
     capabilities.imuProviders = {"icm42688_spi"};
-    capabilities.slamEngines = {"orbslam3", "dpvo_tensorrt"};
+    capabilities.slamEngines = {"klt", "dpvo_tensorrt"};
+#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
+    capabilities.slamEngines.push_back("orbslam3");
+#endif
     capabilities.commandChannels = {"udp_tlv"};
     capabilities.behaviorNotes = {
         std::string("camera.provider.compiled=") + std::string(compiledCameraProvider),
         "slam_mode.relocalization=maps_to_backend_localization_only",
         "slam_mode.tracking_only=maps_to_backend_localization_only",
         "slam_mode.auto=runtime_adaptive_switch_between_mapping_and_localization",
-        "slam.backend.orbslam3=orb_slam3_backend_with_selectable_frontends",
+        "slam.backend.klt=native_cpp_klt_pnp_visual_odometry_backend",
         "slam.backend.dpvo_tensorrt=native_cpp_tensorrt_dpvo_backend",
-        "slam.feature_frontend.orb=full_slam_tracking_path",
         "slam.feature_frontend.lk=grid_lk_pnp_vo",
         "slam.feature_frontend.lk_gftt_per_frame=klt_tracking_pnp_vo",
+#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
+        "slam.backend.orbslam3=orb_slam3_backend_with_selectable_frontends",
+        "slam.feature_frontend.orb=legacy_orb_slam3_tracking_path",
         "slam.feature_frontend.superpoint_lightglue=tensorrt_cpp_superpoint_stereo_injection",
+        "slam.feature_frontend.xfeat_lightglue=external_feature_lightglue_slot_pending_native_client",
+#else
+        "slam.feature_frontend.orb=disabled_at_build_time",
+        "slam.feature_frontend.superpoint_lightglue=disabled_at_build_time",
+        "slam.feature_frontend.xfeat_lightglue=disabled_at_build_time",
+#endif
         "slam.lk_seed.gftt=shi_tomasi_good_features_to_track",
     };
     if (CompiledCameraProviderUsesPackedStereo()) {

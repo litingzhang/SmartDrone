@@ -139,11 +139,6 @@ void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, double meanL, do
     out.left.owner.reset();
 }
 
-bool IsTrackingPoseUsable(int trackingState)
-{
-    return trackingState == ORB_SLAM3::Tracking::OK || trackingState == ORB_SLAM3::Tracking::OK_KLT;
-}
-
 uint8_t ToRuntimeSlamModeValue(smartdrone::core::domain::SlamOperationMode mode)
 {
     switch (mode) {
@@ -196,18 +191,6 @@ AutoSlamModeController::SlamOperationMode AutoSlamModeController::Observe(bool t
         m_weakFrames = 0;
     }
     return m_effectiveMode;
-}
-
-std::vector<ORB_SLAM3::IMU::Point> ToOrbImuPoints(const std::vector<smartdrone::core::ports::ImuReading> &readings)
-{
-    std::vector<ORB_SLAM3::IMU::Point> out;
-    out.reserve(readings.size());
-    for (const auto &reading : readings) {
-        out.emplace_back(cv::Point3f(reading.ax, reading.ay, reading.az),
-                         cv::Point3f(reading.gx, reading.gy, reading.gz),
-                         static_cast<double>(reading.timestampNs) * 1e-9);
-    }
-    return out;
 }
 
 } // namespace smartdrone::core::application

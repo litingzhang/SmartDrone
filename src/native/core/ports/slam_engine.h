@@ -5,8 +5,9 @@
 
 #include <opencv2/core/types.hpp>
 
-#include "ImuTypes.h"
 #include "camera_provider.h"
+#include "imu_provider.h"
+#include "slam_tracking_state.h"
 
 namespace smartdrone::core::ports {
 
@@ -26,7 +27,7 @@ struct SlamInputBatch {
     uint64_t frameId{0};
     int64_t captureTimestampNs{0};
     double frameTimeSec{0.0};
-    std::vector<ORB_SLAM3::IMU::Point> imu;
+    std::vector<ImuReading> imu;
 };
 
 struct SlamOutput {
@@ -34,7 +35,7 @@ struct SlamOutput {
     int64_t captureTimestampNs{0};
     PoseEstimate pose;
     bool poseValid{false};
-    int trackingState{0};
+    int trackingState{kSlamTrackingNoImagesYet};
     unsigned long mapId{0};
     bool usedSuperPointFrontend{false};
     int superpointRawLeftCount{0};

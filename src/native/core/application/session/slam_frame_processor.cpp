@@ -49,6 +49,19 @@ int ComputeAdaptiveSlamInputFps(int configuredFps, int cameraFps, double smoothe
     return std::clamp(throughputAlignedFps, kAdaptiveMinInputFps, cappedConfiguredFps);
 }
 
+bool DpvoEpgPacingEnabled()
+{
+    const char *value = std::getenv("SMART_DRONE_DPVO_EPG_PACING");
+    if (value == nullptr || value[0] == '\0') {
+        return false;
+    }
+    std::string normalized(value);
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return !(normalized == "0" || normalized == "false" || normalized == "off" || normalized == "no" ||
+             normalized == "disabled");
+}
+
 int ComputeSuperPointLoadSheddingLevel(int currentLevel, bool superpointEnabled, bool lastTrackingUsable, double smoothedSlamMs,
                                   double smoothedTotalMs)
 {
@@ -149,6 +162,8 @@ const char *FeatureFrontendName(FeatureFrontend frontend)
         return "lk";
     case FeatureFrontend::SuperPointLightGlue:
         return "superpoint_lightglue";
+    case FeatureFrontend::XFeatLightGlue:
+        return "xfeat_lightglue";
     case FeatureFrontend::Orb:
     default:
         return "orb";
@@ -158,6 +173,8 @@ const char *FeatureFrontendName(FeatureFrontend frontend)
 FeatureFrontend ParseRuntimeFeatureFrontendValue(uint8_t value)
 {
     switch (value) {
+    case static_cast<uint8_t>(FeatureFrontend::XFeatLightGlue):
+        return FeatureFrontend::XFeatLightGlue;
     case static_cast<uint8_t>(FeatureFrontend::SuperPointLightGlue):
         return FeatureFrontend::SuperPointLightGlue;
     case static_cast<uint8_t>(FeatureFrontend::LkGfttPerFrame):
@@ -165,8 +182,9 @@ FeatureFrontend ParseRuntimeFeatureFrontendValue(uint8_t value)
     case static_cast<uint8_t>(FeatureFrontend::LK):
         return FeatureFrontend::LK;
     case static_cast<uint8_t>(FeatureFrontend::Orb):
-    default:
         return FeatureFrontend::Orb;
+    default:
+        return FeatureFrontend::LkGfttPerFrame;
     }
 }
 
@@ -186,8 +204,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::AcquireAndPrepareFrame(bool &
         m_state.effectiveSlamMode = m_state.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto
                                         ? smartdrone::core::domain::SlamOperationMode::Mapping
                                         : m_state.requestedSlamMode;
-        if (m_ctx.orbSlamEngine != nullptr) {
-            m_ctx.orbSlamEngine->SetOperationMode(m_state.effectiveSlamMode);
+        if (m_ctx.slamControl != nullptr) {
+            m_ctx.slamControl->SetOperationMode(m_state.effectiveSlamMode);
         }
         std::cerr << "[slam] operation_mode -> " << smartdrone::core::domain::ToString(m_state.requestedSlamMode);
         if (m_state.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Auto) {
@@ -196,7 +214,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::AcquireAndPrepareFrame(bool &
         std::cerr << "\n";
         if (m_state.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::Relocalization ||
             m_state.requestedSlamMode == smartdrone::core::domain::SlamOperationMode::TrackingOnly) {
-            std::cerr << "[slam] note: requested mode currently maps to ORB-SLAM3 localization-only mode\n";
+            std::cerr << "[slam] note: requested mode currently maps to backend localization-only mode\n";
         }
         m_ctx.livePose.SetSlamMode(ToRuntimeSlamModeValue(m_state.effectiveSlamMode));
     }
@@ -206,20 +224,24 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::AcquireAndPrepareFrame(bool &
     const uint8_t configuredFrontendValue = m_ctx.tuning.featureFrontend.load(std::memory_order_relaxed);
     const FeatureFrontend effectiveFrontend =
         ParseRuntimeFeatureFrontendValue(configuredFrontendValue);
+    const bool dpvoEpgPacing =
+        m_ctx.aliases.slamBackend == SlamBackend::DpvoTensorRt && DpvoEpgPacingEnabled();
     const int effectiveSlamInputFps =
-        ComputeAdaptiveSlamInputFps(configuredSlamInputFps, m_ctx.aliases.fps, m_state.smoothedSlamMs);
+        dpvoEpgPacing ? configuredSlamInputFps
+                      : ComputeAdaptiveSlamInputFps(configuredSlamInputFps, m_ctx.aliases.fps,
+                                                    m_state.smoothedSlamMs);
     m_state.adaptiveSlamInputFps = effectiveSlamInputFps;
     const int superpointLoadSheddingLevel =
         ComputeSuperPointLoadSheddingLevel(m_state.superpointLoadSheddingLevel,
-                                      effectiveFrontend == FeatureFrontend::SuperPointLightGlue,
+                                      IsExternalFeatureLightGlueFrontend(effectiveFrontend),
                                       m_state.lastTrackingUsable, m_state.smoothedSlamMs, m_state.smoothedTotalMs);
     m_state.superpointLoadSheddingLevel = superpointLoadSheddingLevel;
     const auto [superpointBudgetWidth, superpointBudgetHeight] =
         ComputeSuperPointInputBudget(m_ctx.aliases.superpointInputMaxWidth, m_ctx.aliases.superpointInputMaxHeight,
                                 superpointLoadSheddingLevel);
-    if (m_ctx.orbSlamEngine != nullptr) {
-        m_ctx.orbSlamEngine->SetExternalFeatureInputSizeLimit(superpointBudgetWidth, superpointBudgetHeight);
-        m_ctx.orbSlamEngine->SetFeatureFrontend(effectiveFrontend);
+    if (m_ctx.slamControl != nullptr) {
+        m_ctx.slamControl->SetExternalFeatureInputSizeLimit(superpointBudgetWidth, superpointBudgetHeight);
+        m_ctx.slamControl->SetFeatureFrontend(effectiveFrontend);
     }
     if (effectiveFrontend != m_state.lastAppliedFeatureFrontend) {
         std::cerr << "[slam] effective_feature_frontend=" << FeatureFrontendName(effectiveFrontend)
@@ -234,14 +256,16 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::AcquireAndPrepareFrame(bool &
         std::cerr << "[slam] configured_input_fps=" << configuredSlamInputFps
                   << " effective_input_fps=" << effectiveSlamInputFps << " camera_fps=" << m_ctx.aliases.fps
                   << " frame_drop=" << (effectiveSlamInputFps < m_ctx.aliases.fps ? "enabled" : "disabled")
+                  << " dpvo_epg_pacing=" << (dpvoEpgPacing ? 1 : 0)
                   << " smoothed_slam_ms=" << m_state.smoothedSlamMs
                   << " smoothed_total_ms=" << m_state.smoothedTotalMs << "\n";
         m_state.lastLoggedConfiguredSlamInputFps = configuredSlamInputFps;
         m_state.lastLoggedEffectiveSlamInputFps = effectiveSlamInputFps;
     }
-    if (effectiveFrontend == FeatureFrontend::SuperPointLightGlue &&
+    if (IsExternalFeatureLightGlueFrontend(effectiveFrontend) &&
         superpointLoadSheddingLevel != m_state.lastLoggedSuperPointLoadSheddingLevel) {
-        std::cerr << "[slam] superpoint_load_profile=" << DescribeSuperPointLoadSheddingLevel(superpointLoadSheddingLevel)
+        std::cerr << "[slam] external_feature_load_profile=" << DescribeSuperPointLoadSheddingLevel(superpointLoadSheddingLevel)
+                  << " frontend=" << FeatureFrontendName(effectiveFrontend)
                   << " input_max=" << superpointBudgetWidth << "x" << superpointBudgetHeight
                   << " tracking_usable=" << (m_state.lastTrackingUsable ? 1 : 0)
                   << " smoothed_slam_ms=" << m_state.smoothedSlamMs
@@ -312,9 +336,7 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::AcquireAndPrepareFrame(bool &
     smartdrone::core::ports::SlamInputBatch slamInput{};
     const auto imuStartTp = std::chrono::steady_clock::now();
     if (m_ctx.useImu && m_state.lastFrameNs != 0) {
-        const std::vector<smartdrone::core::ports::ImuReading> imuSamples =
-            m_ctx.imuProvider.PopWindow(m_state.lastFrameNs, captureTimestampNs);
-        slamInput.imu = ToOrbImuPoints(imuSamples);
+        slamInput.imu = m_ctx.imuProvider.PopWindow(m_state.lastFrameNs, captureTimestampNs);
         ImuWindowValidation imuWindow{};
         const double prevFrameTime = static_cast<double>(m_state.lastFrameNs) * 1e-9;
         const double expectedImuDtSec = 1.0 / std::max(1, m_ctx.aliases.imuHz);
@@ -451,8 +473,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::PostprocessTrackedFrame(std::
     const double sharpL = frame.sharpL;
     const double sharpR = frame.sharpR;
     const bool debugRightOnlyFeatures = frame.debugRightOnlyFeatures;
-    const int state = debugRightOnlyFeatures ? ORB_SLAM3::Tracking::LOST : slamOutput.trackingState;
-    const bool trackingUsable = !debugRightOnlyFeatures && IsTrackingPoseUsable(state);
+    const int state = debugRightOnlyFeatures ? ports::kSlamTrackingLost : slamOutput.trackingState;
+    const bool trackingUsable = !debugRightOnlyFeatures && ports::IsSlamTrackingPoseUsable(state);
     m_state.lastTrackingState = state;
     m_state.lastTrackingUsable = trackingUsable;
     const unsigned long mapId = debugRightOnlyFeatures ? 0UL : slamOutput.mapId;
@@ -521,8 +543,8 @@ SlamFrameProcessor::StepResult SlamFrameProcessor::PostprocessTrackedFrame(std::
                                                  slamOutput.leftFeatures.size(), slamOutput.rightFeatures.size());
         if (autoEffectiveMode != m_state.effectiveSlamMode) {
             m_state.effectiveSlamMode = autoEffectiveMode;
-            if (m_ctx.orbSlamEngine != nullptr) {
-                m_ctx.orbSlamEngine->SetOperationMode(m_state.effectiveSlamMode);
+            if (m_ctx.slamControl != nullptr) {
+                m_ctx.slamControl->SetOperationMode(m_state.effectiveSlamMode);
             }
             m_ctx.livePose.SetSlamMode(ToRuntimeSlamModeValue(m_state.effectiveSlamMode));
             std::cerr << "[slam_auto] effective_mode -> "

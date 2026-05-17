@@ -2,9 +2,9 @@
 
 ## Purpose
 
-KLT Tracking mode (`--feature-frontend klt_tracking`) is a lightweight stereo visual-odometry baseline. It bypasses ORB-SLAM3 tracking and mapping for pose estimation, but reuses SmartDrone's stereo acquisition, calibration/rectification, output contract, and profiling infrastructure.
+KLT Tracking mode (`--slam-backend klt --feature-frontend klt_tracking`) is the default lightweight stereo visual-odometry backend. It bypasses ORB-SLAM3 entirely and reuses SmartDrone's stereo acquisition, calibration/rectification, output contract, and profiling infrastructure.
 
-The mode is implemented by `KltPerFrameModeStrategy::Process(...)`.
+The mode is implemented by `KltSlamEngine::ProcessPerFrameKlt(...)`.
 
 ## Main Flow
 
@@ -13,8 +13,8 @@ flowchart TD
     A[CLI/runtime config<br/>feature_frontend=klt_tracking] --> B[FeatureFrontend::LkGfttPerFrame]
     B --> C[Replay/live frame acquisition]
     C --> D[SlamInputBatch<br/>left/right gray]
-    D --> E[OrbSlam3Engine::Process]
-    E --> F[KltPerFrameModeStrategy]
+    D --> E[KltSlamEngine::Process]
+    E --> F[ProcessPerFrameKlt]
     F --> G[Ensure gray8 + calibration]
     G --> H[Rectify stereo]
     H --> I{First frame?}
@@ -38,20 +38,21 @@ flowchart TD
 | CLI/offline replay | `tests/euroc/offline_replay_main.cpp` | Parses `klt_tracking`, applies `--lk-per-frame-accel`, runs replay. |
 | Replay loop | `tests/euroc/support/replay_slam_runner.cpp` | Builds input batches and records process-level profiling. |
 | Live loop | `src/native/core/application/session/slam_frame_processor.cpp` | Applies frontend mode and adaptive input FPS in runtime sessions. |
-| Mode strategy | `src/native/adapters/slam/orbslam3_mode_strategy.cpp`, `src/native/adapters/slam/orbslam3_klt_mode_strategy.cpp` | Maps `FeatureFrontend::LkGfttPerFrame` to the per-frame KLT strategy. |
-| KLT implementation | `src/native/adapters/slam/orbslam3_klt_mode_strategy.cpp` | Implements rectification, disparity, GFTT, LK flow, depth, PnP, pose update. |
+| KLT engine | `src/native/adapters/slam/klt_slam_engine.cpp` | Owns KLT frontend selection and pose output. |
+| KLT implementation | `src/native/adapters/slam/klt_per_frame_frontend.cpp`, `src/native/adapters/slam/klt_pnp_observation_builder.cpp`, `src/native/adapters/slam/klt_pose_estimator.cpp` | Implements rectification, disparity, GFTT, LK flow, depth, PnP, pose update. |
 | Output contract | `src/native/core/ports/slam_engine.h` | Carries KLT timing and pose fields in `SlamOutput`. |
 
 ## Mode Selection
 
-The CLI string `klt_tracking` maps to `FeatureFrontend::LkGfttPerFrame`. `OrbSlam3Engine::Process(...)` now delegates to the selected `SlamModeStrategy`; the factory maps this frontend to `KltPerFrameModeStrategy`:
+The CLI string `klt_tracking` maps to `FeatureFrontend::LkGfttPerFrame`. `CreateSlamEngine(...)` selects `KltSlamEngine` when `--slam-backend klt` is active, and `KltSlamEngine::SetFeatureFrontend(...)` chooses the per-frame KLT route:
 
 ```cpp
-case FeatureFrontend::LkGfttPerFrame:
-    return CreateKltPerFrameModeStrategy();
+if (frontend != FeatureFrontend::LK && frontend != FeatureFrontend::LkGfttPerFrame) {
+    frontend = FeatureFrontend::LkGfttPerFrame;
+}
 ```
 
-The strategy ignores `extractPointCloud` because this VO path produces pose and tracking diagnostics only. The per-frame KLT implementation now lives in `src/native/adapters/slam/orbslam3_klt_mode_strategy.cpp`.
+The engine ignores `extractPointCloud` because this VO path produces pose and tracking diagnostics only. The per-frame KLT implementation lives in `src/native/adapters/slam/klt_per_frame_frontend.cpp` and related KLT helper modules.
 
 The EuRoC profiling script uses:
 
@@ -63,7 +64,7 @@ The EuRoC profiling script uses:
 
 ## Input Contract
 
-KLT receives the same `SlamInputBatch` shape as ORB:
+KLT receives the shared `SlamInputBatch` shape:
 
 - `input.stereo.left.gray`
 - `input.stereo.right.gray`
@@ -72,7 +73,7 @@ KLT receives the same `SlamInputBatch` shape as ORB:
 - `input.frameTimeSec`
 - optional IMU vector, unused by this KLT VO path
 
-The input acquisition flow is identical to ORB and SP+LG. `PerceptionPipeline::AcquireNextStereoBatch(...)` handles SLAM FPS limiting and paired timestamp generation before KLT sees the frame.
+The input acquisition flow is shared by all SLAM backends. `PerceptionPipeline::AcquireNextStereoBatch(...)` handles SLAM FPS limiting and paired timestamp generation before KLT sees the frame.
 
 ## Detailed Stage Flow
 
@@ -102,7 +103,7 @@ flowchart LR
 
 ## Stage 1: Preparation and Calibration
 
-`KltPerFrameModeStrategy::Process(...)` starts with:
+`RunKltPerFrameFrontend(...)` starts with:
 
 ```cpp
 cv::Mat leftGray = EnsureGray8(input.stereo.left.gray);
@@ -111,7 +112,7 @@ cv::Mat rightGray = EnsureGray8(input.stereo.right.gray);
 
 If either image is empty or `m_lkCalibrationLoaded` is false, the output is marked:
 
-- `trackingState = ORB_SLAM3::Tracking::LOST`
+- `trackingState = kSlamTrackingLost`
 - `poseValid = false`
 
 The implementation then initializes rectification maps:

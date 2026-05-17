@@ -93,6 +93,7 @@ class PosePostprocessor {
 
       private:
         float ComputeAllowedStep(int64_t frameNs) const;
+        float ComputeAllowedRotation(int64_t frameNs) const;
         void CommitPose(const Px4MavlinkGateway::Pose &pose, int64_t frameNs);
 
         Px4MavlinkGateway::Pose lastPose{};

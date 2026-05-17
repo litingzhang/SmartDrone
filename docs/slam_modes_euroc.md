@@ -1,6 +1,8 @@
-# SLAM Frontend Modes and EuRoC Regression
+# SLAM Backend/Frontend Modes and EuRoC Regression
 
-This document lists the supported visual frontend modes and the current EuRoC Machine Hall regression results for the production-facing modes.
+This document lists the backend/frontend combinations used by SmartDrone and the EuRoC Machine Hall regression results
+that drove earlier tuning. The current production-facing defaults are native `klt` and optional `dpvo_tensorrt`;
+`orbslam3` and SP+LG injection are legacy compatibility/reference paths that require an ORB-enabled build.
 
 ## End-to-End Mode Topology
 
@@ -8,42 +10,49 @@ This document lists the supported visual frontend modes and the current EuRoC Ma
 flowchart TD
     A[EuRoC stereo images<br/>or live packed-UVC stereo] --> B[PerceptionPipeline<br/>timestamp + FPS gate]
     B --> C[SlamInputBatch]
-    C --> D{feature_frontend}
-    D -- orb --> E[ORB-SLAM3 native ORB path]
-    D -- klt_tracking --> F[GFTT + PyrLK + stereo depth + PnP]
-    D -- superpoint_lightglue --> G[SuperPoint/LightGlue native TensorRT frontend]
-    G --> H[External stereo feature packet]
-    H --> I[ORB-SLAM3 prepared stereo tracking]
-    E --> J[SlamOutput + trajectory]
-    F --> J
-    I --> J
-    J --> K[CSV / JSON / Markdown profiling archive]
+    C --> D{slam_backend}
+    D -- klt --> E[KltSlamEngine<br/>GFTT/PyrLK + stereo depth + PnP]
+    D -- dpvo_tensorrt --> F[DpvoTensorRtEngine<br/>TensorRT DPVO backend]
+    D -- orbslam3 optional --> G{feature_frontend}
+    G -- orb --> H[ORB-SLAM3 native ORB path]
+    G -- superpoint_lightglue / xfeat_lightglue --> I[External LightGlue frontend]
+    I --> J[External stereo feature packet]
+    J --> K[ORB-SLAM3 prepared stereo tracking]
+    E --> L[SlamOutput + trajectory]
+    F --> L
+    H --> L
+    K --> L
+    L --> M[CSV / JSON / Markdown profiling archive]
 ```
 
 ## Supported Modes
 
 | UI label | CLI / config value | Backend path | Recommendation |
 | --- | --- | --- | --- |
-| ORB | `orb` | Native ORB-SLAM3 ORB extraction, stereo tracking, local mapping, loop closure, and relocalization | Accuracy reference and baseline mode |
-| KLT Tracking | `klt_tracking` + `--lk-per-frame-accel cpu` | GFTT feature detection, OpenCV pyramidal KLT tracking, CPU stereo depth, and CPU PnP | Jetson tracking baseline |
-| SuperPoint + LightGlue | `superpoint_lightglue` | Native TensorRT SuperPoint detection/description, LightGlue stereo matching when available, descriptor-match fallback, then ORB-SLAM3 prepared stereo tracking | Learned-feature accuracy mode |
+| KLT Tracking | `--slam-backend klt --feature-frontend lk_gftt_per_frame` | `KltSlamEngine`: GFTT feature detection, OpenCV/VPI pyramidal LK, stereo depth, and PnP | Default lightweight runtime |
+| DPVO TensorRT | `--slam-backend dpvo_tensorrt --feature-frontend lk_gftt_per_frame` | `DpvoTensorRtEngine`: backend-level learned VO route | Optional Jetson learned-VO backend |
+| ORB | `--slam-backend orbslam3 --feature-frontend orb` | Optional legacy ORB-SLAM3 native ORB extraction, stereo tracking, local mapping, loop closure, and relocalization | Historical accuracy reference |
+| SuperPoint + LightGlue | `--slam-backend orbslam3 --feature-frontend superpoint_lightglue` | Optional legacy ORB adapter with TensorRT SuperPoint/LightGlue external stereo feature injection | Archived learned-feature reference/experiment path |
 
 Detailed flow documents:
 
 - ORB: `docs/orb_mode_flow.md`
 - KLT Tracking: `docs/klt_tracking_mode_flow.md`
+- DPVO TensorRT: `docs/dpvo_tensorrt_backend.md`
 - SuperPoint + LightGlue: `docs/superpoint_lightglue_mode_flow.md`
 
 Notes:
 
-- Android exposes only these three frontend choices.
-- Frontend switching is allowed only while SLAM is not running; switching restarts the SLAM session.
+- Android exposes backend-aware tracking choices based on runtime capabilities. ORB/SP+LG choices are shown only when
+  the native target reports ORB support.
+- Backend/frontend switching is allowed only while SLAM is not running; switching restarts the SLAM session.
 - Python inference helper processes are not part of the runtime path.
-- ORB mode uses `config/euroc/stereo_orb_official.yaml` for EuRoC regression.
+- Legacy ORB mode uses `config/euroc/stereo_orb_official.yaml` for the archived EuRoC regression.
 
-## SuperPoint + LightGlue Runtime
+## Legacy SuperPoint + LightGlue Runtime
 
-The SuperPoint + LightGlue frontend runs inference fully in C++ TensorRT at runtime.
+The SuperPoint + LightGlue frontend runs inference fully in C++ TensorRT at runtime, but the documented injection path
+requires the optional legacy ORB backend.
 
 Default EuRoC regression engines:
 
@@ -293,7 +302,7 @@ trajectory export or post-run fill was used.
 
 ## Interpretation
 
-- ORB remains the native ORB-SLAM3 accuracy reference on EuRoC Machine Hall.
+- ORB remains a historical native ORB-SLAM3 EuRoC accuracy reference when the optional external ORB backend is enabled.
 - SuperPoint + LightGlue uses the native TensorRT frontend path and is close to ORB on MH_01 and MH_02 in the archived regression.
 - SuperPoint + LightGlue is slightly better than ORB on MH_02 and much improved on MH_04/MH_05 relative to the previous SP+LG regression, but MH_03 remains behind the ORB reference.
 - KLT Tracking is a real GFTT plus pyramidal KLT VO path. It is suitable as a lightweight tracking baseline, but it still drifts more than ORB or SuperPoint + LightGlue on difficult Machine Hall sequences.

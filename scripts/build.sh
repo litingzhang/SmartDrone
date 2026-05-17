@@ -4,14 +4,13 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-  ./scripts/build.sh [smart_drone|orb|android|all|test|replay] [--clean] [--reconfigure] [--jetson-orin-nx]
-                   [--jobs N] [--camera-provider NAME]
+  ./scripts/build.sh [smart_drone|android|all|test|replay] [--clean] [--reconfigure] [--jetson-orin-nx]
+                   [--jobs N] [--camera-provider NAME] [--enable-orb-slam3]
 
 Modes:
   smart_drone     Build the unified runtime target
-  orb             Build ORB-SLAM3 and its native third-party shared libs
   android         Build the Android app (:app:assembleDebug)
-  all             Build ORB-SLAM3 first, then build smart_drone and Android app
+  all             Build smart_drone and Android app
   test            Build and run host-side unit tests with GoogleTest
   replay          Build the host-side offline replay tool
 
@@ -24,6 +23,8 @@ Options:
                   Enable the experimental OpenCV CUDA ORB extractor path when the sysroot provides cudafeatures2d
   --opencv-cuda-orb-root PATH
                   OpenCV install prefix that provides cudafeatures2d for --opencv-cuda-orb
+  --enable-orb-slam3
+                  Build and link the internal ORB-SLAM3 backend under src/native
   --jobs N        Build parallelism; defaults to BUILD_JOBS or nproc
   --camera-provider NAME
                   Native camera provider, e.g. libcamera_stereo_ov9281 or uvc_stereo_opencv
@@ -65,7 +66,6 @@ find_first_toolchain_prefix() {
 
 MODE="${1:-smart_drone}"
 shift $(( $# > 0 ? 1 : 0 ))
-BUILD_ORB=0
 BUILD_SMART_DRONE=OFF
 BUILD_ANDROID=0
 BUILD_TESTS=0
@@ -74,6 +74,7 @@ CLEAN_BUILD=0
 FORCE_RECONFIGURE=0
 JETSON_ORIN_NX=0
 NATIVE_RECONFIGURE_REQUIRED=0
+ENABLE_ORB_SLAM3="${SMART_DRONE_ENABLE_ORB_SLAM3:-OFF}"
 BUILD_JOBS_OVERRIDE=""
 CAMERA_PROVIDER_OVERRIDE=""
 ENABLE_OPENCV_CUDA_ORB=OFF
@@ -83,14 +84,10 @@ case "$MODE" in
     smart_drone)
         BUILD_SMART_DRONE=ON
         ;;
-    orb)
-        BUILD_ORB=1
-        ;;
     android)
         BUILD_ANDROID=1
         ;;
     all)
-        BUILD_ORB=1
         BUILD_SMART_DRONE=ON
         BUILD_ANDROID=1
         ;;
@@ -123,6 +120,9 @@ while [ "$#" -gt 0 ]; do
             ;;
         --opencv-cuda-orb)
             ENABLE_OPENCV_CUDA_ORB=ON
+            ;;
+        --enable-orb-slam3)
+            ENABLE_ORB_SLAM3=ON
             ;;
         --opencv-cuda-orb-root)
             if [ "$#" -lt 2 ]; then
@@ -189,13 +189,15 @@ SYSROOT_DEFAULT="$REPO_ROOT/../sysroots/cm5"
 SYSROOT_ENV_NAME="SYSROOT"
 TOOLCHAIN_FILE="$REPO_ROOT/toolchain/toolchain-cm5-aarch64.cmake"
 TOOLCHAIN_PREFIX=""
-ORB_BUILD_DIR="$OUTPUT_ROOT/build/cm5/orbslam3"
 CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
 NATIVE_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/$PLATFORM_NAME"
 HOST_TEST_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host/unit-test"
 HOST_REPLAY_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host/offline-replay"
 REPLAY_ARTIFACTS_DIR="$HOST_REPLAY_ARTIFACTS_DIR"
 ANDROID_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/android"
+ORB_VOCAB_DIR="$REPO_ROOT/src/native/adapters/slam/orb_slam3/place_recognition/vocabulary"
+ORB_VOCAB_TXT="$ORB_VOCAB_DIR/ORBvoc.txt"
+ORB_VOCAB_ARCHIVE="$ORB_VOCAB_DIR/ORBvoc.txt.tar.gz"
 
 if [ "$JETSON_ORIN_NX" -eq 1 ]; then
     PLATFORM_NAME="jetson-orin-nx"
@@ -203,7 +205,6 @@ if [ "$JETSON_ORIN_NX" -eq 1 ]; then
     SYSROOT_ENV_NAME="JETSON_SYSROOT"
     TOOLCHAIN_FILE="$REPO_ROOT/toolchain/toolchain-jetson-orin-nx-aarch64.cmake"
     BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/smart_drone"
-    ORB_BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/orbslam3"
     REPLAY_BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/offline-replay"
 fi
 
@@ -234,7 +235,7 @@ else
     TOOLCHAIN_PREFIX="${TOOLCHAIN_PREFIX:-}"
 fi
 
-if [ "$BUILD_SMART_DRONE" = "ON" ] || [ "$BUILD_ORB" -eq 1 ]; then
+if [ "$BUILD_SMART_DRONE" = "ON" ]; then
     if [ ! -d "$SYSROOT" ]; then
         echo "Sysroot not found: $SYSROOT" >&2
         echo "Set $SYSROOT_ENV_NAME=/path/to/sysroot and retry." >&2
@@ -275,6 +276,7 @@ if [ -n "${SMART_DRONE_CAMERA_PROVIDER:-}" ]; then
     configure_native_args+=(-DSMART_DRONE_CAMERA_PROVIDER="$SMART_DRONE_CAMERA_PROVIDER")
 fi
 configure_native_args+=(-DSMART_DRONE_ENABLE_OPENCV_CUDA_ORB="$ENABLE_OPENCV_CUDA_ORB")
+configure_native_args+=(-DSMART_DRONE_ENABLE_ORB_SLAM3="$ENABLE_ORB_SLAM3")
 if [ "$ENABLE_OPENCV_CUDA_ORB" = "ON" ]; then
     if [ -z "$OPENCV_CUDA_ORB_ROOT" ]; then
         OPENCV_CUDA_ORB_ROOT="$(find_first_existing_dir \
@@ -314,6 +316,17 @@ copy_artifact() {
     cp -f "$src" "$dst"
 }
 
+ensure_orb_vocabulary() {
+    if [ -f "$ORB_VOCAB_TXT" ]; then
+        return 0
+    fi
+    if [ -f "$ORB_VOCAB_ARCHIVE" ]; then
+        tar -xzf "$ORB_VOCAB_ARCHIVE" -C "$ORB_VOCAB_DIR"
+        return 0
+    fi
+    return 1
+}
+
 sync_native_artifacts() {
     local native_bin="$BUILD_DIR/src/native/smart_drone"
     if [ -f "$native_bin" ]; then
@@ -322,11 +335,6 @@ sync_native_artifacts() {
 
     local lib_dir="$NATIVE_ARTIFACTS_DIR/lib"
     mkdir -p "$lib_dir"
-    for lib_name in libORB_SLAM3.so libDBoW2.so libg2o.so; do
-        if [ -f "$lib_dir/$lib_name" ]; then
-            :
-        fi
-    done
 
     local config_dir="$NATIVE_ARTIFACTS_DIR/config"
     mkdir -p "$config_dir"
@@ -343,11 +351,20 @@ sync_native_artifacts() {
 
     local scripts_dir="$NATIVE_ARTIFACTS_DIR/scripts"
     mkdir -p "$scripts_dir"
-    if [ -f "$REPO_ROOT/ORBvoc.txt" ]; then
-        copy_artifact "$REPO_ROOT/ORBvoc.txt" "$NATIVE_ARTIFACTS_DIR/ORBvoc.txt"
-    elif [ -f "$REPO_ROOT/ORB_SLAM3/Vocabulary/ORBvoc.txt" ]; then
-        copy_artifact "$REPO_ROOT/ORB_SLAM3/Vocabulary/ORBvoc.txt" \
-            "$NATIVE_ARTIFACTS_DIR/ORBvoc.txt"
+    if [ "$ENABLE_ORB_SLAM3" = "ON" ] && [ -d "$BUILD_DIR/orb_slam3/lib" ]; then
+        local orb_lib
+        for orb_lib in libORB_SLAM3.so libDBoW2.so libg2o.so; do
+            if [ -f "$BUILD_DIR/orb_slam3/lib/$orb_lib" ]; then
+                copy_artifact "$BUILD_DIR/orb_slam3/lib/$orb_lib" "$lib_dir/$orb_lib"
+            fi
+        done
+    fi
+    if [ "$ENABLE_ORB_SLAM3" = "ON" ]; then
+        if ensure_orb_vocabulary; then
+            copy_artifact "$ORB_VOCAB_TXT" "$NATIVE_ARTIFACTS_DIR/ORBvoc.txt"
+        else
+            echo "ORB-SLAM3 vocabulary not found: $ORB_VOCAB_TXT or $ORB_VOCAB_ARCHIVE" >&2
+        fi
     fi
 
 }
@@ -423,26 +440,11 @@ echo "FORCE_RECONFIGURE:$FORCE_RECONFIGURE"
 echo "BUILD_JOBS:$BUILD_JOBS"
 echo "CMAKE_BUILD_TYPE:$CMAKE_BUILD_TYPE"
 echo "OPENCV_CUDA_ORB:$ENABLE_OPENCV_CUDA_ORB"
+echo "ORB_SLAM3:$ENABLE_ORB_SLAM3"
 if [ -n "$OPENCV_CUDA_ORB_ROOT" ]; then
     echo "OPENCV_CUDA_ORB_ROOT:$OPENCV_CUDA_ORB_ROOT"
 fi
 echo "OUTPUT_ROOT:$OUTPUT_ROOT"
-
-if [ "$BUILD_ORB" -eq 1 ]; then
-    echo "build ORB-SLAM3"
-    if [ "$CLEAN_BUILD" -eq 1 ]; then
-        rm -rf "$ORB_BUILD_DIR"
-    fi
-    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -f "$ORB_BUILD_DIR/CMakeCache.txt" ]; then
-        cmake -S "$REPO_ROOT/ORB_SLAM3" -B "$ORB_BUILD_DIR" \
-            "${configure_native_args[@]}" \
-            -DORB_SLAM3_OUTPUT_DIR="$NATIVE_ARTIFACTS_DIR/lib" \
-            -DDBOW2_OUTPUT_DIR="$NATIVE_ARTIFACTS_DIR/lib" \
-            -DG2O_OUTPUT_DIR="$NATIVE_ARTIFACTS_DIR/lib"
-    fi
-    cmake --build "$ORB_BUILD_DIR" -j"$BUILD_JOBS"
-    NATIVE_RECONFIGURE_REQUIRED=1
-fi
 
 if [ "$BUILD_SMART_DRONE" = "ON" ]; then
     if [ "$CLEAN_BUILD" -eq 1 ]; then
@@ -450,13 +452,12 @@ if [ "$BUILD_SMART_DRONE" = "ON" ]; then
     fi
     mkdir -p "$BUILD_DIR"
     if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ "$NATIVE_RECONFIGURE_REQUIRED" -eq 1 ] || [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
-        cmake -S "$REPO_ROOT" -B "$BUILD_DIR" \
-            "${configure_native_args[@]}" \
-            -DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config \
-            -DBUILD_SMART_DRONE="$BUILD_SMART_DRONE" \
-            -DORB_LIB_DIR="$NATIVE_ARTIFACTS_DIR/lib" \
-            -DDBOW2_LIB_DIR="$NATIVE_ARTIFACTS_DIR/lib" \
-            -DG2O_LIB_DIR="$NATIVE_ARTIFACTS_DIR/lib"
+        smart_drone_configure_args=(
+            "${configure_native_args[@]}"
+            -DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config
+            -DBUILD_SMART_DRONE="$BUILD_SMART_DRONE"
+        )
+        cmake -S "$REPO_ROOT" -B "$BUILD_DIR" "${smart_drone_configure_args[@]}"
     fi
 
     if [ "$MODE" = "smart_drone" ]; then
@@ -495,6 +496,7 @@ if [ "$BUILD_REPLAY" -eq 1 ]; then
         replay_configure_args=(
             -DBUILD_SMART_DRONE=OFF
             -DENABLE_OFFLINE_REPLAY=ON
+            -DSMART_DRONE_ENABLE_ORB_SLAM3="$ENABLE_ORB_SLAM3"
         )
         if [ "$JETSON_ORIN_NX" -eq 1 ]; then
             replay_configure_args+=(
@@ -511,8 +513,8 @@ if [ "$BUILD_REPLAY" -eq 1 ]; then
         copy_artifact "$REPLAY_BUILD_DIR/tests/smart_drone_offline_replay" \
             "$REPLAY_ARTIFACTS_DIR/smart_drone_offline_replay"
     fi
-    if [ "$JETSON_ORIN_NX" -eq 1 ] && [ -f "$REPLAY_BUILD_DIR/orb_host/lib/libORB_SLAM3.so" ]; then
-        copy_artifact "$REPLAY_BUILD_DIR/orb_host/lib/libORB_SLAM3.so" \
+    if [ "$ENABLE_ORB_SLAM3" = "ON" ] && [ "$JETSON_ORIN_NX" -eq 1 ] && [ -f "$REPLAY_BUILD_DIR/orb_slam3/lib/libORB_SLAM3.so" ]; then
+        copy_artifact "$REPLAY_BUILD_DIR/orb_slam3/lib/libORB_SLAM3.so" \
             "$NATIVE_ARTIFACTS_DIR/lib/libORB_SLAM3.so"
     fi
     echo "offline replay tool built:"

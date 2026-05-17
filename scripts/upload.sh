@@ -128,6 +128,7 @@ if [ -z "${APK_PATH:-}" ]; then
 fi
 
 SMART_DRONE_BIN="$ARTIFACT_ROOT/bin/smart_drone"
+# Legacy ORB-SLAM3 libraries are uploaded only when an ORB-enabled artifact bundle contains them.
 ORB_SO="$ARTIFACT_ROOT/lib/libORB_SLAM3.so"
 DBOW2_SO="$ARTIFACT_ROOT/lib/libDBoW2.so"
 G2O_SO="$ARTIFACT_ROOT/lib/libg2o.so"
@@ -243,9 +244,6 @@ cleanup_legacy_dirs() {
 
 if [ "$ADB_ONLY" != "1" ]; then
     require_file "$SMART_DRONE_BIN"
-    require_file "$ORB_SO"
-    require_file "$DBOW2_SO"
-    require_file "$G2O_SO"
     require_file "$CALIB_YAML"
     require_file "$STEREO_YAML"
     require_file "$MONO_YAML"
@@ -257,9 +255,15 @@ if [ "$ADB_ONLY" != "1" ]; then
         ensure_remote_dirs
 
         upload_atomic "$SMART_DRONE_BIN" "smart_drone"
-        upload_atomic "$ORB_SO" "libORB_SLAM3.so"
-        upload_atomic "$DBOW2_SO" "libDBoW2.so"
-        upload_atomic "$G2O_SO" "libg2o.so"
+        if [ -f "$ORB_SO" ]; then
+            upload_atomic "$ORB_SO" "libORB_SLAM3.so"
+        fi
+        if [ -f "$DBOW2_SO" ]; then
+            upload_atomic "$DBOW2_SO" "libDBoW2.so"
+        fi
+        if [ -f "$G2O_SO" ]; then
+            upload_atomic "$G2O_SO" "libg2o.so"
+        fi
         upload_atomic "$CALIB_YAML" "config/stereo_inertial.yaml"
         upload_atomic "$STEREO_YAML" "config/stereo.yaml"
         upload_atomic "$MONO_YAML" "config/mono_right.yaml"

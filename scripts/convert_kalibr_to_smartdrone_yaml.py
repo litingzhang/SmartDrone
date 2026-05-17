@@ -8,8 +8,8 @@ Inputs:
 - imu yaml used by Kalibr
 
 Outputs:
-- stereo yaml for SmartDrone / ORB-SLAM3
-- stereo_inertial yaml for SmartDrone / ORB-SLAM3
+- stereo yaml for SmartDrone native backends and the optional legacy ORB-SLAM3 adapter
+- stereo_inertial yaml for SmartDrone native backends and the optional legacy ORB-SLAM3 adapter
 - mono_inertial_right yaml for right-camera mono-imu mode
 
 Example:

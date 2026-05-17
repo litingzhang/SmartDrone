@@ -26,6 +26,7 @@ set(SMART_DRONE_GPIOD_LIBRARIES gpiod)
 set(SMART_DRONE_GPIOD_CFLAGS_OTHER "")
 option(SMART_DRONE_ENABLE_VPI "Enable NVIDIA VPI acceleration when headers and libraries are available" OFF)
 option(SMART_DRONE_ENABLE_OPENCV_CUDA_ORB "Enable experimental OpenCV CUDA ORB extraction when supported" OFF)
+option(SMART_DRONE_ENABLE_ORB_SLAM3 "Build the internal ORB-SLAM3 backend absorbed under src/native" OFF)
 set(SMART_DRONE_VPI_ROOT "" CACHE PATH "NVIDIA VPI root, e.g. /opt/nvidia/vpi2")
 
 if(NOT BUILD_SMART_DRONE AND NOT ENABLE_UNIT_TESTS AND NOT ENABLE_OFFLINE_REPLAY)
@@ -59,6 +60,12 @@ if(CROSS_AARCH64)
 endif()
 
 project(SmartDrone CXX)
+
+set(SMART_DRONE_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+set(SMART_DRONE_ORB_MODULE_ROOT "${SMART_DRONE_REPO_ROOT}/src/native/adapters/slam/orb_slam3")
+set(SMART_DRONE_SOPHUS_ROOT "${SMART_DRONE_REPO_ROOT}/third_party/Sophus")
+set(SMART_DRONE_DBOW2_ROOT "${SMART_DRONE_REPO_ROOT}/third_party/DBoW2")
+set(SMART_DRONE_G2O_ROOT "${SMART_DRONE_REPO_ROOT}/third_party/g2o")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -144,7 +151,7 @@ function(configure_common_target target_name)
   endif()
 endfunction()
 
-function(configure_orb_target target_name)
+function(configure_sophus_target target_name)
   find_package(Eigen3 QUIET)
   if(TARGET Eigen3::Eigen)
     target_link_libraries(${target_name} PRIVATE Eigen3::Eigen)
@@ -153,18 +160,31 @@ function(configure_orb_target target_name)
   endif()
 
   target_include_directories(${target_name} PRIVATE
-    "${ORB_SLAM3_ROOT}"
-    "${ORB_SLAM3_ROOT}/include"
-    "${ORB_SLAM3_ROOT}/include/CameraModels"
-    "${ORB_SLAM3_ROOT}/Thirdparty/Sophus"
-    "${ORB_SLAM3_ROOT}/Thirdparty/DBoW2"
-    "${ORB_SLAM3_ROOT}/Thirdparty/g2o"
+    "${SMART_DRONE_SOPHUS_ROOT}"
   )
+endfunction()
 
-  target_link_directories(${target_name} PRIVATE
-    "${ORB_LIB_DIR}"
-    "${G2O_LIB_DIR}"
-    "${DBOW2_LIB_DIR}"
+function(configure_orb_target target_name)
+  configure_sophus_target(${target_name})
+
+  target_include_directories(${target_name} PRIVATE
+    "${SMART_DRONE_ORB_MODULE_ROOT}"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/camera"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/camera/CameraModels"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/common"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/config"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/features"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/frame"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/geometry"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/graph_optimization"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/loop_closing"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/map"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/mapping"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/place_recognition"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/system"
+    "${SMART_DRONE_ORB_MODULE_ROOT}/tracking"
+    "${SMART_DRONE_DBOW2_ROOT}"
+    "${SMART_DRONE_G2O_ROOT}"
   )
 
   target_link_libraries(${target_name} PRIVATE
@@ -172,6 +192,21 @@ function(configure_orb_target target_name)
     DBoW2
     g2o
   )
+endfunction()
+
+function(add_internal_orb_slam3)
+  if(NOT EXISTS "${SMART_DRONE_ORB_MODULE_ROOT}/CMakeLists.txt")
+    message(FATAL_ERROR
+      "SMART_DRONE_ENABLE_ORB_SLAM3=ON requires the absorbed ORB-SLAM3 sources at "
+      "${SMART_DRONE_ORB_MODULE_ROOT}.")
+  endif()
+  if(TARGET ORB_SLAM3)
+    return()
+  endif()
+
+  add_subdirectory("${SMART_DRONE_ORB_MODULE_ROOT}"
+                   "${CMAKE_BINARY_DIR}/orb_slam3/src"
+                   EXCLUDE_FROM_ALL)
 endfunction()
 
 function(configure_superpoint_native_target target_name)
@@ -273,30 +308,8 @@ function(configure_superpoint_native_target target_name)
   endif()
 endfunction()
 
-if(BUILD_SMART_DRONE)
-  set(ORB_SLAM3_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/ORB_SLAM3" CACHE PATH "ORB_SLAM3 root")
-  set(ORB_LIB_DIR "${ORB_LIB_DIR}" CACHE PATH "Directory containing libORB_SLAM3")
-  if(ORB_LIB_DIR STREQUAL "")
-    set(ORB_LIB_DIR "${ORB_SLAM3_ROOT}/lib" CACHE PATH "Directory containing libORB_SLAM3" FORCE)
-  endif()
-
-  set(G2O_LIB_DIR "${G2O_LIB_DIR}" CACHE PATH "Directory containing libg2o")
-  if(G2O_LIB_DIR STREQUAL "")
-    set(G2O_LIB_DIR "${ORB_SLAM3_ROOT}/Thirdparty/g2o/lib" CACHE PATH "Directory containing libg2o" FORCE)
-  endif()
-
-  set(DBOW2_LIB_DIR "${DBOW2_LIB_DIR}" CACHE PATH "Directory containing libDBoW2")
-  if(DBOW2_LIB_DIR STREQUAL "")
-    set(DBOW2_LIB_DIR "${ORB_SLAM3_ROOT}/Thirdparty/DBoW2/lib" CACHE PATH "Directory containing libDBoW2" FORCE)
-  endif()
-endif()
-
-if(ENABLE_OFFLINE_REPLAY)
-  set(ORB_SLAM3_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/ORB_SLAM3")
-  set(ORB_SLAM3_OUTPUT_DIR "${CMAKE_BINARY_DIR}/orb_host/lib" CACHE PATH "Host ORB_SLAM3 output directory" FORCE)
-  set(DBOW2_OUTPUT_DIR "${CMAKE_BINARY_DIR}/orb_host/lib" CACHE PATH "Host DBoW2 output directory" FORCE)
-  set(G2O_OUTPUT_DIR "${CMAKE_BINARY_DIR}/orb_host/lib" CACHE PATH "Host g2o output directory" FORCE)
-  add_subdirectory(ORB_SLAM3 EXCLUDE_FROM_ALL)
+if((BUILD_SMART_DRONE OR ENABLE_OFFLINE_REPLAY) AND SMART_DRONE_ENABLE_ORB_SLAM3)
+  add_internal_orb_slam3()
 endif()
 
 if(BUILD_SMART_DRONE)
@@ -351,8 +364,12 @@ if(BUILD_SMART_DRONE)
     target_compile_definitions(smart_drone PRIVATE SMART_DRONE_CAMERA_PROVIDER_UVC_OPENCV=1)
   endif()
   configure_common_target(smart_drone)
+  configure_sophus_target(smart_drone)
   configure_superpoint_native_target(smart_drone)
-  configure_orb_target(smart_drone)
+  if(SMART_DRONE_ENABLE_ORB_SLAM3)
+    target_compile_definitions(smart_drone PRIVATE SMART_DRONE_ENABLE_ORB_SLAM3=1)
+    configure_orb_target(smart_drone)
+  endif()
 endif()
 
 if(ENABLE_UNIT_TESTS)

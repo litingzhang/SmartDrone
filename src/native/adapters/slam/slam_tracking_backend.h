@@ -5,7 +5,7 @@
 
 #include <opencv2/core.hpp>
 
-#include "Frame.h"
+#include "adapters/slam/external_feature_types.h"
 #include "core/ports/slam_engine.h"
 
 namespace smartdrone::adapters::slam {
@@ -18,7 +18,7 @@ struct ExternalStereoTrackRequest {
     std::chrono::steady_clock::time_point totalStartTp{};
     cv::Mat leftPrepared;
     cv::Mat rightPrepared;
-    ORB_SLAM3::ExternalStereoFrameData externalData;
+    ExternalStereoObservationPacket observations;
     std::vector<cv::Point2f> leftFeaturePoints;
     std::vector<cv::Point2f> rightFeaturePoints;
     uint64_t externalHash{0};

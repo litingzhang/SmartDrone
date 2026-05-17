@@ -5,10 +5,10 @@
 #include <string>
 #include <thread>
 
-#include "System.h"
 #include "adapters/imu/icm42688_imu_provider.h"
-#include "adapters/slam/dpvo_tensorrt_engine.h"
-#include "adapters/slam/slam_engine_adapter.h"
+#include "adapters/slam/external_feature_frontend_client.h"
+#include "adapters/slam/slam_engine_control.h"
+#include "adapters/slam/slam_engine_factory.h"
 #include "adapters/slam/superpoint_lightglue_frontend_client.h"
 #include "adapters/stream/udp_image_sender.h"
 #include "adapters/telemetry/mavlink_pose_publisher.h"
@@ -49,13 +49,12 @@ class SlamSessionRuntime {
     MainRuntimeAliases m_aliases;
     bool m_monoMode{false};
     bool m_useImu{false};
-    ORB_SLAM3::System::eSensor m_orbSensor{ORB_SLAM3::System::STEREO};
     smartdrone::adapters::slam::SlamInputMode m_slamInputMode{smartdrone::adapters::slam::SlamInputMode::Stereo};
     std::string m_effectiveSettingsPath;
 
-    std::unique_ptr<ORB_SLAM3::System> m_slamSystem;
     std::unique_ptr<smartdrone::core::ports::ISlamEngine> m_slamEngine;
-    smartdrone::adapters::slam::SlamEngineAdapter *m_orbSlamEngine{nullptr};
+    smartdrone::adapters::slam::ISlamRuntimeControl *m_slamControl{nullptr};
+    smartdrone::adapters::slam::ExternalFeatureFrontendClient *m_externalFeatureFrontendClient{nullptr};
     smartdrone::adapters::slam::SuperPointLightGlueFrontendClient m_superpointFrontendClient;
     AutoSlamModeController m_autoSlamModeController{};
     StereoBodyExtrinsics m_stereoBodyExtrinsics{};

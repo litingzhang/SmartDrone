@@ -26,7 +26,7 @@ static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
 static constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
-static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 108;
+static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 110;
 
 static uint32_t NowMs32()
 {
@@ -182,7 +182,7 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
     jfloat tbcTx, jfloat tbcTy, jfloat tbcTz, jfloat tbcRollDeg, jfloat tbcPitchDeg, jfloat tbcYawDeg,
     jint orbNFeatures, jfloat orbScaleFactor, jint orbNLevels, jint orbIniThFAST, jint orbMinThFAST,
     jint featureFrontend, jint superpointTopK, jint superpointMaxPoints, jint superpointInputMaxWidth, jint superpointInputMaxHeight,
-    jint lkPerFrameAcceleration, jint orbAcceleration)
+    jint lkPerFrameAcceleration, jint orbAcceleration, jint slamBackend)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     const uint32_t seq = g_seqCounter.fetch_add(1);
@@ -225,6 +225,8 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
     WriteF32LeAt(payload, 102, static_cast<float>(superpointInputMaxHeight));
     payload[106] = 0;
     payload[107] = static_cast<uint8_t>(lkPerFrameAcceleration);
+    payload[108] = static_cast<uint8_t>(orbAcceleration);
+    payload[109] = static_cast<uint8_t>(slamBackend);
 
     const std::vector<uint8_t> frame =
         MakeFrame(1, CMD_RUNTIME_CONFIG, 0, seq, NowMs32(), payload.data(), static_cast<uint16_t>(payload.size()));

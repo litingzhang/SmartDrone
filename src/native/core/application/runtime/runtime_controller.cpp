@@ -35,6 +35,9 @@ void SyncDefaultTbcFromSettings(UnifiedConfig &config)
 
 void SyncDefaultOrbFromSettings(UnifiedConfig &config)
 {
+    if (config.app.runtime.slamBackend != SlamBackend::OrbSlam3) {
+        return;
+    }
     if (config.app.runtime.orbNFeatures > 0 && config.app.runtime.orbScaleFactor > 0.0f &&
         config.app.runtime.orbNLevels > 0 && config.app.runtime.orbIniThFAST > 0 &&
         config.app.runtime.orbMinThFAST > 0) {

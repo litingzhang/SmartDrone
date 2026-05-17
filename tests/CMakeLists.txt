@@ -1,4 +1,4 @@
-find_package(OpenCV REQUIRED COMPONENTS core imgcodecs features2d)
+find_package(OpenCV REQUIRED COMPONENTS core calib3d features2d imgcodecs imgproc video)
 find_package(Threads REQUIRED)
 find_package(Eigen3 QUIET)
 
@@ -39,13 +39,29 @@ if(ENABLE_OFFLINE_REPLAY)
     euroc/support/replay_dataset.cpp
     euroc/support/replay_slam_runner.cpp
     ../src/native/adapters/slam/dpvo_tensorrt_engine.cpp
-    ../src/native/adapters/slam/slam_engine_adapter.cpp
+    ../src/native/adapters/slam/slam_engine_factory.cpp
     ../src/native/adapters/slam/slam_mode_state.cpp
-    ../src/native/adapters/slam/slam_mode_strategy.cpp
-    ../src/native/adapters/slam/slam_tracking_backend.cpp
-    ../src/native/adapters/slam/orb_mode_strategy.cpp
-    ../src/native/adapters/slam/klt_mode_strategy.cpp
-    ../src/native/adapters/slam/superpoint_lightglue_mode_strategy.cpp
+    ../src/native/adapters/slam/klt_slam_engine.cpp
+    ../src/native/adapters/slam/klt_continuous_frontend.cpp
+    ../src/native/adapters/slam/klt_loop_closure_backend.cpp
+    ../src/native/adapters/slam/klt_mode_utils.cpp
+    ../src/native/adapters/slam/klt_per_frame_frontend.cpp
+    ../src/native/adapters/slam/klt_pnp_observation_builder.cpp
+    ../src/native/adapters/slam/klt_pose_estimator.cpp
+    ../src/native/adapters/slam/klt_track_manager.cpp
+    ../src/native/adapters/slam/klt_vpi_acceleration.cpp
+    ../src/native/adapters/slam/feature_point_tracking.cpp
+    ../src/native/adapters/slam/external_feature_frontend_runner.cpp
+    ../src/native/adapters/slam/external_descriptor_geometry.cpp
+    ../src/native/adapters/slam/external_stereo_matching.cpp
+    ../src/native/adapters/slam/external_stereo_pair_builder.cpp
+    ../src/native/adapters/slam/slam_image_utils.cpp
+    ../src/native/adapters/slam/slam_output_utils.cpp
+    ../src/native/adapters/slam/slam_pose_utils.cpp
+    ../src/native/adapters/slam/stereo_calibration.cpp
+    ../src/native/adapters/slam/stereo_frame_preprocessor.cpp
+    ../src/native/adapters/slam/stereo_geometry.cpp
+    ../src/native/adapters/slam/visual_pnp_pose_backend.cpp
     ../src/native/adapters/slam/superpoint_native_extractor.cpp
     ../src/native/adapters/slam/superpoint_lightglue_frontend_client.cpp
     ../src/native/core/application/config/app_args.cpp
@@ -57,13 +73,24 @@ if(ENABLE_OFFLINE_REPLAY)
   target_include_directories(smart_drone_offline_replay PRIVATE
     "${EUROC_TEST_ROOT}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../src/native"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../ORB_SLAM3"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../ORB_SLAM3/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../ORB_SLAM3/include/CameraModels"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../ORB_SLAM3/Thirdparty/Sophus"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../ORB_SLAM3/Thirdparty/DBoW2"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../ORB_SLAM3/Thirdparty/g2o"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/Sophus"
   )
+
+  if(SMART_DRONE_ENABLE_ORB_SLAM3)
+    target_sources(smart_drone_offline_replay PRIVATE
+      ../src/native/adapters/slam/slam_engine_adapter.cpp
+      ../src/native/adapters/slam/slam_mode_strategy.cpp
+      ../src/native/adapters/slam/slam_tracking_backend.cpp
+      ../src/native/adapters/slam/orb_mode_strategy.cpp
+      ../src/native/adapters/slam/external_feature_lightglue_mode_strategy.cpp
+      ../src/native/adapters/slam/external_stereo_feature_packet.cpp
+      ../src/native/adapters/slam/external_temporal_stereo.cpp
+      ../src/native/adapters/slam/orb_feature_utils.cpp
+      ../src/native/adapters/slam/orb_slam3_backend.cpp
+    )
+    configure_orb_target(smart_drone_offline_replay)
+    target_compile_definitions(smart_drone_offline_replay PRIVATE SMART_DRONE_ENABLE_ORB_SLAM3=1)
+  endif()
 
   if(TARGET Eigen3::Eigen)
     target_link_libraries(smart_drone_offline_replay PRIVATE Eigen3::Eigen)
@@ -113,11 +140,9 @@ if(ENABLE_OFFLINE_REPLAY)
   endif()
 
   target_link_libraries(smart_drone_offline_replay PRIVATE
-    ORB_SLAM3
     ${OpenCV_LIBS}
     Threads::Threads
   )
-
   set(EUROC_REGRESSION_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/euroc_regression")
   if(Python3_EXECUTABLE)
     set(EUROC_REGRESSION_PYTHON "${Python3_EXECUTABLE}")

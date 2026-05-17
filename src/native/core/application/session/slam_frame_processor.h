@@ -10,8 +10,8 @@
 #include <sophus/se3.hpp>
 
 #include "adapters/imu/icm42688_imu_provider.h"
-#include "adapters/slam/slam_engine_adapter.h"
-#include "adapters/slam/superpoint_lightglue_frontend_client.h"
+#include "adapters/slam/external_feature_frontend_client.h"
+#include "adapters/slam/slam_engine_control.h"
 #include "adapters/stream/udp_image_sender.h"
 #include "adapters/telemetry/mavlink_pose_publisher.h"
 #include "adapters/telemetry/px4_mavlink_gateway.h"
@@ -25,6 +25,7 @@
 #include "core/application/state/pose_postprocessor.h"
 #include "core/ports/camera_provider.h"
 #include "core/ports/slam_engine.h"
+#include "core/ports/slam_tracking_state.h"
 
 namespace smartdrone::core::application {
 
@@ -38,8 +39,8 @@ class SlamFrameProcessor {
         LivePoseState &livePose;
         Px4MavlinkGateway &mav;
         smartdrone::core::ports::ISlamEngine &slamEngine;
-        smartdrone::adapters::slam::SlamEngineAdapter *orbSlamEngine{nullptr};
-        smartdrone::adapters::slam::SuperPointLightGlueFrontendClient *superpointFrontendClient{nullptr};
+        smartdrone::adapters::slam::ISlamRuntimeControl *slamControl{nullptr};
+        smartdrone::adapters::slam::ExternalFeatureFrontendClient *externalFeatureFrontendClient{nullptr};
         smartdrone::core::ports::ICameraProvider &cameraProvider;
         smartdrone::adapters::imu::Icm42688ImuProvider &imuProvider;
         smartdrone::adapters::telemetry::MavlinkPosePublisher &posePublisher;
@@ -75,8 +76,8 @@ class SlamFrameProcessor {
         uint8_t sessionResetCounterBase{0};
         uint16_t sessionResetMapCountBase{0};
         bool lastTrackingUsable{false};
-        int lastTrackingState{ORB_SLAM3::Tracking::NO_IMAGES_YET};
-        FeatureFrontend lastAppliedFeatureFrontend{FeatureFrontend::Orb};
+        int lastTrackingState{smartdrone::core::ports::kSlamTrackingNoImagesYet};
+        FeatureFrontend lastAppliedFeatureFrontend{FeatureFrontend::LkGfttPerFrame};
         smartdrone::core::domain::SlamOperationMode requestedSlamMode{
             smartdrone::core::domain::SlamOperationMode::Mapping};
         smartdrone::core::domain::SlamOperationMode effectiveSlamMode{

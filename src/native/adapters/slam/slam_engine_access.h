@@ -6,7 +6,7 @@ namespace smartdrone::adapters::slam {
 
 class SlamEngineAccess final {
   public:
-    static ORB_SLAM3::System *System(SlamEngineAdapter &engine) { return engine.m_system.get(); }
+    static OrbSlam3Backend *OrbBackend(SlamEngineAdapter &engine) { return engine.m_orbBackend.get(); }
     static SlamModeSharedState &ModeState(SlamEngineAdapter &engine) { return *engine.m_modeState; }
     static SlamInputMode InputMode(const SlamEngineAdapter &engine) { return engine.m_inputMode; }
     static bool UseImu(const SlamEngineAdapter &engine) { return engine.m_useImu; }

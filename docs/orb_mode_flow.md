@@ -2,19 +2,19 @@
 
 ## Purpose
 
-ORB mode (`--feature-frontend orb`) is the production baseline and EuRoC accuracy reference. It keeps the visual frontend and backend inside native ORB-SLAM3: ORB extraction, stereo matching, tracking, local mapping, relocalization, and loop closure all remain in the ORB-SLAM3 system. SmartDrone code is responsible for frame acquisition, mode selection, input packaging, timing, and converting ORB-SLAM3 output into the project `SlamOutput` contract.
+ORB mode (`--slam-backend orbslam3 --feature-frontend orb`) is a legacy compatibility path and historical EuRoC accuracy reference. It is available only when SmartDrone is built with `SMART_DRONE_ENABLE_ORB_SLAM3=ON` and an external `ORB_SLAM3_ROOT`. The default production path is now the native KLT/PnP backend, with DPVO TensorRT as a backend-level alternative.
 
 ## Main Flow
 
 ```mermaid
 flowchart TD
-    A[CLI/runtime config<br/>feature_frontend=orb] --> B[ParseFeatureFrontendText<br/>FeatureFrontend::Orb]
+    A[CLI/runtime config<br/>slam_backend=orbslam3<br/>feature_frontend=orb] --> B[ParseSlamBackendText + ParseFeatureFrontendText]
     B --> C[RunOfflineReplay or SlamFrameProcessor]
     C --> D[PerceptionPipeline::AcquireNextStereoBatch]
     D --> E{Frame accepted by<br/>SLAM FPS limiter?}
     E -- no --> D
     E -- yes --> F[Build SlamInputBatch<br/>left/right gray, frame id, timestamp, optional IMU]
-    F --> G[OrbSlam3Engine::Process]
+    F --> G[SlamEngineAdapter::Process<br/>legacy ORB adapter]
     G --> H[OrbModeStrategy]
     H --> I[ORB_SLAM3::System::TrackStereo<br/>or TrackStereo with IMU]
     I --> J[ORB-SLAM3 internal pipeline<br/>ORB extract, stereo match, tracking, mapping]
@@ -29,12 +29,12 @@ flowchart TD
 
 | Layer | Code | Responsibility |
 | --- | --- | --- |
-| CLI/offline replay | `tests/euroc/offline_replay_main.cpp` | Parse `--feature-frontend orb`, create ORB-SLAM3 system, run EuRoC replay, export CSV/JSON. |
+| CLI/offline replay | `tests/euroc/offline_replay_main.cpp` | Parse `--slam-backend orbslam3 --feature-frontend orb`, create ORB-SLAM3 system when compiled, run EuRoC replay, export CSV/JSON. |
 | Replay loop | `tests/euroc/support/replay_slam_runner.cpp` | Pull stereo frames and IMU windows, call `ISlamEngine::Process`, collect per-frame timing. |
 | Live loop | `src/native/core/application/session/slam_frame_processor.cpp` | Read runtime tuning, apply frontend mode, acquire camera frames, call SLAM engine. |
 | Rate limiter | `src/native/core/application/state/perception_pipeline.cpp` | Enforce SLAM input FPS and derive stable capture/logical timestamps. |
-| Mode strategy | `src/native/adapters/slam/orbslam3_mode_strategy.cpp`, `src/native/adapters/slam/orbslam3_orb_mode_strategy.cpp` | Select `FeatureFrontend::Orb`, call ORB-SLAM3, and convert pose/telemetry to `SlamOutput`. |
-| Engine state | `src/native/adapters/slam/orbslam3_engine.cpp` | Own ORB-SLAM3 system lifetime, calibration, shared state, and runtime setters. |
+| Mode strategy | `src/native/adapters/slam/slam_mode_strategy.cpp`, `src/native/adapters/slam/orb_mode_strategy.cpp` | Select `FeatureFrontend::Orb`, call ORB-SLAM3, and convert pose/telemetry to `SlamOutput`. |
+| Engine state | `src/native/adapters/slam/slam_engine_adapter.cpp`, `src/native/adapters/slam/orb_slam3_backend.cpp` | Own ORB-SLAM3 system lifetime, calibration, shared state, and runtime setters. |
 | Output contract | `src/native/core/ports/slam_engine.h` | Defines `SlamInputBatch` and `SlamOutput`. |
 
 ## Configuration and Mode Selection
@@ -43,21 +43,22 @@ Offline replay reads:
 
 ```bash
 --feature-frontend orb
+--slam-backend orbslam3
 --sensor-mode stereo
 --settings config/euroc/stereo_orb_official.yaml
 --vocab /home/nvidia/ORBvoc.txt
 ```
 
-`ParseFeatureFrontendText(...)` maps `orb` to `FeatureFrontend::Orb`. `RunOfflineReplay(...)` then constructs:
+`ParseSlamBackendText(...)` maps `orbslam3` to `SlamBackend::OrbSlam3`, and `ParseFeatureFrontendText(...)` maps `orb` to `FeatureFrontend::Orb`. `RunOfflineReplay(...)` then constructs the legacy ORB engine only when the target was compiled with ORB support:
 
 ```cpp
 auto orbSystem = std::make_unique<ORB_SLAM3::System>(opts.vocab, opts.settings, sensor, false);
-OrbSlam3Engine slamEngine(std::move(orbSystem), ResolveOrbInputMode(opts.sensorMode),
-                          UseImu(opts.sensorMode), opts.settings);
+SlamEngineAdapter slamEngine(std::move(orbSystem), ResolveSlamInputMode(opts.sensorMode),
+                             UseImu(opts.sensorMode), opts.settings);
 slamEngine.SetFeatureFrontend(opts.featureFrontend);
 ```
 
-Live runtime follows the same frontend enum path. `SlamFrameProcessor` reads `m_ctx.tuning.featureFrontend`, maps `Reserved` to ORB, and calls `m_ctx.slamEngine.SetFeatureFrontend(effectiveFrontend)` every frame so runtime changes take effect safely.
+Live runtime follows the same backend/frontend enum path. `SlamFrameProcessor` reads `m_ctx.tuning.featureFrontend` and applies it through the generic `ISlamRuntimeControl` interface when the selected backend supports runtime frontend switching.
 
 ## Input Pipeline
 
@@ -67,7 +68,7 @@ sequenceDiagram
     participant Pipe as PerceptionPipeline
     participant Cam as CameraProvider
     participant IMU as ImuProvider
-    participant SLAM as OrbSlam3Engine
+    participant SLAM as SlamEngineAdapter
 
     Runner->>Pipe: AcquireNextStereoBatch(camera, slamInputFps, timeout)
     Pipe->>Cam: GrabStereo(timeout, preferLatest, minTimestampNs)
@@ -90,10 +91,10 @@ Important implementation details:
 
 ## ORB Strategy Dispatch
 
-`OrbSlam3Engine::Process(...)` delegates mode selection to `SlamModeStrategy`. `CreateSlamModeStrategy(...)` maps `FeatureFrontend::Orb` to `OrbModeStrategy`, and that strategy owns the ORB backend execution:
+`SlamEngineAdapter::Process(...)` delegates mode selection to `SlamModeStrategy`. `CreateSlamModeStrategy(...)` maps `FeatureFrontend::Orb` to `OrbModeStrategy`, and that strategy owns the ORB backend execution:
 
 ```cpp
-return ProcessOrbSlamBackend(engine, input, extractFeatures, extractPointCloud, false);
+return RunSlamTrackingBackend(engine, input, extractFeatures, extractPointCloud, nullptr);
 ```
 
 The ORB mode entry point disables external SP+LG feature injection and executes the native ORB-SLAM3 path:
@@ -179,7 +180,7 @@ ORB mode is instrumented at two levels:
 | `replay_acquire_ms` | `ReplaySlamRunner` | Time to acquire the next accepted stereo batch. |
 | `replay_imu_ms` | `ReplaySlamRunner` | Time to collect/convert IMU samples. Usually zero for `--stereo-only`. |
 | `slam_total_ms` | `ReplaySlamRunner` | Full `ISlamEngine::Process(...)` call. |
-| `orb_track_ms` | `OrbSlam3Engine::Process(...)` | Wall time around ORB-SLAM3 `TrackStereo(...)`. |
+| `orb_track_ms` | `OrbSlam3Backend::Track(...)` | Wall time around ORB-SLAM3 `TrackStereo(...)`. |
 | `orb_extract_ms` | ORB-SLAM3 current frame | ORB extraction time. |
 | `orb_stereo_ms` | ORB-SLAM3 current frame | Stereo matching time. |
 
@@ -211,4 +212,4 @@ Summary:
 
 ## Engineering Interpretation
 
-ORB mode is the cleanest reference path: acquisition and rate limiting are SmartDrone responsibilities, but pose estimation is native ORB-SLAM3. It is the right baseline for accuracy and for detecting regressions in calibration, timestamp handling, ORB-SLAM3 integration, or trajectory export.
+ORB mode is now a legacy reference path: acquisition and rate limiting are SmartDrone responsibilities, but pose estimation is native ORB-SLAM3 when the optional external backend is compiled in. It remains useful for archived accuracy comparisons and for detecting regressions in calibration, timestamp handling, ORB-SLAM3 integration, or trajectory export.

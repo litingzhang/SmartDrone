@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <thread>
 
@@ -19,6 +20,20 @@ namespace {
 
 constexpr auto kHeartbeatPeriod = std::chrono::milliseconds(500);
 constexpr auto kHeartbeatTimeout = std::chrono::seconds(3);
+
+int EnvIntValueClamped(const char *name, int fallback, int minValue, int maxValue)
+{
+    const char *value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return fallback;
+    }
+    char *end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    if (end == value) {
+        return fallback;
+    }
+    return std::clamp(static_cast<int>(parsed), minValue, maxValue);
+}
 
 SensorMode ParseRuntimeSensorMode(uint8_t value)
 {
@@ -38,17 +53,20 @@ SensorMode ParseRuntimeSensorMode(uint8_t value)
 FeatureFrontend ParseRuntimeFeatureFrontend(uint8_t value)
 {
     switch (value) {
+    case RUNTIME_FEATURE_FRONTEND_XFEAT_LIGHTGLUE:
+        return FeatureFrontend::XFeatLightGlue;
     case RUNTIME_FEATURE_FRONTEND_SUPERPOINT_LIGHTGLUE:
         return FeatureFrontend::SuperPointLightGlue;
     case RUNTIME_FEATURE_FRONTEND_LK_GFTT_PER_FRAME:
         return FeatureFrontend::LkGfttPerFrame;
     case RUNTIME_FEATURE_FRONTEND_LK:
         return FeatureFrontend::LK;
+    case RUNTIME_FEATURE_FRONTEND_ORB:
+        return FeatureFrontend::Orb;
     case RUNTIME_FEATURE_FRONTEND_RESERVED_SUPERPOINT:
     case RUNTIME_FEATURE_FRONTEND_RESERVED_LEGACY:
-    case RUNTIME_FEATURE_FRONTEND_ORB:
     default:
-        return FeatureFrontend::Orb;
+        return FeatureFrontend::LkGfttPerFrame;
     }
 }
 
@@ -73,6 +91,24 @@ std::string ParseRuntimeOrbAcceleration(uint8_t value)
     case RUNTIME_ORB_ACCEL_CPU:
     default:
         return "cpu";
+    }
+}
+
+SlamBackend ParseRuntimeSlamBackend(uint8_t value)
+{
+    switch (value) {
+    case RUNTIME_SLAM_BACKEND_KLT:
+        return SlamBackend::Klt;
+    case RUNTIME_SLAM_BACKEND_DPVO_TENSORRT:
+        return SlamBackend::DpvoTensorRt;
+    case RUNTIME_SLAM_BACKEND_ORBSLAM3:
+#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
+        return SlamBackend::OrbSlam3;
+#else
+        return SlamBackend::Klt;
+#endif
+    default:
+        return SlamBackend::Klt;
     }
 }
 
@@ -121,7 +157,8 @@ RouteResult HandleRuntimeModeFrame(const TlvFrame &frame, UnifiedRuntimeControll
 RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer, UnifiedRuntimeController &controller,
                                      const PeerToIpStringFn &peerToIpString)
 {
-    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V13 &&
+    if (frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V14 &&
+        frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V13 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V12 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V11 &&
         frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V10 && frame.len != RUNTIME_CONFIG_PAYLOAD_LEN_V9 &&
@@ -144,6 +181,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     r.autoExposureEnabled = !currentCfg.app.camera.aeDisable;
     r.slamInputFps = currentCfg.app.runtime.slamInputFps;
     r.slamOperationMode = currentCfg.app.runtime.slamOperationMode;
+    r.slamBackend = currentCfg.app.runtime.slamBackend;
     r.featureFrontend = currentCfg.app.runtime.featureFrontend;
     r.useCustomTbc = currentCfg.app.runtime.useCustomTbc;
     r.tbcTx = currentCfg.app.runtime.tbcTx;
@@ -229,6 +267,9 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V13) {
         r.orbAcceleration = ParseRuntimeOrbAcceleration(p[RUNTIME_CONFIG_ORB_ACCEL_OFFSET]);
     }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V14) {
+        r.slamBackend = ParseRuntimeSlamBackend(p[RUNTIME_CONFIG_SLAM_BACKEND_OFFSET]);
+    }
     const char *ipChars = reinterpret_cast<const char *>(&p[ipOffset]);
     size_t ipLen = 0;
     while (ipLen < RUNTIME_CONFIG_IP_LEN && ipChars[ipLen] != '\0') {
@@ -248,6 +289,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     update.values[std::string(ConfigRegistry::kCameraAutoExposure)] = r.autoExposureEnabled;
     update.values[std::string(ConfigRegistry::kCameraPairWindowMs)] = static_cast<int64_t>(r.pairMs);
     update.values[std::string(ConfigRegistry::kSlamInputFps)] = static_cast<int64_t>(r.slamInputFps);
+    update.values[std::string(ConfigRegistry::kSlamBackend)] = std::string(ToSlamBackendText(r.slamBackend));
     update.values[std::string(ConfigRegistry::kSlamFeatureFrontend)] = std::string(ToFeatureFrontendText(r.featureFrontend));
     update.values[std::string(ConfigRegistry::kSlamOperationMode)] =
         std::string(smartdrone::core::domain::ToString(r.slamOperationMode));
@@ -286,6 +328,7 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     }
     return {ACK_OK, result.message + " udp=" + r.udpIp +
                         " settings=" + std::string(DefaultSettingsForSensorMode(r.sensorMode)) +
+                        " backend=" + std::string(ToSlamBackendText(r.slamBackend)) +
                         " frontend=" + std::string(ToFeatureFrontendText(r.featureFrontend)) +
                         " slam_mode=" + std::string(smartdrone::core::domain::ToString(r.slamOperationMode)) +
                         " img=" + (r.sendImage ? "on" : "off") + " feat=" + (r.sendFeature ? "on" : "off") +
@@ -405,6 +448,8 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks &hooks, UnifiedRuntimeCo
             CommandPeerGate peerGate;
             uint8_t rx[2048]{};
             auto lastStateTx = std::chrono::steady_clock::now();
+            const int statePeriodMs =
+                EnvIntValueClamped("SMART_DRONE_UDP_STATE_PERIOD_MS", 100, 20, 1000);
             auto lastHeartbeatTx = std::chrono::steady_clock::time_point{};
             auto lastHeartbeatRx = std::chrono::steady_clock::time_point{};
             auto lastRejectedPeerLog = std::chrono::steady_clock::time_point{};
@@ -491,10 +536,10 @@ std::thread StartUdpCommandThread(int port, Px4UdpHooks &hooks, UnifiedRuntimeCo
                 } else if (!vehicleArmed) {
                     heartbeatLandTriggered = false;
                 }
-                if (now - lastStateTx >= std::chrono::milliseconds(100)) {
+                if (now - lastStateTx >= std::chrono::milliseconds(statePeriodMs)) {
                     lastStateTx = now;
                     LivePoseState::Snapshot snap{};
-                    if (livePose.ConsumeSnapshot(snap) && snap.hasPeer) {
+                    if (livePose.ReadSnapshot(snap) && snap.hasPeer) {
                         const UnifiedConfig currentCfg = controller.CurrentConfig();
                         std::vector<uint8_t> payload;
                         payload.reserve(STATE_POSE_PAYLOAD_LEN);

@@ -72,7 +72,7 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
         const auto imuStart = std::chrono::steady_clock::now();
         if (m_cfg.useImu && m_lastFrameNs != 0) {
             imuWindow = m_imu.PopWindow(m_lastFrameNs, batch.captureTimestampNs);
-            input.imu = ToOrbImuPoints(imuWindow);
+            input.imu = imuWindow;
         }
         const auto imuEnd = std::chrono::steady_clock::now();
         m_lastFrameNs = batch.captureTimestampNs;
@@ -158,19 +158,6 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
     }
     m_camera.Stop();
     return outputs;
-}
-
-std::vector<ORB_SLAM3::IMU::Point> ReplaySlamRunner::ToOrbImuPoints(
-    const std::vector<smartdrone::core::ports::ImuReading> &readings)
-{
-    std::vector<ORB_SLAM3::IMU::Point> out;
-    out.reserve(readings.size());
-    for (const auto &reading : readings) {
-        out.emplace_back(cv::Point3f(reading.ax, reading.ay, reading.az),
-                         cv::Point3f(reading.gx, reading.gy, reading.gz),
-                         static_cast<double>(reading.timestampNs) * 1e-9);
-    }
-    return out;
 }
 
 } // namespace smartdrone::tests

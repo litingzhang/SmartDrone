@@ -19,13 +19,13 @@ int ClampSlamInputFps(int requestedFps, int cameraFps)
     return std::clamp(requestedFps, 1, cameraFps);
 }
 
-bool IsFiniteImuPoint(const ORB_SLAM3::IMU::Point &p)
+bool IsFiniteImuReading(const smartdrone::core::ports::ImuReading &reading)
 {
-    return std::isfinite(p.t) && std::isfinite(p.a.x()) && std::isfinite(p.a.y()) && std::isfinite(p.a.z()) &&
-           std::isfinite(p.w.x()) && std::isfinite(p.w.y()) && std::isfinite(p.w.z());
+    return std::isfinite(reading.ax) && std::isfinite(reading.ay) && std::isfinite(reading.az) &&
+           std::isfinite(reading.gx) && std::isfinite(reading.gy) && std::isfinite(reading.gz);
 }
 
-bool SanitizeImuWindow(std::vector<ORB_SLAM3::IMU::Point> &vImu, double prevFrameTime, double frameTime,
+bool SanitizeImuWindow(std::vector<smartdrone::core::ports::ImuReading> &vImu, double prevFrameTime, double frameTime,
                        double expectedImuDtSec, ImuWindowValidation &stats)
 {
     constexpr float kMaxAccelNormMps2 = 200.0f;
@@ -35,26 +35,27 @@ bool SanitizeImuWindow(std::vector<ORB_SLAM3::IMU::Point> &vImu, double prevFram
     stats = ImuWindowValidation{};
     stats.inputCount = vImu.size();
 
-    std::vector<ORB_SLAM3::IMU::Point> filtered;
+    std::vector<smartdrone::core::ports::ImuReading> filtered;
     filtered.reserve(vImu.size());
 
     double lastT = 0.0;
     bool haveLastT = false;
     for (const auto &sample : vImu) {
-        if (!IsFiniteImuPoint(sample)) {
+        if (!IsFiniteImuReading(sample)) {
             ++stats.droppedNonFinite;
             continue;
         }
 
-        const float accelNorm = sample.a.norm();
-        const float gyroNorm = sample.w.norm();
+        const float accelNorm = std::sqrt(sample.ax * sample.ax + sample.ay * sample.ay + sample.az * sample.az);
+        const float gyroNorm = std::sqrt(sample.gx * sample.gx + sample.gy * sample.gy + sample.gz * sample.gz);
         if (!(accelNorm <= kMaxAccelNormMps2) || !(gyroNorm <= kMaxGyroNormRadps)) {
             ++stats.droppedOutOfRange;
             continue;
         }
 
+        const double sampleTime = static_cast<double>(sample.timestampNs) * 1e-9;
         if (haveLastT) {
-            const double dt = sample.t - lastT;
+            const double dt = sampleTime - lastT;
             if (!(dt > kMinSampleDtSec)) {
                 ++stats.droppedNonMonotonic;
                 continue;
@@ -63,7 +64,7 @@ bool SanitizeImuWindow(std::vector<ORB_SLAM3::IMU::Point> &vImu, double prevFram
         }
 
         filtered.push_back(sample);
-        lastT = sample.t;
+        lastT = sampleTime;
         haveLastT = true;
     }
 
@@ -75,8 +76,8 @@ bool SanitizeImuWindow(std::vector<ORB_SLAM3::IMU::Point> &vImu, double prevFram
         return false;
     }
 
-    stats.firstLeadSec = vImu.front().t - prevFrameTime;
-    stats.tailLagSec = frameTime - vImu.back().t;
+    stats.firstLeadSec = static_cast<double>(vImu.front().timestampNs) * 1e-9 - prevFrameTime;
+    stats.tailLagSec = frameTime - static_cast<double>(vImu.back().timestampNs) * 1e-9;
 
     const double boundarySlackSec = std::max(6.0 * expectedImuDtSec, 0.010);
     const double maxGapSec = std::max(12.0 * expectedImuDtSec, 0.030);
@@ -276,15 +277,20 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
                   << " patches=" << app.runtime.dpvoPatchesPerFrame
                   << " opt_window=" << app.runtime.dpvoOptimizationWindow << "\n";
     }
-    std::cerr << "superpoint_trt repo=" << app.runtime.superpointRepo
-              << " device=" << app.runtime.superpointDevice
-              << " top_k=" << app.runtime.superpointTopK
-              << " max_points=" << app.runtime.superpointMaxPoints
-              << " input_max=" << app.runtime.superpointInputMaxWidth << "x" << app.runtime.superpointInputMaxHeight << "\n";
-    std::cerr << "orb nFeatures=" << app.runtime.orbNFeatures << " scaleFactor=" << app.runtime.orbScaleFactor
-              << " nLevels=" << app.runtime.orbNLevels << " iniThFAST=" << app.runtime.orbIniThFAST
-              << " minThFAST=" << app.runtime.orbMinThFAST
-              << " accel=" << app.runtime.orbAcceleration << "\n";
+    if (IsExternalFeatureLightGlueFrontend(a.featureFrontend)) {
+        std::cerr << "superpoint_trt repo=" << app.runtime.superpointRepo
+                  << " device=" << app.runtime.superpointDevice
+                  << " top_k=" << app.runtime.superpointTopK
+                  << " max_points=" << app.runtime.superpointMaxPoints
+                  << " input_max=" << app.runtime.superpointInputMaxWidth << "x"
+                  << app.runtime.superpointInputMaxHeight << "\n";
+    }
+    if (a.slamBackend == SlamBackend::OrbSlam3) {
+        std::cerr << "orb nFeatures=" << app.runtime.orbNFeatures << " scaleFactor=" << app.runtime.orbScaleFactor
+                  << " nLevels=" << app.runtime.orbNLevels << " iniThFAST=" << app.runtime.orbIniThFAST
+                  << " minThFAST=" << app.runtime.orbMinThFAST
+                  << " accel=" << app.runtime.orbAcceleration << "\n";
+    }
     std::cerr << "lk seed=gftt"
               << " loop_closure=" << (app.runtime.lkLoopClosure ? "Y" : "N")
               << " scale=" << app.runtime.lkLoopScale << " relax=" << app.runtime.lkLoopRelaxation
@@ -296,7 +302,10 @@ void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &a, Contr
               << " cmdPort=" << a.cmdPort << "\n";
     std::cerr << "stream img=" << (a.sendImage ? "Y" : "N") << " feat=" << (a.sendFeature ? "Y" : "N")
               << " map=" << (a.sendMap ? "Y" : "N") << "\n";
-    std::cerr << "vocab=" << app.vocab << "\nsettings=" << app.settings << "\n";
+    if (a.slamBackend == SlamBackend::OrbSlam3) {
+        std::cerr << "vocab=" << app.vocab << "\n";
+    }
+    std::cerr << "settings=" << app.settings << "\n";
 }
 
 } // namespace smartdrone::core::application

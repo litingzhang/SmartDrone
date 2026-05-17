@@ -5,7 +5,6 @@
 #include <functional>
 #include <vector>
 
-#include "ImuTypes.h"
 #include "core/application/state/frame_timing_tracker.h"
 #include "core/application/state/perception_pipeline.h"
 #include "core/ports/imu_provider.h"
@@ -102,9 +101,6 @@ class ReplaySlamRunner {
                                       const ReplayPoseSampleCallback &sampleCallback = {});
 
   private:
-    static std::vector<ORB_SLAM3::IMU::Point> ToOrbImuPoints(
-        const std::vector<smartdrone::core::ports::ImuReading> &readings);
-
     smartdrone::core::ports::ICameraProvider &m_camera;
     smartdrone::core::ports::IImuProvider &m_imu;
     smartdrone::core::ports::ISlamEngine &m_slamEngine;
