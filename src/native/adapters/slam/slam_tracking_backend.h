@@ -5,33 +5,34 @@
 
 #include <opencv2/core.hpp>
 
-#include "adapters/slam/external_feature_types.h"
 #include "core/ports/slam_engine.h"
+#include "core/ports/visual_feature_data.h"
 
 namespace smartdrone::adapters::slam {
 
 class SlamEngineAdapter;
 
-struct ExternalStereoTrackRequest {
-    bool enabled{false};
-    bool recordTotalMs{false};
-    std::chrono::steady_clock::time_point totalStartTp{};
-    cv::Mat leftPrepared;
-    cv::Mat rightPrepared;
-    ExternalStereoObservationPacket observations;
-    std::vector<cv::Point2f> leftFeaturePoints;
-    std::vector<cv::Point2f> rightFeaturePoints;
-    uint64_t externalHash{0};
-    double inputPrepareMs{0.0};
-    double frontendMs{0.0};
-    double stereoPairMs{0.0};
-    double externalPackMs{0.0};
-    double monoAugmentMs{0.0};
+struct StereoFeatureTrackRequest {
+  bool enabled{false};
+  bool recordTotalMs{false};
+  std::chrono::steady_clock::time_point totalStartTp{};
+  cv::Mat leftPrepared;
+  cv::Mat rightPrepared;
+  core::ports::StereoFeatureObservationPacket observations;
+  std::vector<cv::Point2f> leftFeaturePoints;
+  std::vector<cv::Point2f> rightFeaturePoints;
+  uint64_t observationHash{0};
+  double inputPrepareMs{0.0};
+  double frontendMs{0.0};
+  double stereoPairMs{0.0};
+  double featurePackMs{0.0};
+  double monoAugmentMs{0.0};
 };
 
-core::ports::SlamOutput RunSlamTrackingBackend(SlamEngineAdapter &engine,
-                                                  const core::ports::SlamInputBatch &input,
-                                                  bool extractFeatures, bool extractPointCloud,
-                                                  const ExternalStereoTrackRequest *externalRequest);
+core::ports::SlamOutput
+RunSlamTrackingBackend(SlamEngineAdapter &engine,
+                       const core::ports::SlamInputBatch &input,
+                       bool extractFeatures, bool extractPointCloud,
+                       const StereoFeatureTrackRequest *stereoFeatureRequest);
 
 } // namespace smartdrone::adapters::slam

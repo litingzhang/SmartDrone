@@ -4,37 +4,36 @@
 
 #include <opencv2/core.hpp>
 
+#include "core/ports/stereo_processing.h"
+
 namespace smartdrone::adapters::slam {
 
-struct StereoCameraIntrinsics {
-    float fx{0.0f};
-    float fy{0.0f};
-    float cx{0.0f};
-    float cy{0.0f};
-    cv::Mat K;
-    cv::Mat D;
+using StereoCameraIntrinsics = core::ports::StereoCameraIntrinsics;
+using StereoRectification = core::ports::StereoRectification;
+using StereoCalibration = core::ports::StereoCalibration;
+
+class DefaultStereoCalibrationLoader final
+    : public core::ports::IStereoCalibrationLoader {
+public:
+  bool LoadFromSettings(const std::string &settingsPath,
+                        StereoCalibration &calibration) const override;
 };
 
-struct StereoRectification {
-    cv::Size imageSize{};
-    cv::Mat leftMapX;
-    cv::Mat leftMapY;
-    cv::Mat rightMapX;
-    cv::Mat rightMapY;
+class DefaultStereoRectifier final : public core::ports::IStereoRectifier {
+public:
+  bool EnsureRectifier(StereoCalibration &calibration,
+                       const cv::Size &inputSize) const override;
+  bool ApplyRectification(StereoCalibration &calibration,
+                          const cv::Mat &leftGray, const cv::Mat &rightGray,
+                          cv::Mat &leftRect, cv::Mat &rightRect) const override;
 };
 
-struct StereoCalibration {
-    StereoCameraIntrinsics left;
-    StereoCameraIntrinsics right;
-    cv::Mat T_c1_c2;
-    float baselineMeters{0.0f};
-    bool loaded{false};
-    mutable StereoRectification rectification;
-};
-
-bool LoadStereoCalibrationFromSettings(const std::string &settingsPath, StereoCalibration &calibration);
-bool EnsureStereoRectifier(StereoCalibration &calibration, const cv::Size &inputSize);
-bool ApplyStereoRectification(StereoCalibration &calibration, const cv::Mat &leftGray,
-                              const cv::Mat &rightGray, cv::Mat &leftRect, cv::Mat &rightRect);
+bool LoadStereoCalibrationFromSettings(const std::string &settingsPath,
+                                       StereoCalibration &calibration);
+bool EnsureStereoRectifier(StereoCalibration &calibration,
+                           const cv::Size &inputSize);
+bool ApplyStereoRectification(StereoCalibration &calibration,
+                              const cv::Mat &leftGray, const cv::Mat &rightGray,
+                              cv::Mat &leftRect, cv::Mat &rightRect);
 
 } // namespace smartdrone::adapters::slam

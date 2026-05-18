@@ -21,8 +21,8 @@ class KltSlamEngine final : public core::ports::ISlamEngine, public ISlamRuntime
 
     void SetOperationMode(core::domain::SlamOperationMode mode) override;
     void SetFeatureFrontend(FeatureFrontend frontend) override;
-    void SetExternalFeatureFrontendClient(ExternalFeatureFrontendClient *client) override;
-    void SetExternalFeatureInputSizeLimit(int maxWidth, int maxHeight) override;
+    void SetVisualFeatureFrontend(core::ports::IVisualFeatureFrontend *frontend) override;
+    void SetVisualFeatureInputSizeLimit(int maxWidth, int maxHeight) override;
     void SetStereoVoLoopClosure(bool enabled, float scale = 1.20f, float relaxation = 1.40f) override;
     void SetStereoVoPerFrameAcceleration(std::string acceleration) override;
 

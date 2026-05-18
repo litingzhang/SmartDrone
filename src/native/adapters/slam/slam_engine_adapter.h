@@ -13,7 +13,6 @@
 
 namespace smartdrone::adapters::slam {
 
-class OrbSlam3Backend;
 class SlamEngineAccess;
 class SlamModeStrategy;
 
@@ -23,15 +22,15 @@ namespace smartdrone::adapters::slam {
 
 class SlamEngineAdapter final : public core::ports::ISlamEngine, public ISlamRuntimeControl {
   public:
-    SlamEngineAdapter(std::unique_ptr<OrbSlam3Backend> backend, SlamInputMode inputMode, bool useImu,
+    SlamEngineAdapter(std::unique_ptr<core::ports::ISlamTrackingBackend> backend, SlamInputMode inputMode, bool useImu,
                       std::string settingsPath = {});
     ~SlamEngineAdapter() override;
 
     bool Start() override;
     void SetOperationMode(core::domain::SlamOperationMode mode) override;
     void SetFeatureFrontend(FeatureFrontend frontend) override;
-    void SetExternalFeatureFrontendClient(ExternalFeatureFrontendClient *client) override;
-    void SetExternalFeatureInputSizeLimit(int maxWidth, int maxHeight) override;
+    void SetVisualFeatureFrontend(core::ports::IVisualFeatureFrontend *frontend) override;
+    void SetVisualFeatureInputSizeLimit(int maxWidth, int maxHeight) override;
     void SetStereoVoLoopClosure(bool enabled, float scale = 1.20f, float relaxation = 1.40f) override;
     void SetStereoVoPerFrameAcceleration(std::string acceleration) override;
     void Stop() override;
@@ -49,7 +48,7 @@ class SlamEngineAdapter final : public core::ports::ISlamEngine, public ISlamRun
     void ResetRealtimeOutputAlignment();
     void ResetOutputSmoother();
 
-    std::unique_ptr<OrbSlam3Backend> m_orbBackend;
+    std::unique_ptr<core::ports::ISlamTrackingBackend> m_trackingBackend;
     std::unique_ptr<SlamModeSharedState> m_modeState;
     SlamInputMode m_inputMode{SlamInputMode::Stereo};
     bool m_useImu{false};

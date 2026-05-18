@@ -2,7 +2,7 @@
 
 ## Purpose
 
-ORB mode (`--slam-backend orbslam3 --feature-frontend orb`) is a legacy compatibility path and historical EuRoC accuracy reference. It is available only when SmartDrone is built with `SMART_DRONE_ENABLE_ORB_SLAM3=ON` and an external `ORB_SLAM3_ROOT`. The default production path is now the native KLT/PnP backend, with DPVO TensorRT as a backend-level alternative.
+ORB mode (`--slam-backend orbslam3 --feature-frontend orb`) uses the absorbed ORB-SLAM3 backend and remains a historical EuRoC accuracy reference. It is available only when SmartDrone is built with `SMART_DRONE_ENABLE_ORB_SLAM3=ON`. The default production path is now the native KLT/PnP backend, with DPVO TensorRT as a backend-level alternative.
 
 ## Main Flow
 
@@ -14,7 +14,7 @@ flowchart TD
     D --> E{Frame accepted by<br/>SLAM FPS limiter?}
     E -- no --> D
     E -- yes --> F[Build SlamInputBatch<br/>left/right gray, frame id, timestamp, optional IMU]
-    F --> G[SlamEngineAdapter::Process<br/>legacy ORB adapter]
+    F --> G[SlamEngineAdapter::Process<br/>ORB-SLAM3 backend]
     G --> H[OrbModeStrategy]
     H --> I[ORB_SLAM3::System::TrackStereo<br/>or TrackStereo with IMU]
     I --> J[ORB-SLAM3 internal pipeline<br/>ORB extract, stereo match, tracking, mapping]
@@ -49,7 +49,7 @@ Offline replay reads:
 --vocab /home/nvidia/ORBvoc.txt
 ```
 
-`ParseSlamBackendText(...)` maps `orbslam3` to `SlamBackend::OrbSlam3`, and `ParseFeatureFrontendText(...)` maps `orb` to `FeatureFrontend::Orb`. `RunOfflineReplay(...)` then constructs the legacy ORB engine only when the target was compiled with ORB support:
+`ParseSlamBackendText(...)` maps `orbslam3` to `SlamBackend::OrbSlam3`, and `ParseFeatureFrontendText(...)` maps `orb` to `FeatureFrontend::Orb`. `RunOfflineReplay(...)` then constructs the ORB engine only when the target was compiled with ORB support:
 
 ```cpp
 auto orbSystem = std::make_unique<ORB_SLAM3::System>(opts.vocab, opts.settings, sensor, false);
@@ -212,4 +212,4 @@ Summary:
 
 ## Engineering Interpretation
 
-ORB mode is now a legacy reference path: acquisition and rate limiting are SmartDrone responsibilities, but pose estimation is native ORB-SLAM3 when the optional external backend is compiled in. It remains useful for archived accuracy comparisons and for detecting regressions in calibration, timestamp handling, ORB-SLAM3 integration, or trajectory export.
+ORB mode is now a legacy reference path: acquisition and rate limiting are SmartDrone responsibilities, but pose estimation is native ORB-SLAM3 when the optional internal backend is compiled in. It remains useful for archived accuracy comparisons and for detecting regressions in calibration, timestamp handling, ORB-SLAM3 integration, or trajectory export.

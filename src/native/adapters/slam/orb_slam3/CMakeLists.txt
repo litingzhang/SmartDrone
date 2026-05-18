@@ -6,6 +6,7 @@ find_package(Boost REQUIRED COMPONENTS serialization)
 find_package(Eigen3 3.1.0 REQUIRED)
 
 set(SMART_DRONE_ORB_MODULE_INCLUDE_DIRS
+  "${SMART_DRONE_REPO_ROOT}/src/native"
   "${SMART_DRONE_ORB_MODULE_ROOT}"
   "${SMART_DRONE_ORB_MODULE_ROOT}/camera"
   "${SMART_DRONE_ORB_MODULE_ROOT}/camera/CameraModels"
@@ -113,8 +114,10 @@ set_target_properties(g2o PROPERTIES
 )
 
 add_library(orb3_common STATIC
+  "${SMART_DRONE_REPO_ROOT}/src/native/adapters/slam/orb_vocabulary.cpp"
   common/Converter.cc
   common/ImuTypes.cc
+  common/Verbose.cc
   config/Config.cc
   config/Settings.cc
 )
@@ -129,6 +132,7 @@ configure_orb_component(orb3_camera)
 target_link_libraries(orb3_camera PUBLIC orb3_common)
 
 add_library(orb3_features STATIC
+  features/FeatureMatcherBackend.cc
   features/ORBextractor.cc
   features/ORBmatcher.cc
 )
@@ -147,10 +151,12 @@ configure_orb_component(orb3_geometry)
 target_link_libraries(orb3_geometry PUBLIC orb3_common orb3_camera)
 
 add_library(orb3_map STATIC
+  "${SMART_DRONE_REPO_ROOT}/src/native/adapters/slam/visual_frame_observation_loader.cpp"
   map/MapPoint.cc
   map/Atlas.cc
   map/Map.cc
   frame/Frame.cc
+  frame/FrameFactory.cc
   frame/KeyFrame.cc
 )
 configure_orb_component(orb3_map)
@@ -159,6 +165,7 @@ target_link_libraries(orb3_map PUBLIC orb3_common orb3_camera orb3_features orb3
 add_library(orb3_optimization STATIC
   graph_optimization/G2oTypes.cc
   graph_optimization/OptimizableTypes.cpp
+  graph_optimization/OptimizationBackend.cc
   graph_optimization/Optimizer.cc
   graph_optimization/Sim3Solver.cc
   graph_optimization/MLPnPsolver.cpp
@@ -168,13 +175,18 @@ target_link_libraries(orb3_optimization PUBLIC orb3_common orb3_map g2o)
 
 add_library(orb3_place_recognition STATIC
   place_recognition/KeyFrameDatabase.cc
+  place_recognition/PlaceRecognitionBackend.cc
 )
 configure_orb_component(orb3_place_recognition)
 target_link_libraries(orb3_place_recognition PUBLIC orb3_common orb3_features orb3_map DBoW2)
 
 add_library(orb3_runtime STATIC
+  tracking/TrackedVisualDataExtractor.cc
+  tracking/TrackingBackend.cc
   tracking/Tracking.cc
+  loop_closing/LoopClosingBackend.cc
   mapping/LocalMapping.cc
+  mapping/LocalMappingBackend.cc
   loop_closing/LoopClosing.cc
 )
 configure_orb_component(orb3_runtime)

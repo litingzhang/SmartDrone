@@ -22,12 +22,11 @@
 
 #include "KeyFrame.h"
 #include "Atlas.h"
-#include "LoopClosing.h"
-#include "Tracking.h"
 #include "KeyFrameDatabase.h"
 #include "Settings.h"
 
 #include <mutex>
+#include <memory>
 
 
 namespace ORB_SLAM3
@@ -37,16 +36,21 @@ class System;
 class Tracking;
 class LoopClosing;
 class Atlas;
+class IOrbLoopClosingBackend;
+class IOrbOptimizationBackend;
+class IOrbTrackingBackend;
 
 class LocalMapping
 {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     LocalMapping(System* pSys, Atlas* pAtlas, const float bMonocular, bool bInertial, const string &_strSeqName=std::string());
+    ~LocalMapping();
 
     void SetLoopCloser(LoopClosing* pLoopCloser);
 
     void SetTracker(Tracking* pTracker);
+    void SetTrackingBackend(IOrbTrackingBackend* trackingBackend);
 
     // Main function
     void Run();
@@ -158,8 +162,9 @@ protected:
 
     Atlas* mpAtlas;
 
-    LoopClosing* mpLoopCloser;
-    Tracking* mpTracker;
+    std::unique_ptr<IOrbLoopClosingBackend> mpLoopClosingBackend;
+    IOrbTrackingBackend* mpTrackingBackend{nullptr};
+    std::unique_ptr<IOrbTrackingBackend> mpOwnedTrackingBackend;
 
     std::list<KeyFrame*> mlNewKeyFrames;
 
@@ -183,6 +188,7 @@ protected:
     void ScaleRefinement();
 
     bool bInitializing;
+    std::unique_ptr<IOrbOptimizationBackend> mpOptimizationBackend;
 
     Eigen::MatrixXd infoInertial;
     int mNumLM;

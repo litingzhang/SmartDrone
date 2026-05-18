@@ -1,4 +1,4 @@
-# MH04 SP+LG Optimization Attempts
+#MH04 SP + LG Optimization Attempts
 
 Date: 2026-05-14
 
@@ -64,9 +64,16 @@ SMART_DRONE_EUROC_OUTPUT_POSITION_SCALE=0.998
 | Parallel SuperPoint postprocess | `SMART_DRONE_SUPERPOINT_PARALLEL_POST=1` | Accepted in Jetson profile defaults. |
 | Filtered stereo injection | `SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT=1` | Accepted. Current strict MH04/MH05 validation uses filtered ZNCC, epipolar, disparity, and grid-balanced pairs. |
 | External stereo depth scale | `SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE=0.965` | Accepted current compensation for SP+LG external stereo depth. |
-| LocalMapping wait | `SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1`, timeout `35 ms` | Accepted. Improves current-frame pose consistency at a latency cost; strict run averaged about `55-56 ms/frame`. |
-| Current-frame pose output | `SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0` | Accepted. Keeps realtime output on the pose returned by `Track()` rather than reference-keyframe trajectory pose. |
-| Realtime pose continuity | `SMART_DRONE_REALTIME_POSE_CONTINUITY=1` | Accepted. Fills only current-frame bootstrap/transient lost outputs; does not rewrite older CSV rows. |
+| LocalMapping wait | `SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1`, timeout `35 ms` | Accepted. Improves current-frame pose consistency at a latency cost;
+strict run averaged about `55 - 56 ms / frame`.| |
+    Current - frame pose output | `SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE =
+    0` |
+    Accepted.Keeps realtime output on the pose returned by `Track()` rather than
+            reference -
+        keyframe trajectory pose.|
+    | Realtime pose continuity | `SMART_DRONE_REALTIME_POSE_CONTINUITY =
+        1` |
+        Accepted.Fills only current - frame bootstrap / transient lost outputs; does not rewrite older CSV rows. |
 | Output timestamp offset | `SMART_DRONE_EUROC_OUTPUT_TIMESTAMP_OFFSET_MS=25` | Accepted in current script defaults. Applied before each realtime CSV row is written. |
 | Output position scale | `SMART_DRONE_EUROC_OUTPUT_POSITION_SCALE=0.998` | Accepted in current script defaults. Applied before each realtime CSV row is written. |
 
@@ -95,7 +102,7 @@ These are present in the working tree on 2026-05-14 and still need Jetson valida
 
 | Attempt | Files | Status |
 | --- | --- | --- |
-| Keep mature bootstrap trust from resetting too easily | `src/native/adapters/slam/external_feature_lightglue_mode_strategy.cpp` | Existing working-tree change. `UpdateLightGlueCadenceState()` now allows the OK streak to continue after trust maturity when tracked map points stay above `SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_HOLD_TRACKED_MPS`. Needs MH04 strict replay validation. |
+| Keep mature bootstrap trust from resetting too easily | `src/native/adapters/slam/visual_feature_lightglue_mode_strategy.cpp` | Existing working-tree change. `UpdateLightGlueCadenceState()` now allows the OK streak to continue after trust maturity when tracked map points stay above `SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_HOLD_TRACKED_MPS`. Needs MH04 strict replay validation. |
 | Realtime quality gate passthrough in feature-compare script | `scripts/run_jetson_euroc_mh_feature_compare.sh` | Added env capture and export for `SMART_DRONE_SP_LG_REALTIME_QUALITY_GATE`, gate mode, inlier/tracked-map thresholds, max step, max innovation, and rotation limit. Defaults keep the gate disabled, so baseline behavior is unchanged unless enabled. |
 | MH04 strict realtime sweep script | `scripts/run_jetson_mh04_splg_realtime_accuracy_sweep.sh` | Added executable sweep entry point. Runs only `MH_04_difficult` + `superpoint_lightglue`, uses `--require-realtime-pose` through the existing evaluator, writes `sweep_summary.md`, and saves `best_profile.env` when a strict profile passes. |
 
@@ -143,12 +150,20 @@ Because the Jetson was unreachable at first, the new sweep script and quality-ga
 
 | Time | Step | Result |
 | --- | --- | --- |
-| 2026-05-14 19:18 CST | Retried SSH to `nvidia@192.168.0.103`. | Connection succeeded; remote host reported `ubuntu`, remote date `2026-05-14T04:18:01-07:00`, and the existing feature-compare script was executable. |
+| 2026-05-14 19:18 CST | Retried SSH to `nvidia@192.168.0.103`. | Connection succeeded;
+remote host reported `ubuntu`, remote date `2026-05-14T04:18:01-07:00`, and the existing feature-compare script was executable. |
 | 2026-05-14 19:18 CST | Uploaded `scripts/run_jetson_euroc_mh_feature_compare.sh` and `scripts/run_jetson_mh04_splg_realtime_accuracy_sweep.sh` to `/home/nvidia/euroc_eval/scripts/`. | Upload succeeded and the MH04 sweep script is executable on Jetson. |
 | 2026-05-14 19:18-19:32 CST | Ran first Jetson MH04 sweep: `stable_realtime qgate_innovation depth_0_960 depth_0_970`. | Result directory: `/home/nvidia/euroc_eval/results/mh04_splg_opt_round1_20260514_041821`. All profiles kept `2032/2032` pose-valid rows. Best profile was `stable_realtime`: `ATE RMSE=0.0583 m`, `RPE RMSE=0.0236 m`, `SLAM mean=67.82 ms`. |
 | 2026-05-14 19:29-19:40 CST | Ran second Jetson MH04 sweep: `qgate_step init_close_select`. | Result directory: `/home/nvidia/euroc_eval/results/mh04_splg_opt_round2_20260514_042900`. Both profiles kept `2032/2032` pose-valid rows, but both were worse than `stable_realtime`. |
-| 2026-05-14 19:34-19:48 CST | Ran output position scale sweep: `0.997`, `0.998`, `0.999`. | Result directory: `/home/nvidia/euroc_eval/results/mh04_splg_opt_scale_20260514_043437`. All profiles kept `2032/2032` pose-valid rows. None beat the best `stable_realtime` result; `0.998` repeat was worse than round 1, showing run-to-run variance. |
-| 2026-05-14 19:42-19:52 CST | Ran LocalMapping wait sweep: `50 ms`, `70 ms`. | Result directory: `/home/nvidia/euroc_eval/results/mh04_splg_opt_wait_20260514_044250`. Both profiles kept strict realtime pose output but were worse than `35 ms`; do not increase the wait timeout for MH04 accuracy. |
+| 2026-05-14 19:34-19:48 CST | Ran output position scale sweep: `0.997`, `0.998`, `0.999`. | Result directory: `/home/nvidia/euroc_eval/results/mh04_splg_opt_scale_20260514_043437`. All profiles kept `2032/2032` pose-valid rows. None beat the best `stable_realtime` result;
+`0.998` repeat was worse than round 1,
+    showing run - to - run variance.| | 2026 - 05 - 14 19 : 42 - 19 : 52 CST | Ran LocalMapping wait sweep : `50 ms`, `70 ms`.|
+                                                                                                                          Result directory
+    : `/
+    home / nvidia / euroc_eval / results /
+    mh04_splg_opt_wait_20260514_044250`.Both profiles kept strict realtime pose
+        output but were worse than `35 ms`;
+do not increase the wait timeout for MH04 accuracy. |
 
 Round 1 results:
 
@@ -225,11 +240,11 @@ Interpretation: pose rows are not dropping, but the same configured profile can 
 
 ## SP+LG Tracking Analysis
 
-The current `superpoint_lightglue` frontend is not a standalone VO pipeline. It supplies ORB-SLAM3 with external stereo observations:
+The current `superpoint_lightglue` frontend is not a standalone VO pipeline. It supplies ORB-SLAM3 with stereo feature observations:
 
 - SuperPoint provides repeatable sparse keypoints and descriptors.
 - LightGlue provides high-confidence stereo correspondences on a cadence.
-- Descriptor fallback fills non-LightGlue frames so the backend still receives current-frame external features.
+- Descriptor fallback fills non-LightGlue frames so the backend still receives current-frame stereo-feature observations.
 - ORB-SLAM3 still owns map state, keyframes, local mapping, tracking recovery, and final pose estimation.
 
 That split is important for MH04 realtime behavior. When an SP+LG frame fails to produce injectable frontend features, the output path must not call a different tracker as a fallback. Calling the ORB fallback mutates the backend, can trigger relocalization/new-map logic, and can make the next realtime pose jump even if the CSV row count stays complete. For strict realtime output, missing/weak frontend frames should be handled at the output-continuity layer, not by advancing a different backend mode.
@@ -242,9 +257,26 @@ Code changes validated in this pass:
 
 | Change | File | Status |
 | --- | --- | --- |
-| On SP+LG frontend/finalize failure, return a realtime continuity pose and mark `RECENTLY_LOST`; do not call ORB fallback or mutate backend. | `src/native/adapters/slam/external_feature_lightglue_mode_strategy.cpp` | Accepted. Removed new-map churn and large realtime jumps. |
-| Detect fixed-point-count LightGlue TensorRT engines from binding/profile dimensions and force `SMART_DRONE_LIGHTGLUE_POINTS` to that fixed count. | `src/native/adapters/slam/superpoint_native_extractor.cpp` | Accepted. Prevents dynamic-shape mismatches such as `[1,495,2]` against a fixed 512-point engine. |
-| Keep mature bootstrap trust after the frontend OK streak is satisfied while tracked map points remain healthy. | `src/native/adapters/slam/external_feature_lightglue_mode_strategy.cpp` | Accepted as current working-tree behavior; default OK streak lowered from `120` to `20`. |
+| On SP+LG frontend/finalize failure, return a realtime continuity pose and mark `RECENTLY_LOST`;
+do
+  not call ORB fallback or
+      mutate backend.| `src / native / adapters / slam /
+                           visual_feature_lightglue_mode_strategy.cpp` |
+          Accepted.Removed new - map churn and large realtime jumps.| |
+          Detect fixed - point -
+              count LightGlue TensorRT engines from binding /
+                  profile dimensions and force `SMART_DRONE_LIGHTGLUE_POINTS` to
+                      that fixed count.| `src / native / adapters / slam /
+                                             superpoint_native_extractor.cpp` |
+          Accepted.Prevents dynamic -
+              shape mismatches such as `[1, 495, 2]` against a fixed 512 -
+              point engine.|
+          |
+          Keep mature bootstrap trust after the frontend OK streak is
+              satisfied while tracked map points remain
+                  healthy.| `src / native / adapters / slam /
+                                visual_feature_lightglue_mode_strategy.cpp` |
+          Accepted as current working - tree behavior; default OK streak lowered from `120` to `20`. |
 | Lower default `SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK` from `120` to `20` in replay/script defaults. | `tests/euroc/offline_replay_main.cpp`, `scripts/run_jetson_euroc_mh_feature_compare.sh`, `scripts/run_jetson_mh04_splg_realtime_accuracy_sweep.sh`, `docs/slam_modes_euroc.md` | Accepted. Matches the historical best complete MH04 SP+LG run configuration. |
 
 Key validation runs:
@@ -276,7 +308,8 @@ Result root: `/home/nvidia/euroc_eval/results/codex_lg_cadence_matrix_mh04_20260
 
 | Profile | Main setting | Strict OK | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | Max adjacent step (m) | Decision |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `lg_every1` | `SMART_DRONE_LIGHTGLUE_EVERY_N=1` | 0 | 2032 / 2032 pose-valid, but 49 unusable strict rows | n/a | n/a | 0.162 | Reject. Many non-OK bootstrap/lost rows; strict evaluator failed. |
+| `lg_every1` | `SMART_DRONE_LIGHTGLUE_EVERY_N=1` | 0 | 2032 / 2032 pose-valid, but 49 unusable strict rows | n/a | n/a | 0.162 | Reject. Many non-OK bootstrap/lost rows;
+strict evaluator failed. |
 | `lg_every2` | `SMART_DRONE_LIGHTGLUE_EVERY_N=2` | 1 | 2032 / 2032 | 0.1071 | 0.0266 | below `0.2` | Reject. More frequent LightGlue worsened ATE. |
 | `lg_every2_supp384` | `SMART_DRONE_LIGHTGLUE_EVERY_N=2`, supplement to 384 | 1 | 2032 / 2032 | 0.1164 | 0.0308 | 0.359 | Reject. Worse ATE and two adjacent steps above `0.3 m`. |
 
@@ -376,85 +409,188 @@ Frame-bucket RMSE showed the main drift zones:
 
 | Frame range | RMSE (m) | Notes |
 | --- | ---: | --- |
-| `700-799` | 0.0258 | Only local segment below the target; not representative of full sequence. |
-| `900-999` | 0.0898 | Weak-frame cluster. |
-| `1200-1299` | 0.1026 | Almost all frames weak by inlier/tracked-map criteria. |
-| `1500-1599` | 0.1299 | Worst full segment; peak frame error `0.1686 m`. |
+| `700-799` | 0.0258 | Only local segment below the target;
+not representative of full sequence.| | `900 - 999` | 0.0898 |
+    Weak - frame cluster.| | `1200 - 1299` | 0.1026 |
+    Almost all frames weak by inlier / tracked - map criteria.|
+    | `1500 - 1599` | 0.1299 | Worst full segment;
+peak frame error `0.1686 m`.|
 
-This motivated a sweep that changed only SP+LG observation supply, not output postprocessing.
+    This motivated a sweep that changed only SP + LG observation supply,
+    not output postprocessing.
 
-Result root: `/home/nvidia/euroc_eval/results/codex_injection_quality_mh04_20260514_081330`
+            Result root : `/
+            home / nvidia / euroc_eval / results /
+            codex_injection_quality_mh04_20260514_081330`
 
-| Profile | Main setting | Strict OK | ATE RMSE (m) | RPE RMSE (m) | Max step (m) | Steps `>0.2 m` | Maps | Decision |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| `weak_pair_192` | limit weak frames to 192 stereo pairs | 1 | 3.0478 | 1.2169 | 11.422 | 185 | maps `0/1/2/3` | Reject. Pair limiting starved tracking and caused map churn. |
-| `temporal_carry` | carry temporally tracked stereo pairs | 1 | 3.1297 | 0.5132 | 8.761 | 62 | maps `0/1` | Reject. Reusing old descriptors at new positions polluted backend matching. |
-| `lg_every3` | `SMART_DRONE_LIGHTGLUE_EVERY_N=3` | 1 | 0.0846 | 0.0229 | 0.353 | 1 | map `0` | Reject. RPE improved slightly, but ATE and jump risk worsened. |
-| `grid6` | `SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=6` | 1 | 0.1359 | 0.0301 | 0.276 | 3 | map `0` | Reject. Too sparse; map support degraded. |
-| `grid12` | `SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=12` | 1 | 0.0622 | 0.0258 | 0.166 | 0 | map `0` | Keep only as an experiment. ATE slightly better in this run, but repeatability was not proven. |
-| `strict_lg_score` | `SMART_DRONE_LIGHTGLUE_MIN_SCORE=0.04`, `MAX_Y_DIFF=1.0` | 1 | 0.1014 | 0.0236 | 0.294 | 5 | map `0` | Reject. Stricter stereo matches reduced pose consistency. |
+        | Profile | Main setting | Strict OK | ATE RMSE(m) | RPE RMSE(m) |
+        Max step(m) | Steps `> 0.2 m` | Maps | Decision | | -- - | -- - |
+        -- - : | -- - : | -- - : | -- - : |
+                                          -- -
+    : |
+      -- - | -- - | | `weak_pair_192` | limit weak frames to 192 stereo pairs |
+      1 | 3.0478 | 1.2169 | 11.422 | 185 | maps `0 / 1 / 2 / 3` |
+      Reject.Pair limiting starved tracking and caused map churn.|
+      | `temporal_carry` | carry temporally tracked stereo pairs | 1 | 3.1297 |
+      0.5132 | 8.761 | 62 | maps `0 / 1` |
+      Reject.Reusing old descriptors at new positions polluted backend
+          matching.|
+      | `lg_every3` | `SMART_DRONE_LIGHTGLUE_EVERY_N =
+        3` | 1 | 0.0846 | 0.0229 | 0.353 | 1 | map `0` |
+        Reject.RPE improved slightly,
+                      but ATE and jump risk worsened.|
+                          | `grid6` | `SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL =
+                          6` | 1 | 0.1359 | 0.0301 | 0.276 | 3 | map `0` |
+                          Reject.Too sparse;
+map support degraded.|
+    | `grid12` | `SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL =
+    12` | 1 | 0.0622 | 0.0258 | 0.166 | 0 | map `0` |
+    Keep only as an experiment.ATE slightly better in this run,
+                 but repeatability was not proven.| | `strict_lg_score` | `SMART_DRONE_LIGHTGLUE_MIN_SCORE = 0.04`, `MAX_Y_DIFF =
+                                                                                                                        1.0` |
+                                                                                                                        1 |
+                                                                                                                        0.1014 |
+                                                                                                                        0.0236 |
+                                                                                                                        0.294 |
+                                                                                                                        5 |
+                                                                                                                        map `0` |
+                                                                                                                        Reject
+                                                                                                                            .Stricter stereo
+                                                                                                                                matches reduced
+                                                                                                                                    pose
+                                                                                                                                        consistency
+                                                                                                                            .|
 
-Interpretation: MH04 SP+LG needs enough fresh, same-frame stereo observations to keep ORB-SLAM3's local map alive. Weak-frame pair limiting and temporal carry both made the tracker less stable. A denser grid (`12` per cell) can slightly reduce ATE in one run, but it needed repeat validation before becoming a recommendation.
+                                                                                                                        Interpretation
+    : MH04 SP +
+      LG needs enough fresh,
+                 same - frame stereo observations to keep ORB -
+                     SLAM3's local map alive. Weak-frame pair limiting and temporal carry both made the tracker less stable. A denser grid (`12` per cell) can slightly reduce ATE in one run, but it needed repeat validation before becoming a recommendation.
 
-## 2026-05-14 Backend-Stability Sweep
+                     ##2026 -
+                     05 - 14 Backend -
+                     Stability Sweep
 
-The next sweep targeted ORB-SLAM3 external-stereo stable-phase behavior: local map projection search radius, keyframe spacing, stable keyframe map-point creation, and stabilizing window length.
+                         The next sweep targeted ORB -
+                     SLAM3 external - stereo stable -
+                     phase behavior : local map projection search radius,
+                 keyframe spacing, stable keyframe map - point creation,
+                 and stabilizing window length.
 
-Result root: `/home/nvidia/euroc_eval/results/codex_backend_stability_mh04_20260514_082939`
+                         Result root
+    : `/ home / nvidia / euroc_eval /
+                         results / codex_backend_stability_mh04_20260514_082939`
 
-| Profile | Main setting | Strict OK | ATE RMSE (m) | RPE RMSE (m) | Max step (m) | Steps `>0.2 m` | Maps | Decision |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| `stable_search3` | `SMART_DRONE_EXTERNAL_STEREO_STABLE_LOCAL_SEARCH_TH=3` | 1 | 0.0764 | 0.0269 | 0.275 | 2 | map `0` | Reject. Wider stable local search worsened ATE and jump risk. |
-| `stable_search5` | `SMART_DRONE_EXTERNAL_STEREO_STABLE_LOCAL_SEARCH_TH=5` | 1 | 0.1069 | 0.0306 | 0.289 | 2 | map `0` | Reject. Further worse. |
-| `stable_more_mps` | `SMART_DRONE_EXTERNAL_STEREO_STABLE_MAX_MAPPOINTS_PER_KF=160` | 1 | 0.1124 | 0.0790 | 6.371 | 37 | map `0` | Reject. More stable-phase map points introduced large pose jumps. |
-| `stabilize_long` | stabilizing window `2000`, KF limit `200` | 1 | 0.0953 | 0.0256 | 0.323 | 2 | map `0` | Reject. Longer stabilizing phase did not reduce drift and added jump risk. |
-| `kf_gap6` | `SMART_DRONE_EXTERNAL_STEREO_MIN_FRAMES_BETWEEN_KF=6` | 1 | 2.6712 | 0.7706 | 9.360 | 125 | maps `0/1/2` | Reject. Keyframes became too sparse; map support collapsed. |
+                     | Profile | Main setting | Strict OK | ATE RMSE(m) |
+                     RPE RMSE(m) | Max step(m) | Steps `> 0.2 m` | Maps
+                     | Decision | | -- - | -- - |
+                     -- - : | -- - : | -- - : | -- - : |
+                                                       -- -
+    : |
+      -- - | -- - |
+      | `stable_search3` | `SMART_DRONE_EXTERNAL_STEREO_STABLE_LOCAL_SEARCH_TH =
+                     3` | 1 | 0.0764 | 0.0269 | 0.275 | 2 | map `0` |
+                     Reject.Wider stable local search worsened ATE and jump risk
+                         .|
+                     | `stable_search5` | `SMART_DRONE_EXTERNAL_STEREO_STABLE_LOCAL_SEARCH_TH =
+                         5` | 1 | 0.1069 | 0.0306 | 0.289 |
+                         2 | map `0` | Reject.Further worse.|
+                         | `stable_more_mps` | `SMART_DRONE_EXTERNAL_STEREO_STABLE_MAX_MAPPOINTS_PER_KF =
+                             160` | 1 | 0.1124 | 0.0790 | 6.371 | 37 | map `0` |
+                             Reject.More stable - phase map points
+                                                  introduced large pose jumps.|
+                             | `stabilize_long` | stabilizing window `2000`,
+                 KF limit `200` | 1 | 0.0953 | 0.0256 | 0.323 | 2 | map `0` |
+                     Reject
+                         .Longer stabilizing phase did
+                     not reduce drift and added jump risk.|
+                     | `kf_gap6` | `SMART_DRONE_EXTERNAL_STEREO_MIN_FRAMES_BETWEEN_KF =
+                     6` | 1 | 2.6712 | 0.7706 | 9.360 | 125 | maps `0 / 1 / 2` |
+                     Reject.Keyframes became too sparse; map support collapsed. |
 | `grid12_search3` | grid `12` plus stable search `3` | 1 | 0.0861 | 0.0227 | 0.166 | 0 | map `0` | Reject for accuracy. It is no-jump, but worse than current no-jump baseline. |
 
 Interpretation: relaxing stable-phase local map matching or changing keyframe density does not recover MH04 to the `0.03 m` target. ORB-SLAM3 is already operating in a narrow stable region for SP+LG observations. More map points, wider projection matching, or fewer keyframes all made the backend more brittle.
 
 Updated recommendation after these sweeps:
 
-- Keep `SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=10`; `12` is interesting but violates no-jump in the single run where it improved ATE.
-- Keep `SMART_DRONE_EXTERNAL_STEREO_STABLE_LOCAL_SEARCH_TH=1`.
-- Keep `SMART_DRONE_EXTERNAL_STEREO_MIN_FRAMES_BETWEEN_KF=4`.
-- Keep `SMART_DRONE_EXTERNAL_STEREO_STABLE_MAX_MAPPOINTS_PER_KF=100`.
-- Keep `SMART_DRONE_EXTERNAL_STEREO_STABILIZING_FRAME_WINDOW=1200` and `SMART_DRONE_EXTERNAL_STEREO_STABILIZING_KF_LIMIT=120`.
+- Keep `SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=10`;
+`12` is interesting but violates no -
+    jump in the single run where it improved ATE.-
+    Keep `SMART_DRONE_EXTERNAL_STEREO_STABLE_LOCAL_SEARCH_TH =
+    1`.- Keep `SMART_DRONE_EXTERNAL_STEREO_MIN_FRAMES_BETWEEN_KF =
+        4`.- Keep `SMART_DRONE_EXTERNAL_STEREO_STABLE_MAX_MAPPOINTS_PER_KF =
+            100`.- Keep `SMART_DRONE_EXTERNAL_STEREO_STABILIZING_FRAME_WINDOW =
+                1200` and `SMART_DRONE_EXTERNAL_STEREO_STABILIZING_KF_LIMIT =
+                    120`.
 
-The best no-jump full MH04 run in the current code remains:
+                        The best no -
+                        jump full MH04 run in the current code remains :
 
-`/home/nvidia/euroc_eval/results/codex_current_streak20_mh04_20260514_075754`
+`/ home / nvidia / euroc_eval / results /
+    codex_current_streak20_mh04_20260514_075754`
 
-| Frames / valid | ATE RMSE (m) | RPE RMSE (m) | Max step (m) | Steps `>0.2 m` | Maps |
-| ---: | ---: | ---: | ---: | ---: | --- |
-| 2032 / 2032 | 0.0657 | 0.0244 | 0.178 | 0 | all map `0` |
+                    | Frames / valid | ATE RMSE(m) | RPE RMSE(m) | Max step(m) |
+                    Steps `> 0.2 m` | Maps | | -- - : | -- - : | -- - : |
+                                                                        -- -
+    : |
+      -- - : | -- - | | 2032 / 2032 | 0.0657 | 0.0244 | 0.178 | 0 |
+             all map `0` |
 
-The best full strict MH04 result found historically is still about `0.0578 m`; the requested full-sequence `0.03 m` target was not reached in any valid complete realtime run.
+             The best full strict MH04 result found historically is still
+                 about `0.0578 m`;
+the requested full -
+        sequence `0.03 m` target was not reached in any valid complete realtime
+            run.
 
-## 2026-05-14 Candidate-Budget Sweep
+        ##2026 -
+        05 - 14 Candidate -
+        Budget Sweep
 
-The next check tested whether MH04 was limited by too few SP/LG candidates or descriptor-supplement candidates.
+                The next check tested whether MH04 was limited by too few SP /
+            LG candidates or
+    descriptor - supplement candidates.
 
-Result root: `/home/nvidia/euroc_eval/results/codex_candidate_budget_mh04_20260514_181954`
+                     Result root : `/
+                     home / nvidia / euroc_eval / results /
+                     codex_candidate_budget_mh04_20260514_181954`
 
-| Profile | Main setting | Frames / valid | ATE RMSE (m) | RPE RMSE (m) | ATE Max (m) | Max step (m) | Steps `>0.2 m` | Decision |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `max768_grid10` | 768 SP points, 768 descriptor candidates | 2032 / 2032 | 0.0987 | 0.0238 | 0.2108 | 0.173 | 0 | Reject. More candidates worsened ATE. |
-| `max768_supp256_grid10` | 768 SP points plus low-yield supplement to 256 | 2032 / 2032 | 0.0974 | 0.0307 | 0.3939 | 0.355 | 2 | Reject. Introduced visible pose jumps. |
-| `max768_grid12` | 768 SP points, grid cap 12 | 2032 / 2032 | 0.0930 | 0.0238 | 0.2014 | 0.175 | 0 | Reject. Still worse than the no-jump baseline. |
-| `max1024_grid10` | 1024 SP points/candidates | 2032 / 2032 | 0.1120 | 0.0226 | 0.2307 | 0.173 | 0 | Reject. Denser candidates increased global drift. |
+        | Profile | Main setting | Frames / valid | ATE RMSE(m) | RPE RMSE(m) |
+        ATE Max(m) | Max step(m) | Steps `> 0.2 m` | Decision | | -- - | -- - |
+        -- - : | -- - : | -- - : | -- - : | -- - : | -- - : | -- - |
+                                                            | `max768_grid10` |
+                                                            768 SP points,
+    768 descriptor candidates | 2032 / 2032 | 0.0987 | 0.0238 | 0.2108 | 0.173 |
+        0 | Reject.More candidates worsened ATE.| | `max768_supp256_grid10` |
+        768 SP points plus low - yield supplement to 256 | 2032 / 2032 |
+        0.0974 | 0.0307 | 0.3939 | 0.355 | 2 |
+        Reject.Introduced visible pose jumps.| | `max768_grid12` |
+        768 SP points,
+    grid cap 12 | 2032 / 2032 | 0.0930 | 0.0238 | 0.2014 | 0.175 | 0 |
+            Reject.Still worse than the no - jump baseline.|
+            | `max1024_grid10` | 1024 SP points / candidates | 2032 / 2032 |
+            0.1120 | 0.0226 | 0.2307 | 0.173 | 0 |
+            Reject.Denser candidates increased global drift.|
 
-Interpretation: the current gap is not a simple "more SP points" problem. Extra candidates increase backend ambiguity more than they improve observability.
+            Interpretation
+    : the current gap is not a simple "more SP points" problem
+          .Extra candidates increase backend ambiguity more than they improve
+              observability.
 
-## 2026-05-14 IMU Control
+      ##2026 - 05 -
+                14 IMU Control
 
-Stereo-IMU was tested as a control to see whether EuRoC IMU constraints could close the remaining MH04 drift.
+                    Stereo -
+                IMU was tested as a control to see whether EuRoC IMU constraints
+                        could close the remaining MH04 drift.
 
-Result root: `/home/nvidia/euroc_eval/results/codex_stereo_imu_control_mh04_20260514_183449`
+                    Result root : `/
+                    home / nvidia / euroc_eval / results /
+                    codex_stereo_imu_control_mh04_20260514_183449`
 
-| Profile | Result | Decision |
-| --- | --- | --- |
-| `orb` stereo-IMU | 2032 rows and no jumps, but 31 non-bootstrap rows were not strict tracking states `2/3`; strict realtime evaluation failed. | Reject. It does not satisfy the realtime tracking-state contract. |
+            | Profile | Result | Decision | | -- - | -- - | -- - |
+            | `orb` stereo - IMU | 2032 rows and
+        no jumps,
+    but 31 non - bootstrap rows were not strict tracking states `2 / 3`; strict realtime evaluation failed. | Reject. It does not satisfy the realtime tracking-state contract. |
 | `superpoint_lightglue` stereo-IMU | Failed to initialize: 2032 identity/lost rows. Logs repeatedly reported stereo init waiting. | Reject. SP+LG stereo-IMU is currently worse than pure stereo. |
 
 Interpretation: IMU is not a shortcut for the current SP+LG target. The pure-stereo SP+LG path is still the valid baseline for strict realtime output.
@@ -467,8 +603,13 @@ Several offline diagnostics checked whether the remaining ATE was an evaluation 
 | --- | --- | --- |
 | Timestamp/scale scan on current best | Best nearby adjustment was effectively unchanged: about `0.0656 m`. | Timestamp offset and scalar output scale are not the main error. |
 | Timestamp/scale scan on historical best | Best nearby adjustment was about `0.0568 m`, only a small improvement. | Historical best is still far above `0.03 m`. |
-| Camera/body lever-arm transform | Best offline variant improved current run from `0.0657` to about `0.0639 m`; historical best from `0.0578` to about `0.0571 m`. | Body-frame output is not enough to reach the target. |
-| Final trajectory export | `/home/nvidia/euroc_eval/results/codex_finaltraj_diag_mh04_20260514_180225` realtime ATE `0.1234`; final shutdown trajectory raw ATE about `0.0891`. | Shutdown/final trajectory does not reveal hidden `<0.03 m` performance, and it would not satisfy realtime output anyway. |
+| Camera/body lever-arm transform | Best offline variant improved current run from `0.0657` to about `0.0639 m`;
+historical best from `0.0578` to about `0.0571 m`.|
+    Body - frame output is not enough to reach the target.| |
+    Final
+        trajectory export | `/ home / nvidia / euroc_eval / results /
+                                codex_finaltraj_diag_mh04_20260514_180225` realtime
+                                    ATE `0.1234`; final shutdown trajectory raw ATE about `0.0891`. | Shutdown/final trajectory does not reveal hidden `<0.03 m` performance, and it would not satisfy realtime output anyway. |
 | Historical sub-`0.03 m` runs | Found only truncated fragments of 429, 653, and 788 rows. | Invalid for the 2032-frame realtime contract. |
 
 Per-frame error analysis still points to backend drift concentrated around frames `900-999`, `1200-1299`, and `1400-1599`. Local displacement scale was near 1.0, so the error is not a simple global or rolling scale factor.
@@ -490,7 +631,7 @@ Interpretation: reducing map-point creation or loosening LocalMapping scheduling
 
 ## 2026-05-14 External Stereo Scale-Level Experiments
 
-SP+LG keypoints are injected into ORB-SLAM3 as external stereo observations. Since these learned keypoints are not native ORB pyramid detections, two controlled experiments were added:
+SP+LG keypoints are injected into ORB-SLAM3 as stereo feature observations. Since these learned keypoints are not native ORB pyramid detections, two controlled experiments were added:
 
 - `SMART_DRONE_EXTERNAL_STEREO_IGNORE_PROJECTION_SCALE_LEVELS=1` skips octave filtering only for external-stereo projection matching.
 - `SMART_DRONE_EXTERNAL_STEREO_KEYPOINT_OCTAVE=N` assigns injected external-stereo keypoints to a fixed ORB pyramid octave.
@@ -664,16 +805,30 @@ Current status after these attempts:
 | --- | --- |
 | Full MH04 realtime rows | Still pass in all complete accepted-control runs: `2032/2032`. |
 | No dropped pose output | Pass for the current no-jump baseline and most diagnostic sweeps. |
-| No pose jumps | Current baseline passes; several rejected sweeps violate this. |
-| Average/full MH04 ATE below `0.03 m` | Not achieved. Best single complete no-jump result found in this pass was `0.0475 m`, but it did not reproduce; best stable accepted baseline remains around `0.06-0.07 m`. |
+| No pose jumps | Current baseline passes;
+several rejected sweeps violate this.| |
+    Average / full MH04 ATE below `0.03 m` |
+    Not achieved.Best single complete no -
+        jump result found in this pass was `0.0475 m`,
+    but it did not reproduce;
+best stable accepted baseline remains around `0.06 - 0.07 m`.|
 
-## 2026-05-15 Realtime Output Stabilizer And ORB Stereo Supplement
+    ##2026 - 05 -
+            15 Realtime Output Stabilizer And ORB Stereo Supplement
 
-The next request focused on making realtime pose output smoother and eliminating jumps while still targeting full-sequence
-`ATE RMSE < 0.03 m`. Two output-layer modes were added behind `SMART_DRONE_POSE_STABILIZER=1`:
+                The next request focused on making realtime pose output smoother
+                    and eliminating jumps while still targeting full -
+            sequence
+`ATE RMSE <
+        0.03 m`.Two output -
+            layer modes were added behind `SMART_DRONE_POSE_STABILIZER = 1`:
 
-- `SMART_DRONE_POSE_STABILIZER_MODE=alpha_beta`: causal alpha-beta translation smoothing with bounded innovation.
-- `SMART_DRONE_POSE_STABILIZER_MODE=guard`: no-lag abnormal-step guard. Normal valid poses pass through unchanged; invalid,
+    - `SMART_DRONE_POSE_STABILIZER_MODE =
+        alpha_beta`: causal alpha -
+                     beta translation smoothing with bounded
+                         innovation.- `SMART_DRONE_POSE_STABILIZER_MODE =
+            guard`: no - lag abnormal -
+                    step guard.Normal valid poses pass through unchanged; invalid,
   identity, stuck, or very large-step frames reuse a velocity prediction from the previous published pose.
 
 Important implementation note: the stabilizer now has its own output state instead of reusing the realtime continuity
@@ -730,8 +885,10 @@ Updated status:
 | --- | --- |
 | Realtime pose rows | Pass in the latest tests: `2032/2032` rows written from the replay callback. |
 | No dropped/invalid pose output | Pass in the latest tests: 0 invalid rows. |
-| No abnormal jumps | Pass for guard and `orb_stereo96`; `orb_stereo48` violated the `>0.2 m` step criterion once. |
-| Full MH04 average ATE below `0.03 m` | Not achieved. Output-layer smoothing is not enough; ORB stereo supplement also failed. |
+| No abnormal jumps | Pass for guard and `orb_stereo96`;
+`orb_stereo48` violated the `> 0.2 m` step criterion once.| |
+    Full MH04 average ATE below `0.03 m` |
+    Not achieved.Output - layer smoothing is not enough; ORB stereo supplement also failed. |
 
 Current engineering conclusion: the remaining error is backend estimation drift under external SP+LG observations, not a
 publish-layer smoothness issue. The publish layer should use continuity plus optional no-lag guard for safety; the accuracy
@@ -811,16 +968,22 @@ Field feedback after deploying the previous build: replay output looked stable, 
 pose jumps when the camera view was rotated. The cause is that the deployed runtime publishes through
 `PosePostprocessor`, while the earlier no-jump guards mainly protected `SlamEngineAdapter` replay/CSV output. In live
 use, a frame can remain `trackingUsable=true` while the backend emits a short-lived bad translation during a viewpoint
-rotation; `StartupAligner` only held pose when tracking was not usable, so this bad translation could still reach UDP and
-MAVLink.
+rotation;
+`StartupAligner` only held pose when tracking was not usable,
+    so this bad translation could still reach UDP and MAVLink.
 
-Change added in this pass:
+            Change added in this pass :
 
-- `PosePostprocessor::OutputGuard` now runs after startup alignment and before velocity estimation/publication.
-- It is causal: it only uses the previous published pose and current frame timestamp, with no future frames or ground
-  truth.
-- Normal pose steps pass through unchanged. If translation exceeds the configured step/speed envelope, only translation
-  is clamped toward the previous published pose; the current quaternion is preserved so turn-in-place rotation can still
+    - `PosePostprocessor::OutputGuard` now runs after
+        startup alignment and before velocity estimation /
+            publication.-
+        It is causal
+    : it only uses the previous published pose and current frame timestamp,
+    with no future frames or
+        ground truth.- Normal pose steps pass through unchanged.If translation
+                               exceeds the configured step /
+                           speed envelope,
+    only translation is clamped toward the previous published pose; the current quaternion is preserved so turn-in-place rotation can still
   update in realtime.
 - Guarded frames are marked `PoseQuality::Weak`, which suppresses velocity reuse and makes the event visible in telemetry.
 - `StartupAligner` is updated with the guarded published pose so later temporary tracking loss holds the safe output, not
@@ -836,7 +999,9 @@ Jetson service defaults for the live build:
 | `SMART_DRONE_ONLINE_POSE_GUARD_DFX` | `1` | Log guard hits as `[pose_guard]` for field debugging. |
 
 Expected effect: this does not solve MH04 global ATE drift, but it directly targets the live safety issue. Rotating the
-camera should no longer publish a sudden large translation jump; if the backend gives an outlier, the published pose moves
+camera should no longer publish a sudden large translation jump;
+if the
+  backend gives an outlier, the published pose moves
 only within the configured envelope and the frame quality becomes weak.
 
 Follow-up field feedback: the effect was still not good enough. Jetson logs during a rotation test showed ORB-SLAM3 +
@@ -862,7 +1027,7 @@ Changes made in this pass:
   - `--dpvo-optimization-window`
 - Added `DpvoTensorRtEngine` as a native `ISlamEngine` implementation.
 - The DPVO backend loads TensorRT engines directly with `NvInfer` and fails closed if they are missing or invalid.
-- Current architecture now defaults to native KLT/PnP, supports DPVO TensorRT as a backend route, and keeps ORB-SLAM3 as an optional external legacy backend.
+- Current architecture now defaults to native KLT/PnP, supports DPVO TensorRT as a backend route, and keeps ORB-SLAM3 as an optional internal legacy backend.
 
 Build result:
 
@@ -872,40 +1037,56 @@ Build result:
 ```
 
 Status: backend selection and native TensorRT engine loading are now compiled into `smart_drone`. Full DPVO pose output is
-not enabled yet. Original DPVO is not a single pose network; it combines patchifier/update networks with CUDA
-correlation, CUDA BA, and SE3 graph state. The runtime therefore refuses to publish placeholder DPVO poses until those
-native CUDA/state pieces are ported.
+not enabled yet. Original DPVO is not a single pose network;
+it combines patchifier / update networks with CUDA correlation, CUDA BA,
+    and SE3 graph state.The runtime therefore refuses to publish placeholder
+                DPVO poses until those native CUDA /
+            state pieces are ported.
 
-Documentation: see `docs/dpvo_tensorrt_backend.md`.
+            Documentation : see `docs /
+            dpvo_tensorrt_backend.md`.
 
-## 2026-05-15 DPVO TensorRT MH04 Replay Attempt
+            ##2026 -
+        05 -
+        15 DPVO TensorRT MH04 Replay Attempt
 
-The DPVO backend was wired into `smart_drone_offline_replay` so the EuRoC replay tool can be launched with
-`--slam-backend dpvo`.
+            The DPVO backend was wired into `smart_drone_offline_replay` so the
+                EuRoC replay tool can be launched with
+`--slam -
+        backend dpvo`.
 
-Jetson command path:
+            Jetson command path :
 
-```text
-/home/nvidia/euroc_eval/bin/smart_drone_offline_replay_dpvo_trt
+```text / home /
+            nvidia / euroc_eval / bin /
+            smart_drone_offline_replay_dpvo_trt
 ```
 
-MH04 artifact directory:
+            MH04 artifact directory :
 
-```text
-/home/nvidia/euroc_eval/results/mh04_dpvo_tensorrt_20260515_040901
+```text /
+    home / nvidia / euroc_eval / results /
+    mh04_dpvo_tensorrt_20260515_040901
 ```
 
-Result: replay selected `slam_backend=dpvo_tensorrt` and failed fast with `REPLAY_STATUS=3` because `/home/nvidia/DPVO`
-and the expected DPVO TensorRT engines were not present on the Jetson:
+    Result : replay selected `slam_backend =
+        dpvo_tensorrt` and failed fast with `REPLAY_STATUS =
+            3` because `/ home / nvidia / DPVO` and
+            the expected DPVO TensorRT engines were not present on the Jetson :
 
-```text
-[offline_replay] slam_backend=dpvo_tensorrt feature_frontend=lk_gftt_per_frame
-[offline_replay] dpvo_repo=/home/nvidia/DPVO patch_engine= update_engine=
-[dpvo_trt] missing engine(s): patch='' update='' repo='/home/nvidia/DPVO'
-offline replay failed: no output frames; check dataset, camera provider, or SLAM backend startup
+```text[offline_replay] slam_backend = dpvo_tensorrt feature_frontend =
+                lk_gftt_per_frame[offline_replay] dpvo_repo =
+                    / home / nvidia / DPVO patch_engine =
+                        update_engine = [dpvo_trt] missing engine(s)
+    : patch ='' update ='' repo =
+          '/home/nvidia/DPVO' offline replay failed : no output frames;
+check dataset, camera provider,
+    or SLAM backend startup
 ```
 
-ATE/RPE were not computed. This run is recorded as infrastructure validation only; it proves the DPVO mode path is
+            ATE /
+            RPE were not computed.This run is recorded
+                as infrastructure validation only; it proves the DPVO mode path is
 reachable from MH04 replay, but the native DPVO inference/state implementation is still blocked on engine export and CUDA
 correlation/BA/SE3 porting.
 

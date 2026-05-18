@@ -13,100 +13,104 @@
 namespace smartdrone::tests {
 
 struct ReplaySlamRunnerConfig {
-    int cameraFps{60};
-    int slamInputFps{20};
-    bool useImu{true};
-    bool preferLatestFrame{true};
-    int timeoutMs{1000};
-    bool extractFeatures{false};
-    bool extractPointCloud{false};
-    bool shutdownEngineOnFinish{true};
+  int cameraFps{60};
+  int slamInputFps{20};
+  bool useImu{true};
+  bool preferLatestFrame{true};
+  int timeoutMs{1000};
+  bool extractFeatures{false};
+  bool extractPointCloud{false};
+  bool shutdownEngineOnFinish{true};
 };
 
 struct ReplayPoseSample {
-    uint64_t frameId{0};
-    int64_t captureTimestampNs{0};
-    int trackingState{0};
-    unsigned long mapId{0};
-    bool poseValid{false};
-    smartdrone::core::ports::PoseEstimate pose{};
-    size_t imuSampleCount{0};
-    bool usedSuperPointFrontend{false};
-    int superpointRawLeftCount{0};
-    int superpointRawRightCount{0};
-    int superpointMatchedStereoCount{0};
-    int superpointInjectedLeftCount{0};
-    int superpointInjectedRightCount{0};
-    uint64_t superpointExternalHash{0};
-    int superpointLightGlueEveryN{0};
-    double superpointFrontendMs{0.0};
-    double superpointStereoMatchMs{0.0};
-    double superpointTotalMs{0.0};
-    double replayAcquireMs{0.0};
-    double replayImuMs{0.0};
-    double slamTotalMs{0.0};
-    double inputPrepareMs{0.0};
-    double frontendMs{0.0};
-    double stereoPairMs{0.0};
-    double externalPackMs{0.0};
-    double monoAugmentMs{0.0};
-    double lkRectifyMs{0.0};
-    double lkDisparityMs{0.0};
-    double lkGfttMs{0.0};
-    double lkFlowMs{0.0};
-    double lkCandidateMs{0.0};
-    double lkPnpMs{0.0};
-    double lkUpdateMs{0.0};
-    double orbTrackMs{0.0};
-    double orbExtractMs{0.0};
-    double orbStereoMatchMs{0.0};
-    double localMappingWaitMs{0.0};
-    int localMappingWaitQueueBefore{0};
-    int localMappingWaitQueueAfter{0};
-    int localMappingWaitTimeoutMs{0};
-    bool localMappingWaitRequested{false};
-    bool localMappingWaitTimedOut{false};
-    bool localMappingAcceptingBefore{false};
-    bool localMappingAcceptingAfter{false};
-    int matchesInliers{0};
-    uint32_t trackedMapPointCount{0};
-    uint32_t localMapPointCount{0};
-    uint64_t localMapPointHash{0};
-    uint64_t matchedMapPointHashBeforePoseOptimization{0};
-    uint64_t trackedMapPointHash{0};
-    uint32_t closeMapPointCount{0};
-    uint64_t orbFrameId{0};
-    int64_t referenceKeyFrameId{-1};
-    int64_t lastKeyFrameId{-1};
-    int64_t lastKeyFrameFrameId{-1};
-    uint32_t keyFramesInMap{0};
-    int externalStereoInitFrameId{-1};
-    bool externalStereoInjected{false};
-    bool externalStereoBootstrap{false};
-    bool externalStereoStabilizing{false};
-    bool realtimePoseQualityGate{false};
-    float rawPoseStepMeters{0.0f};
-    float gatedPoseStepMeters{0.0f};
+  uint64_t frameId{0};
+  int64_t captureTimestampNs{0};
+  int trackingState{0};
+  unsigned long mapId{0};
+  bool poseValid{false};
+  smartdrone::core::ports::PoseEstimate pose{};
+  size_t imuSampleCount{0};
+  bool usedVisualFeatureFrontend{false};
+  int visualFeatureRawLeftCount{0};
+  int visualFeatureRawRightCount{0};
+  int visualFeatureMatchedStereoCount{0};
+  int visualFeatureInjectedLeftCount{0};
+  int visualFeatureInjectedRightCount{0};
+  uint64_t visualFeatureObservationHash{0};
+  int visualFeatureMatchEveryN{0};
+  double visualFeatureFrontendMs{0.0};
+  double visualFeatureStereoMatchMs{0.0};
+  double visualFeatureTotalMs{0.0};
+  double replayAcquireMs{0.0};
+  double replayImuMs{0.0};
+  double slamTotalMs{0.0};
+  double inputPrepareMs{0.0};
+  double frontendMs{0.0};
+  double stereoPairMs{0.0};
+  double featurePackMs{0.0};
+  double monoAugmentMs{0.0};
+  double lkRectifyMs{0.0};
+  double lkDisparityMs{0.0};
+  double lkGfttMs{0.0};
+  double lkFlowMs{0.0};
+  double lkCandidateMs{0.0};
+  double lkPnpMs{0.0};
+  double lkUpdateMs{0.0};
+  double orbTrackMs{0.0};
+  double orbExtractMs{0.0};
+  double orbStereoMatchMs{0.0};
+  double localMappingWaitMs{0.0};
+  int localMappingWaitQueueBefore{0};
+  int localMappingWaitQueueAfter{0};
+  int localMappingWaitTimeoutMs{0};
+  bool localMappingWaitRequested{false};
+  bool localMappingWaitTimedOut{false};
+  bool localMappingAcceptingBefore{false};
+  bool localMappingAcceptingAfter{false};
+  int matchesInliers{0};
+  uint32_t trackedMapPointCount{0};
+  uint32_t localMapPointCount{0};
+  uint64_t localMapPointHash{0};
+  uint64_t matchedMapPointHashBeforePoseOptimization{0};
+  uint64_t trackedMapPointHash{0};
+  uint32_t closeMapPointCount{0};
+  uint64_t orbFrameId{0};
+  int64_t referenceKeyFrameId{-1};
+  int64_t lastKeyFrameId{-1};
+  int64_t lastKeyFrameFrameId{-1};
+  uint32_t keyFramesInMap{0};
+  int stereoFeatureInitFrameId{-1};
+  bool stereoFeatureInjected{false};
+  bool stereoFeatureBootstrap{false};
+  bool stereoFeatureStabilizing{false};
+  bool realtimePoseQualityGate{false};
+  float rawPoseStepMeters{0.0f};
+  float gatedPoseStepMeters{0.0f};
 };
 
 using ReplayPoseSampleCallback = std::function<void(const ReplayPoseSample &)>;
 
 class ReplaySlamRunner {
-  public:
-    ReplaySlamRunner(smartdrone::core::ports::ICameraProvider &camera, smartdrone::core::ports::IImuProvider &imu,
-                     smartdrone::core::ports::ISlamEngine &slamEngine, ReplaySlamRunnerConfig cfg);
+public:
+  ReplaySlamRunner(smartdrone::core::ports::ICameraProvider &camera,
+                   smartdrone::core::ports::IImuProvider &imu,
+                   smartdrone::core::ports::ISlamEngine &slamEngine,
+                   ReplaySlamRunnerConfig cfg);
 
-    std::vector<ReplayPoseSample> Run(size_t maxFrames,
-                                      smartdrone::core::application::FrameTimingTracker *timingTracker = nullptr,
-                                      const ReplayPoseSampleCallback &sampleCallback = {});
+  std::vector<ReplayPoseSample>
+  Run(size_t maxFrames,
+      smartdrone::core::application::FrameTimingTracker *timingTracker =
+          nullptr,
+      const ReplayPoseSampleCallback &sampleCallback = {});
 
-  private:
-    smartdrone::core::ports::ICameraProvider &m_camera;
-    smartdrone::core::ports::IImuProvider &m_imu;
-    smartdrone::core::ports::ISlamEngine &m_slamEngine;
-    ReplaySlamRunnerConfig m_cfg;
-    smartdrone::core::application::PerceptionPipeline m_pipeline;
-    int64_t m_lastFrameNs{0};
+private:
+  smartdrone::core::ports::ICameraProvider &m_camera;
+  smartdrone::core::ports::IImuProvider &m_imu;
+  smartdrone::core::ports::ISlamEngine &m_slamEngine;
+  ReplaySlamRunnerConfig m_cfg;
+  smartdrone::core::application::PerceptionPipeline m_pipeline;
+  int64_t m_lastFrameNs{0};
 };
 
 } // namespace smartdrone::tests

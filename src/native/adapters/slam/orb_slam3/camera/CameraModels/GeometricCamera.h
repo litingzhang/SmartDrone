@@ -40,6 +40,54 @@
 #include "GeometricTools.h"
 
 namespace ORB_SLAM3 {
+    class GeometricCamera;
+
+    struct TwoViewReconstructionRequest {
+        const std::vector<cv::KeyPoint>* keys1 = nullptr;
+        const std::vector<cv::KeyPoint>* keys2 = nullptr;
+        const std::vector<int>* matches12 = nullptr;
+    };
+
+    struct TwoViewReconstructionResult {
+        Sophus::SE3f* T21 = nullptr;
+        std::vector<cv::Point3f>* points3D = nullptr;
+        std::vector<bool>* triangulated = nullptr;
+    };
+
+    struct EpipolarConstraintRequest {
+        GeometricCamera* otherCamera = nullptr;
+        const cv::KeyPoint* keypoint1 = nullptr;
+        const cv::KeyPoint* keypoint2 = nullptr;
+        const Eigen::Matrix3f* R12 = nullptr;
+        const Eigen::Vector3f* t12 = nullptr;
+        float sigmaLevel = 1.0f;
+        float uncertainty = 1.0f;
+    };
+
+    struct CameraMatchTriangulationRequest {
+        const cv::KeyPoint* keypoint1 = nullptr;
+        const cv::KeyPoint* keypoint2 = nullptr;
+        GeometricCamera* otherCamera = nullptr;
+        Sophus::SE3f* Tcw1 = nullptr;
+        Sophus::SE3f* Tcw2 = nullptr;
+        float sigmaLevel1 = 1.0f;
+        float sigmaLevel2 = 1.0f;
+    };
+
+    struct CameraTriangulationRequest {
+        GeometricCamera* otherCamera = nullptr;
+        const cv::KeyPoint* keypoint1 = nullptr;
+        const cv::KeyPoint* keypoint2 = nullptr;
+        const Eigen::Matrix3f* R12 = nullptr;
+        const Eigen::Vector3f* t12 = nullptr;
+        float sigmaLevel = 1.0f;
+        float uncertainty = 1.0f;
+    };
+
+    struct CameraTriangulationResult {
+        Eigen::Vector3f* point3D = nullptr;
+    };
+
     class GeometricCamera {
 
         friend class boost::serialization::access;
@@ -70,23 +118,21 @@ namespace ORB_SLAM3 {
 
         virtual Eigen::Matrix<double,2,3> projectJac(const Eigen::Vector3d& v3D) = 0;
 
-        virtual bool ReconstructWithTwoViews(const std::vector<cv::KeyPoint>& vKeys1, const std::vector<cv::KeyPoint>& vKeys2, const std::vector<int> &vMatches12,
-                                             Sophus::SE3f &T21, std::vector<cv::Point3f> &vP3D, std::vector<bool> &vbTriangulated) = 0;
+        virtual bool ReconstructWithTwoViews(const TwoViewReconstructionRequest& request,
+                                             const TwoViewReconstructionResult& result) = 0;
 
         virtual cv::Mat toK() = 0;
         virtual Eigen::Matrix3f toK_() = 0;
 
-        virtual bool epipolarConstrain(GeometricCamera* otherCamera, const cv::KeyPoint& kp1, const cv::KeyPoint& kp2, const Eigen::Matrix3f& R12, const Eigen::Vector3f& t12, const float sigmaLevel, const float unc) = 0;
+        virtual bool epipolarConstrain(const EpipolarConstraintRequest& request) = 0;
 
         float getParameter(const int i){return mvParameters[i];}
         void setParameter(const float p, const size_t i){mvParameters[i] = p;}
 
         size_t size(){return mvParameters.size();}
 
-        virtual bool matchAndtriangulate(const cv::KeyPoint& kp1, const cv::KeyPoint& kp2, GeometricCamera* pOther,
-                                 Sophus::SE3f& Tcw1, Sophus::SE3f& Tcw2,
-                                 const float sigmaLevel1, const float sigmaLevel2,
-                                 Eigen::Vector3f& x3Dtriangulated) = 0;
+        virtual bool matchAndtriangulate(const CameraMatchTriangulationRequest& request,
+                                 const CameraTriangulationResult& result) = 0;
 
         unsigned int GetId() { return mnId; }
 

@@ -72,18 +72,16 @@ namespace ORB_SLAM3 {
         Eigen::Matrix<double,2,3> projectJac(const Eigen::Vector3d& v3D);
 
 
-        bool ReconstructWithTwoViews(const std::vector<cv::KeyPoint>& vKeys1, const std::vector<cv::KeyPoint>& vKeys2, const std::vector<int> &vMatches12,
-                                             Sophus::SE3f &T21, std::vector<cv::Point3f> &vP3D, std::vector<bool> &vbTriangulated);
+        bool ReconstructWithTwoViews(const TwoViewReconstructionRequest& request,
+                                     const TwoViewReconstructionResult& result);
 
         cv::Mat toK();
         Eigen::Matrix3f toK_();
 
-        bool epipolarConstrain(GeometricCamera* pCamera2, const cv::KeyPoint& kp1, const cv::KeyPoint& kp2, const Eigen::Matrix3f& R12, const Eigen::Vector3f& t12, const float sigmaLevel, const float unc);
+        bool epipolarConstrain(const EpipolarConstraintRequest& request);
 
-        bool matchAndtriangulate(const cv::KeyPoint& kp1, const cv::KeyPoint& kp2, GeometricCamera* pOther,
-                                 Sophus::SE3f& Tcw1, Sophus::SE3f& Tcw2,
-                                 const float sigmaLevel1, const float sigmaLevel2,
-                                 Eigen::Vector3f& x3Dtriangulated) { return false;}
+        bool matchAndtriangulate(const CameraMatchTriangulationRequest& request,
+                                 const CameraTriangulationResult& result) { return false;}
 
         friend std::ostream& operator<<(std::ostream& os, const Pinhole& ph);
         friend std::istream& operator>>(std::istream& os, Pinhole& ph);

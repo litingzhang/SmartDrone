@@ -343,7 +343,7 @@ std::vector<LkStereoTrack> BuildLkGfttStereoSeeds(const cv::Mat &leftGray, const
             continue;
         }
         const float expectedDisparity = disp32f.at<float>(iy, ix);
-        if (!(expectedDisparity >= ExternalStereoMinDisparityPx()) || expectedDisparity > kStereoMaxDisparityPx ||
+        if (!(expectedDisparity >= StereoMinDisparityPx()) || expectedDisparity > kStereoMaxDisparityPx ||
             !std::isfinite(expectedDisparity)) {
             continue;
         }

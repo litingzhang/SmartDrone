@@ -15,7 +15,7 @@ flowchart LR
     B --> C{mode}
     C -- orb --> D[ORB-SLAM3 track/extract/stereo]
     C -- klt_tracking --> E[rectify/disparity/GFTT/flow/PnP]
-    C -- superpoint_lightglue --> F[prepare/frontend/stereo pair/external pack/ORB track]
+    C -- superpoint_lightglue --> F[prepare/frontend/stereo pair/stereo feature pack/ORB track]
     D --> G[euroc_summary.json]
     E --> G
     F --> G

@@ -21,14 +21,13 @@
 #define LOOPCLOSING_H
 
 #include "KeyFrame.h"
-#include "LocalMapping.h"
 #include "Atlas.h"
 #include "ORBVocabulary.h"
-#include "Tracking.h"
 
 #include "KeyFrameDatabase.h"
 
 #include <boost/algorithm/string.hpp>
+#include <memory>
 #include <thread>
 #include <mutex>
 #include "g2o/types/types_seven_dof_expmap.h"
@@ -40,6 +39,10 @@ class Tracking;
 class LocalMapping;
 class KeyFrameDatabase;
 class Map;
+class IOrbLocalMappingBackend;
+class IOrbOptimizationBackend;
+class IOrbPlaceRecognitionBackend;
+class IOrbTrackingBackend;
 
 
 class LoopClosing
@@ -53,8 +56,10 @@ public:
 public:
 
     LoopClosing(Atlas* pAtlas, KeyFrameDatabase* pDB, ORBVocabulary* pVoc,const bool bFixScale, const bool bActiveLC);
+    ~LoopClosing();
 
     void SetTracker(Tracking* pTracker);
+    void SetTrackingBackend(IOrbTrackingBackend* trackingBackend);
 
     void SetLocalMapper(LocalMapping* pLocalMapper);
 
@@ -158,12 +163,14 @@ protected:
     std::mutex mMutexFinish;
 
     Atlas* mpAtlas;
-    Tracking* mpTracker;
+    IOrbTrackingBackend* mpTrackingBackend{nullptr};
 
     KeyFrameDatabase* mpKeyFrameDB;
     ORBVocabulary* mpORBVocabulary;
-
-    LocalMapping *mpLocalMapper;
+    std::unique_ptr<IOrbTrackingBackend> mpOwnedTrackingBackend;
+    std::unique_ptr<IOrbLocalMappingBackend> mpLocalMappingBackend;
+    std::unique_ptr<IOrbOptimizationBackend> mpOptimizationBackend;
+    std::unique_ptr<IOrbPlaceRecognitionBackend> mpPlaceRecognitionBackend;
 
     std::list<KeyFrame*> mlpLoopKeyFrameQueue;
 

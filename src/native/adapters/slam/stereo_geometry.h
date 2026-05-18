@@ -4,7 +4,7 @@
 
 #include <opencv2/core.hpp>
 
-#include "adapters/slam/external_feature_types.h"
+#include "core/ports/visual_feature_data.h"
 
 namespace smartdrone::adapters::slam {
 
@@ -19,21 +19,26 @@ constexpr float kTemporalStereoMinZnccScore = 0.05f;
 constexpr float kStereoDisparityMadScale = 2.5f;
 constexpr float kStereoDisparityMinTolerancePx = 6.0f;
 
-float ExternalStereoMinDisparityPx();
+float StereoMinDisparityPx();
 
 bool ComputePatchZncc(const cv::Mat &leftGray32f, const cv::Point2f &leftPt,
                       const cv::Mat &rightGray32f, const cv::Point2f &rightPt,
                       float &score);
 
-bool IsStereoPairGeometricallyValid(const cv::Point2f &leftPt, const cv::Point2f &rightPt);
+bool IsStereoPairGeometricallyValid(const cv::Point2f &leftPt,
+                                    const cv::Point2f &rightPt);
 
-bool RefineRightPointByStereoZncc(const cv::Mat &leftGray32f, const cv::Point2f &leftPt,
-                                  const cv::Mat &rightGray32f, const cv::Point2f &predictedRightPt,
-                                  cv::Point2f &refinedRightPt, float &bestScore);
+bool RefineRightPointByStereoZncc(const cv::Mat &leftGray32f,
+                                  const cv::Point2f &leftPt,
+                                  const cv::Mat &rightGray32f,
+                                  const cv::Point2f &predictedRightPt,
+                                  cv::Point2f &refinedRightPt,
+                                  float &bestScore);
 
-bool FindRightPointByStereoZncc(const cv::Mat &leftGray32f, const cv::Point2f &leftPt,
-                                const cv::Mat &rightGray32f, cv::Point2f &rightPt,
-                                float &bestScore);
+bool FindRightPointByStereoZncc(const cv::Mat &leftGray32f,
+                                const cv::Point2f &leftPt,
+                                const cv::Mat &rightGray32f,
+                                cv::Point2f &rightPt, float &bestScore);
 
 bool FindRightPointByStereoZnccAroundDisparity(const cv::Mat &leftGray32f,
                                                const cv::Point2f &leftPt,
@@ -45,7 +50,8 @@ bool FindRightPointByStereoZnccAroundDisparity(const cv::Mat &leftGray32f,
 float ComputeStereoCandidateQuality(float descriptorScore, float zncc,
                                     float epipolarErrorPx, float disparity);
 
-std::vector<StereoMatchPair> FilterStereoPairsByDisparityConsistency(
-    const std::vector<StereoMatchPair> &matches);
+std::vector<core::ports::StereoMatchPair>
+FilterStereoPairsByDisparityConsistency(
+    const std::vector<core::ports::StereoMatchPair> &matches);
 
 } // namespace smartdrone::adapters::slam

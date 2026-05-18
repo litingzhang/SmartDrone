@@ -51,4 +51,13 @@ bool TrackPointsForwardBackward(const cv::Mat &prevGray, const cv::Mat &currGray
     return true;
 }
 
+bool DefaultPointTracker2d::TrackForwardBackward(const cv::Mat &prevGray, const cv::Mat &currGray,
+                                                 const std::vector<cv::Point2f> &prevPoints,
+                                                 std::vector<cv::Point2f> &currPoints,
+                                                 std::vector<uchar> &status,
+                                                 const ForwardBackwardTrackingOptions &options) const
+{
+    return TrackPointsForwardBackward(prevGray, currGray, prevPoints, currPoints, status, options);
+}
+
 } // namespace smartdrone::adapters::slam

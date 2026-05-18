@@ -78,12 +78,7 @@ void UpdateLkTracksAfterPoseEstimate(SlamModeSharedState &state, const cv::Mat &
 void CopyLkTrackFeaturesToOutput(const std::vector<LkStereoTrack> &tracks,
                                  core::ports::SlamOutput &out)
 {
-    out.leftFeatures.reserve(out.leftFeatures.size() + tracks.size());
-    out.rightFeatures.reserve(out.rightFeatures.size() + tracks.size());
-    for (const LkStereoTrack &track : tracks) {
-        out.leftFeatures.push_back(track.left);
-        out.rightFeatures.push_back(track.right);
-    }
+    core::ports::CopyStereoTracksToOutput(tracks, out);
 }
 
 } // namespace smartdrone::adapters::slam

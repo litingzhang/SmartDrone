@@ -103,14 +103,27 @@ The current implementation also introduces several UVC/streaming/real-time polic
 - Preview rate limiting:
   `UdpImageSender` now rate-limits image output independently, with a maximum image send rate of `30 FPS`, decoupled from the SLAM input rate.
 
-### 3.5 External Feature Frontend Adaptations
+### 3.5 Visual Localization And Feature Frontend Adaptations
 
-SuperPoint/LightGlue and XFeat/LightGlue are modeled as external feature frontends. In the default runtime they are not
+SuperPoint/LightGlue and XFeat/LightGlue are modeled as visual feature frontends. In the default runtime they are not
 the production backend; `klt` is the native default and `dpvo_tensorrt` is a separate backend-level route. The current
-learned-feature injection path is available only through the optional legacy `orbslam3` adapter, where an external
-frontend prepares stereo feature packets for ORB-SLAM3-compatible tracking.
+learned-feature injection path is available through the optional legacy `orbslam3` adapter, where a generic visual
+feature frontend prepares stereo feature packets for ORB-SLAM3-compatible tracking.
 
-The implementation contains the following external-feature adaptations:
+The SLAM stack is split around reusable ports:
+
+- feature extraction and descriptors: `IVisualFeatureFrontend`, `IVisualDescriptorProvider`
+- stereo preprocessing and pair construction: `IStereoFramePreprocessor`, `IStereoPairBuilder`,
+  `IStereoMatchSelector`
+- temporal feature carry and feature packet build: `ITemporalStereoProcessor`, `IStereoFeaturePacketBuilder`
+- backend tracking, trajectory, map stats, and tracked visual data: `ISlamTrackingBackend`
+- KLT/PnP back-end stages: `IVisualPnpObservationBuilder`, `IVisualPnpPoseBackend`
+- place recognition vocabulary: `IVisualVocabulary`
+
+ORB-SLAM3 source is built from `src/native/adapters/slam/orb_slam3` as internal modules. Third-party dependencies such
+as Sophus, DBoW2, and g2o remain under `third_party`.
+
+The implementation contains the following visual-feature adaptations:
 
 - Native TensorRT frontend execution:
   `smart_drone` owns a `SuperPointLightGlueFrontendClient`, which delegates SuperPoint keypoint and descriptor extraction to `SuperPointNativeExtractor` and keeps keypoints plus `CV_32F` descriptors in process.
@@ -123,23 +136,24 @@ The implementation contains the following external-feature adaptations:
 - Stereo batch inference:
   left and right images are submitted through one stereo frontend call in stereo mode, keeping output split per image while sharing the native extractor path.
 - Input-size adaptation:
-  frontend input images are downscaled by the shared `ExternalFeatureFrontendRunner` path in order to cap frontend cost
+  frontend input images are downscaled by the shared `StereoFeatureFrontendRunner` path in order to cap frontend cost
   on embedded targets. The width and height limits are runtime-configurable. A value of `0` disables the limit on that
   dimension. Setting both limits to `0` disables downscaling.
-- Rectified-image stereo injection for the legacy ORB adapter:
+- Rectified-image stereo injection for the ORB-SLAM3 backend:
   for stereo pinhole configurations that require rectification, learned features are extracted on the same prepared
-  image geometry that the legacy ORB adapter passes to ORB-SLAM3 prepared stereo tracking. This keeps feature
+  image geometry that the ORB-SLAM3 runtime passes to ORB-SLAM3 prepared stereo tracking. This keeps feature
   coordinates and tracking images in the same rectified coordinate system.
 - Backend availability gate:
-  learned-feature injection runs only when the selected backend exposes an external-feature tracking path. Today that
-  means the optional legacy `orbslam3` adapter; KLT and DPVO ignore the external-feature client and run their own
+  learned-feature injection runs only when the selected backend exposes a stereo-feature tracking path. Today that
+  means the optional `orbslam3` backend; KLT and DPVO ignore the visual-feature client and run their own
   backend implementations.
 - Separate raw-display and injected-feature semantics:
   the runtime records raw SuperPoint detections for diagnostics and overlay output, while the features injected into ORB-SLAM3 are the stereo-matched subset. This avoids conflating display density with the effective tracking input.
 - Stereo-specific pair construction:
-  externally injected stereo features are required to be pre-matched. The adaptation layer performs left-right pairing with epipolar and disparity constraints and emits `matchedStereoPairs=true` before entering ORB-SLAM3.
+  injected stereo features are required to be pre-matched. The adaptation layer performs left-right pairing with
+  epipolar and disparity constraints and emits `matchedStereoPairs=true` before entering ORB-SLAM3.
 - Float-descriptor matcher compatibility:
-  the legacy ORB adapter can recompute ORB descriptors at learned-feature locations, and it keeps the old experimental
+  the ORB-SLAM3 descriptor provider can recompute ORB descriptors at learned-feature locations, and it keeps the old experimental
   `CV_32F` descriptor injection path explicit because SuperPoint/XFeat descriptors are not native ORB binary
   descriptors.
 - BoW compatibility limits remain explicit:
@@ -612,7 +626,7 @@ sequenceDiagram
 
 ### 10.5 Full Pose Processing Path (SLAM to external outputs)
 
-1. The selected SLAM engine returns a `SlamOutput` pose in world-camera form. The legacy ORB adapter converts
+1. The selected SLAM engine returns a `SlamOutput` pose in world-camera form. The ORB-SLAM3 runtime converts
    ORB-SLAM3 `T_cw` into `T_w_c`; KLT and DPVO publish their native pose estimate through the same output contract.
 2. `SlamFrameProcessor` forwards the raw pose to `PosePostprocessor::ProcessPose`.
 3. In pure stereo mode with loaded `T_b_c1`, it converts `T_w_c1` to `T_w_b` using `T_w_b = T_w_c1 * (T_b_c1)^-1`.
@@ -623,11 +637,11 @@ sequenceDiagram
    - MAVLink: `MavlinkPosePublisher -> SendOdometry` with `MAV_FRAME_LOCAL_NED / MAV_FRAME_BODY_FRD`.
    - UDP state: stored in `LivePoseState`, then packed by `udp_command_thread` into `CMD_STATE`.
 
-### 10.6 Legacy ORB Parameter Apply Path
+### 10.6 ORB-SLAM3 Parameter Apply Path
 
 1. Android can still send ORB parameters (`slam.orb_*`) via `CMD_RUNTIME_CONFIG` for compatibility.
 2. `RuntimeConfigService` validates and restart-gates those values only when the selected backend is `orbslam3`.
-3. Before legacy ORB startup, `SlamSessionRuntime` generates `*.runtime_orb.yaml` from the active settings file and overrides `ORBextractor.*`.
+3. Before ORB-SLAM3 startup, `SlamSessionRuntime` generates `*.runtime_orb.yaml` from the active settings file and overrides `ORBextractor.*`.
 4. ORB-SLAM3 is initialized from that runtime YAML; values are fixed for that session and further changes apply after restart.
 
 ---

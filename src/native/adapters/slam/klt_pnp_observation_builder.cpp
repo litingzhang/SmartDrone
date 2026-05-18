@@ -197,4 +197,16 @@ KltTrackedStereoPnpObservationSet BuildKltTrackedStereoPnpObservations(
     return result;
 }
 
+KltPnpObservationSet DefaultVisualPnpObservationBuilder::BuildPerFrameObservations(
+    const KltPerFramePnpObservationBuilderOptions &options) const
+{
+    return BuildKltPerFramePnpObservations(options);
+}
+
+KltTrackedStereoPnpObservationSet DefaultVisualPnpObservationBuilder::BuildTrackedStereoObservations(
+    const KltTrackedStereoPnpObservationBuilderOptions &options) const
+{
+    return BuildKltTrackedStereoPnpObservations(options);
+}
+
 } // namespace smartdrone::adapters::slam

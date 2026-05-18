@@ -7,26 +7,19 @@
 #include <opencv2/core.hpp>
 #include <sophus/se3.hpp>
 
+#include "core/ports/visual_pose_backend.h"
+
 namespace smartdrone::adapters::slam {
 
-struct VisualPnpPoseBackendOptions {
-    cv::Mat cameraMatrix;
-    cv::Mat distCoeffs;
-    int minPoints{4};
-    int minInliers{4};
-    int iterations{80};
-    double reprojectionError{4.0};
-    double confidence{0.995};
-    int method{cv::SOLVEPNP_EPNP};
-    bool refineWithInliers{false};
-    std::string logTag;
-};
+using VisualPnpPoseBackendOptions = core::ports::VisualPnpPoseBackendOptions;
+using VisualPnpPoseBackendResult = core::ports::VisualPnpPoseBackendResult;
 
-struct VisualPnpPoseBackendResult {
-    bool poseValid{false};
-    int inlierCount{0};
-    Sophus::SE3f T_camera_object{Sophus::SE3f()};
-    std::vector<int> inlierIndices;
+class DefaultVisualPnpPoseBackend final : public core::ports::IVisualPnpPoseBackend {
+  public:
+    bool EstimatePoseRansac(const std::vector<cv::Point3f> &objectPoints,
+                            const std::vector<cv::Point2f> &imagePoints,
+                            const VisualPnpPoseBackendOptions &options,
+                            VisualPnpPoseBackendResult &result) const override;
 };
 
 bool EstimateVisualPnpPoseRansac(const std::vector<cv::Point3f> &objectPoints,

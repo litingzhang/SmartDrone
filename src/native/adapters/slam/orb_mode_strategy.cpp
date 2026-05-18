@@ -3,18 +3,27 @@
 
 namespace smartdrone::adapters::slam {
 
-FeatureFrontend OrbModeStrategy::Frontend() const { return FeatureFrontend::Orb; }
+namespace {
 
-core::ports::SlamOutput OrbModeStrategy::Process(SlamEngineAdapter &engine,
-                                                 const core::ports::SlamInputBatch &input,
-                                                 bool extractFeatures, bool extractPointCloud)
-{
-    return RunSlamTrackingBackend(engine, input, extractFeatures, extractPointCloud, nullptr);
+const SlamModeStrategyRegistrar
+    kOrbModeStrategyRegistration(FeatureFrontend::Orb, &CreateOrbModeStrategy);
+
+} // namespace
+
+FeatureFrontend OrbModeStrategy::Frontend() const {
+  return FeatureFrontend::Orb;
 }
 
-std::unique_ptr<SlamModeStrategy> CreateOrbModeStrategy()
-{
-    return std::make_unique<OrbModeStrategy>();
+core::ports::SlamOutput
+OrbModeStrategy::Process(SlamEngineAdapter &engine,
+                         const core::ports::SlamInputBatch &input,
+                         bool extractFeatures, bool extractPointCloud) {
+  return RunSlamTrackingBackend(engine, input, extractFeatures,
+                                extractPointCloud, nullptr);
+}
+
+std::unique_ptr<SlamModeStrategy> CreateOrbModeStrategy() {
+  return std::make_unique<OrbModeStrategy>();
 }
 
 } // namespace smartdrone::adapters::slam

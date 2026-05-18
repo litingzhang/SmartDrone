@@ -38,6 +38,7 @@
 #include "g2o/solvers/linear_solver_dense.h"
 #include "G2oTypes.h"
 #include "Converter.h"
+#include "Verbose.h"
 
 #include<mutex>
 

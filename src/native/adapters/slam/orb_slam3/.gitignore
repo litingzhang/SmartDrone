@@ -1,2 +1,3 @@
 *.txt
+place_recognition/vocabulary/ORBvoc.txt.tar.gz
 *.so

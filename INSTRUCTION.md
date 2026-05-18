@@ -1,6 +1,6 @@
 # SmartDrone
 
-SmartDrone is a stereo / stereo-inertial drone runtime built around a pluggable SLAM backend boundary, IMU input, UDP preview streaming, MAVLink pose publishing, and a small Android control app. The default backend is native KLT/PnP visual odometry; DPVO TensorRT and a legacy ORB-SLAM3 adapter are optional backend paths.
+SmartDrone is a stereo / stereo-inertial drone runtime built around a pluggable SLAM backend boundary, IMU input, UDP preview streaming, MAVLink pose publishing, and a small Android control app. The default backend is native KLT/PnP visual odometry; DPVO TensorRT and the absorbed ORB-SLAM3 backend are optional backend paths.
 
 ## Project Layout
 
@@ -30,8 +30,8 @@ flowchart LR
     C --> D{SLAM backend}
     D --> E[KLT/PnP VO]
     D --> F[DPVO TensorRT]
-    D --> G[Optional legacy ORB-SLAM3 adapter]
-    G --> I[ORB/SP+LG/XFeat legacy frontend modes]
+    D --> G[Optional absorbed ORB-SLAM3 backend]
+    G --> I[ORB/SP+LG/XFeat frontend modes]
     E --> H[SlamOutput]
     F --> H
     I --> H
@@ -52,7 +52,7 @@ Build targets:
 
 - `smart_drone`: build the main runtime executable only
 - `android`: build the Android app, defaulting to `:app:assembleDebug`
-- `all`: build the native runtime and Android app; add `--enable-orb-slam3` only when using an external legacy ORB tree
+- `all`: build the native runtime and Android app; add `--enable-orb-slam3` when enabling the absorbed ORB-SLAM3 backend
 - `test`: build and run host-side unit tests
 - `replay`: build the host-side offline replay tool
 
@@ -163,13 +163,13 @@ For the `uvc_stereo_opencv` provider:
 Runtime prerequisites:
 
 - your selected runtime YAML in `config/` must exist on the target
-- `ORBvoc.txt` is required only when running the optional legacy `orbslam3` backend
+- `ORBvoc.txt` is required only when running the optional `orbslam3` backend
 - if you run with stereo-IMU or mono-IMU modes, the SPI IMU node and GPIO line must be available on the target
 - if you run with the default MAVLink setup, `/dev/ttyAMA0` or your chosen serial device must exist and be accessible
 
 ### 3. SuperPoint/LightGlue Runtime Assets
 
-SuperPoint/LightGlue is an optional component for the legacy ORB-SLAM3 adapter path. The default KLT backend does not require it.
+SuperPoint/LightGlue is an optional visual-feature frontend for the ORB-SLAM3 backend path. The default KLT backend does not require it.
 
 If you want `slam.feature_frontend=superpoint_lightglue`, prepare the LightGlue repository and TensorRT engines on the target:
 
@@ -268,10 +268,10 @@ Artifacts are written to:
 
 The current `scripts/build.sh` also provides the following Jetson-specific workflow normalizations:
 
-- `orb` mode is available only when `ORB_SLAM3_ROOT=/path/to/ORB_SLAM3` points to an external ORB-SLAM3 source tree.
+- `orb` mode is available when the internal ORB-SLAM3 backend is built with `--enable-orb-slam3`.
 - `--jetson-orin-nx` auto-detects common sysroot locations, cross-toolchain prefixes, and host libdirs instead of requiring all environment variables every time.
 - `SMART_DRONE_CAMERA_PROVIDER=uvc_stereo_opencv` can be passed directly through to CMake from the unified build entry point.
-- Artifact packaging includes `ORBvoc.txt` only when the optional legacy ORB backend is enabled.
+- Artifact packaging includes `ORBvoc.txt` only when the optional ORB backend is enabled.
 
 Recommended Jetson build command on the build server:
 
@@ -301,7 +301,7 @@ TARGET_HOST=ltz@192.168.0.105 REMOTE_DIR=/home/ltz \
 - `--jetson-orin-nx` defaults to `nvidia@192.168.0.103:/home/nvidia/SmartDrone_cross`
 - Jetson uses `artifact-root` deployment by default, replacing the entire `output/artifacts/jetson-orin-nx` layout atomically on the remote side
 - `SSH_PASSWORD=...` is supported through `sshpass`, including unattended `sudo systemctl restart`
-- artifact-root deployment carries `bin/`, `lib/`, `config/`, `scripts/`, plus optional legacy ORB and TensorRT assets when present
+- artifact-root deployment carries `bin/`, `lib/`, `config/`, `scripts/`, plus optional ORB-SLAM3 and TensorRT assets when present
 
 Recommended Jetson deploy command:
 
@@ -378,7 +378,7 @@ Additional runtime semantics for `uvc_stereo_opencv` are as follows:
 The following items still require manual preparation:
 
 - exporting and refreshing the target sysroot
-- making sure `ORBvoc.txt` is present on the device only when using the optional legacy ORB backend
+- making sure `ORBvoc.txt` is present on the device only when using the optional ORB backend
 - preparing SuperPoint/LightGlue TensorRT engine assets when using the `superpoint_lightglue` frontend
 - camera-specific permissions, device nodes, and service user setup
 - Jetson-specific camera integration if you do not use the current `libcamera` or packed-UVC paths
@@ -407,7 +407,7 @@ Configuration defaults:
 - `JETSON_SYSROOT` defaults to `../sysroots/jetson-orin-nx`
 - `JETSON_TOOLCHAIN_PREFIX` defaults to `aarch64-linux-gnu`
 - native build directory is `output/build/jetson-orin-nx/smart_drone`
-- optional legacy ORB-SLAM3 build directory is `output/build/jetson-orin-nx/orbslam3`
+- internal ORB-SLAM3 build output is under `output/build/jetson-orin-nx/smart_drone/orb_slam3`
 - packaged artifacts go to `output/artifacts/jetson-orin-nx`
 
 Execution example:
@@ -547,7 +547,7 @@ Use stereo-only replay when a dataset does not contain sufficient motion to init
 - `tracking_lost_frames`
 - `identity_pose_frames`
 
-The replay tool defaults to `--slam-backend klt`. `--vocab` is used only with the optional legacy `orbslam3` backend.
+The replay tool defaults to `--slam-backend klt`. `--vocab` is used only with the optional `orbslam3` backend.
 
 ## Offline Replay Baseline
 
@@ -697,7 +697,7 @@ TARGET_HOST=ltz@192.168.0.103 REMOTE_DIR=/home/ltz ./scripts/upload.sh --restart
 Deployment behavior:
 
 - Upload `output/artifacts/cm5/bin/smart_drone`
-- Upload legacy ORB shared libraries only if they exist in the artifact directory
+- Upload ORB-SLAM3 shared libraries only if they exist in the artifact directory
 - Create `~/config` on the target when needed
 - Upload `config/stereo.yaml` and `config/stereo_inertial.yaml`
 - Upload `config/mono_right.yaml` and `config/mono_inertial_right.yaml`
@@ -749,6 +749,6 @@ Additional notes related to the current UVC and SuperPoint/LightGlue adaptation:
 
 Application semantics:
 
-- ORB parameter changes trigger a SLAM session restart only when the optional legacy ORB backend is enabled.
-- Before legacy ORB starts, runtime generates `*.runtime_orb.yaml` from the active settings file, overrides `ORBextractor.*`, then initializes ORB-SLAM3 with that file.
+- ORB parameter changes trigger a SLAM session restart only when the optional ORB backend is enabled.
+- Before ORB-SLAM3 starts, runtime generates `*.runtime_orb.yaml` from the active settings file, overrides `ORBextractor.*`, then initializes ORB-SLAM3 with that file.
 - `slam.orb_min_th_fast` must be less than or equal to `slam.orb_ini_th_fast`; otherwise the config update is rejected.

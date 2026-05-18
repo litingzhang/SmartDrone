@@ -94,4 +94,12 @@ bool EstimateVisualPnpPoseRansac(const std::vector<cv::Point3f> &objectPoints,
     return true;
 }
 
+bool DefaultVisualPnpPoseBackend::EstimatePoseRansac(const std::vector<cv::Point3f> &objectPoints,
+                                                     const std::vector<cv::Point2f> &imagePoints,
+                                                     const VisualPnpPoseBackendOptions &options,
+                                                     VisualPnpPoseBackendResult &result) const
+{
+    return EstimateVisualPnpPoseRansac(objectPoints, imagePoints, options, result);
+}
+
 } // namespace smartdrone::adapters::slam

@@ -1,68 +1,114 @@
 #include "adapters/slam/slam_engine_factory.h"
 
-#include <memory>
-#include <utility>
-
-#include "adapters/slam/dpvo_tensorrt_engine.h"
-#include "adapters/slam/klt_slam_engine.h"
-
-#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
-#include "adapters/slam/orb_slam3_backend.h"
-#include "adapters/slam/slam_engine_adapter.h"
-#endif
+#include <array>
+#include <cstddef>
+#include <iostream>
+#include <mutex>
 
 namespace smartdrone::adapters::slam {
 
-ControlledSlamEngine CreateOrbSlam3Engine(const OrbSlam3EngineConfig &config)
-{
+namespace {
+
+constexpr size_t kMaxSlamEngineFactorySlots = 16;
+
+struct SlamEngineFactoryRegistryEntry {
+  SlamBackend backend{SlamBackend::Klt};
+  SlamEngineFactory factory{nullptr};
+};
+
+std::array<SlamEngineFactoryRegistryEntry, kMaxSlamEngineFactorySlots> &
+SlamEngineFactoryRegistry() {
+  static std::array<SlamEngineFactoryRegistryEntry, kMaxSlamEngineFactorySlots>
+      registry{};
+  return registry;
+}
+
+std::mutex &SlamEngineFactoryRegistryMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+SlamEngineFactory LookupSlamEngineFactory(SlamBackend backend) {
+  std::lock_guard<std::mutex> lock(SlamEngineFactoryRegistryMutex());
+  for (const SlamEngineFactoryRegistryEntry &entry :
+       SlamEngineFactoryRegistry()) {
+    if (entry.factory != nullptr && entry.backend == backend) {
+      return entry.factory;
+    }
+  }
+  return nullptr;
+}
+
+} // namespace
+
+void RegisterSlamEngineFactory(SlamBackend backend, SlamEngineFactory factory) {
+  if (factory == nullptr) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(SlamEngineFactoryRegistryMutex());
+  auto &registry = SlamEngineFactoryRegistry();
+  for (SlamEngineFactoryRegistryEntry &entry : registry) {
+    if (entry.factory != nullptr && entry.backend == backend) {
+      entry.factory = factory;
+      return;
+    }
+  }
+  for (SlamEngineFactoryRegistryEntry &entry : registry) {
+    if (entry.factory == nullptr) {
+      entry.backend = backend;
+      entry.factory = factory;
+      return;
+    }
+  }
+}
+
+SlamEngineFactoryRegistrar::SlamEngineFactoryRegistrar(
+    SlamBackend backend, SlamEngineFactory factory) {
+  RegisterSlamEngineFactory(backend, factory);
+}
+
+ControlledSlamEngine CreateOrbSlam3Engine(const OrbSlam3EngineConfig &config) {
 #if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
-    auto backend = std::make_unique<OrbSlam3Backend>(config.vocabularyPath, config.settingsPath,
-                                                     config.sensorMode, config.useViewer);
-    auto engine = std::make_unique<SlamEngineAdapter>(std::move(backend), config.inputMode, config.useImu,
-                                                      config.settingsPath);
-    ControlledSlamEngine out{};
-    out.control = engine.get();
-    out.engine = std::move(engine);
-    return out;
-#else
-    (void)config;
+  SlamEngineFactory factory = LookupSlamEngineFactory(SlamBackend::OrbSlam3);
+  if (factory == nullptr) {
     return {};
+  }
+  SlamEngineFactoryConfig factoryConfig{};
+  factoryConfig.backend = SlamBackend::OrbSlam3;
+  factoryConfig.vocabularyPath = config.vocabularyPath;
+  factoryConfig.settingsPath = config.settingsPath;
+  factoryConfig.sensorMode = config.sensorMode;
+  factoryConfig.useViewer = config.useViewer;
+  factoryConfig.useImu = config.useImu;
+  factoryConfig.inputMode = config.inputMode;
+  return factory(factoryConfig);
+#else
+  (void)config;
+  return {};
 #endif
 }
 
-ControlledSlamEngine CreateSlamEngine(const SlamEngineFactoryConfig &config)
-{
-    if (config.backend == SlamBackend::Klt) {
-        auto engine = std::make_unique<KltSlamEngine>(config.settingsPath);
-        ControlledSlamEngine out{};
-        out.control = engine.get();
-        out.engine = std::move(engine);
-        return out;
-    }
-
-    if (config.backend == SlamBackend::DpvoTensorRt) {
-        DpvoTensorRtConfig dpvoConfig = MakeDpvoTensorRtConfig(config.runtime, config.settingsPath);
-        ControlledSlamEngine out{};
-        out.engine = std::make_unique<DpvoTensorRtEngine>(std::move(dpvoConfig));
-        return out;
-    }
-
-    OrbSlam3EngineConfig orbConfig{};
-    orbConfig.vocabularyPath = config.vocabularyPath;
-    orbConfig.settingsPath = config.settingsPath;
-    orbConfig.sensorMode = config.sensorMode;
-    orbConfig.useViewer = config.useViewer;
-    orbConfig.useImu = config.useImu;
-    orbConfig.inputMode = config.inputMode;
-    ControlledSlamEngine out = CreateOrbSlam3Engine(orbConfig);
-    if (out.engine != nullptr) {
-        return out;
-    }
-
-    auto fallback = std::make_unique<KltSlamEngine>(config.settingsPath);
-    out.control = fallback.get();
-    out.engine = std::move(fallback);
+ControlledSlamEngine CreateSlamEngine(const SlamEngineFactoryConfig &config) {
+  SlamEngineFactory factory = LookupSlamEngineFactory(config.backend);
+  ControlledSlamEngine out =
+      factory != nullptr ? factory(config) : ControlledSlamEngine{};
+  if (out.engine != nullptr) {
     return out;
+  }
+
+#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
+  if (config.backend == SlamBackend::OrbSlam3) {
+    std::cerr << "[slam_factory] ORB-SLAM3 backend returned no engine; "
+                 "falling back to KLT\n";
+  }
+#endif
+
+  SlamEngineFactory fallbackFactory = LookupSlamEngineFactory(SlamBackend::Klt);
+  if (fallbackFactory == nullptr || config.backend == SlamBackend::Klt) {
+    return {};
+  }
+  return fallbackFactory(config);
 }
 
 } // namespace smartdrone::adapters::slam

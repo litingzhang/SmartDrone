@@ -51,10 +51,10 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/adapters/slam/klt_track_manager.cpp
     ../src/native/adapters/slam/klt_vpi_acceleration.cpp
     ../src/native/adapters/slam/feature_point_tracking.cpp
-    ../src/native/adapters/slam/external_feature_frontend_runner.cpp
-    ../src/native/adapters/slam/external_descriptor_geometry.cpp
-    ../src/native/adapters/slam/external_stereo_matching.cpp
-    ../src/native/adapters/slam/external_stereo_pair_builder.cpp
+    ../src/native/adapters/slam/stereo_feature_frontend_runner.cpp
+    ../src/native/adapters/slam/descriptor_geometry.cpp
+    ../src/native/adapters/slam/stereo_matching.cpp
+    ../src/native/adapters/slam/stereo_pair_builder.cpp
     ../src/native/adapters/slam/slam_image_utils.cpp
     ../src/native/adapters/slam/slam_output_utils.cpp
     ../src/native/adapters/slam/slam_pose_utils.cpp
@@ -62,6 +62,7 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/adapters/slam/stereo_frame_preprocessor.cpp
     ../src/native/adapters/slam/stereo_geometry.cpp
     ../src/native/adapters/slam/visual_pnp_pose_backend.cpp
+    ../src/native/adapters/slam/visual_feature_frontend_client.cpp
     ../src/native/adapters/slam/superpoint_native_extractor.cpp
     ../src/native/adapters/slam/superpoint_lightglue_frontend_client.cpp
     ../src/native/core/application/config/app_args.cpp
@@ -82,10 +83,12 @@ if(ENABLE_OFFLINE_REPLAY)
       ../src/native/adapters/slam/slam_mode_strategy.cpp
       ../src/native/adapters/slam/slam_tracking_backend.cpp
       ../src/native/adapters/slam/orb_mode_strategy.cpp
-      ../src/native/adapters/slam/external_feature_lightglue_mode_strategy.cpp
-      ../src/native/adapters/slam/external_stereo_feature_packet.cpp
-      ../src/native/adapters/slam/external_temporal_stereo.cpp
+      ../src/native/adapters/slam/visual_feature_lightglue_mode_strategy.cpp
+      ../src/native/adapters/slam/stereo_feature_packet.cpp
+      ../src/native/adapters/slam/temporal_stereo.cpp
       ../src/native/adapters/slam/orb_feature_utils.cpp
+      ../src/native/adapters/slam/orb_visual_components.cpp
+      ../src/native/adapters/slam/orb_slam3_runtime.cpp
       ../src/native/adapters/slam/orb_slam3_backend.cpp
     )
     configure_orb_target(smart_drone_offline_replay)

@@ -6,7 +6,26 @@ namespace smartdrone::adapters::slam {
 
 class SlamEngineAccess final {
   public:
-    static OrbSlam3Backend *OrbBackend(SlamEngineAdapter &engine) { return engine.m_orbBackend.get(); }
+    static core::ports::ISlamTrackingBackend *TrackingBackend(SlamEngineAdapter &engine)
+    {
+        return engine.m_trackingBackend.get();
+    }
+    static core::ports::ISlamBackendLifecycle *BackendLifecycle(SlamEngineAdapter &engine)
+    {
+        return engine.m_trackingBackend.get();
+    }
+    static core::ports::ISlamTrackingStatusProvider *TrackingStatus(SlamEngineAdapter &engine)
+    {
+        return engine.m_trackingBackend.get();
+    }
+    static core::ports::ISlamDescriptorProviderSource *DescriptorProviders(SlamEngineAdapter &engine)
+    {
+        return engine.m_trackingBackend.get();
+    }
+    static core::ports::ITrackedVisualDataProvider *TrackedVisualDataProvider(SlamEngineAdapter &engine)
+    {
+        return engine.m_trackingBackend.get();
+    }
     static SlamModeSharedState &ModeState(SlamEngineAdapter &engine) { return *engine.m_modeState; }
     static SlamInputMode InputMode(const SlamEngineAdapter &engine) { return engine.m_inputMode; }
     static bool UseImu(const SlamEngineAdapter &engine) { return engine.m_useImu; }

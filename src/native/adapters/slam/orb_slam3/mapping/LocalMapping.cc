@@ -18,11 +18,13 @@
 
 
 #include "LocalMapping.h"
-#include "LoopClosing.h"
-#include "ORBmatcher.h"
-#include "Optimizer.h"
+#include "FeatureMatcherBackend.h"
+#include "LoopClosingBackend.h"
+#include "OptimizationBackend.h"
+#include "TrackingBackend.h"
 #include "Converter.h"
 #include "GeometricTools.h"
+#include "Verbose.h"
 
 #include<mutex>
 #include<chrono>
@@ -74,12 +76,78 @@ bool RelaxLocalMappingAcceptKeyFramesEnabled()
     }();
     return enabled;
 }
+
+bool RunLocalBundleAdjustment(IOrbOptimizationBackend *backend,
+                              const OrbLocalBundleAdjustmentRequest &request,
+                              OrbLocalBundleAdjustmentResult &result)
+{
+    if(backend == nullptr)
+        return false;
+    return backend->RunLocalBundleAdjustment(request, result);
+}
+
+bool RunLocalInertialBundleAdjustment(
+    IOrbOptimizationBackend *backend,
+    const OrbLocalInertialBundleAdjustmentRequest &request,
+    OrbLocalBundleAdjustmentResult &result)
+{
+    if(backend == nullptr)
+        return false;
+    return backend->RunLocalInertialBundleAdjustment(request, result);
+}
+
+void RunInertialInitializationOptimization(IOrbOptimizationBackend *backend,
+                                           const OrbInertialInitializationOptimizationRequest &request)
+{
+    if(backend == nullptr)
+        return;
+    backend->RunInertialInitializationOptimization(request);
+}
+
+void RunFullInertialBundleAdjustment(
+    IOrbOptimizationBackend *backend,
+    const OrbFullInertialBundleAdjustmentRequest &request)
+{
+    if(backend == nullptr)
+        return;
+    backend->RunFullInertialBundleAdjustment(request);
+}
+
+void RunGravityScaleOptimization(
+    IOrbOptimizationBackend *backend,
+    const OrbGravityScaleOptimizationRequest &request)
+{
+    if(backend == nullptr)
+        return;
+    backend->RunGravityScaleOptimization(request);
+}
+
+OrbTrackingStatus GetTrackingStatus(IOrbTrackingBackend *backend)
+{
+    return backend != nullptr ? backend->Status() : OrbTrackingStatus{};
+}
+
+void UpdateTrackingFrameImu(IOrbTrackingBackend *backend,
+                            const OrbTrackingFrameImuUpdate &request)
+{
+    if(backend != nullptr)
+        backend->UpdateFrameImu(request);
+}
+
+void InsertLoopClosingKeyFrame(IOrbLoopClosingBackend *backend,
+                               KeyFrame *keyFrame)
+{
+    if(backend != nullptr && keyFrame != nullptr)
+        backend->InsertKeyFrame(OrbLoopClosingKeyFrameRequest{keyFrame});
+}
 }
 
 LocalMapping::LocalMapping(System* pSys, Atlas *pAtlas, const float bMonocular, bool bInertial, const string &_strSeqName):
     mpSystem(pSys), mbMonocular(bMonocular), mbInertial(bInertial), mbResetRequested(false), mbResetRequestedActiveMap(false), mbFinishRequested(false), mbFinished(true), mpAtlas(pAtlas), bInitializing(false),
     mbAbortBA(false), mbStopped(false), mbStopRequested(false), mbNotStop(false), mbAcceptKeyFrames(true),
-    mIdxInit(0), mScale(1.0), mInitSect(0), mbNotBA1(true), mbNotBA2(true), mIdxIteration(0), infoInertial(Eigen::MatrixXd::Zero(9,9))
+    mIdxInit(0), mScale(1.0), mInitSect(0), mbNotBA1(true), mbNotBA2(true),
+    mIdxIteration(0), mpOptimizationBackend(CreateDefaultOrbOptimizationBackend()),
+    infoInertial(Eigen::MatrixXd::Zero(9,9))
 {
     mnMatchesInliers = 0;
 
@@ -97,14 +165,22 @@ LocalMapping::LocalMapping(System* pSys, Atlas *pAtlas, const float bMonocular, 
 
 }
 
+LocalMapping::~LocalMapping() = default;
+
 void LocalMapping::SetLoopCloser(LoopClosing* pLoopCloser)
 {
-    mpLoopCloser = pLoopCloser;
+    mpLoopClosingBackend = CreateDefaultOrbLoopClosingBackend(pLoopCloser);
 }
 
 void LocalMapping::SetTracker(Tracking *pTracker)
 {
-    mpTracker=pTracker;
+    mpOwnedTrackingBackend = CreateDefaultOrbTrackingBackend(pTracker);
+    mpTrackingBackend = mpOwnedTrackingBackend.get();
+}
+
+void LocalMapping::SetTrackingBackend(IOrbTrackingBackend* trackingBackend)
+{
+    mpTrackingBackend = trackingBackend;
 }
 
 void LocalMapping::Run()
@@ -195,14 +271,35 @@ void LocalMapping::Run()
                             }
                         }
 
-                        bool bLarge = ((mpTracker->GetMatchesInliers()>75)&&mbMonocular)||((mpTracker->GetMatchesInliers()>100)&&!mbMonocular);
-                        Optimizer::LocalInertialBA(mpCurrentKeyFrame, &mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, bLarge, !mpCurrentKeyFrame->GetMap()->GetIniertialBA2());
-                        b_doneLBA = true;
+                        const OrbTrackingStatus trackingStatus =
+                            GetTrackingStatus(mpTrackingBackend);
+                        bool bLarge = ((trackingStatus.matchesInliers>75)&&mbMonocular)||((trackingStatus.matchesInliers>100)&&!mbMonocular);
+                        OrbLocalBundleAdjustmentResult baResult;
+                        b_doneLBA = RunLocalInertialBundleAdjustment(
+                            mpOptimizationBackend.get(),
+                            OrbLocalInertialBundleAdjustmentRequest{
+                                mpCurrentKeyFrame, mpCurrentKeyFrame->GetMap(),
+                                &mbAbortBA, bLarge,
+                                !mpCurrentKeyFrame->GetMap()->GetIniertialBA2()},
+                            baResult);
+                        num_FixedKF_BA = baResult.fixedKeyframes;
+                        num_OptKF_BA = baResult.optimizedKeyframes;
+                        num_MPs_BA = baResult.mapPoints;
+                        num_edges_BA = baResult.edges;
                     }
                     else
                     {
-                        Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA);
-                        b_doneLBA = true;
+                        OrbLocalBundleAdjustmentResult baResult;
+                        b_doneLBA = RunLocalBundleAdjustment(
+                            mpOptimizationBackend.get(),
+                            OrbLocalBundleAdjustmentRequest{
+                                mpCurrentKeyFrame, mpCurrentKeyFrame->GetMap(),
+                                &mbAbortBA},
+                            baResult);
+                        num_FixedKF_BA = baResult.fixedKeyframes;
+                        num_OptKF_BA = baResult.optimizedKeyframes;
+                        num_MPs_BA = baResult.mapPoints;
+                        num_edges_BA = baResult.edges;
                     }
 
                 }
@@ -249,7 +346,7 @@ void LocalMapping::Run()
 
                 if ((mTinit<50.0f) && mbInertial)
                 {
-                    if(mpCurrentKeyFrame->GetMap()->isImuInitialized() && mpTracker->mState==Tracking::OK) // Enter here everytime local-mapping is called
+                    if(mpCurrentKeyFrame->GetMap()->isImuInitialized() && GetTrackingStatus(mpTrackingBackend).ok) // Enter here everytime local-mapping is called
                     {
                         if(!mpCurrentKeyFrame->GetMap()->GetIniertialBA1()){
                             if (mTinit>5.0f)
@@ -297,7 +394,7 @@ void LocalMapping::Run()
             vdKFCullingSync_ms.push_back(timeKFCulling_ms);
 #endif
 
-            mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);
+            InsertLoopClosingKeyFrame(mpLoopClosingBackend.get(), mpCurrentKeyFrame);
 
 #ifdef REGISTER_TIMES
             std::chrono::steady_clock::time_point time_EndLocalMap = std::chrono::steady_clock::now();
@@ -459,7 +556,8 @@ void LocalMapping::CreateNewMapPoints()
 
     float th = 0.6f;
 
-    ORBmatcher matcher(th,false);
+    auto matcher = CreateDefaultOrbFeatureMatcher(
+        OrbFeatureMatcherOptions{th, false});
 
     Sophus::SE3<float> sophTcw1 = mpCurrentKeyFrame->GetPose();
     Eigen::Matrix<float,3,4> eigTcw1 = sophTcw1.matrix3x4();
@@ -511,9 +609,11 @@ void LocalMapping::CreateNewMapPoints()
 
         // Search matches that fullfil epipolar constraint
         vector<pair<size_t,size_t> > vMatchedIndices;
-        bool bCoarse = mbInertial && mpTracker->mState==Tracking::RECENTLY_LOST && mpCurrentKeyFrame->GetMap()->GetIniertialBA2();
+        bool bCoarse = mbInertial && GetTrackingStatus(mpTrackingBackend).recentlyLost && mpCurrentKeyFrame->GetMap()->GetIniertialBA2();
 
-        matcher.SearchForTriangulation(mpCurrentKeyFrame,pKF2,vMatchedIndices,false,bCoarse);
+        matcher->SearchForTriangulation(
+            OrbTriangulationMatchRequest{
+                mpCurrentKeyFrame, pKF2, &vMatchedIndices, false, bCoarse});
 
         Sophus::SE3<float> sophTcw2 = pKF2->GetPose();
         Eigen::Matrix<float,3,4> eigTcw2 = sophTcw2.matrix3x4();
@@ -815,14 +915,18 @@ void LocalMapping::SearchInNeighbors()
     }
 
     // Search matches by projection from current KF in target KFs
-    ORBmatcher matcher;
+    auto matcher = CreateDefaultOrbFeatureMatcher(
+        OrbFeatureMatcherOptions{0.6f, true});
     vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
     for(vector<KeyFrame*>::iterator vit=vpTargetKFs.begin(), vend=vpTargetKFs.end(); vit!=vend; vit++)
     {
         KeyFrame* pKFi = *vit;
 
-        matcher.Fuse(pKFi,vpMapPointMatches);
-        if(pKFi->NLeft != -1) matcher.Fuse(pKFi,vpMapPointMatches,true);
+        matcher->FuseKeyFrame(
+            OrbKeyFrameFuseRequest{pKFi, &vpMapPointMatches, 3.0f, false});
+        if(pKFi->NLeft != -1)
+            matcher->FuseKeyFrame(
+                OrbKeyFrameFuseRequest{pKFi, &vpMapPointMatches, 3.0f, true});
     }
 
 
@@ -853,8 +957,12 @@ void LocalMapping::SearchInNeighbors()
     if(StableLocalMappingOrderEnabled())
         sort(vpFuseCandidates.begin(), vpFuseCandidates.end(), MapPointIdLess);
 
-    matcher.Fuse(mpCurrentKeyFrame,vpFuseCandidates);
-    if(mpCurrentKeyFrame->NLeft != -1) matcher.Fuse(mpCurrentKeyFrame,vpFuseCandidates,true);
+    matcher->FuseKeyFrame(
+        OrbKeyFrameFuseRequest{
+            mpCurrentKeyFrame, &vpFuseCandidates, 3.0f, false});
+    if(mpCurrentKeyFrame->NLeft != -1)
+        matcher->FuseKeyFrame(
+            OrbKeyFrameFuseRequest{mpCurrentKeyFrame, &vpFuseCandidates, 3.0f, true});
 
 
     // Update points
@@ -1315,10 +1423,14 @@ void LocalMapping::InitializeIMU(float priorG, float priorA, bool bFIBA)
 
     mScale=1.0;
 
-    mInitTime = mpTracker->mLastFrame.mTimeStamp-vpKF.front()->mTimeStamp;
+    mInitTime = GetTrackingStatus(mpTrackingBackend).lastFrameTime-vpKF.front()->mTimeStamp;
 
     std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
-    Optimizer::InertialOptimization(mpAtlas->GetCurrentMap(), mRwg, mScale, mbg, mba, mbMonocular, infoInertial, false, false, priorG, priorA);
+    RunInertialInitializationOptimization(
+        mpOptimizationBackend.get(),
+        OrbInertialInitializationOptimizationRequest{
+            mpAtlas->GetCurrentMap(), &mRwg, &mScale, &mbg, &mba, mbMonocular,
+            &infoInertial, false, false, priorG, priorA});
 
     std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
 
@@ -1335,7 +1447,11 @@ void LocalMapping::InitializeIMU(float priorG, float priorA, bool bFIBA)
         if ((fabs(mScale - 1.f) > 0.00001) || !mbMonocular) {
             Sophus::SE3f Twg(mRwg.cast<float>().transpose(), Eigen::Vector3f::Zero());
             mpAtlas->GetCurrentMap()->ApplyScaledRotation(Twg, mScale, true);
-            mpTracker->UpdateFrameIMU(mScale, vpKF[0]->GetImuBias(), mpCurrentKeyFrame);
+            UpdateTrackingFrameImu(
+                mpTrackingBackend,
+                OrbTrackingFrameImuUpdate{static_cast<float>(mScale),
+                                          vpKF[0]->GetImuBias(),
+                                          mpCurrentKeyFrame});
         }
 
         // Check if initialization OK
@@ -1346,11 +1462,15 @@ void LocalMapping::InitializeIMU(float priorG, float priorA, bool bFIBA)
             }
     }
 
-    mpTracker->UpdateFrameIMU(1.0,vpKF[0]->GetImuBias(),mpCurrentKeyFrame);
+    UpdateTrackingFrameImu(mpTrackingBackend,
+                           OrbTrackingFrameImuUpdate{
+                               1.0f, vpKF[0]->GetImuBias(),
+                               mpCurrentKeyFrame});
     if (!mpAtlas->isImuInitialized())
     {
         mpAtlas->SetImuInitialized();
-        mpTracker->t0IMU = mpTracker->mCurrentFrame.mTimeStamp;
+        mpTrackingBackend->SetImuInitializationTimestamp(
+            GetTrackingStatus(mpTrackingBackend).currentFrameTime);
         mpCurrentKeyFrame->bImu = true;
     }
 
@@ -1358,9 +1478,17 @@ void LocalMapping::InitializeIMU(float priorG, float priorA, bool bFIBA)
     if (bFIBA)
     {
         if (priorA!=0.f)
-            Optimizer::FullInertialBA(mpAtlas->GetCurrentMap(), 100, false, mpCurrentKeyFrame->mnId, NULL, true, priorG, priorA);
+            RunFullInertialBundleAdjustment(
+                mpOptimizationBackend.get(),
+                OrbFullInertialBundleAdjustmentRequest{
+                    mpAtlas->GetCurrentMap(), 100, false,
+                    mpCurrentKeyFrame->mnId, nullptr, true, priorG, priorA});
         else
-            Optimizer::FullInertialBA(mpAtlas->GetCurrentMap(), 100, false, mpCurrentKeyFrame->mnId, NULL, false);
+            RunFullInertialBundleAdjustment(
+                mpOptimizationBackend.get(),
+                OrbFullInertialBundleAdjustmentRequest{
+                    mpAtlas->GetCurrentMap(), 100, false,
+                    mpCurrentKeyFrame->mnId, nullptr, false});
     }
 
     std::chrono::steady_clock::time_point t5 = std::chrono::steady_clock::now();
@@ -1472,7 +1600,8 @@ void LocalMapping::InitializeIMU(float priorG, float priorA, bool bFIBA)
     }
     mlNewKeyFrames.clear();
 
-    mpTracker->mState=Tracking::OK;
+    if(mpTrackingBackend != nullptr)
+        mpTrackingBackend->SetStateOk();
     bInitializing = false;
 
     mpCurrentKeyFrame->GetMap()->IncreaseChangeIndex();
@@ -1512,7 +1641,10 @@ void LocalMapping::ScaleRefinement()
     mScale=1.0;
 
     std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
-    Optimizer::InertialOptimization(mpAtlas->GetCurrentMap(), mRwg, mScale);
+    RunGravityScaleOptimization(
+        mpOptimizationBackend.get(),
+        OrbGravityScaleOptimizationRequest{mpAtlas->GetCurrentMap(), &mRwg,
+                                           &mScale});
     std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
 
     if (mScale<1e-1) // 1e-1
@@ -1530,7 +1662,11 @@ void LocalMapping::ScaleRefinement()
     {
         Sophus::SE3f Tgw(mRwg.cast<float>().transpose(),Eigen::Vector3f::Zero());
         mpAtlas->GetCurrentMap()->ApplyScaledRotation(Tgw,mScale,true);
-        mpTracker->UpdateFrameIMU(mScale,mpCurrentKeyFrame->GetImuBias(),mpCurrentKeyFrame);
+        UpdateTrackingFrameImu(
+            mpTrackingBackend,
+            OrbTrackingFrameImuUpdate{static_cast<float>(mScale),
+                                      mpCurrentKeyFrame->GetImuBias(),
+                                      mpCurrentKeyFrame});
     }
     std::chrono::steady_clock::time_point t3 = std::chrono::steady_clock::now();
 
