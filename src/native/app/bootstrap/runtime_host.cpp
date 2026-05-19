@@ -194,7 +194,7 @@ SystemRuntimeGraphConfig BuildSystemRuntimeGraphConfig(const MainRuntimeAliases 
         [&mav]() { mav.StepSetpointStream(); },
         [&hooks]() { hooks.StepManualControl(); },
         [&controller]() { controller.StepForceRestart(); },
-        [&controller]() { controller.StepSessionSupervisor(); },
+        [&controller]() { controller.OnSessionSupervisorGraphTick(); },
         std::move(commandRuntime),
         []() { return smartdrone::core::application::BuildCapabilitiesPayload(); },
         [](const UnifiedConfig &currentConfig, ControllerMode currentMode) {

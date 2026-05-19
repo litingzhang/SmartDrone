@@ -104,6 +104,8 @@ private:
   bool OpenUdp();
   bool StartImuPoller();
   bool OpenCamera();
+  bool StartOutputAndSensors();
+  void ReleaseResources(bool logProgress);
   void CleanupAfterStartFailure();
 };
 

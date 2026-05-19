@@ -901,6 +901,14 @@ bool UdpCommandRuntime::Start() { return m_impl->Start(); }
 
 void UdpCommandRuntime::Stop() { m_impl->Stop(); }
 
-void UdpCommandRuntime::Step() { m_impl->Step(); }
+void UdpCommandRuntime::OnGraphTick()
+{
+    m_impl->Step();
+}
+
+void UdpCommandRuntime::Step()
+{
+    OnGraphTick();
+}
 
 } // namespace smartdrone::core::application

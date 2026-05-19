@@ -37,6 +37,7 @@ class UnifiedRuntimeController final : public IRuntimeCommandTarget {
     bool UpdateRemoteConfig(const RemoteRuntimeConfig &r, std::string *err);
     UnifiedConfig CurrentConfig();
     ControllerMode CurrentDesiredMode();
+    void OnSessionSupervisorGraphTick();
     void StepSessionSupervisor();
     void StepForceRestart();
     CommandResult ExecuteAction(const RuntimeAction &action) override;

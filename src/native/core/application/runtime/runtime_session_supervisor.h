@@ -42,6 +42,7 @@ class RuntimeSessionSupervisor {
     ~RuntimeSessionSupervisor();
 
     void Stop();
+    void OnGraphTick();
     void Step();
     bool RequestMode(ControllerMode mode, std::string *err);
     void RequestRestart();

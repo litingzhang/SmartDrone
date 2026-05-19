@@ -182,10 +182,15 @@ UnifiedRuntimeController::ControllerMode UnifiedRuntimeController::CurrentDesire
     return m_sessionSupervisor.DesiredMode();
 }
 
+void UnifiedRuntimeController::OnSessionSupervisorGraphTick()
+{
+    m_sessionSupervisor.OnGraphTick();
+    StepPendingCalibCleanup();
+}
+
 void UnifiedRuntimeController::StepSessionSupervisor()
 {
-    m_sessionSupervisor.Step();
-    StepPendingCalibCleanup();
+    OnSessionSupervisorGraphTick();
 }
 
 void UnifiedRuntimeController::StepPendingCalibCleanup()

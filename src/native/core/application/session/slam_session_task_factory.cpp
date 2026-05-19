@@ -1,0 +1,128 @@
+#include "core/application/session/slam_session_task_factory.h"
+
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "common/epg/epg.h"
+#include "core/application/runtime/epg_dfx_snapshot.h"
+#include "core/application/session/slam_session_tasks.h"
+
+namespace smartdrone::core::application {
+namespace {
+
+constexpr const char *kSlamEpgDfxSnapshotPath = "/tmp/smartdrone_epg_slam.json";
+constexpr const char *kSlamSessionGraphName = "cluster_slam_session_graph";
+
+using EpgTaskFactoryEntries = std::vector<epg::TypeCatalog::TaskFactoryEntry>;
+
+template <class TaskType, class Factory>
+void AddFactory(EpgTaskFactoryEntries &entries, const epg::TypeCatalog &catalog,
+                Factory factory)
+{
+    entries.push_back(catalog.MakeTaskFactoryEntry<TaskType>(
+        [factory = std::move(factory)]() {
+            return std::unique_ptr<epg::ITask>(factory());
+        }));
+}
+
+void AddSlamStartupTaskFactories(EpgTaskFactoryEntries &entries,
+                                 const epg::TypeCatalog &catalog,
+                                 SlamTaskFactoryDeps deps)
+{
+    AddFactory<SlamResourceTask>(entries, catalog, [deps]() {
+        return new SlamResourceTask(deps.service, deps.stop,
+                                    deps.runningFlag);
+    });
+    AddFactory<SlamClockTask>(entries, catalog, [deps]() {
+        return new SlamClockTask(deps.stop, deps.runningFlag);
+    });
+}
+
+void AddSlamProcessingTaskFactories(EpgTaskFactoryEntries &entries,
+                                    const epg::TypeCatalog &catalog,
+                                    SlamTaskFactoryDeps deps)
+{
+    AddFactory<SlamImuPollTask>(entries, catalog, [deps]() {
+        return new SlamImuPollTask(deps.service, deps.stop,
+                                   deps.runningFlag);
+    });
+    AddFactory<SlamBackendTickTask>(entries, catalog, [deps]() {
+        return new SlamBackendTickTask(deps.service, deps.stop,
+                                       deps.runningFlag);
+    });
+    AddFactory<SlamImuGateTask>(entries, catalog, [deps]() {
+        return new SlamImuGateTask(deps.service, deps.stop,
+                                   deps.runningFlag, deps.tuning,
+                                   deps.cameraFps);
+    });
+    AddFactory<SlamAcquireTask>(entries, catalog, [deps]() {
+        return new SlamAcquireTask(deps.service, deps.stop,
+                                   deps.runningFlag);
+    });
+    AddFactory<SlamTrackingTask>(entries, catalog, [deps]() {
+        return new SlamTrackingTask(deps.service, deps.stop,
+                                    deps.runningFlag);
+    });
+}
+
+void AddSlamOutputTaskFactories(EpgTaskFactoryEntries &entries,
+                                const epg::TypeCatalog &catalog,
+                                SlamTaskFactoryDeps deps)
+{
+    AddFactory<SlamPosePostprocessTask>(entries, catalog, [deps]() {
+        return new SlamPosePostprocessTask(deps.service, deps.stop,
+                                           deps.runningFlag);
+    });
+    AddFactory<SlamPointCloudTask>(entries, catalog, [deps]() {
+        return new SlamPointCloudTask(deps.service, deps.stop,
+                                      deps.runningFlag);
+    });
+    AddFactory<SlamLivePoseTask>(entries, catalog, [deps]() {
+        return new SlamLivePoseTask(deps.service, deps.stop,
+                                    deps.runningFlag);
+    });
+    AddFactory<SlamMavlinkTask>(entries, catalog, [deps]() {
+        return new SlamMavlinkTask(deps.service, deps.stop,
+                                   deps.runningFlag);
+    });
+    AddFactory<SlamUdpTask>(entries, catalog, [deps]() {
+        return new SlamUdpTask(deps.service, deps.stop, deps.runningFlag);
+    });
+    AddFactory<SlamDfxTask>(entries, catalog, [deps]() {
+        return new SlamDfxTask(deps.service, deps.stop, deps.runningFlag);
+    });
+}
+
+void AddSlamMonitorTaskFactories(EpgTaskFactoryEntries &entries,
+                                 const epg::TypeCatalog &catalog,
+                                 SlamTaskFactoryDeps deps)
+{
+    AddFactory<SlamMonitorTask>(entries, catalog, [deps]() {
+        return new SlamMonitorTask(deps.stop, deps.sessionOk);
+    });
+    AddFactory<EpgDfxSnapshotTask>(entries, catalog, [deps]() {
+        return new EpgDfxSnapshotTask({
+            deps.graphRef,
+            kSlamSessionGraphName,
+            kSlamEpgDfxSnapshotPath,
+        });
+    });
+}
+
+} // namespace
+
+EpgTaskFactoryResolver MakeSlamGraphTaskFactoryResolver(
+    SlamTaskFactoryDeps deps)
+{
+    auto &catalog = epg::TypeCatalog::Global();
+    EpgTaskFactoryEntries entries;
+    entries.reserve(15);
+    AddSlamStartupTaskFactories(entries, catalog, deps);
+    AddSlamProcessingTaskFactories(entries, catalog, deps);
+    AddSlamOutputTaskFactories(entries, catalog, deps);
+    AddSlamMonitorTaskFactories(entries, catalog, deps);
+    return epg::TypeCatalog::MakeTaskFactoryResolver(std::move(entries));
+}
+
+} // namespace smartdrone::core::application

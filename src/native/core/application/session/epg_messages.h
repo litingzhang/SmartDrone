@@ -6,8 +6,6 @@
 #include <string>
 
 #include "common/epg/epg.h"
-#include "core/application/session/slam_frame_processor.h"
-#include "core/application/session/slam_session_runtime.h"
 #include "core/ports/camera_provider.h"
 
 namespace smartdrone::core::application {
@@ -25,22 +23,34 @@ struct SlamImuReady {
 };
 
 struct SlamFrameReady {
-    std::shared_ptr<SlamSessionRuntime> runtime;
+    std::uint64_t sessionId{0};
+};
+
+struct SlamPreparedFramePayload {
+    std::shared_ptr<void> handle;
+};
+
+struct SlamTrackedFramePayload {
+    std::shared_ptr<void> handle;
+};
+
+struct SlamPublishedFramePayload {
+    std::shared_ptr<void> handle;
 };
 
 struct SlamPreparedFrame {
-    std::shared_ptr<SlamSessionRuntime> runtime;
-    std::shared_ptr<SlamFrameProcessor::PreparedFrame> frame;
+    std::uint64_t sessionId{0};
+    std::shared_ptr<SlamPreparedFramePayload> frame;
 };
 
 struct SlamTrackedFrame {
-    std::shared_ptr<SlamSessionRuntime> runtime;
-    std::shared_ptr<SlamFrameProcessor::TrackedFrame> frame;
+    std::uint64_t sessionId{0};
+    std::shared_ptr<SlamTrackedFramePayload> frame;
 };
 
 struct SlamPublishedFrame {
-    std::shared_ptr<SlamSessionRuntime> runtime;
-    std::shared_ptr<SlamFrameProcessor::PublishedFrame> frame;
+    std::uint64_t sessionId{0};
+    std::shared_ptr<SlamPublishedFramePayload> frame;
 };
 
 struct SlamStatus {

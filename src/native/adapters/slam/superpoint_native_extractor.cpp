@@ -1,6 +1,7 @@
 #include "adapters/slam/superpoint_native_extractor.h"
 
 #include "adapters/slam/superpoint_lightglue_frontend_client.h"
+#include "adapters/slam/superpoint_runtime_options.h"
 
 #include <algorithm>
 #include <array>
@@ -57,14 +58,6 @@ std::string LowerCopy(std::string text) {
   return text;
 }
 
-int EnvInt(const char *name, int fallback) {
-  const char *value = std::getenv(name);
-  if (value == nullptr || value[0] == '\0') {
-    return fallback;
-  }
-  return std::max(1, std::atoi(value));
-}
-
 bool EnvFlag(const char *name, bool fallback) {
   const char *value = std::getenv(name);
   if (value == nullptr || value[0] == '\0') {
@@ -85,16 +78,6 @@ int EnvIntClamped(const char *name, int fallback, int minValue, int maxValue) {
     return std::clamp(fallback, minValue, maxValue);
   }
   return std::clamp(static_cast<int>(parsed), minValue, maxValue);
-}
-
-float EnvFloat(const char *name, float fallback) {
-  const char *value = std::getenv(name);
-  if (value == nullptr || value[0] == '\0') {
-    return fallback;
-  }
-  char *end = nullptr;
-  const float parsed = std::strtof(value, &end);
-  return end != value && std::isfinite(parsed) ? parsed : fallback;
 }
 
 float StereoMinDisparityPx() {
@@ -2003,9 +1986,10 @@ struct SuperPointNativeExtractor::Impl {
       }
       return false;
     }
-    const int widthHint = EnvInt("SMART_DRONE_SUPERPOINT_INPUT_MAX_WIDTH", 640);
-    const int heightHint =
-        EnvInt("SMART_DRONE_SUPERPOINT_INPUT_MAX_HEIGHT", 480);
+    const SuperPointTensorRtRuntimeOptions runtimeOptions =
+        LoadSuperPointTensorRtRuntimeOptions();
+    const int widthHint = runtimeOptions.inputMaxWidth;
+    const int heightHint = runtimeOptions.inputMaxHeight;
     const std::filesystem::path enginePath =
         ResolveSuperPointEnginePath(repoPath, widthHint, heightHint);
     if (enginePath.empty()) {
@@ -2027,7 +2011,7 @@ struct SuperPointNativeExtractor::Impl {
               << " input=" << inputWidth << "x" << inputHeight << "\n";
 
     const std::filesystem::path lightGluePath =
-        ResolveLightGlueEnginePath(repoPath, maxPointsForLightGlue());
+        ResolveLightGlueEnginePath(repoPath, runtimeOptions.lightGluePoints);
     if (!lightGluePath.empty()) {
       auto matcher = std::make_unique<TensorRtLightGlueEngine>();
       std::string lgErr;
@@ -2035,21 +2019,19 @@ struct SuperPointNativeExtractor::Impl {
         const int fixedPointCount = matcher->FixedPointCount();
         lightGlueEngine = std::move(matcher);
         lightGluePointCount =
-            fixedPointCount > 0 ? fixedPointCount : maxPointsForLightGlue();
+            fixedPointCount > 0 ? fixedPointCount
+                                : runtimeOptions.lightGluePoints;
         lightGlueDynamicPointCountDisabled = fixedPointCount > 0;
-        lightGlueMinScore = EnvFloat("SMART_DRONE_LIGHTGLUE_MIN_SCORE", 0.02f);
-        lightGlueMaxYDiffPx =
-            EnvFloat("SMART_DRONE_LIGHTGLUE_MAX_Y_DIFF_PX", 1.5f);
-        lightGlueMinDisparityPx =
-            EnvFloat("SMART_DRONE_LIGHTGLUE_MIN_DISPARITY_PX", 0.8f);
+        lightGlueMinScore = runtimeOptions.lightGlueMinScore;
+        lightGlueMaxYDiffPx = runtimeOptions.lightGlueMaxYDiffPx;
+        lightGlueMinDisparityPx = runtimeOptions.lightGlueMinDisparityPx;
         lightGlueEmptyDisableThreshold =
-            EnvInt("SMART_DRONE_LIGHTGLUE_EMPTY_DISABLE_THRESHOLD", 3);
+            runtimeOptions.lightGlueEmptyDisableThreshold;
         lightGlueLowYieldDisableThreshold =
-            EnvInt("SMART_DRONE_LIGHTGLUE_LOW_YIELD_DISABLE_THRESHOLD", 3);
-        lightGlueLowYieldMinPairs =
-            EnvInt("SMART_DRONE_LIGHTGLUE_LOW_YIELD_MIN_PAIRS", 8);
+            runtimeOptions.lightGlueLowYieldDisableThreshold;
+        lightGlueLowYieldMinPairs = runtimeOptions.lightGlueLowYieldMinPairs;
         lightGlueEmptyCooldownFrames =
-            EnvInt("SMART_DRONE_LIGHTGLUE_EMPTY_COOLDOWN_FRAMES", 120);
+            runtimeOptions.lightGlueEmptyCooldownFrames;
         std::cerr << "[lightglue_trt] loaded engine=" << lightGluePath.string()
                   << " points=" << lightGluePointCount
                   << " fixed_points=" << (fixedPointCount > 0 ? "Y" : "N")
@@ -2075,7 +2057,7 @@ struct SuperPointNativeExtractor::Impl {
   }
 
   int maxPointsForLightGlue() const {
-    return EnvInt("SMART_DRONE_LIGHTGLUE_POINTS", 512);
+    return LoadSuperPointTensorRtRuntimeOptions().lightGluePoints;
   }
 
   bool PopulateOutputFromTensors(

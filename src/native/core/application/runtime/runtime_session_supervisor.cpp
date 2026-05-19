@@ -29,7 +29,15 @@ void RuntimeSessionSupervisor::Stop()
     StopActiveSessionSynchronously();
 }
 
-void RuntimeSessionSupervisor::Step() { StepSupervisor(); }
+void RuntimeSessionSupervisor::OnGraphTick()
+{
+    StepSupervisor();
+}
+
+void RuntimeSessionSupervisor::Step()
+{
+    OnGraphTick();
+}
 
 bool RuntimeSessionSupervisor::RequestMode(ControllerMode mode, std::string *err)
 {

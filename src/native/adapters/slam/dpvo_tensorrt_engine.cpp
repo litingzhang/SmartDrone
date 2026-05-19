@@ -34,6 +34,7 @@
 #include "adapters/slam/slam_image_utils.h"
 #include "adapters/slam/slam_mode_state.h"
 #include "adapters/slam/slam_pose_utils.h"
+#include "adapters/slam/dpvo_runtime_options.h"
 #include "core/ports/slam_tracking_state.h"
 
 #if defined(SMART_DRONE_DPVO_TENSORRT_AVAILABLE)
@@ -2617,12 +2618,11 @@ public:
     m_initialized = false;
     m_counter = 0;
     m_keyframeRemovals = 0;
-    m_persistentEdges =
-        EnvFlagEnabled("SMART_DRONE_DPVO_PERSISTENT_EDGES", false);
-    m_keyframeRemovalEnabled =
-        EnvFlagEnabled("SMART_DRONE_DPVO_KEYFRAME", false);
-    m_maxActiveEdges =
-        std::clamp(EnvIntValue("SMART_DRONE_DPVO_MAX_EDGES", 1024), 128, 4096);
+    const DpvoGraphRuntimeOptions options = LoadDpvoGraphRuntimeOptions();
+    m_persistentEdges = options.persistentEdges;
+    m_keyframeRemovalEnabled = options.keyframeRemovalEnabled;
+    m_capRebuiltEdges = options.capRebuiltEdges;
+    m_maxActiveEdges = options.maxActiveEdges;
   }
 
   void PushFrame(uint64_t frameId, int64_t timestampNs, const cv::Mat &gray,
@@ -2698,8 +2698,7 @@ public:
     }
     AppendEdgesForNewest();
     PruneOldEdges();
-    if (m_persistentEdges ||
-        EnvFlagEnabled("SMART_DRONE_DPVO_CAP_REBUILT_EDGES", false)) {
+    if (m_persistentEdges || m_capRebuiltEdges) {
       CapActiveEdges();
     }
     PruneFrames();
@@ -2738,13 +2737,11 @@ public:
     }
 
     int updated = 0;
-    const int maxDisp =
-        std::clamp(EnvIntValue("SMART_DRONE_DPVO_STEREO_MAX_DISP", 36), 2,
-                   std::max(2, rightWidth / 3));
-    const float minScore = std::clamp(
-        EnvFloatValue("SMART_DRONE_DPVO_STEREO_NCC_MIN", 0.05f), -1.0f, 1.0f);
-    const float minMargin = std::clamp(
-        EnvFloatValue("SMART_DRONE_DPVO_STEREO_NCC_MARGIN", 0.01f), 0.0f, 1.0f);
+    const DpvoStereoDepthOptions stereoOptions =
+        LoadDpvoStereoDepthOptions(rightWidth);
+    const int maxDisp = stereoOptions.maxDisparity;
+    const float minScore = stereoOptions.minScore;
+    const float minMargin = stereoOptions.minMargin;
     for (int p = 0; p < static_cast<int>(frame.patches.size()); ++p) {
       DpvoPatchState &patch = frame.patches[static_cast<size_t>(p)];
       if (patch.x < 2.0f || patch.y < 2.0f ||
@@ -3124,9 +3121,7 @@ private:
   }
 
   void CapActiveEdges() {
-    const bool capRebuiltEdges =
-        EnvFlagEnabled("SMART_DRONE_DPVO_CAP_REBUILT_EDGES", false);
-    if ((!m_persistentEdges && !capRebuiltEdges) || m_maxActiveEdges <= 0 ||
+    if ((!m_persistentEdges && !m_capRebuiltEdges) || m_maxActiveEdges <= 0 ||
         static_cast<int>(m_edges.size()) <= m_maxActiveEdges) {
       return;
     }
@@ -3207,6 +3202,7 @@ private:
   int m_keyframeRemovals{0};
   bool m_persistentEdges{false};
   bool m_keyframeRemovalEnabled{false};
+  bool m_capRebuiltEdges{false};
   bool m_initialized{false};
   std::vector<DpvoFrameState> m_frames;
   std::vector<DpvoEdgeState> m_edges;

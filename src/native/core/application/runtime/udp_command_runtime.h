@@ -80,6 +80,7 @@ class UdpCommandRuntime final {
 
     bool Start();
     void Stop();
+    void OnGraphTick();
     void Step();
 
   private:

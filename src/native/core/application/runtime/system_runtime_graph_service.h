@@ -5,11 +5,10 @@
 
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/runtime_aliases.h"
+#include "core/application/runtime/system_runtime_step_services.h"
 #include "core/application/runtime/udp_command_runtime.h"
 
 namespace smartdrone::core::application {
-
-using RuntimeGraphStepFn = std::function<void()>;
 
 struct SystemRuntimeGraphConfig {
     MainRuntimeAliases aliases;
