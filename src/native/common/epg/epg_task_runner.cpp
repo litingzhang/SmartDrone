@@ -1,5 +1,8 @@
 #include "common/epg/epg_internal.h"
 
+#include <pthread.h>
+#include <sched.h>
+
 namespace epg {
 
 EventPipelineGraph::TaskRunner::TaskRunner(TaskConfig config,
@@ -25,14 +28,32 @@ void EventPipelineGraph::TaskRunner::Start() {
     if (m_running.exchange(true, std::memory_order_acq_rel)) {
         return;
     }
+    m_exited.store(false, std::memory_order_release);
     m_thread = std::thread([this]() { Run(); });
 }
 
-void EventPipelineGraph::TaskRunner::Stop() {
+void EventPipelineGraph::TaskRunner::RequestStop() {
     if (!m_running.exchange(false, std::memory_order_acq_rel)) {
         return;
     }
     Notify();
+}
+
+bool EventPipelineGraph::TaskRunner::JoinStopped() {
+    if (m_running.load(std::memory_order_acquire)) {
+        return false;
+    }
+    if (!m_exited.load(std::memory_order_acquire)) {
+        return false;
+    }
+    if (m_thread.joinable()) {
+        m_thread.join();
+    }
+    return true;
+}
+
+void EventPipelineGraph::TaskRunner::Stop() {
+    RequestStop();
     if (m_thread.joinable()) {
         m_thread.join();
     }
@@ -50,12 +71,14 @@ TaskDiagnosticsSnapshot EventPipelineGraph::TaskRunner::Diagnostics() const {
 }
 
 void EventPipelineGraph::TaskRunner::Run() {
+    ApplyScheduling();
     while (m_running.load(std::memory_order_acquire)) {
         if (!WaitForTrigger()) {
             break;
         }
 
-        if (IsQueueTriggeredMode(m_config.trigger.mode) && !QueuesReady()) {
+        if (m_config.trigger.mode != TriggerMode::PeriodicOrAnyQueueReady &&
+            IsQueueTriggeredMode(m_config.trigger.mode) && !QueuesReady()) {
             m_diag.idleWakeups.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
@@ -79,6 +102,16 @@ void EventPipelineGraph::TaskRunner::Run() {
         }
         m_diag.loopCount.fetch_add(1, std::memory_order_relaxed);
     }
+    m_exited.store(true, std::memory_order_release);
+}
+
+void EventPipelineGraph::TaskRunner::ApplyScheduling() {
+    if (!m_config.scheduling.realtime) {
+        return;
+    }
+    sched_param schedParam{};
+    schedParam.sched_priority = m_config.scheduling.priority;
+    (void)pthread_setschedparam(pthread_self(), SCHED_FIFO, &schedParam);
 }
 
 bool EventPipelineGraph::TaskRunner::WaitForTrigger() {

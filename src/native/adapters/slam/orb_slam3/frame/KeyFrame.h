@@ -305,7 +305,7 @@ public:
 
     bool bImu;
 
-    // The following variables are accesed from only 1 thread or never change (no mutex needed).
+    // The following variables are accessed from one execution flow or never change (no mutex needed).
 public:
 
     static long unsigned int nNextId;
@@ -424,7 +424,7 @@ public:
     //bool mbHasHessian;
     //cv::Mat mHessianPose;
 
-    // The following variables need to be accessed trough a mutex to be thread safe.
+    // The following variables need a mutex for concurrent access.
 protected:
     // sophus poses
     Sophus::SE3<float> mTcw;

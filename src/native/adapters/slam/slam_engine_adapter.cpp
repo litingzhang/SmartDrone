@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cmath>
 #include <string>
-#include <thread>
 #include <utility>
 
 #include <sophus/se3.hpp>
@@ -87,6 +86,12 @@ void SlamEngineAdapter::SetStereoVoPerFrameAcceleration(
   m_modeState->m_lkPerFrameAccelLogged = false;
 }
 
+void SlamEngineAdapter::StepBackend() {
+  if (m_trackingBackend) {
+    m_trackingBackend->StepBackend();
+  }
+}
+
 void SlamEngineAdapter::Stop() {
   m_lastStablePose = core::ports::PoseEstimate{};
   m_haveLastStablePose = false;
@@ -127,73 +132,93 @@ void SlamEngineAdapter::ResetOutputSmoother() {
   m_smoothVelZ = 0.0f;
 }
 
-void SlamEngineAdapter::MaintainRealtimePoseContinuity(
-    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
-    int trackingState) {
-  pose.valid = poseValid && IsFinitePose(pose);
-  if (pose.valid) {
-    NormalizePoseQuaternion(pose);
+double SlamEngineAdapter::StablePoseDeltaTime(double timestampSec) const {
+  if (!m_haveLastStablePose || timestampSec <= m_lastStableTimestampSec) {
+    return kPoseStabilizerDefaultDtSec;
   }
-
-  double dt = kPoseStabilizerDefaultDtSec;
-  if (m_haveLastStablePose && timestampSec > m_lastStableTimestampSec) {
-    dt = std::clamp(timestampSec - m_lastStableTimestampSec,
+  return std::clamp(timestampSec - m_lastStableTimestampSec,
                     kPoseStabilizerMinDtSec, kPoseStabilizerMaxDtSec);
+}
+
+double SlamEngineAdapter::SmoothedPoseDeltaTime(double timestampSec) const {
+  if (!m_haveSmoothedOutputPose ||
+      timestampSec <= m_smoothedOutputTimestampSec) {
+    return kPoseStabilizerDefaultDtSec;
   }
+  return std::clamp(timestampSec - m_smoothedOutputTimestampSec,
+                    kPoseStabilizerMinDtSec, kPoseStabilizerMaxDtSec);
+}
 
-  const bool rawIdentity = pose.x == 0.0f && pose.y == 0.0f && pose.z == 0.0f &&
-                           pose.qw == 1.0f && pose.qx == 0.0f &&
-                           pose.qy == 0.0f && pose.qz == 0.0f;
+void SlamEngineAdapter::StoreSmoothedPose(
+    const core::ports::PoseEstimate &pose, double timestampSec) {
+  m_smoothedOutputPose = pose;
+  m_haveSmoothedOutputPose = true;
+  m_smoothedOutputTimestampSec = timestampSec;
+}
 
-  if (pose.valid && !rawIdentity &&
-      trackingState == core::ports::kSlamTrackingOk) {
-    if (m_haveLastStablePose) {
-      float measuredVelX =
-          (pose.x - m_lastStablePose.x) / static_cast<float>(dt);
-      float measuredVelY =
-          (pose.y - m_lastStablePose.y) / static_cast<float>(dt);
-      float measuredVelZ =
-          (pose.z - m_lastStablePose.z) / static_cast<float>(dt);
-      ClampVelocityVector(measuredVelX, measuredVelY, measuredVelZ);
-      m_stableVelX = (1.0f - kPoseStabilizerVelocityAlpha) * m_stableVelX +
-                     kPoseStabilizerVelocityAlpha * measuredVelX;
-      m_stableVelY = (1.0f - kPoseStabilizerVelocityAlpha) * m_stableVelY +
-                     kPoseStabilizerVelocityAlpha * measuredVelY;
-      m_stableVelZ = (1.0f - kPoseStabilizerVelocityAlpha) * m_stableVelZ +
-                     kPoseStabilizerVelocityAlpha * measuredVelZ;
-    }
-    poseValid = true;
-    m_lastStablePose = pose;
-    m_haveLastStablePose = true;
-    m_lastStableTimestampSec = timestampSec;
-    return;
+bool SlamEngineAdapter::AcceptStableRealtimePose(
+    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    double dt, int trackingState) {
+  if (!pose.valid || IsIdentityPose(pose) ||
+      trackingState != core::ports::kSlamTrackingOk) {
+    return false;
   }
+  if (m_haveLastStablePose) {
+    float measuredVelX =
+        (pose.x - m_lastStablePose.x) / static_cast<float>(dt);
+    float measuredVelY =
+        (pose.y - m_lastStablePose.y) / static_cast<float>(dt);
+    float measuredVelZ =
+        (pose.z - m_lastStablePose.z) / static_cast<float>(dt);
+    ClampVelocityVector(measuredVelX, measuredVelY, measuredVelZ);
+    m_stableVelX = (1.0f - kPoseStabilizerVelocityAlpha) * m_stableVelX +
+                   kPoseStabilizerVelocityAlpha * measuredVelX;
+    m_stableVelY = (1.0f - kPoseStabilizerVelocityAlpha) * m_stableVelY +
+                   kPoseStabilizerVelocityAlpha * measuredVelY;
+    m_stableVelZ = (1.0f - kPoseStabilizerVelocityAlpha) * m_stableVelZ +
+                   kPoseStabilizerVelocityAlpha * measuredVelZ;
+  }
+  poseValid = true;
+  m_lastStablePose = pose;
+  m_haveLastStablePose = true;
+  m_lastStableTimestampSec = timestampSec;
+  return true;
+}
 
+bool SlamEngineAdapter::AcceptRealtimeBootstrapPose(
+    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    int trackingState, bool rawIdentity) {
   const bool bootstrapFrame =
       !m_haveLastStablePose &&
       trackingState == core::ports::kSlamTrackingNotInitialized &&
       IsFinitePose(pose) && rawIdentity;
-  if (bootstrapFrame) {
-    pose.valid = true;
-    poseValid = true;
-    m_lastStablePose = pose;
-    m_haveLastStablePose = true;
-    m_lastStableTimestampSec = timestampSec;
-    return;
+  if (!bootstrapFrame) {
+    return false;
   }
+  pose.valid = true;
+  poseValid = true;
+  m_lastStablePose = pose;
+  m_haveLastStablePose = true;
+  m_lastStableTimestampSec = timestampSec;
+  return true;
+}
 
+bool SlamEngineAdapter::PredictRealtimePose(core::ports::PoseEstimate &pose,
+                                            bool &poseValid,
+                                            double timestampSec, double dt,
+                                            int trackingState,
+                                            bool rawIdentity) {
   if (!m_haveLastStablePose) {
     poseValid = pose.valid;
-    return;
+    return true;
   }
-
   const bool canPredict =
       !pose.valid || rawIdentity ||
       trackingState == core::ports::kSlamTrackingRecentlyLost ||
       trackingState == core::ports::kSlamTrackingOkKlt;
   if (!canPredict) {
     poseValid = pose.valid;
-    return;
+    return true;
   }
 
   ClampVelocityVector(m_stableVelX, m_stableVelY, m_stableVelZ);
@@ -209,65 +234,100 @@ void SlamEngineAdapter::MaintainRealtimePoseContinuity(
   m_stableVelX *= kPoseStabilizerPredictedVelocityDecay;
   m_stableVelY *= kPoseStabilizerPredictedVelocityDecay;
   m_stableVelZ *= kPoseStabilizerPredictedVelocityDecay;
+  return true;
 }
 
-void SlamEngineAdapter::GateRealtimePoseQuality(core::ports::SlamOutput &out,
-                                                double timestampSec) {
-  const bool canBridgeMapReset =
-      out.poseValid && out.pose.valid && IsFinitePose(out.pose);
-  if (canBridgeMapReset) {
-    const bool mapChanged =
-        m_realtimeOutputHaveLastMapId && out.mapId != m_realtimeOutputLastMapId;
-    if (mapChanged) {
-      ResetRealtimeOutputAlignment();
-      if (out.usedVisualFeatureFrontend && m_haveLastStablePose &&
-          EnvFlagEnabled("SMART_DRONE_REALTIME_POSE_MAP_BRIDGE", true)) {
-        const Sophus::SE3f rawPose = PoseEstimateToSe3(out.pose);
-        const Sophus::SE3f outputPose = PoseEstimateToSe3(m_lastStablePose);
-        m_realtimeOutputFromRawPose = outputPose * rawPose.inverse();
-        m_realtimeOutputMapContinuityActive = true;
-        m_realtimeOutputMapContinuityMapId = out.mapId;
-        out.rawPoseStepMeters =
-            PoseTranslationDistance(out.pose, m_lastStablePose);
-        out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose * rawPose);
-        out.poseValid = true;
-        out.pose.valid = true;
-        out.trackingState = core::ports::kSlamTrackingRecentlyLost;
-        out.realtimePoseQualityGate = true;
-        out.gatedPoseStepMeters =
-            PoseTranslationDistance(out.pose, m_lastStablePose);
-        m_realtimeOutputHaveLastMapId = true;
-        m_realtimeOutputLastMapId = out.mapId;
-        return;
-      }
-    }
-    m_realtimeOutputHaveLastMapId = true;
-    m_realtimeOutputLastMapId = out.mapId;
-  } else if (!m_realtimeOutputHaveLastMapId) {
-    m_realtimeOutputHaveLastMapId = true;
-    m_realtimeOutputLastMapId = out.mapId;
+void SlamEngineAdapter::MaintainRealtimePoseContinuity(
+    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    int trackingState) {
+  pose.valid = poseValid && IsFinitePose(pose);
+  if (pose.valid) {
+    NormalizePoseQuaternion(pose);
   }
 
-  if (m_realtimeOutputMapContinuityActive && out.poseValid && out.pose.valid &&
-      IsFinitePose(out.pose)) {
-    const core::ports::PoseEstimate rawPose = out.pose;
-    out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose *
-                                 PoseEstimateToSe3(rawPose));
-    out.poseValid = true;
-    out.pose.valid = true;
-    if (m_haveLastStablePose) {
-      out.rawPoseStepMeters =
-          PoseTranslationDistance(rawPose, m_lastStablePose);
-      out.gatedPoseStepMeters =
-          PoseTranslationDistance(out.pose, m_lastStablePose);
-    }
-    if (out.trackingState != core::ports::kSlamTrackingOk) {
-      out.trackingState = core::ports::kSlamTrackingRecentlyLost;
-    }
-    out.realtimePoseQualityGate = true;
+  const double dt = StablePoseDeltaTime(timestampSec);
+  const bool rawIdentity = IsIdentityPose(pose);
+  if (AcceptStableRealtimePose(pose, poseValid, timestampSec, dt,
+                               trackingState)) {
     return;
   }
+  if (AcceptRealtimeBootstrapPose(pose, poseValid, timestampSec,
+                                  trackingState, rawIdentity)) {
+    return;
+  }
+  (void)PredictRealtimePose(pose, poseValid, timestampSec, dt, trackingState,
+                            rawIdentity);
+}
 
+bool SlamEngineAdapter::HandleRealtimeMapBridge(core::ports::SlamOutput &out) {
+  const bool canBridgeMapReset =
+      out.poseValid && out.pose.valid && IsFinitePose(out.pose);
+  if (!canBridgeMapReset) {
+    if (!m_realtimeOutputHaveLastMapId) {
+      m_realtimeOutputHaveLastMapId = true;
+      m_realtimeOutputLastMapId = out.mapId;
+    }
+    return false;
+  }
+
+  const bool mapChanged =
+      m_realtimeOutputHaveLastMapId && out.mapId != m_realtimeOutputLastMapId;
+  if (!mapChanged) {
+    m_realtimeOutputHaveLastMapId = true;
+    m_realtimeOutputLastMapId = out.mapId;
+    return false;
+  }
+
+  ResetRealtimeOutputAlignment();
+  if (!out.usedVisualFeatureFrontend || !m_haveLastStablePose ||
+      !EnvFlagEnabled("SMART_DRONE_REALTIME_POSE_MAP_BRIDGE", true)) {
+    m_realtimeOutputHaveLastMapId = true;
+    m_realtimeOutputLastMapId = out.mapId;
+    return false;
+  }
+
+  const Sophus::SE3f rawPose = PoseEstimateToSe3(out.pose);
+  const Sophus::SE3f outputPose = PoseEstimateToSe3(m_lastStablePose);
+  m_realtimeOutputFromRawPose = outputPose * rawPose.inverse();
+  m_realtimeOutputMapContinuityActive = true;
+  m_realtimeOutputMapContinuityMapId = out.mapId;
+  out.rawPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+  out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose * rawPose);
+  out.poseValid = true;
+  out.pose.valid = true;
+  out.trackingState = core::ports::kSlamTrackingRecentlyLost;
+  out.realtimePoseQualityGate = true;
+  out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+  m_realtimeOutputHaveLastMapId = true;
+  m_realtimeOutputLastMapId = out.mapId;
+  return true;
+}
+
+bool SlamEngineAdapter::ApplyRealtimeMapContinuity(
+    core::ports::SlamOutput &out) {
+  if (!m_realtimeOutputMapContinuityActive || !out.poseValid ||
+      !out.pose.valid || !IsFinitePose(out.pose)) {
+    return false;
+  }
+  const core::ports::PoseEstimate rawPose = out.pose;
+  out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose *
+                               PoseEstimateToSe3(rawPose));
+  out.poseValid = true;
+  out.pose.valid = true;
+  if (m_haveLastStablePose) {
+    out.rawPoseStepMeters = PoseTranslationDistance(rawPose, m_lastStablePose);
+    out.gatedPoseStepMeters =
+        PoseTranslationDistance(out.pose, m_lastStablePose);
+  }
+  if (out.trackingState != core::ports::kSlamTrackingOk) {
+    out.trackingState = core::ports::kSlamTrackingRecentlyLost;
+  }
+  out.realtimePoseQualityGate = true;
+  return true;
+}
+
+bool SlamEngineAdapter::ApplyRealtimeResetGuard(
+    core::ports::SlamOutput &out) {
   const bool canMeasurePoseStep = out.poseValid && out.pose.valid &&
                                   IsFinitePose(out.pose) &&
                                   m_haveLastStablePose;
@@ -275,121 +335,342 @@ void SlamEngineAdapter::GateRealtimePoseQuality(core::ports::SlamOutput &out,
     out.rawPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
     out.gatedPoseStepMeters = out.rawPoseStepMeters;
   }
-  if (canMeasurePoseStep && out.usedVisualFeatureFrontend &&
-      out.trackingState == core::ports::kSlamTrackingOk &&
-      EnvFlagEnabled("SMART_DRONE_REALTIME_POSE_RESET_GUARD", false)) {
-    const float resetJumpMax =
-        EnvFloatValueClamped("SMART_DRONE_REALTIME_POSE_RESET_GUARD_MAX_STEP_M",
-                             0.75f, 0.05f, 10.0f);
-    if (out.rawPoseStepMeters > resetJumpMax) {
-      const Sophus::SE3f rawPose = PoseEstimateToSe3(out.pose);
-      const Sophus::SE3f outputPose = PoseEstimateToSe3(m_lastStablePose);
-      m_realtimeOutputFromRawPose = outputPose * rawPose.inverse();
-      m_realtimeOutputMapContinuityActive = true;
-      m_realtimeOutputMapContinuityMapId = out.mapId;
-      out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose * rawPose);
-      out.poseValid = true;
-      out.trackingState = core::ports::kSlamTrackingRecentlyLost;
-      out.realtimePoseQualityGate = true;
-      out.gatedPoseStepMeters =
-          PoseTranslationDistance(out.pose, m_lastStablePose);
-      return;
-    }
+  if (!canMeasurePoseStep || !out.usedVisualFeatureFrontend ||
+      out.trackingState != core::ports::kSlamTrackingOk ||
+      !EnvFlagEnabled("SMART_DRONE_REALTIME_POSE_RESET_GUARD", false)) {
+    return canMeasurePoseStep;
   }
+
+  const float resetJumpMax =
+      EnvFloatValueClamped("SMART_DRONE_REALTIME_POSE_RESET_GUARD_MAX_STEP_M",
+                           0.75f, 0.05f, 10.0f);
+  if (out.rawPoseStepMeters <= resetJumpMax) {
+    return true;
+  }
+  const Sophus::SE3f rawPose = PoseEstimateToSe3(out.pose);
+  const Sophus::SE3f outputPose = PoseEstimateToSe3(m_lastStablePose);
+  m_realtimeOutputFromRawPose = outputPose * rawPose.inverse();
+  m_realtimeOutputMapContinuityActive = true;
+  m_realtimeOutputMapContinuityMapId = out.mapId;
+  out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose * rawPose);
+  out.poseValid = true;
+  out.trackingState = core::ports::kSlamTrackingRecentlyLost;
+  out.realtimePoseQualityGate = true;
+  out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+  return false;
+}
+
+bool SlamEngineAdapter::ShouldApplyRealtimeFeatureGate(
+    const core::ports::SlamOutput &out) const {
   if (!EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_QUALITY_GATE", false)) {
-    return;
-  }
-  if (!canMeasurePoseStep) {
-    return;
+    return false;
   }
   const bool gateDuringStabilizing =
       EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_GATE_STABILIZING", false);
   if (!out.usedVisualFeatureFrontend || !out.stereoFeatureInjected ||
       (!gateDuringStabilizing && out.stereoFeatureStabilizing) ||
       out.trackingState != core::ports::kSlamTrackingOk) {
-    return;
+    return false;
   }
-
   const int minInliers = EnvIntValueClamped(
       "SMART_DRONE_SP_LG_REALTIME_GATE_MIN_INLIERS", 120, 1, 100000);
   const int minTracked = EnvIntValueClamped(
       "SMART_DRONE_SP_LG_REALTIME_GATE_MIN_TRACKED_MAP", 140, 1, 100000);
-  const float maxStep =
-      EnvFloatValueClamped("SMART_DRONE_SP_LG_REALTIME_GATE_MAX_STEP_M",
-                           kPoseStabilizerMaxStepMeters, 0.005f, 0.25f);
   const bool weakTracking =
       out.matchesInliers < minInliers ||
       static_cast<int>(out.trackedMapPointCount) < minTracked;
-  const float rawStep = out.rawPoseStepMeters;
-  const bool gateAllSuperPointLightGlue =
-      EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_GATE_ALL", false);
-  if (!gateAllSuperPointLightGlue && !weakTracking) {
+  return EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_GATE_ALL", false) ||
+         weakTracking;
+}
+
+void SlamEngineAdapter::ApplyRealtimeInnovationGate(
+    core::ports::SlamOutput &out, double timestampSec, float maxStep) {
+  const double dt = StablePoseDeltaTime(timestampSec);
+  float velocityX = m_stableVelX;
+  float velocityY = m_stableVelY;
+  float velocityZ = m_stableVelZ;
+  ClampVelocityVector(velocityX, velocityY, velocityZ);
+
+  core::ports::PoseEstimate predicted = m_lastStablePose;
+  predicted.x += velocityX * static_cast<float>(dt);
+  predicted.y += velocityY * static_cast<float>(dt);
+  predicted.z += velocityZ * static_cast<float>(dt);
+  predicted.valid = true;
+
+  const float maxInnovation =
+      EnvFloatValueClamped("SMART_DRONE_SP_LG_REALTIME_GATE_MAX_INNOVATION_M",
+                           maxStep, 0.005f, 0.50f);
+  const float innovation = PoseTranslationDistance(out.pose, predicted);
+  if (innovation <= maxInnovation) {
     return;
   }
 
+  const float scale = maxInnovation / std::max(innovation, 1.0e-6f);
   core::ports::PoseEstimate gated = out.pose;
-  const std::string gateMode =
-      EnvStringValue("SMART_DRONE_SP_LG_REALTIME_GATE_MODE", "step");
-  if (gateMode == "innovation" || gateMode == "predict" ||
-      gateMode == "prediction") {
-    double dt = kPoseStabilizerDefaultDtSec;
-    if (timestampSec > m_lastStableTimestampSec) {
-      dt = std::clamp(timestampSec - m_lastStableTimestampSec,
-                      kPoseStabilizerMinDtSec, kPoseStabilizerMaxDtSec);
-    }
-
-    float vx = m_stableVelX;
-    float vy = m_stableVelY;
-    float vz = m_stableVelZ;
-    ClampVelocityVector(vx, vy, vz);
-
-    core::ports::PoseEstimate predicted = m_lastStablePose;
-    predicted.x += vx * static_cast<float>(dt);
-    predicted.y += vy * static_cast<float>(dt);
-    predicted.z += vz * static_cast<float>(dt);
-    predicted.valid = true;
-
-    const float maxInnovation =
-        EnvFloatValueClamped("SMART_DRONE_SP_LG_REALTIME_GATE_MAX_INNOVATION_M",
-                             maxStep, 0.005f, 0.50f);
-    const float innovation = PoseTranslationDistance(out.pose, predicted);
-    if (innovation <= maxInnovation) {
-      return;
-    }
-
-    const float scale = maxInnovation / std::max(innovation, 1.0e-6f);
-    gated.x = predicted.x + (out.pose.x - predicted.x) * scale;
-    gated.y = predicted.y + (out.pose.y - predicted.y) * scale;
-    gated.z = predicted.z + (out.pose.z - predicted.z) * scale;
-    if (EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_GATE_LIMIT_ROTATION",
-                       false)) {
-      LimitPoseRotationStep(predicted, gated, kPoseStabilizerMaxRotStepDeg);
-    }
-    gated.valid = true;
-
-    out.pose = gated;
-    out.poseValid = true;
-    out.realtimePoseQualityGate = true;
-    out.gatedPoseStepMeters =
-        PoseTranslationDistance(out.pose, m_lastStablePose);
-    return;
+  gated.x = predicted.x + (out.pose.x - predicted.x) * scale;
+  gated.y = predicted.y + (out.pose.y - predicted.y) * scale;
+  gated.z = predicted.z + (out.pose.z - predicted.z) * scale;
+  if (EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_GATE_LIMIT_ROTATION",
+                     false)) {
+    LimitPoseRotationStep(predicted, gated, kPoseStabilizerMaxRotStepDeg);
   }
+  gated.valid = true;
+  out.pose = gated;
+  out.poseValid = true;
+  out.realtimePoseQualityGate = true;
+  out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+}
 
+void SlamEngineAdapter::ApplyRealtimeStepGate(core::ports::SlamOutput &out,
+                                              float maxStep) {
+  const float rawStep = out.rawPoseStepMeters;
   if (rawStep <= maxStep) {
     return;
   }
-
   const float scale = maxStep / std::max(rawStep, 1.0e-6f);
+  core::ports::PoseEstimate gated = out.pose;
   gated.x = m_lastStablePose.x + (out.pose.x - m_lastStablePose.x) * scale;
   gated.y = m_lastStablePose.y + (out.pose.y - m_lastStablePose.y) * scale;
   gated.z = m_lastStablePose.z + (out.pose.z - m_lastStablePose.z) * scale;
   LimitPoseRotationStep(m_lastStablePose, gated, kPoseStabilizerMaxRotStepDeg);
   gated.valid = true;
-
   out.pose = gated;
   out.poseValid = true;
   out.realtimePoseQualityGate = true;
   out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
+}
+
+void SlamEngineAdapter::GateRealtimePoseQuality(core::ports::SlamOutput &out,
+                                                double timestampSec) {
+  if (HandleRealtimeMapBridge(out)) {
+    return;
+  }
+  if (ApplyRealtimeMapContinuity(out)) {
+    return;
+  }
+  if (!ApplyRealtimeResetGuard(out)) {
+    return;
+  }
+  if (!ShouldApplyRealtimeFeatureGate(out)) {
+    return;
+  }
+
+  const float maxStep =
+      EnvFloatValueClamped("SMART_DRONE_SP_LG_REALTIME_GATE_MAX_STEP_M",
+                           kPoseStabilizerMaxStepMeters, 0.005f, 0.25f);
+  const std::string gateMode =
+      EnvStringValue("SMART_DRONE_SP_LG_REALTIME_GATE_MODE", "step");
+  if (gateMode == "innovation" || gateMode == "predict" ||
+      gateMode == "prediction") {
+    ApplyRealtimeInnovationGate(out, timestampSec, maxStep);
+    return;
+  }
+  ApplyRealtimeStepGate(out, maxStep);
+}
+
+bool SlamEngineAdapter::UseAlphaBetaSmoother() const {
+  const std::string smootherMode =
+      EnvStringValue("SMART_DRONE_POSE_STABILIZER_MODE", "guard");
+  return smootherMode == "alpha_beta" || smootherMode == "alphabeta" ||
+         smootherMode == "ab";
+}
+
+void SlamEngineAdapter::PredictInvalidSmoothedPose(
+    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec) {
+  if (!m_haveSmoothedOutputPose) {
+    poseValid = false;
+    return;
+  }
+  pose = m_smoothedOutputPose;
+  poseValid = true;
+  m_smoothedOutputTimestampSec = timestampSec;
+  m_smoothVelX *= kPoseStabilizerPredictedVelocityDecay;
+  m_smoothVelY *= kPoseStabilizerPredictedVelocityDecay;
+  m_smoothVelZ *= kPoseStabilizerPredictedVelocityDecay;
+}
+
+void SlamEngineAdapter::PredictIdentitySmoothedPose(
+    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    double dt) {
+  ClampVelocityVector(m_smoothVelX, m_smoothVelY, m_smoothVelZ);
+  pose = m_smoothedOutputPose;
+  pose.x += m_smoothVelX * static_cast<float>(dt);
+  pose.y += m_smoothVelY * static_cast<float>(dt);
+  pose.z += m_smoothVelZ * static_cast<float>(dt);
+  pose.valid = true;
+  poseValid = true;
+  m_smoothVelX *= kPoseStabilizerPredictedVelocityDecay;
+  m_smoothVelY *= kPoseStabilizerPredictedVelocityDecay;
+  m_smoothVelZ *= kPoseStabilizerPredictedVelocityDecay;
+  StoreSmoothedPose(pose, timestampSec);
+}
+
+core::ports::PoseEstimate SlamEngineAdapter::PredictSmoothedPose(
+    double dt) const {
+  core::ports::PoseEstimate predicted = m_smoothedOutputPose;
+  predicted.x += m_smoothVelX * static_cast<float>(dt);
+  predicted.y += m_smoothVelY * static_cast<float>(dt);
+  predicted.z += m_smoothVelZ * static_cast<float>(dt);
+  predicted.valid = true;
+  return predicted;
+}
+
+void SlamEngineAdapter::ClampInnovationVector(float &innovationX,
+                                              float &innovationY,
+                                              float &innovationZ,
+                                              float maxInnovation) const {
+  const float innovationNorm =
+      std::sqrt(innovationX * innovationX + innovationY * innovationY +
+                innovationZ * innovationZ);
+  if (innovationNorm <= maxInnovation || innovationNorm <= 1.0e-6f) {
+    return;
+  }
+  const float scale = maxInnovation / innovationNorm;
+  innovationX *= scale;
+  innovationY *= scale;
+  innovationZ *= scale;
+}
+
+void SlamEngineAdapter::LimitSmoothedStep(core::ports::PoseEstimate &pose,
+                                          float maxStep) const {
+  const float step = PoseTranslationDistance(pose, m_smoothedOutputPose);
+  if (step <= maxStep || step <= 1.0e-6f) {
+    return;
+  }
+  const float scale = maxStep / step;
+  pose.x = m_smoothedOutputPose.x + (pose.x - m_smoothedOutputPose.x) * scale;
+  pose.y = m_smoothedOutputPose.y + (pose.y - m_smoothedOutputPose.y) * scale;
+  pose.z = m_smoothedOutputPose.z + (pose.z - m_smoothedOutputPose.z) * scale;
+}
+
+void SlamEngineAdapter::UpdateAlphaBetaVelocity(float innovationX,
+                                                float innovationY,
+                                                float innovationZ, double dt,
+                                                float beta, float maxSpeed) {
+  m_smoothVelX += beta * innovationX / static_cast<float>(dt);
+  m_smoothVelY += beta * innovationY / static_cast<float>(dt);
+  m_smoothVelZ += beta * innovationZ / static_cast<float>(dt);
+  ClampVelocityVector(m_smoothVelX, m_smoothVelY, m_smoothVelZ);
+  const float speed =
+      std::sqrt(m_smoothVelX * m_smoothVelX + m_smoothVelY * m_smoothVelY +
+                m_smoothVelZ * m_smoothVelZ);
+  if (speed <= maxSpeed || speed <= 1.0e-6f) {
+    return;
+  }
+  const float scale = maxSpeed / speed;
+  m_smoothVelX *= scale;
+  m_smoothVelY *= scale;
+  m_smoothVelZ *= scale;
+}
+
+void SlamEngineAdapter::ApplyAlphaBetaSmoother(
+    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    double dt) {
+  const float alpha = EnvFloatValueClamped(
+      "SMART_DRONE_POSE_STABILIZER_ALPHA", 0.80f, 0.01f, 1.0f);
+  const float beta = EnvFloatValueClamped("SMART_DRONE_POSE_STABILIZER_BETA",
+                                          0.03f, 0.0f, 1.0f);
+  const float maxInnovation = EnvFloatValueClamped(
+      "SMART_DRONE_POSE_STABILIZER_MAX_INNOVATION_M", 0.09f, 0.005f, 1.0f);
+  const float maxSpeed =
+      EnvFloatValueClamped("SMART_DRONE_POSE_STABILIZER_MAX_SPEED_MPS",
+                           kPoseStabilizerMaxSpeedMps, 0.1f, 20.0f);
+  const float maxStep =
+      EnvFloatValueClamped("SMART_DRONE_POSE_STABILIZER_MAX_STEP_M",
+                           kPoseStabilizerMaxStepMeters, 0.005f, 1.0f);
+
+  const core::ports::PoseEstimate predicted = PredictSmoothedPose(dt);
+  float innovationX = pose.x - predicted.x;
+  float innovationY = pose.y - predicted.y;
+  float innovationZ = pose.z - predicted.z;
+  ClampInnovationVector(innovationX, innovationY, innovationZ, maxInnovation);
+
+  core::ports::PoseEstimate smoothed = pose;
+  smoothed.x = predicted.x + alpha * innovationX;
+  smoothed.y = predicted.y + alpha * innovationY;
+  smoothed.z = predicted.z + alpha * innovationZ;
+  LimitSmoothedStep(smoothed, maxStep);
+  LimitPoseRotationStep(m_smoothedOutputPose, smoothed,
+                        kPoseStabilizerMaxRotStepDeg);
+  smoothed.valid = true;
+
+  UpdateAlphaBetaVelocity(innovationX, innovationY, innovationZ, dt, beta,
+                          maxSpeed);
+  pose = smoothed;
+  poseValid = true;
+  StoreSmoothedPose(pose, timestampSec);
+}
+
+core::ports::PoseEstimate SlamEngineAdapter::PredictGuardedSmoothedPose(
+    double dt, float maxGuardStep, float maxSpeed) {
+  ClampVelocityVector(m_smoothVelX, m_smoothVelY, m_smoothVelZ);
+  core::ports::PoseEstimate guarded = PredictSmoothedPose(dt);
+  const float predictedStep =
+      PoseTranslationDistance(guarded, m_smoothedOutputPose);
+  const float maxPredictedStep =
+      std::min(maxSpeed * static_cast<float>(dt), maxGuardStep);
+  LimitSmoothedStep(guarded, maxPredictedStep);
+  if (predictedStep <= maxPredictedStep || predictedStep <= 1.0e-6f) {
+    return guarded;
+  }
+  return guarded;
+}
+
+void SlamEngineAdapter::UpdateGuardMeasuredVelocity(
+    const core::ports::PoseEstimate &pose, double dt, float maxSpeed) {
+  float measuredVelX =
+      (pose.x - m_smoothedOutputPose.x) / static_cast<float>(dt);
+  float measuredVelY =
+      (pose.y - m_smoothedOutputPose.y) / static_cast<float>(dt);
+  float measuredVelZ =
+      (pose.z - m_smoothedOutputPose.z) / static_cast<float>(dt);
+  ClampVelocityVector(measuredVelX, measuredVelY, measuredVelZ);
+  const float measuredSpeed =
+      std::sqrt(measuredVelX * measuredVelX + measuredVelY * measuredVelY +
+                measuredVelZ * measuredVelZ);
+  if (measuredSpeed > maxSpeed && measuredSpeed > 1.0e-6f) {
+    const float scale = maxSpeed / measuredSpeed;
+    measuredVelX *= scale;
+    measuredVelY *= scale;
+    measuredVelZ *= scale;
+  }
+  m_smoothVelX = (1.0f - kPoseStabilizerVelocityAlpha) * m_smoothVelX +
+                 kPoseStabilizerVelocityAlpha * measuredVelX;
+  m_smoothVelY = (1.0f - kPoseStabilizerVelocityAlpha) * m_smoothVelY +
+                 kPoseStabilizerVelocityAlpha * measuredVelY;
+  m_smoothVelZ = (1.0f - kPoseStabilizerVelocityAlpha) * m_smoothVelZ +
+                 kPoseStabilizerVelocityAlpha * measuredVelZ;
+}
+
+void SlamEngineAdapter::ApplyGuardSmoother(
+    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    double dt, int trackingState) {
+  const float rawStep = PoseTranslationDistance(pose, m_smoothedOutputPose);
+  const float maxGuardStep = EnvFloatValueClamped(
+      "SMART_DRONE_POSE_STABILIZER_MAX_STEP_M", 0.22f, 0.02f, 2.0f);
+  const float maxSpeed =
+      EnvFloatValueClamped("SMART_DRONE_POSE_STABILIZER_MAX_SPEED_MPS",
+                           kPoseStabilizerMaxSpeedMps, 0.1f, 20.0f);
+  const bool rawPoseStuck =
+      trackingState != core::ports::kSlamTrackingOk && rawStep < 1.0e-5f;
+
+  if (rawPoseStuck || rawStep > maxGuardStep) {
+    core::ports::PoseEstimate guarded =
+        PredictGuardedSmoothedPose(dt, maxGuardStep, maxSpeed);
+    guarded.valid = true;
+    pose = guarded;
+    poseValid = true;
+    m_smoothVelX *= kPoseStabilizerPredictedVelocityDecay;
+    m_smoothVelY *= kPoseStabilizerPredictedVelocityDecay;
+    m_smoothVelZ *= kPoseStabilizerPredictedVelocityDecay;
+  } else {
+    UpdateGuardMeasuredVelocity(pose, dt, maxSpeed);
+    poseValid = true;
+  }
+
+  if (poseValid && pose.valid) {
+    StoreSmoothedPose(pose, timestampSec);
+  }
 }
 
 void SlamEngineAdapter::StabilizeOutputPose(core::ports::PoseEstimate &pose,
@@ -401,191 +682,30 @@ void SlamEngineAdapter::StabilizeOutputPose(core::ports::PoseEstimate &pose,
     NormalizePoseQuaternion(pose);
   }
 
-  double dt = kPoseStabilizerDefaultDtSec;
-  if (m_haveSmoothedOutputPose && timestampSec > m_smoothedOutputTimestampSec) {
-    dt = std::clamp(timestampSec - m_smoothedOutputTimestampSec,
-                    kPoseStabilizerMinDtSec, kPoseStabilizerMaxDtSec);
-  }
+  const double dt = SmoothedPoseDeltaTime(timestampSec);
 
   if (!pose.valid) {
-    if (!m_haveSmoothedOutputPose) {
-      poseValid = false;
-      return;
-    }
-    pose = m_smoothedOutputPose;
-    poseValid = true;
-    m_smoothedOutputTimestampSec = timestampSec;
-    m_smoothVelX *= kPoseStabilizerPredictedVelocityDecay;
-    m_smoothVelY *= kPoseStabilizerPredictedVelocityDecay;
-    m_smoothVelZ *= kPoseStabilizerPredictedVelocityDecay;
+    PredictInvalidSmoothedPose(pose, poseValid, timestampSec);
     return;
   }
 
   const bool rawIdentity = IsIdentityPose(pose);
   if (!m_haveSmoothedOutputPose) {
-    m_smoothedOutputPose = pose;
-    m_haveSmoothedOutputPose = true;
-    m_smoothedOutputTimestampSec = timestampSec;
+    StoreSmoothedPose(pose, timestampSec);
     poseValid = true;
     return;
   }
 
   if (rawIdentity) {
-    ClampVelocityVector(m_smoothVelX, m_smoothVelY, m_smoothVelZ);
-    pose = m_smoothedOutputPose;
-    pose.x += m_smoothVelX * static_cast<float>(dt);
-    pose.y += m_smoothVelY * static_cast<float>(dt);
-    pose.z += m_smoothVelZ * static_cast<float>(dt);
-    pose.valid = true;
-    poseValid = true;
-    m_smoothVelX *= kPoseStabilizerPredictedVelocityDecay;
-    m_smoothVelY *= kPoseStabilizerPredictedVelocityDecay;
-    m_smoothVelZ *= kPoseStabilizerPredictedVelocityDecay;
-    m_smoothedOutputPose = pose;
-    m_smoothedOutputTimestampSec = timestampSec;
+    PredictIdentitySmoothedPose(pose, poseValid, timestampSec, dt);
     return;
   }
 
-  const std::string smootherMode =
-      EnvStringValue("SMART_DRONE_POSE_STABILIZER_MODE", "guard");
-  if (smootherMode == "alpha_beta" || smootherMode == "alphabeta" ||
-      smootherMode == "ab") {
-    const float alpha = EnvFloatValueClamped(
-        "SMART_DRONE_POSE_STABILIZER_ALPHA", 0.80f, 0.01f, 1.0f);
-    const float beta = EnvFloatValueClamped("SMART_DRONE_POSE_STABILIZER_BETA",
-                                            0.03f, 0.0f, 1.0f);
-    const float maxInnovation = EnvFloatValueClamped(
-        "SMART_DRONE_POSE_STABILIZER_MAX_INNOVATION_M", 0.09f, 0.005f, 1.0f);
-    const float maxSpeed =
-        EnvFloatValueClamped("SMART_DRONE_POSE_STABILIZER_MAX_SPEED_MPS",
-                             kPoseStabilizerMaxSpeedMps, 0.1f, 20.0f);
-    const float maxStep =
-        EnvFloatValueClamped("SMART_DRONE_POSE_STABILIZER_MAX_STEP_M",
-                             kPoseStabilizerMaxStepMeters, 0.005f, 1.0f);
-
-    core::ports::PoseEstimate predicted = m_smoothedOutputPose;
-    predicted.x += m_smoothVelX * static_cast<float>(dt);
-    predicted.y += m_smoothVelY * static_cast<float>(dt);
-    predicted.z += m_smoothVelZ * static_cast<float>(dt);
-    predicted.valid = true;
-
-    float innovationX = pose.x - predicted.x;
-    float innovationY = pose.y - predicted.y;
-    float innovationZ = pose.z - predicted.z;
-    const float innovationNorm =
-        std::sqrt(innovationX * innovationX + innovationY * innovationY +
-                  innovationZ * innovationZ);
-    if (innovationNorm > maxInnovation && innovationNorm > 1.0e-6f) {
-      const float scale = maxInnovation / innovationNorm;
-      innovationX *= scale;
-      innovationY *= scale;
-      innovationZ *= scale;
-    }
-
-    core::ports::PoseEstimate smoothed = pose;
-    smoothed.x = predicted.x + alpha * innovationX;
-    smoothed.y = predicted.y + alpha * innovationY;
-    smoothed.z = predicted.z + alpha * innovationZ;
-
-    const float step = PoseTranslationDistance(smoothed, m_smoothedOutputPose);
-    if (step > maxStep && step > 1.0e-6f) {
-      const float scale = maxStep / step;
-      smoothed.x = m_smoothedOutputPose.x +
-                   (smoothed.x - m_smoothedOutputPose.x) * scale;
-      smoothed.y = m_smoothedOutputPose.y +
-                   (smoothed.y - m_smoothedOutputPose.y) * scale;
-      smoothed.z = m_smoothedOutputPose.z +
-                   (smoothed.z - m_smoothedOutputPose.z) * scale;
-    }
-    LimitPoseRotationStep(m_smoothedOutputPose, smoothed,
-                          kPoseStabilizerMaxRotStepDeg);
-    smoothed.valid = true;
-
-    m_smoothVelX += beta * innovationX / static_cast<float>(dt);
-    m_smoothVelY += beta * innovationY / static_cast<float>(dt);
-    m_smoothVelZ += beta * innovationZ / static_cast<float>(dt);
-    const float speed =
-        std::sqrt(m_smoothVelX * m_smoothVelX + m_smoothVelY * m_smoothVelY +
-                  m_smoothVelZ * m_smoothVelZ);
-    if (speed > maxSpeed && speed > 1.0e-6f) {
-      const float scale = maxSpeed / speed;
-      m_smoothVelX *= scale;
-      m_smoothVelY *= scale;
-      m_smoothVelZ *= scale;
-    }
-
-    pose = smoothed;
-    poseValid = true;
-    m_smoothedOutputPose = pose;
-    m_haveSmoothedOutputPose = true;
-    m_smoothedOutputTimestampSec = timestampSec;
+  if (UseAlphaBetaSmoother()) {
+    ApplyAlphaBetaSmoother(pose, poseValid, timestampSec, dt);
     return;
   }
-
-  const float rawStep = PoseTranslationDistance(pose, m_smoothedOutputPose);
-  const float maxGuardStep = EnvFloatValueClamped(
-      "SMART_DRONE_POSE_STABILIZER_MAX_STEP_M", 0.22f, 0.02f, 2.0f);
-  const float maxSpeed =
-      EnvFloatValueClamped("SMART_DRONE_POSE_STABILIZER_MAX_SPEED_MPS",
-                           kPoseStabilizerMaxSpeedMps, 0.1f, 20.0f);
-  const bool rawPoseStuck =
-      trackingState != core::ports::kSlamTrackingOk && rawStep < 1.0e-5f;
-  if (rawPoseStuck || rawStep > maxGuardStep) {
-    ClampVelocityVector(m_smoothVelX, m_smoothVelY, m_smoothVelZ);
-    core::ports::PoseEstimate guarded = m_smoothedOutputPose;
-    guarded.x += m_smoothVelX * static_cast<float>(dt);
-    guarded.y += m_smoothVelY * static_cast<float>(dt);
-    guarded.z += m_smoothVelZ * static_cast<float>(dt);
-    const float predictedStep =
-        PoseTranslationDistance(guarded, m_smoothedOutputPose);
-    const float maxPredictedStep =
-        std::min(maxSpeed * static_cast<float>(dt), maxGuardStep);
-    if (predictedStep > maxPredictedStep && predictedStep > 1.0e-6f) {
-      const float scale = maxPredictedStep / predictedStep;
-      guarded.x =
-          m_smoothedOutputPose.x + (guarded.x - m_smoothedOutputPose.x) * scale;
-      guarded.y =
-          m_smoothedOutputPose.y + (guarded.y - m_smoothedOutputPose.y) * scale;
-      guarded.z =
-          m_smoothedOutputPose.z + (guarded.z - m_smoothedOutputPose.z) * scale;
-    }
-    guarded.valid = true;
-    pose = guarded;
-    poseValid = true;
-    m_smoothVelX *= kPoseStabilizerPredictedVelocityDecay;
-    m_smoothVelY *= kPoseStabilizerPredictedVelocityDecay;
-    m_smoothVelZ *= kPoseStabilizerPredictedVelocityDecay;
-  } else {
-    float measuredVelX =
-        (pose.x - m_smoothedOutputPose.x) / static_cast<float>(dt);
-    float measuredVelY =
-        (pose.y - m_smoothedOutputPose.y) / static_cast<float>(dt);
-    float measuredVelZ =
-        (pose.z - m_smoothedOutputPose.z) / static_cast<float>(dt);
-    ClampVelocityVector(measuredVelX, measuredVelY, measuredVelZ);
-    const float measuredSpeed =
-        std::sqrt(measuredVelX * measuredVelX + measuredVelY * measuredVelY +
-                  measuredVelZ * measuredVelZ);
-    if (measuredSpeed > maxSpeed && measuredSpeed > 1.0e-6f) {
-      const float scale = maxSpeed / measuredSpeed;
-      measuredVelX *= scale;
-      measuredVelY *= scale;
-      measuredVelZ *= scale;
-    }
-    m_smoothVelX = (1.0f - kPoseStabilizerVelocityAlpha) * m_smoothVelX +
-                   kPoseStabilizerVelocityAlpha * measuredVelX;
-    m_smoothVelY = (1.0f - kPoseStabilizerVelocityAlpha) * m_smoothVelY +
-                   kPoseStabilizerVelocityAlpha * measuredVelY;
-    m_smoothVelZ = (1.0f - kPoseStabilizerVelocityAlpha) * m_smoothVelZ +
-                   kPoseStabilizerVelocityAlpha * measuredVelZ;
-    poseValid = true;
-  }
-
-  if (poseValid && pose.valid) {
-    m_smoothedOutputPose = pose;
-    m_haveSmoothedOutputPose = true;
-    m_smoothedOutputTimestampSec = timestampSec;
-  }
+  ApplyGuardSmoother(pose, poseValid, timestampSec, dt, trackingState);
 }
 
 } // namespace smartdrone::adapters::slam

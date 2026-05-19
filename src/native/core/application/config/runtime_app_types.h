@@ -71,8 +71,8 @@ struct MainRuntimeAliases {
       exposureUs{}, pairMs{}, keepMs{}, pairQueue{};
   int uvcDeviceIndex{}, uvcEyeWidth{}, uvcEyeHeight{};
   bool aeDisable{}, requestY8{}, r16Norm{}, udpEnable{}, allowEmptyImu{},
-      rtImu{}, debugRightOnlyFeatures{}, slamLowLightEnhance{},
-      jsonDiagnostics{}, uvcPackedStereo{}, uvcSwapEyes{};
+      debugRightOnlyFeatures{}, slamLowLightEnhance{}, jsonDiagnostics{},
+      uvcPackedStereo{}, uvcSwapEyes{};
   bool sendImage{true}, sendFeature{true}, sendMap{false};
   float gain{};
   std::string udpIp, spiDev, gpiochip;
@@ -82,7 +82,7 @@ struct MainRuntimeAliases {
   bool lkLoopClosure{};
   float lkLoopScale{1.20f}, lkLoopRelaxation{1.40f};
   int udpPort{}, cmdPort{}, udpJpegQ{}, udpPayload{}, udpQueue{}, imuHz{},
-      accelFsG{}, gyroFsDps{}, rtPrio{};
+      accelFsG{}, gyroFsDps{};
   uint32_t spiSpeed{};
   uint8_t spiMode{}, spiBits{}, imuStartReg{};
   unsigned drdyLine{};

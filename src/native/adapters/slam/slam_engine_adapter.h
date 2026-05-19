@@ -33,6 +33,7 @@ class SlamEngineAdapter final : public core::ports::ISlamEngine, public ISlamRun
     void SetVisualFeatureInputSizeLimit(int maxWidth, int maxHeight) override;
     void SetStereoVoLoopClosure(bool enabled, float scale = 1.20f, float relaxation = 1.40f) override;
     void SetStereoVoPerFrameAcceleration(std::string acceleration) override;
+    void StepBackend() override;
     void Stop() override;
     bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path) override;
     core::ports::SlamOutput Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
@@ -45,6 +46,34 @@ class SlamEngineAdapter final : public core::ports::ISlamEngine, public ISlamRun
     void MaintainRealtimePoseContinuity(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
                                         int trackingState);
     void GateRealtimePoseQuality(core::ports::SlamOutput &out, double timestampSec);
+    double StablePoseDeltaTime(double timestampSec) const;
+    double SmoothedPoseDeltaTime(double timestampSec) const;
+    bool AcceptStableRealtimePose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+                                  double dt, int trackingState);
+    bool AcceptRealtimeBootstrapPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+                                     int trackingState, bool rawIdentity);
+    bool PredictRealtimePose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec, double dt,
+                             int trackingState, bool rawIdentity);
+    bool HandleRealtimeMapBridge(core::ports::SlamOutput &out);
+    bool ApplyRealtimeMapContinuity(core::ports::SlamOutput &out);
+    bool ApplyRealtimeResetGuard(core::ports::SlamOutput &out);
+    bool ShouldApplyRealtimeFeatureGate(const core::ports::SlamOutput &out) const;
+    void ApplyRealtimeInnovationGate(core::ports::SlamOutput &out, double timestampSec, float maxStep);
+    void ApplyRealtimeStepGate(core::ports::SlamOutput &out, float maxStep);
+    void StoreSmoothedPose(const core::ports::PoseEstimate &pose, double timestampSec);
+    bool UseAlphaBetaSmoother() const;
+    void PredictInvalidSmoothedPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec);
+    void PredictIdentitySmoothedPose(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec, double dt);
+    core::ports::PoseEstimate PredictSmoothedPose(double dt) const;
+    void ClampInnovationVector(float &innovationX, float &innovationY, float &innovationZ, float maxInnovation) const;
+    void LimitSmoothedStep(core::ports::PoseEstimate &pose, float maxStep) const;
+    void UpdateAlphaBetaVelocity(float innovationX, float innovationY, float innovationZ, double dt, float beta,
+                                 float maxSpeed);
+    void ApplyAlphaBetaSmoother(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec, double dt);
+    core::ports::PoseEstimate PredictGuardedSmoothedPose(double dt, float maxGuardStep, float maxSpeed);
+    void UpdateGuardMeasuredVelocity(const core::ports::PoseEstimate &pose, double dt, float maxSpeed);
+    void ApplyGuardSmoother(core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec, double dt,
+                            int trackingState);
     void ResetRealtimeOutputAlignment();
     void ResetOutputSmoother();
 

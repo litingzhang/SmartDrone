@@ -23,7 +23,7 @@ void LivePoseState::SetRuntimeMode(uint8_t mode)
         poseValid = false;
         slamMode = RUNTIME_SLAM_MODE_MAPPING;
         trackingState = 0xFF;
-        odomQuality = OdomQualityMode::LOST;
+        poseQuality = LivePoseQuality::Lost;
     }
     dirty = true;
 }
@@ -44,23 +44,22 @@ void LivePoseState::SetVehicleFlightState(bool armedIn, uint8_t px4MainModeIn, u
     dirty = true;
 }
 
-void LivePoseState::UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCounterIn, uint16_t resetMapCountIn,
-                               const Px4MavlinkGateway::Pose &p, OdomQualityMode quality, bool poseValidIn)
+void LivePoseState::UpdatePose(const LivePoseUpdate &update)
 {
     std::lock_guard<std::mutex> lock(mu);
-    runtimeMode = mode;
-    trackingState = tracking;
-    odomQuality = quality;
-    resetCounter = resetCounterIn;
-    resetMapCount = resetMapCountIn;
-    x = p.x;
-    y = p.y;
-    z = p.z;
-    qw = p.qw;
-    qx = p.qx;
-    qy = p.qy;
-    qz = p.qz;
-    poseValid = poseValidIn;
+    runtimeMode = update.runtimeMode;
+    trackingState = update.trackingState;
+    poseQuality = update.quality;
+    resetCounter = update.resetCounter;
+    resetMapCount = update.resetMapCount;
+    x = update.pose.x;
+    y = update.pose.y;
+    z = update.pose.z;
+    qw = update.pose.qw;
+    qx = update.pose.qx;
+    qy = update.pose.qy;
+    qz = update.pose.qz;
+    poseValid = update.poseValid;
     dirty = true;
 }
 
@@ -88,7 +87,7 @@ bool LivePoseState::ConsumeSnapshot(Snapshot &out)
     out.armed = armed;
     out.px4MainMode = px4MainMode;
     out.px4SubMode = px4SubMode;
-    out.odomQuality = odomQuality;
+    out.poseQuality = poseQuality;
     out.resetCounter = resetCounter;
     out.resetMapCount = resetMapCount;
     out.x = x;
@@ -121,7 +120,7 @@ bool LivePoseState::ReadSnapshot(Snapshot &out) const
     out.armed = armed;
     out.px4MainMode = px4MainMode;
     out.px4SubMode = px4SubMode;
-    out.odomQuality = odomQuality;
+    out.poseQuality = poseQuality;
     out.resetCounter = resetCounter;
     out.resetMapCount = resetMapCount;
     out.x = x;

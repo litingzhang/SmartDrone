@@ -2159,28 +2159,21 @@ void Tracking::PreintegrateIMU() {
   }
 
   while (true) {
-    bool bSleep = false;
-    {
-      unique_lock<mutex> lock(mMutexImuQueue);
-      if (!mlQueueImuData.empty()) {
-        IMU::Point *m = &mlQueueImuData.front();
-        cout.precision(17);
-        if (m->t < mCurrentFrame.mpPrevFrame->mTimeStamp - mImuPer) {
-          mlQueueImuData.pop_front();
-        } else if (m->t < mCurrentFrame.mTimeStamp - mImuPer) {
-          mvImuFromLastFrame.push_back(*m);
-          mlQueueImuData.pop_front();
-        } else {
-          mvImuFromLastFrame.push_back(*m);
-          break;
-        }
-      } else {
-        break;
-        bSleep = true;
-      }
+    unique_lock<mutex> lock(mMutexImuQueue);
+    if (mlQueueImuData.empty()) {
+      break;
     }
-    if (bSleep)
-      usleep(500);
+    IMU::Point *m = &mlQueueImuData.front();
+    cout.precision(17);
+    if (m->t < mCurrentFrame.mpPrevFrame->mTimeStamp - mImuPer) {
+      mlQueueImuData.pop_front();
+    } else if (m->t < mCurrentFrame.mTimeStamp - mImuPer) {
+      mvImuFromLastFrame.push_back(*m);
+      mlQueueImuData.pop_front();
+    } else {
+      mvImuFromLastFrame.push_back(*m);
+      break;
+    }
   }
 
   const int n = mvImuFromLastFrame.size() - 1;
@@ -2313,9 +2306,10 @@ void Tracking::ResetFrameIMU() {
 
 void Tracking::Track() {
   if (bStepByStep) {
-    std::cout << "Tracking: Waiting to the next step" << std::endl;
-    while (!mbStep && bStepByStep)
-      usleep(500);
+    if (!mbStep) {
+      std::cout << "Tracking: Waiting to the next step" << std::endl;
+      return;
+    }
     mbStep = false;
   }
 
@@ -2893,9 +2887,7 @@ void Tracking::Track() {
   if (Stop()) {
 
     // Safe area to stop
-    while (isStopped()) {
-      usleep(3000);
-    }
+    return;
   }
 #endif
 }
@@ -4927,8 +4919,8 @@ void Tracking::UpdateFrameIMU(const float s, const IMU::Bias &b,
   mLastFrame.SetNewBias(mLastBias);
   mCurrentFrame.SetNewBias(mLastBias);
 
-  while (!mCurrentFrame.imuIsPreintegrated()) {
-    usleep(500);
+  if (!mCurrentFrame.imuIsPreintegrated()) {
+    return;
   }
 
   if (mLastFrame.mnId == mLastFrame.mpLastKeyFrame->mnFrameId) {

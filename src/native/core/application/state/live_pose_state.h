@@ -5,9 +5,9 @@
 #include <mutex>
 #include <vector>
 
-#include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "common/tlv/tlv_protocol.h"
 #include "common/tlv/udp_server.h"
+#include "core/application/state/live_pose_types.h"
 
 namespace smartdrone::core::application {
 
@@ -22,7 +22,7 @@ struct LivePoseState {
         bool armed{false};
         uint8_t px4MainMode{0};
         uint8_t px4SubMode{0};
-        OdomQualityMode odomQuality{OdomQualityMode::LOST};
+        LivePoseQuality poseQuality{LivePoseQuality::Lost};
         uint16_t resetCounter{0};
         uint16_t resetMapCount{0};
         float x{0.0f}, y{0.0f}, z{0.0f};
@@ -36,8 +36,7 @@ struct LivePoseState {
     void SetRuntimeMode(uint8_t mode);
     void SetSlamMode(uint8_t mode);
     void SetVehicleFlightState(bool armedIn, uint8_t px4MainModeIn, uint8_t px4SubModeIn);
-    void UpdatePose(uint8_t mode, uint8_t tracking, uint16_t resetCounterIn, uint16_t resetMapCountIn,
-                    const Px4MavlinkGateway::Pose &p, OdomQualityMode quality, bool poseValidIn);
+    void UpdatePose(const LivePoseUpdate &update);
     void UpdatePointCloud(std::vector<float> xyz);
     bool ConsumeSnapshot(Snapshot &out);
     bool ReadSnapshot(Snapshot &out) const;
@@ -52,7 +51,7 @@ struct LivePoseState {
     bool armed{false};
     uint8_t px4MainMode{0};
     uint8_t px4SubMode{0};
-    OdomQualityMode odomQuality{OdomQualityMode::LOST};
+    LivePoseQuality poseQuality{LivePoseQuality::Lost};
     uint16_t resetCounter{0};
     uint16_t resetMapCount{0};
     float x{0.0f}, y{0.0f}, z{0.0f};

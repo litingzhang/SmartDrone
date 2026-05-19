@@ -38,7 +38,6 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
-#include <thread>
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
@@ -315,10 +314,8 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight,
   // ORB extraction
   std::chrono::steady_clock::time_point time_StartExtORB =
       std::chrono::steady_clock::now();
-  thread threadLeft(&Frame::ExtractORB, this, 0, imLeft, 0, 0);
-  thread threadRight(&Frame::ExtractORB, this, 1, imRight, 0, 0);
-  threadLeft.join();
-  threadRight.join();
+  ExtractORB(0, imLeft, 0, 0);
+  ExtractORB(1, imRight, 0, 0);
   std::chrono::steady_clock::time_point time_EndExtORB =
       std::chrono::steady_clock::now();
 
@@ -1527,15 +1524,10 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight,
   // ORB extraction
   std::chrono::steady_clock::time_point time_StartExtORB =
       std::chrono::steady_clock::now();
-  thread threadLeft(&Frame::ExtractORB, this, 0, imLeft,
-                    static_cast<KannalaBrandt8 *>(mpCamera)->mvLappingArea[0],
-                    static_cast<KannalaBrandt8 *>(mpCamera)->mvLappingArea[1]);
-  thread threadRight(
-      &Frame::ExtractORB, this, 1, imRight,
-      static_cast<KannalaBrandt8 *>(mpCamera2)->mvLappingArea[0],
-      static_cast<KannalaBrandt8 *>(mpCamera2)->mvLappingArea[1]);
-  threadLeft.join();
-  threadRight.join();
+  ExtractORB(0, imLeft, static_cast<KannalaBrandt8 *>(mpCamera)->mvLappingArea[0],
+             static_cast<KannalaBrandt8 *>(mpCamera)->mvLappingArea[1]);
+  ExtractORB(1, imRight, static_cast<KannalaBrandt8 *>(mpCamera2)->mvLappingArea[0],
+             static_cast<KannalaBrandt8 *>(mpCamera2)->mvLappingArea[1]);
   std::chrono::steady_clock::time_point time_EndExtORB =
       std::chrono::steady_clock::now();
 

@@ -13,6 +13,8 @@ namespace smartdrone::core::application {
 
 namespace {
 
+using PoseEstimate = smartdrone::core::ports::PoseEstimate;
+
 bool EnvFlagEnabled(const char *name, bool defaultValue)
 {
     const char *value = std::getenv(name);
@@ -40,14 +42,67 @@ float EnvFloatValueClamped(const char *name, float fallback, float minValue, flo
     return std::clamp(parsed, minValue, maxValue);
 }
 
-bool IsFinitePose(const Px4MavlinkGateway::Pose &pose)
+void NormalizeQuat(float &w, float &x, float &y, float &z)
+{
+    const float norm = std::sqrt(w * w + x * x + y * y + z * z);
+    if (norm > 1.0e-9f) {
+        w /= norm;
+        x /= norm;
+        y /= norm;
+        z /= norm;
+        return;
+    }
+    w = 1.0f;
+    x = 0.0f;
+    y = 0.0f;
+    z = 0.0f;
+}
+
+PoseEstimate MakePoseEstimate(const Sophus::SE3f &pose)
+{
+    const Eigen::Vector3f t = pose.translation();
+    const Eigen::Quaternionf q(pose.so3().unit_quaternion());
+    PoseEstimate out{};
+    out.valid = true;
+    out.x = t.x();
+    out.y = t.y();
+    out.z = t.z();
+    out.qw = q.w();
+    out.qx = q.x();
+    out.qy = q.y();
+    out.qz = q.z();
+    NormalizeQuat(out.qw, out.qx, out.qy, out.qz);
+    return out;
+}
+
+PoseEstimate EnuToNed(const PoseEstimate &poseEnu)
+{
+    PoseEstimate out{};
+    out.valid = poseEnu.valid;
+    out.x = poseEnu.y;
+    out.y = poseEnu.x;
+    out.z = -poseEnu.z;
+
+    const float s = 0.7071067811865476f;
+    const Eigen::Quaternionf rotation(0.0f, s, s, 0.0f);
+    const Eigen::Quaternionf input(poseEnu.qw, poseEnu.qx, poseEnu.qy, poseEnu.qz);
+    const Eigen::Quaternionf converted = rotation * input * rotation.conjugate();
+    out.qw = converted.w();
+    out.qx = converted.x();
+    out.qy = converted.y();
+    out.qz = converted.z();
+    NormalizeQuat(out.qw, out.qx, out.qy, out.qz);
+    return out;
+}
+
+bool IsFinitePose(const PoseEstimate &pose)
 {
     return std::isfinite(pose.x) && std::isfinite(pose.y) && std::isfinite(pose.z) &&
            std::isfinite(pose.qw) && std::isfinite(pose.qx) && std::isfinite(pose.qy) &&
            std::isfinite(pose.qz);
 }
 
-float TranslationDistance(const Px4MavlinkGateway::Pose &a, const Px4MavlinkGateway::Pose &b)
+float TranslationDistance(const PoseEstimate &a, const PoseEstimate &b)
 {
     const float dx = a.x - b.x;
     const float dy = a.y - b.y;
@@ -55,15 +110,14 @@ float TranslationDistance(const Px4MavlinkGateway::Pose &a, const Px4MavlinkGate
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-float QuaternionAngularDistanceRad(const Px4MavlinkGateway::Pose &a, const Px4MavlinkGateway::Pose &b)
+float QuaternionAngularDistanceRad(const PoseEstimate &a, const PoseEstimate &b)
 {
     float dot = a.qw * b.qw + a.qx * b.qx + a.qy * b.qy + a.qz * b.qz;
     dot = std::clamp(std::fabs(dot), 0.0f, 1.0f);
     return 2.0f * std::acos(dot);
 }
 
-void BlendQuatToward(const Px4MavlinkGateway::Pose &from, const Px4MavlinkGateway::Pose &to, float scale,
-                     Px4MavlinkGateway::Pose &out)
+void BlendQuatToward(const PoseEstimate &from, const PoseEstimate &to, float scale, PoseEstimate &out)
 {
     float tw = to.qw;
     float tx = to.qx;
@@ -81,7 +135,7 @@ void BlendQuatToward(const Px4MavlinkGateway::Pose &from, const Px4MavlinkGatewa
     out.qx = from.qx + (tx - from.qx) * a;
     out.qy = from.qy + (ty - from.qy) * a;
     out.qz = from.qz + (tz - from.qz) * a;
-    Px4MavlinkGateway::NormalizeQuat(out.qw, out.qx, out.qy, out.qz);
+    NormalizeQuat(out.qw, out.qx, out.qy, out.qz);
 }
 
 } // namespace
@@ -129,15 +183,15 @@ uint16_t PosePostprocessor::ContinuityMapper::GetResetMapCount() const
     return static_cast<uint16_t>(resetMapCount & 0xFFFFu);
 }
 
-Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::AlignPose(const Px4MavlinkGateway::Pose &poseNed,
-                                                                     bool trackingUsable, Px4MavlinkGateway &mavlink,
-                                                                     PoseQuality &outQuality)
+PoseEstimate PosePostprocessor::StartupAligner::AlignPose(const PoseEstimate &poseNed, bool trackingUsable,
+                                                          const ReadRangeSensorFn &readRangeSensor,
+                                                          PoseQuality &outQuality)
 {
     const uint64_t nowUs = MonoTimeUs();
-    RefreshRangeSensor(mavlink);
+    RefreshRangeSensor(readRangeSensor);
 
     if (!trackingUsable) {
-        Px4MavlinkGateway::Pose out = ComputeLostPose(nowUs);
+        PoseEstimate out = ComputeLostPose(nowUs);
         outQuality = havePublishedPose ? PoseQuality::Weak : PoseQuality::Lost;
         trackingUsablePrev = false;
         return out;
@@ -150,7 +204,7 @@ Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::AlignPose(const Px4Ma
         weakUntilUs = nowUs + kWeakHoldUs;
     }
 
-    Px4MavlinkGateway::Pose out = poseNed;
+    PoseEstimate out = poseNed;
     out.z += zOffset;
 
     trackingUsablePrev = true;
@@ -161,19 +215,23 @@ Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::AlignPose(const Px4Ma
     return out;
 }
 
-void PosePostprocessor::StartupAligner::SetPublishedPose(const Px4MavlinkGateway::Pose &pose)
+void PosePostprocessor::StartupAligner::SetPublishedPose(const PoseEstimate &pose)
 {
     holdPose = pose;
     havePublishedPose = true;
 }
 
-void PosePostprocessor::StartupAligner::RefreshRangeSensor(Px4MavlinkGateway &mavlink)
+void PosePostprocessor::StartupAligner::RefreshRangeSensor(const ReadRangeSensorFn &readRangeSensor)
 {
-    Px4MavlinkGateway::DownwardDistanceSensor rng{};
-    if (mavlink.GetDownwardDistanceSensor(rng, kRangeSensorMaxAgeUs)) {
-        latestRange = rng;
-        haveLatestRange = true;
+    if (!readRangeSensor) {
+        return;
     }
+    RangeSensorSnapshot snapshot{};
+    if (!readRangeSensor(snapshot)) {
+        return;
+    }
+    latestRange = snapshot;
+    haveLatestRange = true;
 }
 
 bool PosePostprocessor::StartupAligner::HasFreshRange() const
@@ -181,9 +239,9 @@ bool PosePostprocessor::StartupAligner::HasFreshRange() const
     return haveLatestRange && std::isfinite(latestRange.currentDistance);
 }
 
-Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::ComputeLostPose(uint64_t nowUs)
+PoseEstimate PosePostprocessor::StartupAligner::ComputeLostPose(uint64_t nowUs)
 {
-    Px4MavlinkGateway::Pose out = holdPose;
+    PoseEstimate out = holdPose;
     if (!lossActive) {
         lossActive = true;
         if (havePublishedPose) {
@@ -195,7 +253,7 @@ Px4MavlinkGateway::Pose PosePostprocessor::StartupAligner::ComputeLostPose(uint6
     return out;
 }
 
-void PosePostprocessor::StartupAligner::ApplyRangeProtection(Px4MavlinkGateway::Pose &, uint64_t)
+void PosePostprocessor::StartupAligner::ApplyRangeProtection(PoseEstimate &, uint64_t)
 {
     if (!HasFreshRange()) {
         return;
@@ -208,87 +266,103 @@ void PosePostprocessor::StartupAligner::ApplyRangeProtection(Px4MavlinkGateway::
     }
 }
 
-Px4MavlinkGateway::Pose PosePostprocessor::OutputGuard::GuardPose(const Px4MavlinkGateway::Pose &pose,
-                                                                  int64_t frameNs, bool trackingUsable,
-                                                                  PoseQuality &quality, bool &guardApplied,
-                                                                  float &rawStepM, float &maxStepM)
+PosePostprocessor::OutputGuard::GuardResult
+PosePostprocessor::OutputGuard::BuildResult(const PoseEstimate &pose, PoseQuality quality, bool guardApplied,
+                                            float rawStepM, float maxStepM) const
 {
-    guardApplied = false;
-    rawStepM = 0.0f;
-    maxStepM = 0.0f;
+    return GuardResult{pose, quality, guardApplied, rawStepM, maxStepM};
+}
 
-    if (!EnvFlagEnabled("SMART_DRONE_ONLINE_POSE_STEP_GUARD", true)) {
-        if (trackingUsable && quality != PoseQuality::Lost && IsFinitePose(pose)) {
-            CommitPose(pose, frameNs);
-        }
-        return pose;
-    }
-
-    if (!trackingUsable || quality == PoseQuality::Lost) {
-        if (quality != PoseQuality::Lost && IsFinitePose(pose)) {
-            CommitPose(pose, frameNs);
-        }
-        return pose;
-    }
-
-    if (!IsFinitePose(pose)) {
-        if (!haveLastPose) {
-            return pose;
-        }
-        guardApplied = true;
-        quality = PoseQuality::Weak;
-        ++guardHitCount;
-        if (EnvFlagEnabled("SMART_DRONE_ONLINE_POSE_GUARD_DFX", false)) {
-            std::cerr << "[pose_guard] invalid pose replaced with last published pose hits=" << guardHitCount << "\n";
-        }
-        CommitPose(lastPose, frameNs);
-        return lastPose;
-    }
-
+PosePostprocessor::OutputGuard::GuardResult
+PosePostprocessor::OutputGuard::HandleInvalidPose(const GuardRequest &request)
+{
     if (!haveLastPose) {
-        CommitPose(pose, frameNs);
-        return pose;
+        return BuildResult(request.pose, request.quality, false, 0.0f, 0.0f);
     }
-
-    rawStepM = TranslationDistance(pose, lastPose);
-    maxStepM = ComputeAllowedStep(frameNs);
-    const float rawRotRad = QuaternionAngularDistanceRad(pose, lastPose);
-    const float maxRotRad = ComputeAllowedRotation(frameNs);
-    if (std::isfinite(rawStepM) && rawStepM <= maxStepM &&
-        std::isfinite(rawRotRad) && rawRotRad <= maxRotRad) {
-        CommitPose(pose, frameNs);
-        return pose;
+    ++guardHitCount;
+    if (EnvFlagEnabled("SMART_DRONE_ONLINE_POSE_GUARD_DFX", false)) {
+        std::cerr << "[pose_guard] invalid pose replaced with last published pose hits=" << guardHitCount << "\n";
     }
+    CommitPose(lastPose, request.frameNs);
+    return BuildResult(lastPose, PoseQuality::Weak, true, 0.0f, 0.0f);
+}
 
-    Px4MavlinkGateway::Pose guarded = pose;
+PosePostprocessor::OutputGuard::GuardResult
+PosePostprocessor::OutputGuard::ClampPose(const GuardRequest &request, float rawStepM, float maxStepM,
+                                          float rawRotRad, float maxRotRad)
+{
+    PoseEstimate guarded = request.pose;
     if (std::isfinite(rawStepM) && rawStepM > maxStepM) {
         const float scale = maxStepM / std::max(rawStepM, 1.0e-6f);
-        guarded.x = lastPose.x + (pose.x - lastPose.x) * scale;
-        guarded.y = lastPose.y + (pose.y - lastPose.y) * scale;
-        guarded.z = lastPose.z + (pose.z - lastPose.z) * scale;
+        guarded.x = lastPose.x + (request.pose.x - lastPose.x) * scale;
+        guarded.y = lastPose.y + (request.pose.y - lastPose.y) * scale;
+        guarded.z = lastPose.z + (request.pose.z - lastPose.z) * scale;
     }
     if (std::isfinite(rawRotRad) && rawRotRad > maxRotRad) {
         const float scale = maxRotRad / std::max(rawRotRad, 1.0e-6f);
-        BlendQuatToward(lastPose, pose, scale, guarded);
+        BlendQuatToward(lastPose, request.pose, scale, guarded);
     } else {
-        Px4MavlinkGateway::NormalizeQuat(guarded.qw, guarded.qx, guarded.qy, guarded.qz);
+        NormalizeQuat(guarded.qw, guarded.qx, guarded.qy, guarded.qz);
     }
-
-    guardApplied = true;
-    quality = PoseQuality::Weak;
     ++guardHitCount;
-    if (EnvFlagEnabled("SMART_DRONE_ONLINE_POSE_GUARD_DFX", false)) {
-        const bool timeToLog = frameNs <= 0 || lastLogFrameNs <= 0 || frameNs - lastLogFrameNs > 500000000LL;
-        if (guardHitCount <= 10 || (guardHitCount % 20ULL) == 0ULL || timeToLog) {
-            std::cerr << "[pose_guard] clamped online pose step raw_m=" << rawStepM << " max_m=" << maxStepM
-                      << " raw_rot_rad=" << rawRotRad << " max_rot_rad=" << maxRotRad
-                      << " frame_ns=" << frameNs << " hits=" << guardHitCount << "\n";
-            lastLogFrameNs = frameNs;
+    MaybeLogClamp(request.frameNs, rawStepM, maxStepM, rawRotRad, maxRotRad);
+    CommitPose(guarded, request.frameNs);
+    return BuildResult(guarded, PoseQuality::Weak, true, rawStepM, maxStepM);
+}
+
+void PosePostprocessor::OutputGuard::MaybeLogClamp(int64_t frameNs, float rawStepM, float maxStepM, float rawRotRad,
+                                                  float maxRotRad)
+{
+    if (!EnvFlagEnabled("SMART_DRONE_ONLINE_POSE_GUARD_DFX", false)) {
+        return;
+    }
+    const bool timeToLog = frameNs <= 0 || lastLogFrameNs <= 0 || frameNs - lastLogFrameNs > 500000000LL;
+    if (guardHitCount > 10 && (guardHitCount % 20ULL) != 0ULL && !timeToLog) {
+        return;
+    }
+    std::cerr << "[pose_guard] clamped online pose step raw_m=" << rawStepM << " max_m=" << maxStepM
+              << " raw_rot_rad=" << rawRotRad << " max_rot_rad=" << maxRotRad
+              << " frame_ns=" << frameNs << " hits=" << guardHitCount << "\n";
+    lastLogFrameNs = frameNs;
+}
+
+PosePostprocessor::OutputGuard::GuardResult
+PosePostprocessor::OutputGuard::GuardPose(const GuardRequest &request)
+{
+    if (!EnvFlagEnabled("SMART_DRONE_ONLINE_POSE_STEP_GUARD", true)) {
+        if (request.trackingUsable && request.quality != PoseQuality::Lost && IsFinitePose(request.pose)) {
+            CommitPose(request.pose, request.frameNs);
         }
+        return BuildResult(request.pose, request.quality, false, 0.0f, 0.0f);
     }
 
-    CommitPose(guarded, frameNs);
-    return guarded;
+    if (!request.trackingUsable || request.quality == PoseQuality::Lost) {
+        if (request.quality != PoseQuality::Lost && IsFinitePose(request.pose)) {
+            CommitPose(request.pose, request.frameNs);
+        }
+        return BuildResult(request.pose, request.quality, false, 0.0f, 0.0f);
+    }
+
+    if (!IsFinitePose(request.pose)) {
+        return HandleInvalidPose(request);
+    }
+
+    if (!haveLastPose) {
+        CommitPose(request.pose, request.frameNs);
+        return BuildResult(request.pose, request.quality, false, 0.0f, 0.0f);
+    }
+
+    const float rawStepM = TranslationDistance(request.pose, lastPose);
+    const float maxStepM = ComputeAllowedStep(request.frameNs);
+    const float rawRotRad = QuaternionAngularDistanceRad(request.pose, lastPose);
+    const float maxRotRad = ComputeAllowedRotation(request.frameNs);
+    if (std::isfinite(rawStepM) && rawStepM <= maxStepM &&
+        std::isfinite(rawRotRad) && rawRotRad <= maxRotRad) {
+        CommitPose(request.pose, request.frameNs);
+        return BuildResult(request.pose, request.quality, false, rawStepM, maxStepM);
+    }
+
+    return ClampPose(request, rawStepM, maxStepM, rawRotRad, maxRotRad);
 }
 
 float PosePostprocessor::OutputGuard::ComputeAllowedStep(int64_t frameNs) const
@@ -325,7 +399,7 @@ float PosePostprocessor::OutputGuard::ComputeAllowedRotation(int64_t frameNs) co
     return std::max(0.01f, std::min(maxFrameRot, maxRotSpeed * dt));
 }
 
-void PosePostprocessor::OutputGuard::CommitPose(const Px4MavlinkGateway::Pose &pose, int64_t frameNs)
+void PosePostprocessor::OutputGuard::CommitPose(const PoseEstimate &pose, int64_t frameNs)
 {
     lastPose = pose;
     lastFrameNs = frameNs;
@@ -333,13 +407,11 @@ void PosePostprocessor::OutputGuard::CommitPose(const Px4MavlinkGateway::Pose &p
 }
 
 smartdrone::core::ports::VelocityEstimate
-PosePostprocessor::VelocityTracker::Update(const Px4MavlinkGateway::Pose &pose, int64_t frameNs, PoseQuality quality,
+PosePostprocessor::VelocityTracker::Update(const PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
                                            uint16_t resetMapCount)
 {
     smartdrone::core::ports::VelocityEstimate out{};
-
-    if (quality != PoseQuality::Good || !haveLastPose || lastQuality != PoseQuality::Good ||
-        resetMapCount != lastResetMapCount || frameNs <= lastFrameNs) {
+    if (ShouldReset(frameNs, quality, resetMapCount)) {
         ResetState(pose, frameNs, quality, resetMapCount);
         return out;
     }
@@ -350,43 +422,69 @@ PosePostprocessor::VelocityTracker::Update(const Px4MavlinkGateway::Pose &pose, 
         return out;
     }
 
-    const float rawVx = (pose.x - lastPose.x) / dt;
-    const float rawVy = (pose.y - lastPose.y) / dt;
-    const float rawVz = (pose.z - lastPose.z) / dt;
-
-    if (!std::isfinite(rawVx) || !std::isfinite(rawVy) || !std::isfinite(rawVz) ||
-        std::fabs(rawVx) > kMaxHorizontalSpeedMps || std::fabs(rawVy) > kMaxHorizontalSpeedMps ||
-        std::fabs(rawVz) > kMaxVerticalSpeedMps) {
+    const RawVelocity rawVelocity = ComputeRawVelocity(pose, dt);
+    if (!RawVelocityUsable(rawVelocity)) {
         ResetState(pose, frameNs, quality, resetMapCount);
         return out;
     }
 
+    UpdateFilteredVelocity(rawVelocity, dt);
+    out = filteredVelocity;
+    CommitPoseState(pose, frameNs, quality, resetMapCount);
+    return out;
+}
+
+bool PosePostprocessor::VelocityTracker::ShouldReset(int64_t frameNs, PoseQuality quality,
+                                                     uint16_t resetMapCount) const
+{
+    return quality != PoseQuality::Good || !haveLastPose || lastQuality != PoseQuality::Good ||
+           resetMapCount != lastResetMapCount || frameNs <= lastFrameNs;
+}
+
+PosePostprocessor::VelocityTracker::RawVelocity
+PosePostprocessor::VelocityTracker::ComputeRawVelocity(const PoseEstimate &pose, float dt) const
+{
+    return RawVelocity{(pose.x - lastPose.x) / dt, (pose.y - lastPose.y) / dt, (pose.z - lastPose.z) / dt};
+}
+
+bool PosePostprocessor::VelocityTracker::RawVelocityUsable(const RawVelocity &velocity) const
+{
+    if (!std::isfinite(velocity.vx) || !std::isfinite(velocity.vy) || !std::isfinite(velocity.vz)) {
+        return false;
+    }
+    return std::fabs(velocity.vx) <= kMaxHorizontalSpeedMps && std::fabs(velocity.vy) <= kMaxHorizontalSpeedMps &&
+           std::fabs(velocity.vz) <= kMaxVerticalSpeedMps;
+}
+
+void PosePostprocessor::VelocityTracker::UpdateFilteredVelocity(const RawVelocity &velocity, float dt)
+{
     const float alphaXY = dt / (kHorizontalTauSec + dt);
     const float alphaZ = dt / (kVerticalTauSec + dt);
-
     if (!haveFilteredVelocity) {
-        filteredVelocity.vx = rawVx;
-        filteredVelocity.vy = rawVy;
-        filteredVelocity.vz = rawVz;
+        filteredVelocity.vx = velocity.vx;
+        filteredVelocity.vy = velocity.vy;
+        filteredVelocity.vz = velocity.vz;
         filteredVelocity.valid = true;
         haveFilteredVelocity = true;
-    } else {
-        filteredVelocity.vx += alphaXY * (rawVx - filteredVelocity.vx);
-        filteredVelocity.vy += alphaXY * (rawVy - filteredVelocity.vy);
-        filteredVelocity.vz += alphaZ * (rawVz - filteredVelocity.vz);
+        return;
     }
+    filteredVelocity.vx += alphaXY * (velocity.vx - filteredVelocity.vx);
+    filteredVelocity.vy += alphaXY * (velocity.vy - filteredVelocity.vy);
+    filteredVelocity.vz += alphaZ * (velocity.vz - filteredVelocity.vz);
+}
 
-    out = filteredVelocity;
+void PosePostprocessor::VelocityTracker::CommitPoseState(const PoseEstimate &pose, int64_t frameNs,
+                                                         PoseQuality quality, uint16_t resetMapCount)
+{
     lastPose = pose;
     lastFrameNs = frameNs;
     lastQuality = quality;
     lastResetMapCount = resetMapCount;
     haveLastPose = true;
-    return out;
 }
 
-void PosePostprocessor::VelocityTracker::ResetState(const Px4MavlinkGateway::Pose &pose, int64_t frameNs,
-                                                    PoseQuality quality, uint16_t resetMapCount)
+void PosePostprocessor::VelocityTracker::ResetState(const PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
+                                                    uint16_t resetMapCount)
 {
     lastPose = pose;
     lastFrameNs = frameNs;
@@ -397,87 +495,74 @@ void PosePostprocessor::VelocityTracker::ResetState(const Px4MavlinkGateway::Pos
     haveLastPose = true;
 }
 
-PosePostprocessor::Result PosePostprocessor::ProcessPose(const Sophus::SE3f &twcRaw, bool useImu, bool trackingUsable,
-                                                         int, unsigned long mapId, bool stereoExtrinsicsLoaded,
-                                                         const Sophus::SE3f &stereoBodyExtrinsics,
-                                                         bool &stereoReferencePoseSet,
-                                                         Sophus::SE3f &stereoReferencePose, int64_t frameNs,
-                                                         Px4MavlinkGateway &mavlink)
+PosePostprocessor::PreparedPose PosePostprocessor::PreparePose(const ProcessRequest &request)
 {
-    Sophus::SE3f twc = twcRaw;
-    Result out{};
-    out.debug.cameraX = twcRaw.translation().x();
-    out.debug.cameraY = twcRaw.translation().y();
-    out.debug.cameraZ = twcRaw.translation().z();
+    PreparedPose prepared{};
+    prepared.twc = request.twcRaw;
+    prepared.result.debug.cameraX = request.twcRaw.translation().x();
+    prepared.result.debug.cameraY = request.twcRaw.translation().y();
+    prepared.result.debug.cameraZ = request.twcRaw.translation().z();
 
-    if (!useImu && stereoExtrinsicsLoaded) {
+    if (!request.useImu && request.stereoExtrinsicsLoaded) {
         // Pure stereo/LK estimates the left optical camera pose. Convert it to body FRD using T_b_c1
         // before the startup reference is applied, so published local motion is +X forward, +Y right, +Z down.
-        twc = twc * stereoBodyExtrinsics.inverse();
-        out.debug.stereoExtrinsicsApplied = true;
+        prepared.twc = prepared.twc * request.stereoBodyExtrinsics.inverse();
+        prepared.result.debug.stereoExtrinsicsApplied = true;
     }
-    out.debug.bodyX = twc.translation().x();
-    out.debug.bodyY = twc.translation().y();
-    out.debug.bodyZ = twc.translation().z();
+    prepared.result.debug.bodyX = prepared.twc.translation().x();
+    prepared.result.debug.bodyY = prepared.twc.translation().y();
+    prepared.result.debug.bodyZ = prepared.twc.translation().z();
+    return prepared;
+}
 
-    twc = m_continuity.MapPose(mapId, trackingUsable, twc);
-    out.resetCounter = m_continuity.GetResetCounter();
-    out.resetMapCount = m_continuity.GetResetMapCount();
+void PosePostprocessor::ApplyStereoReference(const ProcessRequest &request, PreparedPose &prepared)
+{
+    prepared.twc = m_continuity.MapPose(request.mapId, request.trackingUsable, prepared.twc);
+    prepared.result.resetCounter = m_continuity.GetResetCounter();
+    prepared.result.resetMapCount = m_continuity.GetResetMapCount();
 
-    if (!useImu && trackingUsable) {
-        if (!stereoReferencePoseSet) {
-            stereoReferencePose = twc;
-            stereoReferencePoseSet = true;
+    if (!request.useImu && request.trackingUsable && request.stereoReferencePoseSet != nullptr &&
+        request.stereoReferencePose != nullptr) {
+        if (!*request.stereoReferencePoseSet) {
+            *request.stereoReferencePose = prepared.twc;
+            *request.stereoReferencePoseSet = true;
         }
-        twc = stereoReferencePose.inverse() * twc;
-        out.debug.referenceApplied = true;
+        prepared.twc = request.stereoReferencePose->inverse() * prepared.twc;
+        prepared.result.debug.referenceApplied = true;
     }
-    out.debug.localX = twc.translation().x();
-    out.debug.localY = twc.translation().y();
-    out.debug.localZ = twc.translation().z();
+    prepared.result.debug.localX = prepared.twc.translation().x();
+    prepared.result.debug.localY = prepared.twc.translation().y();
+    prepared.result.debug.localZ = prepared.twc.translation().z();
+}
 
-    const Eigen::Vector3f t = twc.translation();
-    const Eigen::Quaternionf q(twc.so3().unit_quaternion());
-
-    Px4MavlinkGateway::Pose pSlam{};
-    pSlam.x = t.x();
-    pSlam.y = t.y();
-    pSlam.z = t.z();
-    pSlam.qw = q.w();
-    pSlam.qx = q.x();
-    pSlam.qy = q.y();
-    pSlam.qz = q.z();
-    Px4MavlinkGateway::NormalizeQuat(pSlam.qw, pSlam.qx, pSlam.qy, pSlam.qz);
-
-    Px4MavlinkGateway::Pose pRaw = useImu ? Px4MavlinkGateway::EnuToNed(pSlam) : pSlam;
+void PosePostprocessor::PopulateOutputPose(const ProcessRequest &request, PreparedPose &prepared)
+{
+    const PoseEstimate poseSlam = MakePoseEstimate(prepared.twc);
+    const PoseEstimate poseRaw = request.useImu ? EnuToNed(poseSlam) : poseSlam;
     PoseQuality quality = PoseQuality::Lost;
-    const Px4MavlinkGateway::Pose aligned = m_aligner.AlignPose(pRaw, trackingUsable, mavlink, quality);
-    bool outputGuardApplied = false;
-    float outputGuardRawStepM = 0.0f;
-    float outputGuardMaxStepM = 0.0f;
-    const Px4MavlinkGateway::Pose guarded =
-        m_outputGuard.GuardPose(aligned, frameNs, trackingUsable, quality, outputGuardApplied,
-                                outputGuardRawStepM, outputGuardMaxStepM);
-    if (outputGuardApplied) {
-        m_aligner.SetPublishedPose(guarded);
+    const PoseEstimate aligned = m_aligner.AlignPose(poseRaw, request.trackingUsable, request.readRangeSensor, quality);
+    const auto guard = m_outputGuard.GuardPose(
+        PosePostprocessor::OutputGuard::GuardRequest{aligned, request.frameNs, request.trackingUsable, quality});
+    if (guard.guardApplied) {
+        m_aligner.SetPublishedPose(guard.pose);
     }
-    const auto velocity = m_velocity.Update(guarded, frameNs, quality, out.resetMapCount);
+    const auto velocity = m_velocity.Update(guard.pose, request.frameNs, guard.quality, prepared.result.resetMapCount);
 
-    out.alignedPose = guarded;
-    out.poseEstimate.valid = true;
-    out.poseEstimate.x = guarded.x;
-    out.poseEstimate.y = guarded.y;
-    out.poseEstimate.z = guarded.z;
-    out.poseEstimate.qw = guarded.qw;
-    out.poseEstimate.qx = guarded.qx;
-    out.poseEstimate.qy = guarded.qy;
-    out.poseEstimate.qz = guarded.qz;
-    out.velocityEstimate = velocity;
-    out.quality = quality;
-    out.debug.outputGuardApplied = outputGuardApplied;
-    out.debug.outputGuardRawStepM = outputGuardRawStepM;
-    out.debug.outputGuardMaxStepM = outputGuardMaxStepM;
-    return out;
+    prepared.result.poseEstimate = guard.pose;
+    prepared.result.poseEstimate.valid = true;
+    prepared.result.velocityEstimate = velocity;
+    prepared.result.quality = guard.quality;
+    prepared.result.debug.outputGuardApplied = guard.guardApplied;
+    prepared.result.debug.outputGuardRawStepM = guard.rawStepM;
+    prepared.result.debug.outputGuardMaxStepM = guard.maxStepM;
+}
+
+PosePostprocessor::Result PosePostprocessor::ProcessPose(const ProcessRequest &request)
+{
+    PreparedPose prepared = PreparePose(request);
+    ApplyStereoReference(request, prepared);
+    PopulateOutputPose(request, prepared);
+    return prepared.result;
 }
 
 } // namespace smartdrone::core::application

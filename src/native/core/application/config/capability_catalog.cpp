@@ -2,40 +2,33 @@
 #include "core/application/session/sensor_runtime_helpers.h"
 
 namespace smartdrone::core::application {
+namespace {
 
-domain::RuntimeCapabilities CapabilityCatalog::BuildDefault() {
-  domain::RuntimeCapabilities capabilities{};
-  const std::string_view compiledCameraProvider = CompiledCameraProviderName();
-  capabilities.runtimeModes = {
-      domain::RuntimeMode::Idle,
-      domain::RuntimeMode::Slam,
-      domain::RuntimeMode::Calib,
-  };
+std::vector<domain::PerceptionMode> DefaultPerceptionModes() {
   if (CompiledCameraProviderUsesPackedStereo()) {
-    capabilities.perceptionModes = {
+    return {
         domain::PerceptionMode::Stereo,
-    };
-  } else {
-    capabilities.perceptionModes = {
-        domain::PerceptionMode::Stereo,
-        domain::PerceptionMode::StereoImu,
-        domain::PerceptionMode::Mono,
-        domain::PerceptionMode::MonoImu,
     };
   }
-  capabilities.slamModes = {
-      domain::SlamOperationMode::Mapping,
-      domain::SlamOperationMode::Localization,
-      domain::SlamOperationMode::Auto,
+  return {
+      domain::PerceptionMode::Stereo,
+      domain::PerceptionMode::StereoImu,
+      domain::PerceptionMode::Mono,
+      domain::PerceptionMode::MonoImu,
   };
-  capabilities.cameraProviders = {std::string(compiledCameraProvider)};
-  capabilities.imuProviders = {"icm42688_spi"};
-  capabilities.slamEngines = {"klt", "dpvo_tensorrt"};
+}
+
+std::vector<std::string> DefaultSlamEngines() {
+  std::vector<std::string> engines{"klt", "dpvo_tensorrt"};
 #if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
-  capabilities.slamEngines.push_back("orbslam3");
+  engines.push_back("orbslam3");
 #endif
-  capabilities.commandChannels = {"udp_tlv"};
-  capabilities.behaviorNotes = {
+  return engines;
+}
+
+std::vector<std::string> DefaultBehaviorNotes(
+    std::string_view compiledCameraProvider) {
+  std::vector<std::string> notes{
       std::string("camera.provider.compiled=") +
           std::string(compiledCameraProvider),
       "slam_mode.relocalization=maps_to_backend_localization_only",
@@ -60,13 +53,45 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault() {
       "slam.lk_seed.gftt=shi_tomasi_good_features_to_track",
   };
   if (CompiledCameraProviderUsesPackedStereo()) {
-    capabilities.behaviorNotes.push_back(
+    notes.push_back(
         "camera.uvc_stereo_v4l2=single_uvc_device_packed_left_right_frame");
-    capabilities.behaviorNotes.push_back(
-        "camera.uvc_timestamp=v4l2_buffer_timestamp_from_vidioc_dqbuf");
-    capabilities.behaviorNotes.push_back(
+    notes.push_back("camera.uvc_timestamp=v4l2_buffer_timestamp_from_vidioc_dqbuf");
+    notes.push_back(
         "camera.uvc_pairing=not_required_single_capture_provides_both_eyes");
   }
+  return notes;
+}
+
+void PopulateStaticModes(domain::RuntimeCapabilities &capabilities) {
+  capabilities.runtimeModes = {
+      domain::RuntimeMode::Idle,
+      domain::RuntimeMode::Slam,
+      domain::RuntimeMode::Calib,
+  };
+  capabilities.slamModes = {
+      domain::SlamOperationMode::Mapping,
+      domain::SlamOperationMode::Localization,
+      domain::SlamOperationMode::Auto,
+  };
+}
+
+void PopulateProviders(domain::RuntimeCapabilities &capabilities,
+                       std::string_view compiledCameraProvider) {
+  capabilities.cameraProviders = {std::string(compiledCameraProvider)};
+  capabilities.imuProviders = {"icm42688_spi"};
+  capabilities.commandChannels = {"udp_tlv"};
+}
+
+} // namespace
+
+domain::RuntimeCapabilities CapabilityCatalog::BuildDefault() {
+  domain::RuntimeCapabilities capabilities{};
+  const std::string_view compiledCameraProvider = CompiledCameraProviderName();
+  PopulateStaticModes(capabilities);
+  PopulateProviders(capabilities, compiledCameraProvider);
+  capabilities.perceptionModes = DefaultPerceptionModes();
+  capabilities.slamEngines = DefaultSlamEngines();
+  capabilities.behaviorNotes = DefaultBehaviorNotes(compiledCameraProvider);
   capabilities.configKeys = ConfigRegistry::DefaultDescriptors();
   return capabilities;
 }

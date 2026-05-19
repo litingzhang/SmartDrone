@@ -8,69 +8,141 @@ namespace smartdrone::core::application {
 
 PerceptionPipeline::PerceptionPipeline(PerceptionPipelineConfig cfg) : m_cfg(cfg) {}
 
-StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(ports::ICameraProvider &camera, int slamInputFps,
-                                                               int timeoutMs, StereoBatch &out,
-                                                               FrameTimingTracker *timingTracker)
+StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(
+    ports::ICameraProvider &camera, int slamInputFps, int timeoutMs,
+    StereoBatch &out, FrameTimingTracker *timingTracker)
+{
+    return AcquireNextStereoBatch(
+        StereoAcquireRequest{camera, slamInputFps, timeoutMs, out, timingTracker});
+}
+
+StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(
+    const StereoAcquireRequest &request)
 {
     ports::StereoFrame stereo{};
-    const int clampedSlamInputFps = ClampTargetFps(slamInputFps);
+    const int clampedSlamInputFps = ClampTargetFps(request.slamInputFps);
     const int64_t slamFrameStepNs = 1000000000LL / std::max(1, clampedSlamInputFps);
-    uint64_t minTimestampNs = 0;
-    if (m_lastAcceptedCaptureTimestampNs != 0) {
-        const int64_t toleranceNs = std::max<int64_t>(2000000LL, slamFrameStepNs / 20);
-        minTimestampNs =
-            static_cast<uint64_t>(std::max<int64_t>(0, m_lastAcceptedCaptureTimestampNs + slamFrameStepNs - toleranceNs));
-    }
+    const uint64_t minTimestampNs = ComputeMinCaptureTimestampNs(slamFrameStepNs);
 
-    if (!camera.GrabStereo(stereo, timeoutMs, m_cfg.preferLatestFrame, minTimestampNs)) {
-        const auto diag = camera.GetDiagnostics();
-        const bool packedStereo = camera.Semantics() == ports::CameraProviderSemantics::PackedStereoSingleDevice;
-        const char *likelyCause = "stereo_frame_wait_timeout";
-        if (!diag.acceptFrames) {
-            likelyCause = "camera_not_accepting_frames";
-        } else if (!diag.healthy) {
-            likelyCause = "camera_unhealthy";
-        } else if (packedStereo && diag.lastFrameAgeMsL >= timeoutMs && diag.lastFrameAgeMsR >= timeoutMs) {
-            likelyCause = "packed_stereo_stream_stalled";
-        } else if (packedStereo && diag.pairedQueue > 0) {
-            likelyCause = "eligible_frame_filter";
-        } else if (!packedStereo && diag.lastFrameAgeMsL >= timeoutMs && diag.lastFrameAgeMsR < timeoutMs) {
-            likelyCause = "left_stream_stalled";
-        } else if (!packedStereo && diag.lastFrameAgeMsR >= timeoutMs && diag.lastFrameAgeMsL < timeoutMs) {
-            likelyCause = "right_stream_stalled";
-        } else if (!packedStereo && diag.pendingL > 0 && diag.pendingR == 0) {
-            likelyCause = "waiting_right_frame";
-        } else if (!packedStereo && diag.pendingR > 0 && diag.pendingL == 0) {
-            likelyCause = "waiting_left_frame";
-        } else if (!packedStereo && diag.pendingL > 0 && diag.pendingR > 0 && diag.pairedQueue == 0) {
-            likelyCause = "pairing_threshold_or_min_ts";
-        } else if (!packedStereo && diag.pairedQueue > 0) {
-            likelyCause = "eligible_pair_filter";
-        }
-
-        char line[512];
-        std::snprintf(
-            line, sizeof(line),
-            "[stereo_timeout] timeout_ms=%d slam_fps=%d min_ts=%llu last_accept_ts=%lld next_logical_ts=%lld "
-            "accept=%d healthy=%d cause=%s "
-            "raw_seq=[%u,%u] raw_count=[%llu,%llu] pending=[%zu,%zu] paired=%zu "
-            "drop_pair=%llu drop_unpaired=[%llu,%llu] "
-            "pair_tol_ms=%.3f last_pair_dt_ms=%lld last_reject_dt_ms=%.3f age_ms=[%lld,%lld] last_pair_age_ms=%lld",
-            timeoutMs, clampedSlamInputFps, static_cast<unsigned long long>(minTimestampNs),
-            static_cast<long long>(m_lastAcceptedCaptureTimestampNs), static_cast<long long>(m_nextAcceptedLogicalFrameNs),
-            diag.acceptFrames ? 1 : 0, diag.healthy ? 1 : 0, likelyCause, static_cast<unsigned>(diag.lastRawSeqL),
-            static_cast<unsigned>(diag.lastRawSeqR), static_cast<unsigned long long>(diag.rawCountL),
-            static_cast<unsigned long long>(diag.rawCountR), diag.pendingL, diag.pendingR, diag.pairedQueue,
-            static_cast<unsigned long long>(diag.droppedPairs), static_cast<unsigned long long>(diag.droppedUnpairedL),
-            static_cast<unsigned long long>(diag.droppedUnpairedR), static_cast<double>(diag.pairTolNs) * 1e-6,
-            static_cast<long long>(diag.lastPairDtMs), static_cast<double>(diag.lastRejectDtUs) * 1e-3,
-            static_cast<long long>(diag.lastFrameAgeMsL), static_cast<long long>(diag.lastFrameAgeMsR),
-            static_cast<long long>(diag.lastPairAgeMs));
-        std::fprintf(stderr, "%s\n", line);
-        return camera.GetHealth().healthy ? StereoAcquireStatus::Timeout : StereoAcquireStatus::CameraUnhealthy;
+    if (!request.camera.GrabStereo(stereo, request.timeoutMs,
+                                   m_cfg.preferLatestFrame, minTimestampNs)) {
+        return HandleGrabFailure(request.camera, request.timeoutMs,
+                                 clampedSlamInputFps, minTimestampNs);
     }
 
     const int64_t frameStepNs = 1000000000LL / std::max(1, m_cfg.cameraFps);
+    const StereoFrameTiming timing = BuildStereoFrameTiming(stereo, frameStepNs);
+    const int64_t toleranceNs = std::max<int64_t>(2000000LL, slamFrameStepNs / 20);
+    if (ShouldDropByRateLimiter(timing, toleranceNs)) {
+        return StereoAcquireStatus::DroppedByRateLimiter;
+    }
+
+    AcceptStereoBatch(std::move(stereo), timing, slamFrameStepNs, request.out);
+    RecordFrameTiming(request.out, request.timingTracker);
+    return StereoAcquireStatus::Ok;
+}
+
+uint64_t PerceptionPipeline::ComputeMinCaptureTimestampNs(int slamFrameStepNs) const
+{
+    if (m_lastAcceptedCaptureTimestampNs != 0) {
+        const int64_t toleranceNs = std::max<int64_t>(2000000LL, slamFrameStepNs / 20);
+        return
+            static_cast<uint64_t>(std::max<int64_t>(0, m_lastAcceptedCaptureTimestampNs + slamFrameStepNs - toleranceNs));
+    }
+    return 0;
+}
+
+StereoAcquireStatus PerceptionPipeline::HandleGrabFailure(
+    ports::ICameraProvider &camera, int timeoutMs, int clampedSlamInputFps,
+    uint64_t minTimestampNs) const
+{
+    StereoGrabFailureLog failure;
+    failure.diagnostics = camera.GetDiagnostics();
+    failure.minTimestampNs = minTimestampNs;
+    failure.timeoutMs = timeoutMs;
+    failure.clampedSlamInputFps = clampedSlamInputFps;
+    failure.packedStereo =
+        camera.Semantics() == ports::CameraProviderSemantics::PackedStereoSingleDevice;
+    failure.likelyCause = ClassifyGrabFailureCause(failure);
+
+    if (failure.diagnostics.healthy && timeoutMs <= 0) {
+        return StereoAcquireStatus::Timeout;
+    }
+    LogGrabFailure(failure);
+    return camera.GetHealth().healthy ? StereoAcquireStatus::Timeout : StereoAcquireStatus::CameraUnhealthy;
+}
+
+const char *PerceptionPipeline::ClassifyGrabFailureCause(
+    const StereoGrabFailureLog &failure) const
+{
+    const auto &diag = failure.diagnostics;
+    const bool packedStereo = failure.packedStereo;
+    const int timeoutMs = failure.timeoutMs;
+    if (!diag.acceptFrames) {
+        return "camera_not_accepting_frames";
+    }
+    if (!diag.healthy) {
+        return "camera_unhealthy";
+    }
+    if (packedStereo && diag.lastFrameAgeMsL >= timeoutMs &&
+               diag.lastFrameAgeMsR >= timeoutMs) {
+        return "packed_stereo_stream_stalled";
+    }
+    if (packedStereo && diag.pairedQueue > 0) {
+        return "eligible_frame_filter";
+    }
+    if (!packedStereo && diag.lastFrameAgeMsL >= timeoutMs &&
+               diag.lastFrameAgeMsR < timeoutMs) {
+        return "left_stream_stalled";
+    }
+    if (!packedStereo && diag.lastFrameAgeMsR >= timeoutMs &&
+               diag.lastFrameAgeMsL < timeoutMs) {
+        return "right_stream_stalled";
+    }
+    if (!packedStereo && diag.pendingL > 0 && diag.pendingR == 0) {
+        return "waiting_right_frame";
+    }
+    if (!packedStereo && diag.pendingR > 0 && diag.pendingL == 0) {
+        return "waiting_left_frame";
+    }
+    if (!packedStereo && diag.pendingL > 0 && diag.pendingR > 0 &&
+               diag.pairedQueue == 0) {
+        return "pairing_threshold_or_min_ts";
+    }
+    if (!packedStereo && diag.pairedQueue > 0) {
+        return "eligible_pair_filter";
+    }
+    return "stereo_frame_wait_timeout";
+}
+
+void PerceptionPipeline::LogGrabFailure(const StereoGrabFailureLog &failure) const
+{
+    const auto &diag = failure.diagnostics;
+    char line[512];
+    std::snprintf(
+        line, sizeof(line),
+        "[stereo_timeout] timeout_ms=%d slam_fps=%d min_ts=%llu last_accept_ts=%lld next_logical_ts=%lld "
+        "accept=%d healthy=%d cause=%s "
+        "raw_seq=[%u,%u] raw_count=[%llu,%llu] pending=[%zu,%zu] paired=%zu "
+        "drop_pair=%llu drop_unpaired=[%llu,%llu] "
+        "pair_tol_ms=%.3f last_pair_dt_ms=%lld last_reject_dt_ms=%.3f age_ms=[%lld,%lld] last_pair_age_ms=%lld",
+        failure.timeoutMs, failure.clampedSlamInputFps,
+        static_cast<unsigned long long>(failure.minTimestampNs),
+        static_cast<long long>(m_lastAcceptedCaptureTimestampNs), static_cast<long long>(m_nextAcceptedLogicalFrameNs),
+        diag.acceptFrames ? 1 : 0, diag.healthy ? 1 : 0, failure.likelyCause, static_cast<unsigned>(diag.lastRawSeqL),
+        static_cast<unsigned>(diag.lastRawSeqR), static_cast<unsigned long long>(diag.rawCountL),
+        static_cast<unsigned long long>(diag.rawCountR), diag.pendingL, diag.pendingR, diag.pairedQueue,
+        static_cast<unsigned long long>(diag.droppedPairs), static_cast<unsigned long long>(diag.droppedUnpairedL),
+        static_cast<unsigned long long>(diag.droppedUnpairedR), static_cast<double>(diag.pairTolNs) * 1e-6,
+        static_cast<long long>(diag.lastPairDtMs), static_cast<double>(diag.lastRejectDtUs) * 1e-3,
+        static_cast<long long>(diag.lastFrameAgeMsL), static_cast<long long>(diag.lastFrameAgeMsR),
+        static_cast<long long>(diag.lastPairAgeMs));
+    std::fprintf(stderr, "%s\n", line);
+}
+
+StereoFrameTiming PerceptionPipeline::BuildStereoFrameTiming(
+    const ports::StereoFrame &stereo, int64_t frameStepNs) const
+{
     const uint64_t earlierTimestampNs = std::min(stereo.left.timestampNs, stereo.right.timestampNs);
     const uint64_t laterTimestampNs = std::max(stereo.left.timestampNs, stereo.right.timestampNs);
     const int64_t captureTimestampNs =
@@ -79,32 +151,47 @@ StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(ports::ICameraPro
     if (m_lastDeliveredLogicalFrameNs != 0 && logicalFrameTimestampNs <= m_lastDeliveredLogicalFrameNs) {
         logicalFrameTimestampNs = m_lastDeliveredLogicalFrameNs + frameStepNs;
     }
+    return {captureTimestampNs, logicalFrameTimestampNs, frameStepNs};
+}
 
+bool PerceptionPipeline::ShouldDropByRateLimiter(const StereoFrameTiming &timing,
+                                                 int64_t toleranceNs) const
+{
     if (m_nextAcceptedLogicalFrameNs == 0) {
-        m_nextAcceptedLogicalFrameNs = logicalFrameTimestampNs;
+        return false;
+    }
+    return timing.logicalFrameTimestampNs + toleranceNs < m_nextAcceptedLogicalFrameNs;
+}
+
+void PerceptionPipeline::AcceptStereoBatch(ports::StereoFrame stereo,
+                                           const StereoFrameTiming &timing,
+                                           int64_t slamFrameStepNs,
+                                           StereoBatch &out)
+{
+    if (m_nextAcceptedLogicalFrameNs == 0) {
+        m_nextAcceptedLogicalFrameNs = timing.logicalFrameTimestampNs;
     }
 
-    const int64_t toleranceNs = std::max<int64_t>(2000000LL, slamFrameStepNs / 20);
-    if (logicalFrameTimestampNs + toleranceNs < m_nextAcceptedLogicalFrameNs) {
-        return StereoAcquireStatus::DroppedByRateLimiter;
-    }
-
-    m_lastDeliveredLogicalFrameNs = logicalFrameTimestampNs;
-    m_lastAcceptedCaptureTimestampNs = captureTimestampNs;
-    m_nextAcceptedLogicalFrameNs = logicalFrameTimestampNs + slamFrameStepNs;
+    m_lastDeliveredLogicalFrameNs = timing.logicalFrameTimestampNs;
+    m_lastAcceptedCaptureTimestampNs = timing.captureTimestampNs;
+    m_nextAcceptedLogicalFrameNs = timing.logicalFrameTimestampNs + slamFrameStepNs;
 
     out.stereo = std::move(stereo);
     out.frameId = m_nextFrameId++;
-    out.captureTimestampNs = captureTimestampNs;
-    out.logicalFrameTimestampNs = logicalFrameTimestampNs;
-    out.monotonicFrameStepNs = frameStepNs;
+    out.captureTimestampNs = timing.captureTimestampNs;
+    out.logicalFrameTimestampNs = timing.logicalFrameTimestampNs;
+    out.monotonicFrameStepNs = timing.frameStepNs;
+}
+
+void PerceptionPipeline::RecordFrameTiming(const StereoBatch &out,
+                                           FrameTimingTracker *timingTracker) const
+{
     if (timingTracker) {
-        const uint64_t tCamNs = static_cast<uint64_t>(captureTimestampNs);
+        const uint64_t tCamNs = static_cast<uint64_t>(out.captureTimestampNs);
         const uint64_t tCbNs =
             static_cast<uint64_t>(std::max<int64_t>(0, (out.stereo.left.arriveNs + out.stereo.right.arriveNs) / 2LL));
         timingTracker->UpsertCapture(out.frameId, tCamNs, tCbNs);
     }
-    return StereoAcquireStatus::Ok;
 }
 
 int PerceptionPipeline::ClampTargetFps(int requestedFps) const

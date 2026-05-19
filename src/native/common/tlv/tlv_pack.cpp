@@ -43,24 +43,24 @@ float ReadF32Le(const uint8_t *p)
     return out;
 }
 
-std::vector<uint8_t> MakeFrame(uint8_t ver, uint8_t cmd, uint8_t flags, uint32_t seq, uint32_t tMs,
-                               const uint8_t *payload, uint16_t len)
+std::vector<uint8_t> MakeFrame(const TlvFrameBuildRequest &request)
 {
     std::vector<uint8_t> out;
-    out.reserve(static_cast<size_t>(2 + 1 + 1 + 1 + 2 + 4 + 4 + len + 2));
+    constexpr size_t frameOverheadBytes = 2 + 1 + 1 + 1 + 2 + 4 + 4 + 2;
+    out.reserve(frameOverheadBytes + static_cast<size_t>(request.len));
 
     out.push_back(TLV_SYNC0);
     out.push_back(TLV_SYNC1);
-    out.push_back(ver);
-    out.push_back(cmd);
-    out.push_back(flags);
+    out.push_back(request.ver);
+    out.push_back(request.cmd);
+    out.push_back(request.flags);
 
-    WriteU16Le(out, len);
-    WriteU32Le(out, seq);
-    WriteU32Le(out, tMs);
+    WriteU16Le(out, request.len);
+    WriteU32Le(out, request.seq);
+    WriteU32Le(out, request.tMs);
 
-    if (len > 0 && payload != nullptr) {
-        out.insert(out.end(), payload, payload + len);
+    if (request.len > 0 && request.payload != nullptr) {
+        out.insert(out.end(), request.payload, request.payload + request.len);
     }
 
     const uint8_t *crcBase = out.data() + 2;
@@ -98,5 +98,7 @@ std::vector<uint8_t> MakeAckFrame(uint32_t reqSeq, uint32_t tMs, uint8_t ackCmd,
     WriteI16Le(&payload[5], status);
     WriteU16LeToPtr(&payload[7], 0);
 
-    return MakeFrame(TLV_VER, CMD_ACK, 0, reqSeq, tMs, payload, ACK_PAYLOAD_LEN);
+    const TlvFrameBuildRequest request{
+        TLV_VER, CMD_ACK, 0, reqSeq, tMs, payload, ACK_PAYLOAD_LEN};
+    return MakeFrame(request);
 }

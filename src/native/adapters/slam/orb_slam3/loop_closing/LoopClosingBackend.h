@@ -67,6 +67,7 @@ public:
   virtual void Reset(const OrbLoopClosingResetRequest &request) = 0;
   virtual void AttachRuntimePeers(
       const OrbLoopClosingRuntimePeers &peers) = 0;
+  virtual bool Step() = 0;
 };
 
 std::unique_ptr<IOrbLoopClosingBackend>

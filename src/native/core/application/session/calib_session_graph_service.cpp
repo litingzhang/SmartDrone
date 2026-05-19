@@ -8,12 +8,10 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -23,40 +21,25 @@
 #include "adapters/stream/udp_image_sender.h"
 #include "common/epg/epg.h"
 #include "common/tlv/tlv_protocol.h"
-#include "core/application/session/calib_session_service.h"
+#include "core/application/runtime/epg_dfx_snapshot.h"
+#include "core/application/runtime/runtime_aliases.h"
+#include "core/application/session/calib_output_sync.h"
 #include "core/application/session/calib_storage_helpers.h"
 #include "core/application/session/epg_messages.h"
 #include "core/application/session/epg_registry.h"
-#include "core/application/session/runtime_session_common.h"
 #include "core/application/session/sensor_runtime_helpers.h"
+#include "core/application/runtime/epg_graph_lifecycle.h"
+#include "core/domain/runtime_mode.h"
 #include "core/ports/camera_provider.h"
 #include "platform/linux/gpio/drdy_gpio.h"
 
 namespace smartdrone::core::application {
 namespace {
 
+using ControllerMode = smartdrone::core::domain::RuntimeMode;
+
 constexpr int kRecommendedMaxCalibSaveFps = 30;
 constexpr const char *kCalibEpgDfxSnapshotPath = "/tmp/smartdrone_epg_calib.json";
-
-std::uint64_t EpgDfxNowMs()
-{
-    const auto now = std::chrono::steady_clock::now().time_since_epoch();
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
-}
-
-void WriteEpgDfxSnapshotFile(const std::string &path, const std::string &json)
-{
-    const std::string tmpPath = path + ".tmp";
-    {
-        std::ofstream output(tmpPath, std::ios::out | std::ios::trunc);
-        if (!output) {
-            return;
-        }
-        output << json;
-    }
-    (void)std::rename(tmpPath.c_str(), path.c_str());
-}
 
 int ClampCalibSaveFps(int requestedFps, int cameraFps)
 {
@@ -85,9 +68,11 @@ cv::Mat EnsureGray8(const cv::Mat &src, bool &convertedOut)
 
 class CalibRuntimeState final {
   public:
-    CalibRuntimeState(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePoseState &livePose,
-                            std::atomic<bool> &runningFlag)
-        : m_cfg(cfg), m_stop(stop), m_livePose(livePose), m_runningFlag(runningFlag)
+    explicit CalibRuntimeState(CalibSessionGraphRuntimeConfig config)
+        : m_cfg(std::move(config.cfg)),
+          m_stop(config.stop),
+          m_livePose(config.livePose),
+          m_runningFlag(config.runningFlag)
     {
     }
 
@@ -107,52 +92,24 @@ class CalibRuntimeState final {
         PrintStartupConfig(m_cfg.app, m_aliases, ControllerMode::Calib);
         m_livePose.SetRuntimeMode(RUNTIME_MODE_CALIB);
 
-        m_outRoot = MakeCalibSessionDir(m_cfg.calib.root);
-        m_root = fs::path(m_outRoot);
-        m_cam0Dir = m_root / "cam0";
-        m_cam1Dir = m_root / "cam1";
-        EnsureDir(m_cam0Dir);
-        EnsureDir(m_cam1Dir);
-
-        m_fCam0 = std::fopen((m_cam0Dir / "data.csv").string().c_str(), "w");
-        m_fCam1 = std::fopen((m_cam1Dir / "data.csv").string().c_str(), "w");
-        m_fImu = std::fopen((m_root / "imu.csv").string().c_str(), "w");
-        if (!m_fCam0 || !m_fCam1 || !m_fImu) {
+        PrepareOutputDirs();
+        if (!OpenOutputCsv()) {
             m_startFailed = true;
             CloseFilesLocked();
             return false;
         }
 
         std::cerr << "[calib] out=" << m_outRoot << "\n";
-        SetupFileBuffer(m_fCam0, 1 << 20);
-        SetupFileBuffer(m_fCam1, 1 << 20);
-        SetupFileBuffer(m_fImu, 4 << 20);
-        std::fprintf(m_fCam0, "#timestamp [ns],filename\n");
-        std::fprintf(m_fCam1, "#timestamp [ns],filename\n");
-        std::fprintf(m_fImu, "#timestamp [ns],wX [rad/s],wY [rad/s],wZ [rad/s],aX [m/s^2],aY [m/s^2],aZ [m/s^2]\n");
-
-        if (m_aliases.udpEnable && m_aliases.sendImage) {
-            m_udp.Open(m_aliases.udpIp, m_aliases.udpPort, m_aliases.udpJpegQ, m_aliases.udpPayload,
-                       m_aliases.udpQueue);
-            m_udpOpen = true;
-        }
-
-        m_cameraProvider = CreateCameraProvider();
-        m_cameraOpen = m_cameraProvider && m_cameraProvider->Open(m_aliases);
-        if (!m_cameraOpen) {
+        InitOutputCsv();
+        OpenPreviewUdp();
+        if (!OpenCamera()) {
             m_startFailed = true;
             m_stop.store(true);
             FinalizeLocked(false);
             return false;
         }
 
-        m_maxSaveDtNs = static_cast<std::int64_t>(std::max(m_aliases.pairMs, 1)) * 1000000LL;
-        m_calibSaveFps = ClampCalibSaveFps(m_aliases.slamInputFps, m_aliases.fps);
-        m_calibSaveStepNs = 1000000000LL / std::max(1, m_calibSaveFps);
-        std::cerr << "[calib] target_save_fps=" << m_calibSaveFps
-                  << " configured_camera_fps=" << m_aliases.fps
-                  << " requested_slam_fps=" << m_aliases.slamInputFps << "\n";
-
+        ConfigureSavePacing();
         m_started = true;
         return true;
     }
@@ -206,10 +163,7 @@ class CalibRuntimeState final {
         }
         const auto &L = pair.frame->stereo.left;
         const auto &R = pair.frame->stereo.right;
-        if (L.gray.empty() || R.gray.empty()) {
-            std::cerr << "[calib-write] empty image"
-                      << " seqL=" << L.sequence << " seqR=" << R.sequence << " rowsL=" << L.gray.rows
-                      << " colsL=" << L.gray.cols << " rowsR=" << R.gray.rows << " colsR=" << R.gray.cols << "\n";
+        if (!ValidateImagesForSave(L, R)) {
             return false;
         }
 
@@ -217,41 +171,11 @@ class CalibRuntimeState final {
         bool convertedR = false;
         const cv::Mat calibGrayL = EnsureGray8(L.gray, convertedL);
         const cv::Mat calibGrayR = EnsureGray8(R.gray, convertedR);
-        if (convertedL || convertedR) {
-            ++m_conversionLogCount;
-            if ((m_conversionLogCount % 30) == 1) {
-                std::cerr << "[calib-gray] converted to 8-bit"
-                          << " typeL=" << L.gray.type() << " typeR=" << R.gray.type()
-                          << " count=" << m_conversionLogCount << "\n";
-            }
-        }
-
-        const bool okL = cv::imwrite(pair.fnL.string(), calibGrayL);
-        const bool okR = cv::imwrite(pair.fnR.string(), calibGrayR);
-        if (!okL || !okR) {
-            std::cerr << "[calib-write] imwrite failed"
-                      << " okL=" << (okL ? "true" : "false") << " okR=" << (okR ? "true" : "false")
-                      << " pathL=" << pair.fnL.string() << " pathR=" << pair.fnR.string()
-                      << " typeL=" << L.gray.type() << " typeR=" << R.gray.type()
-                      << " rowsL=" << L.gray.rows << " colsL=" << L.gray.cols
-                      << " rowsR=" << R.gray.rows << " colsR=" << R.gray.cols << "\n";
+        LogGrayConversion(L, R, convertedL || convertedR);
+        if (!WriteImages(pair, L, R, calibGrayL, calibGrayR)) {
             return false;
         }
-
-        std::lock_guard<std::mutex> lock(m_fileMu);
-        std::fprintf(m_fCam0, "%lld,%s\n", static_cast<long long>(pair.pairNs), pair.name.c_str());
-        std::fprintf(m_fCam1, "%lld,%s\n", static_cast<long long>(pair.pairNs), pair.name.c_str());
-        m_savedImagePaths.push_back(pair.fnL);
-        m_savedImagePaths.push_back(pair.fnR);
-        const int saved = m_saved.fetch_add(1, std::memory_order_relaxed) + 1;
-        if (((saved - 1) % 30) == 0) {
-            std::cerr << "[calib-save] saved=" << saved << " pathL=" << pair.fnL.string()
-                      << " pathR=" << pair.fnR.string() << "\n";
-        }
-        if ((saved % 50) == 0) {
-            std::fflush(m_fCam0);
-            std::fflush(m_fCam1);
-        }
+        RecordSavedPair(pair);
         return true;
     }
 
@@ -271,6 +195,7 @@ class CalibRuntimeState final {
                       false);
         m_udp.Enqueue(1, static_cast<std::uint64_t>(R.sequence), R.sequence, pairNs * 1e-9, calibGrayR, {}, true,
                       false);
+        m_udp.StepAll();
     }
 
     bool WriteImuSample(const ImuSample &sample)
@@ -291,6 +216,11 @@ class CalibRuntimeState final {
 
     bool ImuOk() const { return m_imuOk.load(std::memory_order_relaxed); }
     int Saved() const { return m_saved.load(std::memory_order_relaxed); }
+    bool Finalized() const
+    {
+        std::lock_guard<std::mutex> lock(m_mu);
+        return m_finalized;
+    }
 
     void Finalize(bool sessionOk)
     {
@@ -299,6 +229,139 @@ class CalibRuntimeState final {
     }
 
   private:
+    void PrepareOutputDirs()
+    {
+        m_outRoot = MakeCalibSessionDir(m_cfg.calib.root);
+        m_root = fs::path(m_outRoot);
+        m_cam0Dir = m_root / "cam0";
+        m_cam1Dir = m_root / "cam1";
+        EnsureDir(m_cam0Dir);
+        EnsureDir(m_cam1Dir);
+    }
+
+    bool OpenOutputCsv()
+    {
+        m_fCam0 = std::fopen((m_cam0Dir / "data.csv").string().c_str(), "w");
+        m_fCam1 = std::fopen((m_cam1Dir / "data.csv").string().c_str(), "w");
+        m_fImu = std::fopen((m_root / "imu.csv").string().c_str(), "w");
+        return m_fCam0 && m_fCam1 && m_fImu;
+    }
+
+    void InitOutputCsv()
+    {
+        SetupFileBuffer(m_fCam0, 1 << 20);
+        SetupFileBuffer(m_fCam1, 1 << 20);
+        SetupFileBuffer(m_fImu, 4 << 20);
+        std::fprintf(m_fCam0, "#timestamp [ns],filename\n");
+        std::fprintf(m_fCam1, "#timestamp [ns],filename\n");
+        std::fprintf(m_fImu, "#timestamp [ns],wX [rad/s],wY [rad/s],wZ [rad/s],aX [m/s^2],aY [m/s^2],aZ [m/s^2]\n");
+    }
+
+    void OpenPreviewUdp()
+    {
+        if (!m_aliases.udpEnable || !m_aliases.sendImage) {
+            return;
+        }
+        m_udp.Open(m_aliases.udpIp, m_aliases.udpPort, m_aliases.udpJpegQ, m_aliases.udpPayload,
+                   m_aliases.udpQueue);
+        m_udpOpen = true;
+    }
+
+    bool OpenCamera()
+    {
+        m_cameraProvider = CreateCameraProvider();
+        m_cameraOpen = m_cameraProvider && m_cameraProvider->Open(m_aliases);
+        return m_cameraOpen;
+    }
+
+    void ConfigureSavePacing()
+    {
+        m_maxSaveDtNs = static_cast<std::int64_t>(std::max(m_aliases.pairMs, 1)) * 1000000LL;
+        m_calibSaveFps = ClampCalibSaveFps(m_aliases.slamInputFps, m_aliases.fps);
+        m_calibSaveStepNs = 1000000000LL / std::max(1, m_calibSaveFps);
+        std::cerr << "[calib] target_save_fps=" << m_calibSaveFps
+                  << " configured_camera_fps=" << m_aliases.fps
+                  << " requested_slam_fps=" << m_aliases.slamInputFps << "\n";
+    }
+
+    bool ValidateImagesForSave(const smartdrone::core::ports::ImageFrame &left,
+                               const smartdrone::core::ports::ImageFrame &right) const
+    {
+        if (!left.gray.empty() && !right.gray.empty()) {
+            return true;
+        }
+        std::cerr << "[calib-write] empty image"
+                  << " seqL=" << left.sequence << " seqR=" << right.sequence << " rowsL=" << left.gray.rows
+                  << " colsL=" << left.gray.cols << " rowsR=" << right.gray.rows << " colsR=" << right.gray.cols
+                  << "\n";
+        return false;
+    }
+
+    void LogGrayConversion(const smartdrone::core::ports::ImageFrame &left,
+                           const smartdrone::core::ports::ImageFrame &right,
+                           bool converted)
+    {
+        if (!converted) {
+            return;
+        }
+        ++m_conversionLogCount;
+        if ((m_conversionLogCount % 30) != 1) {
+            return;
+        }
+        std::cerr << "[calib-gray] converted to 8-bit"
+                  << " typeL=" << left.gray.type() << " typeR=" << right.gray.type()
+                  << " count=" << m_conversionLogCount << "\n";
+    }
+
+    bool WriteImages(const CalibSavePair &pair,
+                     const smartdrone::core::ports::ImageFrame &left,
+                     const smartdrone::core::ports::ImageFrame &right,
+                     const cv::Mat &leftGray, const cv::Mat &rightGray) const
+    {
+        const bool okL = cv::imwrite(pair.fnL.string(), leftGray);
+        const bool okR = cv::imwrite(pair.fnR.string(), rightGray);
+        if (okL && okR) {
+            return true;
+        }
+        std::cerr << "[calib-write] imwrite failed"
+                  << " okL=" << (okL ? "true" : "false") << " okR=" << (okR ? "true" : "false")
+                  << " pathL=" << pair.fnL.string() << " pathR=" << pair.fnR.string()
+                  << " typeL=" << left.gray.type() << " typeR=" << right.gray.type()
+                  << " rowsL=" << left.gray.rows << " colsL=" << left.gray.cols
+                  << " rowsR=" << right.gray.rows << " colsR=" << right.gray.cols << "\n";
+        return false;
+    }
+
+    void RecordSavedPair(const CalibSavePair &pair)
+    {
+        std::lock_guard<std::mutex> lock(m_fileMu);
+        std::fprintf(m_fCam0, "%lld,%s\n", static_cast<long long>(pair.pairNs), pair.name.c_str());
+        std::fprintf(m_fCam1, "%lld,%s\n", static_cast<long long>(pair.pairNs), pair.name.c_str());
+        m_savedImagePaths.push_back(pair.fnL);
+        m_savedImagePaths.push_back(pair.fnR);
+        const int saved = m_saved.fetch_add(1, std::memory_order_relaxed) + 1;
+        LogSavedPair(pair, saved);
+        FlushImageCsvIfNeeded(saved);
+    }
+
+    void LogSavedPair(const CalibSavePair &pair, int saved) const
+    {
+        if (((saved - 1) % 30) != 0) {
+            return;
+        }
+        std::cerr << "[calib-save] saved=" << saved << " pathL=" << pair.fnL.string()
+                  << " pathR=" << pair.fnR.string() << "\n";
+    }
+
+    void FlushImageCsvIfNeeded(int saved)
+    {
+        if ((saved % 50) != 0) {
+            return;
+        }
+        std::fflush(m_fCam0);
+        std::fflush(m_fCam1);
+    }
+
     void FinalizeLocked(bool sessionOk)
     {
         if (m_finalized) {
@@ -323,7 +386,8 @@ class CalibRuntimeState final {
         {
             std::lock_guard<std::mutex> fileLock(m_fileMu);
             std::cerr << "[calib-sync] flushing outputs on calib stop saved=" << m_saved.load() << "\n";
-            FlushCalibOutputs(m_fCam0, m_fCam1, m_fImu, m_savedImagePaths, m_root, m_cam0Dir, m_cam1Dir);
+            FlushCalibOutputs({m_fCam0, m_fCam1, m_fImu, m_savedImagePaths,
+                               m_root, m_cam0Dir, m_cam1Dir});
             CloseFilesLocked();
         }
 
@@ -350,7 +414,7 @@ class CalibRuntimeState final {
         }
     }
 
-    const UnifiedConfig &m_cfg;
+    UnifiedConfig m_cfg;
     std::atomic<bool> &m_stop;
     LivePoseState &m_livePose;
     std::atomic<bool> &m_runningFlag;
@@ -396,12 +460,16 @@ class CalibResourceTask final : public epg::ITask {
 
     void OnTick(epg::TaskContext &context) override
     {
-        if (m_emitted || !m_runningFlag.load() || m_stop.load()) {
+        if (!m_runningFlag.load() || m_stop.load()) {
+            EmitStopRequest(context, false);
+            return;
+        }
+        if (m_emitted) {
             return;
         }
         if (!m_state->EnsureStarted()) {
             m_stop.store(true);
-            EmitDone(context, false);
+            EmitStopRequest(context, false);
             return;
         }
         auto ready = context.Make<CalibResourceReady>();
@@ -412,17 +480,22 @@ class CalibResourceTask final : public epg::ITask {
     }
 
   private:
-    void EmitDone(epg::TaskContext &context, bool sessionOk)
+    void EmitStopRequest(epg::TaskContext &context, bool sessionOk)
     {
-        auto done = context.Make<CalibCaptureDone>();
-        done->sessionOk = sessionOk;
-        context.Push(2, std::move(done));
+        if (m_stopEmitted) {
+            return;
+        }
+        m_stopEmitted = true;
+        auto stop = context.Make<CalibStopRequest>();
+        stop->sessionOk = sessionOk;
+        context.Push(2, std::move(stop));
     }
 
     std::shared_ptr<CalibRuntimeState> m_state;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
     bool m_emitted{false};
+    bool m_stopEmitted{false};
 };
 EPG_REGISTER_TASK_TYPE(CalibResourceTask, "CalibResourceTask")
 
@@ -479,7 +552,7 @@ class CalibCameraAcquireTask final : public epg::ITask {
         }
 
         auto frame = context.Make<CalibStereoFrame>();
-        if (!camera->GrabStereo(frame->stereo, 1000, true)) {
+        if (!camera->GrabStereo(frame->stereo, 0, true)) {
             if (!camera->GetHealth().healthy) {
                 std::cerr << "[calib] camera pipeline unhealthy, aborting session\n";
                 EmitDone(context, false);
@@ -616,7 +689,7 @@ class CalibImuWriterTask final : public epg::ITask {
         }
 
         std::int64_t tNs = 0;
-        if (!m_drdy.WaitTs(1, tNs)) {
+        if (!m_drdy.WaitTs(0, tNs)) {
             return;
         }
         ImuSample sample{};
@@ -640,18 +713,43 @@ class CalibImuWriterTask final : public epg::ITask {
             return m_opened;
         }
         const auto &a = m_state->Aliases();
-        m_spi.reset(new SpiDev(a.spiDev));
-        if (!m_spi->Open(a.spiSpeed, a.spiMode, a.spiBits)) {
-            m_openFailed = true;
+        if (!m_spi && !OpenSpi(a)) {
             return false;
         }
-        if (!IcmResetAndConfig(*m_spi, a.imuHz, a.accelFsG, a.gyroFsDps, m_scale)) {
-            m_openFailed = true;
+        if (!m_configStarted) {
+            BeginConfigure(a);
+        }
+        return StepOpenSequence(a);
+    }
+
+    bool OpenSpi(const MainRuntimeAliases &aliases)
+    {
+        m_spi.reset(new SpiDev(aliases.spiDev));
+        return m_spi->Open(aliases.spiSpeed, aliases.spiMode, aliases.spiBits) || FailOpen();
+    }
+
+    void BeginConfigure(const MainRuntimeAliases &aliases)
+    {
+        m_configSequencer.Reset(aliases.imuHz, aliases.accelFsG, aliases.gyroFsDps);
+        m_configStarted = true;
+    }
+
+    bool StepOpenSequence(const MainRuntimeAliases &aliases)
+    {
+        const auto status = m_configSequencer.Step(*m_spi, m_scale);
+        if (status == Icm42688ConfigSequencer::Status::Pending) {
             return false;
         }
-        if (!m_drdy.Open(a.gpiochip, a.drdyLine)) {
-            m_openFailed = true;
-            return false;
+        if (status == Icm42688ConfigSequencer::Status::Failed) {
+            return FailOpen();
+        }
+        return OpenDrdy(aliases);
+    }
+
+    bool OpenDrdy(const MainRuntimeAliases &aliases)
+    {
+        if (!m_drdy.Open(aliases.gpiochip, aliases.drdyLine)) {
+            return FailOpen();
         }
         std::uint8_t status = 0;
         m_spi->ReadReg(REG_INT_STATUS, status);
@@ -659,16 +757,24 @@ class CalibImuWriterTask final : public epg::ITask {
         return true;
     }
 
+    bool FailOpen()
+    {
+        m_openFailed = true;
+        return false;
+    }
+
     std::shared_ptr<CalibRuntimeState> m_state;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
     std::unique_ptr<SpiDev> m_spi;
     DrdyGpio m_drdy;
+    Icm42688ConfigSequencer m_configSequencer;
     ImuScale m_scale{};
     std::uint8_t m_raw12[12]{};
     bool m_ready{false};
     bool m_opened{false};
     bool m_openFailed{false};
+    bool m_configStarted{false};
 };
 EPG_REGISTER_TASK_TYPE(CalibImuWriterTask, "CalibImuWriterTask")
 
@@ -690,6 +796,10 @@ class CalibCompletionTask final : public epg::ITask {
         }
         while (auto done = context.TryPop<CalibCaptureDone>(0)) {
             m_sessionOk = m_sessionOk && done->sessionOk;
+            EmitFlush(context);
+        }
+        while (auto stop = context.TryPop<CalibStopRequest>(4)) {
+            m_sessionOk = m_sessionOk && stop->sessionOk;
             EmitFlush(context);
         }
         if (!m_flushEmitted && m_state->ShouldFinishCapture()) {
@@ -769,98 +879,223 @@ class CalibMonitorTask final : public epg::ITask {
 };
 EPG_REGISTER_TASK_TYPE(CalibMonitorTask, "CalibMonitorTask")
 
-EpgTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
-    const std::shared_ptr<CalibRuntimeState> &state,
-    std::atomic<bool> &stop,
-    std::atomic<bool> &runningFlag,
-    std::atomic<bool> &sessionOk,
-    std::atomic<bool> &completed)
+struct CalibTaskFactoryDeps {
+    std::shared_ptr<CalibRuntimeState> state;
+    std::atomic<bool> &stop;
+    std::atomic<bool> &runningFlag;
+    std::atomic<bool> &sessionOk;
+    std::atomic<bool> &completed;
+    std::shared_ptr<EpgGraphRef> graphRef;
+};
+
+using CalibTaskFactoryEntries = std::vector<epg::TypeCatalog::TaskFactoryEntry>;
+
+CalibTaskFactoryEntries MakeCalibRuntimeTaskFactoryEntries(const CalibTaskFactoryDeps &deps)
 {
     auto &catalog = epg::TypeCatalog::Global();
-    return epg::TypeCatalog::MakeTaskFactoryResolver({
-        catalog.MakeTaskFactoryEntry<CalibResourceTask>([state, &stop, &runningFlag]() {
+    return {
+        catalog.MakeTaskFactoryEntry<CalibResourceTask>([deps]() {
                 return std::unique_ptr<epg::ITask>(
-                    new CalibResourceTask(state, stop, runningFlag));
+                    new CalibResourceTask(deps.state, deps.stop, deps.runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<CalibClockTask>([&stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<CalibClockTask>([deps]() {
                 return std::unique_ptr<epg::ITask>(
-                    new CalibClockTask(stop, runningFlag));
+                    new CalibClockTask(deps.stop, deps.runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<CalibCameraAcquireTask>([state, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<CalibCameraAcquireTask>([deps]() {
                 return std::unique_ptr<epg::ITask>(
-                    new CalibCameraAcquireTask(state, stop, runningFlag));
+                    new CalibCameraAcquireTask(deps.state, deps.stop, deps.runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<CalibPacingFilterTask>([state]() {
+        catalog.MakeTaskFactoryEntry<CalibPacingFilterTask>([deps]() {
                 return std::unique_ptr<epg::ITask>(
-                    new CalibPacingFilterTask(state));
+                    new CalibPacingFilterTask(deps.state));
             }),
-        catalog.MakeTaskFactoryEntry<CalibStorageWriteTask>([state]() {
+        catalog.MakeTaskFactoryEntry<CalibStorageWriteTask>([deps]() {
                 return std::unique_ptr<epg::ITask>(
-                    new CalibStorageWriteTask(state));
+                    new CalibStorageWriteTask(deps.state));
             }),
-        catalog.MakeTaskFactoryEntry<CalibImuWriterTask>([state, &stop, &runningFlag]() {
+        catalog.MakeTaskFactoryEntry<CalibImuWriterTask>([deps]() {
                 return std::unique_ptr<epg::ITask>(
-                    new CalibImuWriterTask(state, stop, runningFlag));
+                    new CalibImuWriterTask(deps.state, deps.stop, deps.runningFlag));
             }),
-        catalog.MakeTaskFactoryEntry<CalibUdpPreviewTask>([state]() {
+        catalog.MakeTaskFactoryEntry<CalibUdpPreviewTask>([deps]() {
                 return std::unique_ptr<epg::ITask>(
-                    new CalibUdpPreviewTask(state));
+                    new CalibUdpPreviewTask(deps.state));
             }),
-        catalog.MakeTaskFactoryEntry<CalibCompletionTask>([state]() {
+        catalog.MakeTaskFactoryEntry<CalibCompletionTask>([deps]() {
                 return std::unique_ptr<epg::ITask>(
-                    new CalibCompletionTask(state));
+                    new CalibCompletionTask(deps.state));
             }),
-        catalog.MakeTaskFactoryEntry<CalibFlushSyncTask>([state, &completed, &sessionOk]() {
+        catalog.MakeTaskFactoryEntry<CalibFlushSyncTask>([deps]() {
                 return std::unique_ptr<epg::ITask>(
-                    new CalibFlushSyncTask(state, completed, sessionOk));
+                    new CalibFlushSyncTask(deps.state, deps.completed, deps.sessionOk));
             }),
-        catalog.MakeTaskFactoryEntry<CalibMonitorTask>([&sessionOk, &completed]() {
+        catalog.MakeTaskFactoryEntry<CalibMonitorTask>([deps]() {
                 return std::unique_ptr<epg::ITask>(
-                    new CalibMonitorTask(sessionOk, completed));
+                    new CalibMonitorTask(deps.sessionOk, deps.completed));
             }),
+    };
+}
+
+epg::TypeCatalog::TaskFactoryEntry MakeCalibDfxTaskFactoryEntry(const CalibTaskFactoryDeps &deps)
+{
+    auto &catalog = epg::TypeCatalog::Global();
+    return catalog.MakeTaskFactoryEntry<EpgDfxSnapshotTask>([deps]() {
+        return std::unique_ptr<epg::ITask>(new EpgDfxSnapshotTask({
+            deps.graphRef,
+            "cluster_calib_session_graph",
+            kCalibEpgDfxSnapshotPath,
+        }));
     });
+}
+
+EpgTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(CalibTaskFactoryDeps deps)
+{
+    CalibTaskFactoryEntries entries = MakeCalibRuntimeTaskFactoryEntries(deps);
+    entries.push_back(MakeCalibDfxTaskFactoryEntry(deps));
+    return epg::TypeCatalog::MakeTaskFactoryResolver(std::move(entries));
 }
 
 } // namespace
 
-bool RunCalibSessionGraph(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePoseState &livePose,
-                          std::atomic<bool> &runningFlag)
-{
-    std::atomic<bool> sessionOk{true};
-    std::atomic<bool> completed{false};
-
+class CalibSessionGraphRuntime::Impl final {
+  public:
+    explicit Impl(CalibSessionGraphRuntimeConfig config)
+        : m_cfg(std::move(config.cfg)),
+          m_stop(config.stop),
+          m_livePose(config.livePose),
+          m_runningFlag(config.runningFlag),
+          m_lifecycle(EpgGraphLifecycleConfig{
+              m_stop,
+              [this]() { return ResourcesStopped(); },
+              {},
+              [this]() { ResetResources(); },
+          })
     {
-        epg::Registry registry;
-        auto state = std::make_shared<CalibRuntimeState>(cfg, stop, livePose, runningFlag);
-        RegisterEpgTypes(
-            registry, EpgDomain::CalibSession,
-            MakeCalibGraphTaskFactoryResolver(state, stop, runningFlag, sessionOk, completed));
-
-        epg::EventPipelineGraph graph(registry);
-        graph.Configure(CompileEpgConfig(EpgDomain::CalibSession, registry));
-        graph.Start();
-
-        auto nextDfxSnapshot = std::chrono::steady_clock::now();
-        while (runningFlag.load() && !stop.load() && !completed.load(std::memory_order_relaxed)) {
-            const auto now = std::chrono::steady_clock::now();
-            if (now >= nextDfxSnapshot) {
-                WriteEpgDfxSnapshotFile(
-                    kCalibEpgDfxSnapshotPath,
-                    graph.DfxSnapshotJson("cluster_calib_session_graph", EpgDfxNowMs()));
-                nextDfxSnapshot = now + std::chrono::milliseconds(500);
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
-        WriteEpgDfxSnapshotFile(
-            kCalibEpgDfxSnapshotPath,
-            graph.DfxSnapshotJson("cluster_calib_session_graph", EpgDfxNowMs()));
-        if (!completed.load(std::memory_order_relaxed)) {
-            state->Finalize(sessionOk.load(std::memory_order_relaxed));
-        }
-        graph.Stop();
     }
 
-    return sessionOk.load(std::memory_order_relaxed);
+    ~Impl() { Stop(); }
+
+    bool Start()
+    {
+        if (m_lifecycle.HasGraph()) {
+            return true;
+        }
+        m_lifecycle.ResetForStart();
+        m_completed.store(false, std::memory_order_relaxed);
+        m_sessionOk.store(true, std::memory_order_relaxed);
+        m_state = std::make_shared<CalibRuntimeState>(RuntimeConfig());
+        auto graphRef = std::make_shared<EpgGraphRef>();
+        RegisterEpgTypes(m_registry, EpgDomain::CalibSession,
+                         MakeCalibGraphTaskFactoryResolver({
+                             m_state,
+                             m_stop,
+                             m_runningFlag,
+                             m_sessionOk,
+                             m_completed,
+                             graphRef,
+                         }));
+        auto graph = std::make_unique<epg::EventPipelineGraph>(m_registry);
+        graphRef->graph = graph.get();
+        graph->Configure(CompileEpgConfig(EpgDomain::CalibSession, m_registry));
+        graph->Start();
+        m_lifecycle.AttachGraph(std::move(graph));
+        return true;
+    }
+
+    void Step()
+    {
+        if (m_lifecycle.Done()) {
+            return;
+        }
+        if (m_lifecycle.StopRequested()) {
+            m_lifecycle.StepStop();
+            return;
+        }
+        if (!m_lifecycle.HasGraph()) {
+            return;
+        }
+        if (ShouldFinish()) {
+            RequestStop();
+        }
+    }
+
+    void RequestStop()
+    {
+        m_lifecycle.RequestStop();
+    }
+
+    void Stop()
+    {
+        if (m_lifecycle.Done()) {
+            return;
+        }
+        if (m_lifecycle.HasGraph()) {
+            m_lifecycle.StopSynchronously();
+        }
+    }
+
+    bool Done()
+    {
+        m_lifecycle.StepStop();
+        return m_lifecycle.Done();
+    }
+    bool Ok() const { return m_sessionOk.load(std::memory_order_relaxed); }
+
+  private:
+    CalibSessionGraphRuntimeConfig RuntimeConfig()
+    {
+        return {
+            m_cfg,
+            m_stop,
+            m_livePose,
+            m_runningFlag,
+        };
+    }
+
+    bool ShouldFinish() const
+    {
+        return !m_runningFlag.load() || m_stop.load() || m_completed.load(std::memory_order_relaxed);
+    }
+
+    bool ResourcesStopped() const
+    {
+        return m_state && m_state->Finalized();
+    }
+
+    void ResetResources()
+    {
+        m_state.reset();
+    }
+
+    UnifiedConfig m_cfg;
+    std::atomic<bool> &m_stop;
+    LivePoseState &m_livePose;
+    std::atomic<bool> &m_runningFlag;
+    epg::Registry m_registry;
+    std::shared_ptr<CalibRuntimeState> m_state;
+    EpgGraphLifecycle m_lifecycle;
+    std::atomic<bool> m_sessionOk{true};
+    std::atomic<bool> m_completed{false};
+};
+
+CalibSessionGraphRuntime::CalibSessionGraphRuntime(CalibSessionGraphRuntimeConfig config)
+    : m_impl(new Impl(std::move(config)))
+{
 }
+
+CalibSessionGraphRuntime::~CalibSessionGraphRuntime() = default;
+
+bool CalibSessionGraphRuntime::Start() { return m_impl->Start(); }
+
+void CalibSessionGraphRuntime::Step() { m_impl->Step(); }
+
+void CalibSessionGraphRuntime::RequestStop() { m_impl->RequestStop(); }
+
+void CalibSessionGraphRuntime::Stop() { m_impl->Stop(); }
+
+bool CalibSessionGraphRuntime::Done() { return m_impl->Done(); }
+
+bool CalibSessionGraphRuntime::Ok() const { return m_impl->Ok(); }
 
 } // namespace smartdrone::core::application

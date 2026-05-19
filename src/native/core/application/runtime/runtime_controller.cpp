@@ -2,14 +2,16 @@
 
 #include <chrono>
 #include <csignal>
+#include <iostream>
 #include <utility>
 
-#include "common/thread_launch.h"
-#include "core/application/session/runtime_session_common.h"
+#include "core/application/session/slam_settings_loader.h"
 
 namespace smartdrone::core::application {
 
 namespace {
+
+constexpr auto kCalibCleanupIdleTimeout = std::chrono::seconds(5);
 
 void SyncDefaultTbcFromSettings(UnifiedConfig &config)
 {
@@ -63,22 +65,20 @@ void SyncDefaultOrbFromSettings(UnifiedConfig &config)
 
 } // namespace
 
-UnifiedRuntimeController::UnifiedRuntimeController(UnifiedConfig initialConfig, LiveRuntimeTuning &tuning,
-                                                   Px4MavlinkGateway &mav, LivePoseState &livePose,
-                                                   std::atomic<bool> &runningFlag, SlamSessionRunner slamSessionRunner,
-                                                   CalibSessionRunner calibSessionRunner,
-                                                   CleanupCalibDataFn cleanupCalibData)
-    : m_config(std::move(initialConfig)), m_tuning(tuning), m_mav(mav), m_livePose(livePose),
-      m_cleanupCalibData(std::move(cleanupCalibData)),
+UnifiedRuntimeController::UnifiedRuntimeController(UnifiedRuntimeControllerConfig config)
+    : m_config(std::move(config.initialConfig)), m_tuning(config.tuning),
+      m_publishRuntimeMode(std::move(config.publishRuntimeMode)),
+      m_cleanupCalibData(std::move(config.cleanupCalibData)),
       m_configService(m_config, m_tuning, m_mu,
                       [this]() {
                           if (m_sessionSupervisor.DesiredMode() != ControllerMode::Idle) {
                               m_sessionSupervisor.RequestRestart();
                           }
                       }),
-      m_sessionSupervisor(
-          runningFlag, tuning, mav, livePose, [this]() { return CurrentConfig(); }, std::move(slamSessionRunner),
-          std::move(calibSessionRunner))
+      m_sessionSupervisor(RuntimeSessionSupervisor::Config{
+          config.runningFlag,
+          [this]() { return CurrentConfig(); },
+          std::move(config.createSession)})
 {
     SyncDefaultTbcFromSettings(m_config);
     SyncDefaultOrbFromSettings(m_config);
@@ -100,16 +100,25 @@ UnifiedRuntimeController::UnifiedRuntimeController(UnifiedConfig initialConfig, 
     m_tuning.tbcYawDeg.store(m_config.app.runtime.tbcYawDeg, std::memory_order_relaxed);
 }
 
-void UnifiedRuntimeController::Start() { m_sessionSupervisor.Start(); }
-
 void UnifiedRuntimeController::Stop() { m_sessionSupervisor.Stop(); }
 
 bool UnifiedRuntimeController::SetMode(ControllerMode mode, std::string *err)
 {
+    if (mode != ControllerMode::Idle) {
+        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
+        if (m_calibCleanupPending) {
+            if (err) {
+                *err = "calib clean pending";
+            }
+            return false;
+        }
+    }
     if (!m_sessionSupervisor.RequestMode(mode, err)) {
         return false;
     }
-    m_livePose.SetRuntimeMode(static_cast<uint8_t>(mode));
+    if (m_publishRuntimeMode) {
+        m_publishRuntimeMode(mode);
+    }
     return true;
 }
 
@@ -118,31 +127,48 @@ bool UnifiedRuntimeController::UpdateRemoteConfig(const RemoteRuntimeConfig &r, 
     return m_configService.UpdateRemoteConfig(r, err);
 }
 
-bool UnifiedRuntimeController::CleanupCalibData(std::string *msg)
+CommandResult UnifiedRuntimeController::RequestCalibCleanup()
 {
-    if (m_sessionSupervisor.ActiveMode() != ControllerMode::Idle ||
-        m_sessionSupervisor.DesiredMode() != ControllerMode::Idle) {
-        std::string err;
-        if (!m_sessionSupervisor.RequestMode(ControllerMode::Idle, &err)) {
-            if (msg) {
-                *msg = err.empty() ? "runtime stopping" : err;
-            }
-            return false;
+    {
+        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
+        if (m_calibCleanupPending) {
+            return {true, "calib clean pending"};
         }
-        bool stopping = false;
-        if (!m_sessionSupervisor.WaitForIdle(std::chrono::seconds(5), &stopping)) {
-            if (msg) {
-                *msg = stopping ? "runtime stopping" : "runtime busy";
-            }
-            return false;
-        }
+        m_calibCleanupPending = true;
+        m_calibCleanupDeadline = std::chrono::steady_clock::now() + kCalibCleanupIdleTimeout;
     }
 
-    const int removed = m_cleanupCalibData ? m_cleanupCalibData(m_config.calib.root) : 0;
-    if (msg) {
-        *msg = "calib clean removed=" + std::to_string(removed);
+    const auto status = m_sessionSupervisor.GetIdleStatus();
+    if (status.stopping) {
+        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
+        m_calibCleanupPending = false;
+        return {false, "runtime stopping"};
     }
-    return true;
+    if (status.idle) {
+        const auto result = RunCalibCleanup();
+        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
+        m_calibCleanupPending = false;
+        return result;
+    }
+
+    std::string err;
+    if (!m_sessionSupervisor.RequestMode(ControllerMode::Idle, &err)) {
+        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
+        m_calibCleanupPending = false;
+        return {false, err.empty() ? "runtime stopping" : err};
+    }
+    return {true, "calib clean pending"};
+}
+
+CommandResult UnifiedRuntimeController::RunCalibCleanup()
+{
+    std::string root;
+    {
+        std::lock_guard<std::mutex> lock(m_mu);
+        root = m_config.calib.root;
+    }
+    const int removed = m_cleanupCalibData ? m_cleanupCalibData(root) : 0;
+    return {true, "calib clean removed=" + std::to_string(removed)};
 }
 
 UnifiedConfig UnifiedRuntimeController::CurrentConfig()
@@ -154,6 +180,61 @@ UnifiedConfig UnifiedRuntimeController::CurrentConfig()
 UnifiedRuntimeController::ControllerMode UnifiedRuntimeController::CurrentDesiredMode()
 {
     return m_sessionSupervisor.DesiredMode();
+}
+
+void UnifiedRuntimeController::StepSessionSupervisor()
+{
+    m_sessionSupervisor.Step();
+    StepPendingCalibCleanup();
+}
+
+void UnifiedRuntimeController::StepPendingCalibCleanup()
+{
+    const auto status = m_sessionSupervisor.GetIdleStatus();
+    const auto now = std::chrono::steady_clock::now();
+    bool shouldRun = false;
+    bool expired = false;
+    bool stopping = false;
+    {
+        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
+        if (!m_calibCleanupPending) {
+            return;
+        }
+        if (status.stopping) {
+            m_calibCleanupPending = false;
+            stopping = true;
+        } else if (status.idle) {
+            shouldRun = true;
+        } else if (now >= m_calibCleanupDeadline) {
+            m_calibCleanupPending = false;
+            expired = true;
+        }
+    }
+    if (shouldRun) {
+        const auto result = RunCalibCleanup();
+        {
+            std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
+            m_calibCleanupPending = false;
+        }
+        std::cerr << "[runtime] " << result.message << "\n";
+    } else if (expired) {
+        std::cerr << "[runtime] calib clean skipped: runtime busy\n";
+    } else if (stopping) {
+        std::cerr << "[runtime] calib clean skipped: runtime stopping\n";
+    }
+}
+
+void UnifiedRuntimeController::StepForceRestart()
+{
+    const auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(m_forceRestartMtx);
+        if (m_forceRestartAt.time_since_epoch().count() == 0 || now < m_forceRestartAt) {
+            return;
+        }
+        m_forceRestartAt = std::chrono::steady_clock::time_point{};
+    }
+    std::raise(SIGKILL);
 }
 
 CommandResult UnifiedRuntimeController::ExecuteAction(const RuntimeAction &action)
@@ -171,20 +252,13 @@ CommandResult UnifiedRuntimeController::ExecuteAction(const RuntimeAction &actio
         }
         return {true, "runtime -> idle"};
     case RuntimeAction::Type::CleanCalibration: {
-        std::string msg;
-        if (!CleanupCalibData(&msg)) {
-            return {false, msg.empty() ? "calib clean failed" : msg};
-        }
-        return {true, msg};
+        return RequestCalibCleanup();
     }
     case RuntimeAction::Type::ForceRestart:
-        smartdrone::common::StartDetachedThread(
-            smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::RuntimeForceRestart,
-                                                     "UnifiedRuntimeController"),
-            []() {
-                std::this_thread::sleep_for(std::chrono::milliseconds(150));
-                std::raise(SIGKILL);
-            });
+        {
+            std::lock_guard<std::mutex> lock(m_forceRestartMtx);
+            m_forceRestartAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(150);
+        }
         return {true, "service restart scheduled"};
     case RuntimeAction::Type::ResetMap:
         return {false, "reset map not implemented"};

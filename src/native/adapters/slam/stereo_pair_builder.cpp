@@ -17,6 +17,36 @@ constexpr int kStereoMaxPairsPerCell = 10;
 constexpr int kStereoMaxPairsPerCellLimit = 32;
 constexpr float kStereoMinCandidateQuality = 0.18f;
 
+struct DescriptorStereoCandidate {
+  int rightIndex{-1};
+  float bestScore{-std::numeric_limits<float>::infinity()};
+  float secondScore{-std::numeric_limits<float>::infinity()};
+  float disparity{0.0f};
+};
+
+struct DescriptorStereoSelection {
+  std::vector<core::ports::StereoMatchPair> bestForLeft;
+  std::vector<int> bestLeftForRight;
+  std::vector<float> bestLeftScore;
+  std::vector<float> bestLeftZncc;
+};
+
+struct DescriptorMatchBuildRequest {
+  const core::ports::VisualFeatureSet *left{nullptr};
+  const core::ports::VisualFeatureSet *right{nullptr};
+  const cv::Mat *leftGray32f{nullptr};
+  const cv::Mat *rightGray32f{nullptr};
+  int leftIndex{0};
+};
+
+struct AlignedStereoMatchBuildRequest {
+  const cv::Mat *leftGray32f{nullptr};
+  const cv::Mat *rightGray32f{nullptr};
+  cv::Point2f leftPt;
+  cv::Point2f rightPt;
+  size_t index{0};
+};
+
 bool IsBetterRightCandidate(float candidateScore, float candidateZncc,
                             float currentScore, float currentZncc) {
   if (!std::isfinite(currentScore)) {
@@ -38,6 +68,200 @@ bool DescriptorSimilarity(const cv::Mat &lhs, const cv::Mat &rhs,
   }
   score = lhs.dot(rhs);
   return std::isfinite(score);
+}
+
+bool IsStereoCandidateGeometryValid(const cv::Point2f &leftPt,
+                                    const cv::Point2f &rightPt,
+                                    float &yDelta, float &disparity) {
+  yDelta = std::fabs(leftPt.y - rightPt.y);
+  disparity = leftPt.x - rightPt.x;
+  return yDelta <= kStereoMaxEpipolarDeltaPx &&
+         disparity >= StereoMinDisparityPx() &&
+         disparity <= kStereoMaxDisparityPx;
+}
+
+bool IsDescriptorRatioAccepted(float bestScore, float secondScore) {
+  if (!std::isfinite(bestScore) ||
+      bestScore < kStereoMinDescriptorSimilarity) {
+    return false;
+  }
+  return !std::isfinite(secondScore) ||
+         bestScore >= secondScore / kStereoSimilarityRatioTest;
+}
+
+bool IsDescriptorMatchOrderBetter(float score,
+                                  const DescriptorStereoCandidate &best) {
+  return score > best.bestScore;
+}
+
+void UpdateDescriptorCandidate(float score, float disparity, int rightIndex,
+                               DescriptorStereoCandidate &best) {
+  if (IsDescriptorMatchOrderBetter(score, best)) {
+    best.secondScore = best.bestScore;
+    best.bestScore = score;
+    best.rightIndex = rightIndex;
+    best.disparity = disparity;
+    return;
+  }
+  if (score > best.secondScore) {
+    best.secondScore = score;
+  }
+}
+
+DescriptorStereoCandidate FindBestDescriptorCandidate(
+    const core::ports::VisualFeatureSet &left,
+    const core::ports::VisualFeatureSet &right, int leftIndex) {
+  DescriptorStereoCandidate best;
+  const cv::Point2f &leftPt = left.keypoints[static_cast<size_t>(leftIndex)];
+  for (int ri = 0; ri < right.descriptors.rows; ++ri) {
+    float yDelta = 0.0f;
+    float disparity = 0.0f;
+    const cv::Point2f &rightPt = right.keypoints[static_cast<size_t>(ri)];
+    if (!IsStereoCandidateGeometryValid(leftPt, rightPt, yDelta, disparity)) {
+      continue;
+    }
+
+    float score = -std::numeric_limits<float>::infinity();
+    if (DescriptorSimilarity(left.descriptors.row(leftIndex),
+                             right.descriptors.row(ri), score)) {
+      UpdateDescriptorCandidate(score, disparity, ri, best);
+    }
+  }
+  return best;
+}
+
+bool BuildDescriptorMatchForLeft(const DescriptorMatchBuildRequest &request,
+                                 core::ports::StereoMatchPair &match) {
+  const core::ports::VisualFeatureSet &left = *request.left;
+  const core::ports::VisualFeatureSet &right = *request.right;
+  const DescriptorStereoCandidate best =
+      FindBestDescriptorCandidate(left, right, request.leftIndex);
+  if (best.rightIndex < 0 ||
+      !IsDescriptorRatioAccepted(best.bestScore, best.secondScore)) {
+    return false;
+  }
+
+  const cv::Point2f &leftPt =
+      left.keypoints[static_cast<size_t>(request.leftIndex)];
+  const cv::Point2f &rightPt =
+      right.keypoints[static_cast<size_t>(best.rightIndex)];
+  float zncc = -1.0f;
+  if (!ComputePatchZncc(*request.leftGray32f, leftPt, *request.rightGray32f,
+                        rightPt, zncc) ||
+      zncc < kStereoMinZnccScore) {
+    return false;
+  }
+
+  const float epipolarError = std::fabs(leftPt.y - rightPt.y);
+  const float quality =
+      ComputeStereoCandidateQuality(best.bestScore, zncc, epipolarError,
+                                    best.disparity);
+  if (quality < kStereoMinCandidateQuality) {
+    return false;
+  }
+  match = core::ports::StereoMatchPair{request.leftIndex, best.rightIndex,
+                                       best.bestScore, zncc, best.disparity,
+                                       quality};
+  return true;
+}
+
+DescriptorStereoSelection MakeDescriptorStereoSelection(int leftRows,
+                                                        int rightRows) {
+  DescriptorStereoSelection selection;
+  selection.bestForLeft.resize(static_cast<size_t>(leftRows));
+  selection.bestLeftForRight.assign(static_cast<size_t>(rightRows), -1);
+  selection.bestLeftScore.assign(
+      static_cast<size_t>(rightRows),
+      -std::numeric_limits<float>::infinity());
+  selection.bestLeftZncc.assign(static_cast<size_t>(rightRows), -1.0f);
+  return selection;
+}
+
+void UpdateBestRightDescriptorMatch(const core::ports::StereoMatchPair &match,
+                                    DescriptorStereoSelection &selection) {
+  const size_t rightIndex = static_cast<size_t>(match.rightIndex);
+  if (!IsBetterRightCandidate(match.descriptorScore, match.zncc,
+                              selection.bestLeftScore[rightIndex],
+                              selection.bestLeftZncc[rightIndex])) {
+    return;
+  }
+  selection.bestLeftScore[rightIndex] = match.descriptorScore;
+  selection.bestLeftZncc[rightIndex] = match.zncc;
+  selection.bestLeftForRight[rightIndex] = match.leftIndex;
+}
+
+std::vector<core::ports::StereoMatchPair> CollectMutualDescriptorMatches(
+    const DescriptorStereoSelection &selection, int leftRows, int rightRows) {
+  std::vector<core::ports::StereoMatchPair> matches;
+  matches.reserve(static_cast<size_t>(std::min(leftRows, rightRows)));
+  for (const core::ports::StereoMatchPair &pair : selection.bestForLeft) {
+    if (pair.rightIndex < 0) {
+      continue;
+    }
+    if (selection.bestLeftForRight[static_cast<size_t>(pair.rightIndex)] ==
+        pair.leftIndex) {
+      matches.push_back(pair);
+    }
+  }
+  return matches;
+}
+
+void SortDescriptorMatches(std::vector<core::ports::StereoMatchPair> &matches) {
+  std::sort(matches.begin(), matches.end(),
+            [](const core::ports::StereoMatchPair &a,
+               const core::ports::StereoMatchPair &b) {
+              if (a.descriptorScore != b.descriptorScore) {
+                return a.descriptorScore > b.descriptorScore;
+              }
+              if (a.zncc != b.zncc) {
+                return a.zncc > b.zncc;
+              }
+              if (a.quality != b.quality) {
+                return a.quality > b.quality;
+              }
+              return a.disparity < b.disparity;
+            });
+}
+
+bool BuildAlignedStereoMatch(const AlignedStereoMatchBuildRequest &request,
+                             core::ports::StereoMatchPair &match) {
+  float yDelta = 0.0f;
+  float disparity = 0.0f;
+  if (!IsStereoCandidateGeometryValid(request.leftPt, request.rightPt, yDelta,
+                                      disparity)) {
+    return false;
+  }
+
+  float zncc = -1.0f;
+  if (!ComputePatchZncc(*request.leftGray32f, request.leftPt,
+                        *request.rightGray32f, request.rightPt, zncc) ||
+      zncc < kStereoMinZnccScore) {
+    return false;
+  }
+
+  const float quality =
+      ComputeStereoCandidateQuality(1.0f, zncc, yDelta, disparity);
+  if (quality < kStereoMinCandidateQuality) {
+    return false;
+  }
+  match = core::ports::StereoMatchPair{
+      static_cast<int>(request.index), static_cast<int>(request.index), 1.0f,
+      zncc, disparity, quality};
+  return true;
+}
+
+void SortAlignedMatches(std::vector<core::ports::StereoMatchPair> &matches) {
+  std::sort(matches.begin(), matches.end(),
+            [](const core::ports::StereoMatchPair &a,
+               const core::ports::StereoMatchPair &b) {
+              if (a.quality != b.quality) {
+                return a.quality > b.quality;
+              }
+              if (a.zncc != b.zncc) {
+                return a.zncc > b.zncc;
+              }
+              return a.disparity < b.disparity;
+            });
 }
 
 std::vector<core::ports::StereoMatchPair> SelectGridBalancedPairs(
@@ -132,112 +356,22 @@ MatchStereoPairs(const core::ports::VisualFeatureSet &left,
   leftGray.convertTo(leftGray32f, CV_32F);
   rightGray.convertTo(rightGray32f, CV_32F);
 
-  std::vector<core::ports::StereoMatchPair> bestForLeft(
-      static_cast<size_t>(left.descriptors.rows));
-  std::vector<int> bestLeftForRight(static_cast<size_t>(right.descriptors.rows),
-                                    -1);
-  std::vector<float> bestLeftScore(static_cast<size_t>(right.descriptors.rows),
-                                   -std::numeric_limits<float>::infinity());
-  std::vector<float> bestLeftZncc(static_cast<size_t>(right.descriptors.rows),
-                                  -1.0f);
-
+  DescriptorStereoSelection selection = MakeDescriptorStereoSelection(
+      left.descriptors.rows, right.descriptors.rows);
   for (int li = 0; li < left.descriptors.rows; ++li) {
-    const cv::Point2f &leftPt = left.keypoints[static_cast<size_t>(li)];
-    int bestRi = -1;
-    float bestScore = -std::numeric_limits<float>::infinity();
-    float secondScore = -std::numeric_limits<float>::infinity();
-    float bestZncc = -1.0f;
-    float bestDisparity = 0.0f;
-
-    for (int ri = 0; ri < right.descriptors.rows; ++ri) {
-      const cv::Point2f &rightPt = right.keypoints[static_cast<size_t>(ri)];
-      const float yDelta = std::fabs(leftPt.y - rightPt.y);
-      const float disparity = leftPt.x - rightPt.x;
-      if (yDelta > kStereoMaxEpipolarDeltaPx ||
-          disparity < StereoMinDisparityPx() ||
-          disparity > kStereoMaxDisparityPx) {
-        continue;
-      }
-
-      float score = -std::numeric_limits<float>::infinity();
-      if (!DescriptorSimilarity(left.descriptors.row(li),
-                                right.descriptors.row(ri), score)) {
-        continue;
-      }
-      if (score > bestScore) {
-        secondScore = bestScore;
-        bestScore = score;
-        bestRi = ri;
-        bestDisparity = disparity;
-      } else if (score > secondScore) {
-        secondScore = score;
-      }
-    }
-
-    if (bestRi < 0 || !std::isfinite(bestScore) ||
-        bestScore < kStereoMinDescriptorSimilarity) {
+    core::ports::StereoMatchPair match;
+    const DescriptorMatchBuildRequest request{&left, &right, &leftGray32f,
+                                              &rightGray32f, li};
+    if (!BuildDescriptorMatchForLeft(request, match)) {
       continue;
     }
-    if (std::isfinite(secondScore) &&
-        bestScore < secondScore / kStereoSimilarityRatioTest) {
-      continue;
-    }
-
-    float zncc = -1.0f;
-    if (!ComputePatchZncc(leftGray32f, leftPt, rightGray32f,
-                          right.keypoints[static_cast<size_t>(bestRi)], zncc) ||
-        zncc < kStereoMinZnccScore) {
-      continue;
-    }
-
-    bestZncc = zncc;
-    const float epipolarError =
-        std::fabs(leftPt.y - right.keypoints[static_cast<size_t>(bestRi)].y);
-    const float quality = ComputeStereoCandidateQuality(
-        bestScore, bestZncc, epipolarError, bestDisparity);
-    if (quality < kStereoMinCandidateQuality) {
-      continue;
-    }
-    bestForLeft[static_cast<size_t>(li)] = core::ports::StereoMatchPair{
-        li, bestRi, bestScore, bestZncc, bestDisparity, quality};
-
-    if (IsBetterRightCandidate(bestScore, bestZncc,
-                               bestLeftScore[static_cast<size_t>(bestRi)],
-                               bestLeftZncc[static_cast<size_t>(bestRi)])) {
-      bestLeftScore[static_cast<size_t>(bestRi)] = bestScore;
-      bestLeftZncc[static_cast<size_t>(bestRi)] = bestZncc;
-      bestLeftForRight[static_cast<size_t>(bestRi)] = li;
-    }
+    selection.bestForLeft[static_cast<size_t>(li)] = match;
+    UpdateBestRightDescriptorMatch(match, selection);
   }
 
-  matches.reserve(static_cast<size_t>(
-      std::min(left.descriptors.rows, right.descriptors.rows)));
-  for (size_t li = 0; li < bestForLeft.size(); ++li) {
-    const core::ports::StereoMatchPair &pair = bestForLeft[li];
-    if (pair.rightIndex < 0) {
-      continue;
-    }
-    if (bestLeftForRight[static_cast<size_t>(pair.rightIndex)] !=
-        pair.leftIndex) {
-      continue;
-    }
-    matches.push_back(pair);
-  }
-
-  std::sort(matches.begin(), matches.end(),
-            [](const core::ports::StereoMatchPair &a,
-               const core::ports::StereoMatchPair &b) {
-              if (a.descriptorScore != b.descriptorScore) {
-                return a.descriptorScore > b.descriptorScore;
-              }
-              if (a.zncc != b.zncc) {
-                return a.zncc > b.zncc;
-              }
-              if (a.quality != b.quality) {
-                return a.quality > b.quality;
-              }
-              return a.disparity < b.disparity;
-            });
+  matches = CollectMutualDescriptorMatches(selection, left.descriptors.rows,
+                                           right.descriptors.rows);
+  SortDescriptorMatches(matches);
   return SelectGridBalancedPairs(matches, left.keypoints, leftGray.cols,
                                  leftGray.rows);
 }
@@ -260,43 +394,15 @@ BuildAlignedStereoPairs(const core::ports::VisualFeatureSet &left,
 
   matches.reserve(pairCount);
   for (size_t i = 0; i < pairCount; ++i) {
-    const cv::Point2f &leftPt = left.keypoints[i];
-    const cv::Point2f &rightPt = right.keypoints[i];
-    const float yDelta = std::fabs(leftPt.y - rightPt.y);
-    const float disparity = leftPt.x - rightPt.x;
-    if (yDelta > kStereoMaxEpipolarDeltaPx ||
-        disparity < StereoMinDisparityPx() ||
-        disparity > kStereoMaxDisparityPx) {
-      continue;
+    core::ports::StereoMatchPair match;
+    const AlignedStereoMatchBuildRequest request{
+        &leftGray32f, &rightGray32f, left.keypoints[i], right.keypoints[i], i};
+    if (BuildAlignedStereoMatch(request, match)) {
+      matches.push_back(match);
     }
-
-    float zncc = -1.0f;
-    if (!ComputePatchZncc(leftGray32f, leftPt, rightGray32f, rightPt, zncc) ||
-        zncc < kStereoMinZnccScore) {
-      continue;
-    }
-
-    const float quality =
-        ComputeStereoCandidateQuality(1.0f, zncc, yDelta, disparity);
-    if (quality < kStereoMinCandidateQuality) {
-      continue;
-    }
-    matches.push_back(core::ports::StereoMatchPair{static_cast<int>(i),
-                                                   static_cast<int>(i), 1.0f,
-                                                   zncc, disparity, quality});
   }
 
-  std::sort(matches.begin(), matches.end(),
-            [](const core::ports::StereoMatchPair &a,
-               const core::ports::StereoMatchPair &b) {
-              if (a.quality != b.quality) {
-                return a.quality > b.quality;
-              }
-              if (a.zncc != b.zncc) {
-                return a.zncc > b.zncc;
-              }
-              return a.disparity < b.disparity;
-            });
+  SortAlignedMatches(matches);
   return SelectGridBalancedPairs(matches, left.keypoints, leftGray.cols,
                                  leftGray.rows);
 }

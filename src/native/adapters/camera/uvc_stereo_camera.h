@@ -1,18 +1,18 @@
 #pragma once
 
-#include <atomic>
-#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <opencv2/core/mat.hpp>
 
-#include "core/application/session/runtime_session_common.h"
 #include "core/ports/camera_provider.h"
+
+struct v4l2_buffer;
+struct v4l2_capability;
+struct v4l2_format;
 
 namespace smartdrone::adapters::camera {
 
@@ -42,15 +42,58 @@ class UvcStereoCamera final : public core::ports::ICameraProvider {
         size_t length{0};
     };
 
-    void CaptureLoop();
-    bool OpenDevice(int deviceIndex, int width, int height, int fps, bool aeDisable, int exposureUs, float gain);
+    struct CapturedPackedFrame {
+        cv::Mat packed;
+        uint64_t captureTimestampNs{0};
+        uint64_t arriveNs{0};
+    };
+
+    struct DeviceOpenParams {
+        int deviceIndex{0};
+        int width{0};
+        int height{0};
+        int fps{0};
+        bool aeDisable{false};
+        int exposureUs{0};
+        float gain{0.0F};
+    };
+
+    enum class CaptureStatus {
+        Frame,
+        NoFrame,
+        Timeout,
+        Stopped,
+        Fatal,
+    };
+
+    CaptureStatus CaptureOnce(int timeoutMs);
+    CaptureStatus PollCaptureReady(int fd, int timeoutMs);
+    CaptureStatus DequeueCaptureBuffer(int fd, v4l2_buffer &buffer);
+    CaptureStatus DecodeCaptureBuffer(int fd, v4l2_buffer &buffer, CapturedPackedFrame &frame);
+    bool TryPopOrStop(core::ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs);
+    void DrainReadyFrames();
+    bool OpenDevice(const DeviceOpenParams &params);
+    bool ValidateDeviceCapabilities(int fd, const std::string &devicePath, v4l2_capability &caps);
+    bool ApplyDeviceFormat(int fd, const std::string &devicePath, const DeviceOpenParams &params,
+                           v4l2_format &format);
+    bool ConfigureDeviceFps(int fd, const std::string &devicePath, int fps);
+    bool RequestAndMapBuffers(int fd, const std::string &devicePath, uint32_t &bufferCount,
+                              std::vector<MappedBuffer> &buffers);
+    bool QueueBuffersAndStart(int fd, const std::string &devicePath, uint32_t bufferCount,
+                              std::vector<MappedBuffer> &buffers);
+    void ReleaseMappedBuffers(std::vector<MappedBuffer> &buffers);
+    void StoreOpenedDevice(int fd, const v4l2_format &format, std::vector<MappedBuffer> &&buffers);
+    void LogOpenedDevice(const DeviceOpenParams &params, const v4l2_capability &caps, const v4l2_format &format,
+                         uint32_t bufferCount);
     void CloseDevice();
+    bool PopCandidateLocked(core::ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs);
+    core::ports::StereoFrame BuildStereoFrame(const cv::Mat &packed, uint64_t captureTimestampNs, uint64_t arriveNs);
     void PushFrame(core::ports::StereoFrame &&frame, uint64_t captureTimestampNs);
+    void MarkCaptureFault(bool acceptingFrames);
 
     mutable std::mutex m_mutex;
-    std::condition_variable m_cv;
+    std::mutex m_captureMu;
     std::deque<StereoFrameItem> m_queue;
-    std::thread m_thread;
     bool m_open{false};
     bool m_running{false};
     bool m_streaming{false};

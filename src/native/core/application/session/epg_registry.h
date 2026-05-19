@@ -8,6 +8,7 @@
 namespace smartdrone::core::application {
 
 enum class EpgDomain {
+    SystemRuntime,
     SlamSession,
     CalibSession,
 };

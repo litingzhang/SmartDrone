@@ -140,6 +140,8 @@ public:
     long unsigned int GetNumLivedMP();
 
 protected:
+    void CreateNewMapLocked();
+    void SelectUsableMapLocked();
 
     std::set<Map*> mspMaps;
     std::set<Map*> mspBadMaps;

@@ -24,6 +24,7 @@ public:
 
   bool Available() const override;
   void SetOperationMode(core::domain::SlamOperationMode mode) override;
+  void StepBackend() override;
   void Shutdown() override;
   bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path) override;
 

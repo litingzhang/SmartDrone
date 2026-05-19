@@ -145,6 +145,7 @@ The panel currently supports two data modes:
 EPG graph sessions write live snapshots every 500 ms:
 
 ```sh
+python3 tools/epg_tui.py --graph cluster_system_runtime_graph --snapshot /tmp/smartdrone_epg_system.json
 python3 tools/epg_tui.py --graph cluster_slam_session_graph --snapshot /tmp/smartdrone_epg_slam.json
 python3 tools/epg_tui.py --graph cluster_calib_session_graph --snapshot /tmp/smartdrone_epg_calib.json
 ```

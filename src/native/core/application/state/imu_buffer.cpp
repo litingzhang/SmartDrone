@@ -18,106 +18,38 @@ void ImuBuffer::Push(const ImuSample &sample)
     }
 }
 
-std::vector<smartdrone::core::ports::ImuReading> ImuBuffer::PopBetweenNs(int64_t t0Ns, int64_t t1Ns,
-                                                                         int64_t slackBeforeNs,
-                                                                         int64_t slackAfterNs)
+std::vector<smartdrone::core::ports::ImuReading>
+ImuBuffer::PopBetweenNs(const ImuTimeRange &range)
 {
     std::vector<smartdrone::core::ports::ImuReading> out;
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (m_queue.empty() || t1Ns < t0Ns) {
+    if (m_queue.empty() || range.endNs < range.startNs) {
         return out;
     }
 
-    const int64_t rangeStartNs = t0Ns - slackBeforeNs;
-    const int64_t rangeEndNs = t1Ns + slackAfterNs;
+    const int64_t rangeStartNs = range.startNs - range.slackBeforeNs;
+    const int64_t rangeEndNs = range.endNs + range.slackAfterNs;
+    const size_t searchBeginIdx = FindSearchBeginIndex(rangeStartNs);
+    out.reserve(std::min(m_queue.size() - searchBeginIdx, static_cast<size_t>(256)));
 
-    size_t i = std::min(m_lastUsedIdx > 0 ? (m_lastUsedIdx - 1) : 0, m_queue.size());
-    while (i < m_queue.size() && m_queue[i].tNs < rangeStartNs) {
-        ++i;
-    }
-
-    auto appendSample = [&out](const ImuSample &sample) {
-        smartdrone::core::ports::ImuReading reading{};
-        reading.timestampNs = sample.tNs;
-        reading.ax = sample.ax;
-        reading.ay = sample.ay;
-        reading.az = sample.az;
-        reading.gx = sample.gx;
-        reading.gy = sample.gy;
-        reading.gz = sample.gz;
-        out.push_back(reading);
-    };
-
-    auto appendInterpolatedSample = [&appendSample](const ImuSample &a, const ImuSample &b, int64_t targetNs) {
-        appendSample(InterpolateSample(a, b, targetNs));
-    };
-
-    out.reserve(std::min(m_queue.size() - i, static_cast<size_t>(256)));
-
-    size_t startIdx = i;
-    while (startIdx < m_queue.size() && m_queue[startIdx].tNs < t0Ns) {
-        ++startIdx;
-    }
-
-    int64_t lastAppendedTsNs = std::numeric_limits<int64_t>::min();
-
-    auto appendUnique = [&](const ImuSample &sample) {
-        if (sample.tNs != lastAppendedTsNs) {
-            appendSample(sample);
-            lastAppendedTsNs = sample.tNs;
-        }
-    };
-
-    if (startIdx < m_queue.size() && m_queue[startIdx].tNs == t0Ns) {
-        appendUnique(m_queue[startIdx]);
-        ++startIdx;
-    } else if (startIdx > 0 && startIdx < m_queue.size() && m_queue[startIdx - 1].tNs < t0Ns &&
-               m_queue[startIdx].tNs > t0Ns && m_queue[startIdx].tNs <= rangeEndNs) {
-        appendInterpolatedSample(m_queue[startIdx - 1], m_queue[startIdx], t0Ns);
-        lastAppendedTsNs = t0Ns;
-    } else if (startIdx > 0 && m_queue[startIdx - 1].tNs >= rangeStartNs) {
-        appendUnique(m_queue[startIdx - 1]);
-    }
-
-    size_t j = startIdx;
-    while (j < m_queue.size() && m_queue[j].tNs <= t1Ns) {
-        if (m_queue[j].tNs > t0Ns) {
-            appendUnique(m_queue[j]);
-        }
-        ++j;
-    }
-
-    const bool haveExactTrailing = !out.empty() && lastAppendedTsNs == t1Ns;
-    if (!haveExactTrailing) {
-        if (j < m_queue.size() && m_queue[j].tNs == t1Ns) {
-            appendUnique(m_queue[j]);
-        } else if (j > 0 && j < m_queue.size() && m_queue[j - 1].tNs < t1Ns && m_queue[j].tNs > t1Ns &&
-                   m_queue[j].tNs <= rangeEndNs) {
-            appendInterpolatedSample(m_queue[j - 1], m_queue[j], t1Ns);
-            lastAppendedTsNs = t1Ns;
-        } else if (j < m_queue.size() && m_queue[j].tNs <= rangeEndNs) {
-            appendUnique(m_queue[j]);
-        }
-    }
+    size_t startIdx = FindFirstIndexAtOrAfter(range.startNs, searchBeginIdx);
+    AppendLeadingSample(range, rangeEndNs, startIdx, out);
+    const size_t cursorIdx = AppendSamplesUntil(range.startNs, range.endNs, startIdx, out);
+    AppendTrailingSample(range, rangeEndNs, cursorIdx, out);
 
     if (!out.empty()) {
-        size_t nextUsedIdx = i;
-        while (nextUsedIdx < m_queue.size() && m_queue[nextUsedIdx].tNs < t1Ns) {
-            ++nextUsedIdx;
-        }
-        m_lastUsedIdx = nextUsedIdx;
+        UpdateLastUsedIndex(searchBeginIdx, range.endNs);
     }
-
-    const int64_t purgeBeforeNs = t0Ns - m_purgeMarginNs;
-    while (!m_queue.empty() && m_queue.front().tNs < purgeBeforeNs) {
-        m_queue.pop_front();
-        if (m_lastUsedIdx > 0) {
-            --m_lastUsedIdx;
-        }
-    }
-
+    PurgeBefore(range.startNs - m_purgeMarginNs);
     return out;
+}
+
+std::vector<smartdrone::core::ports::ImuReading>
+ImuBuffer::PopBetweenNs(int64_t t0Ns, int64_t t1Ns,
+                        int64_t slackBeforeNs, int64_t slackAfterNs)
+{
+    return PopBetweenNs(ImuTimeRange{t0Ns, t1Ns, slackBeforeNs, slackAfterNs});
 }
 
 size_t ImuBuffer::Size() const
@@ -160,4 +92,112 @@ ImuSample ImuBuffer::InterpolateSample(const ImuSample &a, const ImuSample &b, i
     out.gy = a.gy + (b.gy - a.gy) * alpha;
     out.gz = a.gz + (b.gz - a.gz) * alpha;
     return out;
+}
+
+smartdrone::core::ports::ImuReading ImuBuffer::ToReading(const ImuSample &sample)
+{
+    smartdrone::core::ports::ImuReading reading{};
+    reading.timestampNs = sample.tNs;
+    reading.ax = sample.ax;
+    reading.ay = sample.ay;
+    reading.az = sample.az;
+    reading.gx = sample.gx;
+    reading.gy = sample.gy;
+    reading.gz = sample.gz;
+    return reading;
+}
+
+size_t ImuBuffer::FindFirstIndexAtOrAfter(int64_t timestampNs, size_t beginIdx) const
+{
+    size_t index = beginIdx;
+    while (index < m_queue.size() && m_queue[index].tNs < timestampNs) {
+        ++index;
+    }
+    return index;
+}
+
+size_t ImuBuffer::FindSearchBeginIndex(int64_t rangeStartNs) const
+{
+    const size_t rewindIdx =
+        std::min(m_lastUsedIdx > 0 ? (m_lastUsedIdx - 1) : 0, m_queue.size());
+    return FindFirstIndexAtOrAfter(rangeStartNs, rewindIdx);
+}
+
+void ImuBuffer::AppendLeadingSample(
+    const ImuTimeRange &range, int64_t rangeEndNs, size_t &startIdx,
+    std::vector<smartdrone::core::ports::ImuReading> &out) const
+{
+    if (startIdx < m_queue.size() && m_queue[startIdx].tNs == range.startNs) {
+        out.push_back(ToReading(m_queue[startIdx]));
+        ++startIdx;
+        return;
+    }
+    if (startIdx > 0 && startIdx < m_queue.size() &&
+        m_queue[startIdx - 1].tNs < range.startNs &&
+        m_queue[startIdx].tNs > range.startNs &&
+        m_queue[startIdx].tNs <= rangeEndNs) {
+        out.push_back(ToReading(InterpolateSample(m_queue[startIdx - 1],
+                                                  m_queue[startIdx], range.startNs)));
+        return;
+    }
+    const int64_t rangeStartNs = range.startNs - range.slackBeforeNs;
+    if (startIdx > 0 && m_queue[startIdx - 1].tNs >= rangeStartNs) {
+        out.push_back(ToReading(m_queue[startIdx - 1]));
+    }
+}
+
+size_t ImuBuffer::AppendSamplesUntil(
+    int64_t startNs, int64_t endNs, size_t beginIdx,
+    std::vector<smartdrone::core::ports::ImuReading> &out) const
+{
+    int64_t lastAppendedTsNs =
+        out.empty() ? std::numeric_limits<int64_t>::min() : out.back().timestampNs;
+    size_t index = beginIdx;
+    while (index < m_queue.size() && m_queue[index].tNs <= endNs) {
+        if (m_queue[index].tNs > startNs && m_queue[index].tNs != lastAppendedTsNs) {
+            out.push_back(ToReading(m_queue[index]));
+            lastAppendedTsNs = m_queue[index].tNs;
+        }
+        ++index;
+    }
+    return index;
+}
+
+void ImuBuffer::AppendTrailingSample(
+    const ImuTimeRange &range, int64_t rangeEndNs, size_t cursorIdx,
+    std::vector<smartdrone::core::ports::ImuReading> &out) const
+{
+    if (!out.empty() && out.back().timestampNs == range.endNs) {
+        return;
+    }
+    if (cursorIdx < m_queue.size() && m_queue[cursorIdx].tNs == range.endNs) {
+        out.push_back(ToReading(m_queue[cursorIdx]));
+        return;
+    }
+    if (cursorIdx > 0 && cursorIdx < m_queue.size() &&
+        m_queue[cursorIdx - 1].tNs < range.endNs &&
+        m_queue[cursorIdx].tNs > range.endNs &&
+        m_queue[cursorIdx].tNs <= rangeEndNs) {
+        out.push_back(ToReading(InterpolateSample(m_queue[cursorIdx - 1],
+                                                  m_queue[cursorIdx], range.endNs)));
+        return;
+    }
+    if (cursorIdx < m_queue.size() && m_queue[cursorIdx].tNs <= rangeEndNs) {
+        out.push_back(ToReading(m_queue[cursorIdx]));
+    }
+}
+
+void ImuBuffer::UpdateLastUsedIndex(size_t searchBeginIdx, int64_t endNs)
+{
+    m_lastUsedIdx = FindFirstIndexAtOrAfter(endNs, searchBeginIdx);
+}
+
+void ImuBuffer::PurgeBefore(int64_t purgeBeforeNs)
+{
+    while (!m_queue.empty() && m_queue.front().tNs < purgeBeforeNs) {
+        m_queue.pop_front();
+        if (m_lastUsedIdx > 0) {
+            --m_lastUsedIdx;
+        }
+    }
 }

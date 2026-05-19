@@ -1,11 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <limits>
 
 #include <sophus/se3.hpp>
 
-#include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "core/ports/pose_publisher.h"
 
 namespace smartdrone::core::application {
@@ -13,6 +13,13 @@ namespace smartdrone::core::application {
 class PosePostprocessor {
   public:
     using PoseQuality = smartdrone::core::ports::PoseQuality;
+
+    struct RangeSensorSnapshot {
+        float currentDistance{std::numeric_limits<float>::quiet_NaN()};
+        uint8_t signalQuality{0};
+    };
+
+    using ReadRangeSensorFn = std::function<bool(RangeSensorSnapshot &)>;
 
     struct Result {
         struct DebugPose {
@@ -32,7 +39,6 @@ class PosePostprocessor {
             bool outputGuardApplied{false};
         };
 
-        Px4MavlinkGateway::Pose alignedPose{};
         smartdrone::core::ports::PoseEstimate poseEstimate{};
         smartdrone::core::ports::VelocityEstimate velocityEstimate{};
         PoseQuality quality{PoseQuality::Lost};
@@ -61,17 +67,17 @@ class PosePostprocessor {
     };
 
     struct StartupAligner {
-        Px4MavlinkGateway::Pose AlignPose(const Px4MavlinkGateway::Pose &poseNed, bool trackingUsable,
-                                          Px4MavlinkGateway &mavlink, PoseQuality &outQuality);
-        void SetPublishedPose(const Px4MavlinkGateway::Pose &pose);
+        smartdrone::core::ports::PoseEstimate AlignPose(const smartdrone::core::ports::PoseEstimate &poseNed,
+                                                        bool trackingUsable, const ReadRangeSensorFn &readRangeSensor,
+                                                        PoseQuality &outQuality);
+        void SetPublishedPose(const smartdrone::core::ports::PoseEstimate &pose);
 
       private:
-        void RefreshRangeSensor(Px4MavlinkGateway &mavlink);
+        void RefreshRangeSensor(const ReadRangeSensorFn &readRangeSensor);
         bool HasFreshRange() const;
-        Px4MavlinkGateway::Pose ComputeLostPose(uint64_t nowUs);
-        void ApplyRangeProtection(Px4MavlinkGateway::Pose &pose, uint64_t nowUs);
+        smartdrone::core::ports::PoseEstimate ComputeLostPose(uint64_t nowUs);
+        void ApplyRangeProtection(smartdrone::core::ports::PoseEstimate &pose, uint64_t nowUs);
 
-        static constexpr uint64_t kRangeSensorMaxAgeUs = 200000ULL;
         static constexpr uint64_t kWeakHoldUs = 1500000ULL;
         static constexpr float kRangeHardFloorM = 0.35f;
 
@@ -82,21 +88,40 @@ class PosePostprocessor {
         bool trackingUsablePrev{false};
         bool havePublishedPose{false};
         bool haveLatestRange{false};
-        Px4MavlinkGateway::Pose holdPose{};
-        Px4MavlinkGateway::DownwardDistanceSensor latestRange{};
+        smartdrone::core::ports::PoseEstimate holdPose{};
+        RangeSensorSnapshot latestRange{};
     };
 
     struct OutputGuard {
-        Px4MavlinkGateway::Pose GuardPose(const Px4MavlinkGateway::Pose &pose, int64_t frameNs, bool trackingUsable,
-                                          PoseQuality &quality, bool &guardApplied, float &rawStepM,
-                                          float &maxStepM);
+        struct GuardRequest {
+            smartdrone::core::ports::PoseEstimate pose{};
+            int64_t frameNs{0};
+            bool trackingUsable{false};
+            PoseQuality quality{PoseQuality::Lost};
+        };
+
+        struct GuardResult {
+            smartdrone::core::ports::PoseEstimate pose{};
+            PoseQuality quality{PoseQuality::Lost};
+            bool guardApplied{false};
+            float rawStepM{0.0f};
+            float maxStepM{0.0f};
+        };
+
+        GuardResult GuardPose(const GuardRequest &request);
 
       private:
         float ComputeAllowedStep(int64_t frameNs) const;
         float ComputeAllowedRotation(int64_t frameNs) const;
-        void CommitPose(const Px4MavlinkGateway::Pose &pose, int64_t frameNs);
+        GuardResult BuildResult(const smartdrone::core::ports::PoseEstimate &pose, PoseQuality quality,
+                                bool guardApplied, float rawStepM, float maxStepM) const;
+        GuardResult HandleInvalidPose(const GuardRequest &request);
+        GuardResult ClampPose(const GuardRequest &request, float rawStepM, float maxStepM, float rawRotRad,
+                              float maxRotRad);
+        void MaybeLogClamp(int64_t frameNs, float rawStepM, float maxStepM, float rawRotRad, float maxRotRad);
+        void CommitPose(const smartdrone::core::ports::PoseEstimate &pose, int64_t frameNs);
 
-        Px4MavlinkGateway::Pose lastPose{};
+        smartdrone::core::ports::PoseEstimate lastPose{};
         int64_t lastFrameNs{0};
         int64_t lastLogFrameNs{0};
         uint64_t guardHitCount{0};
@@ -104,11 +129,24 @@ class PosePostprocessor {
     };
 
     struct VelocityTracker {
-        smartdrone::core::ports::VelocityEstimate Update(const Px4MavlinkGateway::Pose &pose, int64_t frameNs,
-                                                         PoseQuality quality, uint16_t resetMapCount);
+        smartdrone::core::ports::VelocityEstimate Update(const smartdrone::core::ports::PoseEstimate &pose,
+                                                         int64_t frameNs, PoseQuality quality,
+                                                         uint16_t resetMapCount);
 
       private:
-        void ResetState(const Px4MavlinkGateway::Pose &pose, int64_t frameNs, PoseQuality quality,
+        struct RawVelocity {
+            float vx{0.0f};
+            float vy{0.0f};
+            float vz{0.0f};
+        };
+
+        bool ShouldReset(int64_t frameNs, PoseQuality quality, uint16_t resetMapCount) const;
+        RawVelocity ComputeRawVelocity(const smartdrone::core::ports::PoseEstimate &pose, float dt) const;
+        bool RawVelocityUsable(const RawVelocity &velocity) const;
+        void UpdateFilteredVelocity(const RawVelocity &velocity, float dt);
+        void CommitPoseState(const smartdrone::core::ports::PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
+                             uint16_t resetMapCount);
+        void ResetState(const smartdrone::core::ports::PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
                         uint16_t resetMapCount);
 
         static constexpr float kHorizontalTauSec = 0.18f;
@@ -116,7 +154,7 @@ class PosePostprocessor {
         static constexpr float kMaxHorizontalSpeedMps = 8.0f;
         static constexpr float kMaxVerticalSpeedMps = 4.0f;
 
-        Px4MavlinkGateway::Pose lastPose{};
+        smartdrone::core::ports::PoseEstimate lastPose{};
         smartdrone::core::ports::VelocityEstimate filteredVelocity{};
         int64_t lastFrameNs{0};
         PoseQuality lastQuality{PoseQuality::Lost};
@@ -125,12 +163,31 @@ class PosePostprocessor {
         bool haveFilteredVelocity{false};
     };
 
-    Result ProcessPose(const Sophus::SE3f &twcRaw, bool useImu, bool trackingUsable, int trackingState,
-                       unsigned long mapId, bool stereoExtrinsicsLoaded, const Sophus::SE3f &stereoBodyExtrinsics,
-                       bool &stereoReferencePoseSet, Sophus::SE3f &stereoReferencePose, int64_t frameNs,
-                       Px4MavlinkGateway &mavlink);
+    struct ProcessRequest {
+        Sophus::SE3f twcRaw{Sophus::SE3f()};
+        bool useImu{false};
+        bool trackingUsable{false};
+        unsigned long mapId{ContinuityMapper::kInvalidMapId};
+        bool stereoExtrinsicsLoaded{false};
+        Sophus::SE3f stereoBodyExtrinsics{Sophus::SE3f()};
+        bool *stereoReferencePoseSet{nullptr};
+        Sophus::SE3f *stereoReferencePose{nullptr};
+        int64_t frameNs{0};
+        ReadRangeSensorFn readRangeSensor;
+    };
+
+    Result ProcessPose(const ProcessRequest &request);
 
   private:
+    struct PreparedPose {
+        Sophus::SE3f twc{Sophus::SE3f()};
+        Result result{};
+    };
+
+    PreparedPose PreparePose(const ProcessRequest &request);
+    void ApplyStereoReference(const ProcessRequest &request, PreparedPose &prepared);
+    void PopulateOutputPose(const ProcessRequest &request, PreparedPose &prepared);
+
     ContinuityMapper m_continuity{};
     StartupAligner m_aligner{};
     OutputGuard m_outputGuard{};

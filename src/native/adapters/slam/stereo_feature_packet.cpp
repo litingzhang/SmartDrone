@@ -22,6 +22,43 @@ using core::ports::StereoFeaturePacketBuildInput;
 using core::ports::StereoMatchPair;
 using core::ports::VisualFeatureSet;
 
+struct OrbStereoAugmentCandidate {
+  int leftIndex{-1};
+  int rightIndex{-1};
+  int distance{INT_MAX};
+  float zncc{-1.0f};
+  float disparity{0.0f};
+};
+
+struct OrbStereoAugmentOptions {
+  int maxHamming{60};
+  int maxSecondBest{80};
+  float ratio{0.85f};
+  float minZncc{kStereoMinZnccScore};
+};
+
+struct OrbStereoAugmentFeatures {
+  std::vector<cv::KeyPoint> leftKeypoints;
+  std::vector<cv::KeyPoint> rightKeypoints;
+  cv::Mat leftDescriptors;
+  cv::Mat rightDescriptors;
+};
+
+struct OrbStereoAugmentMatchState {
+  std::vector<int> bestLeftForRight;
+  std::vector<int> bestRightDistance;
+};
+
+struct OrbStereoAugmentCandidateRequest {
+  const IVisualDescriptorProvider *leftProvider{nullptr};
+  const OrbStereoAugmentFeatures *features{nullptr};
+  const OrbStereoAugmentOptions *options{nullptr};
+  const cv::Mat *rightGray{nullptr};
+  const cv::Mat *leftGray32f{nullptr};
+  const cv::Mat *rightGray32f{nullptr};
+  size_t leftIndex{0};
+};
+
 uint64_t HashFloatValue(uint64_t hash, float value) {
   uint32_t bits = 0;
   static_assert(sizeof(bits) == sizeof(value), "unexpected float size");
@@ -108,6 +145,14 @@ bool HasValidFeatureDescriptors(const VisualFeatureSet &features) {
          features.descriptors.rows ==
              static_cast<int>(features.keypoints.size()) &&
          features.descriptors.cols > 0;
+}
+
+bool IsStereoMatchInFeatureRange(const StereoMatchPair &match,
+                                 const VisualFeatureSet &leftFeatures,
+                                 const VisualFeatureSet &rightFeatures) {
+  return match.leftIndex >= 0 && match.rightIndex >= 0 &&
+         static_cast<size_t>(match.leftIndex) < leftFeatures.keypoints.size() &&
+         static_cast<size_t>(match.rightIndex) < rightFeatures.keypoints.size();
 }
 
 bool BuildStereoObservationsFromFeatureMatches(
@@ -214,6 +259,248 @@ bool FinalizeStereoObservationsFromPairs(
   return true;
 }
 
+bool LoadOrbStereoAugmentFeatures(
+    const IVisualDescriptorProvider *leftProvider,
+    const IVisualDescriptorProvider *rightProvider, const cv::Mat &leftGray,
+    const cv::Mat &rightGray, OrbStereoAugmentFeatures &features) {
+  if (!leftProvider->DetectAndCompute(leftGray, features.leftKeypoints,
+                                      features.leftDescriptors) ||
+      !rightProvider->DetectAndCompute(rightGray, features.rightKeypoints,
+                                       features.rightDescriptors)) {
+    return false;
+  }
+  return !features.leftKeypoints.empty() && !features.rightKeypoints.empty() &&
+         !features.leftDescriptors.empty() && !features.rightDescriptors.empty();
+}
+
+bool HasValidOrbStereoAugmentFeatures(
+    const OrbStereoAugmentFeatures &features) {
+  return features.leftDescriptors.type() == CV_8U &&
+         features.rightDescriptors.type() == CV_8U &&
+         features.leftDescriptors.rows ==
+             static_cast<int>(features.leftKeypoints.size()) &&
+         features.rightDescriptors.rows ==
+             static_cast<int>(features.rightKeypoints.size()) &&
+         features.leftDescriptors.cols == features.rightDescriptors.cols;
+}
+
+bool CanMergeOrbStereoAugmentDescriptors(
+    const StereoFeatureObservationPacket &stereoData,
+    const OrbStereoAugmentFeatures &features) {
+  if (!stereoData.leftDescriptors.empty() &&
+      (stereoData.leftDescriptors.type() != CV_8U ||
+       stereoData.leftDescriptors.cols != features.leftDescriptors.cols)) {
+    return false;
+  }
+  return stereoData.rightDescriptors.empty() ||
+         (stereoData.rightDescriptors.type() == CV_8U &&
+          stereoData.rightDescriptors.cols == features.rightDescriptors.cols);
+}
+
+OrbStereoAugmentOptions LoadOrbStereoAugmentOptions() {
+  OrbStereoAugmentOptions options;
+  options.maxHamming = EnvIntValueClamped(
+      "SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_MAX_HAMMING", 60, 1, 256);
+  options.maxSecondBest = EnvIntValueClamped(
+      "SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_SECOND_BEST", 80, 1, 256);
+  options.ratio = EnvFloatValueClamped(
+      "SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_RATIO", 0.85f, 0.1f, 1.0f);
+  options.minZncc =
+      EnvFloatValueClamped("SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_MIN_ZNCC",
+                           kStereoMinZnccScore, -1.0f, 1.0f);
+  return options;
+}
+
+bool PassesOrbStereoRatioTest(int bestDistance, int secondDistance,
+                              const OrbStereoAugmentOptions &options) {
+  if (bestDistance > options.maxHamming) {
+    return false;
+  }
+  return secondDistance >= options.maxSecondBest ||
+         bestDistance <= static_cast<int>(options.ratio * secondDistance);
+}
+
+int FindBestOrbStereoRightIndex(
+    const IVisualDescriptorProvider &leftProvider,
+    const OrbStereoAugmentFeatures &features, const cv::Mat &rightGray,
+    size_t leftIndex, int &bestDistance, int &secondDistance) {
+  const cv::Point2f &leftPt = features.leftKeypoints[leftIndex].pt;
+  int bestRight = -1;
+  bestDistance = INT_MAX;
+  secondDistance = INT_MAX;
+  for (size_t ri = 0; ri < features.rightKeypoints.size(); ++ri) {
+    const cv::Point2f &rightPt = features.rightKeypoints[ri].pt;
+    if (!IsPointSafeForDescriptor(rightPt, rightGray) ||
+        !IsStereoPairGeometricallyValid(leftPt, rightPt)) {
+      continue;
+    }
+    const int distance = leftProvider.DescriptorDistance(
+        features.leftDescriptors.row(static_cast<int>(leftIndex)),
+        features.rightDescriptors.row(static_cast<int>(ri)));
+    if (distance < bestDistance) {
+      secondDistance = bestDistance;
+      bestDistance = distance;
+      bestRight = static_cast<int>(ri);
+    } else if (distance < secondDistance) {
+      secondDistance = distance;
+    }
+  }
+  return bestRight;
+}
+
+bool BuildOrbStereoAugmentCandidate(
+    const OrbStereoAugmentCandidateRequest &request,
+    OrbStereoAugmentCandidate &candidate) {
+  const OrbStereoAugmentFeatures &features = *request.features;
+  const OrbStereoAugmentOptions &options = *request.options;
+  int bestDistance = INT_MAX;
+  int secondDistance = INT_MAX;
+  const int bestRight = FindBestOrbStereoRightIndex(
+      *request.leftProvider, features, *request.rightGray, request.leftIndex,
+      bestDistance, secondDistance);
+  if (bestRight < 0 ||
+      !PassesOrbStereoRatioTest(bestDistance, secondDistance, options)) {
+    return false;
+  }
+
+  const cv::Point2f &leftPt = features.leftKeypoints[request.leftIndex].pt;
+  const cv::Point2f &rightPt =
+      features.rightKeypoints[static_cast<size_t>(bestRight)].pt;
+  float zncc = -1.0f;
+  if (!ComputePatchZncc(*request.leftGray32f, leftPt, *request.rightGray32f,
+                        rightPt, zncc) ||
+      zncc < request.options->minZncc) {
+    return false;
+  }
+  candidate =
+      OrbStereoAugmentCandidate{static_cast<int>(request.leftIndex),
+                                bestRight, bestDistance, zncc,
+                                leftPt.x - rightPt.x};
+  return true;
+}
+
+void SortOrbStereoAugmentCandidates(
+    std::vector<OrbStereoAugmentCandidate> &candidates) {
+  std::sort(candidates.begin(), candidates.end(),
+            [](const OrbStereoAugmentCandidate &a,
+               const OrbStereoAugmentCandidate &b) {
+              if (a.distance != b.distance) {
+                return a.distance < b.distance;
+              }
+              if (a.zncc != b.zncc) {
+                return a.zncc > b.zncc;
+              }
+              return a.disparity > b.disparity;
+            });
+}
+
+std::vector<OrbStereoAugmentCandidate> CollectOrbStereoAugmentCandidates(
+    const IVisualDescriptorProvider &leftProvider,
+    const OrbStereoAugmentFeatures &features,
+    const StereoFeatureObservationPacket &stereoData,
+    const OrbStereoAugmentOptions &options, const cv::Mat &leftGray,
+    const cv::Mat &rightGray, OrbStereoAugmentMatchState &matchState) {
+  cv::Mat leftGray32f;
+  cv::Mat rightGray32f;
+  leftGray.convertTo(leftGray32f, CV_32F);
+  rightGray.convertTo(rightGray32f, CV_32F);
+
+  std::vector<OrbStereoAugmentCandidate> candidates;
+  candidates.reserve(
+      std::min(features.leftKeypoints.size(), features.rightKeypoints.size()));
+  for (size_t li = 0; li < features.leftKeypoints.size(); ++li) {
+    const cv::Point2f &leftPt = features.leftKeypoints[li].pt;
+    if (!IsPointSafeForDescriptor(leftPt, leftGray) ||
+        IsPointNearExistingKeypoint(leftPt, stereoData.leftKeypoints)) {
+      continue;
+    }
+
+    OrbStereoAugmentCandidate candidate;
+    const OrbStereoAugmentCandidateRequest request{
+        &leftProvider, &features, &options, &rightGray, &leftGray32f,
+        &rightGray32f, li};
+    if (!BuildOrbStereoAugmentCandidate(request, candidate)) {
+      continue;
+    }
+    const size_t rightIndex = static_cast<size_t>(candidate.rightIndex);
+    if (candidate.distance >= matchState.bestRightDistance[rightIndex]) {
+      continue;
+    }
+    matchState.bestRightDistance[rightIndex] = candidate.distance;
+    matchState.bestLeftForRight[rightIndex] = candidate.leftIndex;
+    candidates.push_back(candidate);
+  }
+  SortOrbStereoAugmentCandidates(candidates);
+  return candidates;
+}
+
+void EnsureLeftToRightMatchInitialized(StereoFeatureObservationPacket &data) {
+  if (!data.leftToRightMatch.empty()) {
+    return;
+  }
+  data.leftToRightMatch.resize(data.leftKeypoints.size(), -1);
+  const size_t alignedCount =
+      std::min(data.leftKeypoints.size(), data.rightKeypoints.size());
+  for (size_t i = 0; i < alignedCount; ++i) {
+    data.leftToRightMatch[i] = static_cast<int>(i);
+  }
+}
+
+bool IsOrbStereoAugmentCandidateCurrent(
+    const OrbStereoAugmentCandidate &candidate,
+    const OrbStereoAugmentFeatures &features,
+    const OrbStereoAugmentMatchState &matchState) {
+  return candidate.leftIndex >= 0 && candidate.rightIndex >= 0 &&
+         static_cast<size_t>(candidate.leftIndex) <
+             features.leftKeypoints.size() &&
+         static_cast<size_t>(candidate.rightIndex) <
+             features.rightKeypoints.size() &&
+         matchState.bestLeftForRight[static_cast<size_t>(
+             candidate.rightIndex)] == candidate.leftIndex;
+}
+
+void AppendOrbStereoAugmentCandidate(
+    const OrbStereoAugmentCandidate &candidate,
+    const OrbStereoAugmentFeatures &features,
+    StereoFeatureObservationPacket &stereoData) {
+  const int rightOutputIndex =
+      static_cast<int>(stereoData.rightKeypoints.size());
+  stereoData.leftKeypoints.push_back(
+      features.leftKeypoints[static_cast<size_t>(candidate.leftIndex)]);
+  stereoData.rightKeypoints.push_back(
+      features.rightKeypoints[static_cast<size_t>(candidate.rightIndex)]);
+  stereoData.leftDescriptors.push_back(
+      features.leftDescriptors.row(candidate.leftIndex));
+  stereoData.rightDescriptors.push_back(
+      features.rightDescriptors.row(candidate.rightIndex));
+  stereoData.leftToRightMatch.push_back(rightOutputIndex);
+}
+
+size_t AppendOrbStereoAugmentCandidates(
+    const std::vector<OrbStereoAugmentCandidate> &candidates,
+    const OrbStereoAugmentFeatures &features,
+    const OrbStereoAugmentMatchState &matchState,
+    StereoFeatureObservationPacket &stereoData, size_t maxExtraPairs) {
+  EnsureLeftToRightMatchInitialized(stereoData);
+  size_t appended = 0;
+  for (const OrbStereoAugmentCandidate &candidate : candidates) {
+    if (appended >= maxExtraPairs) {
+      break;
+    }
+    if (!IsOrbStereoAugmentCandidateCurrent(candidate, features, matchState)) {
+      continue;
+    }
+    const cv::Point2f &leftPt =
+        features.leftKeypoints[static_cast<size_t>(candidate.leftIndex)].pt;
+    if (IsPointNearExistingKeypoint(leftPt, stereoData.leftKeypoints)) {
+      continue;
+    }
+    AppendOrbStereoAugmentCandidate(candidate, features, stereoData);
+    ++appended;
+  }
+  return appended;
+}
+
 bool FinalizeStereoObservationsFromPairsWithAllLeft(
     const IVisualDescriptorProvider *leftProvider,
     const IVisualDescriptorProvider *rightProvider, const cv::Mat &leftGray,
@@ -249,10 +536,7 @@ bool FinalizeStereoObservationsFromPairsWithAllLeft(
   stereoLeftPoints.reserve(stereoMatches.size());
   stereoRightPoints.reserve(stereoMatches.size());
   for (const StereoMatchPair &match : stereoMatches) {
-    if (match.leftIndex < 0 || match.rightIndex < 0 ||
-        static_cast<size_t>(match.leftIndex) >= leftFeatures.keypoints.size() ||
-        static_cast<size_t>(match.rightIndex) >=
-            rightFeatures.keypoints.size()) {
+    if (!IsStereoMatchInFeatureRange(match, leftFeatures, rightFeatures)) {
       continue;
     }
     const cv::Point2f &leftPoint =
@@ -386,172 +670,30 @@ size_t AppendDescriptorStereoAugmentFeatures(
     return 0;
   }
 
-  std::vector<cv::KeyPoint> leftKeypoints;
-  std::vector<cv::KeyPoint> rightKeypoints;
-  cv::Mat leftDescriptors;
-  cv::Mat rightDescriptors;
-  if (!leftProvider->DetectAndCompute(leftGray, leftKeypoints,
-                                      leftDescriptors) ||
-      !rightProvider->DetectAndCompute(rightGray, rightKeypoints,
-                                       rightDescriptors)) {
+  OrbStereoAugmentFeatures features;
+  if (!LoadOrbStereoAugmentFeatures(leftProvider, rightProvider, leftGray,
+                                    rightGray, features)) {
     return 0;
   }
-  if (leftKeypoints.empty() || rightKeypoints.empty() ||
-      leftDescriptors.empty() || rightDescriptors.empty() ||
-      leftDescriptors.type() != CV_8U || rightDescriptors.type() != CV_8U ||
-      leftDescriptors.rows != static_cast<int>(leftKeypoints.size()) ||
-      rightDescriptors.rows != static_cast<int>(rightKeypoints.size()) ||
-      leftDescriptors.cols != rightDescriptors.cols) {
-    return 0;
-  }
-  if ((!stereoData.leftDescriptors.empty() &&
-       (stereoData.leftDescriptors.type() != CV_8U ||
-        stereoData.leftDescriptors.cols != leftDescriptors.cols)) ||
-      (!stereoData.rightDescriptors.empty() &&
-       (stereoData.rightDescriptors.type() != CV_8U ||
-        stereoData.rightDescriptors.cols != rightDescriptors.cols))) {
+  if (!HasValidOrbStereoAugmentFeatures(features) ||
+      !CanMergeOrbStereoAugmentDescriptors(stereoData, features)) {
     return 0;
   }
 
-  struct OrbStereoAugmentCandidate {
-    int leftIndex{-1};
-    int rightIndex{-1};
-    int distance{INT_MAX};
-    float zncc{-1.0f};
-    float disparity{0.0f};
-  };
-
-  cv::Mat leftGray32f;
-  cv::Mat rightGray32f;
-  leftGray.convertTo(leftGray32f, CV_32F);
-  rightGray.convertTo(rightGray32f, CV_32F);
-
-  const int maxHamming = EnvIntValueClamped(
-      "SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_MAX_HAMMING", 60, 1, 256);
-  const int maxSecondBest = EnvIntValueClamped(
-      "SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_SECOND_BEST", 80, 1, 256);
-  const float ratio = EnvFloatValueClamped(
-      "SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_RATIO", 0.85f, 0.1f, 1.0f);
-  const float minZncc =
-      EnvFloatValueClamped("SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_MIN_ZNCC",
-                           kStereoMinZnccScore, -1.0f, 1.0f);
-
-  std::vector<int> bestLeftForRight(rightKeypoints.size(), -1);
-  std::vector<int> bestRightDistance(rightKeypoints.size(), INT_MAX);
-  std::vector<OrbStereoAugmentCandidate> candidates;
-  candidates.reserve(std::min(leftKeypoints.size(), rightKeypoints.size()));
-
-  for (size_t li = 0; li < leftKeypoints.size(); ++li) {
-    const cv::Point2f &leftPt = leftKeypoints[li].pt;
-    if (!IsPointSafeForDescriptor(leftPt, leftGray) ||
-        IsPointNearExistingKeypoint(leftPt, stereoData.leftKeypoints)) {
-      continue;
-    }
-
-    int bestRight = -1;
-    int bestDistance = INT_MAX;
-    int secondDistance = INT_MAX;
-    for (size_t ri = 0; ri < rightKeypoints.size(); ++ri) {
-      const cv::Point2f &rightPt = rightKeypoints[ri].pt;
-      if (!IsPointSafeForDescriptor(rightPt, rightGray) ||
-          !IsStereoPairGeometricallyValid(leftPt, rightPt)) {
-        continue;
-      }
-      const int distance = leftProvider->DescriptorDistance(
-          leftDescriptors.row(static_cast<int>(li)),
-          rightDescriptors.row(static_cast<int>(ri)));
-      if (distance < bestDistance) {
-        secondDistance = bestDistance;
-        bestDistance = distance;
-        bestRight = static_cast<int>(ri);
-      } else if (distance < secondDistance) {
-        secondDistance = distance;
-      }
-    }
-    if (bestRight < 0 || bestDistance > maxHamming) {
-      continue;
-    }
-    if (secondDistance < maxSecondBest &&
-        bestDistance > static_cast<int>(ratio * secondDistance)) {
-      continue;
-    }
-
-    const cv::Point2f &rightPt =
-        rightKeypoints[static_cast<size_t>(bestRight)].pt;
-    float zncc = -1.0f;
-    if (!ComputePatchZncc(leftGray32f, leftPt, rightGray32f, rightPt, zncc) ||
-        zncc < minZncc) {
-      continue;
-    }
-    if (bestDistance >= bestRightDistance[static_cast<size_t>(bestRight)]) {
-      continue;
-    }
-    bestRightDistance[static_cast<size_t>(bestRight)] = bestDistance;
-    bestLeftForRight[static_cast<size_t>(bestRight)] = static_cast<int>(li);
-    candidates.push_back(OrbStereoAugmentCandidate{static_cast<int>(li),
-                                                   bestRight, bestDistance,
-                                                   zncc, leftPt.x - rightPt.x});
-  }
-
+  OrbStereoAugmentMatchState matchState;
+  matchState.bestLeftForRight.assign(features.rightKeypoints.size(), -1);
+  matchState.bestRightDistance.assign(features.rightKeypoints.size(), INT_MAX);
+  const OrbStereoAugmentOptions options = LoadOrbStereoAugmentOptions();
+  std::vector<OrbStereoAugmentCandidate> candidates =
+      CollectOrbStereoAugmentCandidates(*leftProvider, features, stereoData,
+                                        options, leftGray, rightGray,
+                                        matchState);
   if (candidates.empty()) {
     return 0;
   }
 
-  std::sort(candidates.begin(), candidates.end(),
-            [](const OrbStereoAugmentCandidate &a,
-               const OrbStereoAugmentCandidate &b) {
-              if (a.distance != b.distance) {
-                return a.distance < b.distance;
-              }
-              if (a.zncc != b.zncc) {
-                return a.zncc > b.zncc;
-              }
-              return a.disparity > b.disparity;
-            });
-
-  const bool haveLeftMatch = !stereoData.leftToRightMatch.empty();
-  if (!haveLeftMatch) {
-    stereoData.leftToRightMatch.resize(stereoData.leftKeypoints.size(), -1);
-    const size_t alignedCount = std::min(stereoData.leftKeypoints.size(),
-                                         stereoData.rightKeypoints.size());
-    for (size_t i = 0; i < alignedCount; ++i) {
-      stereoData.leftToRightMatch[i] = static_cast<int>(i);
-    }
-  }
-
-  size_t appended = 0;
-  for (const OrbStereoAugmentCandidate &candidate : candidates) {
-    if (appended >= maxExtraPairs) {
-      break;
-    }
-    if (candidate.leftIndex < 0 || candidate.rightIndex < 0 ||
-        static_cast<size_t>(candidate.leftIndex) >= leftKeypoints.size() ||
-        static_cast<size_t>(candidate.rightIndex) >= rightKeypoints.size() ||
-        bestLeftForRight[static_cast<size_t>(candidate.rightIndex)] !=
-            candidate.leftIndex) {
-      continue;
-    }
-
-    const cv::Point2f &leftPt =
-        leftKeypoints[static_cast<size_t>(candidate.leftIndex)].pt;
-    if (IsPointNearExistingKeypoint(leftPt, stereoData.leftKeypoints)) {
-      continue;
-    }
-
-    const int rightOutputIndex =
-        static_cast<int>(stereoData.rightKeypoints.size());
-    stereoData.leftKeypoints.push_back(
-        leftKeypoints[static_cast<size_t>(candidate.leftIndex)]);
-    stereoData.rightKeypoints.push_back(
-        rightKeypoints[static_cast<size_t>(candidate.rightIndex)]);
-    stereoData.leftDescriptors.push_back(
-        leftDescriptors.row(candidate.leftIndex));
-    stereoData.rightDescriptors.push_back(
-        rightDescriptors.row(candidate.rightIndex));
-    stereoData.leftToRightMatch.push_back(rightOutputIndex);
-    ++appended;
-  }
-
+  const size_t appended = AppendOrbStereoAugmentCandidates(
+      candidates, features, matchState, stereoData, maxExtraPairs);
   if (appended > 0) {
     stereoData.matchedStereoPairs = true;
   }

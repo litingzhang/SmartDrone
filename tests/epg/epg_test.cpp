@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <stdexcept>
@@ -34,6 +35,7 @@ EPG_REGISTER_MESSAGE(ReflectedPacket, "ReflectedPacket")
 
 struct SlamResourceReady {};
 struct SlamTick {};
+struct SlamImuReady {};
 struct SlamFrameReady {};
 struct SlamPreparedFrame {};
 struct SlamTrackedFrame {};
@@ -44,6 +46,7 @@ struct CalibTick {};
 struct CalibStereoFrame {};
 struct CalibSavePair {};
 struct CalibCaptureDone {};
+struct CalibStopRequest {};
 struct CalibStorageStatus {};
 struct CalibImuStatus {};
 struct CalibPreviewStatus {};
@@ -251,6 +254,7 @@ Registry MakeSlamShapeRegistry() {
     Registry registry;
     registry.RegisterMessageType<SlamResourceReady>("SlamResourceReady");
     registry.RegisterMessageType<SlamTick>("SlamTick");
+    registry.RegisterMessageType<SlamImuReady>("SlamImuReady");
     registry.RegisterMessageType<SlamFrameReady>("SlamFrameReady");
     registry.RegisterMessageType<SlamPreparedFrame>("SlamPreparedFrame");
     registry.RegisterMessageType<SlamTrackedFrame>("SlamTrackedFrame");
@@ -262,6 +266,8 @@ Registry MakeSlamShapeRegistry() {
     };
     registry.RegisterTaskFactory("SlamResourceTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamClockTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamImuPollTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamBackendTickTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamImuGateTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamAcquireTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamTrackingTask", {}, {}, factory);
@@ -272,6 +278,23 @@ Registry MakeSlamShapeRegistry() {
     registry.RegisterTaskFactory("SlamUdpTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamDfxTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamMonitorTask", {}, {}, factory);
+    registry.RegisterTaskFactory("EpgDfxSnapshotTask", {}, {}, factory);
+    return registry;
+}
+
+Registry MakeSystemShapeRegistry() {
+    Registry registry;
+    const auto factory = []() {
+        return std::unique_ptr<ITask>(new TestHeartbeatTask());
+    };
+    registry.RegisterTaskFactory("VehicleTelemetryRxTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SetpointStreamTask", {}, {}, factory);
+    registry.RegisterTaskFactory("UdpCommandTask", {}, {}, factory);
+    registry.RegisterTaskFactory("ManualControlTask", {}, {}, factory);
+    registry.RegisterTaskFactory("ForceRestartTask", {}, {}, factory);
+    registry.RegisterTaskFactory("RuntimeSupervisorTask", {}, {}, factory);
+    registry.RegisterTaskFactory("DiscoveryBeaconTask", {}, {}, factory);
+    registry.RegisterTaskFactory("EpgDfxSnapshotTask", {}, {}, factory);
     return registry;
 }
 
@@ -282,6 +305,7 @@ Registry MakeCalibShapeRegistry() {
     registry.RegisterMessageType<CalibStereoFrame>("CalibStereoFrame");
     registry.RegisterMessageType<CalibSavePair>("CalibSavePair");
     registry.RegisterMessageType<CalibCaptureDone>("CalibCaptureDone");
+    registry.RegisterMessageType<CalibStopRequest>("CalibStopRequest");
     registry.RegisterMessageType<CalibStorageStatus>("CalibStorageStatus");
     registry.RegisterMessageType<CalibImuStatus>("CalibImuStatus");
     registry.RegisterMessageType<CalibPreviewStatus>("CalibPreviewStatus");
@@ -301,6 +325,7 @@ Registry MakeCalibShapeRegistry() {
     registry.RegisterTaskFactory("CalibCompletionTask", {}, {}, factory);
     registry.RegisterTaskFactory("CalibFlushSyncTask", {}, {}, factory);
     registry.RegisterTaskFactory("CalibMonitorTask", {}, {}, factory);
+    registry.RegisterTaskFactory("EpgDfxSnapshotTask", {}, {}, factory);
     return registry;
 }
 
@@ -624,7 +649,7 @@ TEST(EventPipelineGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
     auto registry = MakeRegistry();
     const auto config = epg::ParseGraphConfigMermaid(R"(
       flowchart LR
-        source["type=TestSourceTask; trigger=periodic; interval_ms=1"]
+        source["type=TestSourceTask; trigger=periodic; interval_ms=1; realtime=true; priority=42"]
         forward["type=TestForwardTask; trigger=any_queue_ready"]
         sink["type=TestSinkTask; trigger=any_queue_ready"]
 
@@ -640,6 +665,8 @@ TEST(EventPipelineGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
 
     ASSERT_EQ(config.tasks.size(), 3u);
     EXPECT_EQ(config.tasks[0].name, "source");
+    EXPECT_TRUE(config.tasks[0].scheduling.realtime);
+    EXPECT_EQ(config.tasks[0].scheduling.priority, 42);
     EXPECT_EQ(config.tasks[0].outputs.at(0), "source_0_to_forward_0");
     EXPECT_EQ(config.tasks[1].inputs.at(0), "source_0_to_forward_0");
     EXPECT_EQ(config.tasks[1].outputs.at(0), "forward_0_to_sink_0");
@@ -682,8 +709,8 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
         "cluster_slam_session_graph",
         registry);
 
-    ASSERT_EQ(config.tasks.size(), 12u);
-    ASSERT_EQ(config.queues.size(), 11u);
+    ASSERT_EQ(config.tasks.size(), 15u);
+    ASSERT_EQ(config.queues.size(), 12u);
 
     EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));
@@ -707,12 +734,29 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
     EXPECT_EQ(clock->trigger.mode, epg::TriggerMode::Periodic);
     EXPECT_EQ(clock->trigger.interval, std::chrono::milliseconds(50));
 
+    const auto* imuPoll = findTask("SlamImuPollTask");
+    ASSERT_NE(imuPoll, nullptr);
+    EXPECT_EQ(imuPoll->inputs.at(0), "SlamResourceTask_0_to_SlamImuPollTask_0");
+    EXPECT_EQ(imuPoll->trigger.mode, epg::TriggerMode::PeriodicOrAnyQueueReady);
+    EXPECT_EQ(imuPoll->trigger.interval, std::chrono::milliseconds(1));
+    EXPECT_FALSE(imuPoll->scheduling.realtime);
+    EXPECT_EQ(imuPoll->scheduling.priority, 0);
+    EXPECT_EQ(imuPoll->trigger.queues,
+              (std::vector<std::string>{"SlamResourceTask_0_to_SlamImuPollTask_0"}));
+
+    const auto* backendTick = findTask("SlamBackendTickTask");
+    ASSERT_NE(backendTick, nullptr);
+    EXPECT_TRUE(backendTick->inputs.empty());
+    EXPECT_EQ(backendTick->trigger.mode, epg::TriggerMode::Periodic);
+    EXPECT_EQ(backendTick->trigger.interval, std::chrono::milliseconds(5));
+    EXPECT_TRUE(backendTick->trigger.queues.empty());
+
     const auto* imuGate = findTask("SlamImuGateTask");
     ASSERT_NE(imuGate, nullptr);
-    EXPECT_EQ(imuGate->inputs.at(0), "SlamResourceTask_0_to_SlamImuGateTask_0");
+    EXPECT_EQ(imuGate->inputs.at(0), "SlamImuPollTask_0_to_SlamImuGateTask_0");
     EXPECT_EQ(imuGate->inputs.at(1), "SlamClockTask_0_to_SlamImuGateTask_1");
     EXPECT_EQ(imuGate->trigger.queues,
-              (std::vector<std::string>{"SlamResourceTask_0_to_SlamImuGateTask_0",
+              (std::vector<std::string>{"SlamImuPollTask_0_to_SlamImuGateTask_0",
                                          "SlamClockTask_0_to_SlamImuGateTask_1"}));
 
     const auto* acquire = findTask("SlamAcquireTask");
@@ -728,6 +772,59 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
               "SlamAcquireTask_0_to_SlamTrackingTask_0");
     EXPECT_EQ(tracking->trigger.queues,
               (std::vector<std::string>{"SlamAcquireTask_0_to_SlamTrackingTask_0"}));
+
+    const auto* dfxSnapshot = findTask("SlamGraphDfxSnapshotTask");
+    ASSERT_NE(dfxSnapshot, nullptr);
+    EXPECT_EQ(dfxSnapshot->type, "EpgDfxSnapshotTask");
+    EXPECT_EQ(dfxSnapshot->trigger.interval, std::chrono::milliseconds(500));
+}
+
+TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology) {
+    auto registry = MakeSystemShapeRegistry();
+    const auto config = epg::ParseGraphConfigDotFile(
+        std::string(TEST_EPG_DIR) + "/../../config/epg/epg_topology.dot",
+        "cluster_system_runtime_graph",
+        registry);
+
+    ASSERT_EQ(config.tasks.size(), 8u);
+    ASSERT_EQ(config.queues.size(), 0u);
+
+    EventPipelineGraph graph(registry);
+    EXPECT_NO_THROW(graph.Configure(config));
+
+    auto findTask = [&config](const std::string& name) -> const epg::TaskConfig* {
+        for (const auto& task : config.tasks) {
+            if (task.name == name) {
+                return &task;
+            }
+        }
+        return nullptr;
+    };
+
+    const auto* vehicleTelemetryRx = findTask("VehicleTelemetryRxTask");
+    ASSERT_NE(vehicleTelemetryRx, nullptr);
+    EXPECT_EQ(vehicleTelemetryRx->trigger.interval, std::chrono::milliseconds(2));
+
+    const auto* setpointStream = findTask("SetpointStreamTask");
+    ASSERT_NE(setpointStream, nullptr);
+    EXPECT_EQ(setpointStream->trigger.interval, std::chrono::milliseconds(5));
+
+    const auto* manualControl = findTask("ManualControlTask");
+    ASSERT_NE(manualControl, nullptr);
+    EXPECT_EQ(manualControl->trigger.interval, std::chrono::milliseconds(50));
+
+    const auto* forceRestart = findTask("ForceRestartTask");
+    ASSERT_NE(forceRestart, nullptr);
+    EXPECT_EQ(forceRestart->trigger.interval, std::chrono::milliseconds(50));
+
+    const auto* supervisor = findTask("RuntimeSupervisorTask");
+    ASSERT_NE(supervisor, nullptr);
+    EXPECT_EQ(supervisor->trigger.interval, std::chrono::milliseconds(100));
+
+    const auto* dfxSnapshot = findTask("EpgDfxSnapshotTask");
+    ASSERT_NE(dfxSnapshot, nullptr);
+    EXPECT_EQ(dfxSnapshot->type, "EpgDfxSnapshotTask");
+    EXPECT_EQ(dfxSnapshot->trigger.interval, std::chrono::milliseconds(500));
 }
 
 TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology) {
@@ -737,8 +834,8 @@ TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology) {
         "cluster_calib_session_graph",
         registry);
 
-    ASSERT_EQ(config.tasks.size(), 10u);
-    ASSERT_EQ(config.queues.size(), 12u);
+    ASSERT_EQ(config.tasks.size(), 11u);
+    ASSERT_EQ(config.queues.size(), 13u);
 
     EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));
@@ -764,6 +861,18 @@ TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology) {
     const auto* preview = findTask("CalibUdpPreviewTask");
     ASSERT_NE(preview, nullptr);
     EXPECT_EQ(preview->inputs.at(0), "CalibCameraAcquireTask_1_to_CalibUdpPreviewTask_0");
+
+    const auto* completion = findTask("CalibCompletionTask");
+    ASSERT_NE(completion, nullptr);
+    EXPECT_EQ(completion->inputs.at(4), "CalibResourceTask_2_to_CalibCompletionTask_4");
+    EXPECT_NE(std::find(completion->trigger.queues.begin(), completion->trigger.queues.end(),
+                        "CalibResourceTask_2_to_CalibCompletionTask_4"),
+              completion->trigger.queues.end());
+
+    const auto* dfxSnapshot = findTask("CalibGraphDfxSnapshotTask");
+    ASSERT_NE(dfxSnapshot, nullptr);
+    EXPECT_EQ(dfxSnapshot->type, "EpgDfxSnapshotTask");
+    EXPECT_EQ(dfxSnapshot->trigger.interval, std::chrono::milliseconds(500));
 }
 
 TEST(EventPipelineGraphDotTopology, RunsBasicTopologyFromDot) {
@@ -936,6 +1045,36 @@ TEST(EventPipelineGraph, PeriodicOrAnyQueueReadyRunsWithQueueTrigger) {
     EXPECT_EQ(taskDiagnostics.at("hybrid_sink").errorCount, 0u);
 }
 
+TEST(EventPipelineGraph, PeriodicOrAnyQueueReadyRunsWithoutQueuedItems) {
+    auto registry = MakeRegistry();
+    int ticks = 0;
+    registry.RegisterTaskFactory(
+        "CountingHybridTask", {PortSpec{0, "TestPacket"}}, {},
+        [&ticks]() { return std::unique_ptr<ITask>(new TestCountingTask(ticks)); });
+    EventPipelineGraph graph(registry);
+
+    graph.ConfigureJson(R"({
+      "queues": [
+        {"name": "packets", "type": "TestPacket", "depth": 1, "overflow": "drop_newest"}
+      ],
+      "tasks": [
+        {
+          "name": "hybrid",
+          "type": "CountingHybridTask",
+          "trigger": {"mode": "periodic_or_any_queue_ready", "interval_ms": 5, "queues": ["packets"]},
+          "inputs": {"0": "packets"}
+        }
+      ]
+    })");
+
+    graph.Start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    graph.Stop();
+
+    EXPECT_GT(ticks, 0);
+    EXPECT_EQ(graph.TaskDiagnostics().at("hybrid").errorCount, 0u);
+}
+
 TEST(EventPipelineGraph, PeriodicTaskCanRunWithoutQueues) {
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
@@ -1053,6 +1192,19 @@ TEST(EventPipelineGraph, LifecycleStateAndAccessorsBehaveAsExpected) {
     graph.Start();
     EXPECT_TRUE(graph.Running());
     EXPECT_THROW(graph.ConfigureJson(MinimalValidJson()), std::runtime_error);
+    graph.RequestStop();
+    EXPECT_TRUE(graph.Running());
+    for (int i = 0; i < 50 && graph.Running(); ++i) {
+        if (graph.JoinStopped()) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_TRUE(graph.JoinStopped());
+    EXPECT_FALSE(graph.Running());
+
+    graph.Start();
+    EXPECT_TRUE(graph.Running());
     graph.Stop();
     EXPECT_FALSE(graph.Running());
 
@@ -1070,6 +1222,7 @@ TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile) {
           "name": "source\nname",
           "type": "TestSourceTask",
           "trigger": {"mode": "periodic", "interval_ms": 1},
+          "scheduling": {"realtime": true, "priority": 42},
           "outputs": {"0": "packets"}
         }
       ]
@@ -1077,6 +1230,8 @@ TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile) {
 
     ASSERT_EQ(config.tasks.size(), 1u);
     EXPECT_EQ(config.tasks.front().name, "source\nname");
+    EXPECT_TRUE(config.tasks.front().scheduling.realtime);
+    EXPECT_EQ(config.tasks.front().scheduling.priority, 42);
     EXPECT_THROW(
         epg::ParseGraphConfigJsonFile("/tmp/smart_drone_missing_epg.json"),
         std::runtime_error);
@@ -1158,6 +1313,8 @@ TEST(EventPipelineGraphValidation, RejectsInvalidTopologyConfigurations) {
         R"({"queues":[{"name":"packets","type":"TestPacket","depth":0,"overflow":"drop_newest"}],"tasks":[]})",
         R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1}},{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1}}]})",
         R"({"queues":[],"tasks":[{"name":"missing","type":"MissingTask","trigger":{"mode":"periodic","interval_ms":1}}]})",
+        R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1},"scheduling":{"realtime":true,"priority":0}}]})",
+        R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1},"scheduling":{"realtime":true,"priority":100}}]})",
         R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":0}}]})",
         R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":[]},"inputs": {"0":"packets"}}]})",
         R"({"queues":[],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["missing"]},"inputs": {"0":"missing"}}]})",

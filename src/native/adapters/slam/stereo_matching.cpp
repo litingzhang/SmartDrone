@@ -143,6 +143,100 @@ std::vector<core::ports::StereoMatchPair> BuildStereoPairsForSelection(
   return std::move(pairResult.matches);
 }
 
+void InitializeMatchSelectionState(
+    const core::ports::StereoMatchSelectionInput &input,
+    const core::ports::VisualFeatureSet &leftFeatures,
+    const core::ports::VisualFeatureSet &rightFeatures,
+    core::ports::StereoMatchSelection &selection) {
+  selection.pairedFeatureCount =
+      std::min(leftFeatures.keypoints.size(), rightFeatures.keypoints.size());
+  selection.trustFrontendPairs =
+      selection.pairedFeatureCount > 0 &&
+      (input.trustFrontendInitPairs || input.trustFrontendRecoveryPairs ||
+       input.trustFrontendBootstrapPairs);
+  selection.initializationTrustedPairSelection =
+      input.initializing && selection.trustFrontendPairs &&
+      EnvFlagEnabled("SMART_DRONE_SP_LG_INIT_TRUST_SELECT_CLOSE_PAIRS", false);
+}
+
+void PopulateRawMatches(
+    const core::ports::StereoMatchSelectionInput &input,
+    const core::ports::VisualFeatureSet &leftFeatures,
+    const core::ports::VisualFeatureSet &rightFeatures,
+    const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
+    const core::ports::IStereoPairBuilder &pairBuilder,
+    core::ports::StereoMatchSelection &selection) {
+  if (selection.initializationTrustedPairSelection) {
+    selection.initializationTrustedMatches = SelectInitializationTrustedPairs(
+        leftFeatures, rightFeatures, leftPrepared, rightPrepared, pairBuilder);
+    if (!selection.initializationTrustedMatches.empty()) {
+      return;
+    }
+  } else if (selection.trustFrontendPairs) {
+    return;
+  }
+
+  selection.rawMatches = BuildStereoPairsForSelection(
+      leftFeatures, rightFeatures, leftPrepared, rightPrepared, pairBuilder);
+}
+
+void ApplyInitializationStereoBias(
+    const core::ports::StereoMatchSelectionInput &input,
+    core::ports::StereoMatchSelection &selection) {
+  selection.initializationStereoBias =
+      EnvFlagEnabled("SMART_DRONE_SP_LG_INIT_STEREO_BIAS", false) &&
+      input.initializing;
+  if (selection.initializationStereoBias) {
+    BiasInitializationMatches(selection.rawMatches);
+  }
+}
+
+bool UseTrustedInitializationMatches(
+    const core::ports::StereoMatchSelection &selection) {
+  return selection.initializationTrustedPairSelection &&
+         !selection.initializationTrustedMatches.empty();
+}
+
+void CopySelectedStereoPoints(
+    const core::ports::VisualFeatureSet &leftFeatures,
+    const core::ports::VisualFeatureSet &rightFeatures,
+    core::ports::StereoMatchSelection &selection) {
+  if (UseTrustedInitializationMatches(selection)) {
+    CopyMatchedStereoPointsFromPairs(
+        leftFeatures, rightFeatures, selection.initializationTrustedMatches,
+        selection.matchedLeftPoints, selection.matchedRightPoints);
+    return;
+  }
+  if (selection.trustFrontendPairs) {
+    AppendAlignedFrontendPairs(
+        leftFeatures, rightFeatures, selection.pairedFeatureCount,
+        selection.matchedLeftPoints, selection.matchedRightPoints);
+    return;
+  }
+  if (selection.initializationStereoBias && !selection.rawMatches.empty()) {
+    CopyMatchedStereoPointsFromPairs(
+        leftFeatures, rightFeatures, selection.rawMatches,
+        selection.matchedLeftPoints, selection.matchedRightPoints);
+    return;
+  }
+  if (EnvFlagEnabled("SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT", true) &&
+      !selection.filteredMatches.empty()) {
+    CopyMatchedStereoPointsFromPairs(
+        leftFeatures, rightFeatures, selection.filteredMatches,
+        selection.matchedLeftPoints, selection.matchedRightPoints);
+    return;
+  }
+  AppendAlignedFrontendPairs(
+      leftFeatures, rightFeatures, selection.pairedFeatureCount,
+      selection.matchedLeftPoints, selection.matchedRightPoints);
+}
+
+bool HasConsistentMatchedPoints(
+    const core::ports::StereoMatchSelection &selection) {
+  return !selection.matchedLeftPoints.empty() &&
+         selection.matchedLeftPoints.size() == selection.matchedRightPoints.size();
+}
+
 } // namespace
 
 void CopyMatchedStereoPointsFromPairs(
@@ -184,68 +278,18 @@ bool SelectStereoFeatureMatches(
   const DefaultStereoPairBuilder defaultPairBuilder;
   const core::ports::IStereoPairBuilder &pairBuilder =
       input.pairBuilder != nullptr ? *input.pairBuilder : defaultPairBuilder;
-  selection.pairedFeatureCount =
-      std::min(leftFeatures.keypoints.size(), rightFeatures.keypoints.size());
-  selection.trustFrontendPairs =
-      selection.pairedFeatureCount > 0 &&
-      (input.trustFrontendInitPairs || input.trustFrontendRecoveryPairs ||
-       input.trustFrontendBootstrapPairs);
-  selection.initializationTrustedPairSelection =
-      input.initializing && selection.trustFrontendPairs &&
-      EnvFlagEnabled("SMART_DRONE_SP_LG_INIT_TRUST_SELECT_CLOSE_PAIRS", false);
 
-  if (selection.initializationTrustedPairSelection) {
-    selection.initializationTrustedMatches = SelectInitializationTrustedPairs(
-        leftFeatures, rightFeatures, leftPrepared, rightPrepared, pairBuilder);
-    if (selection.initializationTrustedMatches.empty()) {
-      selection.rawMatches = BuildStereoPairsForSelection(
-          leftFeatures, rightFeatures, leftPrepared, rightPrepared,
-          pairBuilder);
-    }
-  } else if (!selection.trustFrontendPairs) {
-    selection.rawMatches = BuildStereoPairsForSelection(
-        leftFeatures, rightFeatures, leftPrepared, rightPrepared, pairBuilder);
-  }
-
-  selection.initializationStereoBias =
-      EnvFlagEnabled("SMART_DRONE_SP_LG_INIT_STEREO_BIAS", false) &&
-      input.initializing;
-  if (selection.initializationStereoBias) {
-    BiasInitializationMatches(selection.rawMatches);
-  }
+  InitializeMatchSelectionState(input, leftFeatures, rightFeatures, selection);
+  PopulateRawMatches(input, leftFeatures, rightFeatures, leftPrepared,
+                     rightPrepared, pairBuilder, selection);
+  ApplyInitializationStereoBias(input, selection);
 
   selection.filteredMatches =
       FilterStereoPairsByDisparityConsistency(selection.rawMatches);
-  if (selection.initializationTrustedPairSelection &&
-      !selection.initializationTrustedMatches.empty()) {
-    CopyMatchedStereoPointsFromPairs(
-        leftFeatures, rightFeatures, selection.initializationTrustedMatches,
-        selection.matchedLeftPoints, selection.matchedRightPoints);
-  } else if (selection.trustFrontendPairs) {
-    AppendAlignedFrontendPairs(
-        leftFeatures, rightFeatures, selection.pairedFeatureCount,
-        selection.matchedLeftPoints, selection.matchedRightPoints);
-  } else if (selection.initializationStereoBias &&
-             !selection.rawMatches.empty()) {
-    CopyMatchedStereoPointsFromPairs(
-        leftFeatures, rightFeatures, selection.rawMatches,
-        selection.matchedLeftPoints, selection.matchedRightPoints);
-  } else if (EnvFlagEnabled("SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT", true) &&
-             !selection.filteredMatches.empty()) {
-    CopyMatchedStereoPointsFromPairs(
-        leftFeatures, rightFeatures, selection.filteredMatches,
-        selection.matchedLeftPoints, selection.matchedRightPoints);
-  } else {
-    AppendAlignedFrontendPairs(
-        leftFeatures, rightFeatures, selection.pairedFeatureCount,
-        selection.matchedLeftPoints, selection.matchedRightPoints);
-  }
-
+  CopySelectedStereoPoints(leftFeatures, rightFeatures, selection);
   LimitWeakFramePairs(selection.matchedLeftPoints, selection.matchedRightPoints,
                       input);
-  return !selection.matchedLeftPoints.empty() &&
-         selection.matchedLeftPoints.size() ==
-             selection.matchedRightPoints.size();
+  return HasConsistentMatchedPoints(selection);
 }
 
 bool DefaultStereoMatchSelector::SelectMatches(

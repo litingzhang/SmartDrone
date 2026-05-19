@@ -153,11 +153,11 @@ public:
     if (m_localMapping == nullptr) {
       return;
     }
-    if (request.activeMapOnly) {
-      m_localMapping->RequestResetActiveMap(request.map);
-      return;
-    }
-    m_localMapping->RequestReset();
+    m_localMapping->RequestResetAsync(request.map, request.activeMapOnly);
+  }
+
+  bool Step() override {
+    return m_localMapping != nullptr && m_localMapping->Step();
   }
 
 private:

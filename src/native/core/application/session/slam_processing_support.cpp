@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <future>
 
 #include <opencv2/features2d.hpp>
 #include <opencv2/imgproc.hpp>
@@ -102,25 +101,25 @@ cv::Mat EnhanceLowLightGrayForSlam(const cv::Mat &gray)
     return enhanced;
 }
 
-void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, double meanL, double stdL, double meanR, double stdR,
-                              double sharpL, double sharpR, bool enableLowLightEnhance, ports::StereoFrame &out)
+void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, const StereoFrameQuality &quality,
+                              bool enableLowLightEnhance, ports::StereoFrame &out)
 {
     out = stereo;
     if (!enableLowLightEnhance) {
         return;
     }
 
-    const bool lowLightL = ShouldEnhanceLowLightFrame(meanL, stdL);
-    const bool lowLightR = ShouldEnhanceLowLightFrame(meanR, stdR);
-    const bool lowTextureL = IsLowTextureFrame(stdL, sharpL);
-    const bool lowTextureR = IsLowTextureFrame(stdR, sharpR);
+    const bool lowLightL = ShouldEnhanceLowLightFrame(quality.leftMean, quality.leftStddev);
+    const bool lowLightR = ShouldEnhanceLowLightFrame(quality.rightMean, quality.rightStddev);
+    const bool lowTextureL = IsLowTextureFrame(quality.leftStddev, quality.leftSharpness);
+    const bool lowTextureR = IsLowTextureFrame(quality.rightStddev, quality.rightSharpness);
     const bool shouldEnhance = lowLightL || lowLightR || (lowTextureL && lowTextureR);
     if (!shouldEnhance) {
         return;
     }
 
     // Keep left/right photometric transform consistent to avoid stereo matcher drift.
-    const bool severeLowLight = (meanL < 25.0 || meanR < 25.0);
+    const bool severeLowLight = (quality.leftMean < 25.0 || quality.rightMean < 25.0);
     const double gamma = severeLowLight ? 1.45 : 1.20;
     const double clipLimit = severeLowLight ? 3.0 : 2.3;
 
@@ -132,11 +131,10 @@ void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, double meanL, do
         return claheOut;
     };
 
-    auto leftTask = std::async(std::launch::async, [&]() { return processOne(stereo.left.gray); });
+    out.left.gray = processOne(stereo.left.gray);
+    out.left.owner.reset();
     out.right.gray = processOne(stereo.right.gray);
     out.right.owner.reset();
-    out.left.gray = leftTask.get();
-    out.left.owner.reset();
 }
 
 uint8_t ToRuntimeSlamModeValue(smartdrone::core::domain::SlamOperationMode mode)

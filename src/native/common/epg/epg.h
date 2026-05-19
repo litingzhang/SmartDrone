@@ -82,10 +82,16 @@ struct TriggerConfig {
     std::vector<std::string> queues;
 };
 
+struct TaskSchedulingConfig {
+    bool realtime{false};
+    int priority{0};
+};
+
 struct TaskConfig {
     std::string name;
     std::string type;
     TriggerConfig trigger;
+    TaskSchedulingConfig scheduling;
     std::map<PortId, std::string> inputs;
     std::map<PortId, std::string> outputs;
 };
@@ -567,6 +573,8 @@ public:
     void Configure(const GraphConfig& config);
     void ConfigureJson(const std::string& jsonText);
     void Start();
+    void RequestStop();
+    bool JoinStopped();
     void Stop();
     bool Running() const;
 
@@ -599,6 +607,37 @@ public:
 
 private:
     class TaskRunner;
+    struct ConfigureUsage;
+
+    void ResetConfiguredGraph();
+    void CreateConfiguredQueues(const GraphConfig& config,
+                                ConfigureUsage& usage);
+    void ValidateConfiguredTasks(const GraphConfig& config,
+                                  ConfigureUsage& usage) const;
+    void ValidateTaskConfig(const TaskConfig& taskConfig,
+                            ConfigureUsage& usage) const;
+    void ValidateTaskPorts(const TaskConfig& taskConfig,
+                           const Registry::TaskTypeInfo& taskType,
+                           ConfigureUsage& usage) const;
+    void ValidateTaskInputs(const TaskConfig& taskConfig,
+                            const std::map<PortId, PortSpec>& declaredInputs,
+                            ConfigureUsage& usage) const;
+    void ValidateTaskOutputs(const TaskConfig& taskConfig,
+                             const std::map<PortId, PortSpec>& declaredOutputs,
+                             ConfigureUsage& usage) const;
+    void ValidateTaskTrigger(const TaskConfig& taskConfig) const;
+    void ValidateTriggerQueues(const TaskConfig& taskConfig) const;
+    void PublishTaskProducedQueues(const ConfigureUsage& usage);
+    void CreateConfiguredTaskRunners(const GraphConfig& config);
+    std::unordered_map<PortId, IQueue*>
+    MakeInputQueueBindings(const TaskConfig& taskConfig) const;
+    std::unordered_map<PortId, IQueue*>
+    MakeOutputQueueBindings(const TaskConfig& taskConfig) const;
+    std::vector<IQueue*>
+    MakeTriggerQueueBindings(const TaskConfig& taskConfig) const;
+    void BindInputNotifiers(const GraphConfig& config);
+    void BindTaskInputNotifiers(TaskRunner& runner,
+                                const TaskConfig& taskConfig);
 
     const Registry& m_registry;
     bool m_configured{false};

@@ -391,77 +391,108 @@ uint8_t ArgReader::ParseUint8HexOrDec(const std::string &text,
   }
 }
 
-AppConfig ParseAppConfig(int argc, char **argv) {
-  ArgReader argReader(argc, argv);
-  AppConfig config;
+namespace {
 
+const char *GetArgv0(int argc, char **argv) {
+  if (argc > 0) {
+    return argv[0];
+  }
+  return nullptr;
+}
+
+void ParseSensorSettings(const ArgReader &argReader, const char *argv0,
+                         AppConfig &config) {
   config.sensorMode =
       ParseSensorModeText(argReader.GetString("--sensor-mode", "stereo"));
   const char *defaultSettings = DefaultSettingsForSensorMode(config.sensorMode);
-  config.settings =
-      ResolveRuntimePath(argReader.GetString("--settings", defaultSettings),
-                         argc > 0 ? argv[0] : nullptr);
+  config.settings = ResolveRuntimePath(
+      argReader.GetString("--settings", defaultSettings), argv0);
+}
 
-  config.camera.width = argReader.GetInt("--w", 640);
-  config.camera.height = argReader.GetInt("--h", 400);
-  config.camera.fps = argReader.GetInt("--fps", 60);
-  config.camera.leftCamIndex = argReader.GetInt("--left-cam-index", 0);
-  config.camera.rightCamIndex = argReader.GetInt("--right-cam-index", 1);
-  config.camera.uvcDeviceIndex =
-      argReader.GetInt("--uvc-device-index", config.camera.leftCamIndex);
-  config.camera.uvcEyeWidth =
-      argReader.GetInt("--uvc-eye-width", config.camera.width);
-  config.camera.uvcEyeHeight =
-      argReader.GetInt("--uvc-eye-height", config.camera.height);
-  config.camera.uvcPackedStereo = true;
+void ParseCameraPackingFlags(const ArgReader &argReader,
+                             CameraConfig &cameraConfig) {
+  cameraConfig.uvcPackedStereo = true;
   if (argReader.HasFlag("--no-uvc-packed-stereo")) {
-    config.camera.uvcPackedStereo = false;
+    cameraConfig.uvcPackedStereo = false;
   }
   if (argReader.HasFlag("--uvc-packed-stereo")) {
-    config.camera.uvcPackedStereo = true;
+    cameraConfig.uvcPackedStereo = true;
   }
-  config.camera.uvcSwapEyes = argReader.HasFlag("--uvc-swap-eyes");
-  if (argReader.HasFlag("--swap-cams")) {
-    std::swap(config.camera.leftCamIndex, config.camera.rightCamIndex);
-  }
-  config.camera.aeDisable = false;
+}
+
+void ParseCameraExposureFlags(const ArgReader &argReader,
+                              CameraConfig &cameraConfig) {
+  cameraConfig.aeDisable = false;
   if (argReader.HasFlag("--no-ae")) {
-    config.camera.aeDisable = true;
+    cameraConfig.aeDisable = true;
   }
   if (argReader.HasFlag("--ae")) {
-    config.camera.aeDisable = false;
+    cameraConfig.aeDisable = false;
   }
-  config.camera.exposureUs = argReader.GetInt("--exp-us", 5000);
-  config.camera.gain = argReader.GetFloat("--gain", 2.0f);
-  config.camera.requestY8 = !argReader.HasFlag("--no-y8");
-  config.camera.r16Norm = argReader.HasFlag("--r16-norm");
-  config.camera.pairMs = argReader.GetInt("--pair-ms", 2);
-  config.camera.keepMs = argReader.GetInt("--keep-ms", 120);
-  config.camera.pairQueue = argReader.GetInt("--pair-queue", 3);
+}
 
-  config.udp.enable = argReader.HasFlag("--udp");
-  config.udp.ip = argReader.GetString("--udp-ip", "10.42.0.109");
-  config.udp.port = argReader.GetInt("--udp-port", 5000);
-  config.udp.cmdPort = argReader.GetInt("--cmd-port", 14550);
-  config.udp.jpegQ = argReader.GetInt("--udp-jpeg-q", 80);
-  config.udp.payload = argReader.GetInt("--udp-payload", 1200);
-  config.udp.queue = argReader.GetInt("--udp-queue", 4);
+CameraConfig ParseCameraConfig(const ArgReader &argReader) {
+  CameraConfig cameraConfig;
+  cameraConfig.width = argReader.GetInt("--w", 640);
+  cameraConfig.height = argReader.GetInt("--h", 400);
+  cameraConfig.fps = argReader.GetInt("--fps", 60);
+  cameraConfig.leftCamIndex = argReader.GetInt("--left-cam-index", 0);
+  cameraConfig.rightCamIndex = argReader.GetInt("--right-cam-index", 1);
+  cameraConfig.uvcDeviceIndex =
+      argReader.GetInt("--uvc-device-index", cameraConfig.leftCamIndex);
+  cameraConfig.uvcEyeWidth =
+      argReader.GetInt("--uvc-eye-width", cameraConfig.width);
+  cameraConfig.uvcEyeHeight =
+      argReader.GetInt("--uvc-eye-height", cameraConfig.height);
+  ParseCameraPackingFlags(argReader, cameraConfig);
+  cameraConfig.uvcSwapEyes = argReader.HasFlag("--uvc-swap-eyes");
+  if (argReader.HasFlag("--swap-cams")) {
+    std::swap(cameraConfig.leftCamIndex, cameraConfig.rightCamIndex);
+  }
+  ParseCameraExposureFlags(argReader, cameraConfig);
+  cameraConfig.exposureUs = argReader.GetInt("--exp-us", 5000);
+  cameraConfig.gain = argReader.GetFloat("--gain", 2.0f);
+  cameraConfig.requestY8 = !argReader.HasFlag("--no-y8");
+  cameraConfig.r16Norm = argReader.HasFlag("--r16-norm");
+  cameraConfig.pairMs = argReader.GetInt("--pair-ms", 2);
+  cameraConfig.keepMs = argReader.GetInt("--keep-ms", 120);
+  cameraConfig.pairQueue = argReader.GetInt("--pair-queue", 3);
+  return cameraConfig;
+}
 
-  config.imu.spiDev = argReader.GetString("--spi", "/dev/spidev0.0");
-  config.imu.spiSpeed =
+UdpConfig ParseUdpConfig(const ArgReader &argReader) {
+  UdpConfig udpConfig;
+  udpConfig.enable = argReader.HasFlag("--udp");
+  udpConfig.ip = argReader.GetString("--udp-ip", "10.42.0.109");
+  udpConfig.port = argReader.GetInt("--udp-port", 5000);
+  udpConfig.cmdPort = argReader.GetInt("--cmd-port", 14550);
+  udpConfig.jpegQ = argReader.GetInt("--udp-jpeg-q", 80);
+  udpConfig.payload = argReader.GetInt("--udp-payload", 1200);
+  udpConfig.queue = argReader.GetInt("--udp-queue", 4);
+  return udpConfig;
+}
+
+ImuRuntimeConfig ParseImuRuntimeConfig(const ArgReader &argReader) {
+  ImuRuntimeConfig imuConfig;
+  imuConfig.spiDev = argReader.GetString("--spi", "/dev/spidev0.0");
+  imuConfig.spiSpeed =
       static_cast<uint32_t>(argReader.GetInt("--speed", 8000000));
-  config.imu.spiMode = static_cast<uint8_t>(argReader.GetInt("--mode", 0));
-  config.imu.spiBits = static_cast<uint8_t>(argReader.GetInt("--bits", 8));
-  config.imu.gpiochip = argReader.GetString("--gpiochip", "/dev/gpiochip0");
-  config.imu.drdyLine = static_cast<unsigned>(argReader.GetInt("--drdy", 24));
-  config.imu.imuHz = argReader.GetInt("--imu-hz", 500);
-  config.imu.accelFsG = argReader.GetInt("--accel-fs", 16);
-  config.imu.gyroFsDps = argReader.GetInt("--gyro-fs", 2000);
-  config.imu.imuStartReg =
+  imuConfig.spiMode = static_cast<uint8_t>(argReader.GetInt("--mode", 0));
+  imuConfig.spiBits = static_cast<uint8_t>(argReader.GetInt("--bits", 8));
+  imuConfig.gpiochip = argReader.GetString("--gpiochip", "/dev/gpiochip0");
+  imuConfig.drdyLine = static_cast<unsigned>(argReader.GetInt("--drdy", 24));
+  imuConfig.imuHz = argReader.GetInt("--imu-hz", 500);
+  imuConfig.accelFsG = argReader.GetInt("--accel-fs", 16);
+  imuConfig.gyroFsDps = argReader.GetInt("--gyro-fs", 2000);
+  imuConfig.imuStartReg =
       argReader.GetUint8HexOrDec("--imu-start-reg", 0x1F, "0x1F");
-  config.imu.rtImu = argReader.HasFlag("--rt-imu");
-  config.imu.rtPrio = argReader.GetInt("--rt-prio", 60);
+  imuConfig.rtImu = argReader.HasFlag("--rt-imu");
+  imuConfig.rtPrio = argReader.GetInt("--rt-prio", 60);
+  return imuConfig;
+}
 
+void ParseCoreRuntimeConfig(const ArgReader &argReader, const char *argv0,
+                            AppConfig &config) {
   config.runtime.offRejectNs =
       argReader.GetInt64("--off-reject-ns", 10'000'000);
   config.runtime.allowEmptyImu = argReader.HasFlag("--allow-empty-imu");
@@ -473,79 +504,116 @@ AppConfig ParseAppConfig(int argc, char **argv) {
   const std::string vocabArg = argReader.GetString(
       "--vocab",
       config.runtime.slamBackend == SlamBackend::OrbSlam3 ? "ORBvoc.txt" : "");
-  config.vocab = ResolveRuntimePath(vocabArg, argc > 0 ? argv[0] : nullptr);
-  config.runtime.dpvoRepo = ResolveRuntimePath(
-      argReader.GetString("--dpvo-repo", ""), argc > 0 ? argv[0] : nullptr);
-  config.runtime.dpvoPatchEngine =
-      ResolveRuntimePath(argReader.GetString("--dpvo-patch-engine", ""),
-                         argc > 0 ? argv[0] : nullptr);
-  config.runtime.dpvoUpdateEngine =
-      ResolveRuntimePath(argReader.GetString("--dpvo-update-engine", ""),
-                         argc > 0 ? argv[0] : nullptr);
-  config.runtime.dpvoInputWidth = argReader.GetInt("--dpvo-input-width", 640);
-  config.runtime.dpvoInputHeight = argReader.GetInt("--dpvo-input-height", 400);
-  config.runtime.dpvoPatchesPerFrame =
+  config.vocab = ResolveRuntimePath(vocabArg, argv0);
+}
+
+void ParseDpvoRuntimeConfig(const ArgReader &argReader, const char *argv0,
+                            RuntimeConfig &runtimeConfig) {
+  runtimeConfig.dpvoRepo =
+      ResolveRuntimePath(argReader.GetString("--dpvo-repo", ""), argv0);
+  runtimeConfig.dpvoPatchEngine =
+      ResolveRuntimePath(argReader.GetString("--dpvo-patch-engine", ""), argv0);
+  runtimeConfig.dpvoUpdateEngine = ResolveRuntimePath(
+      argReader.GetString("--dpvo-update-engine", ""), argv0);
+  runtimeConfig.dpvoInputWidth = argReader.GetInt("--dpvo-input-width", 640);
+  runtimeConfig.dpvoInputHeight = argReader.GetInt("--dpvo-input-height", 400);
+  runtimeConfig.dpvoPatchesPerFrame =
       argReader.GetInt("--dpvo-patches-per-frame", 48);
-  config.runtime.dpvoOptimizationWindow =
+  runtimeConfig.dpvoOptimizationWindow =
       argReader.GetInt("--dpvo-optimization-window", 7);
-  config.runtime.featureFrontend = ParseFeatureFrontendText(
-      argReader.GetString("--feature-frontend", "lk_gftt_per_frame"));
-  {
-    const char *home = std::getenv("HOME");
-    const std::string explicitRepo = GetStringWithLegacyFallback(
-        argReader, "--visual-feature-repo", "--superpoint-repo", "");
-    if (!explicitRepo.empty()) {
-      config.runtime.visualFeatureRepo =
-          ResolveRuntimePath(explicitRepo, argc > 0 ? argv[0] : nullptr);
-    } else {
-      std::vector<std::string> repoCandidates;
-      repoCandidates.emplace_back("LightGlue");
-      repoCandidates.emplace_back("lightglue");
-      repoCandidates.emplace_back("third_party/LightGlue");
-      repoCandidates.emplace_back("third_party/lightglue");
-      if (home != nullptr) {
-        repoCandidates.push_back((fs::path(home) / "LightGlue").string());
-        repoCandidates.push_back((fs::path(home) / "lightglue").string());
-        repoCandidates.push_back(
-            (fs::path(home) / "third_party" / "LightGlue").string());
-        repoCandidates.push_back(
-            (fs::path(home) / "third_party" / "lightglue").string());
-      }
-      config.runtime.visualFeatureRepo = ResolveFirstExistingRuntimePath(
-          repoCandidates, argc > 0 ? argv[0] : nullptr);
-    }
+}
+
+std::vector<std::string> BuildVisualFeatureRepoCandidates(const char *home) {
+  std::vector<std::string> repoCandidates;
+  repoCandidates.emplace_back("LightGlue");
+  repoCandidates.emplace_back("lightglue");
+  repoCandidates.emplace_back("third_party/LightGlue");
+  repoCandidates.emplace_back("third_party/lightglue");
+  if (home == nullptr) {
+    return repoCandidates;
   }
-  config.runtime.visualFeatureDevice = GetStringWithLegacyFallback(
+  repoCandidates.push_back((fs::path(home) / "LightGlue").string());
+  repoCandidates.push_back((fs::path(home) / "lightglue").string());
+  repoCandidates.push_back(
+      (fs::path(home) / "third_party" / "LightGlue").string());
+  repoCandidates.push_back(
+      (fs::path(home) / "third_party" / "lightglue").string());
+  return repoCandidates;
+}
+
+std::string ResolveVisualFeatureRepo(const ArgReader &argReader,
+                                     const char *argv0) {
+  const std::string explicitRepo = GetStringWithLegacyFallback(
+      argReader, "--visual-feature-repo", "--superpoint-repo", "");
+  if (!explicitRepo.empty()) {
+    return ResolveRuntimePath(explicitRepo, argv0);
+  }
+  return ResolveFirstExistingRuntimePath(
+      BuildVisualFeatureRepoCandidates(std::getenv("HOME")), argv0);
+}
+
+void ParseVisualFeatureRuntimeConfig(const ArgReader &argReader,
+                                     const char *argv0,
+                                     RuntimeConfig &runtimeConfig) {
+  runtimeConfig.featureFrontend = ParseFeatureFrontendText(
+      argReader.GetString("--feature-frontend", "lk_gftt_per_frame"));
+  runtimeConfig.visualFeatureRepo = ResolveVisualFeatureRepo(argReader, argv0);
+  runtimeConfig.visualFeatureDevice = GetStringWithLegacyFallback(
       argReader, "--visual-feature-device", "--superpoint-device", "auto");
-  config.runtime.visualFeatureTopK = GetIntWithLegacyFallback(
+  runtimeConfig.visualFeatureTopK = GetIntWithLegacyFallback(
       argReader, "--visual-feature-top-k", "--superpoint-top-k", 1024);
-  config.runtime.visualFeatureMaxPoints = GetIntWithLegacyFallback(
+  runtimeConfig.visualFeatureMaxPoints = GetIntWithLegacyFallback(
       argReader, "--visual-feature-max-points", "--superpoint-max-points", 512);
-  config.runtime.visualFeatureInputMaxWidth =
+  runtimeConfig.visualFeatureInputMaxWidth =
       GetIntWithLegacyFallback(argReader, "--visual-feature-input-max-width",
                                "--superpoint-input-max-width", 640);
-  config.runtime.visualFeatureInputMaxHeight = GetIntWithLegacyFallback(
+  runtimeConfig.visualFeatureInputMaxHeight = GetIntWithLegacyFallback(
       argReader, "--visual-feature-input-max-height",
       "--superpoint-input-max-height",
-      config.runtime.featureFrontend == FeatureFrontend::SuperPointLightGlue
+      runtimeConfig.featureFrontend == FeatureFrontend::SuperPointLightGlue
           ? 409
           : 400);
-  config.runtime.lkLoopClosure = argReader.HasFlag("--lk-loop-closure");
-  config.runtime.lkLoopScale = argReader.GetFloat("--lk-loop-scale", 1.20f);
-  config.runtime.lkLoopRelaxation =
-      argReader.GetFloat("--lk-loop-relax", 1.40f);
-  config.runtime.lkPerFrameAcceleration =
+}
+
+void ParseSlamFeatureTuningConfig(const ArgReader &argReader,
+                                  RuntimeConfig &runtimeConfig) {
+  runtimeConfig.lkLoopClosure = argReader.HasFlag("--lk-loop-closure");
+  runtimeConfig.lkLoopScale = argReader.GetFloat("--lk-loop-scale", 1.20f);
+  runtimeConfig.lkLoopRelaxation = argReader.GetFloat("--lk-loop-relax", 1.40f);
+  runtimeConfig.lkPerFrameAcceleration =
       argReader.GetString("--lk-per-frame-accel", "vpi-cuda");
-  config.runtime.orbAcceleration =
+  runtimeConfig.orbAcceleration =
       NormalizeAccelerationText(argReader.GetString("--orb-accel", "cpu"));
-  if (config.runtime.slamBackend == SlamBackend::OrbSlam3) {
-    ApplyOrbAccelerationEnvironment(config.runtime.orbAcceleration);
+  if (runtimeConfig.slamBackend == SlamBackend::OrbSlam3) {
+    ApplyOrbAccelerationEnvironment(runtimeConfig.orbAcceleration);
   }
-  config.runtime.debugRightOnlyFeatures =
+}
+
+void ParseDiagnosticsConfig(const ArgReader &argReader,
+                            RuntimeConfig &runtimeConfig) {
+  runtimeConfig.debugRightOnlyFeatures =
       argReader.HasFlag("--debug-right-only-features");
-  config.runtime.slamLowLightEnhance =
+  runtimeConfig.slamLowLightEnhance =
       argReader.HasFlag("--slam-lowlight-enhance");
-  config.runtime.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");
+  runtimeConfig.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");
+}
+
+} // namespace
+
+AppConfig ParseAppConfig(int argc, char **argv) {
+  const char *argv0 = GetArgv0(argc, argv);
+  ArgReader argReader(argc, argv);
+  AppConfig config;
+
+  ParseSensorSettings(argReader, argv0, config);
+  config.camera = ParseCameraConfig(argReader);
+  config.udp = ParseUdpConfig(argReader);
+  config.imu = ParseImuRuntimeConfig(argReader);
+  ParseCoreRuntimeConfig(argReader, argv0, config);
+  ParseDpvoRuntimeConfig(argReader, argv0, config.runtime);
+  ParseVisualFeatureRuntimeConfig(argReader, argv0, config.runtime);
+  ParseSlamFeatureTuningConfig(argReader, config.runtime);
+  ParseDiagnosticsConfig(argReader, config.runtime);
 
   return config;
 }

@@ -54,6 +54,7 @@ public:
 
     // Main function
     void Run();
+    bool Step();
 
     void InsertKeyFrame(KeyFrame* pKF);
     void EmptyQueue();
@@ -62,6 +63,7 @@ public:
     void RequestStop();
     void RequestReset();
     void RequestResetActiveMap(Map* pMap);
+    void RequestResetAsync(Map* pMap, bool activeMapOnly);
     bool Stop();
     void Release();
     bool isStopped();

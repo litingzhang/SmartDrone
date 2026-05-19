@@ -28,12 +28,34 @@ digraph EpgTopology {
     labelangle=25
   ];
 
-  subgraph cluster_supervisor_graph {
-    label="Runtime Supervisor Graph";
+  subgraph cluster_system_runtime_graph {
+    label="System Runtime Graph";
     color="#a7b0bd";
     style="rounded,dashed";
+
+    VehicleTelemetryRxTask [
+      label="{VehicleTelemetryRxTask|type=VehicleTelemetryRxTask|trigger=periodic|interval_ms=2}"
+    ];
+    SetpointStreamTask [
+      label="{SetpointStreamTask|type=SetpointStreamTask|trigger=periodic|interval_ms=5}"
+    ];
+    UdpCommandTask [
+      label="{UdpCommandTask|type=UdpCommandTask|trigger=periodic|interval_ms=2}"
+    ];
+    ManualControlTask [
+      label="{ManualControlTask|type=ManualControlTask|trigger=periodic|interval_ms=50}"
+    ];
+    ForceRestartTask [
+      label="{ForceRestartTask|type=ForceRestartTask|trigger=periodic|interval_ms=50}"
+    ];
     RuntimeSupervisorTask [
       label="{RuntimeSupervisorTask|type=RuntimeSupervisorTask|trigger=periodic|interval_ms=100}"
+    ];
+    DiscoveryBeaconTask [
+      label="{DiscoveryBeaconTask|type=DiscoveryBeaconTask|trigger=periodic|interval_ms=100}"
+    ];
+    EpgDfxSnapshotTask [
+      label="{EpgDfxSnapshotTask|type=EpgDfxSnapshotTask|trigger=periodic|interval_ms=500}"
     ];
   }
 
@@ -48,8 +70,14 @@ digraph EpgTopology {
     SlamClockTask [
       label="{SlamClockTask|type=SlamClockTask|trigger=periodic|interval_ms=50}"
     ];
+    SlamImuPollTask [
+      label="{SlamImuPollTask|type=SlamImuPollTask|trigger=periodic_or_any_queue_ready|interval_ms=1|trigger_queues=SlamResourceReady|realtime=false|priority=0}"
+    ];
+    SlamBackendTickTask [
+      label="{SlamBackendTickTask|type=SlamBackendTickTask|trigger=periodic|interval_ms=5}"
+    ];
     SlamImuGateTask [
-      label="{SlamImuGateTask|type=SlamImuGateTask|trigger=any_queue_ready|trigger_queues=SlamResourceReady+SlamTick}"
+      label="{SlamImuGateTask|type=SlamImuGateTask|trigger=any_queue_ready|trigger_queues=SlamImuReady+SlamTick}"
     ];
     SlamAcquireTask [
       label="{SlamAcquireTask|type=SlamAcquireTask|stage=frame_acquire_and_prepare|trigger=any_queue_ready|trigger_queues=SlamFrameReady}"
@@ -78,9 +106,15 @@ digraph EpgTopology {
     SlamMonitorTask [
       label="{SlamMonitorTask|type=SlamMonitorTask|trigger=any_queue_ready|trigger_queues=SlamStatus}"
     ];
+    SlamGraphDfxSnapshotTask [
+      label="{SlamGraphDfxSnapshotTask|type=EpgDfxSnapshotTask|trigger=periodic|interval_ms=500}"
+    ];
 
-    SlamResourceTask -> SlamImuGateTask [
+    SlamResourceTask -> SlamImuPollTask [
       taillabel="0", headlabel="0", label="SlamResourceReady\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamImuPollTask -> SlamImuGateTask [
+      taillabel="0", headlabel="0", label="SlamImuReady\ndepth=1\noverflow=overwrite_oldest"
     ];
     SlamClockTask -> SlamImuGateTask [
       taillabel="0", headlabel="1", label="SlamTick\ndepth=1\noverflow=overwrite_oldest"
@@ -141,7 +175,7 @@ digraph EpgTopology {
       label="{CalibUdpPreviewTask|type=CalibUdpPreviewTask|trigger=any_queue_ready|trigger_queues=CalibStereoFrame}"
     ];
     CalibCompletionTask [
-      label="{CalibCompletionTask|type=CalibCompletionTask|trigger=any_queue_ready|trigger_queues=CalibCaptureDone+CalibStorageStatus+CalibImuStatus+CalibPreviewStatus}"
+      label="{CalibCompletionTask|type=CalibCompletionTask|trigger=any_queue_ready|trigger_queues=CalibCaptureDone+CalibStorageStatus+CalibImuStatus+CalibPreviewStatus+CalibStopRequest}"
     ];
     CalibFlushSyncTask [
       label="{CalibFlushSyncTask|type=CalibFlushSyncTask|trigger=any_queue_ready|trigger_queues=CalibFlushRequest}"
@@ -149,12 +183,18 @@ digraph EpgTopology {
     CalibMonitorTask [
       label="{CalibMonitorTask|type=CalibMonitorTask|trigger=any_queue_ready|trigger_queues=CalibStatus}"
     ];
+    CalibGraphDfxSnapshotTask [
+      label="{CalibGraphDfxSnapshotTask|type=EpgDfxSnapshotTask|trigger=periodic|interval_ms=500}"
+    ];
 
     CalibResourceTask -> CalibCameraAcquireTask [
       taillabel="0", headlabel="0", label="CalibResourceReady\ndepth=1\noverflow=overwrite_oldest"
     ];
     CalibResourceTask -> CalibImuWriterTask [
       taillabel="1", headlabel="0", label="CalibResourceReady\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    CalibResourceTask -> CalibCompletionTask [
+      taillabel="2", headlabel="4", label="CalibStopRequest\ndepth=1\noverflow=overwrite_oldest"
     ];
     CalibClockTask -> CalibCameraAcquireTask [
       taillabel="0", headlabel="1", label="CalibTick\ndepth=1\noverflow=overwrite_oldest"

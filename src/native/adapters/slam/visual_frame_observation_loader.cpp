@@ -28,6 +28,93 @@ void ApplyOctave(std::vector<cv::KeyPoint> &keypoints, int octave) {
   }
 }
 
+void LoadStereoKeypointsAndDescriptors(
+    const core::ports::StereoFeatureObservationPacket &features,
+    core::ports::VisualFrameObservationData &outData) {
+  outData.leftKeypoints = features.leftKeypoints;
+  outData.rightKeypoints = features.rightKeypoints;
+  outData.leftDescriptors =
+      TrimDescriptorRows(features.leftDescriptors, outData.leftKeypoints.size());
+  outData.rightDescriptors = TrimDescriptorRows(features.rightDescriptors,
+                                               outData.rightKeypoints.size());
+  FitKeypointsToDescriptors(outData.leftKeypoints, outData.leftDescriptors);
+  FitKeypointsToDescriptors(outData.rightKeypoints, outData.rightDescriptors);
+}
+
+void ApplyInjectedOctave(
+    const core::ports::StereoFrameObservationLoadRequest &request,
+    core::ports::VisualFrameObservationData &outData) {
+  const int octave = std::clamp(request.options.injectedKeypointOctave, 0,
+                               std::max(0, request.options.maxScaleLevel));
+  ApplyOctave(outData.leftKeypoints, octave);
+  ApplyOctave(outData.rightKeypoints, octave);
+}
+
+void InitializeStereoDepthOutputs(
+    core::ports::VisualFrameObservationData &outData) {
+  outData.featureCount = static_cast<int>(outData.leftKeypoints.size());
+  outData.rightU = std::vector<float>(
+      static_cast<size_t>(outData.featureCount), -1.0f);
+  outData.depth = std::vector<float>(
+      static_cast<size_t>(outData.featureCount), -1.0f);
+}
+
+size_t StereoPairCount(const core::ports::StereoFeatureObservationPacket &features,
+                       const core::ports::VisualFrameObservationData &outData) {
+  if (features.leftToRightMatch.empty()) {
+    return std::min(outData.leftKeypoints.size(), outData.rightKeypoints.size());
+  }
+  return outData.leftKeypoints.size();
+}
+
+int ResolveRightFeatureIndex(
+    const core::ports::StereoFeatureObservationPacket &features,
+    size_t leftIndex) {
+  if (features.leftToRightMatch.empty()) {
+    return static_cast<int>(leftIndex);
+  }
+  if (leftIndex >= features.leftToRightMatch.size()) {
+    return -1;
+  }
+  return features.leftToRightMatch[leftIndex];
+}
+
+void ApplyStereoDepthForPair(
+    const core::ports::StereoFrameObservationLoadRequest &request,
+    size_t leftIndex, int rightIndex,
+    core::ports::VisualFrameObservationData &outData) {
+  if (rightIndex < 0 ||
+      static_cast<size_t>(rightIndex) >= outData.rightKeypoints.size()) {
+    return;
+  }
+  const float rightX =
+      outData.rightKeypoints[static_cast<size_t>(rightIndex)].pt.x;
+  const float disparity = outData.leftKeypoints[leftIndex].pt.x - rightX;
+  if (disparity <= 0.0f) {
+    return;
+  }
+
+  outData.rightU[leftIndex] = rightX;
+  outData.depth[leftIndex] =
+      (request.options.baselineFx / disparity) *
+      request.options.injectedStereoDepthScale;
+  if (outData.depth[leftIndex] > 0.0f &&
+      outData.depth[leftIndex] < request.options.closeDepthThreshold) {
+    ++outData.closePointCount;
+  }
+}
+
+void FillMatchedStereoDepth(
+    const core::ports::StereoFrameObservationLoadRequest &request,
+    const core::ports::StereoFeatureObservationPacket &features,
+    core::ports::VisualFrameObservationData &outData) {
+  const size_t pairCount = StereoPairCount(features, outData);
+  for (size_t i = 0; i < pairCount; ++i) {
+    ApplyStereoDepthForPair(request, i, ResolveRightFeatureIndex(features, i),
+                            outData);
+  }
+}
+
 } // namespace
 
 bool DefaultVisualFrameObservationLoader::LoadMonoObservation(
@@ -57,62 +144,15 @@ bool DefaultVisualFrameObservationLoader::LoadStereoObservation(
 
   const core::ports::StereoFeatureObservationPacket &features =
       *request.features;
-  outData.leftKeypoints = features.leftKeypoints;
-  outData.rightKeypoints = features.rightKeypoints;
-  outData.leftDescriptors =
-      TrimDescriptorRows(features.leftDescriptors, outData.leftKeypoints.size());
-  outData.rightDescriptors = TrimDescriptorRows(features.rightDescriptors,
-                                               outData.rightKeypoints.size());
-  FitKeypointsToDescriptors(outData.leftKeypoints, outData.leftDescriptors);
-  FitKeypointsToDescriptors(outData.rightKeypoints, outData.rightDescriptors);
-
-  const int octave = std::clamp(request.options.injectedKeypointOctave, 0,
-                               std::max(0, request.options.maxScaleLevel));
-  ApplyOctave(outData.leftKeypoints, octave);
-  ApplyOctave(outData.rightKeypoints, octave);
-
-  outData.featureCount = static_cast<int>(outData.leftKeypoints.size());
-  outData.rightU = std::vector<float>(
-      static_cast<size_t>(outData.featureCount), -1.0f);
-  outData.depth = std::vector<float>(
-      static_cast<size_t>(outData.featureCount), -1.0f);
+  LoadStereoKeypointsAndDescriptors(features, outData);
+  ApplyInjectedOctave(request, outData);
+  InitializeStereoDepthOutputs(outData);
 
   if (!features.matchedStereoPairs) {
     return true;
   }
 
-  const size_t pairCount =
-      features.leftToRightMatch.empty()
-          ? std::min(outData.leftKeypoints.size(), outData.rightKeypoints.size())
-          : outData.leftKeypoints.size();
-  for (size_t i = 0; i < pairCount; ++i) {
-    int rightIndex = static_cast<int>(i);
-    if (!features.leftToRightMatch.empty()) {
-      if (i >= features.leftToRightMatch.size()) {
-        continue;
-      }
-      rightIndex = features.leftToRightMatch[i];
-    }
-    if (rightIndex < 0 ||
-        static_cast<size_t>(rightIndex) >= outData.rightKeypoints.size()) {
-      continue;
-    }
-    const float rightX =
-        outData.rightKeypoints[static_cast<size_t>(rightIndex)].pt.x;
-    const float disparity = outData.leftKeypoints[i].pt.x - rightX;
-    if (disparity <= 0.0f) {
-      continue;
-    }
-    outData.rightU[i] = rightX;
-    outData.depth[i] =
-        (request.options.baselineFx / disparity) *
-        request.options.injectedStereoDepthScale;
-    if (outData.depth[i] > 0.0f &&
-        outData.depth[i] < request.options.closeDepthThreshold) {
-      ++outData.closePointCount;
-    }
-  }
-
+  FillMatchedStereoDepth(request, features, outData);
   return true;
 }
 

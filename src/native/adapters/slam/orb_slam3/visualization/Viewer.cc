@@ -370,10 +370,8 @@ void Viewer::Run()
 
         if(Stop())
         {
-            while(isStopped())
-            {
-                usleep(3000);
-            }
+            Release();
+            continue;
         }
 
         if(CheckFinish())

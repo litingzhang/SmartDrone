@@ -62,6 +62,7 @@ class ICameraProvider {
     virtual void Close() = 0;
     virtual bool Start() = 0;
     virtual void Stop() = 0;
+    // timeoutMs == 0 performs one non-blocking capture attempt for EPG tasks.
     virtual bool GrabStereo(StereoFrame &out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs = 0) = 0;
     virtual CameraHealth GetHealth() const = 0;
     virtual CameraDiagnostics GetDiagnostics() const = 0;

@@ -52,6 +52,7 @@ public:
 
   virtual bool Available() const = 0;
   virtual void SetOperationMode(core::domain::SlamOperationMode mode) = 0;
+  virtual void StepBackend() {}
   virtual void Shutdown() = 0;
 };
 

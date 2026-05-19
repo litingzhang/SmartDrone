@@ -523,11 +523,11 @@ Result:
 
 ```text
 runtime_config_service.cpp compiled
-udp_command_thread.cpp compiled
+udp_command_runtime.cpp compiled
 link failed: cannot find -lORB_SLAM3, -lDBoW2, -lg2o
 ```
 
-Interpretation from the historical run: Android/JNI/CMake build passed, and the runtime config/UDP command path compiled.
+Interpretation from the historical run: Android/JNI/CMake build passed, and the runtime config/UDP command runtime path compiled.
 The previous final link blockage was removed by making ORB-SLAM3 an optional internal legacy backend.
 
 ## 2026-05-16 Build Fix And Deployment

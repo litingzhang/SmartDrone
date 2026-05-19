@@ -58,7 +58,6 @@ Atlas::~Atlas()
 void Atlas::CreateNewMap()
 {
     unique_lock<mutex> lock(mMutexAtlas);
-    cout << "Creation of new map with id: " << Map::nNextId << endl;
     if(mpCurrentMap){
         if(!mspMaps.empty() && mnLastInitKFidMap < mpCurrentMap->GetMaxKFid())
             mnLastInitKFidMap = mpCurrentMap->GetMaxKFid()+1; //The init KF is the next of current maximum
@@ -69,11 +68,7 @@ void Atlas::CreateNewMap()
         //if(mHasViewer)
         //    mpViewer->AddMapToCreateThumbnail(mpCurrentMap);
     }
-    cout << "Creation of new map with last KF id: " << mnLastInitKFidMap << endl;
-
-    mpCurrentMap = new Map(mnLastInitKFidMap);
-    mpCurrentMap->SetCurrentMap();
-    mspMaps.insert(mpCurrentMap);
+    CreateNewMapLocked();
 }
 
 void Atlas::ChangeMap(Map* pMap)
@@ -86,6 +81,27 @@ void Atlas::ChangeMap(Map* pMap)
 
     mpCurrentMap = pMap;
     mpCurrentMap->SetCurrentMap();
+}
+
+void Atlas::CreateNewMapLocked()
+{
+    cout << "Creation of new map with id: " << Map::nNextId << endl;
+    cout << "Creation of new map with last KF id: " << mnLastInitKFidMap << endl;
+    mpCurrentMap = new Map(mnLastInitKFidMap);
+    mpCurrentMap->SetCurrentMap();
+    mspMaps.insert(mpCurrentMap);
+}
+
+void Atlas::SelectUsableMapLocked()
+{
+    for(Map* pMap : mspMaps) {
+        if(pMap != nullptr && !pMap->IsBad()) {
+            mpCurrentMap = pMap;
+            mpCurrentMap->SetCurrentMap();
+            return;
+        }
+    }
+    CreateNewMapLocked();
 }
 
 unsigned long int Atlas::GetLastInitKFid()
@@ -249,10 +265,9 @@ void Atlas::clearAtlas()
 Map* Atlas::GetCurrentMap()
 {
     unique_lock<mutex> lock(mMutexAtlas);
-    if(!mpCurrentMap)
-        CreateNewMap();
-    while(mpCurrentMap->IsBad())
-        usleep(3000);
+    if(!mpCurrentMap || mpCurrentMap->IsBad()) {
+        SelectUsableMapLocked();
+    }
 
     return mpCurrentMap;
 }

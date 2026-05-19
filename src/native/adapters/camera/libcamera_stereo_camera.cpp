@@ -4,10 +4,20 @@ namespace smartdrone::adapters::camera {
 
 bool LibcameraStereoCamera::Open(const smartdrone::core::application::MainRuntimeAliases &aliases)
 {
-    return m_impl.Open(aliases.width, aliases.height, aliases.fps, aliases.aeDisable, aliases.exposureUs, aliases.gain,
-                       aliases.requestY8, static_cast<int64_t>(aliases.pairMs) * 1000000LL,
-                       static_cast<int64_t>(aliases.keepMs) * 1000000LL, aliases.pairQueue, aliases.r16Norm,
-                       aliases.leftCamIndex, aliases.rightCamIndex);
+    const StereoCameraOpenParams params{aliases.width,
+                                        aliases.height,
+                                        aliases.fps,
+                                        aliases.aeDisable,
+                                        aliases.exposureUs,
+                                        aliases.gain,
+                                        aliases.requestY8,
+                                        static_cast<int64_t>(aliases.pairMs) * 1000000LL,
+                                        static_cast<int64_t>(aliases.keepMs) * 1000000LL,
+                                        aliases.pairQueue,
+                                        aliases.r16Norm,
+                                        aliases.leftCamIndex,
+                                        aliases.rightCamIndex};
+    return m_impl.Open(params);
 }
 
 void LibcameraStereoCamera::Close() { m_impl.Close(); }

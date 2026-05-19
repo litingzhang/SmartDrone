@@ -5,7 +5,6 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -15,13 +14,11 @@
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <numeric>
 #include <random>
 #include <sstream>
 #include <string>
 #include <system_error>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -4360,26 +4357,7 @@ struct DpvoTensorRtEngine::Impl {
   explicit Impl(DpvoTensorRtConfig cfg) : config(std::move(cfg)) {}
   ~Impl() { Stop(); }
 
-  struct CachedTrackingSnapshot {
-    bool havePose{false};
-    int frameCount{0};
-    int edgeCount{0};
-    int patchCount{0};
-    int stereoDepthUpdates{0};
-  };
-
-  struct AsyncUpdateJob {
-    uint64_t frameId{0};
-    int64_t timestampNs{0};
-    cv::Mat leftGray;
-    cv::Mat rightGray;
-    float scaleX{1.0f};
-    float scaleY{1.0f};
-    bool runRight{true};
-  };
-
   bool Start() {
-    StopAsyncWorker();
     const std::filesystem::path patchPath =
         ResolveEnginePath(config.patchEnginePath, config.repoPath,
                           {"dpvo_patchifier_fp16.engine",
@@ -4494,23 +4472,10 @@ struct DpvoTensorRtEngine::Impl {
       }
     }
     nativeSolver.Reset();
-    {
-      std::lock_guard<std::mutex> lock(cacheMutex);
-      haveLastPose = false;
-      lastPose = core::ports::PoseEstimate{};
-      haveAsyncPublishPose = false;
-      asyncPublishPose = core::ports::PoseEstimate{};
-      cachedFrameCount = 0;
-      cachedEdgeCount = 0;
-      cachedPatchCount = 0;
-      cachedStereoDepthUpdates = 0;
-      cachedLeftFeatures.clear();
-    }
+    haveLastPose = false;
+    lastPose = core::ports::PoseEstimate{};
     loggedKeyframeRemovals = 0;
     processedFrameCount = 0;
-    asyncUpdateEnabled =
-        EnvFlagEnabled("SMART_DRONE_DPVO_ASYNC_UPDATE",
-                       EnvFlagEnabled("SMART_DRONE_DPVO_EPG_PACING", false));
     const int defaultHeavyEveryN =
         EnvFlagEnabled("SMART_DRONE_DPVO_EPG_PACING", false) ? 3 : 1;
     heavyEveryN =
@@ -4527,7 +4492,6 @@ struct DpvoTensorRtEngine::Impl {
                                std::max(8, config.optimizationWindow + 1)),
                    1, 60);
     loggedEpgPacing = false;
-    loggedAsyncUpdate = false;
     lastHeavyUpdateEndNs.store(0, std::memory_order_relaxed);
     running.store(true, std::memory_order_release);
     std::cerr << "[dpvo_trt] ready patch_engine=" << patchEngine.Path()
@@ -4553,11 +4517,6 @@ struct DpvoTensorRtEngine::Impl {
                 << " warmup_full_frames=" << warmupFullFrames << "\n";
       loggedEpgPacing = true;
     }
-    if (asyncUpdateEnabled && !loggedAsyncUpdate) {
-      std::cerr << "[dpvo_trt] async update enabled: foreground publishes "
-                   "cached pose, worker runs patch/corr/BA\n";
-      loggedAsyncUpdate = true;
-    }
     if (!voState.LoadStereoCalibration(config.settingsPath)) {
       std::cerr << "[dpvo_trt] DPVO calibration unavailable settings='"
                 << config.settingsPath << "'; pose output disabled\n";
@@ -4565,362 +4524,14 @@ struct DpvoTensorRtEngine::Impl {
       return false;
     }
     voState.ResetTrackingState();
-    if (asyncUpdateEnabled) {
-      StartAsyncWorker();
-    }
     return true;
   }
 
   void Stop() {
     running.store(false, std::memory_order_release);
-    StopAsyncWorker();
-    {
-      std::lock_guard<std::mutex> lock(graphMutex);
-      nativeSolver.Reset();
-    }
+    nativeSolver.Reset();
     cudaKernelReady = false;
     cudaStream.Reset();
-  }
-
-  CachedTrackingSnapshot
-  CopyCachedTracking(core::ports::PoseEstimate *pose,
-                     std::vector<cv::Point2f> *features = nullptr) {
-    std::lock_guard<std::mutex> lock(cacheMutex);
-    if (pose != nullptr) {
-      *pose = lastPose;
-    }
-    if (features != nullptr) {
-      *features = cachedLeftFeatures;
-    }
-    CachedTrackingSnapshot snapshot{};
-    snapshot.havePose = haveLastPose;
-    snapshot.frameCount = cachedFrameCount;
-    snapshot.edgeCount = cachedEdgeCount;
-    snapshot.patchCount = cachedPatchCount;
-    snapshot.stereoDepthUpdates = cachedStereoDepthUpdates;
-    return snapshot;
-  }
-
-  void FillOutputFromCache(core::ports::SlamOutput &out,
-                           const CachedTrackingSnapshot &snapshot,
-                           const core::ports::PoseEstimate &pose,
-                           const std::vector<cv::Point2f> *features,
-                           const std::chrono::steady_clock::time_point &start) {
-    out.visualFeatureRawLeftCount = snapshot.patchCount;
-    out.visualFeatureRawRightCount = snapshot.stereoDepthUpdates;
-    out.visualFeatureMatchedStereoCount = snapshot.edgeCount;
-    out.matchesInliers = snapshot.edgeCount;
-    out.trackedMapPointCount = static_cast<uint32_t>(snapshot.edgeCount);
-    out.localMapPointCount = static_cast<uint32_t>(snapshot.patchCount);
-    out.frontendMs = 0.0;
-    out.lkUpdateMs = 0.0;
-    if (snapshot.havePose) {
-      const core::ports::PoseEstimate publishPose =
-          SmoothAsyncPublishPose(pose);
-      out.trackingState = core::ports::kSlamTrackingOk;
-      out.poseValid = true;
-      out.pose = publishPose;
-      out.pose.valid = true;
-    } else {
-      out.trackingState = core::ports::kSlamTrackingLost;
-      out.poseValid = false;
-    }
-    if (features != nullptr) {
-      out.leftFeatures = *features;
-    }
-    out.orbTrackMs = ElapsedMs(start, std::chrono::steady_clock::now());
-  }
-
-  core::ports::PoseEstimate
-  SmoothAsyncPublishPose(const core::ports::PoseEstimate &target) {
-    if (!EnvFlagEnabled("SMART_DRONE_DPVO_ASYNC_PUBLISH_SMOOTH", true) ||
-        !target.valid) {
-      asyncPublishPose = target;
-      haveAsyncPublishPose = target.valid;
-      return target;
-    }
-    if (!haveAsyncPublishPose || !asyncPublishPose.valid) {
-      asyncPublishPose = target;
-      haveAsyncPublishPose = true;
-      return target;
-    }
-
-    const float maxStep = std::max(
-        0.0f,
-        EnvFloatValue("SMART_DRONE_DPVO_ASYNC_PUBLISH_MAX_STEP_M", 0.025f));
-    const float maxRot = std::max(
-        0.0f,
-        EnvFloatValue("SMART_DRONE_DPVO_ASYNC_PUBLISH_MAX_ROT_RAD", 0.035f));
-    const float dx = target.x - asyncPublishPose.x;
-    const float dy = target.y - asyncPublishPose.y;
-    const float dz = target.z - asyncPublishPose.z;
-    const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-    if (maxStep > 0.0f && std::isfinite(dist) && dist > maxStep) {
-      const float scale = maxStep / std::max(dist, 1.0e-6f);
-      asyncPublishPose.x += dx * scale;
-      asyncPublishPose.y += dy * scale;
-      asyncPublishPose.z += dz * scale;
-    } else {
-      asyncPublishPose.x = target.x;
-      asyncPublishPose.y = target.y;
-      asyncPublishPose.z = target.z;
-    }
-
-    float tw = target.qw;
-    float tx = target.qx;
-    float ty = target.qy;
-    float tz = target.qz;
-    float dot = asyncPublishPose.qw * tw + asyncPublishPose.qx * tx +
-                asyncPublishPose.qy * ty + asyncPublishPose.qz * tz;
-    if (dot < 0.0f) {
-      tw = -tw;
-      tx = -tx;
-      ty = -ty;
-      tz = -tz;
-      dot = -dot;
-    }
-    dot = std::clamp(dot, 0.0f, 1.0f);
-    const float angle = 2.0f * std::acos(dot);
-    const float rotAlpha =
-        (maxRot > 0.0f && std::isfinite(angle) && angle > maxRot)
-            ? maxRot / std::max(angle, 1.0e-6f)
-            : 1.0f;
-    asyncPublishPose.qw += (tw - asyncPublishPose.qw) * rotAlpha;
-    asyncPublishPose.qx += (tx - asyncPublishPose.qx) * rotAlpha;
-    asyncPublishPose.qy += (ty - asyncPublishPose.qy) * rotAlpha;
-    asyncPublishPose.qz += (tz - asyncPublishPose.qz) * rotAlpha;
-    const float qn = std::sqrt(asyncPublishPose.qw * asyncPublishPose.qw +
-                               asyncPublishPose.qx * asyncPublishPose.qx +
-                               asyncPublishPose.qy * asyncPublishPose.qy +
-                               asyncPublishPose.qz * asyncPublishPose.qz);
-    if (qn > 1.0e-9f) {
-      asyncPublishPose.qw /= qn;
-      asyncPublishPose.qx /= qn;
-      asyncPublishPose.qy /= qn;
-      asyncPublishPose.qz /= qn;
-    } else {
-      asyncPublishPose.qw = 1.0f;
-      asyncPublishPose.qx = 0.0f;
-      asyncPublishPose.qy = 0.0f;
-      asyncPublishPose.qz = 0.0f;
-    }
-    asyncPublishPose.valid = true;
-    return asyncPublishPose;
-  }
-
-  bool AsyncWorkerIdle() {
-    std::lock_guard<std::mutex> lock(workerMutex);
-    return !workerHasJob && !workerRunning;
-  }
-
-  bool QueueAsyncUpdateJob(AsyncUpdateJob job) {
-    if (!running.load(std::memory_order_acquire)) {
-      return false;
-    }
-    std::lock_guard<std::mutex> lock(workerMutex);
-    if (workerStopRequested || workerHasJob || workerRunning) {
-      return false;
-    }
-    pendingWorkerJob = std::move(job);
-    workerHasJob = true;
-    workerCv.notify_one();
-    return true;
-  }
-
-  void StartAsyncWorker() {
-    StopAsyncWorker();
-    {
-      std::lock_guard<std::mutex> lock(workerMutex);
-      workerStopRequested = false;
-      workerHasJob = false;
-      workerRunning = false;
-    }
-    workerThread = std::thread([this]() { AsyncWorkerLoop(); });
-  }
-
-  void StopAsyncWorker() {
-    {
-      std::lock_guard<std::mutex> lock(workerMutex);
-      workerStopRequested = true;
-      workerHasJob = false;
-      pendingWorkerJob = AsyncUpdateJob{};
-    }
-    workerCv.notify_all();
-    if (workerThread.joinable()) {
-      workerThread.join();
-    }
-    {
-      std::lock_guard<std::mutex> lock(workerMutex);
-      workerStopRequested = false;
-      workerHasJob = false;
-      workerRunning = false;
-    }
-  }
-
-  void AsyncWorkerLoop() {
-    for (;;) {
-      AsyncUpdateJob job{};
-      {
-        std::unique_lock<std::mutex> lock(workerMutex);
-        workerCv.wait(lock,
-                      [this]() { return workerStopRequested || workerHasJob; });
-        if (workerStopRequested) {
-          break;
-        }
-        job = std::move(pendingWorkerJob);
-        pendingWorkerJob = AsyncUpdateJob{};
-        workerHasJob = false;
-        workerRunning = true;
-      }
-
-      ProcessAsyncUpdateJob(job);
-
-      {
-        std::lock_guard<std::mutex> lock(workerMutex);
-        workerRunning = false;
-      }
-      workerCv.notify_all();
-    }
-  }
-
-  void ProcessAsyncUpdateJob(const AsyncUpdateJob &job) {
-    if (job.leftGray.empty() || !running.load(std::memory_order_acquire)) {
-      return;
-    }
-
-    const auto workerStart = std::chrono::steady_clock::now();
-    std::string dpvoErr;
-    std::string rightDpvoErr;
-    const DpvoPatchifierRun patchRun = patchifierRuntime.Run(
-        job.leftGray, patchEngine, cudaStream.stream, true, true, &dpvoErr);
-    const DpvoPatchifierRun rightPatchRun =
-        job.runRight && !job.rightGray.empty()
-            ? patchifierRightRuntime.Run(job.rightGray, patchEngine,
-                                         cudaStream.stream, true, false,
-                                         &rightDpvoErr)
-            : DpvoPatchifierRun{};
-
-    if (patchRun.ok) {
-      if (!loggedPatchifierShape) {
-        std::cerr << "[dpvo_trt] patchifier active fmap="
-                  << DimsToString(patchRun.fmapDims)
-                  << " imap=" << DimsToString(patchRun.imapDims)
-                  << " ms=" << patchRun.elapsedMs << "\n";
-        loggedPatchifierShape = true;
-      }
-    } else if (!loggedPatchifierError) {
-      std::cerr << "[dpvo_trt] patchifier inference disabled for async frame: "
-                << dpvoErr << "\n";
-      loggedPatchifierError = true;
-    }
-    if (job.runRight && !rightPatchRun.ok && !loggedRightPatchifierError) {
-      std::cerr
-          << "[dpvo_trt] right patchifier inference disabled for async frame: "
-          << rightDpvoErr << "\n";
-      loggedRightPatchifierError = true;
-    }
-
-    const DpvoIntrinsics intrinsics{voState.m_lkFx * job.scaleX * 0.25f,
-                                    voState.m_lkFy * job.scaleY * 0.25f,
-                                    voState.m_lkCx * job.scaleX * 0.25f,
-                                    voState.m_lkCy * job.scaleY * 0.25f};
-
-    bool poseUpdated = false;
-    double nativeUpdateMs = 0.0;
-    int frameCount = 0;
-    int edgeCount = 0;
-    int patchCount = 0;
-    int stereoDepthUpdates = 0;
-    bool havePose = false;
-    core::ports::PoseEstimate publishPose{};
-    std::vector<cv::Point2f> publishFeatures;
-    int keyframeRemovalsBefore = 0;
-
-    {
-      std::lock_guard<std::mutex> lock(graphMutex);
-      if (!running.load(std::memory_order_acquire)) {
-        return;
-      }
-      graphState.PushFrame(job.frameId, job.timestampNs, job.leftGray,
-                           nativeSolver.HasPose() ? nativeSolver.LastTcw()
-                                                  : Sophus::SE3f{},
-                           patchRun);
-      if (rightPatchRun.ok) {
-        graphState.ApplyStereoDepthFromRightFmap(rightPatchRun, intrinsics.fx,
-                                                 voState.m_lkBaseline);
-        if (!loggedStereoDepthInit && graphState.LastStereoDepthUpdates() > 0) {
-          std::cerr << "[dpvo_trt] stereo fmap depth init updates="
-                    << graphState.LastStereoDepthUpdates()
-                    << " fx_feature=" << intrinsics.fx
-                    << " baseline=" << voState.m_lkBaseline << "\n";
-          loggedStereoDepthInit = true;
-        }
-      }
-
-      keyframeRemovalsBefore = graphState.KeyframeRemovals();
-      if (patchRun.ok && softAggSplitReady) {
-        poseUpdated = nativeSolver.Step(
-            graphState, updatePreAggRuntime, updatePreAggEngine,
-            updatePostAggRuntime, updatePostAggEngine,
-            cudaKernelReady ? &cudaKernelRuntime : nullptr, cudaStream.stream,
-            intrinsics, &nativeUpdateMs, &dpvoErr);
-      }
-      lastHeavyUpdateEndNs.store(SteadyNowNs(), std::memory_order_release);
-
-      frameCount = graphState.FrameCount();
-      edgeCount = graphState.EdgeCount();
-      patchCount = graphState.PatchCount();
-      stereoDepthUpdates = graphState.LastStereoDepthUpdates();
-      if (graphState.KeyframeRemovals() != keyframeRemovalsBefore &&
-          graphState.KeyframeRemovals() != loggedKeyframeRemovals) {
-        loggedKeyframeRemovals = graphState.KeyframeRemovals();
-        std::cerr << "[dpvo_trt] keyframe removal count="
-                  << loggedKeyframeRemovals
-                  << " active_edges=" << graphState.EdgeCount()
-                  << " active_frames=" << graphState.FrameCount() << "\n";
-      }
-      if (poseUpdated || nativeSolver.HasPose() ||
-          graphState.FrameCount() > 0) {
-        const Sophus::SE3f publishTcw =
-            nativeSolver.HasPose() ? nativeSolver.LastTcw() : Sophus::SE3f{};
-        publishPose = PoseFromTwc(publishTcw.inverse());
-        havePose = publishPose.valid;
-      }
-      const DpvoFrameState *newest = graphState.NewestFrame();
-      if (newest != nullptr) {
-        publishFeatures.reserve(newest->patches.size());
-        for (const DpvoPatchState &patch : newest->patches) {
-          publishFeatures.emplace_back(
-              patch.x * 4.0f / std::max(job.scaleX, 1e-6f),
-              patch.y * 4.0f / std::max(job.scaleY, 1e-6f));
-        }
-      }
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(cacheMutex);
-      cachedFrameCount = frameCount;
-      cachedEdgeCount = edgeCount;
-      cachedPatchCount = patchCount;
-      cachedStereoDepthUpdates = stereoDepthUpdates;
-      cachedLeftFeatures = std::move(publishFeatures);
-      if (havePose) {
-        lastPose = publishPose;
-        haveLastPose = true;
-      }
-    }
-
-    if (!poseUpdated && !dpvoErr.empty() && !loggedNativeSolverWait) {
-      std::cerr << "[dpvo_trt] native solver waiting: " << dpvoErr << "\n";
-      loggedNativeSolverWait = true;
-    }
-    std::cerr << "[dpvo_async] update frame=" << job.frameId
-              << " patch_ms=" << patchRun.elapsedMs << " right_ms="
-              << (rightPatchRun.ok ? rightPatchRun.elapsedMs : 0.0)
-              << " update_ms=" << nativeUpdateMs << " total_ms="
-              << ElapsedMs(workerStart, std::chrono::steady_clock::now())
-              << " frames=" << frameCount << " edges=" << edgeCount
-              << " pose=" << (havePose ? 1 : 0) << "\n";
   }
 
   core::ports::SlamOutput Process(const core::ports::SlamInputBatch &input,
@@ -4979,46 +4590,6 @@ struct DpvoTensorRtEngine::Impl {
     }
 
     ++processedFrameCount;
-    if (asyncUpdateEnabled) {
-      core::ports::PoseEstimate cachedPose{};
-      std::vector<cv::Point2f> cachedFeatures;
-      const CachedTrackingSnapshot snapshot = CopyCachedTracking(
-          &cachedPose, extractFeatures ? &cachedFeatures : nullptr);
-      const bool warmupFrame =
-          !snapshot.havePose || snapshot.frameCount < warmupFullFrames;
-      const int64_t lastUpdateNs =
-          lastHeavyUpdateEndNs.load(std::memory_order_acquire);
-      const int64_t nowNs = SteadyNowNs();
-      const bool intervalReady =
-          heavyIntervalMs <= 0 || lastUpdateNs == 0 ||
-          nowNs - lastUpdateNs >=
-              static_cast<int64_t>(heavyIntervalMs) * 1000000LL;
-      const bool cadenceReady =
-          heavyEveryN <= 1 || ((processedFrameCount - 1U) %
-                               static_cast<uint64_t>(heavyEveryN)) == 0U;
-      const bool heavyFrame = warmupFrame || (intervalReady && cadenceReady);
-      const bool rightFrame =
-          heavyFrame && (warmupFrame || rightEveryN <= 1 ||
-                         ((processedFrameCount - 1U) %
-                          static_cast<uint64_t>(rightEveryN)) == 0U);
-      if (heavyFrame && AsyncWorkerIdle()) {
-        AsyncUpdateJob job{};
-        job.frameId = input.frameId;
-        job.timestampNs = input.captureTimestampNs;
-        job.leftGray = resizedGray.clone();
-        job.rightGray = rightFrame ? resizedRightGray.clone() : cv::Mat{};
-        job.scaleX =
-            static_cast<float>(config.inputWidth) / std::max(1, leftRect.cols);
-        job.scaleY =
-            static_cast<float>(config.inputHeight) / std::max(1, leftRect.rows);
-        job.runRight = rightFrame;
-        (void)QueueAsyncUpdateJob(std::move(job));
-      }
-      FillOutputFromCache(out, snapshot, cachedPose,
-                          extractFeatures ? &cachedFeatures : nullptr, start);
-      return out;
-    }
-
     const bool warmupFrame =
         !nativeSolver.HasPose() || graphState.FrameCount() < warmupFullFrames;
     const int64_t lastUpdateNs =
@@ -5191,36 +4762,18 @@ struct DpvoTensorRtEngine::Impl {
   SlamModeSharedState voState;
   cv::Mat resizedGray;
   cv::Mat resizedRightGray;
-  std::mutex cacheMutex;
-  std::mutex graphMutex;
-  std::mutex workerMutex;
-  std::condition_variable workerCv;
-  std::thread workerThread;
-  AsyncUpdateJob pendingWorkerJob;
   core::ports::PoseEstimate lastPose{};
-  core::ports::PoseEstimate asyncPublishPose{};
-  std::vector<cv::Point2f> cachedLeftFeatures;
   uint64_t processedFrameCount{0};
   int heavyEveryN{1};
   int rightEveryN{1};
   int heavyIntervalMs{0};
   int warmupFullFrames{8};
   std::atomic<int64_t> lastHeavyUpdateEndNs{0};
-  int cachedFrameCount{0};
-  int cachedEdgeCount{0};
-  int cachedPatchCount{0};
-  int cachedStereoDepthUpdates{0};
   bool haveLastPose{false};
-  bool haveAsyncPublishPose{false};
   std::atomic<bool> running{false};
-  bool asyncUpdateEnabled{false};
-  bool workerStopRequested{false};
-  bool workerHasJob{false};
-  bool workerRunning{false};
   bool softAggSplitReady{false};
   bool cudaKernelReady{false};
   bool loggedEpgPacing{false};
-  bool loggedAsyncUpdate{false};
   bool loggedPatchifierShape{false};
   bool loggedPatchifierError{false};
   bool loggedRightPatchifierError{false};

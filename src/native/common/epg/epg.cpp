@@ -1,10 +1,13 @@
 #include "common/epg/epg_internal.h"
 
-#include <sstream>
 #include <set>
+#include <sstream>
 
 namespace epg {
 namespace {
+
+constexpr int MIN_REALTIME_PRIORITY = 1;
+constexpr int MAX_REALTIME_PRIORITY = 99;
 
 std::string JsonEscape(const std::string& value) {
     std::ostringstream out;
@@ -33,6 +36,18 @@ std::string JsonEscape(const std::string& value) {
     return out.str();
 }
 
+void ValidateTaskScheduling(const TaskConfig& taskConfig) {
+    if (!taskConfig.scheduling.realtime) {
+        return;
+    }
+    if (taskConfig.scheduling.priority >= MIN_REALTIME_PRIORITY &&
+        taskConfig.scheduling.priority <= MAX_REALTIME_PRIORITY) {
+        return;
+    }
+    throw std::runtime_error("realtime task priority must be in [1,99]: " +
+                             taskConfig.name);
+}
+
 } // namespace
 
 EventPipelineGraph::EventPipelineGraph(const Registry& registry) : m_registry(registry) {
@@ -41,6 +56,13 @@ EventPipelineGraph::EventPipelineGraph(const Registry& registry) : m_registry(re
 EventPipelineGraph::~EventPipelineGraph() {
     Stop();
 }
+
+struct EventPipelineGraph::ConfigureUsage {
+    std::set<std::string> queueNames;
+    std::set<std::string> taskNames;
+    std::map<std::string, int> producers;
+    std::map<std::string, int> consumers;
+};
 
 void EventPipelineGraph::ConfigureJson(const std::string& jsonText) {
     Configure(ParseGraphConfigJson(jsonText));
@@ -51,25 +73,35 @@ void EventPipelineGraph::Configure(const GraphConfig& config) {
         throw std::runtime_error("cannot configure a running EventPipelineGraph");
     }
 
+    ConfigureUsage usage;
+    ResetConfiguredGraph();
+    CreateConfiguredQueues(config, usage);
+    ValidateConfiguredTasks(config, usage);
+    PublishTaskProducedQueues(usage);
+    CreateConfiguredTaskRunners(config);
+    BindInputNotifiers(config);
+    m_configured = true;
+}
+
+void EventPipelineGraph::ResetConfiguredGraph() {
     m_queues.clear();
     m_runners.clear();
     m_taskProducedQueues.clear();
     m_externalIngressQueues.clear();
+}
 
-    std::set<std::string> queueNames;
-    std::set<std::string> taskNames;
-    std::map<std::string, int> producers;
-    std::map<std::string, int> consumers;
-
+void EventPipelineGraph::CreateConfiguredQueues(const GraphConfig& config,
+                                                ConfigureUsage& usage) {
     for (const auto& queueConfig : config.queues) {
         if (queueConfig.name.empty()) {
             throw std::runtime_error("queue name must not be empty");
         }
-        if (!queueNames.insert(queueConfig.name).second) {
+        if (!usage.queueNames.insert(queueConfig.name).second) {
             throw std::runtime_error("duplicate queue name: " + queueConfig.name);
         }
         if (queueConfig.depth == 0) {
-            throw std::runtime_error("queue depth must be greater than zero: " + queueConfig.name);
+            throw std::runtime_error("queue depth must be greater than zero: " +
+                                     queueConfig.name);
         }
         const auto* type = m_registry.FindQueueType(queueConfig.type);
         if (!type) {
@@ -77,141 +109,200 @@ void EventPipelineGraph::Configure(const GraphConfig& config) {
         }
         m_queues[queueConfig.name] = type->factory(queueConfig);
     }
+}
 
+void EventPipelineGraph::ValidateConfiguredTasks(const GraphConfig& config,
+                                                 ConfigureUsage& usage) const {
     for (const auto& taskConfig : config.tasks) {
-        if (taskConfig.name.empty()) {
-            throw std::runtime_error("task name must not be empty");
-        }
-        if (!taskNames.insert(taskConfig.name).second) {
-            throw std::runtime_error("duplicate task name: " + taskConfig.name);
-        }
-        const auto* taskType = m_registry.FindTaskType(taskConfig.type);
-        if (!taskType) {
-            throw std::runtime_error("unregistered task type: " + taskConfig.type);
-        }
+        ValidateTaskConfig(taskConfig, usage);
+    }
+}
 
-        const auto declaredInputs = MakePortMap(taskType->inputs);
-        const auto declaredOutputs = MakePortMap(taskType->outputs);
+void EventPipelineGraph::ValidateTaskConfig(const TaskConfig& taskConfig,
+                                            ConfigureUsage& usage) const {
+    if (taskConfig.name.empty()) {
+        throw std::runtime_error("task name must not be empty");
+    }
+    if (!usage.taskNames.insert(taskConfig.name).second) {
+        throw std::runtime_error("duplicate task name: " + taskConfig.name);
+    }
+    const auto* taskType = m_registry.FindTaskType(taskConfig.type);
+    if (!taskType) {
+        throw std::runtime_error("unregistered task type: " + taskConfig.type);
+    }
+    ValidateTaskScheduling(taskConfig);
+    ValidateTaskPorts(taskConfig, *taskType, usage);
+    ValidateTaskTrigger(taskConfig);
+}
 
-        for (const auto& input : taskConfig.inputs) {
-            const auto specIt = declaredInputs.find(input.first);
-            if (specIt == declaredInputs.end()) {
-                throw std::runtime_error("task input port is not declared: " +
-                                         taskConfig.name + "." + std::to_string(input.first));
-            }
-            const auto qIt = m_queues.find(input.second);
-            if (qIt == m_queues.end()) {
-                throw std::runtime_error("task input references missing queue: " +
-                                         taskConfig.name + "." + std::to_string(input.first) + " -> " + input.second);
-            }
-            if (qIt->second->TypeName() != specIt->second.type) {
-                throw std::runtime_error("task input type mismatch: " +
-                                         taskConfig.name + "." + std::to_string(input.first));
-            }
-            consumers[input.second] += 1;
+void EventPipelineGraph::ValidateTaskPorts(
+    const TaskConfig& taskConfig,
+    const Registry::TaskTypeInfo& taskType,
+    ConfigureUsage& usage) const {
+    ValidateTaskInputs(taskConfig, MakePortMap(taskType.inputs), usage);
+    ValidateTaskOutputs(taskConfig, MakePortMap(taskType.outputs), usage);
+}
+
+void EventPipelineGraph::ValidateTaskInputs(
+    const TaskConfig& taskConfig,
+    const std::map<PortId, PortSpec>& declaredInputs,
+    ConfigureUsage& usage) const {
+    for (const auto& input : taskConfig.inputs) {
+        const auto specIt = declaredInputs.find(input.first);
+        if (specIt == declaredInputs.end()) {
+            throw std::runtime_error("task input port is not declared: " +
+                                     taskConfig.name + "." + std::to_string(input.first));
         }
-
-        for (const auto& output : taskConfig.outputs) {
-            const auto specIt = declaredOutputs.find(output.first);
-            if (specIt == declaredOutputs.end()) {
-                throw std::runtime_error("task output port is not declared: " +
-                                         taskConfig.name + "." + std::to_string(output.first));
-            }
-            const auto qIt = m_queues.find(output.second);
-            if (qIt == m_queues.end()) {
-                throw std::runtime_error("task output references missing queue: " +
-                                         taskConfig.name + "." + std::to_string(output.first) + " -> " + output.second);
-            }
-            if (qIt->second->TypeName() != specIt->second.type) {
-                throw std::runtime_error("task output type mismatch: " +
-                                         taskConfig.name + "." + std::to_string(output.first));
-            }
-            producers[output.second] += 1;
+        const auto queueIt = m_queues.find(input.second);
+        if (queueIt == m_queues.end()) {
+            throw std::runtime_error("task input references missing queue: " +
+                                     taskConfig.name + "." + std::to_string(input.first) +
+                                     " -> " + input.second);
         }
-
-        if (taskConfig.trigger.mode == TriggerMode::Periodic ||
-            taskConfig.trigger.mode == TriggerMode::PeriodicOrAnyQueueReady) {
-            if (taskConfig.trigger.interval.count() <= 0) {
-                throw std::runtime_error("periodic task interval_ms must be greater than zero: " +
-                                         taskConfig.name);
-            }
+        if (queueIt->second->TypeName() != specIt->second.type) {
+            throw std::runtime_error("task input type mismatch: " +
+                                     taskConfig.name + "." + std::to_string(input.first));
         }
+        usage.consumers[input.second] += 1;
+    }
+}
 
-        if (IsQueueTriggeredMode(taskConfig.trigger.mode)) {
-            if (taskConfig.trigger.queues.empty()) {
-                throw std::runtime_error("queue-triggered task has no trigger queues: " +
-                                         taskConfig.name);
-            }
-            for (const auto& triggerQueue : taskConfig.trigger.queues) {
-                if (m_queues.find(triggerQueue) == m_queues.end()) {
-                    throw std::runtime_error("task trigger references missing queue: " +
-                                             taskConfig.name + " -> " + triggerQueue);
-                }
-                const auto usedAsInput =
-                    std::find_if(taskConfig.inputs.begin(), taskConfig.inputs.end(),
-                                 [&triggerQueue](const std::pair<const PortId, std::string>& input) {
-                                     return input.second == triggerQueue;
-                                 }) != taskConfig.inputs.end();
-                if (!usedAsInput) {
-                    throw std::runtime_error("trigger queue must also be a task input: " +
-                                             taskConfig.name + " -> " + triggerQueue);
-                }
-            }
-        } else if (taskConfig.inputs.empty() && taskConfig.trigger.interval.count() <= 0) {
-            throw std::runtime_error("task has no wake source: " + taskConfig.name);
+void EventPipelineGraph::ValidateTaskOutputs(
+    const TaskConfig& taskConfig,
+    const std::map<PortId, PortSpec>& declaredOutputs,
+    ConfigureUsage& usage) const {
+    for (const auto& output : taskConfig.outputs) {
+        const auto specIt = declaredOutputs.find(output.first);
+        if (specIt == declaredOutputs.end()) {
+            throw std::runtime_error("task output port is not declared: " +
+                                     taskConfig.name + "." + std::to_string(output.first));
+        }
+        const auto queueIt = m_queues.find(output.second);
+        if (queueIt == m_queues.end()) {
+            throw std::runtime_error("task output references missing queue: " +
+                                     taskConfig.name + "." + std::to_string(output.first) +
+                                     " -> " + output.second);
+        }
+        if (queueIt->second->TypeName() != specIt->second.type) {
+            throw std::runtime_error("task output type mismatch: " +
+                                     taskConfig.name + "." + std::to_string(output.first));
+        }
+        usage.producers[output.second] += 1;
+    }
+}
+
+void EventPipelineGraph::ValidateTaskTrigger(const TaskConfig& taskConfig) const {
+    if (taskConfig.trigger.mode == TriggerMode::Periodic ||
+        taskConfig.trigger.mode == TriggerMode::PeriodicOrAnyQueueReady) {
+        if (taskConfig.trigger.interval.count() <= 0) {
+            throw std::runtime_error("periodic task interval_ms must be greater than zero: " +
+                                     taskConfig.name);
         }
     }
+    if (IsQueueTriggeredMode(taskConfig.trigger.mode)) {
+        ValidateTriggerQueues(taskConfig);
+        return;
+    }
+    if (taskConfig.inputs.empty() && taskConfig.trigger.interval.count() <= 0) {
+        throw std::runtime_error("task has no wake source: " + taskConfig.name);
+    }
+}
 
-    for (const auto& producer : producers) {
+void EventPipelineGraph::ValidateTriggerQueues(
+    const TaskConfig& taskConfig) const {
+    if (taskConfig.trigger.queues.empty()) {
+        throw std::runtime_error("queue-triggered task has no trigger queues: " +
+                                 taskConfig.name);
+    }
+    for (const auto& triggerQueue : taskConfig.trigger.queues) {
+        if (m_queues.find(triggerQueue) == m_queues.end()) {
+            throw std::runtime_error("task trigger references missing queue: " +
+                                     taskConfig.name + " -> " + triggerQueue);
+        }
+        const auto usedAsInput =
+            std::find_if(taskConfig.inputs.begin(), taskConfig.inputs.end(),
+                         [&triggerQueue](const std::pair<const PortId, std::string>& input) {
+                             return input.second == triggerQueue;
+                         }) != taskConfig.inputs.end();
+        if (!usedAsInput) {
+            throw std::runtime_error("trigger queue must also be a task input: " +
+                                     taskConfig.name + " -> " + triggerQueue);
+        }
+    }
+}
+
+void EventPipelineGraph::PublishTaskProducedQueues(const ConfigureUsage& usage) {
+    for (const auto& producer : usage.producers) {
         if (producer.second > 1) {
             throw std::runtime_error("SPSC queue has multiple producers: " + producer.first);
         }
         m_taskProducedQueues.insert(producer.first);
     }
-    for (const auto& consumer : consumers) {
+    for (const auto& consumer : usage.consumers) {
         if (consumer.second > 1) {
             throw std::runtime_error("SPSC queue has multiple consumers: " + consumer.first);
         }
     }
+}
 
+void EventPipelineGraph::CreateConfiguredTaskRunners(const GraphConfig& config) {
     for (const auto& taskConfig : config.tasks) {
         const auto* taskType = m_registry.FindTaskType(taskConfig.type);
-        std::unordered_map<PortId, IQueue*> inputs;
-        std::unordered_map<PortId, IQueue*> outputs;
-        std::vector<IQueue*> triggerQueues;
-
-        for (const auto& input : taskConfig.inputs) {
-            inputs[input.first] = m_queues.at(input.second).get();
-        }
-        for (const auto& output : taskConfig.outputs) {
-            outputs[output.first] = m_queues.at(output.second).get();
-        }
-        for (const auto& triggerQueue : taskConfig.trigger.queues) {
-            triggerQueues.push_back(m_queues.at(triggerQueue).get());
-        }
-
-        m_runners.emplace_back(new TaskRunner(taskConfig,
-                                              taskType->factory(),
-                                              std::move(inputs),
-                                              std::move(outputs),
-                                              std::move(triggerQueues)));
+        m_runners.emplace_back(new TaskRunner(
+            taskConfig,
+            taskType->factory(),
+            MakeInputQueueBindings(taskConfig),
+            MakeOutputQueueBindings(taskConfig),
+            MakeTriggerQueueBindings(taskConfig)));
     }
+}
 
+std::unordered_map<PortId, IQueue*>
+EventPipelineGraph::MakeInputQueueBindings(const TaskConfig& taskConfig) const {
+    std::unordered_map<PortId, IQueue*> inputs;
+    for (const auto& input : taskConfig.inputs) {
+        inputs[input.first] = m_queues.at(input.second).get();
+    }
+    return inputs;
+}
+
+std::unordered_map<PortId, IQueue*>
+EventPipelineGraph::MakeOutputQueueBindings(const TaskConfig& taskConfig) const {
+    std::unordered_map<PortId, IQueue*> outputs;
+    for (const auto& output : taskConfig.outputs) {
+        outputs[output.first] = m_queues.at(output.second).get();
+    }
+    return outputs;
+}
+
+std::vector<IQueue*>
+EventPipelineGraph::MakeTriggerQueueBindings(const TaskConfig& taskConfig) const {
+    std::vector<IQueue*> triggerQueues;
+    for (const auto& triggerQueue : taskConfig.trigger.queues) {
+        triggerQueues.push_back(m_queues.at(triggerQueue).get());
+    }
+    return triggerQueues;
+}
+
+void EventPipelineGraph::BindInputNotifiers(const GraphConfig& config) {
     for (auto& runner : m_runners) {
         for (const auto& taskConfig : config.tasks) {
-            if (taskConfig.name != runner->Name()) {
-                continue;
-            }
-            for (const auto& input : taskConfig.inputs) {
-                auto* inputQueue = m_queues.at(input.second).get();
-                inputQueue->SetNotifier([runnerPtr = runner.get()]() {
-                    runnerPtr->Notify();
-                });
+            if (taskConfig.name == runner->Name()) {
+                BindTaskInputNotifiers(*runner, taskConfig);
+                break;
             }
         }
     }
+}
 
-    m_configured = true;
+void EventPipelineGraph::BindTaskInputNotifiers(TaskRunner& runner,
+                                                const TaskConfig& taskConfig) {
+    for (const auto& input : taskConfig.inputs) {
+        auto* inputQueue = m_queues.at(input.second).get();
+        inputQueue->SetNotifier([runnerPtr = &runner]() {
+            runnerPtr->Notify();
+        });
+    }
 }
 
 void EventPipelineGraph::Start() {
@@ -235,6 +326,28 @@ void EventPipelineGraph::Stop() {
         runner->Stop();
     }
     m_running = false;
+}
+
+void EventPipelineGraph::RequestStop() {
+    if (!m_running) {
+        return;
+    }
+    for (auto& runner : m_runners) {
+        runner->RequestStop();
+    }
+}
+
+bool EventPipelineGraph::JoinStopped() {
+    if (!m_running) {
+        return true;
+    }
+    for (auto& runner : m_runners) {
+        if (!runner->JoinStopped()) {
+            return false;
+        }
+    }
+    m_running = false;
+    return true;
 }
 
 bool EventPipelineGraph::Running() const {

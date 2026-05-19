@@ -1,4 +1,4 @@
-#include "core/application/session/calib_session_service.h"
+#include "core/application/session/calib_output_sync.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -7,9 +7,6 @@
 
 #include <fcntl.h>
 #include <unistd.h>
-
-#include "core/application/session/calib_session_graph_service.h"
-#include "core/application/session/calib_storage_helpers.h"
 
 namespace smartdrone::core::application {
 
@@ -25,7 +22,7 @@ void FlushAndSyncFile(FILE *file, const char *label)
     }
 }
 
-void SyncPathFile(const fs::path &path)
+void SyncPathFile(const std::filesystem::path &path)
 {
     const int fd = ::open(path.c_str(), O_RDONLY);
     if (fd < 0) {
@@ -38,7 +35,7 @@ void SyncPathFile(const fs::path &path)
     ::close(fd);
 }
 
-void SyncDirPath(const fs::path &path)
+void SyncDirPath(const std::filesystem::path &path)
 {
     const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY);
     if (fd < 0) {
@@ -51,26 +48,19 @@ void SyncDirPath(const fs::path &path)
     ::close(fd);
 }
 
-void FlushCalibOutputs(FILE *fCam0, FILE *fCam1, FILE *fImu, const std::vector<fs::path> &imagePaths,
-                       const fs::path &root, const fs::path &cam0Dir, const fs::path &cam1Dir)
+void FlushCalibOutputs(const CalibOutputFlushRequest &request)
 {
-    FlushAndSyncFile(fCam0, "cam0.csv");
-    FlushAndSyncFile(fCam1, "cam1.csv");
-    FlushAndSyncFile(fImu, "imu.csv");
+    FlushAndSyncFile(request.cam0File, "cam0.csv");
+    FlushAndSyncFile(request.cam1File, "cam1.csv");
+    FlushAndSyncFile(request.imuFile, "imu.csv");
 
-    for (const auto &imagePath : imagePaths) {
+    for (const auto &imagePath : request.imagePaths) {
         SyncPathFile(imagePath);
     }
 
-    SyncDirPath(cam0Dir);
-    SyncDirPath(cam1Dir);
-    SyncDirPath(root);
-}
-
-bool RunCalibSession(const UnifiedConfig &cfg, std::atomic<bool> &stop, LivePoseState &livePose,
-                     std::atomic<bool> &runningFlag)
-{
-    return RunCalibSessionGraph(cfg, stop, livePose, runningFlag);
+    SyncDirPath(request.cam0Dir);
+    SyncDirPath(request.cam1Dir);
+    SyncDirPath(request.root);
 }
 
 } // namespace smartdrone::core::application

@@ -21,8 +21,18 @@ double ComputeSharpnessLaplacianVar(const cv::Mat &gray);
 std::vector<cv::Point2f> ComputeOrbDebugFeatures(const cv::Mat &gray);
 bool ShouldEnhanceLowLightFrame(double mean, double stddev);
 cv::Mat EnhanceLowLightGrayForSlam(const cv::Mat &gray);
-void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, double meanL, double stdL, double meanR, double stdR,
-                              double sharpL, double sharpR, bool enableLowLightEnhance, ports::StereoFrame &out);
+
+struct StereoFrameQuality {
+    double leftMean{0.0};
+    double leftStddev{0.0};
+    double rightMean{0.0};
+    double rightStddev{0.0};
+    double leftSharpness{0.0};
+    double rightSharpness{0.0};
+};
+
+void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, const StereoFrameQuality &quality,
+                              bool enableLowLightEnhance, ports::StereoFrame &out);
 uint8_t ToRuntimeSlamModeValue(smartdrone::core::domain::SlamOperationMode mode);
 
 class AutoSlamModeController {

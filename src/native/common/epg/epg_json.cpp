@@ -298,6 +298,28 @@ std::chrono::milliseconds OptionalMilliseconds(const JsonValue& value,
     return std::chrono::milliseconds(static_cast<int>(child->number));
 }
 
+bool OptionalBool(const JsonValue& value, const std::string& field, bool fallback) {
+    const auto* child = value.Find(field);
+    if (!child) {
+        return fallback;
+    }
+    if (child->kind != JsonValue::Kind::Bool) {
+        throw std::runtime_error("json field must be bool: " + field);
+    }
+    return child->boolean;
+}
+
+int OptionalInt(const JsonValue& value, const std::string& field, int fallback) {
+    const auto* child = value.Find(field);
+    if (!child) {
+        return fallback;
+    }
+    if (child->kind != JsonValue::Kind::Number) {
+        throw std::runtime_error("json field must be number: " + field);
+    }
+    return static_cast<int>(child->number);
+}
+
 std::vector<std::string> OptionalStringArray(const JsonValue& value, const std::string& field) {
     std::vector<std::string> result;
     const auto* child = value.Find(field);
@@ -314,6 +336,20 @@ std::vector<std::string> OptionalStringArray(const JsonValue& value, const std::
         result.push_back(item.string);
     }
     return result;
+}
+
+TaskSchedulingConfig OptionalScheduling(const JsonValue& value) {
+    TaskSchedulingConfig scheduling;
+    const auto* child = value.Find("scheduling");
+    if (!child) {
+        return scheduling;
+    }
+    if (child->kind != JsonValue::Kind::Object) {
+        throw std::runtime_error("task scheduling must be object");
+    }
+    scheduling.realtime = OptionalBool(*child, "realtime", false);
+    scheduling.priority = OptionalInt(*child, "priority", 0);
+    return scheduling;
 }
 
 PortId ParsePortId(const std::string& value, const std::string& field) {
@@ -369,57 +405,79 @@ TriggerMode ParseTriggerMode(const std::string& value) {
     throw std::runtime_error("unsupported task trigger mode: " + value);
 }
 
+const JsonValue& RequiredArrayField(const JsonValue& value,
+                                    const std::string& field) {
+    const auto& child = value.At(field);
+    if (child.kind != JsonValue::Kind::Array) {
+        throw std::runtime_error("json field must be array: " + field);
+    }
+    return child;
+}
+
+void RequireConfigObject(const JsonValue& value, const std::string& message) {
+    if (value.kind != JsonValue::Kind::Object) {
+        throw std::runtime_error(message);
+    }
+}
+
+QueueConfig ParseQueueConfig(const JsonValue& item) {
+    RequireConfigObject(item, "queue config must be object");
+    QueueConfig queue;
+    queue.name = RequiredString(item, "name");
+    queue.type = RequiredString(item, "type");
+    queue.depth = RequiredSize(item, "depth");
+    queue.overflow = ParseOverflow(RequiredString(item, "overflow"));
+    return queue;
+}
+
+TriggerConfig ParseTaskTriggerConfig(const JsonValue& item,
+                                     const std::string& taskName) {
+    const auto& trigger = item.At("trigger");
+    if (trigger.kind != JsonValue::Kind::Object) {
+        throw std::runtime_error("task trigger must be object: " + taskName);
+    }
+
+    TriggerConfig config;
+    config.mode = ParseTriggerMode(RequiredString(trigger, "mode"));
+    config.interval =
+        OptionalMilliseconds(trigger, "interval_ms", std::chrono::milliseconds(0));
+    config.queues = OptionalStringArray(trigger, "queues");
+    return config;
+}
+
+TaskConfig ParseTaskConfig(const JsonValue& item) {
+    RequireConfigObject(item, "task config must be object");
+    TaskConfig task;
+    task.name = RequiredString(item, "name");
+    task.type = RequiredString(item, "type");
+    task.inputs = OptionalPortQueueMap(item, "inputs");
+    task.outputs = OptionalPortQueueMap(item, "outputs");
+    task.trigger = ParseTaskTriggerConfig(item, task.name);
+    task.scheduling = OptionalScheduling(item);
+    return task;
+}
+
+void AppendQueueConfigs(const JsonValue& queues, GraphConfig& config) {
+    for (const auto& item : queues.array) {
+        config.queues.push_back(ParseQueueConfig(item));
+    }
+}
+
+void AppendTaskConfigs(const JsonValue& tasks, GraphConfig& config) {
+    for (const auto& item : tasks.array) {
+        config.tasks.push_back(ParseTaskConfig(item));
+    }
+}
+
 } // namespace
 
 GraphConfig ParseGraphConfigJson(const std::string& jsonText) {
     const auto root = JsonParser(jsonText).Parse();
-    if (root.kind != JsonValue::Kind::Object) {
-        throw std::runtime_error("EventPipelineGraph json root must be object");
-    }
+    RequireConfigObject(root, "EventPipelineGraph json root must be object");
 
     GraphConfig config;
-
-    const auto& queues = root.At("queues");
-    if (queues.kind != JsonValue::Kind::Array) {
-        throw std::runtime_error("json field must be array: queues");
-    }
-    for (const auto& item : queues.array) {
-        if (item.kind != JsonValue::Kind::Object) {
-            throw std::runtime_error("queue config must be object");
-        }
-        QueueConfig queue;
-        queue.name = RequiredString(item, "name");
-        queue.type = RequiredString(item, "type");
-        queue.depth = RequiredSize(item, "depth");
-        queue.overflow = ParseOverflow(RequiredString(item, "overflow"));
-        config.queues.push_back(std::move(queue));
-    }
-
-    const auto& tasks = root.At("tasks");
-    if (tasks.kind != JsonValue::Kind::Array) {
-        throw std::runtime_error("json field must be array: tasks");
-    }
-    for (const auto& item : tasks.array) {
-        if (item.kind != JsonValue::Kind::Object) {
-            throw std::runtime_error("task config must be object");
-        }
-        TaskConfig task;
-        task.name = RequiredString(item, "name");
-        task.type = RequiredString(item, "type");
-        task.inputs = OptionalPortQueueMap(item, "inputs");
-        task.outputs = OptionalPortQueueMap(item, "outputs");
-
-        const auto& trigger = item.At("trigger");
-        if (trigger.kind != JsonValue::Kind::Object) {
-            throw std::runtime_error("task trigger must be object: " + task.name);
-        }
-        task.trigger.mode = ParseTriggerMode(RequiredString(trigger, "mode"));
-        task.trigger.interval = OptionalMilliseconds(trigger, "interval_ms", std::chrono::milliseconds(0));
-        task.trigger.queues = OptionalStringArray(trigger, "queues");
-
-        config.tasks.push_back(std::move(task));
-    }
-
+    AppendQueueConfigs(RequiredArrayField(root, "queues"), config);
+    AppendTaskConfigs(RequiredArrayField(root, "tasks"), config);
     return config;
 }
 

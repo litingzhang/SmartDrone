@@ -1,64 +1,77 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
-#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 
-#include "adapters/telemetry/px4_mavlink_gateway.h"
-#include "common/epg/epg.h"
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/mode_manager.h"
-#include "core/application/state/live_pose_state.h"
 
 namespace smartdrone::core::application {
+
+class ISessionGraphRuntime;
 
 class RuntimeSessionSupervisor {
   public:
     using ControllerMode = smartdrone::core::domain::RuntimeMode;
     using CurrentConfigFn = std::function<UnifiedConfig()>;
-    using SlamSessionRunner = std::function<bool(const UnifiedConfig &, LiveRuntimeTuning &, Px4MavlinkGateway &,
-                                                 std::atomic<bool> &, LivePoseState &)>;
-    using CalibSessionRunner = std::function<bool(const UnifiedConfig &, std::atomic<bool> &, LivePoseState &)>;
 
-    RuntimeSessionSupervisor(std::atomic<bool> &runningFlag, LiveRuntimeTuning &tuning, Px4MavlinkGateway &mav,
-                             LivePoseState &livePose, CurrentConfigFn currentConfig,
-                             SlamSessionRunner slamSessionRunner, CalibSessionRunner calibSessionRunner);
+    struct IdleStatus {
+        bool idle{false};
+        bool stopping{false};
+    };
 
-    void Start();
+    struct SessionStartRequest {
+        ControllerMode mode{ControllerMode::Idle};
+        const UnifiedConfig &cfg;
+        std::atomic<bool> &stop;
+        std::atomic<bool> &runningFlag;
+    };
+
+    using CreateSessionFn = std::function<std::unique_ptr<ISessionGraphRuntime>(const SessionStartRequest &)>;
+
+    struct Config {
+        std::atomic<bool> &runningFlag;
+        CurrentConfigFn currentConfig;
+        CreateSessionFn createSession;
+    };
+
+    explicit RuntimeSessionSupervisor(Config config);
+    ~RuntimeSessionSupervisor();
+
     void Stop();
+    void Step();
     bool RequestMode(ControllerMode mode, std::string *err);
     void RequestRestart();
     ControllerMode DesiredMode() const;
     ControllerMode ActiveMode() const;
-    bool WaitForIdle(std::chrono::milliseconds timeout, bool *stoppingOut = nullptr);
+    IdleStatus GetIdleStatus() const;
 
   private:
-    void ConfigureGraph();
-    void JoinSession();
+    void ApplyGlobalStop();
+    void StopRequestedSession();
+    void StepActiveSession();
+    void FinishCompletedSession();
+    void LaunchRequestedSession();
+    void StopActiveSessionSynchronously();
+    void MarkSessionJoined();
     void StepSupervisor();
+    bool PrepareLaunch(ControllerMode &mode, UnifiedConfig &cfg);
+    bool SessionIdleUnlocked() const;
+    std::shared_ptr<ISessionGraphRuntime> MakeSessionRuntime(ControllerMode mode, const UnifiedConfig &cfg);
 
     std::atomic<bool> &m_runningFlag;
-    LiveRuntimeTuning &m_tuning;
-    Px4MavlinkGateway &m_mav;
-    LivePoseState &m_livePose;
     CurrentConfigFn m_currentConfig;
-    SlamSessionRunner m_slamSessionRunner;
-    CalibSessionRunner m_calibSessionRunner;
+    CreateSessionFn m_createSession;
 
+    std::mutex m_stepMu;
     mutable std::mutex m_mu;
-    std::condition_variable m_cv;
     ModeManager m_modeManager{};
-    bool m_sessionDone{false};
     bool m_stopping{false};
     std::atomic<bool> m_sessionStop{false};
-    epg::Registry m_graphRegistry;
-    std::unique_ptr<epg::EventPipelineGraph> m_graph;
-    std::thread m_session;
+    std::shared_ptr<ISessionGraphRuntime> m_session;
 };
 
 } // namespace smartdrone::core::application

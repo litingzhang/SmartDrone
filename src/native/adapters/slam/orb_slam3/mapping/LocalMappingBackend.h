@@ -99,6 +99,7 @@ public:
   virtual void ApplyRuntimeConfig(
       const OrbLocalMappingRuntimeConfig &config) = 0;
   virtual void Reset(const OrbLocalMappingResetRequest &request) = 0;
+  virtual bool Step() = 0;
 };
 
 std::unique_ptr<IOrbLocalMappingBackend>

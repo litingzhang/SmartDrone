@@ -3,6 +3,7 @@
 #include "crc16_ccitt_false.h"
 #include "tlv_protocol.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +25,9 @@ class TlvParser {
   public:
     static constexpr size_t kMaxPayloadSize = 512;
     static constexpr size_t kMaxBufferSize = 4096;
+    static constexpr size_t kFrameHeaderSize = 2 + (1 + 1 + 1 + 2 + 4 + 4);
+    static constexpr size_t kFrameCrcSize = 2;
+    static constexpr size_t kMinFrameSize = kFrameHeaderSize + kFrameCrcSize;
 
     void Push(const uint8_t *data, size_t size)
     {
@@ -49,70 +53,109 @@ class TlvParser {
     std::optional<TlvFrame> TryPop()
     {
         while (true) {
-            const size_t kMinSize = 2 + (1 + 1 + 1 + 2 + 4 + 4) + 2;
-            if (m_size < kMinSize) {
+            if (m_size < kMinFrameSize) {
                 return std::nullopt;
             }
 
-            size_t syncIndex = 0;
-            for (; syncIndex + 1 < m_size; ++syncIndex) {
-                if (ByteAt(syncIndex) == TLV_SYNC0 && ByteAt(syncIndex + 1) == TLV_SYNC1) {
-                    break;
-                }
-            }
-            if (syncIndex > 0) {
-                Advance(syncIndex);
-            }
-            if (m_size < kMinSize) {
-                return std::nullopt;
-            }
-            if (!(ByteAt(0) == TLV_SYNC0 && ByteAt(1) == TLV_SYNC1)) {
+            if (!AlignToSync()) {
                 return std::nullopt;
             }
 
-            const uint8_t ver = ByteAt(2);
-            const uint8_t cmd = ByteAt(3);
-            const uint8_t flags = ByteAt(4);
-            const uint16_t len = ReadU16LeAt(5);
-            if (len > kMaxPayloadSize) {
+            const TlvFrameHeader header = ReadFrameHeader();
+            if (header.len > kMaxPayloadSize) {
                 Advance(1);
                 continue;
             }
 
-            const size_t totalSize = 2 + (1 + 1 + 1 + 2 + 4 + 4) + static_cast<size_t>(len) + 2;
-            if (m_size < totalSize) {
+            const size_t totalSize = FrameTotalSize(header.len);
+            if (!FrameAvailable(totalSize)) {
                 return std::nullopt;
             }
 
-            const uint32_t seq = ReadU32LeAt(7);
-            const uint32_t tMs = ReadU32LeAt(11);
-
-            const size_t crcLen = (totalSize - 2) - 2;
-            const uint16_t crcCalc = CalcCrc(2, crcLen);
-            const uint16_t crcRecv = ReadU16LeAt(totalSize - 2);
-            if (crcCalc != crcRecv) {
+            if (!FrameCrcValid(totalSize)) {
                 Advance(1);
                 continue;
             }
 
-            TlvFrame frame;
-            frame.ver = ver;
-            frame.cmd = cmd;
-            frame.flags = flags;
-            frame.len = len;
-            frame.seq = seq;
-            frame.tMs = tMs;
-            frame.payload.resize(len);
-            if (len > 0) {
-                CopyOut(15, frame.payload.data(), len);
-            }
-
+            TlvFrame frame = BuildFrame(header);
             Advance(totalSize);
             return frame;
         }
     }
 
   private:
+    struct TlvFrameHeader {
+        uint8_t ver{0};
+        uint8_t cmd{0};
+        uint8_t flags{0};
+        uint16_t len{0};
+        uint32_t seq{0};
+        uint32_t tMs{0};
+    };
+
+    bool AlignToSync()
+    {
+        const size_t syncIndex = FindSyncIndex();
+        if (syncIndex > 0) {
+            Advance(syncIndex);
+        }
+        return m_size >= kMinFrameSize && ByteAt(0) == TLV_SYNC0 && ByteAt(1) == TLV_SYNC1;
+    }
+
+    size_t FindSyncIndex() const
+    {
+        size_t syncIndex = 0;
+        for (; syncIndex + 1 < m_size; ++syncIndex) {
+            if (ByteAt(syncIndex) == TLV_SYNC0 && ByteAt(syncIndex + 1) == TLV_SYNC1) {
+                break;
+            }
+        }
+        return syncIndex;
+    }
+
+    TlvFrameHeader ReadFrameHeader() const
+    {
+        TlvFrameHeader header;
+        header.ver = ByteAt(2);
+        header.cmd = ByteAt(3);
+        header.flags = ByteAt(4);
+        header.len = ReadU16LeAt(5);
+        header.seq = ReadU32LeAt(7);
+        header.tMs = ReadU32LeAt(11);
+        return header;
+    }
+
+    static size_t FrameTotalSize(uint16_t payloadLen)
+    {
+        return kFrameHeaderSize + static_cast<size_t>(payloadLen) + kFrameCrcSize;
+    }
+
+    bool FrameAvailable(size_t totalSize) const { return m_size >= totalSize; }
+
+    bool FrameCrcValid(size_t totalSize) const
+    {
+        const size_t crcLen = (totalSize - 2) - kFrameCrcSize;
+        const uint16_t crcCalc = CalcCrc(2, crcLen);
+        const uint16_t crcRecv = ReadU16LeAt(totalSize - kFrameCrcSize);
+        return crcCalc == crcRecv;
+    }
+
+    TlvFrame BuildFrame(const TlvFrameHeader &header) const
+    {
+        TlvFrame frame;
+        frame.ver = header.ver;
+        frame.cmd = header.cmd;
+        frame.flags = header.flags;
+        frame.len = header.len;
+        frame.seq = header.seq;
+        frame.tMs = header.tMs;
+        frame.payload.resize(header.len);
+        if (header.len > 0) {
+            CopyOut(kFrameHeaderSize, frame.payload.data(), header.len);
+        }
+        return frame;
+    }
+
     uint8_t ByteAt(size_t offset) const { return m_buffer[(m_head + offset) % kMaxBufferSize]; }
 
     uint16_t CalcCrc(size_t offset, size_t len) const

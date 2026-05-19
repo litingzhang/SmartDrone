@@ -5,18 +5,23 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
-#include <thread>
+#include <utility>
 #include <vector>
 
 #include "common/logger.h"
 #include "common/tlv/tlv_protocol.h"
-#include "core/application/session/runtime_session_common.h"
+#include "core/application/runtime/runtime_aliases.h"
+#include "core/application/session/slam_settings_loader.h"
+#include "core/domain/runtime_mode.h"
 
 namespace smartdrone::core::application {
+
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -85,80 +90,118 @@ void ReplaceOrInsertYamlScalar(std::string &text, const std::string &key,
   text = output.str();
 }
 
-std::string BuildEffectiveSlamSettingsPath(const UnifiedConfig &cfg) {
-  if (cfg.app.runtime.slamBackend != SlamBackend::OrbSlam3) {
-    return cfg.app.settings;
-  }
-  if (cfg.app.runtime.orbNFeatures <= 0 ||
-      !(cfg.app.runtime.orbScaleFactor > 0.0f) ||
-      cfg.app.runtime.orbNLevels <= 0 || cfg.app.runtime.orbIniThFAST <= 0 ||
-      cfg.app.runtime.orbMinThFAST <= 0) {
-    return cfg.app.settings;
-  }
+bool HasOrbExtractorRuntimeOverride(const RuntimeConfig &runtime) {
+  return runtime.orbNFeatures > 0 && runtime.orbScaleFactor > 0.0f &&
+         runtime.orbNLevels > 0 && runtime.orbIniThFAST > 0 &&
+         runtime.orbMinThFAST > 0;
+}
 
-  std::ifstream in(cfg.app.settings, std::ios::in);
+bool ShouldWriteRuntimeOrbSettings(const AppConfig &app) {
+  return app.runtime.slamBackend == SlamBackend::OrbSlam3 &&
+         HasOrbExtractorRuntimeOverride(app.runtime);
+}
+
+std::string ReadSettingsFile(const std::string &settingsPath, bool &ok) {
+  std::ifstream in(settingsPath, std::ios::in);
   if (!in.is_open()) {
     std::cerr << "[slam] warning: failed to open settings for ORB override: "
-              << cfg.app.settings << "\n";
-    return cfg.app.settings;
+              << settingsPath << "\n";
+    ok = false;
+    return {};
   }
 
   std::ostringstream buffer;
   buffer << in.rdbuf();
-  std::string content = buffer.str();
-  if (content.empty()) {
-    std::cerr << "[slam] warning: empty settings file for ORB override: "
-              << cfg.app.settings << "\n";
-    return cfg.app.settings;
-  }
+  ok = true;
+  return buffer.str();
+}
 
+std::string FormatRuntimeFloat(float value) {
+  std::ostringstream ss;
+  ss << std::fixed << std::setprecision(6) << value;
+  return ss.str();
+}
+
+void ApplyOrbExtractorRuntimeConfig(std::string &content,
+                                    const RuntimeConfig &runtime) {
   ReplaceOrInsertYamlScalar(content, "ORBextractor.nFeatures",
-                            std::to_string(cfg.app.runtime.orbNFeatures));
-  {
-    std::ostringstream ss;
-    ss << std::fixed << std::setprecision(6) << cfg.app.runtime.orbScaleFactor;
-    ReplaceOrInsertYamlScalar(content, "ORBextractor.scaleFactor", ss.str());
-  }
+                            std::to_string(runtime.orbNFeatures));
+  ReplaceOrInsertYamlScalar(content, "ORBextractor.scaleFactor",
+                            FormatRuntimeFloat(runtime.orbScaleFactor));
   ReplaceOrInsertYamlScalar(content, "ORBextractor.nLevels",
-                            std::to_string(cfg.app.runtime.orbNLevels));
+                            std::to_string(runtime.orbNLevels));
   ReplaceOrInsertYamlScalar(content, "ORBextractor.iniThFAST",
-                            std::to_string(cfg.app.runtime.orbIniThFAST));
+                            std::to_string(runtime.orbIniThFAST));
   ReplaceOrInsertYamlScalar(content, "ORBextractor.minThFAST",
-                            std::to_string(cfg.app.runtime.orbMinThFAST));
+                            std::to_string(runtime.orbMinThFAST));
+}
 
-  const fs::path sourcePath(cfg.app.settings);
+fs::path MakeRuntimeOrbSettingsPath(const std::string &settingsPath) {
+  const fs::path sourcePath(settingsPath);
   const fs::path sourceDir =
       sourcePath.has_parent_path() ? sourcePath.parent_path() : fs::path(".");
-  const fs::path sourceStem = sourcePath.stem();
-  const fs::path targetPath =
-      sourceDir / (sourceStem.string() + ".runtime_orb.yaml");
+  return sourceDir / (sourcePath.stem().string() + ".runtime_orb.yaml");
+}
 
+bool WriteRuntimeSettingsFile(const fs::path &targetPath,
+                              const std::string &content) {
   std::ofstream out(targetPath.string(), std::ios::out | std::ios::trunc);
   if (!out.is_open()) {
     std::cerr << "[slam] warning: failed to write runtime ORB settings file: "
               << targetPath.string() << "\n";
-    return cfg.app.settings;
+    return false;
   }
   out << content;
   out.close();
   if (!out) {
     std::cerr << "[slam] warning: failed to flush runtime ORB settings file: "
               << targetPath.string() << "\n";
+    return false;
+  }
+  return true;
+}
+
+void LogRuntimeOrbSettings(const RuntimeConfig &runtime,
+                           const fs::path &targetPath) {
+  std::cerr << "[slam] ORB settings override: nFeatures="
+            << runtime.orbNFeatures << " scaleFactor="
+            << runtime.orbScaleFactor << " nLevels=" << runtime.orbNLevels
+            << " iniThFAST=" << runtime.orbIniThFAST
+            << " minThFAST=" << runtime.orbMinThFAST
+            << " file=" << targetPath.string() << "\n";
+}
+
+std::string BuildEffectiveSlamSettingsPath(const UnifiedConfig &cfg) {
+  if (!ShouldWriteRuntimeOrbSettings(cfg.app)) {
     return cfg.app.settings;
   }
 
-  std::cerr << "[slam] ORB settings override: nFeatures="
-            << cfg.app.runtime.orbNFeatures
-            << " scaleFactor=" << cfg.app.runtime.orbScaleFactor
-            << " nLevels=" << cfg.app.runtime.orbNLevels
-            << " iniThFAST=" << cfg.app.runtime.orbIniThFAST
-            << " minThFAST=" << cfg.app.runtime.orbMinThFAST
-            << " file=" << targetPath.string() << "\n";
+  bool readOk = false;
+  std::string content = ReadSettingsFile(cfg.app.settings, readOk);
+  if (!readOk) {
+    return cfg.app.settings;
+  }
+  if (content.empty()) {
+    std::cerr << "[slam] warning: empty settings file for ORB override: "
+              << cfg.app.settings << "\n";
+    return cfg.app.settings;
+  }
+
+  ApplyOrbExtractorRuntimeConfig(content, cfg.app.runtime);
+  const fs::path targetPath = MakeRuntimeOrbSettingsPath(cfg.app.settings);
+  if (!WriteRuntimeSettingsFile(targetPath, content)) {
+    return cfg.app.settings;
+  }
+
+  LogRuntimeOrbSettings(cfg.app.runtime, targetPath);
   return targetPath.string();
 }
 
 std::atomic<uint32_t> g_slamSessionResetCounter{0};
 std::atomic<uint32_t> g_slamSessionResetMapCount{0};
+
+using ControllerMode = smartdrone::core::domain::RuntimeMode;
+constexpr uint64_t kRangeSensorMaxAgeUs = 200000ULL;
 
 smartdrone::adapters::imu::Icm42688ImuProviderConfig
 MakeImuProviderConfig(const MainRuntimeAliases &aliases) {
@@ -232,17 +275,27 @@ void ApplyOrbAccelerationEnvironment(const std::string &acceleration) {
   }
 }
 
+PosePostprocessor::ReadRangeSensorFn
+BuildRangeSensorReader(
+    smartdrone::core::ports::ISlamSessionTelemetryPort &telemetry) {
+  return [&telemetry](PosePostprocessor::RangeSensorSnapshot &snapshot) {
+    smartdrone::core::ports::SlamRangeSensor range{};
+    if (!telemetry.GetDownwardRange(range, kRangeSensorMaxAgeUs)) {
+      return false;
+    }
+    snapshot.currentDistance = range.currentDistance;
+    snapshot.signalQuality = range.signalQuality;
+    return true;
+  };
+}
+
 } // namespace
 
-SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg,
-                                       LiveRuntimeTuning &tuning,
-                                       Px4MavlinkGateway &mav,
-                                       LivePoseState &livePose,
-                                       std::atomic<bool> &stop,
-                                       std::atomic<bool> &runningFlag)
-    : m_cfg(cfg), m_tuning(tuning), m_mav(mav), m_livePose(livePose),
-      m_stop(stop), m_runningFlag(runningFlag),
-      m_aliases(BuildRuntimeAliases(cfg.app)),
+SlamSessionRuntime::SlamSessionRuntime(SlamSessionRuntimeConfig config)
+    : m_cfg(config.cfg), m_tuning(config.tuning), m_telemetry(config.telemetry),
+      m_posePublisher(config.posePublisher), m_livePose(config.livePose),
+      m_stop(config.stop), m_runningFlag(config.runningFlag),
+      m_aliases(BuildRuntimeAliases(config.cfg.app)),
       m_monoMode(m_aliases.sensorMode == SensorMode::Mono ||
                  m_aliases.sensorMode == SensorMode::MonoImu),
       m_useImu(m_aliases.sensorMode == SensorMode::StereoImu ||
@@ -250,24 +303,24 @@ SlamSessionRuntime::SlamSessionRuntime(const UnifiedConfig &cfg,
       m_slamInputMode(m_monoMode
                           ? smartdrone::adapters::slam::SlamInputMode::MonoRight
                           : smartdrone::adapters::slam::SlamInputMode::Stereo),
-      m_effectiveSettingsPath(BuildEffectiveSlamSettingsPath(cfg)),
+      m_effectiveSettingsPath(BuildEffectiveSlamSettingsPath(config.cfg)),
+      m_imuPoller(m_aliases, m_imuState),
       m_cameraProvider(CreateCameraProvider()),
       m_imuProvider(m_imuState.imuBuffer, MakeImuProviderConfig(m_aliases)),
-      m_posePublisher(mav),
       m_perceptionPipeline(PerceptionPipelineConfig{m_aliases.fps, true}),
       m_frameProcessorState(MakeInitialFrameProcessorState(m_aliases)) {
   if (m_aliases.slamBackend == SlamBackend::OrbSlam3) {
-    ApplyOrbAccelerationEnvironment(cfg.app.runtime.orbAcceleration);
+    ApplyOrbAccelerationEnvironment(config.cfg.app.runtime.orbAcceleration);
   }
   smartdrone::adapters::slam::SlamEngineFactoryConfig engineConfig{};
   engineConfig.backend = m_aliases.slamBackend;
-  engineConfig.vocabularyPath = cfg.app.vocab;
+  engineConfig.vocabularyPath = config.cfg.app.vocab;
   engineConfig.settingsPath = m_effectiveSettingsPath;
   engineConfig.sensorMode = m_aliases.sensorMode;
   engineConfig.useViewer = false;
   engineConfig.useImu = m_useImu;
   engineConfig.inputMode = m_slamInputMode;
-  engineConfig.runtime = cfg.app.runtime;
+  engineConfig.runtime = config.cfg.app.runtime;
   smartdrone::adapters::slam::ControlledSlamEngine slamEngine =
       smartdrone::adapters::slam::CreateSlamEngine(engineConfig);
   m_slamControl = slamEngine.control;
@@ -278,147 +331,213 @@ bool SlamSessionRuntime::Start() {
   PrintStartupConfig(m_cfg.app, m_aliases, ControllerMode::Slam);
   m_livePose.SetRuntimeMode(RUNTIME_MODE_SLAM);
   Logger::Init("./stereo_vslam.log", 32 * 1024 * 1024, Logger::INFO, true);
-  if (!m_slamEngine || !m_slamEngine->Start()) {
-    m_stop.store(true);
-    CleanupAfterStartFailure();
+  if (!StartSlamEngine()) {
     return false;
   }
-  m_slamStarted = true;
 
-  if (m_slamControl != nullptr) {
-    m_slamControl->SetOperationMode(m_frameProcessorState.effectiveSlamMode);
-    m_slamControl->SetFeatureFrontend(m_aliases.featureFrontend);
-    m_slamControl->SetVisualFeatureInputSizeLimit(
-        m_cfg.app.runtime.visualFeatureInputMaxWidth,
-        m_cfg.app.runtime.visualFeatureInputMaxHeight);
-    m_slamControl->SetStereoVoLoopClosure(m_cfg.app.runtime.lkLoopClosure,
-                                          m_cfg.app.runtime.lkLoopScale,
-                                          m_cfg.app.runtime.lkLoopRelaxation);
-    m_slamControl->SetStereoVoPerFrameAcceleration(
-        m_cfg.app.runtime.lkPerFrameAcceleration);
+  ConfigureSlamControl();
+  ApplyInitialSlamMode();
+  LoadStereoBodyExtrinsicsIfNeeded();
+  StartVisualFeatureFrontend();
+  LogLkFrontendSelection();
+  if (!OpenUdp() || !StartImuPoller() || !OpenCamera()) {
+    return false;
   }
+
+  m_telemetry.SetFrameTimingTracker(&m_frameTimingTracker);
+  return true;
+}
+
+bool SlamSessionRuntime::FailStart() {
+  m_stop.store(true);
+  CleanupAfterStartFailure();
+  return false;
+}
+
+bool SlamSessionRuntime::StartSlamEngine() {
+  if (m_slamEngine != nullptr && m_slamEngine->Start()) {
+    m_slamStarted = true;
+    return true;
+  }
+  return FailStart();
+}
+
+void SlamSessionRuntime::ConfigureSlamControl() {
+  if (m_slamControl == nullptr) {
+    return;
+  }
+  m_slamControl->SetOperationMode(m_frameProcessorState.effectiveSlamMode);
+  m_slamControl->SetFeatureFrontend(m_aliases.featureFrontend);
+  m_slamControl->SetVisualFeatureInputSizeLimit(
+      m_cfg.app.runtime.visualFeatureInputMaxWidth,
+      m_cfg.app.runtime.visualFeatureInputMaxHeight);
+  m_slamControl->SetStereoVoLoopClosure(m_cfg.app.runtime.lkLoopClosure,
+                                        m_cfg.app.runtime.lkLoopScale,
+                                        m_cfg.app.runtime.lkLoopRelaxation);
+  m_slamControl->SetStereoVoPerFrameAcceleration(
+      m_cfg.app.runtime.lkPerFrameAcceleration);
+}
+
+void SlamSessionRuntime::ApplyInitialSlamMode() {
   if (m_frameProcessorState.requestedSlamMode ==
       smartdrone::core::domain::SlamOperationMode::Auto) {
     std::cerr << "[slam] operation_mode=auto effective_mode=mapping\n";
   }
   m_livePose.SetSlamMode(
       ToRuntimeSlamModeValue(m_frameProcessorState.effectiveSlamMode));
-  if (m_frameProcessorState.requestedSlamMode ==
-          smartdrone::core::domain::SlamOperationMode::Relocalization ||
-      m_frameProcessorState.requestedSlamMode ==
+  const auto requestedMode = m_frameProcessorState.requestedSlamMode;
+  if (requestedMode == smartdrone::core::domain::SlamOperationMode::
+                           Relocalization ||
+      requestedMode ==
           smartdrone::core::domain::SlamOperationMode::TrackingOnly) {
     std::cerr << "[slam] note: slam_mode="
               << smartdrone::core::domain::ToString(m_aliases.slamOperationMode)
               << " currently maps to backend localization-only mode\n";
   }
+}
 
+void SlamSessionRuntime::LoadStereoBodyExtrinsicsIfNeeded() {
   if (m_aliases.sensorMode == SensorMode::Stereo) {
     m_stereoBodyExtrinsics = LoadStereoBodyExtrinsics(m_effectiveSettingsPath);
   }
+}
 
-  if (IsVisualFeatureLightGlueFrontend(m_aliases.featureFrontend)) {
-    smartdrone::adapters::slam::VisualFeatureFrontendRuntimeConfig
-        featureConfig{};
-    featureConfig.repoPath =
-        smartdrone::adapters::slam::ResolveVisualFeatureFrontendRepo(
-            m_aliases.featureFrontend, m_cfg.app.runtime.visualFeatureRepo);
-    featureConfig.device = m_cfg.app.runtime.visualFeatureDevice;
-    featureConfig.topK = m_cfg.app.runtime.visualFeatureTopK;
-    featureConfig.maxPoints = m_cfg.app.runtime.visualFeatureMaxPoints;
-    featureConfig.inputMaxWidth = m_cfg.app.runtime.visualFeatureInputMaxWidth;
-    featureConfig.inputMaxHeight =
-        m_cfg.app.runtime.visualFeatureInputMaxHeight;
-    smartdrone::adapters::slam::ConfigureVisualFeatureFrontendDefaults(
-        m_aliases.featureFrontend, featureConfig);
-    if (smartdrone::adapters::slam::VisualFeatureFrontendClientEnabled(
-            m_aliases.featureFrontend)) {
-      m_visualFeatureFrontendClient =
-          smartdrone::adapters::slam::CreateVisualFeatureFrontendClient(
-              m_aliases.featureFrontend);
-      if (m_visualFeatureFrontendClient == nullptr) {
-        std::cerr << "[slam] warning: "
-                  << ToFeatureFrontendText(m_aliases.featureFrontend)
-                  << " frontend route is available, but no native client is "
-                     "registered\n";
-      } else {
-        std::string featureErr;
-        if (m_visualFeatureFrontendClient->Start(featureConfig, &featureErr)) {
-          m_visualFeatureFrontend = m_visualFeatureFrontendClient.get();
-          if (m_slamControl != nullptr) {
-            m_slamControl->SetVisualFeatureFrontend(m_visualFeatureFrontend);
-          }
-          std::cerr << "[slam] "
-                    << ToFeatureFrontendText(m_aliases.featureFrontend)
-                    << " frontend ready repo=" << featureConfig.repoPath
-                    << " device=" << m_cfg.app.runtime.visualFeatureDevice
-                    << " top_k=" << m_cfg.app.runtime.visualFeatureTopK
-                    << " max_points="
-                    << m_cfg.app.runtime.visualFeatureMaxPoints << "\n";
-        } else {
-          std::cerr << "[slam] warning: "
-                    << ToFeatureFrontendText(m_aliases.featureFrontend)
-                    << " frontend start failed: " << featureErr << "\n";
-          m_visualFeatureFrontendClient.reset();
-          m_visualFeatureFrontend = nullptr;
-        }
-      }
-    }
+smartdrone::adapters::slam::VisualFeatureFrontendRuntimeConfig
+SlamSessionRuntime::BuildVisualFeatureFrontendConfig() const {
+  smartdrone::adapters::slam::VisualFeatureFrontendRuntimeConfig featureConfig{};
+  featureConfig.repoPath =
+      smartdrone::adapters::slam::ResolveVisualFeatureFrontendRepo(
+          m_aliases.featureFrontend, m_cfg.app.runtime.visualFeatureRepo);
+  featureConfig.device = m_cfg.app.runtime.visualFeatureDevice;
+  featureConfig.topK = m_cfg.app.runtime.visualFeatureTopK;
+  featureConfig.maxPoints = m_cfg.app.runtime.visualFeatureMaxPoints;
+  featureConfig.inputMaxWidth = m_cfg.app.runtime.visualFeatureInputMaxWidth;
+  featureConfig.inputMaxHeight = m_cfg.app.runtime.visualFeatureInputMaxHeight;
+  return featureConfig;
+}
+
+void SlamSessionRuntime::StartVisualFeatureFrontend() {
+  if (!IsVisualFeatureLightGlueFrontend(m_aliases.featureFrontend)) {
+    return;
   }
+
+  auto featureConfig = BuildVisualFeatureFrontendConfig();
+  smartdrone::adapters::slam::ConfigureVisualFeatureFrontendDefaults(
+      m_aliases.featureFrontend, featureConfig);
+  if (!smartdrone::adapters::slam::VisualFeatureFrontendClientEnabled(
+          m_aliases.featureFrontend)) {
+    return;
+  }
+
+  m_visualFeatureFrontendClient =
+      smartdrone::adapters::slam::CreateVisualFeatureFrontendClient(
+          m_aliases.featureFrontend);
+  if (m_visualFeatureFrontendClient == nullptr) {
+    std::cerr << "[slam] warning: "
+              << ToFeatureFrontendText(m_aliases.featureFrontend)
+              << " frontend route is available, but no native client is "
+                 "registered\n";
+    return;
+  }
+
+  std::string featureErr;
+  if (!m_visualFeatureFrontendClient->Start(featureConfig, &featureErr)) {
+    HandleVisualFeatureFrontendStartFailure(featureErr);
+    return;
+  }
+  HandleVisualFeatureFrontendReady(featureConfig);
+}
+
+void SlamSessionRuntime::HandleVisualFeatureFrontendReady(
+    const smartdrone::adapters::slam::VisualFeatureFrontendRuntimeConfig
+        &featureConfig) {
+  m_visualFeatureFrontend = m_visualFeatureFrontendClient.get();
+  if (m_slamControl != nullptr) {
+    m_slamControl->SetVisualFeatureFrontend(m_visualFeatureFrontend);
+  }
+  std::cerr << "[slam] " << ToFeatureFrontendText(m_aliases.featureFrontend)
+            << " frontend ready repo=" << featureConfig.repoPath
+            << " device=" << m_cfg.app.runtime.visualFeatureDevice
+            << " top_k=" << m_cfg.app.runtime.visualFeatureTopK
+            << " max_points=" << m_cfg.app.runtime.visualFeatureMaxPoints
+            << "\n";
+}
+
+void SlamSessionRuntime::HandleVisualFeatureFrontendStartFailure(
+    const std::string &featureErr) {
+  std::cerr << "[slam] warning: "
+            << ToFeatureFrontendText(m_aliases.featureFrontend)
+            << " frontend start failed: " << featureErr << "\n";
+  m_visualFeatureFrontendClient.reset();
+  m_visualFeatureFrontend = nullptr;
+}
+
+void SlamSessionRuntime::LogLkFrontendSelection() const {
   if (m_aliases.featureFrontend == FeatureFrontend::LK) {
     std::cerr << "[slam] feature_frontend=lk selected; lk_grid=48\n";
   }
-  if (m_aliases.udpEnable) {
-    auto destinationResolver = [this](sockaddr_in &dst) {
-      LivePoseState::Snapshot snapshot{};
-      if (!m_livePose.ReadSnapshot(snapshot) || !snapshot.hasPeer ||
-          !snapshot.peer.valid) {
-        return false;
-      }
-      dst = snapshot.peer.addr;
-      return true;
-    };
-    if (!m_udp.Open(m_aliases.udpIp, m_aliases.udpPort, m_aliases.udpJpegQ,
-                    m_aliases.udpPayload, m_aliases.udpQueue,
-                    std::move(destinationResolver))) {
-      std::cerr << "[session] slam udp open failed\n";
-      m_stop.store(true);
-      CleanupAfterStartFailure();
+}
+
+bool SlamSessionRuntime::OpenUdp() {
+  if (!m_aliases.udpEnable) {
+    return true;
+  }
+
+  auto destinationResolver = [this](sockaddr_in &dst) {
+    LivePoseState::Snapshot snapshot{};
+    if (!m_livePose.ReadSnapshot(snapshot) || !snapshot.hasPeer ||
+        !snapshot.peer.valid) {
       return false;
     }
+    dst = snapshot.peer.addr;
+    return true;
+  };
+  if (m_udp.Open(m_aliases.udpIp, m_aliases.udpPort, m_aliases.udpJpegQ,
+                 m_aliases.udpPayload, m_aliases.udpQueue,
+                 std::move(destinationResolver))) {
     m_udpOpen = true;
+    return true;
   }
-  if (m_useImu) {
-    m_imuThread = StartImuThread(m_aliases, m_imuState, m_stop, m_runningFlag);
-  }
-  const bool cameraOpened =
-      m_cameraProvider && m_cameraProvider->Open(m_aliases);
-  if (!cameraOpened) {
-    m_stop.store(true);
-    CleanupAfterStartFailure();
-    return false;
-  }
-  m_cameraOpen = true;
 
-  m_mav.SetFrameTimingTracker(&m_frameTimingTracker);
-  return true;
+  std::cerr << "[session] slam udp open failed\n";
+  return FailStart();
+}
+
+bool SlamSessionRuntime::StartImuPoller() {
+  if (!m_useImu) {
+    return true;
+  }
+  if (m_imuPoller.Start()) {
+    return true;
+  }
+  return FailStart();
+}
+
+bool SlamSessionRuntime::OpenCamera() {
+  if (m_cameraProvider != nullptr && m_cameraProvider->Open(m_aliases)) {
+    m_cameraOpen = true;
+    return true;
+  }
+  return FailStart();
 }
 
 void SlamSessionRuntime::Stop() {
-  m_mav.SetFrameTimingTracker(nullptr);
+  m_telemetry.SetFrameTimingTracker(nullptr);
   if (m_cameraOpen) {
     m_cameraProvider->Close();
     m_cameraOpen = false;
     std::cerr << "[session] slam camera closed\n";
   }
-  if (m_imuThread.joinable())
-    m_imuThread.join();
-  std::cerr << "[session] slam imu joined\n";
+  if (m_useImu) {
+    m_imuPoller.Stop();
+    std::cerr << "[session] slam imu stopped\n";
+  }
   if (m_udpOpen) {
     m_udp.Close();
     m_udpOpen = false;
     std::cerr << "[session] slam udp closed\n";
   }
-  m_mav.StopSetpointStream();
+  m_telemetry.StopSetpointStream();
   std::cerr << "[session] slam setpoint stopped\n";
   if (m_slamStarted) {
     m_slamEngine->Stop();
@@ -434,7 +553,14 @@ void SlamSessionRuntime::Stop() {
   std::cerr << "[session] slam exit\n";
 }
 
-bool SlamSessionRuntime::WaitForImuReady() const {
+bool SlamSessionRuntime::StepImuPoll() {
+  if (!m_useImu)
+    return true;
+  m_imuPoller.Step();
+  return !m_imuPoller.Failed();
+}
+
+bool SlamSessionRuntime::ImuReady() const {
   if (!m_useImu)
     return true;
   const uint64_t imuCnt = m_imuState.imuCnt.load(std::memory_order_relaxed);
@@ -442,7 +568,6 @@ bool SlamSessionRuntime::WaitForImuReady() const {
                         imuCnt >= m_frameProcessorState.imuWarmupSamples;
   if (imuReady)
     return true;
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
   return false;
 }
 
@@ -450,7 +575,8 @@ SlamFrameProcessor &SlamSessionRuntime::FrameProcessor() {
   if (!m_frameProcessorContext) {
     m_frameProcessorContext = std::make_unique<SlamFrameProcessor::Context>(
         SlamFrameProcessor::Context{
-            m_aliases, m_monoMode, m_useImu, m_tuning, m_livePose, m_mav,
+            m_aliases, m_monoMode, m_useImu, m_tuning, m_livePose,
+            BuildRangeSensorReader(m_telemetry),
             *m_slamEngine, m_slamControl, m_visualFeatureFrontend,
             *m_cameraProvider, m_imuProvider, m_posePublisher, m_udp,
             m_frameTimingTracker, m_perceptionPipeline, m_posePostprocessor,
@@ -464,13 +590,13 @@ SlamFrameProcessor &SlamSessionRuntime::FrameProcessor() {
 }
 
 void SlamSessionRuntime::CleanupAfterStartFailure() {
-  m_mav.SetFrameTimingTracker(nullptr);
+  m_telemetry.SetFrameTimingTracker(nullptr);
   if (m_cameraOpen) {
     m_cameraProvider->Close();
     m_cameraOpen = false;
   }
-  if (m_imuThread.joinable()) {
-    m_imuThread.join();
+  if (m_useImu) {
+    m_imuPoller.Stop();
   }
   if (m_udpOpen) {
     m_udp.Close();
@@ -481,7 +607,7 @@ void SlamSessionRuntime::CleanupAfterStartFailure() {
     m_visualFeatureFrontendClient.reset();
   }
   m_visualFeatureFrontend = nullptr;
-  m_mav.StopSetpointStream();
+  m_telemetry.StopSetpointStream();
   if (m_slamStarted) {
     m_slamEngine->Stop();
     m_slamStarted = false;

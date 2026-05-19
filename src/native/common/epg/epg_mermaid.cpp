@@ -156,6 +156,16 @@ std::size_t ParseSize(const std::string& value, const std::string& field) {
     return parsed;
 }
 
+bool ParseBool(const std::string& value, const std::string& field) {
+    if (value == "true" || value == "1" || value == "yes") {
+        return true;
+    }
+    if (value == "false" || value == "0" || value == "no") {
+        return false;
+    }
+    throw std::runtime_error("Mermaid bool field is invalid: " + field + "=" + value);
+}
+
 bool IsQueueTriggeredMode(TriggerMode mode) {
     return mode == TriggerMode::AnyQueueReady ||
            mode == TriggerMode::AllQueueReady ||
@@ -239,6 +249,14 @@ TaskConfig ParseNodeLine(const std::string& line) {
             throw std::runtime_error("Mermaid trigger_queues must not be empty: " + task.name);
         }
     }
+    const auto realtimeIt = fields.find("realtime");
+    if (realtimeIt != fields.end()) {
+        task.scheduling.realtime = ParseBool(realtimeIt->second, "realtime");
+    }
+    const auto priorityIt = fields.find("priority");
+    if (priorityIt != fields.end()) {
+        task.scheduling.priority = static_cast<int>(ParseSize(priorityIt->second, "priority"));
+    }
 
     return task;
 }
@@ -247,6 +265,11 @@ struct EdgeConfig {
     Endpoint from;
     Endpoint to;
     QueueConfig queue;
+};
+
+struct EdgeLabel {
+    std::string label;
+    std::string right;
 };
 
 bool ParsePortPairField(const std::string& field, PortId& from, PortId& to) {
@@ -259,6 +282,61 @@ bool ParsePortPairField(const std::string& field, PortId& from, PortId& to) {
     return true;
 }
 
+EdgeLabel ParseEdgeLabel(const std::string& line, std::size_t labelStart) {
+    EdgeLabel result;
+    if (labelStart >= line.size() || line[labelStart] != '|') {
+        result.right = line.substr(labelStart);
+        return result;
+    }
+
+    const auto labelEnd = line.find('|', labelStart + 1);
+    if (labelEnd == std::string::npos) {
+        throw std::runtime_error("Mermaid edge label is missing closing '|': " + line);
+    }
+    result.label = line.substr(labelStart + 1, labelEnd - labelStart - 1);
+    result.right = line.substr(labelEnd + 1);
+    return result;
+}
+
+void ApplyEdgePortPair(EdgeConfig& edge, PortId fromPort, PortId toPort) {
+    edge.from.port = fromPort;
+    edge.from.hasPort = true;
+    edge.to.port = toPort;
+    edge.to.hasPort = true;
+}
+
+std::string CollectEdgeMetadataFields(EdgeConfig& edge, const std::string& label) {
+    const auto labelFields = SplitFields(NormalizeMermaidLabel(StripQuotes(label)));
+    std::ostringstream metadata;
+    bool hasMetadata = false;
+
+    for (const auto& field : labelFields) {
+        PortId fromPort = 0;
+        PortId toPort = 0;
+        if (ParsePortPairField(field, fromPort, toPort)) {
+            ApplyEdgePortPair(edge, fromPort, toPort);
+            continue;
+        }
+        if (hasMetadata) {
+            metadata << ';';
+        }
+        metadata << field;
+        hasMetadata = true;
+    }
+    return metadata.str();
+}
+
+void ApplyEdgeQueueFields(EdgeConfig& edge, const std::string& metadata) {
+    const auto fields = ParseFields(metadata);
+    const auto nameIt = fields.find("name");
+    if (nameIt != fields.end()) {
+        edge.queue.name = nameIt->second;
+    }
+    edge.queue.type = RequireField(fields, "type", edge.queue.name);
+    edge.queue.depth = ParseSize(RequireField(fields, "depth", edge.queue.name), "depth");
+    edge.queue.overflow = ParseMermaidOverflow(RequireField(fields, "overflow", edge.queue.name));
+}
+
 EdgeConfig ParseEdgeLine(const std::string& line) {
     const auto arrow = line.find("-->");
     if (arrow == std::string::npos) {
@@ -268,52 +346,9 @@ EdgeConfig ParseEdgeLine(const std::string& line) {
     EdgeConfig edge;
     edge.from = ParseEndpoint(line.substr(0, arrow));
 
-    std::string label;
-    std::string right;
-    const auto labelStart = arrow + 3;
-    if (labelStart < line.size() && line[labelStart] == '|') {
-        const auto labelEnd = line.find('|', labelStart + 1);
-        if (labelEnd == std::string::npos) {
-            throw std::runtime_error("Mermaid edge label is missing closing '|': " + line);
-        }
-        label = line.substr(labelStart + 1, labelEnd - labelStart - 1);
-        right = line.substr(labelEnd + 1);
-    } else {
-        right = line.substr(labelStart);
-    }
-
-    edge.to = ParseEndpoint(right);
-
-    const auto labelFields = SplitFields(NormalizeMermaidLabel(StripQuotes(label)));
-    std::vector<std::string> metadataFields;
-    for (const auto& field : labelFields) {
-        PortId fromPort = 0;
-        PortId toPort = 0;
-        if (ParsePortPairField(field, fromPort, toPort)) {
-            edge.from.port = fromPort;
-            edge.from.hasPort = true;
-            edge.to.port = toPort;
-            edge.to.hasPort = true;
-            continue;
-        }
-        metadataFields.push_back(field);
-    }
-
-    std::ostringstream metadata;
-    for (std::size_t i = 0; i < metadataFields.size(); ++i) {
-        if (i != 0) {
-            metadata << ';';
-        }
-        metadata << metadataFields[i];
-    }
-    const auto fields = ParseFields(metadata.str());
-    const auto nameIt = fields.find("name");
-    if (nameIt != fields.end()) {
-        edge.queue.name = nameIt->second;
-    }
-    edge.queue.type = RequireField(fields, "type", edge.queue.name);
-    edge.queue.depth = ParseSize(RequireField(fields, "depth", edge.queue.name), "depth");
-    edge.queue.overflow = ParseMermaidOverflow(RequireField(fields, "overflow", edge.queue.name));
+    const auto edgeLabel = ParseEdgeLabel(line, arrow + 3);
+    edge.to = ParseEndpoint(edgeLabel.right);
+    ApplyEdgeQueueFields(edge, CollectEdgeMetadataFields(edge, edgeLabel.label));
     return edge;
 }
 
@@ -518,6 +553,126 @@ bool SubgraphLineMatches(const std::string& line, const std::string& subgraphNam
     return line.substr(labelBegin + 2, labelEnd - labelBegin - 2) == subgraphName;
 }
 
+struct MermaidParseState {
+    GraphConfig config;
+    Registry* registry{};
+    std::map<std::string, std::size_t> taskIndexByName;
+    std::set<std::string> queueNames;
+    std::map<std::string, std::set<PortId>> usedOutputs;
+    std::map<std::string, std::set<PortId>> usedInputs;
+    std::map<std::string, QueueConfig> queueByName;
+    std::map<std::string, std::vector<PortSpec>> graphInputsByTaskType;
+    std::map<std::string, std::vector<PortSpec>> graphOutputsByTaskType;
+};
+
+void AddTaskToState(MermaidParseState& state, TaskConfig task) {
+    if (state.taskIndexByName.find(task.name) != state.taskIndexByName.end()) {
+        throw std::runtime_error("duplicate Mermaid node id: " + task.name);
+    }
+    state.taskIndexByName[task.name] = state.config.tasks.size();
+    state.config.tasks.push_back(std::move(task));
+}
+
+std::size_t RequireTaskIndex(const MermaidParseState& state,
+                             const std::string& node,
+                             const std::string& role) {
+    const auto task = state.taskIndexByName.find(node);
+    if (task == state.taskIndexByName.end()) {
+        throw std::runtime_error("Mermaid edge references undefined " + role + " node: " + node);
+    }
+    return task->second;
+}
+
+void ResolveEdgePorts(MermaidParseState& state, EdgeConfig& edge) {
+    if (state.registry) {
+        InferMissingPorts(edge,
+                          state.config,
+                          state.taskIndexByName,
+                          *state.registry,
+                          state.usedOutputs,
+                          state.usedInputs);
+        return;
+    }
+
+    if (!edge.from.hasPort) {
+        throw std::runtime_error("missing Mermaid source port on " + edge.from.node);
+    }
+    if (!edge.to.hasPort) {
+        throw std::runtime_error("missing Mermaid target port on " + edge.to.node);
+    }
+    if (edge.queue.name.empty()) {
+        edge.queue.name = AutoQueueName(edge.from, edge.to);
+    }
+}
+
+void ConnectEdgePorts(MermaidParseState& state,
+                      const EdgeConfig& edge,
+                      std::size_t fromIndex,
+                      std::size_t toIndex) {
+    auto& from = state.config.tasks[fromIndex];
+    auto& to = state.config.tasks[toIndex];
+    state.graphOutputsByTaskType[from.type].push_back(PortSpec{edge.from.port, edge.queue.type});
+    state.graphInputsByTaskType[to.type].push_back(PortSpec{edge.to.port, edge.queue.type});
+    if (!from.outputs.emplace(edge.from.port, edge.queue.name).second) {
+        throw std::runtime_error("Mermaid output port is connected more than once: " +
+                                 edge.from.node + "." + std::to_string(edge.from.port));
+    }
+    if (!to.inputs.emplace(edge.to.port, edge.queue.name).second) {
+        throw std::runtime_error("Mermaid input port is connected more than once: " +
+                                 edge.to.node + "." + std::to_string(edge.to.port));
+    }
+}
+
+void AddEdgeToState(MermaidParseState& state, EdgeConfig edge) {
+    const auto fromIndex = RequireTaskIndex(state, edge.from.node, "source");
+    const auto toIndex = RequireTaskIndex(state, edge.to.node, "target");
+    ResolveEdgePorts(state, edge);
+
+    if (!state.queueNames.insert(edge.queue.name).second) {
+        throw std::runtime_error("duplicate Mermaid queue name: " + edge.queue.name);
+    }
+
+    state.config.queues.push_back(edge.queue);
+    state.queueByName[edge.queue.name] = edge.queue;
+    ConnectEdgePorts(state, edge, fromIndex, toIndex);
+    state.usedOutputs[edge.from.node].insert(edge.from.port);
+    state.usedInputs[edge.to.node].insert(edge.to.port);
+}
+
+void ParseMermaidConfigLine(MermaidParseState& state, const std::string& line) {
+    if (line.empty() || IsHeaderLine(line) || IsSubgraphLine(line) || IsEndLine(line)) {
+        return;
+    }
+    if (line.find("-->") != std::string::npos) {
+        AddEdgeToState(state, ParseEdgeLine(line));
+        return;
+    }
+    AddTaskToState(state, ParseNodeLine(line));
+}
+
+void ResolveConfigTriggers(MermaidParseState& state) {
+    for (auto& task : state.config.tasks) {
+        task.trigger.queues = ResolveTriggerQueues(task, state.queueByName);
+    }
+}
+
+void MergeRegistryPorts(MermaidParseState& state) {
+    if (!state.registry) {
+        return;
+    }
+
+    std::set<std::string> mergedTaskTypes;
+    for (const auto& task : state.config.tasks) {
+        if (!mergedTaskTypes.insert(task.type).second) {
+            continue;
+        }
+        state.registry->MergeTaskPorts(
+            task.type,
+            state.graphInputsByTaskType[task.type],
+            state.graphOutputsByTaskType[task.type]);
+    }
+}
+
 std::string ExtractMermaidSubgraphBlock(const std::string& mermaidText,
                                         const std::string& subgraphName) {
     std::istringstream input(ExtractMermaidBlock(mermaidText));
@@ -563,100 +718,18 @@ std::string ExtractMermaidSubgraphBlock(const std::string& mermaidText,
 
 GraphConfig ParseGraphConfigMermaidInternal(const std::string& mermaidText,
                                                           Registry* registry) {
-    GraphConfig config;
-    std::map<std::string, std::size_t> taskIndexByName;
-    std::set<std::string> queueNames;
-    std::map<std::string, std::set<PortId>> usedOutputs;
-    std::map<std::string, std::set<PortId>> usedInputs;
-    std::map<std::string, QueueConfig> queueByName;
-    std::map<std::string, std::vector<PortSpec>> graphInputsByTaskType;
-    std::map<std::string, std::vector<PortSpec>> graphOutputsByTaskType;
-
+    MermaidParseState state;
+    state.registry = registry;
     std::istringstream input(ExtractMermaidBlock(mermaidText));
     std::string rawLine;
     while (std::getline(input, rawLine)) {
         const auto line = Trim(StripMermaidComment(rawLine));
-        if (line.empty() || IsHeaderLine(line)) {
-            continue;
-        }
-        if (IsSubgraphLine(line) || IsEndLine(line)) {
-            continue;
-        }
-
-        if (line.find("-->") != std::string::npos) {
-            auto edge = ParseEdgeLine(line);
-            const auto fromTask = taskIndexByName.find(edge.from.node);
-            const auto toTask = taskIndexByName.find(edge.to.node);
-            if (fromTask == taskIndexByName.end()) {
-                throw std::runtime_error("Mermaid edge references undefined source node: " + edge.from.node);
-            }
-            if (toTask == taskIndexByName.end()) {
-                throw std::runtime_error("Mermaid edge references undefined target node: " + edge.to.node);
-            }
-
-            if (registry) {
-                InferMissingPorts(edge, config, taskIndexByName, *registry, usedOutputs, usedInputs);
-            } else {
-                if (!edge.from.hasPort) {
-                    throw std::runtime_error("missing Mermaid source port on " + edge.from.node);
-                }
-                if (!edge.to.hasPort) {
-                    throw std::runtime_error("missing Mermaid target port on " + edge.to.node);
-                }
-                if (edge.queue.name.empty()) {
-                    edge.queue.name = AutoQueueName(edge.from, edge.to);
-                }
-            }
-
-            if (!queueNames.insert(edge.queue.name).second) {
-                throw std::runtime_error("duplicate Mermaid queue name: " + edge.queue.name);
-            }
-
-            config.queues.push_back(edge.queue);
-            queueByName[edge.queue.name] = edge.queue;
-            auto& from = config.tasks[fromTask->second];
-            auto& to = config.tasks[toTask->second];
-            graphOutputsByTaskType[from.type].push_back(PortSpec{edge.from.port, edge.queue.type});
-            graphInputsByTaskType[to.type].push_back(PortSpec{edge.to.port, edge.queue.type});
-            if (!from.outputs.emplace(edge.from.port, edge.queue.name).second) {
-                throw std::runtime_error("Mermaid output port is connected more than once: " +
-                                         edge.from.node + "." + std::to_string(edge.from.port));
-            }
-            if (!to.inputs.emplace(edge.to.port, edge.queue.name).second) {
-                throw std::runtime_error("Mermaid input port is connected more than once: " +
-                                         edge.to.node + "." + std::to_string(edge.to.port));
-            }
-            usedOutputs[edge.from.node].insert(edge.from.port);
-            usedInputs[edge.to.node].insert(edge.to.port);
-            continue;
-        }
-
-        auto task = ParseNodeLine(line);
-        if (taskIndexByName.find(task.name) != taskIndexByName.end()) {
-            throw std::runtime_error("duplicate Mermaid node id: " + task.name);
-        }
-        taskIndexByName[task.name] = config.tasks.size();
-        config.tasks.push_back(std::move(task));
+        ParseMermaidConfigLine(state, line);
     }
 
-    for (auto& task : config.tasks) {
-        task.trigger.queues = ResolveTriggerQueues(task, queueByName);
-    }
-
-    if (registry) {
-        std::set<std::string> mergedTaskTypes;
-        for (const auto& task : config.tasks) {
-            if (!mergedTaskTypes.insert(task.type).second) {
-                continue;
-            }
-            registry->MergeTaskPorts(
-                task.type,
-                graphInputsByTaskType[task.type],
-                graphOutputsByTaskType[task.type]);
-        }
-    }
-
-    return config;
+    ResolveConfigTriggers(state);
+    MergeRegistryPorts(state);
+    return state.config;
 }
 
 GraphConfig ParseGraphConfigMermaid(const std::string& mermaidText) {

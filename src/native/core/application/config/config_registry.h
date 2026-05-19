@@ -71,11 +71,6 @@ public:
   static constexpr std::string_view kSlamOrbAcceleration = "slam.orb_accel";
 
   static std::vector<domain::ConfigDescriptor> DefaultDescriptors();
-
-private:
-  static domain::ConfigDescriptor
-  Make(std::string_view key, std::string_view description, bool hotReloadable,
-       bool requiresPipelineRestart, bool requiresDeviceRestart);
 };
 
 } // namespace smartdrone::core::application

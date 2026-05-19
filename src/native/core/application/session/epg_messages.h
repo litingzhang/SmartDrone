@@ -20,6 +20,10 @@ struct SlamTick {
     std::uint64_t sequence{0};
 };
 
+struct SlamImuReady {
+    bool ready{false};
+};
+
 struct SlamFrameReady {
     std::shared_ptr<SlamSessionRuntime> runtime;
 };
@@ -66,6 +70,10 @@ struct CalibSavePair {
 
 struct CalibCaptureDone {
     bool sessionOk{true};
+};
+
+struct CalibStopRequest {
+    bool sessionOk{false};
 };
 
 struct CalibStorageStatus {

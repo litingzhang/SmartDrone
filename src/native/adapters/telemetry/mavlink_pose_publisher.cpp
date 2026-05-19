@@ -31,8 +31,15 @@ void MavlinkPosePublisher::PublishPose(uint64_t frameId, const core::ports::Pose
         odomQuality = OdomQualityMode::LOST;
     }
 
-    m_serial.SendOdometry(frameId, mavPose, mavVelocity, MAV_FRAME_LOCAL_FRD, MAV_FRAME_BODY_FRD, resetCounter,
-                          odomQuality);
+    Px4MavlinkGateway::OdometryRequest request{};
+    request.frameId = frameId;
+    request.poseNed = mavPose;
+    request.velocityNed = mavVelocity;
+    request.mavFrameId = MAV_FRAME_LOCAL_FRD;
+    request.childFrameId = MAV_FRAME_BODY_FRD;
+    request.resetCounter = resetCounter;
+    request.qualityMode = odomQuality;
+    m_serial.SendOdometry(request);
 }
 
 } // namespace smartdrone::adapters::telemetry

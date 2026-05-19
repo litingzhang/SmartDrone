@@ -1,21 +1,10 @@
 #include "adapters/imu/icm42688/icm42688_imu.h"
 
-#include <pthread.h>
-#include <sched.h>
-#include <unistd.h>
-
 #include <iostream>
 
 int16_t Be16ToI16(uint8_t hi, uint8_t lo)
 {
     return static_cast<int16_t>((static_cast<uint16_t>(hi) << 8) | static_cast<uint16_t>(lo));
-}
-
-bool SetThreadRealtime(int priority)
-{
-    sched_param schedParam{};
-    schedParam.sched_priority = priority;
-    return pthread_setschedparam(pthread_self(), SCHED_FIFO, &schedParam) == 0;
 }
 
 uint8_t OdrCodeFromHz(int hz)
@@ -42,7 +31,7 @@ uint8_t OdrCodeFromHz(int hz)
     }
 }
 
-bool BuildFsBitsAndScale(int accelFsG, int gyroFsDps, uint8_t &accelFsBits, uint8_t &gyroFsBits, ImuScale &scale)
+bool BuildAccelFsBitsAndScale(int accelFsG, uint8_t &accelFsBits, ImuScale &scale)
 {
     switch (accelFsG) {
     case 2:
@@ -65,7 +54,11 @@ bool BuildFsBitsAndScale(int accelFsG, int gyroFsDps, uint8_t &accelFsBits, uint
         std::cerr << "Unsupported accel-fs " << accelFsG << " (use 2/4/8/16)\n";
         return false;
     }
+    return true;
+}
 
+bool BuildGyroFsBitsAndScale(int gyroFsDps, uint8_t &gyroFsBits, ImuScale &scale)
+{
     switch (gyroFsDps) {
     case 125:
         scale.gyroLsbPerDps = 262.4f;
@@ -95,41 +88,10 @@ bool BuildFsBitsAndScale(int accelFsG, int gyroFsDps, uint8_t &accelFsBits, uint
     return true;
 }
 
-bool IcmResetAndConfig(SpiDev &spi, int imuHz, int accelFsG, int gyroFsDps, ImuScale &scaleOut)
+bool BuildFsBitsAndScale(int accelFsG, int gyroFsDps, uint8_t &accelFsBits, uint8_t &gyroFsBits, ImuScale &scale)
 {
-    uint8_t accelFsBits = 0;
-    uint8_t gyroFsBits = 0;
-    ImuScale scale;
-    if (!BuildFsBitsAndScale(accelFsG, gyroFsDps, accelFsBits, gyroFsBits, scale)) {
-        return false;
-    }
-
-    if (!spi.WriteReg(REG_DEVICE_CONFIG, 0x01)) {
-        return false;
-    }
-    usleep(100000);
-
-    spi.WriteReg(REG_INT_CONFIG, 0x30);
-    spi.WriteReg(REG_INT_SOURCE0, 0x08);
-    spi.WriteReg(REG_INT_CONFIG1, 0x00);
-
-    spi.WriteReg(REG_PWR_MGMT0, 0x0F);
-    usleep(20000);
-
-    const uint8_t odrCode = OdrCodeFromHz(imuHz);
-    const uint8_t gyroConfig0 = static_cast<uint8_t>((gyroFsBits << 5) | (odrCode & 0x0F));
-    const uint8_t accelConfig0 = static_cast<uint8_t>((accelFsBits << 5) | (odrCode & 0x0F));
-
-    if (!spi.WriteReg(REG_GYRO_CONFIG0, gyroConfig0)) {
-        return false;
-    }
-    if (!spi.WriteReg(REG_ACCEL_CONFIG0, accelConfig0)) {
-        return false;
-    }
-    usleep(20000);
-
-    scaleOut = scale;
-    return true;
+    return BuildAccelFsBitsAndScale(accelFsG, accelFsBits, scale) &&
+           BuildGyroFsBitsAndScale(gyroFsDps, gyroFsBits, scale);
 }
 
 void ConvertRaw12AccelGyroToSi(const uint8_t raw12[12], const ImuScale &scale, ImuSample &sample)
@@ -150,4 +112,115 @@ void ConvertRaw12AccelGyroToSi(const uint8_t raw12[12], const ImuScale &scale, I
     sample.gx = (static_cast<float>(gx) / scale.gyroLsbPerDps) * K_DEG_TO_RAD;
     sample.gy = (static_cast<float>(gy) / scale.gyroLsbPerDps) * K_DEG_TO_RAD;
     sample.gz = (static_cast<float>(gz) / scale.gyroLsbPerDps) * K_DEG_TO_RAD;
+}
+
+void Icm42688ConfigSequencer::Reset(int imuHz, int accelFsG, int gyroFsDps)
+{
+    m_stage = Stage::Start;
+    m_nextStage = Stage::Done;
+    m_resumeAt = {};
+    m_scale = {};
+    m_accelFsBits = 0;
+    m_gyroFsBits = 0;
+    m_imuHz = imuHz;
+    if (!BuildFsBitsAndScale(accelFsG, gyroFsDps, m_accelFsBits, m_gyroFsBits, m_scale)) {
+        m_stage = Stage::Failed;
+    }
+}
+
+Icm42688ConfigSequencer::Status Icm42688ConfigSequencer::Step(SpiDev &spi, ImuScale &scaleOut)
+{
+    const auto now = std::chrono::steady_clock::now();
+    if (m_stage == Stage::Done) {
+        scaleOut = m_scale;
+        return Status::Done;
+    }
+    if (m_stage == Stage::Failed) {
+        return Status::Failed;
+    }
+    if (!DelayElapsed(now)) {
+        return Status::Pending;
+    }
+    AdvanceWaitStage();
+    if (m_stage == Stage::Done) {
+        scaleOut = m_scale;
+        return Status::Done;
+    }
+
+    if (m_stage == Stage::Start) {
+        return StepStart(spi, now);
+    }
+    if (m_stage == Stage::PowerOn) {
+        return StepPowerOn(spi, now);
+    }
+    if (m_stage == Stage::ConfigureRate) {
+        return StepConfigureRate(spi, now);
+    }
+    return Status::Pending;
+}
+
+bool Icm42688ConfigSequencer::DelayElapsed(std::chrono::steady_clock::time_point now) const
+{
+    return m_resumeAt.time_since_epoch().count() == 0 || now >= m_resumeAt;
+}
+
+void Icm42688ConfigSequencer::AdvanceWaitStage()
+{
+    if (m_stage == Stage::WaitAfterReset || m_stage == Stage::WaitAfterPower || m_stage == Stage::WaitAfterRate) {
+        m_stage = m_nextStage;
+    }
+}
+
+void Icm42688ConfigSequencer::WaitFor(std::chrono::steady_clock::time_point now, std::chrono::milliseconds delay,
+                                      Stage nextStage)
+{
+    m_nextStage = nextStage;
+    m_resumeAt = now + delay;
+    if (nextStage == Stage::PowerOn) {
+        m_stage = Stage::WaitAfterReset;
+    } else if (nextStage == Stage::ConfigureRate) {
+        m_stage = Stage::WaitAfterPower;
+    } else {
+        m_stage = Stage::WaitAfterRate;
+    }
+}
+
+Icm42688ConfigSequencer::Status Icm42688ConfigSequencer::StepStart(
+    SpiDev &spi, std::chrono::steady_clock::time_point now)
+{
+    if (!spi.WriteReg(REG_DEVICE_CONFIG, 0x01)) {
+        return Fail();
+    }
+    WaitFor(now, std::chrono::milliseconds(100), Stage::PowerOn);
+    return Status::Pending;
+}
+
+Icm42688ConfigSequencer::Status Icm42688ConfigSequencer::StepPowerOn(
+    SpiDev &spi, std::chrono::steady_clock::time_point now)
+{
+    spi.WriteReg(REG_INT_CONFIG, 0x30);
+    spi.WriteReg(REG_INT_SOURCE0, 0x08);
+    spi.WriteReg(REG_INT_CONFIG1, 0x00);
+    spi.WriteReg(REG_PWR_MGMT0, 0x0F);
+    WaitFor(now, std::chrono::milliseconds(20), Stage::ConfigureRate);
+    return Status::Pending;
+}
+
+Icm42688ConfigSequencer::Status Icm42688ConfigSequencer::StepConfigureRate(
+    SpiDev &spi, std::chrono::steady_clock::time_point now)
+{
+    const uint8_t odrCode = OdrCodeFromHz(m_imuHz);
+    const uint8_t gyroConfig0 = static_cast<uint8_t>((m_gyroFsBits << 5) | (odrCode & 0x0F));
+    const uint8_t accelConfig0 = static_cast<uint8_t>((m_accelFsBits << 5) | (odrCode & 0x0F));
+    if (!spi.WriteReg(REG_GYRO_CONFIG0, gyroConfig0) || !spi.WriteReg(REG_ACCEL_CONFIG0, accelConfig0)) {
+        return Fail();
+    }
+    WaitFor(now, std::chrono::milliseconds(20), Stage::Done);
+    return Status::Pending;
+}
+
+Icm42688ConfigSequencer::Status Icm42688ConfigSequencer::Fail()
+{
+    m_stage = Stage::Failed;
+    return Status::Failed;
 }

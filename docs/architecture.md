@@ -11,7 +11,7 @@ This specification covers:
 - Core runtime services: `src/native/core/application/runtime/*`
 - Session and processing pipeline: `src/native/core/application/session/*`
 - Shared state and protocol: `src/native/core/application/state/*`, `src/native/common/tlv/*`
-- Link discovery: `src/native/common/discovery/udp_discovery_beacon.cpp`
+- Link discovery: `DiscoveryBeaconTask` in `src/native/core/application/runtime/system_runtime_graph_service.cpp`
 - Flight telemetry integration: `src/native/adapters/telemetry/px4_mavlink_gateway.cpp`
 - Android control app: `src/android/app/src/main/java/com/example/smartdrone/MainActivity.java`
 
@@ -25,14 +25,14 @@ This specification covers:
 - Ports: abstraction boundaries for camera/IMU/SLAM/pose publishing/command channel (`core/ports`)
 - Application: orchestration, session supervision, runtime config, live state (`core/application`)
 - Adapters: concrete implementations for camera/IMU/SLAM/MAVLink/UDP (`adapters`)
-- Common: TLV framing, UDP helpers, thread launch logging, discovery beacon (`common`)
+- Common: TLV framing, UDP helpers, EPG scheduling, runtime stop state (`common`)
 
 ### 2.2 Design Principles
 
 - Control plane and data plane are separated
 - Mode switching is centralized by `UnifiedRuntimeController`
 - Session lifecycle is isolated and deterministic
-- Observability is built into protocol, threading, and diagnostics
+- Observability is built into protocol, EPG scheduling, and diagnostics
 
 ---
 
@@ -43,17 +43,16 @@ This specification covers:
 Startup sequence:
 
 1. `RuntimeHost::Run` initializes MAVLink gateway, live state, PX4 hooks, and runtime controller
-2. Starts MAVLink RX and timesync threads
-3. Starts UDP command thread
-4. Starts UDP discovery beacon thread
-5. Optionally enters `slam` or `calib` mode based on startup args
+2. Starts `SystemRuntimeGraph`
+3. `SystemRuntimeGraph` schedules MAVLink RX, setpoint stream, UDP command, manual control, force restart, runtime supervisor, and discovery beacon tasks
+4. Optionally enters `slam` or `calib` mode based on startup args
 
 Shutdown sequence:
 
+- stop `SystemRuntimeGraph`
 - stop controller
 - stop setpoint stream
-- stop MAVLink threads
-- join discovery and command threads
+- close MAVLink resources
 
 ### 3.2 Runtime Mode Management
 
@@ -63,7 +62,7 @@ Supported modes:
 - `Slam`
 - `Calib`
 
-`RuntimeSessionSupervisor` maintains desired and active modes, joins previous session, and launches the next session thread.
+`RuntimeSessionSupervisor` maintains desired and active modes, requests the active session graph to stop, and launches the next session graph when the previous one is joined.
 
 ### 3.3 Flight Control Features
 
@@ -81,7 +80,7 @@ Constraints:
 
 ### 3.4 SLAM Session Features
 
-`RunSlamSession` and `SlamFrameProcessor` handle:
+`SlamSessionGraphRuntime` and `SlamFrameProcessor` handle:
 
 - stereo acquisition with optional IMU fusion window
 - dynamic SLAM operation mode update
@@ -165,7 +164,7 @@ The implementation contains the following visual-feature adaptations:
 
 ### 3.6 Calibration Session Features
 
-`RunCalibSession` handles:
+`CalibSessionGraphRuntime` handles:
 
 - auto-creating `calib_data_N` output directory
 - writing stereo images and IMU records
@@ -221,7 +220,7 @@ The current implementation also updates the Android source so that it remains al
 
 ### 4.1 Discovery Link
 
-Server side (`StartUdpDiscoveryBeaconThread`):
+Server side (`DiscoveryBeaconTask` via `SystemRuntimeGraph`):
 
 - port: `15000`
 - period: `1s`
@@ -249,7 +248,7 @@ Key command groups:
 
 ### 4.3 Heartbeat and State Link
 
-Server behavior (`udp_command_thread`):
+Server behavior (`UdpCommandRuntime` via EPG):
 
 - heartbeat TX: every `500ms`
 - state TX: every `100ms`
@@ -269,25 +268,23 @@ Peer gate policy:
 ### 4.4 MAVLink Link
 
 - transport: `/dev/ttyAMA0 @ 921600`
-- threads: `mavlink_rx`, `mavlink_timesync`, `mavlink_setpoint_stream`
+- EPG tasks: `MavlinkRxTask`, `SetpointStreamTask`
 - capabilities: `COMMAND_LONG+ACK`, mode switch, manual control, setpoint streaming, odometry publish
 
 ---
 
-## 5. Concurrency and Threading Model
+## 5. EPG Scheduling Model
 
-Thread roles are unified in `thread_launch.h`:
+Runtime work is unified under EPG graphs:
 
-- `RuntimeWorker`, `RuntimeSession`, `RuntimeForceRestart`
-- `MavlinkRx`, `MavlinkTimesync`, `MavlinkSetpointStream`
-- `UdpCommand`, `DiscoveryBeacon`
-- `UdpImageCam0`, `UdpImageCam1`
-- `Imu`, `CalibImuWriter`, `ManualControl`
+- `SystemRuntimeGraph`: persistent control-plane and telemetry tasks
+- `SlamSessionGraphRuntime`: SLAM resource, clock, IMU polling, frame processing, backend ticks, and monitor tasks
+- `CalibSessionGraphRuntime`: calibration resource, camera acquisition, IMU writing, storage, preview, completion, flush, and monitor tasks
 
 Concurrency properties:
 
-- single active session thread at a time
-- manual control loop is persistent; streaming is gated
+- single active session graph at a time
+- manual control and setpoint streaming are persistent system tasks; behavior is gated by runtime state
 - setpoint stream is enabled on demand and disabled outside OFFBOARD
 - `LivePoseState` is mutex-protected
 
@@ -308,9 +305,9 @@ Concurrency properties:
 
 ### 6.3 Session Safety
 
-- condition-variable based supervision and transition
-- `WaitForIdle` for protected operations (e.g., calib cleanup)
-- force-restart path is isolated in detached thread
+- session transitions use nonblocking graph stop requests and join checks
+- protected operations such as calibration cleanup run only when the supervisor reports idle
+- force restart is scheduled by `ForceRestartTask`
 
 ### 6.4 Data Validity
 
@@ -367,13 +364,14 @@ Throughput control in the current implementation is centered on the following be
 ### 8.3 Design for Explainability and Observability
 
 - diagnostics channels: `slam_dfx`, `odom_ts`, ACK logs, timesync logs
-- role-based thread launch logging
+- EPG DFX snapshots and task timing logs
+- EPG graph snapshots are written to `/tmp/smartdrone_epg_system.json`, `/tmp/smartdrone_epg_slam.json`, and `/tmp/smartdrone_epg_calib.json`
 - remote capability and config query endpoints
 
 Additional observability points introduced in the current implementation:
 
 - config payloads now include `camera.auto_exposure_note` and `camera.pair_window_ms_note` to explain packed-UVC-specific semantics
-- startup logs from `runtime_session_common` explicitly print `pixelFormat=YUYV_packed_stereo`, `packed_stereo=Y/N`, and `stereo_input_note=single_uvc_frame_split_left_right_no_timestamp_pairing`
+- startup logs from `runtime_aliases` explicitly print `pixelFormat=YUYV_packed_stereo`, `packed_stereo=Y/N`, and `stereo_input_note=single_uvc_frame_split_left_right_no_timestamp_pairing`
 - `UdpImageSender` logs destination peer changes, which helps debug cases where the phone is connected but still receives no preview
 
 ### 8.4 Design for Extensibility
@@ -392,7 +390,7 @@ Additional observability points introduced in the current implementation:
 flowchart LR
     App[Android App]
     Disc[Discovery Beacon]
-    Cmd[UDP Command Thread]
+    Cmd[UdpCommandRuntime]
     Ctrl[UnifiedRuntimeController]
     Sup[RuntimeSessionSupervisor]
     SlamSess[Slam Session]
@@ -435,7 +433,7 @@ flowchart TB
     subgraph Application
       A1[runtime_controller]
       A2[runtime_session_supervisor]
-      A3[udp_command_thread]
+      A3[UdpCommandRuntime]
       A4[slam_frame_processor]
       A5[runtime_config_service]
     end
@@ -468,26 +466,26 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     participant APP as Android
-    participant DISC as DiscoveryBeacon
-    participant CMD as UdpCommand
+    participant DISC as DiscoveryBeaconTask
+    participant CMD as UdpCommandRuntime
     participant CTRL as Controller
     participant SUP as SessionSupervisor
-    participant SLAM as SlamSession
+    participant SLAM as SlamSessionGraph
     participant PX4 as Px4Mavlink
 
     DISC-->>APP: discovery broadcast every 1s
     APP->>CMD: runtime mode and runtime config
     CMD->>CTRL: execute action and apply config
     CTRL->>SUP: request mode
-    SUP->>SLAM: start session thread
+    SUP->>SLAM: start session graph
 
-    loop frame loop
+    loop EPG scheduled ticks
       SLAM->>PX4: send odometry
       SLAM->>CMD: update pose state
       CMD-->>APP: state frame every 100ms
     end
 
-    loop heartbeat loop
+    loop EPG scheduled heartbeat
       APP->>CMD: heartbeat
       CMD-->>APP: heartbeat every 500ms
     end
@@ -544,7 +542,7 @@ Scenario B: heartbeat timeout landing
 ```mermaid
 sequenceDiagram
     participant APP as Android
-    participant CMD as UdpCommandThread
+    participant CMD as UdpCommandRuntime
     participant HOOK as Px4UdpHooks
     participant PX4 as PX4
 
@@ -635,7 +633,7 @@ sequenceDiagram
 6. `StartupAligner` aligns startup pose (prefers PX4 local `z`, then fallback strategy), and sets `Good/Weak/Lost` quality.
 7. The final pose is published through two paths in parallel:
    - MAVLink: `MavlinkPosePublisher -> SendOdometry` with `MAV_FRAME_LOCAL_NED / MAV_FRAME_BODY_FRD`.
-   - UDP state: stored in `LivePoseState`, then packed by `udp_command_thread` into `CMD_STATE`.
+   - UDP state: stored in `LivePoseState`, then packed by `UdpCommandRuntime` into `CMD_STATE`.
 
 ### 10.6 ORB-SLAM3 Parameter Apply Path
 

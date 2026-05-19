@@ -57,6 +57,13 @@ OrbSlam3Runtime::~OrbSlam3Runtime() = default;
 
 bool OrbSlam3Runtime::Available() const { return m_impl && m_impl->system; }
 
+void OrbSlam3Runtime::StepBackend() {
+  ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
+  if (system != nullptr) {
+    system->StepBackend();
+  }
+}
+
 void OrbSlam3Runtime::SetOperationMode(core::domain::SlamOperationMode mode) {
   ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
   if (system == nullptr || m_operationMode == mode) {

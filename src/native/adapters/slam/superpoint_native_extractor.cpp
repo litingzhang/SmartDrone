@@ -6,7 +6,6 @@
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -14,9 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
-#include <mutex>
 #include <numeric>
-#include <thread>
 #include <utility>
 
 #include <opencv2/imgproc.hpp>
@@ -1964,7 +1961,6 @@ struct SuperPointNativeExtractor::Impl {
   std::vector<float> lightGlueDesc0;
   std::vector<float> lightGlueDesc1;
   SuperPointPostScratch mainPostScratch;
-  SuperPointPostScratch parallelPostScratch;
   int inputHeight{0};
   int inputWidth{0};
   int lightGluePointCount{0};
@@ -1996,133 +1992,7 @@ struct SuperPointNativeExtractor::Impl {
   TensorRtForwardStats lastSuperPointForwardStats{};
   TensorRtForwardStats lastLightGlueForwardStats{};
   SuperPointPostStats lastSuperPointPostStats{};
-  std::mutex parallelPostMutex;
-  std::condition_variable parallelPostCv;
-  std::condition_variable parallelPostDoneCv;
-  std::thread parallelPostThread;
-  bool parallelPostStop{false};
-  bool parallelPostHasJob{false};
-  bool parallelPostDone{false};
   bool lightGlueDynamicPointCountDisabled{false};
-  const TensorBlob *parallelPostDetector{nullptr};
-  const TensorBlob *parallelPostDescriptors{nullptr};
-  const cv::Mat *parallelPostImage{nullptr};
-  SuperPointFeatureSet *parallelPostOutput{nullptr};
-  SuperPointPostStats *parallelPostStats{nullptr};
-  std::string parallelPostError;
-  int parallelPostTensorBatch{0};
-  int parallelPostTargetHeight{0};
-  int parallelPostTargetWidth{0};
-  int parallelPostMaxPoints{0};
-  int parallelPostDescriptorLimit{0};
-  bool parallelPostOk{false};
-
-  ~Impl() { StopParallelPostWorker(); }
-
-  void StopParallelPostWorker() {
-    {
-      std::lock_guard<std::mutex> lock(parallelPostMutex);
-      parallelPostStop = true;
-    }
-    parallelPostCv.notify_one();
-    if (parallelPostThread.joinable()) {
-      parallelPostThread.join();
-    }
-  }
-
-  void EnsureParallelPostWorker() {
-    if (parallelPostThread.joinable()) {
-      return;
-    }
-    parallelPostStop = false;
-    parallelPostThread = std::thread([this]() { ParallelPostWorkerLoop(); });
-  }
-
-  void ParallelPostWorkerLoop() {
-    while (true) {
-      const TensorBlob *detectorBlob = nullptr;
-      const TensorBlob *descriptorBlob = nullptr;
-      const cv::Mat *sourceImage = nullptr;
-      SuperPointFeatureSet *output = nullptr;
-      SuperPointPostStats *postStats = nullptr;
-      int tensorBatch = 0;
-      int targetHeight = 0;
-      int targetWidth = 0;
-      int maxPoints = 0;
-      int descriptorLimit = 0;
-      {
-        std::unique_lock<std::mutex> lock(parallelPostMutex);
-        parallelPostCv.wait(
-            lock, [this]() { return parallelPostStop || parallelPostHasJob; });
-        if (parallelPostStop && !parallelPostHasJob) {
-          return;
-        }
-        detectorBlob = parallelPostDetector;
-        descriptorBlob = parallelPostDescriptors;
-        sourceImage = parallelPostImage;
-        output = parallelPostOutput;
-        postStats = parallelPostStats;
-        tensorBatch = parallelPostTensorBatch;
-        targetHeight = parallelPostTargetHeight;
-        targetWidth = parallelPostTargetWidth;
-        maxPoints = parallelPostMaxPoints;
-        descriptorLimit = parallelPostDescriptorLimit;
-        parallelPostHasJob = false;
-      }
-
-      std::string workerError;
-      const bool ok =
-          detectorBlob != nullptr && descriptorBlob != nullptr &&
-          sourceImage != nullptr && output != nullptr && postStats != nullptr &&
-          PopulateOutputFromTensors(
-              *detectorBlob, *descriptorBlob, tensorBatch, *sourceImage,
-              targetHeight, targetWidth, maxPoints, descriptorLimit, *output,
-              parallelPostScratch, postStats, &workerError);
-      {
-        std::lock_guard<std::mutex> lock(parallelPostMutex);
-        parallelPostOk = ok;
-        parallelPostError = std::move(workerError);
-        parallelPostDone = true;
-      }
-      parallelPostDoneCv.notify_one();
-    }
-  }
-
-  void StartParallelPostJob(const TensorBlob &detectorBlob,
-                            const TensorBlob &descriptorBlob, int tensorBatch,
-                            const cv::Mat &sourceImage, int targetHeight,
-                            int targetWidth, int maxPoints, int descriptorLimit,
-                            SuperPointFeatureSet &output,
-                            SuperPointPostStats &postStats) {
-    EnsureParallelPostWorker();
-    {
-      std::lock_guard<std::mutex> lock(parallelPostMutex);
-      parallelPostDetector = &detectorBlob;
-      parallelPostDescriptors = &descriptorBlob;
-      parallelPostImage = &sourceImage;
-      parallelPostOutput = &output;
-      parallelPostStats = &postStats;
-      parallelPostTensorBatch = tensorBatch;
-      parallelPostTargetHeight = targetHeight;
-      parallelPostTargetWidth = targetWidth;
-      parallelPostMaxPoints = maxPoints;
-      parallelPostDescriptorLimit = descriptorLimit;
-      parallelPostError.clear();
-      parallelPostOk = false;
-      parallelPostDone = false;
-      parallelPostHasJob = true;
-    }
-    parallelPostCv.notify_one();
-  }
-
-  bool WaitParallelPostJob(std::string *err) {
-    std::unique_lock<std::mutex> lock(parallelPostMutex);
-    parallelPostDoneCv.wait(lock, [this]() { return parallelPostDone; });
-    if (!parallelPostOk && err != nullptr) {
-      *err = parallelPostError;
-    }
-    return parallelPostOk;
-  }
 
   bool Load(const std::string &repoPath, const std::string &deviceText,
             std::string *err) {
@@ -2343,36 +2213,14 @@ struct SuperPointNativeExtractor::Impl {
                              &batchStats, &batchErr)) {
         const auto forwardEndTp = std::chrono::steady_clock::now();
         const auto postStartTp = forwardEndTp;
-        if (EnvFlag("SMART_DRONE_SUPERPOINT_PARALLEL_POST", false) &&
-            grayImages.size() == 2) {
-          std::array<SuperPointPostStats, 2> postStats{};
-          std::array<std::string, 2> postErrors{};
-          StartParallelPostJob(detector, descriptors, 1, grayImages[1],
-                               batchTargetHeight, batchTargetWidth, maxPoints,
-                               descriptorLimit, outputs[1], postStats[1]);
-          const bool leftOk = PopulateOutputFromTensors(
-              detector, descriptors, 0, grayImages[0], batchTargetHeight,
-              batchTargetWidth, maxPoints, descriptorLimit, outputs[0],
-              mainPostScratch, &postStats[0], &postErrors[0]);
-          const bool rightOk = WaitParallelPostJob(&postErrors[1]);
-          if (!leftOk || !rightOk) {
-            if (err != nullptr) {
-              *err = !postErrors[0].empty() ? postErrors[0] : postErrors[1];
-            }
+        for (size_t batchIndex = 0; batchIndex < grayImages.size();
+             ++batchIndex) {
+          if (!PopulateOutputFromTensors(
+                  detector, descriptors, static_cast<int>(batchIndex),
+                  grayImages[batchIndex], batchTargetHeight, batchTargetWidth,
+                  maxPoints, descriptorLimit, outputs[batchIndex],
+                  mainPostScratch, &lastSuperPointPostStats, err)) {
             return false;
-          }
-          lastSuperPointPostStats.Add(postStats[0]);
-          lastSuperPointPostStats.Add(postStats[1]);
-        } else {
-          for (size_t batchIndex = 0; batchIndex < grayImages.size();
-               ++batchIndex) {
-            if (!PopulateOutputFromTensors(
-                    detector, descriptors, static_cast<int>(batchIndex),
-                    grayImages[batchIndex], batchTargetHeight, batchTargetWidth,
-                    maxPoints, descriptorLimit, outputs[batchIndex],
-                    mainPostScratch, &lastSuperPointPostStats, err)) {
-              return false;
-            }
           }
         }
         const auto postEndTp = std::chrono::steady_clock::now();

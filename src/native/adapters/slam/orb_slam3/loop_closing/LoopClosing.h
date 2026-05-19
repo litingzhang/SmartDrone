@@ -28,7 +28,6 @@
 
 #include <boost/algorithm/string.hpp>
 #include <memory>
-#include <thread>
 #include <mutex>
 #include "g2o/types/types_seven_dof_expmap.h"
 
@@ -65,13 +64,14 @@ public:
 
     // Main function
     void Run();
+    bool Step();
 
     void InsertKeyFrame(KeyFrame *pKF);
 
     void RequestReset();
     void RequestResetActiveMap(Map* pMap);
+    void RequestResetAsync(Map* pMap, bool activeMapOnly);
 
-    // This function will run in a separate thread
     void RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoopKF);
 
     bool isRunningGBA(){
@@ -225,7 +225,6 @@ protected:
     bool mbFinishedGBA;
     bool mbStopGBA;
     std::mutex mMutexGBA;
-    std::thread* mpThreadGBA;
 
     // Fix scale in the stereo/RGB-D case
     bool mbFixScale;

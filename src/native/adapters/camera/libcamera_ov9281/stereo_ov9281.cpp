@@ -69,13 +69,17 @@ bool SetControlIfSupported(libcamera::Camera *camera, libcamera::ControlList &co
     return false;
 }
 
-void CompressR16AdaptiveForSlam(const cv::Mat &src16, cv::Mat &dst8, int camIndex, uint32_t seq)
+using R16Histogram = std::array<uint32_t, 4096>;
+
+R16CompressionState &R16StateForCamera(int camIndex)
 {
     static std::array<R16CompressionState, 2> states{};
     const size_t stateIdx = static_cast<size_t>((camIndex == 1) ? 1 : 0);
-    R16CompressionState &state = states[stateIdx];
+    return states[stateIdx];
+}
 
-    std::array<uint32_t, 4096> hist{};
+uint32_t BuildR16Histogram(const cv::Mat &src16, R16Histogram &hist)
+{
     uint32_t sampleCount = 0;
     for (int y = 0; y < src16.rows; y += 2) {
         const uint16_t *row = src16.ptr<uint16_t>(y);
@@ -86,12 +90,11 @@ void CompressR16AdaptiveForSlam(const cv::Mat &src16, cv::Mat &dst8, int camInde
             ++sampleCount;
         }
     }
-    if (sampleCount == 0) {
-        dst8.create(src16.rows, src16.cols, CV_8UC1);
-        dst8.setTo(0);
-        return;
-    }
+    return sampleCount;
+}
 
+void EstimateR16Range(const R16Histogram &hist, uint32_t sampleCount, double &targetLo, double &targetHi)
+{
     const uint32_t lowTargetCount = static_cast<uint32_t>(sampleCount * 0.01);
     const uint32_t highTargetCount = static_cast<uint32_t>(sampleCount * 0.99);
     uint32_t cumulative = 0;
@@ -110,12 +113,15 @@ void CompressR16AdaptiveForSlam(const cv::Mat &src16, cv::Mat &dst8, int camInde
         }
     }
 
-    double targetLo = static_cast<double>(lowBin << 4);
-    double targetHi = static_cast<double>(highBin << 4);
+    targetLo = static_cast<double>(lowBin << 4);
+    targetHi = static_cast<double>(highBin << 4);
     if (targetHi <= targetLo + 64.0) {
         targetHi = targetLo + 64.0;
     }
+}
 
+void UpdateR16Range(R16CompressionState &state, double targetLo, double targetHi)
+{
     if (!state.initialized) {
         state.lo = targetLo;
         state.hi = targetHi;
@@ -127,14 +133,20 @@ void CompressR16AdaptiveForSlam(const cv::Mat &src16, cv::Mat &dst8, int camInde
     if (state.hi <= state.lo + 64.0) {
         state.hi = state.lo + 64.0;
     }
+}
 
+void RebuildR16Lut(R16CompressionState &state)
+{
     const double invRange = 255.0 / (state.hi - state.lo);
     for (int i = 0; i < 65536; ++i) {
         const double v = (static_cast<double>(i) - state.lo) * invRange;
         const int out = (v <= 0.0) ? 0 : (v >= 255.0) ? 255 : static_cast<int>(v + 0.5);
         state.lut[static_cast<size_t>(i)] = static_cast<uint8_t>(out);
     }
+}
 
+void ApplyR16Lut(const cv::Mat &src16, cv::Mat &dst8, const R16CompressionState &state)
+{
     dst8.create(src16.rows, src16.cols, CV_8UC1);
     for (int y = 0; y < src16.rows; ++y) {
         const uint16_t *srcRow = src16.ptr<uint16_t>(y);
@@ -143,99 +155,55 @@ void CompressR16AdaptiveForSlam(const cv::Mat &src16, cv::Mat &dst8, int camInde
             dstRow[x] = state.lut[srcRow[x]];
         }
     }
+}
 
+void LogR16Compression(int camIndex, uint32_t seq, const R16CompressionState &state, uint32_t sampleCount)
+{
     if ((seq % 120u) == 0u) {
         std::cerr << "[cam_r16] cam=" << camIndex << " seq=" << seq << " lo=" << state.lo << " hi=" << state.hi
                   << " samples=" << sampleCount << "\n";
     }
 }
 
+void CompressR16AdaptiveForSlam(const cv::Mat &src16, cv::Mat &dst8, int camIndex, uint32_t seq)
+{
+    R16CompressionState &state = R16StateForCamera(camIndex);
+    R16Histogram hist{};
+    const uint32_t sampleCount = BuildR16Histogram(src16, hist);
+    if (sampleCount == 0) {
+        dst8.create(src16.rows, src16.cols, CV_8UC1);
+        dst8.setTo(0);
+        return;
+    }
+
+    double targetLo = 0.0;
+    double targetHi = 0.0;
+    EstimateR16Range(hist, sampleCount, targetLo, targetHi);
+    UpdateR16Range(state, targetLo, targetHi);
+    RebuildR16Lut(state);
+    ApplyR16Lut(src16, dst8, state);
+    LogR16Compression(camIndex, seq, state, sampleCount);
+}
+
 } // namespace
 
-bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex, int w, int h, int fps, bool aeDisable,
-                            int exposureUs, float gain, bool requestY8)
+bool LibcameraMonoCam::Open(const MonoCameraOpenParams &params)
 {
-    ResetOpenState();
-    m_cam = std::move(cam);
-    m_camIndex = camIndex;
-    m_active.store(true, std::memory_order_relaxed);
-    m_streamFault.store(false, std::memory_order_relaxed);
-    {
-        std::lock_guard<std::mutex> lock(m_callbackMu);
-        m_closing = false;
-        m_callbacksInFlight = 0;
-    }
-
-    if (!m_cam) {
+    if (!PrepareOpen(params)) {
         return false;
     }
-    if (m_cam->acquire()) {
-        std::cerr << "Failed to acquire camera " << m_cam->id() << "\n";
-        ResetOpenState();
+    if (!ConfigureStream(params)) {
         return false;
     }
 
-    m_config = m_cam->generateConfiguration({libcamera::StreamRole::Viewfinder});
-    if (!m_config || m_config->size() < 1) {
-        std::cerr << "Failed to generate config\n";
-        ResetOpenState();
-        return false;
-    }
-
-    libcamera::StreamConfiguration &sc = m_config->at(0);
-    sc.size.width = w;
-    sc.size.height = h;
-    if (requestY8) {
-        sc.pixelFormat = libcamera::formats::R8;
-    }
-
-    const int64_t frameDurationUs = std::max<int64_t>(1, 1000000LL / std::max(1, fps));
+    const int64_t frameDurationUs = std::max<int64_t>(1, 1000000LL / std::max(1, params.fps));
     m_controls.set(libcamera::controls::FrameDurationLimits,
                    libcamera::Span<const int64_t, 2>({frameDurationUs, frameDurationUs}));
     const int32_t exposureCapUs =
         static_cast<int32_t>(std::max<int64_t>(1, std::min<int64_t>(kSlamAeMaxExposureUs, frameDurationUs - 500)));
-    const float gainCap = kSlamAeMaxGain;
-    m_aeConfiguredAuto = !aeDisable;
+    ConfigureControls(params, frameDurationUs, exposureCapUs);
 
-    if (aeDisable) {
-        const int32_t manualExposureUs = std::max<int32_t>(1, std::min<int32_t>(exposureUs, exposureCapUs));
-        const float manualGain = std::max(1.0f, std::min(gain, gainCap));
-        m_controls.set(libcamera::controls::AeEnable, false);
-        m_controls.set(libcamera::controls::ExposureTime, manualExposureUs);
-        m_controls.set(libcamera::controls::AnalogueGain, manualGain);
-    } else {
-        // Explicitly hand exposure/gain back to libcamera ISP auto-control path.
-        m_controls.set(libcamera::controls::AeEnable, true);
-        // Soft guidance for AE start point / cap preference where pipeline supports it.
-        m_controls.set(libcamera::controls::ExposureTime, exposureCapUs);
-        m_controls.set(libcamera::controls::AnalogueGain, std::max(1.0f, std::min(gain, gainCap)));
-    }
-
-    // Prefer ISP-side conservative image processing tuned for SLAM stability.
-    const bool nrSet = SetControlIfSupported(m_cam.get(), m_controls, "NoiseReductionMode", libcamera::ControlValue(1));
-    const bool sharpSet = SetControlIfSupported(m_cam.get(), m_controls, "Sharpness", libcamera::ControlValue(0.0f));
-    const bool tonemapSet = SetControlIfSupported(m_cam.get(), m_controls, "TonemapMode", libcamera::ControlValue(0));
-    std::cerr << "[cam] isp_hint cam=" << m_camIndex << " ae=" << (aeDisable ? "manual" : "auto")
-              << " frame_us=" << frameDurationUs << " exp_cap_us=" << exposureCapUs << " gain_cap=" << gainCap
-              << " nr=" << (nrSet ? "set" : "n/a") << " sharp=" << (sharpSet ? "set" : "n/a")
-              << " tonemap=" << (tonemapSet ? "set" : "n/a") << "\n";
-
-    if (m_config->validate() == libcamera::CameraConfiguration::Invalid) {
-        std::cerr << "Invalid camera configuration\n";
-        ResetOpenState();
-        return false;
-    }
-
-    if (m_cam->configure(m_config.get())) {
-        std::cerr << "Failed to configure camera\n";
-        ResetOpenState();
-        return false;
-    }
-
-    m_stream = sc.stream();
-    if (!m_stream) {
-        std::cerr << "No stream after configure\n";
-        ResetOpenState();
+    if (!ConfigureCamera()) {
         return false;
     }
 
@@ -253,53 +221,100 @@ bool LibcameraMonoCam::Open(std::shared_ptr<libcamera::Camera> cam, int camIndex
         return false;
     }
 
-    m_bufferMaps.clear();
-    for (auto &buf : buffers) {
-        std::vector<PlaneMap> planes;
-        planes.reserve(buf->planes().size());
-        for (const libcamera::FrameBuffer::Plane &p : buf->planes()) {
-            const int fd = p.fd.get();
-            const size_t len = p.length;
-            const off_t off = static_cast<off_t>(p.offset);
-            void *addr = MMapFD(fd, len, off);
-            if (!addr) {
-                std::cerr << "mmap failed\n";
-                ResetOpenState();
-                return false;
-            }
-            planes.push_back({addr, len, off});
-        }
-        m_bufferMaps[buf.get()] = std::move(planes);
+    if (!MapBuffers(buffers) || !CreateRequests(buffers)) {
+        return false;
     }
-
-    m_requests.clear();
-    for (auto &buf : buffers) {
-        std::unique_ptr<libcamera::Request> req = m_cam->createRequest();
-        if (!req) {
-            ResetOpenState();
-            return false;
-        }
-        if (req->addBuffer(m_stream, buf.get()) < 0) {
-            ResetOpenState();
-            return false;
-        }
-        m_requests.push_back(std::move(req));
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(m_framePoolMu);
-        m_framePool = std::make_shared<FramePoolState>();
-        m_framePool->active.store(true, std::memory_order_relaxed);
-        const size_t slotCount = buffers.size() + 2;
-        m_framePool->slots.reserve(slotCount);
-        for (size_t i = 0; i < slotCount; ++i) {
-            m_framePool->slots.push_back(std::make_unique<FrameSlot>());
-            m_framePool->freeSlots.push_back(m_framePool->slots.back().get());
-        }
-    }
+    CreateFramePool(buffers.size() + 2);
 
     m_cam->requestCompleted.connect(this, &LibcameraMonoCam::OnRequestComplete);
     return true;
+}
+
+bool LibcameraMonoCam::PrepareOpen(const MonoCameraOpenParams &params)
+{
+    ResetOpenState();
+    m_cam = params.camera;
+    m_camIndex = params.camIndex;
+    m_active.store(true, std::memory_order_relaxed);
+    m_streamFault.store(false, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMu);
+        m_closing = false;
+        m_callbacksInFlight = 0;
+    }
+    if (!m_cam) {
+        return false;
+    }
+    if (!m_cam->acquire()) {
+        return true;
+    }
+    std::cerr << "Failed to acquire camera " << m_cam->id() << "\n";
+    ResetOpenState();
+    return false;
+}
+
+bool LibcameraMonoCam::ConfigureStream(const MonoCameraOpenParams &params)
+{
+    m_config = m_cam->generateConfiguration({libcamera::StreamRole::Viewfinder});
+    if (!m_config || m_config->size() < 1) {
+        std::cerr << "Failed to generate config\n";
+        ResetOpenState();
+        return false;
+    }
+    libcamera::StreamConfiguration &sc = m_config->at(0);
+    sc.size.width = params.width;
+    sc.size.height = params.height;
+    if (params.requestY8) {
+        sc.pixelFormat = libcamera::formats::R8;
+    }
+    return true;
+}
+
+void LibcameraMonoCam::ConfigureControls(const MonoCameraOpenParams &params, int64_t frameDurationUs,
+                                         int32_t exposureCapUs)
+{
+    const float gainCap = kSlamAeMaxGain;
+    m_aeConfiguredAuto = !params.aeDisable;
+    if (params.aeDisable) {
+        const int32_t manualExposureUs = std::max<int32_t>(1, std::min<int32_t>(params.exposureUs, exposureCapUs));
+        const float manualGain = std::max(1.0f, std::min(params.gain, gainCap));
+        m_controls.set(libcamera::controls::AeEnable, false);
+        m_controls.set(libcamera::controls::ExposureTime, manualExposureUs);
+        m_controls.set(libcamera::controls::AnalogueGain, manualGain);
+    } else {
+        m_controls.set(libcamera::controls::AeEnable, true);
+        m_controls.set(libcamera::controls::ExposureTime, exposureCapUs);
+        m_controls.set(libcamera::controls::AnalogueGain, std::max(1.0f, std::min(params.gain, gainCap)));
+    }
+
+    const bool nrSet = SetControlIfSupported(m_cam.get(), m_controls, "NoiseReductionMode", libcamera::ControlValue(1));
+    const bool sharpSet = SetControlIfSupported(m_cam.get(), m_controls, "Sharpness", libcamera::ControlValue(0.0f));
+    const bool tonemapSet = SetControlIfSupported(m_cam.get(), m_controls, "TonemapMode", libcamera::ControlValue(0));
+    std::cerr << "[cam] isp_hint cam=" << m_camIndex << " ae=" << (params.aeDisable ? "manual" : "auto")
+              << " frame_us=" << frameDurationUs << " exp_cap_us=" << exposureCapUs << " gain_cap=" << gainCap
+              << " nr=" << (nrSet ? "set" : "n/a") << " sharp=" << (sharpSet ? "set" : "n/a")
+              << " tonemap=" << (tonemapSet ? "set" : "n/a") << "\n";
+}
+
+bool LibcameraMonoCam::ConfigureCamera()
+{
+    if (m_config->validate() == libcamera::CameraConfiguration::Invalid) {
+        std::cerr << "Invalid camera configuration\n";
+        ResetOpenState();
+        return false;
+    }
+    if (m_cam->configure(m_config.get())) {
+        std::cerr << "Failed to configure camera\n";
+        ResetOpenState();
+        return false;
+    }
+    m_stream = m_config->at(0).stream();
+    if (m_stream) {
+        return true;
+    }
+    std::cerr << "No stream after configure\n";
+    ResetOpenState();
+    return false;
 }
 
 bool LibcameraMonoCam::Start()
@@ -318,6 +333,55 @@ bool LibcameraMonoCam::Start()
         }
     }
     return true;
+}
+
+bool LibcameraMonoCam::MapBuffers(const std::vector<std::unique_ptr<libcamera::FrameBuffer>> &buffers)
+{
+    m_bufferMaps.clear();
+    for (auto &buf : buffers) {
+        std::vector<PlaneMap> planes;
+        planes.reserve(buf->planes().size());
+        for (const libcamera::FrameBuffer::Plane &p : buf->planes()) {
+            const int fd = p.fd.get();
+            const size_t len = p.length;
+            const off_t off = static_cast<off_t>(p.offset);
+            void *addr = MMapFD(fd, len, off);
+            if (!addr) {
+                std::cerr << "mmap failed\n";
+                ResetOpenState();
+                return false;
+            }
+            planes.push_back({addr, len, off});
+        }
+        m_bufferMaps[buf.get()] = std::move(planes);
+    }
+    return true;
+}
+
+bool LibcameraMonoCam::CreateRequests(const std::vector<std::unique_ptr<libcamera::FrameBuffer>> &buffers)
+{
+    m_requests.clear();
+    for (auto &buf : buffers) {
+        std::unique_ptr<libcamera::Request> req = m_cam->createRequest();
+        if (!req || req->addBuffer(m_stream, buf.get()) < 0) {
+            ResetOpenState();
+            return false;
+        }
+        m_requests.push_back(std::move(req));
+    }
+    return true;
+}
+
+void LibcameraMonoCam::CreateFramePool(size_t slotCount)
+{
+    std::lock_guard<std::mutex> lock(m_framePoolMu);
+    m_framePool = std::make_shared<FramePoolState>();
+    m_framePool->active.store(true, std::memory_order_relaxed);
+    m_framePool->slots.reserve(slotCount);
+    for (size_t i = 0; i < slotCount; ++i) {
+        m_framePool->slots.push_back(std::make_unique<FrameSlot>());
+        m_framePool->freeSlots.push_back(m_framePool->slots.back().get());
+    }
 }
 
 void LibcameraMonoCam::Stop()
@@ -463,26 +527,17 @@ bool LibcameraMonoCam::RequeueRequest(libcamera::Request *req)
 void LibcameraMonoCam::OnRequestComplete(libcamera::Request *req)
 {
     CallbackScope callbackScope(this);
-    if (!callbackScope.Active()) {
-        return;
-    }
-    if (!m_active.load(std::memory_order_relaxed)) {
-        return;
-    }
-    if (!req || req->status() == libcamera::Request::RequestCancelled) {
+    if (!callbackScope.Active() || !m_active.load(std::memory_order_relaxed) || !req ||
+        req->status() == libcamera::Request::RequestCancelled) {
         return;
     }
 
-    auto it = req->buffers().find(m_stream);
-    if (it == req->buffers().end()) {
-        if (m_active.load(std::memory_order_relaxed)) {
-            RequeueRequest(req);
-        }
+    libcamera::FrameBuffer *buf = RequestBuffer(req);
+    if (!buf) {
+        RequeueIfActive(req);
         return;
     }
-    libcamera::FrameBuffer *buf = it->second;
     const libcamera::FrameMetadata &md = buf->metadata();
-    const libcamera::ControlList &meta = req->metadata();
 
     FrameItem item;
     item.camIndex = m_camIndex;
@@ -490,85 +545,109 @@ void LibcameraMonoCam::OnRequestComplete(libcamera::Request *req)
     item.tsNs = md.timestamp;
     item.seq = md.sequence;
 
-    if ((md.sequence % 120u) == 0u) {
-        const std::optional<int32_t> metaExposureUs = meta.get(libcamera::controls::ExposureTime);
-        const std::optional<float> metaGain = meta.get(libcamera::controls::AnalogueGain);
-        const std::optional<bool> metaAe = meta.get(libcamera::controls::AeEnable);
-        const char *metaAeText = "na";
-        if (metaAe.has_value()) {
-            metaAeText = *metaAe ? "1" : "0";
-        }
-        std::cerr << "[cam_isp] cam=" << m_camIndex << " seq=" << md.sequence
-                  << " ae_cfg=" << (m_aeConfiguredAuto ? "auto" : "manual")
-                  << " ae_meta=" << metaAeText
-                  << " exp_us=" << (metaExposureUs.has_value() ? *metaExposureUs : -1)
-                  << " gain=" << (metaGain.has_value() ? *metaGain : -1.0f) << "\n";
-        if (metaExposureUs.has_value() && *metaExposureUs > kSlamAeMaxExposureUs) {
-            std::cerr << "[cam_isp_warn] cam=" << m_camIndex << " seq=" << md.sequence
-                      << " exposure high for slam exp_us=" << *metaExposureUs << " cap_us=" << kSlamAeMaxExposureUs
-                      << "\n";
-        }
-        if (metaGain.has_value() && *metaGain > kSlamAeMaxGain) {
-            std::cerr << "[cam_isp_warn] cam=" << m_camIndex << " seq=" << md.sequence
-                      << " gain high for slam gain=" << *metaGain << " cap=" << kSlamAeMaxGain << "\n";
-        }
-    }
-
-    const libcamera::StreamConfiguration &sc = m_config->at(0);
-    const int w = sc.size.width;
-    const int h = sc.size.height;
-    const int stride = sc.stride;
-
-    auto mit = m_bufferMaps.find(buf);
-    if (mit == m_bufferMaps.end() || mit->second.empty() || !mit->second[0].addr) {
-        if (m_active.load(std::memory_order_relaxed)) {
-            RequeueRequest(req);
-        }
+    LogIspMetadata(md, req->metadata());
+    uint8_t *data = MappedBufferData(buf);
+    if (!data) {
+        RequeueIfActive(req);
         return;
     }
-    uint8_t *p0 = reinterpret_cast<uint8_t *>(mit->second[0].addr);
 
     auto frameSlot = AcquireFrameSlot();
     if (!frameSlot) {
-        if (m_active.load(std::memory_order_relaxed)) {
-            RequeueRequest(req);
-        }
+        RequeueIfActive(req);
         return;
     }
-    cv::Mat &gray8 = frameSlot->gray;
-    if (sc.pixelFormat == libcamera::formats::R8) {
-        cv::Mat g(h, w, CV_8UC1, static_cast<void *>(p0), static_cast<size_t>(stride));
+
+    ConvertFrameToGray(m_config->at(0), data, md.sequence, frameSlot->gray);
+    item.gray = frameSlot->gray;
+    PublishFrame(std::move(item), std::move(frameSlot));
+    RequeueIfActive(req);
+}
+
+void LibcameraMonoCam::LogIspMetadata(const libcamera::FrameMetadata &metadata,
+                                      const libcamera::ControlList &meta) const
+{
+    if ((metadata.sequence % 120u) != 0u) {
+        return;
+    }
+    const std::optional<int32_t> metaExposureUs = meta.get(libcamera::controls::ExposureTime);
+    const std::optional<float> metaGain = meta.get(libcamera::controls::AnalogueGain);
+    const std::optional<bool> metaAe = meta.get(libcamera::controls::AeEnable);
+    const char *metaAeText = metaAe.has_value() ? (*metaAe ? "1" : "0") : "na";
+    std::cerr << "[cam_isp] cam=" << m_camIndex << " seq=" << metadata.sequence
+              << " ae_cfg=" << (m_aeConfiguredAuto ? "auto" : "manual") << " ae_meta=" << metaAeText
+              << " exp_us=" << (metaExposureUs.has_value() ? *metaExposureUs : -1)
+              << " gain=" << (metaGain.has_value() ? *metaGain : -1.0f) << "\n";
+    if (metaExposureUs.has_value() && *metaExposureUs > kSlamAeMaxExposureUs) {
+        std::cerr << "[cam_isp_warn] cam=" << m_camIndex << " seq=" << metadata.sequence
+                  << " exposure high for slam exp_us=" << *metaExposureUs << " cap_us=" << kSlamAeMaxExposureUs
+                  << "\n";
+    }
+    if (metaGain.has_value() && *metaGain > kSlamAeMaxGain) {
+        std::cerr << "[cam_isp_warn] cam=" << m_camIndex << " seq=" << metadata.sequence
+                  << " gain high for slam gain=" << *metaGain << " cap=" << kSlamAeMaxGain << "\n";
+    }
+}
+
+libcamera::FrameBuffer *LibcameraMonoCam::RequestBuffer(libcamera::Request *req)
+{
+    auto it = req->buffers().find(m_stream);
+    return it == req->buffers().end() ? nullptr : it->second;
+}
+
+uint8_t *LibcameraMonoCam::MappedBufferData(libcamera::FrameBuffer *buffer)
+{
+    auto mit = m_bufferMaps.find(buffer);
+    if (mit == m_bufferMaps.end() || mit->second.empty() || !mit->second[0].addr) {
+        return nullptr;
+    }
+    return reinterpret_cast<uint8_t *>(mit->second[0].addr);
+}
+
+void LibcameraMonoCam::ConvertFrameToGray(const libcamera::StreamConfiguration &config, uint8_t *data,
+                                          uint32_t sequence, cv::Mat &gray8)
+{
+    const int w = config.size.width;
+    const int h = config.size.height;
+    const int stride = config.stride;
+    if (config.pixelFormat == libcamera::formats::R8) {
+        cv::Mat g(h, w, CV_8UC1, static_cast<void *>(data), static_cast<size_t>(stride));
         gray8.create(h, w, CV_8UC1);
         g.copyTo(gray8);
-    } else if (sc.pixelFormat == libcamera::formats::XRGB8888) {
-        cv::Mat bgra(h, w, CV_8UC4, static_cast<void *>(p0), static_cast<size_t>(stride));
+    } else if (config.pixelFormat == libcamera::formats::XRGB8888) {
+        cv::Mat bgra(h, w, CV_8UC4, static_cast<void *>(data), static_cast<size_t>(stride));
         gray8.create(h, w, CV_8UC1);
         cv::cvtColor(bgra, gray8, cv::COLOR_BGRA2GRAY);
-    } else if (sc.pixelFormat == libcamera::formats::RGB888) {
-        cv::Mat rgb(h, w, CV_8UC3, static_cast<void *>(p0), static_cast<size_t>(stride));
+    } else if (config.pixelFormat == libcamera::formats::RGB888) {
+        cv::Mat rgb(h, w, CV_8UC3, static_cast<void *>(data), static_cast<size_t>(stride));
         gray8.create(h, w, CV_8UC1);
         cv::cvtColor(rgb, gray8, cv::COLOR_RGB2GRAY);
-    } else if (sc.pixelFormat == libcamera::formats::R16) {
-        cv::Mat m16(h, w, CV_16UC1, static_cast<void *>(p0), static_cast<size_t>(stride));
+    } else if (config.pixelFormat == libcamera::formats::R16) {
+        cv::Mat m16(h, w, CV_16UC1, static_cast<void *>(data), static_cast<size_t>(stride));
         gray8.create(h, w, CV_8UC1);
         if (!m_r16Normalize) {
             m16.convertTo(gray8, CV_8U, 1.0 / 256.0);
         } else {
-            CompressR16AdaptiveForSlam(m16, gray8, m_camIndex, md.sequence);
+            CompressR16AdaptiveForSlam(m16, gray8, m_camIndex, sequence);
         }
     } else {
-        cv::Mat g(h, w, CV_8UC1, static_cast<void *>(p0), static_cast<size_t>(stride));
+        cv::Mat g(h, w, CV_8UC1, static_cast<void *>(data), static_cast<size_t>(stride));
         gray8.create(h, w, CV_8UC1);
         g.copyTo(gray8);
     }
+}
 
-    item.gray = gray8;
+void LibcameraMonoCam::PublishFrame(FrameItem &&item, std::shared_ptr<FrameSlot> frameSlot)
+{
     item.owner = std::shared_ptr<void>(std::move(frameSlot));
     auto sink = CopySink();
     if (sink) {
         sink(std::move(item));
     }
+}
 
+void LibcameraMonoCam::RequeueIfActive(libcamera::Request *req)
+{
     if (m_active.load(std::memory_order_relaxed)) {
         RequeueRequest(req);
     }
@@ -599,31 +678,48 @@ std::shared_ptr<LibcameraMonoCam::FrameSlot> LibcameraMonoCam::AcquireFrameSlot(
     });
 }
 
-bool LibcameraStereoOV9281_TsPair::Open(int w, int h, int fps, bool aeDisable, int exposureUs, float gain,
-                                        bool requestY8, int64_t pairThreshNs, int64_t keepWindowNs, int maxPairQueue,
-                                        bool r16Normalize, int leftCamIndex, int rightCamIndex)
+bool LibcameraStereoOV9281_TsPair::Open(const StereoCameraOpenParams &params)
 {
     Close();
     ResetPairingState();
-    m_w = w;
-    m_h = h;
-    m_fps = fps;
-    m_maxPairQueue = maxPairQueue;
-    m_pairThreshNs = pairThreshNs;
-    m_keepWindowNs = keepWindowNs;
+    ApplyOpenParams(params);
     m_acceptFrames.store(true, std::memory_order_relaxed);
 
-    m_cm = std::make_unique<libcamera::CameraManager>();
-    if (m_cm->start()) {
-        std::cerr << "CameraManager start failed\n";
+    if (!StartCameraManager() || !SelectCameras(params.leftCamIndex, params.rightCamIndex) ||
+        !OpenMonoCameras(params) || !StartMonoCameras()) {
         Close();
         return false;
     }
 
+    LogMonoFormats();
+    return true;
+}
+
+void LibcameraStereoOV9281_TsPair::ApplyOpenParams(const StereoCameraOpenParams &params)
+{
+    m_w = params.width;
+    m_h = params.height;
+    m_fps = params.fps;
+    m_maxPairQueue = params.maxPairQueue;
+    m_pairThreshNs = params.pairThreshNs;
+    m_keepWindowNs = params.keepWindowNs;
+}
+
+bool LibcameraStereoOV9281_TsPair::StartCameraManager()
+{
+    m_cm = std::make_unique<libcamera::CameraManager>();
+    if (!m_cm->start()) {
+        return true;
+    }
+    std::cerr << "CameraManager start failed\n";
+    return false;
+}
+
+bool LibcameraStereoOV9281_TsPair::SelectCameras(int leftCamIndex, int rightCamIndex)
+{
     const auto &cams = m_cm->cameras();
     if (cams.size() < 2) {
         std::cerr << "Need 2 cameras, but found " << cams.size() << "\n";
-        Close();
         return false;
     }
 
@@ -634,48 +730,56 @@ bool LibcameraStereoOV9281_TsPair::Open(int w, int h, int fps, bool aeDisable, i
         for (int i = 0; i < camCount; ++i) {
             std::cerr << "[cam] available index=" << i << " id=" << cams[static_cast<size_t>(i)]->id() << "\n";
         }
-        Close();
         return false;
     }
     if (leftCamIndex == rightCamIndex) {
         std::cerr << "[cam] left and right camera index must differ, got " << leftCamIndex << "\n";
-        Close();
         return false;
     }
 
     m_camL = cams[static_cast<size_t>(leftCamIndex)];
     m_camR = cams[static_cast<size_t>(rightCamIndex)];
+    return true;
+}
 
+bool LibcameraStereoOV9281_TsPair::OpenMonoCameras(const StereoCameraOpenParams &params)
+{
     auto sink = [&](FrameItem &&fi) { PushFrame(std::move(fi)); };
-
-    if (!m_left.Open(m_camL, 0, w, h, fps, aeDisable, exposureUs, gain, requestY8)) {
-        Close();
+    const MonoCameraOpenParams leftParams{m_camL, 0, params.width, params.height, params.fps, params.aeDisable,
+                                          params.exposureUs, params.gain, params.requestY8};
+    const MonoCameraOpenParams rightParams{m_camR, 1, params.width, params.height, params.fps, params.aeDisable,
+                                           params.exposureUs, params.gain, params.requestY8};
+    if (!m_left.Open(leftParams)) {
         return false;
     }
-    if (!m_right.Open(m_camR, 1, w, h, fps, aeDisable, exposureUs, gain, requestY8)) {
-        Close();
+    if (!m_right.Open(rightParams)) {
         return false;
     }
 
-    m_left.SetR16Normalize(r16Normalize);
-    m_right.SetR16Normalize(r16Normalize);
+    m_left.SetR16Normalize(params.r16Normalize);
+    m_right.SetR16Normalize(params.r16Normalize);
     m_left.SetSink(sink);
     m_right.SetSink(sink);
+    return true;
+}
 
+bool LibcameraStereoOV9281_TsPair::StartMonoCameras()
+{
     if (!m_left.Start()) {
-        Close();
         return false;
     }
     if (!m_right.Start()) {
-        Close();
         return false;
     }
+    return true;
+}
 
+void LibcameraStereoOV9281_TsPair::LogMonoFormats() const
+{
     std::cerr << "Left fmt=" << m_left.PixelFmt().toString() << " size=" << m_left.SizeWH().toString()
               << " stride=" << m_left.Stride() << "\n";
     std::cerr << "Right fmt=" << m_right.PixelFmt().toString() << " size=" << m_right.SizeWH().toString()
               << " stride=" << m_right.Stride() << "\n";
-    return true;
 }
 
 void LibcameraStereoOV9281_TsPair::Close()
@@ -709,41 +813,39 @@ bool LibcameraStereoOV9281_TsPair::GrabPair(FrameItem &L, FrameItem &R, int time
                                             uint64_t minTimestampNs)
 {
     std::unique_lock<std::mutex> lk(m_muPair);
+    if (timeoutMs <= 0) {
+        return TryGrabPairLocked(L, R, preferLatest, minTimestampNs);
+    }
     if (!m_cvPair.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&] {
             return HasEligiblePairLocked(minTimestampNs) || !smartdrone::common::g_runningFlag.load() ||
                    !m_acceptFrames.load(std::memory_order_relaxed);
         })) {
         return false;
     }
-    if (!HasEligiblePairLocked(minTimestampNs)) {
-        return false;
-    }
+    return TryGrabPairLocked(L, R, preferLatest, minTimestampNs);
+}
 
-    size_t selectedIndex = 0;
-    if (minTimestampNs > 0) {
-        selectedIndex = m_paired.size();
-        for (size_t i = 0; i < m_paired.size(); ++i) {
-            if (PairTimestampNs(m_paired[i]) >= minTimestampNs) {
-                selectedIndex = i;
-                if (!preferLatest) {
-                    break;
-                }
-            }
-        }
-        if (selectedIndex >= m_paired.size()) {
-            return false;
-        }
-    } else if (preferLatest && m_paired.size() > 1) {
-        selectedIndex = m_paired.size() - 1;
-    }
-
+void LibcameraStereoOV9281_TsPair::DropPairsBeforeLocked(size_t selectedIndex)
+{
     if (selectedIndex > 0) {
         m_droppedPaired.fetch_add(selectedIndex, std::memory_order_relaxed);
         for (size_t i = 0; i < selectedIndex; ++i) {
             m_paired.pop_front();
         }
     }
+}
 
+bool LibcameraStereoOV9281_TsPair::TryGrabPairLocked(FrameItem &L, FrameItem &R, bool preferLatest,
+                                                     uint64_t minTimestampNs)
+{
+    if (!HasEligiblePairLocked(minTimestampNs)) {
+        return false;
+    }
+    const size_t selectedIndex = SelectPairIndexLocked(preferLatest, minTimestampNs);
+    if (selectedIndex >= m_paired.size()) {
+        return false;
+    }
+    DropPairsBeforeLocked(selectedIndex);
     auto &p = m_paired.front();
     L = std::move(p.first);
     R = std::move(p.second);
@@ -852,6 +954,24 @@ bool LibcameraStereoOV9281_TsPair::HasEligiblePairLocked(uint64_t minTimestampNs
     return false;
 }
 
+size_t LibcameraStereoOV9281_TsPair::SelectPairIndexLocked(bool preferLatest, uint64_t minTimestampNs) const
+{
+    if (minTimestampNs == 0) {
+        return preferLatest && m_paired.size() > 1 ? m_paired.size() - 1 : 0;
+    }
+    size_t selectedIndex = m_paired.size();
+    for (size_t i = 0; i < m_paired.size(); ++i) {
+        if (PairTimestampNs(m_paired[i]) < minTimestampNs) {
+            continue;
+        }
+        selectedIndex = i;
+        if (!preferLatest) {
+            break;
+        }
+    }
+    return selectedIndex;
+}
+
 void LibcameraStereoOV9281_TsPair::PushFrame(FrameItem &&fi)
 {
     if (!m_acceptFrames.load(std::memory_order_relaxed)) {
@@ -870,6 +990,20 @@ bool LibcameraStereoOV9281_TsPair::TryPairLocked()
         return false;
     }
 
+    const PairMatchSelection selection = SelectPairMatchLocked();
+    if (!selection.valid) {
+        return false;
+    }
+    if (selection.bestDtNs > m_pairThreshNs) {
+        return DropOldestUnpairedLocked(selection.bestDtNs);
+    }
+
+    CommitPairLocked(selection);
+    return true;
+}
+
+LibcameraStereoOV9281_TsPair::PairMatchSelection LibcameraStereoOV9281_TsPair::SelectPairMatchLocked() const
+{
     const size_t bestRightForLeft = FindBestMatchIndex(m_qR, m_qL.front().tsNs);
     const int64_t bestLeftDt =
         (bestRightForLeft < m_qR.size())
@@ -882,30 +1016,41 @@ bool LibcameraStereoOV9281_TsPair::TryPairLocked()
             : INT64_MAX;
 
     const bool pairFromLeft = bestLeftDt <= bestRightDt;
-    const int64_t bestDt = pairFromLeft ? bestLeftDt : bestRightDt;
-    if (bestDt > m_pairThreshNs) {
-        m_lastRejectDtNs.store(bestDt == INT64_MAX ? -1 : bestDt, std::memory_order_relaxed);
-        if (m_qL.front().tsNs <= m_qR.front().tsNs) {
-            m_droppedUnpaired[0].fetch_add(1, std::memory_order_relaxed);
-            m_qL.pop_front();
-        } else {
-            m_droppedUnpaired[1].fetch_add(1, std::memory_order_relaxed);
-            m_qR.pop_front();
-        }
-        return true;
-    }
+    PairMatchSelection selection;
+    selection.valid = true;
+    selection.pairFromLeft = pairFromLeft;
+    selection.leftIndex = pairFromLeft ? 0 : bestLeftForRight;
+    selection.rightIndex = pairFromLeft ? bestRightForLeft : 0;
+    selection.bestDtNs = pairFromLeft ? bestLeftDt : bestRightDt;
+    return selection;
+}
 
+bool LibcameraStereoOV9281_TsPair::DropOldestUnpairedLocked(int64_t rejectDtNs)
+{
+    m_lastRejectDtNs.store(rejectDtNs == INT64_MAX ? -1 : rejectDtNs, std::memory_order_relaxed);
+    if (m_qL.front().tsNs <= m_qR.front().tsNs) {
+        m_droppedUnpaired[0].fetch_add(1, std::memory_order_relaxed);
+        m_qL.pop_front();
+    } else {
+        m_droppedUnpaired[1].fetch_add(1, std::memory_order_relaxed);
+        m_qR.pop_front();
+    }
+    return true;
+}
+
+void LibcameraStereoOV9281_TsPair::CommitPairLocked(const PairMatchSelection &selection)
+{
     FrameItem L;
     FrameItem R;
-    if (pairFromLeft) {
+    if (selection.pairFromLeft) {
         L = std::move(m_qL.front());
-        R = std::move(m_qR[bestRightForLeft]);
+        R = std::move(m_qR[selection.rightIndex]);
         m_qL.pop_front();
-        m_qR.erase(m_qR.begin() + static_cast<std::ptrdiff_t>(bestRightForLeft));
+        m_qR.erase(m_qR.begin() + static_cast<std::ptrdiff_t>(selection.rightIndex));
     } else {
-        L = std::move(m_qL[bestLeftForRight]);
+        L = std::move(m_qL[selection.leftIndex]);
         R = std::move(m_qR.front());
-        m_qL.erase(m_qL.begin() + static_cast<std::ptrdiff_t>(bestLeftForRight));
+        m_qL.erase(m_qL.begin() + static_cast<std::ptrdiff_t>(selection.leftIndex));
         m_qR.pop_front();
     }
 
@@ -918,7 +1063,6 @@ bool LibcameraStereoOV9281_TsPair::TryPairLocked()
         m_droppedPaired.fetch_add(1, std::memory_order_relaxed);
     }
     m_cvPair.notify_one();
-    return true;
 }
 
 size_t LibcameraStereoOV9281_TsPair::FindBestMatchIndex(const std::deque<FrameItem> &q, uint64_t targetTs) const

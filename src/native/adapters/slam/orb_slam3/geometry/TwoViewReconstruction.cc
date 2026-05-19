@@ -25,7 +25,6 @@
 
 #include <cstdlib>
 #include <string>
-#include<thread>
 
 
 using namespace std;
@@ -116,17 +115,12 @@ namespace ORB_SLAM3
             }
         }
 
-        // Launch threads to compute in parallel a fundamental matrix and a homography
         vector<bool> vbMatchesInliersH, vbMatchesInliersF;
         float SH, SF;
         Eigen::Matrix3f H, F;
 
-        thread threadH(&TwoViewReconstruction::FindHomography,this,ref(vbMatchesInliersH), ref(SH), ref(H));
-        thread threadF(&TwoViewReconstruction::FindFundamental,this,ref(vbMatchesInliersF), ref(SF), ref(F));
-
-        // Wait until both threads have finished
-        threadH.join();
-        threadF.join();
+        FindHomography(vbMatchesInliersH, SH, H);
+        FindFundamental(vbMatchesInliersF, SF, F);
 
         // Compute ratio of scores
         if(SH+SF == 0.f) return false;

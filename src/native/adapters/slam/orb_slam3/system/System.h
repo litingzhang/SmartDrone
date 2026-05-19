@@ -28,8 +28,6 @@
 #include <stdlib.h>
 #include <memory>
 #include <string>
-#include <thread>
-#include <unistd.h>
 #include <vector>
 
 #include "core/ports/slam_backend_modules.h"
@@ -133,6 +131,7 @@ public:
                                       const cv::Mat &imRight,
                                       cv::Mat &imLeftPrepared,
                                       cv::Mat &imRightPrepared) const;
+  void StepBackend();
   Sophus::SE3f TrackStereoPreparedWithFeatures(
       const cv::Mat &imLeftPrepared, const cv::Mat &imRightPrepared,
       const StereoFeatureFrameData &features, const double &timestamp,
@@ -161,10 +160,9 @@ public:
       const vector<IMU::Point> &vImuMeas = vector<IMU::Point>(),
       string filename = "");
 
-  // This stops local mapping thread (map building) and performs only camera
-  // tracking.
+  // This pauses local mapping ticks and performs only camera tracking.
   void ActivateLocalizationMode();
-  // This resumes local mapping thread and performs SLAM again.
+  // This resumes local mapping ticks and performs SLAM again.
   void DeactivateLocalizationMode();
 
   // Returns true if there have been a big map change (loop closure, global BA)
@@ -313,12 +311,7 @@ private:
   // FrameDrawer* mpFrameDrawer;
   // MapDrawer* mpMapDrawer;
 
-  // System threads: Local Mapping, Loop Closing, Viewer.
-  // The Tracking thread "lives" in the main execution thread that creates the
-  // System object.
-  std::thread *mptLocalMapping;
-  std::thread *mptLoopClosing;
-  std::thread *mptViewer;
+  // System runtime modules: Tracking, Local Mapping, Loop Closing, Viewer.
 
   // Reset flag
   std::mutex mMutexReset;

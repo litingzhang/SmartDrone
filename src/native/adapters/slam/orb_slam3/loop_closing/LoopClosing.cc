@@ -30,7 +30,6 @@
 #include "Tracking.h"
 
 #include<mutex>
-#include<thread>
 
 
 namespace ORB_SLAM3
@@ -126,12 +125,12 @@ void WaitLocalMappingStopped(IOrbLocalMappingBackend *backend,
 {
     if(backend == nullptr)
         return;
-    while(true)
-    {
+    constexpr int maxDrainSteps = 256;
+    for(int i = 0; i < maxDrainSteps; ++i) {
         const OrbLocalMappingStatus status = backend->Status();
         if(status.stopped || (allowFinished && status.finished))
             return;
-        usleep(1000);
+        backend->Step();
     }
 }
 
@@ -183,7 +182,7 @@ void UpdateTrackingFrameImu(IOrbTrackingBackend *backend,
 LoopClosing::LoopClosing(Atlas *pAtlas, KeyFrameDatabase *pDB, ORBVocabulary *pVoc, const bool bFixScale, const bool bActiveLC):
     mbResetRequested(false), mbResetActiveMapRequested(false), mbFinishRequested(false), mbFinished(true), mpAtlas(pAtlas),
     mpKeyFrameDB(pDB), mpORBVocabulary(pVoc), mpOptimizationBackend(CreateDefaultOrbOptimizationBackend()), mpPlaceRecognitionBackend(CreateDefaultOrbPlaceRecognitionBackend(pDB)), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
-    mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), mnFullBAIdx(0), mnLoopNumCoincidences(0), mnMergeNumCoincidences(0),
+    mbStopGBA(false), mbFixScale(bFixScale), mnFullBAIdx(0), mnLoopNumCoincidences(0), mnMergeNumCoincidences(0),
     mbLoopDetected(false), mbMergeDetected(false), mnLoopNumNotFound(0), mnMergeNumNotFound(0), mbActiveLC(bActiveLC)
 {
     mnCovisibilityConsistencyTh = 3;
@@ -254,11 +253,18 @@ void LoopClosing::AbortGlobalBundleAdjustment()
 
 void LoopClosing::Run()
 {
-    mbFinished =false;
+    Step();
+}
 
-    while(1)
+bool LoopClosing::Step()
+{
     {
-
+        unique_lock<mutex> lock(mMutexFinish);
+        if (mbFinished && mbFinishRequested)
+            return false;
+        if (mbFinished)
+            mbFinished = false;
+    }
         //NEW LOOP AND MERGE DETECTION ALGORITHM
         //----------------------------
 
@@ -315,7 +321,8 @@ void LoopClosing::Run()
                                 mnMergeNumNotFound = 0;
                                 mbMergeDetected = false;
                                 Verbose::PrintMess("scale bad estimated. Abort merging", Verbose::VERBOSITY_NORMAL);
-                                continue;
+                                ResetIfRequested();
+                                return true;
                             }
                             // If inertial, force only yaw
                             if ((TrackingUsesImu(mpTrackingBackend)) &&
@@ -464,13 +471,11 @@ void LoopClosing::Run()
         ResetIfRequested();
 
         if(CheckFinish()){
-            break;
+            SetFinish();
+            return false;
         }
 
-        usleep(5000);
-    }
-
-    SetFinish();
+    return true;
 }
 
 void LoopClosing::InsertKeyFrame(KeyFrame *pKF)
@@ -1183,12 +1188,6 @@ void LoopClosing::CorrectLoop()
         mbStopGBA = true;
 
         mnFullBAIdx++;
-
-        if(mpThreadGBA)
-        {
-            mpThreadGBA->detach();
-            delete mpThreadGBA;
-        }
         cout << "  Done!!" << endl;
     }
 
@@ -1400,7 +1399,6 @@ void LoopClosing::CorrectLoop()
     mpLoopMatchedKF->AddLoopEdge(mpCurrentKF);
     mpCurrentKF->AddLoopEdge(mpLoopMatchedKF);
 
-    // Launch a new thread to perform Global Bundle Adjustment (Only if few keyframes, if not it would take too much time)
     if(!pLoopMap->isImuInitialized() || (pLoopMap->KeyFramesInMap()<200 && mpAtlas->CountMaps()==1))
     {
         mbRunningGBA = true;
@@ -1408,7 +1406,7 @@ void LoopClosing::CorrectLoop()
         mbStopGBA = false;
         mnCorrectionGBA = mnNumCorrection;
 
-        mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment, this, pLoopMap, mpCurrentKF->mnId);
+        RunGlobalBundleAdjustment(pLoopMap, mpCurrentKF->mnId);
     }
 
     // Loop closed. Release Local Mapping.
@@ -1439,12 +1437,6 @@ void LoopClosing::MergeLocal()
         mbStopGBA = true;
 
         mnFullBAIdx++;
-
-        if(mpThreadGBA)
-        {
-            mpThreadGBA->detach();
-            delete mpThreadGBA;
-        }
         bRelaunchBA = true;
     }
 
@@ -1974,11 +1966,10 @@ void LoopClosing::MergeLocal()
 
     if(bRelaunchBA && (!pCurrentMap->isImuInitialized() || (pCurrentMap->KeyFramesInMap()<200 && mpAtlas->CountMaps()==1)))
     {
-        // Launch a new thread to perform Global Bundle Adjustment
         mbRunningGBA = true;
         mbFinishedGBA = false;
         mbStopGBA = false;
-        mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this, pMergeMap, mpCurrentKF->mnId);
+        RunGlobalBundleAdjustment(pMergeMap, mpCurrentKF->mnId);
     }
 
     mpMergeMatchedKF->AddMergeEdge(mpCurrentKF);
@@ -2019,12 +2010,6 @@ void LoopClosing::MergeLocal2()
         mbStopGBA = true;
 
         mnFullBAIdx++;
-
-        if(mpThreadGBA)
-        {
-            mpThreadGBA->detach();
-            delete mpThreadGBA;
-        }
         bRelaunchBA = true;
     }
 
@@ -2428,37 +2413,23 @@ void LoopClosing::SearchAndFuse(const vector<KeyFrame*> &vConectedKFs, vector<Ma
 
 void LoopClosing::RequestReset()
 {
-    {
-        unique_lock<mutex> lock(mMutexReset);
-        mbResetRequested = true;
-    }
-    while(1)
-    {
-        {
-        unique_lock<mutex> lock2(mMutexReset);
-        if(!mbResetRequested)
-            break;
-        }
-        usleep(5000);
-    }
+    RequestResetAsync(nullptr, false);
 }
 
 void LoopClosing::RequestResetActiveMap(Map *pMap)
 {
-    {
-        unique_lock<mutex> lock(mMutexReset);
+    RequestResetAsync(pMap, true);
+}
+
+void LoopClosing::RequestResetAsync(Map *pMap, bool activeMapOnly)
+{
+    unique_lock<mutex> lock(mMutexReset);
+    if (activeMapOnly) {
         mbResetActiveMapRequested = true;
         mpMapToReset = pMap;
+        return;
     }
-    while(1)
-    {
-        {
-            unique_lock<mutex> lock2(mMutexReset);
-            if(!mbResetActiveMapRequested)
-                break;
-        }
-        usleep(3000);
-    }
+    mbResetRequested = true;
 }
 
 void LoopClosing::ResetIfRequested()

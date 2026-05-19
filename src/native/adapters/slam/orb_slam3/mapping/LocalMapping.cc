@@ -185,19 +185,28 @@ void LocalMapping::SetTrackingBackend(IOrbTrackingBackend* trackingBackend)
 
 void LocalMapping::Run()
 {
-    mbFinished = false;
+    Step();
+}
 
-    while(1)
+bool LocalMapping::Step()
+{
     {
-        const bool relaxAcceptKeyFrames = RelaxLocalMappingAcceptKeyFramesEnabled();
-        if(!relaxAcceptKeyFrames)
-            SetAcceptKeyFrames(false);
+        unique_lock<mutex> lock(mMutexFinish);
+        if (mbFinished && mbFinishRequested)
+            return false;
+        if (mbFinished)
+            mbFinished = false;
+    }
 
-        // Check if there are keyframes in the queue
-        if(CheckNewKeyFrames() && !mbBadImu)
-        {
-            if(relaxAcceptKeyFrames)
-                SetAcceptKeyFrames(false);
+    const bool relaxAcceptKeyFrames = RelaxLocalMappingAcceptKeyFramesEnabled();
+    if(!relaxAcceptKeyFrames)
+        SetAcceptKeyFrames(false);
+
+    // Check if there are keyframes in the queue
+    if(CheckNewKeyFrames() && !mbBadImu)
+    {
+        if(relaxAcceptKeyFrames)
+            SetAcceptKeyFrames(false);
 
 #ifdef REGISTER_TIMES
             double timeLBA_ms = 0;
@@ -402,30 +411,33 @@ void LocalMapping::Run()
             double timeLocalMap = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndLocalMap - time_StartProcessKF).count();
             vdLMTotal_ms.push_back(timeLocalMap);
 #endif
-        }
-        else if(Stop() && !mbBadImu)
+    }
+    else if(Stop() && !mbBadImu)
+    {
+        // Safe area to stop
+        if(isStopped() && !CheckFinish())
         {
-            // Safe area to stop
-            while(isStopped() && !CheckFinish())
-            {
-                usleep(3000);
-            }
-            if(CheckFinish())
-                break;
+            return true;
         }
-
-        ResetIfRequested();
-
-        // Tracking will see that Local Mapping is busy
-        SetAcceptKeyFrames(true);
-
         if(CheckFinish())
-            break;
-
-        usleep(3000);
+        {
+            SetFinish();
+            return false;
+        }
     }
 
-    SetFinish();
+    ResetIfRequested();
+
+    // Tracking will see that Local Mapping is busy
+    SetAcceptKeyFrames(true);
+
+    if(CheckFinish())
+    {
+        SetFinish();
+        return false;
+    }
+
+    return true;
 }
 
 void LocalMapping::InsertKeyFrame(KeyFrame *pKF)
@@ -1217,45 +1229,25 @@ void LocalMapping::KeyFrameCulling()
 
 void LocalMapping::RequestReset()
 {
-    {
-        unique_lock<mutex> lock(mMutexReset);
-        cout << "LM: Map reset recieved" << endl;
-        mbResetRequested = true;
-    }
-    cout << "LM: Map reset, waiting..." << endl;
-
-    while(1)
-    {
-        {
-            unique_lock<mutex> lock2(mMutexReset);
-            if(!mbResetRequested)
-                break;
-        }
-        usleep(3000);
-    }
-    cout << "LM: Map reset, Done!!!" << endl;
+    RequestResetAsync(nullptr, false);
 }
 
 void LocalMapping::RequestResetActiveMap(Map* pMap)
 {
-    {
-        unique_lock<mutex> lock(mMutexReset);
+    RequestResetAsync(pMap, true);
+}
+
+void LocalMapping::RequestResetAsync(Map* pMap, bool activeMapOnly)
+{
+    unique_lock<mutex> lock(mMutexReset);
+    if (activeMapOnly) {
         cout << "LM: Active map reset recieved" << endl;
         mbResetRequestedActiveMap = true;
         mpMapToReset = pMap;
+        return;
     }
-    cout << "LM: Active map reset, waiting..." << endl;
-
-    while(1)
-    {
-        {
-            unique_lock<mutex> lock2(mMutexReset);
-            if(!mbResetRequestedActiveMap)
-                break;
-        }
-        usleep(3000);
-    }
-    cout << "LM: Active map reset, Done!!!" << endl;
+    cout << "LM: Map reset recieved" << endl;
+    mbResetRequested = true;
 }
 
 void LocalMapping::ResetIfRequested()

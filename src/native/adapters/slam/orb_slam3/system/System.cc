@@ -41,7 +41,6 @@
 #include <mutex>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <thread>
 // #include <pangolin/pangolin.h>
 #include "features/orb_vocabulary_bridge.h"
 #include <boost/archive/binary_iarchive.hpp>
@@ -326,8 +325,9 @@ LocalMappingWaitStats WaitForLocalMappingIdle(
   if (localMapper == nullptr)
     return stats;
 
-  const int timeoutMs = EnvIntClamped(
-      "SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS", 200, 1, 5000);
+  const int maxSteps = EnvIntClamped(
+      "SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_STEPS", 8, 1, 256);
+  const int timeoutMs = maxSteps;
   stats.timeoutMs = timeoutMs;
   OrbLocalMappingStatus status = localMapper->Status();
   stats.queueBefore = status.keyframesInQueue;
@@ -340,18 +340,11 @@ LocalMappingWaitStats WaitForLocalMappingIdle(
 
   stats.requested = true;
   const auto start = std::chrono::steady_clock::now();
-  while (status.keyframesInQueue > 0 || !status.acceptingKeyframes) {
-    usleep(1000);
-    const auto elapsedMs =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start)
-            .count();
-    if (elapsedMs >= timeoutMs) {
-      stats.timedOut = true;
-      break;
-    }
+  for (int i = 0; i < maxSteps && (status.keyframesInQueue > 0 || !status.acceptingKeyframes); ++i) {
+    localMapper->Step();
     status = localMapper->Status();
   }
+  stats.timedOut = status.keyframesInQueue > 0 || !status.acceptingKeyframes;
   const auto end = std::chrono::steady_clock::now();
   stats.waitMs = std::chrono::duration<double, std::milli>(end - start).count();
   status = localMapper->Status();
@@ -370,8 +363,12 @@ void WaitLocalMappingStopped(IOrbLocalMappingBackend *localMapper) {
   if (localMapper == nullptr) {
     return;
   }
-  while (!localMapper->Status().stopped) {
-    usleep(1000);
+  constexpr int kStopDrainMaxSteps = 256;
+  for (int i = 0; i < kStopDrainMaxSteps; ++i) {
+    if (localMapper->Status().stopped) {
+      return;
+    }
+    localMapper->Step();
   }
 }
 
@@ -499,8 +496,7 @@ System::System(const string &strVocFile, const string &strSettingsFile,
     : mSensor(sensor), mpVocabulary(nullptr), mpKeyFrameDatabase(nullptr),
       mpAtlas(nullptr), mpTracker(nullptr), mpLocalMapper(nullptr),
       mpLocalMappingBackend(nullptr),
-      mpLoopCloser(nullptr), mptLocalMapping(nullptr), mptLoopClosing(nullptr),
-      mptViewer(nullptr), mbReset(false), mbResetActiveMap(false),
+      mpLoopCloser(nullptr), mbReset(false), mbResetActiveMap(false),
       mbActivateLocalizationMode(false), mbDeactivateLocalizationMode(false),
       mbShutDown(false), mTrackingState(kOrbTrackingStateSystemNotReady),
       mpOptimizationBackend(CreateDefaultOrbOptimizationBackend()),
@@ -642,7 +638,6 @@ System::System(const string &strVocFile, const string &strSettingsFile,
     // unsigned msElapsed = timeElapsed / (CLOCKS_PER_SEC / 1000);
     // cout << "Binary file read in " << msElapsed << " ms" << endl;
 
-    // usleep(10*1000*1000);
   }
 
   if (mSensor == IMU_STEREO || mSensor == IMU_MONOCULAR || mSensor == IMU_RGBD)
@@ -652,20 +647,17 @@ System::System(const string &strVocFile, const string &strSettingsFile,
   //  mpFrameDrawer = new FrameDrawer(mpAtlas);
   //  mpMapDrawer = new MapDrawer(mpAtlas, strSettingsFile, settings_);
 
-  // Initialize the Tracking thread
-  //(it will live in the main thread of execution, the one that called this
-  // constructor)
+  // Initialize tracking. Runtime ticks call it through the EPG session graph.
   cout << "Seq. Name: " << strSequence << endl;
   mpTracker = new Tracking(this, mpVocabulary, mpAtlas, mpKeyFrameDatabase,
                            strSettingsFile, mSensor, settings_, strSequence);
 
-  // Initialize the Local Mapping thread and launch
+  // Initialize local mapping. The backend is ticked by the EPG session graph.
   mpLocalMapper = new LocalMapping(
       this, mpAtlas, mSensor == MONOCULAR || mSensor == IMU_MONOCULAR,
       mSensor == IMU_MONOCULAR || mSensor == IMU_STEREO || mSensor == IMU_RGBD,
       strSequence);
   mpLocalMappingBackend = CreateDefaultOrbLocalMappingBackend(mpLocalMapper);
-  mptLocalMapping = new thread(&ORB_SLAM3::LocalMapping::Run, mpLocalMapper);
   float farPointThreshold = 0.0f;
   if (settings_)
     farPointThreshold = settings_->thFarPoints();
@@ -678,14 +670,13 @@ System::System(const string &strVocFile, const string &strSettingsFile,
          << " m from current camera" << endl;
   }
 
-  // Initialize the Loop Closing thread and launch
+  // Initialize loop closing. The backend is ticked by the EPG session graph.
   //  mSensor!=MONOCULAR && mSensor!=IMU_MONOCULAR
   mpLoopCloser =
       new LoopClosing(mpAtlas, mpKeyFrameDatabase, mpVocabulary,
                       mSensor != MONOCULAR, activeLC); // mSensor!=MONOCULAR);
-  mptLoopClosing = new thread(&ORB_SLAM3::LoopClosing::Run, mpLoopCloser);
 
-  // Set pointers between threads
+  // Set runtime peer pointers
   mpTracker->SetLocalMapper(mpLocalMapper);
   mpTracker->SetLoopClosing(mpLoopCloser);
 
@@ -697,21 +688,6 @@ System::System(const string &strVocFile, const string &strSettingsFile,
   mpLoopClosingBackend->AttachRuntimePeers(
       OrbLoopClosingRuntimePeers{mpTrackingBackend.get()});
   mpLoopCloser->SetLocalMapper(mpLocalMapper);
-
-  // usleep(10*1000*1000);
-
-  // Initialize the Viewer thread and launch
-  //  if(bUseViewer)
-  // if(false) // TODO
-  //  {
-  //      mpViewer = new Viewer(this,
-  //      mpFrameDrawer,mpMapDrawer,mpTracker,strSettingsFile,settings_);
-  //      mptViewer = new thread(&Viewer::Run, mpViewer);
-  //      mpTracker->SetViewer(mpViewer);
-  //      mpLoopCloser->mpViewer = mpViewer;
-  //      mpViewer->both = mpFrameDrawer->both;
-  //  }
-
   // Fix verbosity
   Verbose::SetTh(Verbose::VERBOSITY_QUIET);
 }
@@ -753,6 +729,15 @@ bool System::PrepareStereoImagesForTracking(const cv::Mat &imLeft,
   DumpStereoDebugImages(imLeft, imRight, imLeftPrepared, imRightPrepared,
                         rectified);
   return true;
+}
+
+void System::StepBackend() {
+  if (mpLocalMappingBackend != nullptr) {
+    mpLocalMappingBackend->Step();
+  }
+  if (mpLoopClosingBackend != nullptr) {
+    mpLoopClosingBackend->Step();
+  }
 }
 
 Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight,
@@ -1147,40 +1132,19 @@ void System::Shutdown() {
     mpLoopClosingBackend->RequestFinish();
     mpLoopClosingBackend->AbortGlobalBundleAdjustment();
   }
-  /*if(mpViewer)
-  {
-      mpViewer->RequestFinish();
-      while(!mpViewer->isFinished())
-          usleep(5000);
-  }*/
-
-  while ((mpLocalMappingBackend != nullptr &&
-          !mpLocalMappingBackend->Status().finished) ||
-         (mpLoopClosingBackend != nullptr &&
-          (!mpLoopClosingBackend->Status().finished ||
-           mpLoopClosingBackend->Status().runningGlobalBundleAdjustment))) {
-    usleep(5000);
+  constexpr int kShutdownBackendDrainMaxIterations = 1000;
+  int drainIterations = 0;
+  while (((mpLocalMappingBackend != nullptr &&
+           !mpLocalMappingBackend->Status().finished) ||
+          (mpLoopClosingBackend != nullptr &&
+           (!mpLoopClosingBackend->Status().finished ||
+            mpLoopClosingBackend->Status().runningGlobalBundleAdjustment))) &&
+         drainIterations < kShutdownBackendDrainMaxIterations) {
+    StepBackend();
+    ++drainIterations;
   }
-
-  if (mptLocalMapping) {
-    if (mptLocalMapping->joinable())
-      mptLocalMapping->join();
-    delete mptLocalMapping;
-    mptLocalMapping = nullptr;
-  }
-
-  if (mptLoopClosing) {
-    if (mptLoopClosing->joinable())
-      mptLoopClosing->join();
-    delete mptLoopClosing;
-    mptLoopClosing = nullptr;
-  }
-
-  if (mptViewer) {
-    if (mptViewer->joinable())
-      mptViewer->join();
-    delete mptViewer;
-    mptViewer = nullptr;
+  if (drainIterations >= kShutdownBackendDrainMaxIterations) {
+    cerr << "ORB backend shutdown drain timed out" << endl;
   }
 
   if (!mStrSaveAtlasToFile.empty()) {

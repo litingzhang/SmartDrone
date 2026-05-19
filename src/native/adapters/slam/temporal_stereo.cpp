@@ -35,6 +35,38 @@ struct TemporalStereoPair {
   int sourceIndex{-1};
 };
 
+struct TemporalStereoTrackingResult {
+  std::vector<cv::Point2f> trackedLeft;
+  std::vector<cv::Point2f> trackedRight;
+  std::vector<uchar> leftStatus;
+  std::vector<uchar> rightStatus;
+};
+
+struct TemporalStereoMergeBuffers {
+  std::vector<cv::Point2f> leftPoints;
+  std::vector<cv::Point2f> rightPoints;
+  size_t inserted{0};
+};
+
+struct TemporalStereoTrackRequest {
+  const cv::Mat *prevLeftGray{nullptr};
+  const cv::Mat *prevRightGray{nullptr};
+  const std::vector<cv::Point2f> *prevLeftPoints{nullptr};
+  const std::vector<cv::Point2f> *prevRightPoints{nullptr};
+  const cv::Mat *currLeftGray{nullptr};
+  const cv::Mat *currRightGray{nullptr};
+  const core::ports::IPointTracker2d *pointTracker{nullptr};
+};
+
+struct TemporalStereoPairBuildRequest {
+  const TemporalStereoTrackingResult *tracking{nullptr};
+  const cv::Mat *currLeftGray{nullptr};
+  const cv::Mat *currRightGray{nullptr};
+  const cv::Mat *currLeftGray32f{nullptr};
+  const cv::Mat *currRightGray32f{nullptr};
+  size_t index{0};
+};
+
 bool HasTemporalCarryInput(const TemporalStereoCarryInput &input) {
   if (input.state == nullptr || input.leftPrepared == nullptr ||
       input.rightPrepared == nullptr) {
@@ -61,6 +93,72 @@ size_t TemporalStereoCarryBudget(bool previousFrameWeak) {
                              kTemporalStereoCarryMaxBudget);
 }
 
+bool TrackTemporalStereoPoints(const TemporalStereoTrackRequest &request,
+                               TemporalStereoTrackingResult &result) {
+  const ForwardBackwardTrackingOptions trackingOptions{
+      kTemporalStereoFlowWindowPx, kTemporalStereoFlowMaxLevel,
+      kTemporalStereoForwardBackwardMaxErrorPx};
+  DefaultPointTracker2d defaultPointTracker;
+  const core::ports::IPointTracker2d &tracker =
+      request.pointTracker != nullptr ? *request.pointTracker
+                                      : defaultPointTracker;
+  return tracker.TrackForwardBackward(*request.prevLeftGray,
+                                      *request.currLeftGray,
+                                      *request.prevLeftPoints,
+                                      result.trackedLeft,
+                                      result.leftStatus, trackingOptions) &&
+         tracker.TrackForwardBackward(*request.prevRightGray,
+                                      *request.currRightGray,
+                                      *request.prevRightPoints,
+                                      result.trackedRight,
+                                      result.rightStatus, trackingOptions);
+}
+
+bool IsTrackedTemporalStereoPointValid(
+    const TemporalStereoTrackingResult &tracking, size_t index) {
+  return index < tracking.trackedLeft.size() &&
+         index < tracking.trackedRight.size() &&
+         index < tracking.leftStatus.size() &&
+         index < tracking.rightStatus.size() && tracking.leftStatus[index] &&
+         tracking.rightStatus[index];
+}
+
+bool BuildTemporalStereoPair(const TemporalStereoPairBuildRequest &request,
+                             TemporalStereoPair &pair) {
+  const TemporalStereoTrackingResult &tracking = *request.tracking;
+  if (!IsTrackedTemporalStereoPointValid(tracking, request.index)) {
+    return false;
+  }
+
+  const cv::Point2f &leftPt = tracking.trackedLeft[request.index];
+  const cv::Point2f &rightPt = tracking.trackedRight[request.index];
+  if (!IsPointSafeForDescriptor(leftPt, *request.currLeftGray) ||
+      !IsPointSafeForDescriptor(rightPt, *request.currRightGray) ||
+      !IsStereoPairGeometricallyValid(leftPt, rightPt)) {
+    return false;
+  }
+
+  float zncc = -1.0f;
+  if (!ComputePatchZncc(*request.currLeftGray32f, leftPt,
+                        *request.currRightGray32f, rightPt, zncc) ||
+      zncc < kTemporalStereoMinZnccScore) {
+    return false;
+  }
+  pair = TemporalStereoPair{leftPt, rightPt, zncc,
+                            static_cast<int>(request.index)};
+  return true;
+}
+
+void SortAndLimitTemporalPairs(std::vector<TemporalStereoPair> &trackedPairs) {
+  std::sort(trackedPairs.begin(), trackedPairs.end(),
+            [](const TemporalStereoPair &lhs, const TemporalStereoPair &rhs) {
+              return lhs.zncc > rhs.zncc;
+            });
+  if (trackedPairs.size() > kTemporalStereoMaxCarryPairs) {
+    trackedPairs.resize(kTemporalStereoMaxCarryPairs);
+  }
+}
+
 std::vector<TemporalStereoPair> TrackStereoPairsTemporally(
     const cv::Mat &prevLeftGray, const cv::Mat &prevRightGray,
     const std::vector<cv::Point2f> &prevLeftPoints,
@@ -74,21 +172,11 @@ std::vector<TemporalStereoPair> TrackStereoPairsTemporally(
     return trackedPairs;
   }
 
-  std::vector<cv::Point2f> trackedLeft;
-  std::vector<cv::Point2f> trackedRight;
-  std::vector<uchar> leftStatus;
-  std::vector<uchar> rightStatus;
-  const ForwardBackwardTrackingOptions trackingOptions{
-      kTemporalStereoFlowWindowPx, kTemporalStereoFlowMaxLevel,
-      kTemporalStereoForwardBackwardMaxErrorPx};
-  DefaultPointTracker2d defaultPointTracker;
-  const core::ports::IPointTracker2d &tracker =
-      pointTracker != nullptr ? *pointTracker : defaultPointTracker;
-  if (!tracker.TrackForwardBackward(prevLeftGray, currLeftGray, prevLeftPoints,
-                                    trackedLeft, leftStatus, trackingOptions) ||
-      !tracker.TrackForwardBackward(prevRightGray, currRightGray,
-                                    prevRightPoints, trackedRight, rightStatus,
-                                    trackingOptions)) {
+  TemporalStereoTrackingResult tracking;
+  const TemporalStereoTrackRequest trackRequest{
+      &prevLeftGray,  &prevRightGray, &prevLeftPoints, &prevRightPoints,
+      &currLeftGray, &currRightGray, pointTracker};
+  if (!TrackTemporalStereoPoints(trackRequest, tracking)) {
     return trackedPairs;
   }
 
@@ -99,38 +187,16 @@ std::vector<TemporalStereoPair> TrackStereoPairsTemporally(
 
   trackedPairs.reserve(prevLeftPoints.size());
   for (size_t i = 0; i < prevLeftPoints.size(); ++i) {
-    if (i >= trackedLeft.size() || i >= trackedRight.size() ||
-        i >= leftStatus.size() || i >= rightStatus.size() || !leftStatus[i] ||
-        !rightStatus[i]) {
-      continue;
+    TemporalStereoPair pair;
+    const TemporalStereoPairBuildRequest pairRequest{
+        &tracking, &currLeftGray, &currRightGray, &currLeftGray32f,
+        &currRightGray32f, i};
+    if (BuildTemporalStereoPair(pairRequest, pair)) {
+      trackedPairs.push_back(pair);
     }
-
-    const cv::Point2f &leftPt = trackedLeft[i];
-    const cv::Point2f &rightPt = trackedRight[i];
-    if (!IsPointSafeForDescriptor(leftPt, currLeftGray) ||
-        !IsPointSafeForDescriptor(rightPt, currRightGray) ||
-        !IsStereoPairGeometricallyValid(leftPt, rightPt)) {
-      continue;
-    }
-
-    float zncc = -1.0f;
-    if (!ComputePatchZncc(currLeftGray32f, leftPt, currRightGray32f, rightPt,
-                          zncc) ||
-        zncc < kTemporalStereoMinZnccScore) {
-      continue;
-    }
-
-    trackedPairs.push_back(
-        TemporalStereoPair{leftPt, rightPt, zncc, static_cast<int>(i)});
   }
 
-  std::sort(trackedPairs.begin(), trackedPairs.end(),
-            [](const TemporalStereoPair &lhs, const TemporalStereoPair &rhs) {
-              return lhs.zncc > rhs.zncc;
-            });
-  if (trackedPairs.size() > kTemporalStereoMaxCarryPairs) {
-    trackedPairs.resize(kTemporalStereoMaxCarryPairs);
-  }
+  SortAndLimitTemporalPairs(trackedPairs);
   return trackedPairs;
 }
 
@@ -216,6 +282,43 @@ bool IsStereoPairNearExisting(const cv::Point2f &leftPt,
   return false;
 }
 
+void AppendUniqueTemporalPairs(const std::vector<cv::Point2f> &sourceLeft,
+                               const std::vector<cv::Point2f> &sourceRight,
+                               size_t maxMergedPairs, bool countInserted,
+                               TemporalStereoMergeBuffers &buffers) {
+  for (size_t i = 0; i < sourceLeft.size() && i < sourceRight.size(); ++i) {
+    if (buffers.leftPoints.size() >= maxMergedPairs) {
+      return;
+    }
+    if (IsStereoPairNearExisting(sourceLeft[i], sourceRight[i],
+                                 buffers.leftPoints, buffers.rightPoints)) {
+      continue;
+    }
+    buffers.leftPoints.push_back(sourceLeft[i]);
+    buffers.rightPoints.push_back(sourceRight[i]);
+    if (countInserted) {
+      ++buffers.inserted;
+    }
+  }
+}
+
+void CollectTemporalCarryPairs(
+    const std::vector<TemporalStereoPair> &trackedPairs,
+    const std::vector<cv::Point2f> &matchedLeftPoints,
+    const std::vector<cv::Point2f> &matchedRightPoints,
+    std::vector<cv::Point2f> &carryLeftPoints,
+    std::vector<cv::Point2f> &carryRightPoints) {
+  carryLeftPoints.reserve(trackedPairs.size());
+  carryRightPoints.reserve(trackedPairs.size());
+  for (const TemporalStereoPair &pair : trackedPairs) {
+    if (!IsStereoPairNearExisting(pair.leftPt, pair.rightPt, matchedLeftPoints,
+                                  matchedRightPoints)) {
+      carryLeftPoints.push_back(pair.leftPt);
+      carryRightPoints.push_back(pair.rightPt);
+    }
+  }
+}
+
 } // namespace
 
 size_t AppendTemporalStereoCarry(const TemporalStereoCarryInput &input,
@@ -242,55 +345,29 @@ size_t AppendTemporalStereoCarry(const TemporalStereoCarryInput &input,
 
   std::vector<cv::Point2f> carryLeftPoints;
   std::vector<cv::Point2f> carryRightPoints;
-  carryLeftPoints.reserve(trackedPairs.size());
-  carryRightPoints.reserve(trackedPairs.size());
-  for (const TemporalStereoPair &pair : trackedPairs) {
-    if (IsStereoPairNearExisting(pair.leftPt, pair.rightPt, matchedLeftPoints,
-                                 matchedRightPoints)) {
-      continue;
-    }
-    carryLeftPoints.push_back(pair.leftPt);
-    carryRightPoints.push_back(pair.rightPt);
-  }
+  CollectTemporalCarryPairs(trackedPairs, matchedLeftPoints, matchedRightPoints,
+                            carryLeftPoints, carryRightPoints);
   if (carryLeftPoints.empty()) {
     return 0;
   }
 
   const size_t before = matchedLeftPoints.size();
-  size_t inserted = 0;
-  std::vector<cv::Point2f> mergedLeftPoints;
-  std::vector<cv::Point2f> mergedRightPoints;
+  TemporalStereoMergeBuffers merged;
   const size_t maxMergedPairs =
       EnvSizeValueClamped("SMART_DRONE_SP_LG_TEMPORAL_CARRY_MAX_PAIRS",
                           std::max(before, kTemporalStereoMaxInjectedPairs),
                           kTemporalStereoMaxInjectedPairs, 1200);
-  mergedLeftPoints.reserve(
+  merged.leftPoints.reserve(
       std::min(maxMergedPairs, before + carryLeftPoints.size()));
-  mergedRightPoints.reserve(
+  merged.rightPoints.reserve(
       std::min(maxMergedPairs, before + carryRightPoints.size()));
-  auto appendUnique = [&](const std::vector<cv::Point2f> &sourceLeft,
-                          const std::vector<cv::Point2f> &sourceRight,
-                          bool countInserted) {
-    for (size_t i = 0; i < sourceLeft.size() && i < sourceRight.size(); ++i) {
-      if (mergedLeftPoints.size() >= maxMergedPairs) {
-        return;
-      }
-      if (IsStereoPairNearExisting(sourceLeft[i], sourceRight[i],
-                                   mergedLeftPoints, mergedRightPoints)) {
-        continue;
-      }
-      mergedLeftPoints.push_back(sourceLeft[i]);
-      mergedRightPoints.push_back(sourceRight[i]);
-      if (countInserted) {
-        ++inserted;
-      }
-    }
-  };
-  appendUnique(carryLeftPoints, carryRightPoints, true);
-  appendUnique(matchedLeftPoints, matchedRightPoints, false);
-  matchedLeftPoints = std::move(mergedLeftPoints);
-  matchedRightPoints = std::move(mergedRightPoints);
-  return inserted;
+  AppendUniqueTemporalPairs(carryLeftPoints, carryRightPoints, maxMergedPairs,
+                            true, merged);
+  AppendUniqueTemporalPairs(matchedLeftPoints, matchedRightPoints,
+                            maxMergedPairs, false, merged);
+  matchedLeftPoints = std::move(merged.leftPoints);
+  matchedRightPoints = std::move(merged.rightPoints);
+  return merged.inserted;
 }
 
 bool DefaultTemporalStereoProcessor::AppendCarry(

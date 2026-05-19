@@ -32,10 +32,37 @@ struct PlaneMap {
     off_t off{0};
 };
 
+struct MonoCameraOpenParams {
+    std::shared_ptr<libcamera::Camera> camera;
+    int camIndex{-1};
+    int width{0};
+    int height{0};
+    int fps{0};
+    bool aeDisable{false};
+    int exposureUs{0};
+    float gain{0.0F};
+    bool requestY8{false};
+};
+
+struct StereoCameraOpenParams {
+    int width{0};
+    int height{0};
+    int fps{0};
+    bool aeDisable{false};
+    int exposureUs{0};
+    float gain{0.0F};
+    bool requestY8{false};
+    int64_t pairThreshNs{0};
+    int64_t keepWindowNs{0};
+    int maxPairQueue{8};
+    bool r16Normalize{false};
+    int leftCamIndex{0};
+    int rightCamIndex{1};
+};
+
 class LibcameraMonoCam {
   public:
-    bool Open(std::shared_ptr<libcamera::Camera> cam, int camIndex, int w, int h, int fps, bool aeDisable,
-              int exposureUs, float gain, bool requestY8);
+    bool Open(const MonoCameraOpenParams &params);
     bool Start();
     void Stop();
     void Close();
@@ -72,6 +99,20 @@ class LibcameraMonoCam {
     std::function<void(FrameItem &&)> CopySink() const;
     bool RequeueRequest(libcamera::Request *req);
     void OnRequestComplete(libcamera::Request *req);
+    bool PrepareOpen(const MonoCameraOpenParams &params);
+    bool ConfigureStream(const MonoCameraOpenParams &params);
+    void ConfigureControls(const MonoCameraOpenParams &params, int64_t frameDurationUs, int32_t exposureCapUs);
+    bool ConfigureCamera();
+    bool MapBuffers(const std::vector<std::unique_ptr<libcamera::FrameBuffer>> &buffers);
+    bool CreateRequests(const std::vector<std::unique_ptr<libcamera::FrameBuffer>> &buffers);
+    void CreateFramePool(size_t slotCount);
+    void LogIspMetadata(const libcamera::FrameMetadata &metadata, const libcamera::ControlList &meta) const;
+    libcamera::FrameBuffer *RequestBuffer(libcamera::Request *req);
+    uint8_t *MappedBufferData(libcamera::FrameBuffer *buffer);
+    void ConvertFrameToGray(const libcamera::StreamConfiguration &config, uint8_t *data, uint32_t sequence,
+                            cv::Mat &gray);
+    void PublishFrame(FrameItem &&item, std::shared_ptr<FrameSlot> frameSlot);
+    void RequeueIfActive(libcamera::Request *req);
     std::shared_ptr<FrameSlot> AcquireFrameSlot();
     void ResetOpenState();
 
@@ -122,9 +163,7 @@ class LibcameraStereoOV9281_TsPair {
 
     static constexpr size_t kPairLookahead = 3;
 
-    bool Open(int w, int h, int fps, bool aeDisable, int exposureUs, float gain, bool requestY8, int64_t pairThreshNs,
-              int64_t keepWindowNs, int maxPairQueue = 8, bool r16Normalize = false, int leftCamIndex = 0,
-              int rightCamIndex = 1);
+    bool Open(const StereoCameraOpenParams &params);
     void Close();
     bool GrabPair(FrameItem &L, FrameItem &R, int timeoutMs = 1000, bool preferLatest = false,
                   uint64_t minTimestampNs = 0);
@@ -146,14 +185,34 @@ class LibcameraStereoOV9281_TsPair {
     PairingDiagnostics GetDiagnostics() const;
 
   private:
+    struct PairMatchSelection {
+        bool valid{false};
+        bool pairFromLeft{true};
+        size_t leftIndex{0};
+        size_t rightIndex{0};
+        int64_t bestDtNs{0};
+    };
+
     uint64_t PairTimestampNs(const std::pair<FrameItem, FrameItem> &pair) const;
     bool HasEligiblePairLocked(uint64_t minTimestampNs) const;
+    size_t SelectPairIndexLocked(bool preferLatest, uint64_t minTimestampNs) const;
+    void DropPairsBeforeLocked(size_t selectedIndex);
+    bool TryGrabPairLocked(FrameItem &L, FrameItem &R, bool preferLatest, uint64_t minTimestampNs);
     void PushFrame(FrameItem &&fi);
     bool TryPairLocked();
+    PairMatchSelection SelectPairMatchLocked() const;
+    bool DropOldestUnpairedLocked(int64_t rejectDtNs);
+    void CommitPairLocked(const PairMatchSelection &selection);
     size_t FindBestMatchIndex(const std::deque<FrameItem> &q, uint64_t targetTs) const;
     void PurgeOldLocked();
     void OnFrameLocked(FrameItem &&fi);
     void ResetPairingState();
+    void ApplyOpenParams(const StereoCameraOpenParams &params);
+    bool StartCameraManager();
+    bool SelectCameras(int leftCamIndex, int rightCamIndex);
+    bool OpenMonoCameras(const StereoCameraOpenParams &params);
+    bool StartMonoCameras();
+    void LogMonoFormats() const;
 
     int m_w{640};
     int m_h{400};

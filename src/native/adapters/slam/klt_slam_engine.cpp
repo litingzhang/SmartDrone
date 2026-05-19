@@ -28,6 +28,166 @@ CreateKltSlamEngine(const SlamEngineFactoryConfig &config) {
   return out;
 }
 
+struct ContinuousKltFrameRequest {
+  SlamModeSharedState *state{nullptr};
+  KltContinuousFrontendResult *frontend{nullptr};
+  uint64_t frameId{0};
+  bool extractFeatures{false};
+  core::ports::SlamOutput *out{nullptr};
+};
+
+struct PerFrameKltTrackingRequest {
+  SlamModeSharedState *state{nullptr};
+  KltPerFrameFrontendResult *frontend{nullptr};
+  bool extractFeatures{false};
+  core::ports::SlamOutput *out{nullptr};
+};
+
+void CopyKltFrontendTimings(const KltPerFrameFrontendResult &frontend,
+                            core::ports::SlamOutput &out) {
+  out.inputPrepareMs = frontend.inputPrepareMs;
+  out.lkRectifyMs = frontend.rectifyMs;
+  out.lkDisparityMs = frontend.disparityMs;
+  out.lkGfttMs = frontend.gfttMs;
+  out.lkFlowMs = frontend.flowMs;
+  out.lkCandidateMs = frontend.candidateMs;
+}
+
+void InitializeContinuousKltFrame(const ContinuousKltFrameRequest &request) {
+  SlamModeSharedState &state = *request.state;
+  KltContinuousFrontendResult &frontend = *request.frontend;
+  core::ports::SlamOutput &out = *request.out;
+  RefreshLkStereoSeedsIfNeeded(state, frontend.leftRect, frontend.rightRect,
+                               request.frameId, true);
+  state.m_lkTracks =
+      SelectLkTracksGridBalanced(state.m_lkTracks, frontend.leftRect.size());
+  state.m_lkPrevLeft = frontend.leftRect.clone();
+  state.m_lkPrevRight = frontend.rightRect.clone();
+  state.m_lkTwc = Sophus::SE3f();
+  ResetKltLoopClosureState(state);
+  state.m_lkHavePrev = true;
+  state.m_lkFrameCount = 1;
+  if (request.extractFeatures) {
+    CopyLkTrackFeaturesToOutput(state.m_lkTracks, out);
+  }
+}
+
+void ProcessContinuousKltTrackingFrame(
+    const ContinuousKltFrameRequest &request) {
+  SlamModeSharedState &state = *request.state;
+  KltContinuousFrontendResult &frontend = *request.frontend;
+  core::ports::SlamOutput &out = *request.out;
+  std::vector<cv::Point3f> objectPoints =
+      std::move(frontend.observations.pnp.objectPoints);
+  std::vector<cv::Point2f> imagePoints =
+      std::move(frontend.observations.pnp.imagePoints);
+  std::vector<LkStereoTrack> trackedTracks =
+      std::move(frontend.observations.trackedTracks);
+
+  const KltPnpCameraIntrinsics camera{state.m_lkFx, state.m_lkFy,
+                                      state.m_lkCx, state.m_lkCy};
+  const KltPnpPoseEstimateResult poseEstimate = EstimateKltPnpPoseDelta(
+      objectPoints, imagePoints,
+      MakeKltContinuousPnpPoseEstimatorOptions(
+          camera, frontend.horizontalLateralFlow),
+      state.VisualPnpPoseBackend());
+  std::vector<LkStereoTrack> inlierTracks =
+      KeepLkTracksByIndices(trackedTracks, poseEstimate.inlierIndices);
+  if (!inlierTracks.empty()) {
+    trackedTracks = std::move(inlierTracks);
+  }
+  if (poseEstimate.poseUpdated) {
+    state.m_lkTwc = state.m_lkTwc * poseEstimate.deltaTwc;
+  }
+
+  out.matchesInliers = poseEstimate.inlierCount;
+  out.trackedMapPointCount = static_cast<uint32_t>(poseEstimate.inlierCount);
+  out.localMapPointCount = static_cast<uint32_t>(objectPoints.size());
+  UpdateLkTracksAfterPoseEstimate(state, frontend.leftRect, frontend.rightRect,
+                                  request.frameId, std::move(trackedTracks),
+                                  poseEstimate.inlierCount);
+  if (request.extractFeatures) {
+    CopyLkTrackFeaturesToOutput(state.m_lkTracks, out);
+  }
+  state.m_lkPrevLeft = frontend.leftRect.clone();
+  state.m_lkPrevRight = frontend.rightRect.clone();
+  ++state.m_lkFrameCount;
+}
+
+void InitializePerFrameKltFrame(SlamModeSharedState &state,
+                                const KltPerFrameFrontendResult &frontend) {
+  state.m_lkTwc = Sophus::SE3f();
+  UpdateKltPerFrameReferenceFrame(state, frontend);
+  state.m_lkHavePrev = true;
+  state.m_lkFrameCount = 1;
+}
+
+KltPnpPoseEstimateResult EstimatePerFrameKltPose(
+    SlamModeSharedState &state, const KltPerFrameFrontendResult &frontend,
+    const std::vector<cv::Point3f> &objectPoints,
+    const std::vector<cv::Point2f> &imagePoints) {
+  const KltPnpCameraIntrinsics camera{state.m_lkFx, state.m_lkFy,
+                                      state.m_lkCx, state.m_lkCy};
+  return EstimateKltPnpPoseDelta(
+      objectPoints, imagePoints,
+      MakeKltPerFramePnpPoseEstimatorOptions(
+          camera, frontend.preferAcceleratedPnpDefaults),
+      state.VisualPnpPoseBackend());
+}
+
+void ApplyPerFrameKltPose(SlamModeSharedState &state,
+                          const KltPerFrameFrontendResult &frontend,
+                          const KltPnpPoseEstimateResult &poseEstimate) {
+  if (!poseEstimate.poseUpdated) {
+    return;
+  }
+  if (frontend.useKeyframeReference) {
+    state.m_lkTwc = state.m_lkPerFrameReferenceTwc * poseEstimate.deltaTwc;
+    return;
+  }
+  state.m_lkTwc = state.m_lkTwc * poseEstimate.deltaTwc;
+}
+
+void ProcessPerFrameKltTrackingFrame(
+    const PerFrameKltTrackingRequest &request) {
+  SlamModeSharedState &state = *request.state;
+  KltPerFrameFrontendResult &frontend = *request.frontend;
+  core::ports::SlamOutput &out = *request.out;
+  std::vector<cv::Point3f> objectPoints =
+      std::move(frontend.observations.objectPoints);
+  std::vector<cv::Point2f> imagePoints =
+      std::move(frontend.observations.imagePoints);
+
+  const auto pnpStartTp = std::chrono::steady_clock::now();
+  const KltPnpPoseEstimateResult poseEstimate =
+      EstimatePerFrameKltPose(state, frontend, objectPoints, imagePoints);
+  ApplyPerFrameKltPose(state, frontend, poseEstimate);
+  out.lkPnpMs = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - pnpStartTp)
+                    .count();
+  out.frontendMs = out.lkDisparityMs + out.lkGfttMs + out.lkFlowMs +
+                   out.lkCandidateMs + out.lkPnpMs;
+
+  out.matchesInliers = poseEstimate.inlierCount;
+  out.trackedMapPointCount = static_cast<uint32_t>(poseEstimate.inlierCount);
+  out.localMapPointCount = static_cast<uint32_t>(objectPoints.size());
+  if (request.extractFeatures) {
+    out.leftFeatures = std::move(frontend.currentLeftPoints);
+  }
+  const auto updateStartTp = std::chrono::steady_clock::now();
+  if (ShouldRefreshKltPerFrameReference(state, frontend,
+                                        poseEstimate.inlierCount)) {
+    UpdateKltPerFrameReferenceFrame(state, frontend);
+  }
+  out.lkUpdateMs = std::chrono::duration<double, std::milli>(
+                       std::chrono::steady_clock::now() - updateStartTp)
+                       .count();
+  if (!poseEstimate.poseUpdated) {
+    MarkSlamOutputPoseLost(out, core::ports::kSlamTrackingLost);
+  }
+  ++state.m_lkFrameCount;
+}
+
 const SlamEngineFactoryRegistrar kKltSlamEngineRegistrar(SlamBackend::Klt,
                                                          CreateKltSlamEngine);
 
@@ -137,56 +297,13 @@ KltSlamEngine::ProcessContinuousKlt(const core::ports::SlamInputBatch &input,
   }
 
   if (!frontend.havePreviousFrame) {
-    RefreshLkStereoSeedsIfNeeded(state, frontend.leftRect, frontend.rightRect,
-                                 input.frameId, true);
-    state.m_lkTracks =
-        SelectLkTracksGridBalanced(state.m_lkTracks, frontend.leftRect.size());
-    state.m_lkPrevLeft = frontend.leftRect.clone();
-    state.m_lkPrevRight = frontend.rightRect.clone();
-    state.m_lkTwc = Sophus::SE3f();
-    ResetKltLoopClosureState(state);
-    state.m_lkHavePrev = true;
-    state.m_lkFrameCount = 1;
-    if (extractFeatures) {
-      CopyLkTrackFeaturesToOutput(state.m_lkTracks, out);
-    }
+    const ContinuousKltFrameRequest request{&state, &frontend, input.frameId,
+                                            extractFeatures, &out};
+    InitializeContinuousKltFrame(request);
   } else {
-    std::vector<cv::Point3f> objectPoints =
-        std::move(frontend.observations.pnp.objectPoints);
-    std::vector<cv::Point2f> imagePoints =
-        std::move(frontend.observations.pnp.imagePoints);
-    std::vector<LkStereoTrack> trackedTracks =
-        std::move(frontend.observations.trackedTracks);
-
-    const KltPnpCameraIntrinsics camera{state.m_lkFx, state.m_lkFy,
-                                        state.m_lkCx, state.m_lkCy};
-    const KltPnpPoseEstimateResult poseEstimate =
-        EstimateKltPnpPoseDelta(objectPoints, imagePoints,
-                                MakeKltContinuousPnpPoseEstimatorOptions(
-                                    camera, frontend.horizontalLateralFlow),
-                                state.VisualPnpPoseBackend());
-    int inlierCount = poseEstimate.inlierCount;
-    std::vector<LkStereoTrack> inlierTracks =
-        KeepLkTracksByIndices(trackedTracks, poseEstimate.inlierIndices);
-    if (!inlierTracks.empty()) {
-      trackedTracks = std::move(inlierTracks);
-    }
-    if (poseEstimate.poseUpdated) {
-      state.m_lkTwc = state.m_lkTwc * poseEstimate.deltaTwc;
-    }
-
-    out.matchesInliers = inlierCount;
-    out.trackedMapPointCount = static_cast<uint32_t>(inlierCount);
-    out.localMapPointCount = static_cast<uint32_t>(objectPoints.size());
-    UpdateLkTracksAfterPoseEstimate(state, frontend.leftRect,
-                                    frontend.rightRect, input.frameId,
-                                    std::move(trackedTracks), inlierCount);
-    if (extractFeatures) {
-      CopyLkTrackFeaturesToOutput(state.m_lkTracks, out);
-    }
-    state.m_lkPrevLeft = frontend.leftRect.clone();
-    state.m_lkPrevRight = frontend.rightRect.clone();
-    ++state.m_lkFrameCount;
+    const ContinuousKltFrameRequest request{&state, &frontend, input.frameId,
+                                            extractFeatures, &out};
+    ProcessContinuousKltTrackingFrame(request);
   }
 
   const Sophus::SE3f outputTwc = ApplyKltLoopClosure(
@@ -205,12 +322,7 @@ KltSlamEngine::ProcessPerFrameKlt(const core::ports::SlamInputBatch &input,
 
   KltPerFrameFrontendResult frontend = RunKltPerFrameFrontend(
       state, input.stereo.left.gray, input.stereo.right.gray);
-  out.inputPrepareMs = frontend.inputPrepareMs;
-  out.lkRectifyMs = frontend.rectifyMs;
-  out.lkDisparityMs = frontend.disparityMs;
-  out.lkGfttMs = frontend.gfttMs;
-  out.lkFlowMs = frontend.flowMs;
-  out.lkCandidateMs = frontend.candidateMs;
+  CopyKltFrontendTimings(frontend, out);
 
   if (!frontend.valid) {
     MarkSlamOutputPoseLost(out, core::ports::kSlamTrackingLost);
@@ -218,62 +330,11 @@ KltSlamEngine::ProcessPerFrameKlt(const core::ports::SlamInputBatch &input,
   }
 
   if (!state.m_lkHavePrev) {
-    state.m_lkTwc = Sophus::SE3f();
-    UpdateKltPerFrameReferenceFrame(state, frontend);
-    state.m_lkHavePrev = true;
-    state.m_lkFrameCount = 1;
+    InitializePerFrameKltFrame(state, frontend);
   } else {
-    std::vector<cv::Point3f> objectPoints =
-        std::move(frontend.observations.objectPoints);
-    std::vector<cv::Point2f> imagePoints =
-        std::move(frontend.observations.imagePoints);
-
-    int inlierCount = 0;
-    bool poseUpdated = false;
-    const auto pnpStartTp = std::chrono::steady_clock::now();
-    {
-      const KltPnpCameraIntrinsics camera{state.m_lkFx, state.m_lkFy,
-                                          state.m_lkCx, state.m_lkCy};
-      const KltPnpPoseEstimateResult poseEstimate = EstimateKltPnpPoseDelta(
-          objectPoints, imagePoints,
-          MakeKltPerFramePnpPoseEstimatorOptions(
-              camera, frontend.preferAcceleratedPnpDefaults),
-          state.VisualPnpPoseBackend());
-      inlierCount = poseEstimate.inlierCount;
-      if (poseEstimate.poseUpdated) {
-        if (frontend.useKeyframeReference) {
-          state.m_lkTwc =
-              state.m_lkPerFrameReferenceTwc * poseEstimate.deltaTwc;
-        } else {
-          state.m_lkTwc = state.m_lkTwc * poseEstimate.deltaTwc;
-        }
-        poseUpdated = true;
-      }
-    }
-    const auto pnpEndTp = std::chrono::steady_clock::now();
-    out.lkPnpMs =
-        std::chrono::duration<double, std::milli>(pnpEndTp - pnpStartTp)
-            .count();
-    out.frontendMs = out.lkDisparityMs + out.lkGfttMs + out.lkFlowMs +
-                     out.lkCandidateMs + out.lkPnpMs;
-
-    out.matchesInliers = inlierCount;
-    out.trackedMapPointCount = static_cast<uint32_t>(inlierCount);
-    out.localMapPointCount = static_cast<uint32_t>(objectPoints.size());
-    if (extractFeatures) {
-      out.leftFeatures = std::move(frontend.currentLeftPoints);
-    }
-    const auto updateStartTp = std::chrono::steady_clock::now();
-    if (ShouldRefreshKltPerFrameReference(state, frontend, inlierCount)) {
-      UpdateKltPerFrameReferenceFrame(state, frontend);
-    }
-    out.lkUpdateMs = std::chrono::duration<double, std::milli>(
-                         std::chrono::steady_clock::now() - updateStartTp)
-                         .count();
-    if (!poseUpdated) {
-      MarkSlamOutputPoseLost(out, core::ports::kSlamTrackingLost);
-    }
-    ++state.m_lkFrameCount;
+    const PerFrameKltTrackingRequest request{&state, &frontend,
+                                             extractFeatures, &out};
+    ProcessPerFrameKltTrackingFrame(request);
   }
 
   out.pose = PoseFromTwc(state.m_lkTwc);

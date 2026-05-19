@@ -61,46 +61,12 @@ void MavlinkSerialTransport::Close()
     }
 }
 
-bool MavlinkSerialTransport::WriteAll(const uint8_t *data, size_t len, int timeoutMs)
+ssize_t MavlinkSerialTransport::WriteSome(const uint8_t *data, size_t len) const
 {
     if (m_fd < 0 || data == nullptr) {
-        return false;
+        return -1;
     }
-
-    size_t written = 0;
-    while (written < len) {
-        pollfd pfd{};
-        pfd.fd = m_fd;
-        pfd.events = POLLOUT;
-
-        const int pr = ::poll(&pfd, 1, timeoutMs);
-        if (pr == 0) {
-            return false;
-        }
-        if (pr < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            return false;
-        }
-        if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-            return false;
-        }
-        if ((pfd.revents & POLLOUT) == 0) {
-            continue;
-        }
-
-        const ssize_t n = ::write(m_fd, data + written, len - written);
-        if (n > 0) {
-            written += static_cast<size_t>(n);
-            continue;
-        }
-        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
-            continue;
-        }
-        return false;
-    }
-    return true;
+    return ::write(m_fd, data, len);
 }
 
 int MavlinkSerialTransport::PollReadable(int timeoutMs) const

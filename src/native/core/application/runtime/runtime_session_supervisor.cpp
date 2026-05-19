@@ -1,58 +1,20 @@
 #include "core/application/runtime/runtime_session_supervisor.h"
 
-#include <csignal>
-#include <functional>
 #include <utility>
 
-#include "common/thread_launch.h"
+#include "core/application/session/session_graph_runtime.h"
 
 namespace smartdrone::core::application {
 
-namespace {
-
-class FunctionTask final : public epg::ITask {
-  public:
-    explicit FunctionTask(std::function<void()> onTick) : m_onTick(std::move(onTick)) {}
-
-    void OnTick(epg::TaskContext &context) override
-    {
-        (void)context;
-        m_onTick();
-    }
-
-  private:
-    std::function<void()> m_onTick;
-};
-
-epg::GraphConfig MakeRuntimeSupervisorGraphConfig()
-{
-    epg::TaskConfig supervisor;
-    supervisor.name = "supervisor";
-    supervisor.type = "RuntimeSupervisorTask";
-    supervisor.trigger.mode = epg::TriggerMode::Periodic;
-    supervisor.trigger.interval = std::chrono::milliseconds(100);
-
-    epg::GraphConfig config;
-    config.tasks.push_back(std::move(supervisor));
-    return config;
-}
-
-} // namespace
-
-RuntimeSessionSupervisor::RuntimeSessionSupervisor(std::atomic<bool> &runningFlag, LiveRuntimeTuning &tuning,
-                                                   Px4MavlinkGateway &mav, LivePoseState &livePose,
-                                                   CurrentConfigFn currentConfig, SlamSessionRunner slamSessionRunner,
-                                                   CalibSessionRunner calibSessionRunner)
-    : m_runningFlag(runningFlag), m_tuning(tuning), m_mav(mav), m_livePose(livePose),
-      m_currentConfig(std::move(currentConfig)), m_slamSessionRunner(std::move(slamSessionRunner)),
-      m_calibSessionRunner(std::move(calibSessionRunner))
+RuntimeSessionSupervisor::RuntimeSessionSupervisor(Config config)
+    : m_runningFlag(config.runningFlag), m_currentConfig(std::move(config.currentConfig)),
+      m_createSession(std::move(config.createSession))
 {
 }
 
-void RuntimeSessionSupervisor::Start()
+RuntimeSessionSupervisor::~RuntimeSessionSupervisor()
 {
-    ConfigureGraph();
-    m_graph->Start();
+    Stop();
 }
 
 void RuntimeSessionSupervisor::Stop()
@@ -63,12 +25,11 @@ void RuntimeSessionSupervisor::Stop()
         m_modeManager.RequestMode(ControllerMode::Idle);
         m_sessionStop.store(true);
     }
-    m_cv.notify_all();
-    if (m_graph) {
-        m_graph->Stop();
-    }
-    JoinSession();
+    std::lock_guard<std::mutex> stepLock(m_stepMu);
+    StopActiveSessionSynchronously();
 }
+
+void RuntimeSessionSupervisor::Step() { StepSupervisor(); }
 
 bool RuntimeSessionSupervisor::RequestMode(ControllerMode mode, std::string *err)
 {
@@ -80,7 +41,6 @@ bool RuntimeSessionSupervisor::RequestMode(ControllerMode mode, std::string *err
         return false;
     }
     m_modeManager.RequestMode(mode);
-    m_cv.notify_all();
     return true;
 }
 
@@ -89,7 +49,6 @@ void RuntimeSessionSupervisor::RequestRestart()
     std::lock_guard<std::mutex> lock(m_mu);
     m_modeManager.RequestRestart();
     m_sessionStop.store(true);
-    m_cv.notify_all();
 }
 
 RuntimeSessionSupervisor::ControllerMode RuntimeSessionSupervisor::DesiredMode() const
@@ -104,112 +63,143 @@ RuntimeSessionSupervisor::ControllerMode RuntimeSessionSupervisor::ActiveMode() 
     return m_modeManager.ActiveMode();
 }
 
-bool RuntimeSessionSupervisor::WaitForIdle(std::chrono::milliseconds timeout, bool *stoppingOut)
+RuntimeSessionSupervisor::IdleStatus RuntimeSessionSupervisor::GetIdleStatus() const
 {
-    std::unique_lock<std::mutex> lock(m_mu);
-    const bool idleReady = m_cv.wait_for(lock, timeout, [this]() {
-        return m_stopping ||
-               (m_modeManager.ActiveMode() == ControllerMode::Idle &&
-                m_modeManager.DesiredMode() == ControllerMode::Idle && !m_session.joinable() && !m_sessionDone);
-    });
-    if (stoppingOut) {
-        *stoppingOut = m_stopping;
-    }
-    return idleReady;
-}
-
-void RuntimeSessionSupervisor::JoinSession()
-{
-    if (m_session.joinable()) {
-        m_session.join();
-    }
-}
-
-void RuntimeSessionSupervisor::ConfigureGraph()
-{
-    if (m_graph) {
-        return;
-    }
-
-    m_graphRegistry.RegisterTaskFactory(
-        "RuntimeSupervisorTask", {}, {},
-        [this]() {
-            return std::unique_ptr<epg::ITask>(new FunctionTask([this]() { StepSupervisor(); }));
-        });
-    m_graph.reset(new epg::EventPipelineGraph(m_graphRegistry));
-    m_graph->Configure(MakeRuntimeSupervisorGraphConfig());
+    std::lock_guard<std::mutex> lock(m_mu);
+    return {SessionIdleUnlocked(), m_stopping};
 }
 
 void RuntimeSessionSupervisor::StepSupervisor()
 {
-    if (!m_runningFlag.load()) {
-        std::lock_guard<std::mutex> lock(m_mu);
-        m_sessionStop.store(true);
-        m_stopping = true;
-        m_modeManager.RequestMode(ControllerMode::Idle);
-    }
+    std::lock_guard<std::mutex> stepLock(m_stepMu);
+    ApplyGlobalStop();
+    StopRequestedSession();
+    StepActiveSession();
+    FinishCompletedSession();
+    LaunchRequestedSession();
+}
 
-    ControllerMode startMode = ControllerMode::Idle;
+void RuntimeSessionSupervisor::ApplyGlobalStop()
+{
+    if (m_runningFlag.load()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(m_mu);
+    m_sessionStop.store(true);
+    m_stopping = true;
+    m_modeManager.RequestMode(ControllerMode::Idle);
+}
+
+void RuntimeSessionSupervisor::StopRequestedSession()
+{
+    std::shared_ptr<ISessionGraphRuntime> session;
+    {
+        std::lock_guard<std::mutex> lock(m_mu);
+        if (m_stopping || m_modeManager.ShouldStopActiveSession()) {
+            m_sessionStop.store(true);
+            session = m_session;
+        }
+    }
+    if (session) {
+        session->RequestStop();
+    }
+}
+
+void RuntimeSessionSupervisor::StepActiveSession()
+{
+    std::shared_ptr<ISessionGraphRuntime> session;
+    {
+        std::lock_guard<std::mutex> lock(m_mu);
+        session = m_session;
+    }
+    if (session) {
+        session->Step();
+    }
+}
+
+void RuntimeSessionSupervisor::FinishCompletedSession()
+{
+    std::shared_ptr<ISessionGraphRuntime> session;
+    {
+        std::lock_guard<std::mutex> lock(m_mu);
+        session = m_session;
+    }
+    if (!session || !session->Done()) {
+        return;
+    }
+    MarkSessionJoined();
+}
+
+void RuntimeSessionSupervisor::LaunchRequestedSession()
+{
+    ControllerMode mode = ControllerMode::Idle;
     UnifiedConfig cfg{};
-    bool startSession = false;
-    bool needJoin = false;
+    if (!PrepareLaunch(mode, cfg)) {
+        return;
+    }
+    auto session = MakeSessionRuntime(mode, cfg);
+    if (!session || !session->Start()) {
+        MarkSessionJoined();
+        return;
+    }
+    std::lock_guard<std::mutex> lock(m_mu);
+    m_session = std::move(session);
+}
+
+bool RuntimeSessionSupervisor::PrepareLaunch(ControllerMode &mode, UnifiedConfig &cfg)
+{
+    std::lock_guard<std::mutex> lock(m_mu);
+    if (m_stopping || m_session || m_modeManager.ActiveMode() != ControllerMode::Idle) {
+        return false;
+    }
+    if (m_modeManager.DesiredMode() == ControllerMode::Idle) {
+        m_modeManager.MarkSessionJoined();
+        return false;
+    }
+    cfg = m_currentConfig();
+    mode = m_modeManager.DesiredMode();
+    m_modeManager.MarkSessionLaunching(mode);
+    m_sessionStop.store(false);
+    return true;
+}
+
+std::shared_ptr<ISessionGraphRuntime> RuntimeSessionSupervisor::MakeSessionRuntime(
+    ControllerMode mode, const UnifiedConfig &cfg)
+{
+    if (!m_createSession) {
+        return nullptr;
+    }
+    auto runtime = m_createSession(SessionStartRequest{mode, cfg, m_sessionStop, m_runningFlag});
+    if (!runtime) {
+        return nullptr;
+    }
+    return std::shared_ptr<ISessionGraphRuntime>(std::move(runtime));
+}
+
+void RuntimeSessionSupervisor::StopActiveSessionSynchronously()
+{
+    std::shared_ptr<ISessionGraphRuntime> session;
     {
         std::lock_guard<std::mutex> lock(m_mu);
-        if (m_sessionDone) {
-            needJoin = true;
-        }
-        if (m_stopping) {
-            m_sessionStop.store(true);
-        }
-        if (m_modeManager.ShouldStopActiveSession()) {
-            m_sessionStop.store(true);
-            needJoin = true;
-        }
+        session = std::move(m_session);
     }
-    if (needJoin) {
-        JoinSession();
+    if (session) {
+        session->Stop();
     }
-    {
-        std::lock_guard<std::mutex> lock(m_mu);
-        if (needJoin) {
-            m_sessionDone = false;
-            m_modeManager.MarkSessionJoined();
-            m_cv.notify_all();
-        }
-        if (m_stopping) {
-            return;
-        }
-        if (m_modeManager.ActiveMode() != ControllerMode::Idle &&
-            m_modeManager.DesiredMode() == m_modeManager.ActiveMode() && !m_modeManager.RestartRequested()) {
-            return;
-        }
-        if (m_modeManager.DesiredMode() != ControllerMode::Idle) {
-            cfg = m_currentConfig();
-            startMode = m_modeManager.DesiredMode();
-            m_modeManager.MarkSessionLaunching(startMode);
-            m_sessionStop.store(false);
-            startSession = true;
-        } else {
-            m_modeManager.MarkSessionJoined();
-        }
-    }
-    if (startSession) {
-        m_session = smartdrone::common::StartThread(
-            smartdrone::common::MakeThreadLaunchInfo(smartdrone::common::ThreadRole::RuntimeSession,
-                                                     "RuntimeSessionSupervisor"),
-            [this, cfg, startMode]() mutable {
-                bool ok = false;
-                if (startMode == ControllerMode::Slam && m_slamSessionRunner) {
-                    ok = m_slamSessionRunner(cfg, m_tuning, m_mav, m_sessionStop, m_livePose);
-                } else if (startMode == ControllerMode::Calib && m_calibSessionRunner) {
-                    ok = m_calibSessionRunner(cfg, m_sessionStop, m_livePose);
-                }
-                (void)ok;
-                std::lock_guard<std::mutex> lock(m_mu);
-                m_sessionDone = true;
-                m_cv.notify_all();
-            });
-    }
+    MarkSessionJoined();
+}
+
+void RuntimeSessionSupervisor::MarkSessionJoined()
+{
+    std::lock_guard<std::mutex> lock(m_mu);
+    m_session.reset();
+    m_modeManager.MarkSessionJoined();
+}
+
+bool RuntimeSessionSupervisor::SessionIdleUnlocked() const
+{
+    return m_modeManager.ActiveMode() == ControllerMode::Idle &&
+           m_modeManager.DesiredMode() == ControllerMode::Idle && !m_session;
 }
 
 } // namespace smartdrone::core::application

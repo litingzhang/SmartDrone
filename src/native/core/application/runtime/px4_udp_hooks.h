@@ -2,31 +2,53 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
-#include <thread>
 
-#include "adapters/telemetry/px4_mavlink_gateway.h"
-#include "common/tlv/mavlink_hooks.h"
-#include "core/application/state/live_pose_state.h"
+#include "common/tlv/runtime_command_hooks.h"
+#include "core/application/state/live_pose_types.h"
+#include "core/ports/vehicle_control_port.h"
+
+namespace smartdrone::core::ports {
+class IVehicleControlPort;
+}
 
 namespace smartdrone::core::application {
 
-class Px4UdpHooks final : public MavlinkHooks {
+struct RuntimeGateSnapshot {
+    uint8_t runtimeMode{RUNTIME_MODE_IDLE};
+    bool poseValid{false};
+    uint8_t trackingState{0xFF};
+    LivePoseQuality poseQuality{LivePoseQuality::Lost};
+};
+
+using ReadRuntimeGateFn = std::function<bool(RuntimeGateSnapshot &)>;
+using PublishVehicleFlightStateFn = std::function<void(bool, uint8_t, uint8_t)>;
+
+struct Px4UdpHooksConfig {
+    smartdrone::core::ports::IVehicleControlPort &vehicleControl;
+    ReadRuntimeGateFn readRuntimeGate;
+    PublishVehicleFlightStateFn publishVehicleFlightState;
+};
+
+class Px4UdpHooks final : public RuntimeCommandHook {
   public:
-    Px4UdpHooks(Px4MavlinkGateway &mavlink, LivePoseState &livePose);
+    explicit Px4UdpHooks(Px4UdpHooksConfig config);
     ~Px4UdpHooks() override;
 
-    VehicleGate GetGate() const override;
-    bool Arm(std::string *err) override;
-    bool Disarm(std::string *err) override;
-    bool EmergencyStop(std::string *err) override;
-    bool SetOffboard(std::string *err) override;
-    bool Hold(std::string *err) override;
-    bool Position(std::string *err) override;
-    bool Land(std::string *err) override;
-    bool SetMoveGoal(const MoveGoal &goal, std::string *err) override;
+    RuntimeCommandGate ReadCommandGate() const override;
+    bool ArmVehicle(std::string *err) override;
+    bool DisarmVehicle(std::string *err) override;
+    bool StopVehicleImmediately(std::string *err) override;
+    bool EnterGuidedControl(std::string *err) override;
+    bool HoldVehicle(std::string *err) override;
+    bool EnterPositionControl(std::string *err) override;
+    bool LandVehicle(std::string *err) override;
+    bool ApplyMoveGoal(const MoveGoal &goal, std::string *err) override;
+    void StepManualControl();
 
   private:
     struct AutoLandingState {
@@ -38,6 +60,13 @@ class Px4UdpHooks final : public MavlinkHooks {
         std::chrono::steady_clock::time_point lastDisarmAttempt{};
     };
 
+    struct PendingCommandAck {
+        bool active{false};
+        ports::VehicleCommandAckKind command{ports::VehicleCommandAckKind::ArmDisarm};
+        std::string label;
+        std::chrono::steady_clock::time_point deadline{};
+    };
+
     static constexpr float kAutoLandThrottleNorm = -0.6f;
     static constexpr float kAutoLandStableRangeDeltaM = 0.03f;
     static constexpr float kAutoLandNearGroundM = 0.35f;
@@ -47,7 +76,7 @@ class Px4UdpHooks final : public MavlinkHooks {
 
     static float ClampSignedUnit(float value);
     static bool IsTrackingPoseUsable(int trackingState);
-    static bool IsOdomQualityUsable(OdomQualityMode quality);
+    static bool IsPoseQualityUsable(LivePoseQuality quality);
 
     void CancelAutoLanding();
     bool IsAutoLandingActive() const;
@@ -55,28 +84,39 @@ class Px4UdpHooks final : public MavlinkHooks {
     void EnsureManualControlStream();
     void DisableRemoteControl(bool stopManualStream);
     void SetManualControlNeutral();
-    void SetManualControlInput(const Px4MavlinkGateway::ManualControlInput &input);
-    Px4MavlinkGateway::ManualControlInput GetManualControlSnapshot() const;
+    void SetManualControlInput(const smartdrone::core::ports::VehicleManualControl &input);
+    smartdrone::core::ports::VehicleManualControl GetManualControlSnapshot() const;
     void SendManualControlSnapshot();
+    bool ApplyRcMoveGoal(const MoveGoal &goal);
+    bool ApplyOffboardMoveGoal(const MoveGoal &goal, std::string *err);
+    bool EnsureOffboardMoveReady(std::string *err);
+    smartdrone::core::ports::VehicleSetpointLocalNed BuildMoveSetpoint(const MoveGoal &goal) const;
     bool EnsureOffboardMode(bool force, std::string *err);
     bool EnsureFlightMode(uint8_t mainMode, bool force, std::string *err, const char *modeName);
     bool EnsurePositionMode(bool force, std::string *err);
+    bool PrepareAutoLandingRangeWindow(const smartdrone::core::ports::VehicleDownwardRange &range,
+                                       std::chrono::steady_clock::time_point now,
+                                       bool &shouldDisarm);
     void UpdateAutoLanding();
-    void ManualControlLoop();
+    void BeginAutoLandingDisarm();
+    void TrackCommandAck(ports::VehicleCommandAckKind command, const std::string &label);
+    void StepCommandAck();
+    void ClearCommandAckIfCurrent(ports::VehicleCommandAckKind command, const std::string &label);
 
-    Px4MavlinkGateway &m_mavlink;
-    LivePoseState &m_livePose;
+    smartdrone::core::ports::IVehicleControlPort &m_vehicleControl;
+    ReadRuntimeGateFn m_readRuntimeGate;
+    PublishVehicleFlightStateFn m_publishVehicleFlightState;
     std::atomic<bool> m_streamStarted{false};
     std::atomic<bool> m_manualControlStreaming{false};
     std::atomic<bool> m_remoteModeRequested{false};
     std::atomic<bool> m_offboardModeRequested{false};
-    std::atomic<bool> m_manualLoopStop{false};
-    std::thread m_manualLoop;
     mutable std::mutex m_manualControlMtx;
-    Px4MavlinkGateway::ManualControlInput m_manualControlInput{};
+    smartdrone::core::ports::VehicleManualControl m_manualControlInput{};
     mutable std::mutex m_remoteModeMtx;
     mutable std::mutex m_autoLandingMtx;
     AutoLandingState m_autoLanding{};
+    mutable std::mutex m_commandAckMtx;
+    PendingCommandAck m_pendingCommandAck{};
     bool m_modeChangeRequested{false};
     uint8_t m_requestedMainMode{0};
     std::chrono::steady_clock::time_point m_lastPositionModeRequest{};

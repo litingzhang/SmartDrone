@@ -41,12 +41,15 @@ public:
 
     const std::string& Name() const;
     void Start();
+    void RequestStop();
+    bool JoinStopped();
     void Stop();
     void Notify();
     TaskDiagnosticsSnapshot Diagnostics() const;
 
 private:
     void Run();
+    void ApplyScheduling();
     bool WaitForTrigger();
     bool QueuesReady() const;
 
@@ -56,6 +59,7 @@ private:
     std::vector<IQueue*> m_triggerQueues;
     mutable ::epg::TaskDiagnostics m_diag;
     std::atomic<bool> m_running{false};
+    std::atomic<bool> m_exited{true};
     std::thread m_thread;
     std::mutex m_mutex;
     std::condition_variable m_cv;

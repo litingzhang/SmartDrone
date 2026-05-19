@@ -9,8 +9,18 @@ void WriteF32Le(std::vector<uint8_t> &buffer, float value);
 uint16_t ReadU16Le(const uint8_t *p);
 uint32_t ReadU32Le(const uint8_t *p);
 float ReadF32Le(const uint8_t *p);
-std::vector<uint8_t> MakeFrame(uint8_t ver, uint8_t cmd, uint8_t flags, uint32_t seq, uint32_t tMs,
-                               const uint8_t *payload, uint16_t len);
+
+struct TlvFrameBuildRequest {
+    uint8_t ver{0};
+    uint8_t cmd{0};
+    uint8_t flags{0};
+    uint32_t seq{0};
+    uint32_t tMs{0};
+    const uint8_t *payload{nullptr};
+    uint16_t len{0};
+};
+
+std::vector<uint8_t> MakeFrame(const TlvFrameBuildRequest &request);
 void WriteI16Le(uint8_t *p, int16_t value);
 void WriteU16LeToPtr(uint8_t *p, uint16_t value);
 void WriteU32LeToPtr(uint8_t *p, uint32_t value);

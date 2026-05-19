@@ -77,11 +77,7 @@ public:
     if (m_loopClosing == nullptr) {
       return;
     }
-    if (request.activeMapOnly) {
-      m_loopClosing->RequestResetActiveMap(request.map);
-      return;
-    }
-    m_loopClosing->RequestReset();
+    m_loopClosing->RequestResetAsync(request.map, request.activeMapOnly);
   }
 
   void AttachRuntimePeers(
@@ -89,6 +85,10 @@ public:
     if (m_loopClosing != nullptr) {
       m_loopClosing->SetTrackingBackend(peers.tracking);
     }
+  }
+
+  bool Step() override {
+    return m_loopClosing != nullptr && m_loopClosing->Step();
   }
 
 private:
