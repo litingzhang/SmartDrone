@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "core/application/session/session_graph_runtime.h"
+#include "core/application/session/epg/session_graph_runtime.h"
 
 namespace smartdrone::core::application {
 

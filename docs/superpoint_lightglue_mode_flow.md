@@ -57,7 +57,7 @@ flowchart TD
 | --- | --- | --- |
 | CLI/offline replay | `tests/euroc/offline_replay_main.cpp` | Parses SP+LG options, starts frontend client, runs replay. |
 | Live runtime | `src/native/core/application/session/slam_session_runtime.cpp` | Resolves repo/engine paths and starts TensorRT frontend for runtime sessions. |
-| Live frame loop | `src/native/core/application/session/slam_frame_processor.cpp` | Applies frontend mode, load shedding, input size budget, and calls SLAM engine. |
+| Live frame loop | `src/native/core/application/session/slam_frame_input_port.cpp`, `src/native/core/application/session/slam_frame_tracking_port.cpp` | Applies frontend mode, load shedding, input size budget, and calls SLAM engine. |
 | Frontend client | `src/native/adapters/slam/superpoint_lightglue_frontend_client.cpp` | Owns frontend lifetime and delegates native extraction/matching to `SuperPointNativeExtractor`. |
 | TensorRT frontend | `src/native/adapters/slam/superpoint_native_extractor.cpp` | Loads engines, runs SuperPoint batch inference, attempts LightGlue matching, applies descriptor-match fallback, records stats. |
 | Mode strategy | `src/native/adapters/slam/visual_feature_lightglue_mode_strategy.cpp` | Maps LightGlue-style visual feature frontends to the ORB-SLAM3 stereo-feature tracking path. |
@@ -125,7 +125,7 @@ if (opts.featureFrontend == FeatureFrontend::SuperPointLightGlue && SuperPointLi
               Live runtime also applies adaptive input
               -
               size budgeting
-                  . `SlamFrameProcessor` computes `superpointLoadSheddingLevel`,
+                  . `SlamFrameInputPort` computes `superpointLoadSheddingLevel`,
           derives a budget, and calls :
 
 ```cpp m_ctx.slamControl->SetVisualFeatureInputSizeLimit(

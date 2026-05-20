@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <iostream>
 
-namespace smartdrone::core::application {
+#include "core/application/sensors/camera_runtime_provider.h"
 
-bool CompiledCameraProviderUsesPackedStereo();
+namespace smartdrone::core::application {
 
 namespace {
 

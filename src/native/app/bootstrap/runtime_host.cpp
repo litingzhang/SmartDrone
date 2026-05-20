@@ -19,8 +19,8 @@
 #include "core/application/runtime/runtime_aliases.h"
 #include "core/application/runtime/runtime_controller.h"
 #include "core/application/runtime/system_runtime_graph_service.h"
-#include "core/application/session/calib_storage_helpers.h"
-#include "core/application/session/session_graph_runtime_factory.h"
+#include "core/application/session/calib/calib_storage_helpers.h"
+#include "core/application/session/epg/session_graph_runtime_factory.h"
 #include "core/application/state/live_pose_state.h"
 #include "core/ports/vehicle_control_port.h"
 

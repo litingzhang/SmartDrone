@@ -47,6 +47,9 @@ Startup sequence:
 3. `SystemRuntimeGraph` schedules MAVLink RX, setpoint stream, UDP command, manual control, force restart, runtime supervisor, and discovery beacon tasks
 4. Optionally enters `slam` or `calib` mode based on startup args
 
+`SystemRuntimeGraph` keeps persistent control-plane graph lifecycle in `system_runtime_graph_service`, task
+registration in `system_runtime_task_factory`, and individual EPG task behavior in `system_runtime_tasks`.
+
 Shutdown sequence:
 
 - stop `SystemRuntimeGraph`
@@ -80,7 +83,7 @@ Constraints:
 
 ### 3.4 SLAM Session Features
 
-`SlamSessionGraphRuntime` and `SlamFrameProcessor` handle:
+`SlamSessionGraphRuntime` and the SLAM frame ports handle:
 
 - stereo acquisition with optional IMU fusion window
 - dynamic SLAM operation mode update
@@ -88,6 +91,14 @@ Constraints:
 - MAVLink odometry publishing
 - image/feature/map streaming based on runtime config
 - periodic and abnormal `slam_dfx` diagnostics
+
+`SlamSessionRuntime` owns session lifecycle and hardware/backend resources. Per-frame work is delegated through
+`SlamFramePortSet`, which assembles input, tracking, pose-postprocess, and output ports with stage-local context and
+state objects. This keeps EPG tasks responsible for scheduling and queue transfer while the ports own frame algorithms
+and side effects. Backend control operations are routed through `SlamRuntimeControlPort`, so independently scheduled
+frame ports do not share direct access to the backend control surface.
+SLAM IMU polling uses `Icm42688SampleSource`, a shared non-blocking IMU sample interface that owns the ICM42688
+SPI/DRDY open, configuration, and raw sample conversion flow.
 
 The current implementation also introduces several UVC/streaming/real-time policies on top of the baseline SLAM session:
 
@@ -170,6 +181,16 @@ The implementation contains the following visual-feature adaptations:
 - writing stereo images and IMU records
 - optional UDP image preview
 - flush/fsync on stop for durability
+
+The calibration graph keeps lifecycle in `CalibSessionGraphRuntime`, task registration in
+`calib_session_task_factory`, queue-level scheduling in `calib_session_tasks`, session resource composition behind
+`CalibSessionPortSet`, camera capture behind
+`CalibCameraInputPort`, save-pair pacing behind `CalibSavePacingPort`, IMU capture behind `CalibImuSamplePort`,
+preview access and open-status propagation behind `CalibPreviewPort`, UDP image output behind `CalibPreviewPublisher`, serialized storage access
+behind `CalibStoragePort`, and output directory, image/CSV writing, image-normalization, and final fsync behind `CalibOutputStore`. Calibration IMU sampling reuses `Icm42688SampleSource`,
+matching the SLAM IMU hardware path while keeping CSV writing inside the calibration output store.
+Hot-path calibration task calls snapshot the session port set and then run through port-local locks, avoiding a
+session-wide mutex around capture, pacing, storage, preview, and IMU work.
 
 ### 3.7 Runtime Configuration Features
 
@@ -280,6 +301,12 @@ Runtime work is unified under EPG graphs:
 - `SystemRuntimeGraph`: persistent control-plane and telemetry tasks
 - `SlamSessionGraphRuntime`: SLAM resource, clock, IMU polling, frame processing, backend ticks, and monitor tasks
 - `CalibSessionGraphRuntime`: calibration resource, camera acquisition, IMU writing, storage, preview, completion, flush, and monitor tasks
+
+Common EPG type registration and DOT topology compilation live in `core/application/epg`, outside session-specific
+code, because the same registry services system, SLAM, and calibration graphs. Shared sensor resource interfaces live
+in `core/application/sensors`: `camera_runtime_provider` exposes the selected camera provider factory,
+`icm42688_sample_source` owns non-blocking IMU sampling, and `imu_sensor_poller` adapts the sample source into the SLAM
+IMU buffer.
 
 Concurrency properties:
 
@@ -434,7 +461,7 @@ flowchart TB
       A1[runtime_controller]
       A2[runtime_session_supervisor]
       A3[UdpCommandRuntime]
-      A4[slam_frame_processor]
+      A4[slam_frame_ports]
       A5[runtime_config_service]
     end
 
@@ -626,7 +653,7 @@ sequenceDiagram
 
 1. The selected SLAM engine returns a `SlamOutput` pose in world-camera form. The ORB-SLAM3 runtime converts
    ORB-SLAM3 `T_cw` into `T_w_c`; KLT and DPVO publish their native pose estimate through the same output contract.
-2. `SlamFrameProcessor` forwards the raw pose to `PosePostprocessor::ProcessPose`.
+2. `SlamFramePosePostprocessPort` forwards the raw pose to `PosePostprocessor::ProcessPose`.
 3. In pure stereo mode with loaded `T_b_c1`, it converts `T_w_c1` to `T_w_b` using `T_w_b = T_w_c1 * (T_b_c1)^-1`.
 4. In pure stereo mode, the first usable tracking frame is used as a session reference origin to produce relative continuous output.
 5. `ContinuityMapper` bridges map switches/relocalization and updates `resetCounter/resetMapCount`.

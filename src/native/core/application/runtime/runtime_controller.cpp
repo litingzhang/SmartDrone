@@ -5,7 +5,7 @@
 #include <iostream>
 #include <utility>
 
-#include "core/application/session/slam_settings_loader.h"
+#include "core/application/session/slam/slam_settings_loader.h"
 
 namespace smartdrone::core::application {
 

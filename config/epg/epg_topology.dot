@@ -131,20 +131,53 @@ digraph EpgTopology {
     SlamPosePostprocessTask -> SlamPointCloudTask [
       taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
     ];
-    SlamPointCloudTask -> SlamLivePoseTask [
+    SlamPosePostprocessTask -> SlamLivePoseTask [
+      taillabel="1", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamPosePostprocessTask -> SlamMavlinkTask [
+      taillabel="2", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamPosePostprocessTask -> SlamUdpTask [
+      taillabel="3", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamPointCloudTask -> SlamDfxTask [
       taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
     ];
-    SlamLivePoseTask -> SlamMavlinkTask [
-      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+    SlamLivePoseTask -> SlamDfxTask [
+      taillabel="0", headlabel="1", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
     ];
-    SlamMavlinkTask -> SlamUdpTask [
-      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+    SlamMavlinkTask -> SlamDfxTask [
+      taillabel="0", headlabel="2", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
     ];
     SlamUdpTask -> SlamDfxTask [
-      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
+      taillabel="0", headlabel="3", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
     ];
     SlamDfxTask -> SlamMonitorTask [
-      taillabel="1", headlabel="0", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+      taillabel="0", headlabel="0", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamImuGateTask -> SlamMonitorTask [
+      taillabel="1", headlabel="1", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamAcquireTask -> SlamMonitorTask [
+      taillabel="1", headlabel="2", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamTrackingTask -> SlamMonitorTask [
+      taillabel="1", headlabel="3", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamPosePostprocessTask -> SlamMonitorTask [
+      taillabel="4", headlabel="4", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamPointCloudTask -> SlamMonitorTask [
+      taillabel="1", headlabel="5", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamLivePoseTask -> SlamMonitorTask [
+      taillabel="1", headlabel="6", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamMavlinkTask -> SlamMonitorTask [
+      taillabel="1", headlabel="7", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamUdpTask -> SlamMonitorTask [
+      taillabel="1", headlabel="8", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
     ];
   }
 

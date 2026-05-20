@@ -9,7 +9,7 @@ ORB mode (`--slam-backend orbslam3 --feature-frontend orb`) uses the absorbed OR
 ```mermaid
 flowchart TD
     A[CLI/runtime config<br/>slam_backend=orbslam3<br/>feature_frontend=orb] --> B[ParseSlamBackendText + ParseFeatureFrontendText]
-    B --> C[RunOfflineReplay or SlamFrameProcessor]
+    B --> C[RunOfflineReplay or SLAM frame ports]
     C --> D[PerceptionPipeline::AcquireNextStereoBatch]
     D --> E{Frame accepted by<br/>SLAM FPS limiter?}
     E -- no --> D
@@ -31,7 +31,7 @@ flowchart TD
 | --- | --- | --- |
 | CLI/offline replay | `tests/euroc/offline_replay_main.cpp` | Parse `--slam-backend orbslam3 --feature-frontend orb`, create ORB-SLAM3 system when compiled, run EuRoC replay, export CSV/JSON. |
 | Replay loop | `tests/euroc/support/replay_slam_runner.cpp` | Pull stereo frames and IMU windows, call `ISlamEngine::Process`, collect per-frame timing. |
-| Live loop | `src/native/core/application/session/slam_frame_processor.cpp` | Read runtime tuning, apply frontend mode, acquire camera frames, call SLAM engine. |
+| Live loop | `src/native/core/application/session/slam_frame_input_port.cpp`, `src/native/core/application/session/slam_frame_tracking_port.cpp` | Read runtime tuning, apply frontend mode, acquire camera frames, call SLAM engine. |
 | Rate limiter | `src/native/core/application/state/perception_pipeline.cpp` | Enforce SLAM input FPS and derive stable capture/logical timestamps. |
 | Mode strategy | `src/native/adapters/slam/slam_mode_strategy.cpp`, `src/native/adapters/slam/orb_mode_strategy.cpp` | Select `FeatureFrontend::Orb`, call ORB-SLAM3, and convert pose/telemetry to `SlamOutput`. |
 | Engine state | `src/native/adapters/slam/slam_engine_adapter.cpp`, `src/native/adapters/slam/orb_slam3_backend.cpp` | Own ORB-SLAM3 system lifetime, calibration, shared state, and runtime setters. |
@@ -58,13 +58,13 @@ SlamEngineAdapter slamEngine(std::move(orbSystem), ResolveSlamInputMode(opts.sen
 slamEngine.SetFeatureFrontend(opts.featureFrontend);
 ```
 
-Live runtime follows the same backend/frontend enum path. `SlamFrameProcessor` reads `m_ctx.tuning.featureFrontend` and applies it through the generic `ISlamRuntimeControl` interface when the selected backend supports runtime frontend switching.
+Live runtime follows the same backend/frontend enum path. `SlamFrameInputPort` reads `m_ctx.tuning.featureFrontend` and applies it through the generic `ISlamRuntimeControl` interface when the selected backend supports runtime frontend switching.
 
 ## Input Pipeline
 
 ```mermaid
 sequenceDiagram
-    participant Runner as ReplaySlamRunner / SlamFrameProcessor
+    participant Runner as ReplaySlamRunner / SLAM frame ports
     participant Pipe as PerceptionPipeline
     participant Cam as CameraProvider
     participant IMU as ImuProvider

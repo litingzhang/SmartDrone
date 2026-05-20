@@ -1,0 +1,27 @@
+#pragma once
+
+#include <memory>
+
+#include "core/application/session/epg/messages/slam_epg_messages.h"
+
+namespace smartdrone::core::application {
+
+struct SlamTaskStepResult {
+    bool sessionAvailable{false};
+    bool sessionOk{true};
+    bool abortRequested{false};
+};
+
+struct SlamPrepareFrameResult : SlamTaskStepResult {
+    std::shared_ptr<ISlamPreparedFramePayload> frame;
+};
+
+struct SlamTrackFrameResult : SlamTaskStepResult {
+    std::shared_ptr<ISlamTrackedFramePayload> frame;
+};
+
+struct SlamPublishFrameResult : SlamTaskStepResult {
+    std::shared_ptr<ISlamPublishedFramePayload> frame;
+};
+
+} // namespace smartdrone::core::application

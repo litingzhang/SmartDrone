@@ -776,7 +776,7 @@ Implementation:
   `SMART_DRONE_DPVO_BOOTSTRAP_UPDATE_ITERS`, `SMART_DRONE_DPVO_UPDATE_ITERS`.
 - Rebuilt-edge graphs can now be capped with `SMART_DRONE_DPVO_CAP_REBUILT_EDGES=1`; the edge cap clamp was widened down
   to `128` so Jetson live mode can run below the previous `512` minimum.
-- DPVO mode bypasses `SlamFrameProcessor` adaptive input-FPS downscaling when
+- DPVO mode bypasses `SlamFrameInputPort` adaptive input-FPS downscaling when
   `SMART_DRONE_DPVO_EPG_PACING=1`, because the fast path makes the old `smoothed_slam_ms` throttle too pessimistic.
 
 Jetson service live profile:

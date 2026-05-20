@@ -3,7 +3,7 @@
 #include <sstream>
 
 #include "core/application/config/capability_catalog.h"
-#include "core/application/session/sensor_runtime_helpers.h"
+#include "core/application/sensors/camera_runtime_provider.h"
 
 namespace smartdrone::core::application {
 

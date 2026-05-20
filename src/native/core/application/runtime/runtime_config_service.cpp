@@ -10,7 +10,7 @@
 
 #include "core/application/config/app_args.h"
 #include "core/application/config/config_registry.h"
-#include "core/application/session/slam_settings_loader.h"
+#include "core/application/session/slam/slam_settings_loader.h"
 
 namespace smartdrone::core::application {
 namespace {
