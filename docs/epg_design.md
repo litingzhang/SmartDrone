@@ -24,6 +24,8 @@ An EPG graph is compiled into `epg::GraphConfig`.
 - `QueueConfig`: queue name, message type, depth, overflow policy
 - `TaskConfig`: task name, task type, trigger config, input ports, output ports
 - `TriggerConfig`: trigger mode, optional interval, optional trigger queues
+- `TaskSchedulingConfig`: resource tag, optional CPU affinity, runtime budget,
+  deadline, and realtime priority hints
 
 Tasks communicate only through typed queues. Each task sees queues through numeric
 port ids:
@@ -150,8 +152,50 @@ python3 tools/epg_tui.py --graph cluster_slam_session_graph --snapshot /tmp/smar
 python3 tools/epg_tui.py --graph cluster_calib_session_graph --snapshot /tmp/smartdrone_epg_calib.json
 ```
 
+Each snapshot tick also writes a solver profile:
+
+- `/tmp/smartdrone_epg_system_profile.json`
+- `/tmp/smartdrone_epg_slam_profile.json`
+- `/tmp/smartdrone_epg_calib_profile.json`
+
+Profiles include `topologyVersion` and `taskCatalog`. The catalog records task
+role, resource, budget, deadline, and replaceability metadata so solver decisions
+are tied to declared task semantics instead of only to task names.
+
+The system runtime graph contains `EpgOptimizeTask`, which periodically consumes
+fresh profiles and refreshes the optimized config files inside the EPG schedule.
+The command-line tools remain useful for manual review and offline reproduction.
+
+Solve a profile into a deployable graph config and a reviewable report:
+
+```sh
+python3 tools/epg_solver.py \
+  --profile /tmp/smartdrone_epg_slam_profile.json \
+  --output output/epg/optimized_slam_session_graph.json \
+  --report output/epg/optimized_slam_session_graph_report.json
+```
+
+Solve every available runtime profile in one command:
+
+```sh
+python3 tools/epg_optimize_all.py
+```
+
+The deployable config keeps the standard GraphConfig shape plus provenance
+fields: `schema`, `targetGraph`, `topologyVersion`, `solverVersion`, and source
+profile timestamp. The report records the objective, constraints, score, and
+per-queue or per-task decisions so an optimization can be reviewed before the
+next runtime start picks it up.
+
+At startup, the runtime first looks for the optimized config declared in the
+EPG manifest. If it is missing, the graph falls back to
+`config/epg/epg_topology.dot`; if it exists, the optimized JSON is parsed,
+validated against the same task manifest, `targetGraph`, and `topologyVersion`,
+and deployed as the active graph.
+
 Queue rows show current size, depth, congestion percentage, and drop/overwrite
-counters. Task rows show last/max loop cost, loop count, and error count.
+counters. Task rows show last/max loop cost, percentile loop cost, loop count,
+budget/deadline violations, scheduling errors, and error count.
 
 Color rules:
 
@@ -170,16 +214,23 @@ Snapshot JSON shape:
       "pushed": 100,
       "popped": 99,
       "droppedNewest": 0,
-      "overwrittenOldest": 0
+      "overwrittenOldest": 0,
+      "pushedPerSecond": 60,
+      "poppedPerSecond": 59,
+      "droppedPerSecond": 0
     }
   },
   "tasks": {
     "SourceTask": {
       "lastLoopUs": 900,
       "maxLoopUs": 1300,
+      "p90LoopUs": 1200,
+      "p99LoopUs": 1300,
       "loopCount": 100,
       "errorCount": 0,
-      "idleWakeups": 0
+      "idleWakeups": 0,
+      "budgetOverrunCount": 0,
+      "deadlineMissCount": 0
     }
   }
 }
@@ -240,13 +291,20 @@ Optional fields:
 
 - `interval_ms`: required for `periodic` and `periodic_or_any_queue_ready`
 - `trigger_queues`: queue type names or queue names separated by `+`
+- `resource`: scheduling resource tag, default `cpu`
+- `cpu_affinity`: Linux CPU id, or `-1` to leave affinity unchanged
+- `budget_us`: expected per-loop runtime budget used by diagnostics and solver
+- `deadline_us`: per-loop deadline used by diagnostics and solver
+- `backpressure_outputs`: output port ids separated by `+`; the EPG runner skips
+  the task when those output queues are already full
+- `realtime` and `priority`: optional Linux realtime scheduling hint
 - other fields such as `stage` are allowed for humans and ignored by the compiler
 
 Example:
 
 ```dot
 SlamAcquireTask [
-  label="{SlamAcquireTask|type=SlamAcquireTask|stage=frame_acquire_and_prepare|trigger=any_queue_ready|trigger_queues=SlamFrameReady}"
+  label="{SlamAcquireTask|type=SlamAcquireTask|stage=frame_acquire_and_prepare|trigger=any_queue_ready|trigger_queues=SlamFrameReady|resource=cpu|budget_us=12000|deadline_us=16000|backpressure_outputs=0}"
 ];
 ```
 

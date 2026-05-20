@@ -7,6 +7,7 @@
 #include "common/epg/epg.h"
 #include "core/application/epg/epg_task_manifest.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
+#include "core/application/runtime/epg_optimize_task.h"
 #include "core/application/runtime/system_runtime_tasks.h"
 
 namespace smartdrone::core::application {
@@ -61,9 +62,19 @@ void AddSystemRuntimeTaskFactories(SystemRuntimeTaskFactoryEntries &entries,
     AddFactory<EpgDfxSnapshotTask>(
         entries, catalog,
         [target = EpgDfxSnapshotTarget{deps.graphRef, manifest.subgraphName,
-                                       manifest.dfxSnapshotPath}]() {
+                                       manifest.topologyVersion,
+                                       EpgTaskCatalogJson(manifest),
+                                       manifest.dfxSnapshotPath,
+                                       manifest.profilePath}]() {
             return new EpgDfxSnapshotTask(target);
         });
+    AddFactory<EpgOptimizeTask>(entries, catalog, []() {
+        return new EpgOptimizeTask({
+            EpgDomain::SystemRuntime,
+            EpgDomain::SlamSession,
+            EpgDomain::CalibSession,
+        });
+    });
 }
 
 } // namespace
@@ -75,7 +86,7 @@ EpgTaskFactoryResolver MakeSystemRuntimeTaskFactoryResolver(
     const EpgTaskManifest &manifest =
         EpgManifestForDomain(EpgDomain::SystemRuntime);
     SystemRuntimeTaskFactoryEntries entries;
-    entries.reserve(8);
+    entries.reserve(9);
     AddSystemStepTaskFactories(entries, catalog, deps);
     AddSystemRuntimeTaskFactories(entries, catalog, deps, manifest);
     auto resolver =

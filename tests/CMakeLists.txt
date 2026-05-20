@@ -11,6 +11,9 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/common/epg/epg_json.cpp
     ../src/native/common/epg/epg_mermaid.cpp
     ../src/native/common/epg/epg_task_runner.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer.cpp
+    ../src/native/core/application/epg/epg_task_manifest.cpp
+    ../src/native/core/application/runtime/epg_dfx_snapshot.cpp
   )
 
   target_include_directories(epg_tests PRIVATE
@@ -27,6 +30,19 @@ if(ENABLE_UNIT_TESTS)
   )
 
   add_test(NAME EventPipelineGraphTests COMMAND epg_tests)
+
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_EXECUTABLE)
+    add_test(
+      NAME EventPipelineGraphSolver
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/epg/run_epg_solver_test.py"
+              "${CMAKE_SOURCE_DIR}"
+              "${CMAKE_CURRENT_BINARY_DIR}/epg_solver"
+    )
+  else()
+    message(STATUS "Python3 interpreter not available; skipping EPG solver test")
+  endif()
 endif()
 
 if(ENABLE_OFFLINE_REPLAY)

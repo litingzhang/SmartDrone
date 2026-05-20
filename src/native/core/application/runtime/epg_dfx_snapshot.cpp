@@ -15,9 +15,15 @@ void EpgDfxSnapshotTask::OnTick(epg::TaskContext &context)
     if (!m_target.graphRef || !m_target.graphRef->graph) {
         return;
     }
-    WriteEpgDfxSnapshotFile(
-        m_target.path,
-        m_target.graphRef->graph->DfxSnapshotJson(m_target.graphName, EpgDfxNowMs()));
+    const std::uint64_t nowMs = EpgDfxNowMs();
+    WriteEpgDfxSnapshotFile(m_target.snapshotPath,
+                            m_target.graphRef->graph->DfxSnapshotJson(
+                                m_target.graphName, nowMs));
+    WriteEpgDfxSnapshotFile(m_target.profilePath,
+                            m_target.graphRef->graph->ProfileJson(
+                                m_target.graphName, nowMs,
+                                m_target.topologyVersion,
+                                m_target.taskCatalogJson));
 }
 
 EPG_REGISTER_TASK_TYPE(EpgDfxSnapshotTask, "EpgDfxSnapshotTask")

@@ -1,9 +1,72 @@
 #include "common/epg/epg_internal.h"
 
+#include <vector>
 #include <pthread.h>
 #include <sched.h>
 
 namespace epg {
+namespace {
+
+std::uint64_t SteadyNowMs()
+{
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+}
+
+void StoreFirstLoopTime(TaskDiagnostics &diag, std::uint64_t nowMs)
+{
+    std::uint64_t empty = 0;
+    (void)diag.firstLoopMs.compare_exchange_strong(
+        empty, nowMs, std::memory_order_relaxed, std::memory_order_relaxed);
+}
+
+void UpdateMaxLoopUs(TaskDiagnostics &diag, std::uint64_t elapsedUs)
+{
+    auto max = diag.maxLoopUs.load(std::memory_order_relaxed);
+    while (elapsedUs > max &&
+           !diag.maxLoopUs.compare_exchange_weak(
+               max, elapsedUs,
+               std::memory_order_relaxed,
+               std::memory_order_relaxed)) {
+    }
+}
+
+void StoreLoopTiming(TaskDiagnostics &diag, std::uint64_t elapsedUs)
+{
+    const std::uint64_t nowMs = SteadyNowMs();
+    StoreFirstLoopTime(diag, nowMs);
+    diag.lastLoopMs.store(nowMs, std::memory_order_relaxed);
+    diag.lastLoopUs.store(elapsedUs, std::memory_order_relaxed);
+    diag.totalLoopUs.fetch_add(elapsedUs, std::memory_order_relaxed);
+    UpdateMaxLoopUs(diag, elapsedUs);
+}
+
+void StoreBudgetDiagnostics(TaskDiagnostics &diag,
+                            const TaskSchedulingConfig &scheduling,
+                            std::uint64_t elapsedUs)
+{
+    if (scheduling.budgetUs > 0 && elapsedUs > scheduling.budgetUs) {
+        diag.budgetOverrunCount.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (scheduling.deadlineUs > 0 && elapsedUs > scheduling.deadlineUs) {
+        diag.deadlineMissCount.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+std::uint64_t PercentileValue(std::vector<std::uint64_t> values,
+                              std::uint64_t percentile)
+{
+    if (values.empty()) {
+        return 0;
+    }
+    std::sort(values.begin(), values.end());
+    const auto index =
+        ((values.size() - 1) * percentile + 99) / 100;
+    return values[index];
+}
+
+} // namespace
 
 EventPipelineGraph::TaskRunner::TaskRunner(TaskConfig config,
                                      std::unique_ptr<ITask> task,
@@ -67,7 +130,9 @@ void EventPipelineGraph::TaskRunner::Notify() {
 }
 
 TaskDiagnosticsSnapshot EventPipelineGraph::TaskRunner::Diagnostics() const {
-    return SnapshotTaskDiagnostics(m_diag);
+    auto snapshot = SnapshotTaskDiagnostics(m_diag);
+    FillLoopPercentiles(snapshot);
+    return snapshot;
 }
 
 void EventPipelineGraph::TaskRunner::Run() {
@@ -82,6 +147,10 @@ void EventPipelineGraph::TaskRunner::Run() {
             m_diag.idleWakeups.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
+        if (BackpressureBlocked()) {
+            m_diag.idleWakeups.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
 
         const auto begin = std::chrono::steady_clock::now();
         try {
@@ -92,26 +161,80 @@ void EventPipelineGraph::TaskRunner::Run() {
         const auto end = std::chrono::steady_clock::now();
         const auto elapsedUs =
             std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
-        m_diag.lastLoopUs.store(static_cast<std::uint64_t>(elapsedUs), std::memory_order_relaxed);
-        auto max = m_diag.maxLoopUs.load(std::memory_order_relaxed);
-        while (static_cast<std::uint64_t>(elapsedUs) > max &&
-               !m_diag.maxLoopUs.compare_exchange_weak(max,
-                                                       static_cast<std::uint64_t>(elapsedUs),
-                                                       std::memory_order_relaxed,
-                                                       std::memory_order_relaxed)) {
-        }
+        const auto elapsed = static_cast<std::uint64_t>(elapsedUs);
+        StoreLoopTiming(m_diag, elapsed);
+        StoreBudgetDiagnostics(m_diag, m_config.scheduling, elapsed);
+        StoreLoopSample(elapsed);
         m_diag.loopCount.fetch_add(1, std::memory_order_relaxed);
     }
     m_exited.store(true, std::memory_order_release);
 }
 
-void EventPipelineGraph::TaskRunner::ApplyScheduling() {
-    if (!m_config.scheduling.realtime) {
+void EventPipelineGraph::TaskRunner::StoreLoopSample(std::uint64_t elapsedUs)
+{
+    std::lock_guard<std::mutex> lock(m_sampleMutex);
+    m_loopSamples[m_loopSampleCursor] = elapsedUs;
+    m_loopSampleCursor = (m_loopSampleCursor + 1) % m_loopSamples.size();
+    if (m_loopSampleCount < m_loopSamples.size()) {
+        ++m_loopSampleCount;
+    }
+}
+
+void EventPipelineGraph::TaskRunner::FillLoopPercentiles(
+    TaskDiagnosticsSnapshot &snapshot) const
+{
+    std::vector<std::uint64_t> values;
+    {
+        std::lock_guard<std::mutex> lock(m_sampleMutex);
+        values.assign(m_loopSamples.begin(),
+                      m_loopSamples.begin() + m_loopSampleCount);
+    }
+    snapshot.p50LoopUs = PercentileValue(values, 50);
+    snapshot.p90LoopUs = PercentileValue(values, 90);
+    snapshot.p99LoopUs = PercentileValue(values, 99);
+}
+
+namespace {
+
+void RecordSchedulingError(TaskDiagnostics &diag, int error)
+{
+    if (error == 0) {
+        return;
+    }
+    diag.schedulingErrorCount.fetch_add(1, std::memory_order_relaxed);
+    diag.lastSchedulingError.store(error, std::memory_order_relaxed);
+}
+
+void ApplyRealtimeScheduling(const TaskSchedulingConfig &scheduling,
+                             TaskDiagnostics &diag)
+{
+    if (!scheduling.realtime) {
         return;
     }
     sched_param schedParam{};
-    schedParam.sched_priority = m_config.scheduling.priority;
-    (void)pthread_setschedparam(pthread_self(), SCHED_FIFO, &schedParam);
+    schedParam.sched_priority = scheduling.priority;
+    RecordSchedulingError(
+        diag, pthread_setschedparam(pthread_self(), SCHED_FIFO, &schedParam));
+}
+
+void ApplyCpuAffinity(const TaskSchedulingConfig &scheduling,
+                      TaskDiagnostics &diag)
+{
+    if (scheduling.cpuAffinity < 0) {
+        return;
+    }
+    cpu_set_t cpuSet;
+    CPU_ZERO(&cpuSet);
+    CPU_SET(scheduling.cpuAffinity, &cpuSet);
+    RecordSchedulingError(
+        diag, pthread_setaffinity_np(pthread_self(), sizeof(cpuSet), &cpuSet));
+}
+
+} // namespace
+
+void EventPipelineGraph::TaskRunner::ApplyScheduling() {
+    ApplyCpuAffinity(m_config.scheduling, m_diag);
+    ApplyRealtimeScheduling(m_config.scheduling, m_diag);
 }
 
 bool EventPipelineGraph::TaskRunner::WaitForTrigger() {
@@ -154,6 +277,17 @@ bool EventPipelineGraph::TaskRunner::QueuesReady() const {
     }
     return std::any_of(m_triggerQueues.begin(), m_triggerQueues.end(),
                        [](const IQueue* queue) { return !queue->Empty(); });
+}
+
+bool EventPipelineGraph::TaskRunner::BackpressureBlocked() const
+{
+    for (const auto port : m_config.scheduling.backpressureOutputs) {
+        const auto queueIt = m_context.OutputQueueByPort(port);
+        if (!queueIt || queueIt->Size() >= queueIt->Depth()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace epg

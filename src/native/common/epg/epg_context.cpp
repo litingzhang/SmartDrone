@@ -37,6 +37,11 @@ std::size_t TaskContext::OutputSize(PortId port) const {
     return it->second->Size();
 }
 
+const IQueue* TaskContext::OutputQueueByPort(PortId port) const {
+    const auto it = m_outputs.find(port);
+    return it == m_outputs.end() ? nullptr : it->second;
+}
+
 void Registry::RegisterTaskFactory(const std::string& name,
                                    std::vector<PortSpec> inputs,
                                    std::vector<PortSpec> outputs,

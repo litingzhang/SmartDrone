@@ -15,7 +15,10 @@ struct EpgGraphRef {
 struct EpgDfxSnapshotTarget {
     std::shared_ptr<EpgGraphRef> graphRef;
     std::string graphName;
-    std::string path;
+    std::string topologyVersion;
+    std::string taskCatalogJson;
+    std::string snapshotPath;
+    std::string profilePath;
 };
 
 class EpgDfxSnapshotTask final : public epg::ITask {

@@ -4,11 +4,16 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "core/application/epg/epg_runtime_optimizer.h"
+#include "core/application/runtime/epg_dfx_snapshot.h"
 
 namespace {
 
@@ -176,6 +181,14 @@ private:
     int& m_packets;
 };
 
+class TestSlowTask final : public ITask {
+public:
+    void OnTick(TaskContext& context) override {
+        (void)context;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+};
+
 class ReflectedSourceTask final : public ITask {
 public:
     void OnTick(TaskContext& context) override {
@@ -247,6 +260,10 @@ Registry MakeRegistry() {
         "TestBadContextTask",
         {},
         {});
+    registry.RegisterTaskType<TestSlowTask>(
+        "TestSlowTask",
+        {},
+        {});
     return registry;
 }
 
@@ -295,6 +312,7 @@ Registry MakeSystemShapeRegistry() {
     registry.RegisterTaskFactory("RuntimeSupervisorTask", {}, {}, factory);
     registry.RegisterTaskFactory("DiscoveryBeaconTask", {}, {}, factory);
     registry.RegisterTaskFactory("EpgDfxSnapshotTask", {}, {}, factory);
+    registry.RegisterTaskFactory("EpgOptimizeTask", {}, {}, factory);
     return registry;
 }
 
@@ -408,6 +426,12 @@ void RunTopologyFromDotFile(const std::string& dotFile,
             registry),
         queues,
         tasks);
+}
+
+std::string ReadFileText(const std::string& path) {
+    std::ifstream input(path);
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
 }
 
 } // namespace
@@ -649,7 +673,7 @@ TEST(EventPipelineGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
     auto registry = MakeRegistry();
     const auto config = epg::ParseGraphConfigMermaid(R"(
       flowchart LR
-        source["type=TestSourceTask; trigger=periodic; interval_ms=1; realtime=true; priority=42"]
+        source["type=TestSourceTask; trigger=periodic; interval_ms=1; resource=cpu; cpu_affinity=-1; budget_us=500; deadline_us=900; backpressure_outputs=0; realtime=true; priority=42"]
         forward["type=TestForwardTask; trigger=any_queue_ready"]
         sink["type=TestSinkTask; trigger=any_queue_ready"]
 
@@ -665,6 +689,12 @@ TEST(EventPipelineGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
 
     ASSERT_EQ(config.tasks.size(), 3u);
     EXPECT_EQ(config.tasks[0].name, "source");
+    EXPECT_EQ(config.tasks[0].scheduling.resource, "cpu");
+    EXPECT_EQ(config.tasks[0].scheduling.cpuAffinity, -1);
+    EXPECT_EQ(config.tasks[0].scheduling.budgetUs, 500u);
+    EXPECT_EQ(config.tasks[0].scheduling.deadlineUs, 900u);
+    EXPECT_EQ(config.tasks[0].scheduling.backpressureOutputs,
+              std::vector<epg::PortId>{0});
     EXPECT_TRUE(config.tasks[0].scheduling.realtime);
     EXPECT_EQ(config.tasks[0].scheduling.priority, 42);
     EXPECT_EQ(config.tasks[0].outputs.at(0), "source_0_to_forward_0");
@@ -710,7 +740,7 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
         registry);
 
     ASSERT_EQ(config.tasks.size(), 15u);
-    ASSERT_EQ(config.queues.size(), 12u);
+    ASSERT_EQ(config.queues.size(), 23u);
 
     EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));
@@ -777,6 +807,14 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
     ASSERT_NE(dfxSnapshot, nullptr);
     EXPECT_EQ(dfxSnapshot->type, "EpgDfxSnapshotTask");
     EXPECT_EQ(dfxSnapshot->trigger.interval, std::chrono::milliseconds(500));
+
+    const auto* monitor = findTask("SlamMonitorTask");
+    ASSERT_NE(monitor, nullptr);
+    EXPECT_EQ(monitor->inputs.at(8), "SlamUdpTask_1_to_SlamMonitorTask_8");
+    EXPECT_NE(std::find(monitor->trigger.queues.begin(),
+                        monitor->trigger.queues.end(),
+                        "SlamUdpTask_1_to_SlamMonitorTask_8"),
+              monitor->trigger.queues.end());
 }
 
 TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology) {
@@ -786,7 +824,7 @@ TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology)
         "cluster_system_runtime_graph",
         registry);
 
-    ASSERT_EQ(config.tasks.size(), 8u);
+    ASSERT_EQ(config.tasks.size(), 9u);
     ASSERT_EQ(config.queues.size(), 0u);
 
     EventPipelineGraph graph(registry);
@@ -825,6 +863,11 @@ TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology)
     ASSERT_NE(dfxSnapshot, nullptr);
     EXPECT_EQ(dfxSnapshot->type, "EpgDfxSnapshotTask");
     EXPECT_EQ(dfxSnapshot->trigger.interval, std::chrono::milliseconds(500));
+
+    const auto* optimizer = findTask("EpgOptimizeTask");
+    ASSERT_NE(optimizer, nullptr);
+    EXPECT_EQ(optimizer->type, "EpgOptimizeTask");
+    EXPECT_EQ(optimizer->trigger.interval, std::chrono::milliseconds(5000));
 }
 
 TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology) {
@@ -1154,6 +1197,33 @@ TEST(EventPipelineGraph, TaskExceptionsAreCountedAndRunnerKeepsAlive) {
     EXPECT_EQ(diag.errorCount, diag.loopCount);
 }
 
+TEST(EventPipelineGraph, TaskBudgetAndDeadlineViolationsAreCounted) {
+    auto registry = MakeRegistry();
+    EventPipelineGraph graph(registry);
+
+    graph.ConfigureJson(R"({
+      "queues": [],
+      "tasks": [
+        {
+          "name": "slow",
+          "type": "TestSlowTask",
+          "trigger": {"mode": "periodic", "interval_ms": 1},
+          "scheduling": {"budget_us": 1, "deadline_us": 1}
+        }
+      ]
+    })");
+
+    graph.Start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    graph.Stop();
+
+    const auto diag = graph.TaskDiagnostics().at("slow");
+    EXPECT_GT(diag.loopCount, 0u);
+    EXPECT_GT(diag.budgetOverrunCount, 0u);
+    EXPECT_GT(diag.deadlineMissCount, 0u);
+    EXPECT_GT(diag.p50LoopUs, 0u);
+}
+
 TEST(EventPipelineGraph, ContextSlotErrorsAreCountedAsTaskErrors) {
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
@@ -1212,6 +1282,89 @@ TEST(EventPipelineGraph, LifecycleStateAndAccessorsBehaveAsExpected) {
     EXPECT_FALSE(graph.Running());
 }
 
+TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
+    auto registry = MakeRegistry();
+    EventPipelineGraph graph(registry);
+
+    graph.ConfigureJson(MinimalValidJson());
+    graph.Start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    graph.Stop();
+
+    const std::string profile = graph.ProfileJson(
+        "test_graph", 123, "test-topology",
+        R"([{"taskType":"TestSourceTask","role":"source"}])");
+    EXPECT_NE(profile.find("\"schema\": \"smartdrone.epg.profile.v1\""),
+              std::string::npos);
+    EXPECT_NE(profile.find("\"graph\": \"test_graph\""), std::string::npos);
+    EXPECT_NE(profile.find("\"topologyVersion\": \"test-topology\""),
+              std::string::npos);
+    EXPECT_NE(profile.find("\"taskCatalog\""), std::string::npos);
+    EXPECT_NE(profile.find("\"timestampMs\": 123"), std::string::npos);
+    EXPECT_NE(profile.find("\"topology\""), std::string::npos);
+    EXPECT_NE(profile.find("\"queues\""), std::string::npos);
+    EXPECT_NE(profile.find("\"tasks\""), std::string::npos);
+    EXPECT_NE(profile.find("\"name\": \"packets\""), std::string::npos);
+    EXPECT_NE(profile.find("\"type\": \"TestPacket\""), std::string::npos);
+    EXPECT_NE(profile.find("\"overflow\": \"drop_newest\""), std::string::npos);
+    EXPECT_NE(profile.find("\"name\": \"source\""), std::string::npos);
+    EXPECT_NE(profile.find("\"mode\": \"periodic\""), std::string::npos);
+    EXPECT_NE(profile.find("\"interval_ms\": 1"), std::string::npos);
+    EXPECT_NE(profile.find("\"backpressure_outputs\""), std::string::npos);
+    EXPECT_NE(profile.find("\"diagnostics\""), std::string::npos);
+    EXPECT_NE(profile.find("\"loopCount\""), std::string::npos);
+    EXPECT_NE(profile.find("\"totalLoopUs\""), std::string::npos);
+    EXPECT_NE(profile.find("\"averageLoopUs\""), std::string::npos);
+    EXPECT_NE(profile.find("\"p50LoopUs\""), std::string::npos);
+    EXPECT_NE(profile.find("\"p90LoopUs\""), std::string::npos);
+    EXPECT_NE(profile.find("\"p99LoopUs\""), std::string::npos);
+    EXPECT_NE(profile.find("\"windowMs\""), std::string::npos);
+    EXPECT_NE(profile.find("\"utilizationPpm\""), std::string::npos);
+    EXPECT_NE(profile.find("\"budgetOverrunCount\""), std::string::npos);
+    EXPECT_NE(profile.find("\"deadlineMissCount\""), std::string::npos);
+    EXPECT_NE(profile.find("\"schedulingErrorCount\""), std::string::npos);
+    EXPECT_NE(profile.find("\"pushedPerSecond\""), std::string::npos);
+    EXPECT_NE(profile.find("\"poppedPerSecond\""), std::string::npos);
+    EXPECT_NE(profile.find("\"droppedPerSecond\""), std::string::npos);
+    EXPECT_NE(profile.find("\"maxDepthObserved\""), std::string::npos);
+}
+
+TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
+    auto registry = MakeRegistry();
+    EventPipelineGraph graph(registry);
+    graph.ConfigureJson(MinimalValidJson());
+
+    const std::string profilePath = "/tmp/smartdrone_epg_optimizer_test_profile.json";
+    const std::string outputPath = "/tmp/smartdrone_epg_optimizer_test_optimized.json";
+    const std::uint64_t nowMs = 1000;
+    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+        profilePath,
+        graph.ProfileJson("test_graph", nowMs, "test-topology", "[]"));
+
+    smartdrone::core::application::EpgTaskManifest manifest;
+    manifest.subgraphName = "test_graph";
+    manifest.topologyVersion = "test-topology";
+    manifest.profilePath = profilePath;
+    manifest.optimizedConfigPath = outputPath;
+
+    const auto result =
+        smartdrone::core::application::OptimizeEpgProfileForManifest(
+            manifest, nowMs + 10);
+    EXPECT_TRUE(result.optimized) << result.message;
+
+    const std::string optimized = ReadFileText(outputPath);
+    EXPECT_NE(optimized.find("\"schema\": \"smartdrone.epg.optimized_config.v1\""),
+              std::string::npos);
+    EXPECT_NE(optimized.find("\"targetGraph\": \"test_graph\""),
+              std::string::npos);
+    EXPECT_NE(optimized.find("\"topologyVersion\": \"test-topology\""),
+              std::string::npos);
+    EXPECT_NO_THROW(epg::ParseGraphConfigJson(optimized));
+
+    (void)std::remove(profilePath.c_str());
+    (void)std::remove(outputPath.c_str());
+}
+
 TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile) {
     const auto config = epg::ParseGraphConfigJson(R"({
       "queues": [
@@ -1222,7 +1375,15 @@ TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile) {
           "name": "source\nname",
           "type": "TestSourceTask",
           "trigger": {"mode": "periodic", "interval_ms": 1},
-          "scheduling": {"realtime": true, "priority": 42},
+          "scheduling": {
+            "resource": "cpu",
+            "cpu_affinity": -1,
+            "budget_us": 500,
+            "deadline_us": 900,
+            "backpressure_outputs": [0],
+            "realtime": true,
+            "priority": 42
+          },
           "outputs": {"0": "packets"}
         }
       ]
@@ -1230,11 +1391,51 @@ TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile) {
 
     ASSERT_EQ(config.tasks.size(), 1u);
     EXPECT_EQ(config.tasks.front().name, "source\nname");
+    EXPECT_EQ(config.tasks.front().scheduling.resource, "cpu");
+    EXPECT_EQ(config.tasks.front().scheduling.cpuAffinity, -1);
+    EXPECT_EQ(config.tasks.front().scheduling.budgetUs, 500u);
+    EXPECT_EQ(config.tasks.front().scheduling.deadlineUs, 900u);
+    EXPECT_EQ(config.tasks.front().scheduling.backpressureOutputs,
+              std::vector<epg::PortId>{0});
     EXPECT_TRUE(config.tasks.front().scheduling.realtime);
     EXPECT_EQ(config.tasks.front().scheduling.priority, 42);
     EXPECT_THROW(
         epg::ParseGraphConfigJsonFile("/tmp/smart_drone_missing_epg.json"),
         std::runtime_error);
+}
+
+TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
+    const auto config = epg::ParseGraphConfigJson(R"({
+      "schema": "smartdrone.epg.optimized_config.v1",
+      "targetGraph": "test_graph",
+      "topologyVersion": "test-topology",
+      "solverVersion": "unit-test",
+      "sourceProfile": "test_graph",
+      "sourceTimestampMs": 123,
+      "queues": [
+        {"name": "packets", "type": "TestPacket", "depth": 6, "overflow": "drop_newest"}
+      ],
+      "tasks": [
+        {
+          "name": "source",
+          "type": "TestSourceTask",
+          "trigger": {"mode": "periodic", "interval_ms": 3},
+          "outputs": {"0": "packets"}
+        },
+        {
+          "name": "sink",
+          "type": "TestSinkTask",
+          "trigger": {"mode": "any_queue_ready", "queues": ["packets"]},
+          "inputs": {"0": "packets"}
+        }
+      ]
+    })");
+
+    ASSERT_EQ(config.queues.size(), 1u);
+    EXPECT_EQ(config.queues.front().depth, 6u);
+    ASSERT_EQ(config.tasks.size(), 2u);
+    EXPECT_EQ(config.tasks.front().trigger.interval,
+              std::chrono::milliseconds(3));
 }
 
 TEST(GraphConfig, RejectsInvalidJsonAndUnsupportedEnumValues) {
@@ -1315,6 +1516,9 @@ TEST(EventPipelineGraphValidation, RejectsInvalidTopologyConfigurations) {
         R"({"queues":[],"tasks":[{"name":"missing","type":"MissingTask","trigger":{"mode":"periodic","interval_ms":1}}]})",
         R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1},"scheduling":{"realtime":true,"priority":0}}]})",
         R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1},"scheduling":{"realtime":true,"priority":100}}]})",
+        R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1},"scheduling":{"resource":""}}]})",
+        R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1},"scheduling":{"cpu_affinity":-2}}]})",
+        R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":1},"scheduling":{"budget_us":2000,"deadline_us":1000}}]})",
         R"({"queues":[],"tasks":[{"name":"heartbeat","type":"TestHeartbeatTask","trigger":{"mode":"periodic","interval_ms":0}}]})",
         R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":[]},"inputs": {"0":"packets"}}]})",
         R"({"queues":[],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["missing"]},"inputs": {"0":"missing"}}]})",

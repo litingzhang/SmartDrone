@@ -104,7 +104,10 @@ void AddSlamMonitorTaskFactories(EpgTaskFactoryEntries &entries,
     AddFactory<EpgDfxSnapshotTask>(
         entries, catalog,
         [target = EpgDfxSnapshotTarget{deps.graphRef, manifest.subgraphName,
-                                       manifest.dfxSnapshotPath}]() {
+                                       manifest.topologyVersion,
+                                       EpgTaskCatalogJson(manifest),
+                                       manifest.dfxSnapshotPath,
+                                       manifest.profilePath}]() {
             return new EpgDfxSnapshotTask(target);
         });
 }

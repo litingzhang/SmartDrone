@@ -1,5 +1,6 @@
 #include "common/epg/epg_internal.h"
 
+#include <functional>
 #include <set>
 #include <sstream>
 
@@ -8,6 +9,8 @@ namespace {
 
 constexpr int MIN_REALTIME_PRIORITY = 1;
 constexpr int MAX_REALTIME_PRIORITY = 99;
+constexpr std::uint64_t MICROS_PER_MILLI = 1000;
+constexpr std::uint64_t MILLIS_PER_SECOND = 1000;
 
 std::string JsonEscape(const std::string& value) {
     std::ostringstream out;
@@ -37,18 +40,276 @@ std::string JsonEscape(const std::string& value) {
 }
 
 void ValidateTaskScheduling(const TaskConfig& taskConfig) {
-    if (!taskConfig.scheduling.realtime) {
+    const auto& scheduling = taskConfig.scheduling;
+    if (scheduling.resource.empty()) {
+        throw std::runtime_error("task scheduling resource must not be empty: " +
+                                 taskConfig.name);
+    }
+    if (scheduling.cpuAffinity < -1) {
+        throw std::runtime_error("task cpu_affinity must be -1 or greater: " +
+                                 taskConfig.name);
+    }
+    if (scheduling.deadlineUs > 0 &&
+        scheduling.budgetUs > scheduling.deadlineUs) {
+        throw std::runtime_error("task budget_us must not exceed deadline_us: " +
+                                 taskConfig.name);
+    }
+    if (!scheduling.realtime) {
         return;
     }
-    if (taskConfig.scheduling.priority >= MIN_REALTIME_PRIORITY &&
-        taskConfig.scheduling.priority <= MAX_REALTIME_PRIORITY) {
-        return;
+    if (scheduling.priority < MIN_REALTIME_PRIORITY ||
+        scheduling.priority > MAX_REALTIME_PRIORITY) {
+        throw std::runtime_error("realtime task priority must be in [1,99]: " +
+                                 taskConfig.name);
     }
-    throw std::runtime_error("realtime task priority must be in [1,99]: " +
-                             taskConfig.name);
+}
+
+const char* OverflowPolicyName(OverflowPolicy policy)
+{
+    switch (policy) {
+    case OverflowPolicy::DropNewest:
+        return "drop_newest";
+    case OverflowPolicy::OverwriteOldest:
+        return "overwrite_oldest";
+    }
+    return "unknown";
+}
+
+const char* TriggerModeName(TriggerMode mode)
+{
+    switch (mode) {
+    case TriggerMode::Periodic:
+        return "periodic";
+    case TriggerMode::AnyQueueReady:
+        return "any_queue_ready";
+    case TriggerMode::AllQueueReady:
+        return "all_queue_ready";
+    case TriggerMode::PeriodicOrAnyQueueReady:
+        return "periodic_or_any_queue_ready";
+    }
+    return "unknown";
+}
+
+void WriteStringArray(std::ostringstream& out,
+                      const std::vector<std::string>& values)
+{
+    out << "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i != 0) {
+            out << ", ";
+        }
+        out << "\"" << JsonEscape(values[i]) << "\"";
+    }
+    out << "]";
+}
+
+void WritePortMap(std::ostringstream& out,
+                  const std::map<PortId, std::string>& ports)
+{
+    out << "{";
+    bool first = true;
+    for (const auto& port : ports) {
+        if (!first) {
+            out << ", ";
+        }
+        first = false;
+        out << "\"" << port.first << "\": \"" << JsonEscape(port.second) << "\"";
+    }
+    out << "}";
+}
+
+void WritePortIdArray(std::ostringstream& out,
+                      const std::vector<PortId>& values)
+{
+    out << "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i != 0) {
+            out << ", ";
+        }
+        out << values[i];
+    }
+    out << "]";
+}
+
+void WriteQueueConfigJson(std::ostringstream& out,
+                          const QueueConfig& queueConfig)
+{
+    out << "{";
+    out << "\"name\": \"" << JsonEscape(queueConfig.name) << "\", ";
+    out << "\"type\": \"" << JsonEscape(queueConfig.type) << "\", ";
+    out << "\"depth\": " << queueConfig.depth << ", ";
+    out << "\"overflow\": \"" << OverflowPolicyName(queueConfig.overflow) << "\"";
+    out << "}";
+}
+
+void WriteTaskConfigJson(std::ostringstream& out,
+                         const TaskConfig& taskConfig)
+{
+    out << "{";
+    out << "\"name\": \"" << JsonEscape(taskConfig.name) << "\", ";
+    out << "\"type\": \"" << JsonEscape(taskConfig.type) << "\", ";
+    out << "\"trigger\": {";
+    out << "\"mode\": \"" << TriggerModeName(taskConfig.trigger.mode) << "\", ";
+    out << "\"interval_ms\": " << taskConfig.trigger.interval.count() << ", ";
+    out << "\"queues\": ";
+    WriteStringArray(out, taskConfig.trigger.queues);
+    out << "}, ";
+    out << "\"scheduling\": {";
+    out << "\"resource\": \"" << JsonEscape(taskConfig.scheduling.resource) << "\", ";
+    out << "\"cpu_affinity\": " << taskConfig.scheduling.cpuAffinity << ", ";
+    out << "\"budget_us\": " << taskConfig.scheduling.budgetUs << ", ";
+    out << "\"deadline_us\": " << taskConfig.scheduling.deadlineUs << ", ";
+    out << "\"backpressure_outputs\": ";
+    WritePortIdArray(out, taskConfig.scheduling.backpressureOutputs);
+    out << ", ";
+    out << "\"realtime\": " << (taskConfig.scheduling.realtime ? "true" : "false") << ", ";
+    out << "\"priority\": " << taskConfig.scheduling.priority;
+    out << "}, ";
+    out << "\"inputs\": ";
+    WritePortMap(out, taskConfig.inputs);
+    out << ", \"outputs\": ";
+    WritePortMap(out, taskConfig.outputs);
+    out << "}";
+}
+
+void WriteJsonMetadata(
+    std::ostringstream& out,
+    const std::map<std::string, std::string>& stringMetadata,
+    const std::map<std::string, std::uint64_t>& numericMetadata)
+{
+    for (const auto& item : stringMetadata) {
+        out << "  \"" << JsonEscape(item.first) << "\": \""
+            << JsonEscape(item.second) << "\",\n";
+    }
+    for (const auto& item : numericMetadata) {
+        out << "  \"" << JsonEscape(item.first) << "\": "
+            << item.second << ",\n";
+    }
+}
+
+void WriteGraphConfigBody(std::ostringstream& out, const GraphConfig& config)
+{
+    out << "  \"queues\": [\n";
+    for (std::size_t i = 0; i < config.queues.size(); ++i) {
+        if (i != 0) {
+            out << ",\n";
+        }
+        out << "    ";
+        WriteQueueConfigJson(out, config.queues[i]);
+    }
+    out << "\n  ],\n";
+    out << "  \"tasks\": [\n";
+    for (std::size_t i = 0; i < config.tasks.size(); ++i) {
+        if (i != 0) {
+            out << ",\n";
+        }
+        out << "    ";
+        WriteTaskConfigJson(out, config.tasks[i]);
+    }
+    out << "\n  ]\n";
+}
+
+std::uint64_t ObservationWindowMs(const TaskDiagnosticsSnapshot& diag)
+{
+    if (diag.firstLoopMs == 0 || diag.lastLoopMs <= diag.firstLoopMs) {
+        return 0;
+    }
+    return diag.lastLoopMs - diag.firstLoopMs;
+}
+
+std::uint64_t AverageLoopUs(const TaskDiagnosticsSnapshot& diag)
+{
+    if (diag.loopCount == 0) {
+        return 0;
+    }
+    return diag.totalLoopUs / diag.loopCount;
+}
+
+std::uint64_t UtilizationPpm(const TaskDiagnosticsSnapshot& diag)
+{
+    const std::uint64_t windowMs = ObservationWindowMs(diag);
+    if (windowMs == 0) {
+        return 0;
+    }
+    return (diag.totalLoopUs * MICROS_PER_MILLI) / windowMs;
+}
+
+std::uint64_t QueueObservationWindowMs(const QueueDiagnosticsSnapshot& diag)
+{
+    if (diag.firstActivityMs == 0 || diag.lastActivityMs <= diag.firstActivityMs) {
+        return 0;
+    }
+    return diag.lastActivityMs - diag.firstActivityMs;
+}
+
+std::uint64_t CounterRatePerSecond(std::uint64_t count, std::uint64_t windowMs)
+{
+    if (windowMs == 0) {
+        return 0;
+    }
+    return (count * MILLIS_PER_SECOND) / windowMs;
+}
+
+void WriteQueueDiagnosticsJson(std::ostringstream& out,
+                               const IQueue& queue,
+                               const QueueDiagnosticsSnapshot& diag)
+{
+    const std::uint64_t windowMs = QueueObservationWindowMs(diag);
+    out << "\"type\": \"" << JsonEscape(queue.TypeName()) << "\", ";
+    out << "\"size\": " << queue.Size() << ", ";
+    out << "\"depth\": " << queue.Depth() << ", ";
+    out << "\"pushed\": " << diag.pushed << ", ";
+    out << "\"popped\": " << diag.popped << ", ";
+    out << "\"droppedNewest\": " << diag.droppedNewest << ", ";
+    out << "\"overwrittenOldest\": " << diag.overwrittenOldest << ", ";
+    out << "\"wakeups\": " << diag.wakeups << ", ";
+    out << "\"maxDepthObserved\": " << diag.maxDepthObserved << ", ";
+    out << "\"firstActivityMs\": " << diag.firstActivityMs << ", ";
+    out << "\"lastActivityMs\": " << diag.lastActivityMs << ", ";
+    out << "\"windowMs\": " << windowMs << ", ";
+    out << "\"pushedPerSecond\": " << CounterRatePerSecond(diag.pushed, windowMs) << ", ";
+    out << "\"poppedPerSecond\": " << CounterRatePerSecond(diag.popped, windowMs) << ", ";
+    out << "\"droppedPerSecond\": " <<
+        CounterRatePerSecond(diag.droppedNewest + diag.overwrittenOldest, windowMs);
+}
+
+void WriteTaskDiagnosticsJson(std::ostringstream& out,
+                              const TaskDiagnosticsSnapshot& diag)
+{
+    out << "\"lastLoopUs\": " << diag.lastLoopUs << ", ";
+    out << "\"maxLoopUs\": " << diag.maxLoopUs << ", ";
+    out << "\"p50LoopUs\": " << diag.p50LoopUs << ", ";
+    out << "\"p90LoopUs\": " << diag.p90LoopUs << ", ";
+    out << "\"p99LoopUs\": " << diag.p99LoopUs << ", ";
+    out << "\"totalLoopUs\": " << diag.totalLoopUs << ", ";
+    out << "\"averageLoopUs\": " << AverageLoopUs(diag) << ", ";
+    out << "\"loopCount\": " << diag.loopCount << ", ";
+    out << "\"errorCount\": " << diag.errorCount << ", ";
+    out << "\"idleWakeups\": " << diag.idleWakeups << ", ";
+    out << "\"firstLoopMs\": " << diag.firstLoopMs << ", ";
+    out << "\"lastLoopMs\": " << diag.lastLoopMs << ", ";
+    out << "\"windowMs\": " << ObservationWindowMs(diag) << ", ";
+    out << "\"utilizationPpm\": " << UtilizationPpm(diag) << ", ";
+    out << "\"budgetOverrunCount\": " << diag.budgetOverrunCount << ", ";
+    out << "\"deadlineMissCount\": " << diag.deadlineMissCount << ", ";
+    out << "\"schedulingErrorCount\": " << diag.schedulingErrorCount << ", ";
+    out << "\"lastSchedulingError\": " << diag.lastSchedulingError;
 }
 
 } // namespace
+
+std::string GraphConfigToJson(
+    const GraphConfig& config,
+    const std::map<std::string, std::string>& stringMetadata,
+    const std::map<std::string, std::uint64_t>& numericMetadata)
+{
+    std::ostringstream out;
+    out << "{\n";
+    WriteJsonMetadata(out, stringMetadata, numericMetadata);
+    WriteGraphConfigBody(out, config);
+    out << "}\n";
+    return out.str();
+}
 
 EventPipelineGraph::EventPipelineGraph(const Registry& registry) : m_registry(registry) {
 }
@@ -80,6 +341,7 @@ void EventPipelineGraph::Configure(const GraphConfig& config) {
     PublishTaskProducedQueues(usage);
     CreateConfiguredTaskRunners(config);
     BindInputNotifiers(config);
+    m_config = config;
     m_configured = true;
 }
 
@@ -88,6 +350,7 @@ void EventPipelineGraph::ResetConfiguredGraph() {
     m_runners.clear();
     m_taskProducedQueues.clear();
     m_externalIngressQueues.clear();
+    m_config = {};
 }
 
 void EventPipelineGraph::CreateConfiguredQueues(const GraphConfig& config,
@@ -395,15 +658,7 @@ std::string EventPipelineGraph::DfxSnapshotJson(const std::string& graphName,
         }
         first = false;
         out << "    \"" << JsonEscape(queue.first) << "\": {";
-        out << "\"type\": \"" << JsonEscape(queue.second->TypeName()) << "\", ";
-        out << "\"size\": " << queue.second->Size() << ", ";
-        out << "\"depth\": " << queue.second->Depth() << ", ";
-        out << "\"pushed\": " << diag.pushed << ", ";
-        out << "\"popped\": " << diag.popped << ", ";
-        out << "\"droppedNewest\": " << diag.droppedNewest << ", ";
-        out << "\"overwrittenOldest\": " << diag.overwrittenOldest << ", ";
-        out << "\"wakeups\": " << diag.wakeups << ", ";
-        out << "\"maxDepthObserved\": " << diag.maxDepthObserved;
+        WriteQueueDiagnosticsJson(out, *queue.second, diag);
         out << "}";
     }
     out << "\n  },\n";
@@ -416,14 +671,52 @@ std::string EventPipelineGraph::DfxSnapshotJson(const std::string& graphName,
         }
         first = false;
         out << "    \"" << JsonEscape(runner->Name()) << "\": {";
-        out << "\"lastLoopUs\": " << diag.lastLoopUs << ", ";
-        out << "\"maxLoopUs\": " << diag.maxLoopUs << ", ";
-        out << "\"loopCount\": " << diag.loopCount << ", ";
-        out << "\"errorCount\": " << diag.errorCount << ", ";
-        out << "\"idleWakeups\": " << diag.idleWakeups;
+        WriteTaskDiagnosticsJson(out, diag);
         out << "}";
     }
     out << "\n  }\n";
+    out << "}\n";
+    return out.str();
+}
+
+std::string EventPipelineGraph::ProfileJson(const std::string& graphName,
+                                            std::uint64_t timestampMs,
+                                            const std::string& topologyVersion,
+                                            const std::string& taskCatalogJson) const
+{
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"schema\": \"smartdrone.epg.profile.v1\",\n";
+    out << "  \"graph\": \"" << JsonEscape(graphName) << "\",\n";
+    if (!topologyVersion.empty()) {
+        out << "  \"topologyVersion\": \"" << JsonEscape(topologyVersion) << "\",\n";
+    }
+    out << "  \"timestampMs\": " << timestampMs << ",\n";
+    if (!taskCatalogJson.empty()) {
+        out << "  \"taskCatalog\": " << taskCatalogJson << ",\n";
+    }
+    out << "  \"topology\": {\n";
+    out << "    \"queues\": [\n";
+    for (std::size_t i = 0; i < m_config.queues.size(); ++i) {
+        if (i != 0) {
+            out << ",\n";
+        }
+        out << "      ";
+        WriteQueueConfigJson(out, m_config.queues[i]);
+    }
+    out << "\n    ],\n";
+    out << "    \"tasks\": [\n";
+    for (std::size_t i = 0; i < m_config.tasks.size(); ++i) {
+        if (i != 0) {
+            out << ",\n";
+        }
+        out << "      ";
+        WriteTaskConfigJson(out, m_config.tasks[i]);
+    }
+    out << "\n    ]\n";
+    out << "  },\n";
+    out << "  \"diagnostics\": ";
+    out << DfxSnapshotJson(graphName, timestampMs);
     out << "}\n";
     return out.str();
 }

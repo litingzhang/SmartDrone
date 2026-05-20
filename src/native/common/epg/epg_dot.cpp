@@ -58,6 +58,20 @@ bool ParseBool(const std::string& value, const std::string& field) {
     throw std::runtime_error("DOT bool field is invalid: " + field + "=" + value);
 }
 
+int ParseInt(const std::string& value, const std::string& field) {
+    std::size_t parsedChars = 0;
+    int parsed = 0;
+    try {
+        parsed = std::stoi(value, &parsedChars, 10);
+    } catch (const std::exception&) {
+        throw std::runtime_error("DOT integer field is invalid: " + field + "=" + value);
+    }
+    if (parsedChars != value.size()) {
+        throw std::runtime_error("DOT integer field is invalid: " + field + "=" + value);
+    }
+    return parsed;
+}
+
 OverflowPolicy ParseDotOverflow(const std::string& value) {
     if (value == "drop_newest" || value == "tail_drop") {
         return OverflowPolicy::DropNewest;
@@ -475,6 +489,29 @@ TaskConfig ParseTaskStatement(const std::string& head,
     const auto priorityIt = fields.find("priority");
     if (priorityIt != fields.end()) {
         task.scheduling.priority = static_cast<int>(ParseSize(priorityIt->second, "priority"));
+    }
+    const auto resourceIt = fields.find("resource");
+    if (resourceIt != fields.end()) {
+        task.scheduling.resource = resourceIt->second;
+    }
+    const auto cpuAffinityIt = fields.find("cpu_affinity");
+    if (cpuAffinityIt != fields.end()) {
+        task.scheduling.cpuAffinity = ParseInt(cpuAffinityIt->second, "cpu_affinity");
+    }
+    const auto budgetIt = fields.find("budget_us");
+    if (budgetIt != fields.end()) {
+        task.scheduling.budgetUs = ParseSize(budgetIt->second, "budget_us");
+    }
+    const auto deadlineIt = fields.find("deadline_us");
+    if (deadlineIt != fields.end()) {
+        task.scheduling.deadlineUs = ParseSize(deadlineIt->second, "deadline_us");
+    }
+    const auto backpressureIt = fields.find("backpressure_outputs");
+    if (backpressureIt != fields.end()) {
+        for (const auto& port : Split(backpressureIt->second, '+')) {
+            task.scheduling.backpressureOutputs.push_back(
+                ParsePortId(port, "backpressure_outputs"));
+        }
     }
     return task;
 }

@@ -42,6 +42,8 @@ struct QueueDiagnostics {
     std::atomic<std::uint64_t> overwrittenOldest{0};
     std::atomic<std::uint64_t> wakeups{0};
     std::atomic<std::uint64_t> maxDepthObserved{0};
+    std::atomic<std::uint64_t> firstActivityMs{0};
+    std::atomic<std::uint64_t> lastActivityMs{0};
 };
 
 struct QueueDiagnosticsSnapshot {
@@ -51,6 +53,8 @@ struct QueueDiagnosticsSnapshot {
     std::uint64_t overwrittenOldest{};
     std::uint64_t wakeups{};
     std::uint64_t maxDepthObserved{};
+    std::uint64_t firstActivityMs{};
+    std::uint64_t lastActivityMs{};
 };
 
 struct TaskDiagnostics {
@@ -59,6 +63,13 @@ struct TaskDiagnostics {
     std::atomic<std::uint64_t> idleWakeups{0};
     std::atomic<std::uint64_t> lastLoopUs{0};
     std::atomic<std::uint64_t> maxLoopUs{0};
+    std::atomic<std::uint64_t> totalLoopUs{0};
+    std::atomic<std::uint64_t> firstLoopMs{0};
+    std::atomic<std::uint64_t> lastLoopMs{0};
+    std::atomic<std::uint64_t> budgetOverrunCount{0};
+    std::atomic<std::uint64_t> deadlineMissCount{0};
+    std::atomic<std::uint64_t> schedulingErrorCount{0};
+    std::atomic<int> lastSchedulingError{0};
 };
 
 struct TaskDiagnosticsSnapshot {
@@ -67,6 +78,16 @@ struct TaskDiagnosticsSnapshot {
     std::uint64_t idleWakeups{};
     std::uint64_t lastLoopUs{};
     std::uint64_t maxLoopUs{};
+    std::uint64_t p50LoopUs{};
+    std::uint64_t p90LoopUs{};
+    std::uint64_t p99LoopUs{};
+    std::uint64_t totalLoopUs{};
+    std::uint64_t firstLoopMs{};
+    std::uint64_t lastLoopMs{};
+    std::uint64_t budgetOverrunCount{};
+    std::uint64_t deadlineMissCount{};
+    std::uint64_t schedulingErrorCount{};
+    int lastSchedulingError{};
 };
 
 struct QueueConfig {
@@ -83,6 +104,11 @@ struct TriggerConfig {
 };
 
 struct TaskSchedulingConfig {
+    std::string resource{"cpu"};
+    int cpuAffinity{-1};
+    std::uint64_t budgetUs{0};
+    std::uint64_t deadlineUs{0};
+    std::vector<PortId> backpressureOutputs;
     bool realtime{false};
     int priority{0};
 };
@@ -123,6 +149,10 @@ GraphConfig ParseGraphConfigDot(const std::string& dotText,
 GraphConfig ParseGraphConfigDotFile(const std::string& path,
                                                   const std::string& subgraphName,
                                                   Registry& registry);
+std::string GraphConfigToJson(
+    const GraphConfig& config,
+    const std::map<std::string, std::string>& stringMetadata = {},
+    const std::map<std::string, std::uint64_t>& numericMetadata = {});
 
 struct PortSpec {
     PortId id{};
@@ -186,6 +216,7 @@ public:
         if (next == tail) {
             if (m_overflow == OverflowPolicy::DropNewest) {
                 m_diag.droppedNewest.fetch_add(1, std::memory_order_relaxed);
+                StoreQueueActivity();
                 return false;
             }
 
@@ -203,6 +234,7 @@ public:
         m_slots[head] = std::move(item);
         m_head.store(next, std::memory_order_release);
         m_diag.pushed.fetch_add(1, std::memory_order_relaxed);
+        StoreQueueActivity();
         UpdateMaxDepth(Size());
         Notify();
         return true;
@@ -223,6 +255,7 @@ public:
                 auto item = std::move(m_slots[tail]);
                 m_slots[tail].reset();
                 m_diag.popped.fetch_add(1, std::memory_order_relaxed);
+                StoreQueueActivity();
                 return item;
             }
         }
@@ -256,6 +289,8 @@ public:
         snapshot.overwrittenOldest = m_diag.overwrittenOldest.load(std::memory_order_relaxed);
         snapshot.wakeups = m_diag.wakeups.load(std::memory_order_relaxed);
         snapshot.maxDepthObserved = m_diag.maxDepthObserved.load(std::memory_order_relaxed);
+        snapshot.firstActivityMs = m_diag.firstActivityMs.load(std::memory_order_relaxed);
+        snapshot.lastActivityMs = m_diag.lastActivityMs.load(std::memory_order_relaxed);
         return snapshot;
     }
 
@@ -276,6 +311,24 @@ private:
                                                               std::memory_order_relaxed,
                                                               std::memory_order_relaxed)) {
         }
+    }
+
+    static std::uint64_t SteadyNowMs() {
+        const auto now = std::chrono::steady_clock::now().time_since_epoch();
+        return static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+    }
+
+    void StoreFirstQueueActivity(std::uint64_t nowMs) {
+        std::uint64_t empty = 0;
+        (void)m_diag.firstActivityMs.compare_exchange_strong(
+            empty, nowMs, std::memory_order_relaxed, std::memory_order_relaxed);
+    }
+
+    void StoreQueueActivity() {
+        const std::uint64_t nowMs = SteadyNowMs();
+        StoreFirstQueueActivity(nowMs);
+        m_diag.lastActivityMs.store(nowMs, std::memory_order_relaxed);
     }
 
     void Notify() {
@@ -335,6 +388,7 @@ public:
     std::size_t InputSize(PortId port) const;
     bool OutputExists(PortId port) const;
     std::size_t OutputSize(PortId port) const;
+    const IQueue* OutputQueueByPort(PortId port) const;
 
 private:
     template <class T>
@@ -604,6 +658,10 @@ public:
     std::map<std::string, TaskDiagnosticsSnapshot> TaskDiagnostics() const;
     std::string DfxSnapshotJson(const std::string& graphName,
                                 std::uint64_t timestampMs) const;
+    std::string ProfileJson(const std::string& graphName,
+                            std::uint64_t timestampMs,
+                            const std::string& topologyVersion = {},
+                            const std::string& taskCatalogJson = {}) const;
 
 private:
     class TaskRunner;
@@ -642,6 +700,7 @@ private:
     const Registry& m_registry;
     bool m_configured{false};
     bool m_running{false};
+    GraphConfig m_config;
     std::unordered_map<std::string, std::unique_ptr<IQueue>> m_queues;
     std::set<std::string> m_taskProducedQueues;
     std::set<std::string> m_externalIngressQueues;

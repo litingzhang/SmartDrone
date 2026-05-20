@@ -57,6 +57,9 @@ digraph EpgTopology {
     EpgDfxSnapshotTask [
       label="{EpgDfxSnapshotTask|type=EpgDfxSnapshotTask|trigger=periodic|interval_ms=500}"
     ];
+    EpgOptimizeTask [
+      label="{EpgOptimizeTask|type=EpgOptimizeTask|trigger=periodic|interval_ms=5000}"
+    ];
   }
 
   subgraph cluster_slam_session_graph {

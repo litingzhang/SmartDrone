@@ -320,6 +320,32 @@ int OptionalInt(const JsonValue& value, const std::string& field, int fallback) 
     return static_cast<int>(child->number);
 }
 
+std::uint64_t OptionalUInt64(const JsonValue& value,
+                             const std::string& field,
+                             std::uint64_t fallback) {
+    const auto* child = value.Find(field);
+    if (!child) {
+        return fallback;
+    }
+    if (child->kind != JsonValue::Kind::Number || child->number < 0) {
+        throw std::runtime_error("json field must be non-negative number: " + field);
+    }
+    return static_cast<std::uint64_t>(child->number);
+}
+
+std::string OptionalString(const JsonValue& value,
+                           const std::string& field,
+                           const std::string& fallback) {
+    const auto* child = value.Find(field);
+    if (!child) {
+        return fallback;
+    }
+    if (child->kind != JsonValue::Kind::String) {
+        throw std::runtime_error("json field must be string: " + field);
+    }
+    return child->string;
+}
+
 std::vector<std::string> OptionalStringArray(const JsonValue& value, const std::string& field) {
     std::vector<std::string> result;
     const auto* child = value.Find(field);
@@ -338,6 +364,25 @@ std::vector<std::string> OptionalStringArray(const JsonValue& value, const std::
     return result;
 }
 
+std::vector<PortId> OptionalPortIdArray(const JsonValue& value,
+                                        const std::string& field) {
+    std::vector<PortId> result;
+    const auto* child = value.Find(field);
+    if (!child) {
+        return result;
+    }
+    if (child->kind != JsonValue::Kind::Array) {
+        throw std::runtime_error("json field must be port id array: " + field);
+    }
+    for (const auto& item : child->array) {
+        if (item.kind != JsonValue::Kind::Number || item.number < 0) {
+            throw std::runtime_error("json array item must be port id: " + field);
+        }
+        result.push_back(static_cast<PortId>(item.number));
+    }
+    return result;
+}
+
 TaskSchedulingConfig OptionalScheduling(const JsonValue& value) {
     TaskSchedulingConfig scheduling;
     const auto* child = value.Find("scheduling");
@@ -347,6 +392,15 @@ TaskSchedulingConfig OptionalScheduling(const JsonValue& value) {
     if (child->kind != JsonValue::Kind::Object) {
         throw std::runtime_error("task scheduling must be object");
     }
+    scheduling.resource = OptionalString(*child, "resource", scheduling.resource);
+    scheduling.cpuAffinity =
+        OptionalInt(*child, "cpu_affinity", scheduling.cpuAffinity);
+    scheduling.budgetUs =
+        OptionalUInt64(*child, "budget_us", scheduling.budgetUs);
+    scheduling.deadlineUs =
+        OptionalUInt64(*child, "deadline_us", scheduling.deadlineUs);
+    scheduling.backpressureOutputs =
+        OptionalPortIdArray(*child, "backpressure_outputs");
     scheduling.realtime = OptionalBool(*child, "realtime", false);
     scheduling.priority = OptionalInt(*child, "priority", 0);
     return scheduling;
