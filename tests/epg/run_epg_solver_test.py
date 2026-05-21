@@ -240,6 +240,15 @@ def main() -> int:
     assert report["sourceTimestampMs"] == 123
     assert report["generatedAtMs"] == 456
     assert report["solverVersion"] == "python-heuristic-v2"
+    for field in [
+            "targetGraph",
+            "topologyVersion",
+            "sourceProfile",
+            "sourceTimestampMs",
+            "generatedAtMs",
+            "solverVersion",
+    ]:
+        assert report[field] == optimized[field]
     assert report["objective"]["score"]["totalPenalty"] > 0
     assert report["objective"]["score"]["budgetOverruns"] == 2
     assert report["objective"]["score"]["deadlineMisses"] == 1

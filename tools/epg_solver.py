@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Set, Tuple
 
 PROFILE_SCHEMA = "smartdrone.epg.profile.v1"
 OPTIMIZED_SCHEMA = "smartdrone.epg.optimized_config.v1"
+SOLVER_REPORT_SCHEMA = "smartdrone.epg.solver_report.v1"
 SOLVER_VERSION = "python-heuristic-v2"
 
 
@@ -374,6 +375,25 @@ def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
     }
 
 
+def validate_generated_pair(config: Dict[str, Any],
+                            report: Dict[str, Any]) -> None:
+    fields = [
+        "targetGraph",
+        "topologyVersion",
+        "sourceProfile",
+        "sourceTimestampMs",
+        "generatedAtMs",
+        "solverVersion",
+    ]
+    if config.get("schema") != OPTIMIZED_SCHEMA:
+        raise ValueError("EPG optimized config schema mismatch")
+    if report.get("schema") != SOLVER_REPORT_SCHEMA:
+        raise ValueError("EPG solver report schema mismatch")
+    for field in fields:
+        if config.get(field) != report.get(field):
+            raise ValueError(f"EPG solver report provenance mismatch: {field}")
+
+
 def optimize_profile(profile: Dict[str, Any],
                      limits: SolverLimits,
                      generated_at_ms: int) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -414,7 +434,7 @@ def optimize_profile(profile: Dict[str, Any],
         "tasks": optimized_tasks,
     }
     report = {
-        "schema": "smartdrone.epg.solver_report.v1",
+        "schema": SOLVER_REPORT_SCHEMA,
         "targetGraph": profile.get("graph", ""),
         "topologyVersion": profile.get("topologyVersion", ""),
         "sourceProfile": profile.get("graph", ""),
@@ -432,6 +452,7 @@ def optimize_profile(profile: Dict[str, Any],
         },
         "decisions": decisions,
     }
+    validate_generated_pair(config, report)
     return config, report
 
 

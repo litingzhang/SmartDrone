@@ -2162,6 +2162,11 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
               std::string::npos);
     EXPECT_NE(report.find("\"replaceable\": true"), std::string::npos);
     EXPECT_NE(report.find("\"budgetOverruns\": 2"), std::string::npos);
+    const auto optimizedGraph = epg::ParseOptimizedGraphJson(optimized);
+    const auto reportMetadata = epg::ParseSolverReportMetadataJson(report);
+    EXPECT_NO_THROW(
+        smartdrone::core::application::ValidateEpgSolverReportManifest(
+            manifest, optimizedGraph.metadata, reportMetadata));
 
     (void)std::remove(profilePath.c_str());
     (void)std::remove(outputPath.c_str());

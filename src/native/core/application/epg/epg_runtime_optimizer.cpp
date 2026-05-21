@@ -589,6 +589,18 @@ std::string BuildSolverReport(const EpgTaskManifest &manifest,
     return out.str();
 }
 
+epg::OptimizedGraph ValidateGeneratedArtifacts(
+    const EpgTaskManifest &manifest,
+    const std::string &optimizedJson,
+    const std::string &reportJson)
+{
+    auto optimized = epg::ParseOptimizedGraphJson(optimizedJson);
+    ValidateEpgOptimizedGraphManifest(manifest, optimized);
+    const auto report = epg::ParseSolverReportMetadataJson(reportJson);
+    ValidateEpgSolverReportManifest(manifest, optimized.metadata, report);
+    return optimized;
+}
+
 EpgRuntimeOptimizerResult WriteOptimizedConfig(const EpgTaskManifest &manifest,
                                                const epg::GraphProfile &profile,
                                                std::uint64_t nowMs)
@@ -601,10 +613,9 @@ EpgRuntimeOptimizerResult WriteOptimizedConfig(const EpgTaskManifest &manifest,
     const std::string json =
         epg::GraphConfigToJson(config, MakeOptimizerStrings(manifest),
                                MakeOptimizerNumbers(profile.metadata, nowMs));
-    ValidateEpgOptimizedGraphManifest(manifest,
-                                      epg::ParseOptimizedGraphJson(json));
     const std::string report =
         BuildSolverReport(manifest, profile.metadata, nowMs, decisions);
+    (void)ValidateGeneratedArtifacts(manifest, json, report);
     const bool changed =
         OptimizedConfigChanged(ReadFile(paths.optimizedConfigPath), json);
     WriteRequiredArtifactFile(paths.solverReportPath, report);
