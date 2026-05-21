@@ -423,15 +423,40 @@ def validate_generated_pair(config: Dict[str, Any],
     for field in SOLVER_CONSTRAINT_FIELDS:
         if integer(constraints.get(field), -1) < 0:
             raise ValueError(f"EPG solver report constraint invalid: {field}")
+    penalty = (integer(score.get("queuePressure")) * 1000 +
+               integer(score.get("periodicOverloadUs")) +
+               integer(score.get("schedulingErrors")) * 10000 +
+               integer(score.get("budgetOverruns")) * 2000 +
+               integer(score.get("deadlineMisses")) * 5000 +
+               integer(score.get("utilizationOverPpm")))
+    if integer(score.get("totalPenalty")) != penalty:
+        raise ValueError("EPG solver report score mismatch")
     decisions = report.get("decisions")
     if not isinstance(decisions, list):
         raise ValueError("EPG solver report decisions missing")
+    expected = {
+        f"queue:{item.get('name', '')}"
+        for item in config.get("queues", [])
+        if isinstance(item, dict)
+    }
+    expected.update({
+        f"task:{item.get('name', '')}"
+        for item in config.get("tasks", [])
+        if isinstance(item, dict)
+    })
+    actual = set()
     for item in decisions:
         if not isinstance(item, dict):
             raise ValueError("EPG solver report decision invalid")
-        require_text(item, "kind", "solver report decision")
-        require_text(item, "name", "solver report decision")
+        kind = require_text(item, "kind", "solver report decision")
+        name = require_text(item, "name", "solver report decision")
         require_text(item, "reason", "solver report decision")
+        key = f"{kind}:{name}"
+        if key in actual:
+            raise ValueError(f"EPG solver report duplicates decision: {key}")
+        actual.add(key)
+    if actual != expected:
+        raise ValueError("EPG solver report decision coverage mismatch")
 
 
 def optimize_profile(profile: Dict[str, Any],

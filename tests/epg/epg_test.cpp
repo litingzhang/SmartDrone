@@ -1827,12 +1827,13 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
         "targetUtilizationPpm": 800000
       },
       "decisions": [
+        {"kind": "queue", "name": "packets", "reason": "keep"},
         {"kind": "task", "name": "source", "reason": "keep"}
       ]
     })");
     EXPECT_NO_THROW(
-        smartdrone::core::application::ValidateEpgSolverReportManifest(
-            manifest, optimized.metadata, report.metadata));
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, report));
 
     auto wrongTarget = optimized;
     wrongTarget.metadata.targetGraph = "other_graph";
@@ -1888,6 +1889,27 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_THROW(
         smartdrone::core::application::ValidateEpgSolverReportManifest(
             manifest, optimized.metadata, wrongReportVersion),
+        std::runtime_error);
+
+    auto missingDecision = report;
+    missingDecision.decisions.pop_back();
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, missingDecision),
+        std::runtime_error);
+
+    auto duplicateDecision = report;
+    duplicateDecision.decisions.push_back(duplicateDecision.decisions.front());
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, duplicateDecision),
+        std::runtime_error);
+
+    auto wrongScore = report;
+    wrongScore.score.totalPenalty = 1;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, wrongScore),
         std::runtime_error);
 }
 
@@ -2182,8 +2204,8 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     const auto optimizedGraph = epg::ParseOptimizedGraphJson(optimized);
     const auto parsedReport = epg::ParseSolverReportJson(report);
     EXPECT_NO_THROW(
-        smartdrone::core::application::ValidateEpgSolverReportManifest(
-            manifest, optimizedGraph.metadata, parsedReport.metadata));
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimizedGraph, parsedReport));
     EXPECT_EQ(parsedReport.objectiveName,
               "minimize_epg_pressure_overload_deadline_and_scheduling_penalty");
     EXPECT_EQ(parsedReport.constraints.maxQueueDepth, 16u);
@@ -2709,6 +2731,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
         "targetUtilizationPpm": 800000
       },
       "decisions": [
+        {"kind": "queue", "name": "packets", "reason": "keep"},
         {"kind": "task", "name": "source", "reason": "keep"}
       ]
     })");
@@ -2722,8 +2745,8 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     EXPECT_EQ(report.objectiveName, "unit");
     EXPECT_EQ(report.score.totalPenalty, 0u);
     EXPECT_EQ(report.constraints.maxQueueDepth, 16u);
-    ASSERT_EQ(report.decisions.size(), 1u);
-    EXPECT_EQ(report.decisions.front().name, "source");
+    ASSERT_EQ(report.decisions.size(), 2u);
+    EXPECT_EQ(report.decisions.front().name, "packets");
     EXPECT_THROW(
         epg::ParseSolverReportJson(R"({
           "schema": "smartdrone.epg.solver_report.v1",

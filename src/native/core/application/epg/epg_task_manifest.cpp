@@ -401,6 +401,42 @@ void ValidateGraphRuntimeTuningDeclared(
     }
 }
 
+void ValidateSolverReportScore(const epg::SolverReport &report)
+{
+    const auto &score = report.score;
+    const auto weightedPenalty =
+        score.queuePressure * 1000 + score.periodicOverloadUs +
+        score.schedulingErrors * 10000 + score.budgetOverruns * 2000 +
+        score.deadlineMisses * 5000 + score.utilizationOverPpm;
+    if (score.totalPenalty != weightedPenalty) {
+        throw std::runtime_error("solver report score mismatch");
+    }
+}
+
+void ValidateSolverReportDecisionCoverage(
+    const epg::GraphConfig &graphConfig,
+    const epg::SolverReport &report)
+{
+    std::set<std::string> expected;
+    for (const auto &queue : graphConfig.queues) {
+        expected.insert("queue:" + queue.name);
+    }
+    for (const auto &task : graphConfig.tasks) {
+        expected.insert("task:" + task.name);
+    }
+    std::set<std::string> actual;
+    for (const auto &decision : report.decisions) {
+        const auto key = decision.kind + ":" + decision.name;
+        if (!actual.insert(key).second) {
+            throw std::runtime_error("solver report duplicates decision: " +
+                                     key);
+        }
+    }
+    if (actual != expected) {
+        throw std::runtime_error("solver report decision coverage mismatch");
+    }
+}
+
 std::string BuildPath(const char *directory, const std::string &stem,
                       const char *suffix)
 {
@@ -616,6 +652,20 @@ void ValidateEpgSolverReportManifest(
         reportMetadata.generatedAtMs != optimizedMetadata.generatedAtMs) {
         throw std::runtime_error("solver report provenance mismatch");
     }
+}
+
+void ValidateEpgSolverReport(
+    const EpgTaskManifest &manifest,
+    const epg::OptimizedGraph &optimizedGraph,
+    const epg::SolverReport &report)
+{
+    ValidateEpgSolverReportManifest(manifest, optimizedGraph.metadata,
+                                    report.metadata);
+    if (report.objectiveName.empty()) {
+        throw std::runtime_error("solver report objective missing");
+    }
+    ValidateSolverReportScore(report);
+    ValidateSolverReportDecisionCoverage(optimizedGraph.config, report);
 }
 
 } // namespace smartdrone::core::application
