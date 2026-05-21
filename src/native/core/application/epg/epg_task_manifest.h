@@ -56,6 +56,9 @@ const EpgTaskManifest &EpgManifestForDomain(EpgDomain domain);
 std::vector<std::string> EpgTaskCatalogTypes(
     const EpgTaskManifest &manifest);
 std::string EpgTaskCatalogJson(const EpgTaskManifest &manifest);
+void ApplyEpgTaskCatalogDefaults(
+    const EpgTaskManifest &manifest,
+    epg::GraphConfig &graphConfig);
 void ValidateEpgTaskManifest(
     const EpgTaskManifest &manifest);
 void ValidateEpgTaskFactoryManifest(

@@ -160,6 +160,53 @@ void ValidateGraphTaskTypeAllowed(const EpgTaskManifest &manifest,
                              task.name + " type=" + task.type);
 }
 
+const EpgTaskCatalogEntry &RequireCatalogEntry(
+    const EpgTaskManifest &manifest,
+    const std::string &taskType)
+{
+    for (const auto &entry : manifest.catalog) {
+        if (entry.taskType == taskType) {
+            return entry;
+        }
+    }
+    throw std::runtime_error(TaskGraphLabel(manifest) +
+                             " missing catalog task type: " + taskType);
+}
+
+const EpgTaskCatalogEntry *FindCatalogEntry(
+    const EpgTaskManifest &manifest,
+    const std::string &taskType)
+{
+    for (const auto &entry : manifest.catalog) {
+        if (entry.taskType == taskType) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+void ApplyCatalogDefaultsToTask(const EpgTaskCatalogEntry &entry,
+                                epg::TaskConfig &task)
+{
+    task.scheduling.resource = entry.resource;
+    task.scheduling.budgetUs = entry.budgetUs;
+    task.scheduling.deadlineUs = entry.deadlineUs;
+}
+
+void ValidateTaskSchedulingCatalogMatch(const EpgTaskManifest &manifest,
+                                        const epg::TaskConfig &task)
+{
+    const auto &entry = RequireCatalogEntry(manifest, task.type);
+    const auto &scheduling = task.scheduling;
+    if (scheduling.resource != entry.resource ||
+        scheduling.budgetUs != entry.budgetUs ||
+        scheduling.deadlineUs != entry.deadlineUs) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " task scheduling catalog mismatch: " +
+                                 task.name + " type=" + task.type);
+    }
+}
+
 void ValidateManifestTaskTypeUsed(const EpgTaskManifest &manifest,
                                   const std::string &taskType,
                                   const std::set<std::string> &usedTypes)
@@ -332,6 +379,21 @@ std::string EpgTaskCatalogJson(const EpgTaskManifest &manifest)
     return out.str();
 }
 
+void ApplyEpgTaskCatalogDefaults(
+    const EpgTaskManifest &manifest,
+    epg::GraphConfig &graphConfig)
+{
+    ValidateManifestMetadata(manifest);
+    ValidateManifestCatalog(manifest);
+    for (auto &task : graphConfig.tasks) {
+        const auto *entry = FindCatalogEntry(manifest, task.type);
+        if (!entry) {
+            continue;
+        }
+        ApplyCatalogDefaultsToTask(*entry, task);
+    }
+}
+
 void ValidateEpgTaskManifest(
     const EpgTaskManifest &manifest)
 {
@@ -368,6 +430,7 @@ void ValidateEpgTaskGraphManifest(
     std::set<std::string> usedTypes;
     for (const auto &task : graphConfig.tasks) {
         ValidateGraphTaskTypeAllowed(manifest, task, allowedTypes);
+        ValidateTaskSchedulingCatalogMatch(manifest, task);
         usedTypes.insert(task.type);
     }
     for (const auto &entry : manifest.catalog) {

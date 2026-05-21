@@ -1596,6 +1596,11 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
           "name": "source",
           "type": "TestSourceTask",
           "trigger": {"mode": "periodic", "interval_ms": 1},
+          "scheduling": {
+            "resource": "cpu",
+            "budget_us": 1000,
+            "deadline_us": 2000
+          },
           "outputs": {"0": "packets"}
         }
       ]
@@ -1630,6 +1635,13 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_THROW(
         smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, wrongTask),
+        std::runtime_error);
+
+    auto wrongScheduling = optimized;
+    wrongScheduling.config.tasks[0].scheduling.budgetUs = 999;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+            manifest, wrongScheduling),
         std::runtime_error);
 }
 

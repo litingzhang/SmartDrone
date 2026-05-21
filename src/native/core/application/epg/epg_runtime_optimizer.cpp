@@ -304,23 +304,6 @@ std::uint64_t TargetIntervalMs(const epg::TaskConfig &task,
     return std::min(target, MAX_PERIODIC_INTERVAL_MS);
 }
 
-void ApplyCatalogDefaults(epg::TaskConfig &task,
-                          const EpgTaskCatalogEntry *catalog)
-{
-    if (!catalog) {
-        return;
-    }
-    if (task.scheduling.resource.empty()) {
-        task.scheduling.resource = catalog->resource;
-    }
-    if (task.scheduling.budgetUs == 0) {
-        task.scheduling.budgetUs = catalog->budgetUs;
-    }
-    if (task.scheduling.deadlineUs == 0) {
-        task.scheduling.deadlineUs = catalog->deadlineUs;
-    }
-}
-
 std::map<std::string, std::uint64_t>
 MakeOptimizerNumbers(const epg::GraphProfileMetadata &metadata,
                      std::uint64_t nowMs)
@@ -374,7 +357,6 @@ void OptimizeTask(epg::TaskConfig &task,
                   const EpgTaskCatalogEntry *catalog,
                   std::vector<SolverDecision> &decisions)
 {
-    ApplyCatalogDefaults(task, catalog);
     const auto intervalBefore =
         static_cast<std::uint64_t>(task.trigger.interval.count());
     const auto effectiveLoopUs = EffectiveLoopUs(stats);
@@ -414,6 +396,7 @@ epg::GraphConfig OptimizeGraphConfig(const EpgTaskManifest &manifest,
                                      std::vector<SolverDecision> &decisions)
 {
     auto config = profileTopology;
+    ApplyEpgTaskCatalogDefaults(manifest, config);
 
     for (auto &queue : config.queues) {
         const auto statsIt = diagnostics.queues.find(queue.name);
@@ -611,6 +594,7 @@ OptimizeEpgProfileForManifest(const EpgTaskManifest &manifest,
     }
     try {
         ValidateProfileCatalog(manifest, profile);
+        ApplyEpgTaskCatalogDefaults(manifest, profile.topology);
         ValidateEpgTaskGraphManifest(manifest, profile.topology);
         return WriteOptimizedConfig(manifest, profile, nowMs);
     } catch (const std::exception &error) {

@@ -29,8 +29,10 @@ std::string ReadTextFile(const std::string &path)
 epg::GraphConfig CompileStaticEpgConfig(const EpgTaskManifest &manifest,
                                         epg::Registry &registry)
 {
-    return epg::ParseGraphConfigDotFile(
+    auto config = epg::ParseGraphConfigDotFile(
         manifest.topologyPath, manifest.subgraphName, registry);
+    ApplyEpgTaskCatalogDefaults(manifest, config);
+    return config;
 }
 
 epg::GraphConfig CompileOptimizedEpgConfig(const EpgTaskManifest &manifest)

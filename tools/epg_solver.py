@@ -211,12 +211,9 @@ def normalized_task(task: Dict[str, Any], limits: SolverLimits,
     name = str(result.get("name", ""))
     diag = diagnostics.get(name, {})
     catalog_item = catalog.get(str(result.get("type", "")), {})
-    if "budgetUs" in catalog_item and "budget_us" not in scheduling:
-        scheduling["budget_us"] = integer(catalog_item.get("budgetUs"))
-    if "deadlineUs" in catalog_item and "deadline_us" not in scheduling:
-        scheduling["deadline_us"] = integer(catalog_item.get("deadlineUs"))
-    if "resource" in catalog_item and "resource" not in scheduling:
-        scheduling["resource"] = catalog_item.get("resource")
+    scheduling["budget_us"] = integer(catalog_item.get("budgetUs"))
+    scheduling["deadline_us"] = integer(catalog_item.get("deadlineUs"))
+    scheduling["resource"] = catalog_item.get("resource")
     loop_us = effective_loop_us(diag)
     average_loop_us = integer(diag.get("averageLoopUs"), loop_us)
     utilization_ppm = integer(diag.get("utilizationPpm"))
