@@ -64,12 +64,59 @@ def task_diagnostics(profile: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 def task_catalog(profile: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     catalog = profile.get("taskCatalog", [])
     if not isinstance(catalog, list):
-        return {}
+        raise ValueError("EPG profile taskCatalog must be an array")
     result = {}
     for item in catalog:
-        if isinstance(item, dict):
-            result[str(item.get("taskType", ""))] = item
+        task_type = validate_task_catalog_entry(item)
+        if task_type in result:
+            raise ValueError(
+                f"EPG profile taskCatalog duplicates taskType: {task_type}")
+        result[task_type] = item
+    if not result:
+        raise ValueError("EPG profile taskCatalog must not be empty")
     return result
+
+
+def required_catalog_text(item: Dict[str, Any], field: str) -> str:
+    value = str(item.get(field, ""))
+    if not value:
+        raise ValueError(f"EPG profile taskCatalog entry missing {field}")
+    return value
+
+
+def required_catalog_positive_int(item: Dict[str, Any], field: str) -> int:
+    value = integer(item.get(field))
+    if value <= 0:
+        raise ValueError(f"EPG profile taskCatalog entry invalid {field}")
+    return value
+
+
+def validate_task_catalog_entry(item: Any) -> str:
+    if not isinstance(item, dict):
+        raise ValueError("EPG profile taskCatalog entries must be objects")
+    task_type = required_catalog_text(item, "taskType")
+    required_catalog_text(item, "role")
+    required_catalog_text(item, "resource")
+    budget_us = required_catalog_positive_int(item, "budgetUs")
+    deadline_us = required_catalog_positive_int(item, "deadlineUs")
+    if deadline_us < budget_us:
+        raise ValueError(
+            f"EPG profile taskCatalog timing invalid: {task_type}")
+    if "replaceable" in item and not isinstance(item["replaceable"], bool):
+        raise ValueError(
+            f"EPG profile taskCatalog replaceable invalid: {task_type}")
+    return task_type
+
+
+def validate_task_catalog_coverage(tasks: List[Dict[str, Any]],
+                                   catalog: Dict[str, Dict[str, Any]]) -> None:
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        task_type = str(task.get("type", ""))
+        if task_type not in catalog:
+            raise ValueError(
+                f"EPG profile task type missing catalog metadata: {task_type}")
 
 
 def queue_pressure(depth: int, diag: Dict[str, Any]) -> int:
@@ -266,6 +313,7 @@ def optimize_profile(profile: Dict[str, Any],
     queue_diag = queue_diagnostics(profile)
     task_diag = task_diagnostics(profile)
     catalog = task_catalog(profile)
+    validate_task_catalog_coverage(tasks, catalog)
     optimized_queues = []
     optimized_tasks = []
     decisions = []

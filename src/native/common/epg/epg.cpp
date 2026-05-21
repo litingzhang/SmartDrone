@@ -686,7 +686,7 @@ std::string EventPipelineGraph::ProfileJson(const std::string& graphName,
 {
     std::ostringstream out;
     out << "{\n";
-    out << "  \"schema\": \"smartdrone.epg.profile.v1\",\n";
+    out << "  \"schema\": \"" << GRAPH_PROFILE_SCHEMA << "\",\n";
     out << "  \"graph\": \"" << JsonEscape(graphName) << "\",\n";
     if (!topologyVersion.empty()) {
         out << "  \"topologyVersion\": \"" << JsonEscape(topologyVersion) << "\",\n";

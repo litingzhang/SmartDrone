@@ -106,8 +106,8 @@ void AddSlamMonitorTaskFactories(EpgTaskFactoryEntries &entries,
         [target = EpgDfxSnapshotTarget{deps.graphRef, manifest.subgraphName,
                                        manifest.topologyVersion,
                                        EpgTaskCatalogJson(manifest),
-                                       manifest.dfxSnapshotPath,
-                                       manifest.profilePath}]() {
+                                       manifest.artifactPaths.dfxSnapshotPath,
+                                       manifest.artifactPaths.profilePath}]() {
             return new EpgDfxSnapshotTask(target);
         });
 }
@@ -121,7 +121,7 @@ EpgTaskFactoryResolver MakeSlamGraphTaskFactoryResolver(
     const EpgTaskManifest &manifest =
         EpgManifestForDomain(EpgDomain::SlamSession);
     EpgTaskFactoryEntries entries;
-    entries.reserve(15);
+    entries.reserve(manifest.catalog.size());
     AddSlamStartupTaskFactories(entries, catalog, deps);
     AddSlamProcessingTaskFactories(entries, catalog, deps);
     AddSlamOutputTaskFactories(entries, catalog, deps);

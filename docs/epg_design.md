@@ -158,12 +158,26 @@ Each snapshot tick also writes a solver profile:
 - `/tmp/smartdrone_epg_slam_profile.json`
 - `/tmp/smartdrone_epg_calib_profile.json`
 
+The runtime manifest owns these artifact paths: each graph declares snapshot and
+optimized-config stems, and the manifest builder derives snapshot, profile, and
+deployable optimized-config paths from the shared naming convention.
+The same manifest also declares the maintained DOT topology path and topology
+version used to validate optimized configs before deployment.
+
 Profiles include `topologyVersion` and `taskCatalog`. The catalog records task
 role, resource, budget, deadline, and replaceability metadata so solver decisions
 are tied to declared task semantics instead of only to task names.
 
 The system runtime graph contains `EpgOptimizeTask`, which periodically consumes
 fresh profiles and refreshes the optimized config files inside the EPG schedule.
+The native runtime optimizer applies the same pressure/overload heuristics as
+the offline solver for queue depth, periodic interval, and catalog budget
+defaults, then writes both the deployable config and a solver report.
+When a session graph optimized config changes, `EpgOptimizeTask` raises a
+redeploy request and the system graph applies it on `EpgRedeployTask`, causing
+the active Slam/Calib session to restart through the normal supervisor boundary.
+When the system runtime graph config changes, the request is handed to
+`RuntimeHost`, which restarts the system EPG graph from outside the graph runner.
 The command-line tools remain useful for manual review and offline reproduction.
 
 Solve a profile into a deployable graph config and a reviewable report:

@@ -82,6 +82,53 @@ def write_profile(path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def expect_solver_failure(repo_root: Path,
+                          profile_path: Path,
+                          output_path: Path,
+                          expected: str) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "tools" / "epg_solver.py"),
+            "--profile",
+            str(profile_path),
+            "--output",
+            str(output_path),
+        ],
+        check=False,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert expected in result.stderr
+
+
+def write_bad_catalog_profile(path: Path,
+                              catalog: object,
+                              task_type: str = "TestSourceTask") -> None:
+    payload = {
+        "schema": "smartdrone.epg.profile.v1",
+        "graph": "test_graph",
+        "topologyVersion": "test-topology-v1",
+        "timestampMs": 123,
+        "taskCatalog": catalog,
+        "topology": {
+            "queues": [],
+            "tasks": [
+                {
+                    "name": "source",
+                    "type": task_type,
+                    "trigger": {"mode": "periodic", "interval_ms": 1},
+                    "inputs": {},
+                    "outputs": {},
+                }
+            ],
+        },
+        "diagnostics": {"queues": {}, "tasks": {}},
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def main() -> int:
     repo_root = Path(sys.argv[1])
     work_dir = Path(sys.argv[2])
@@ -111,6 +158,8 @@ def main() -> int:
     assert optimized["targetGraph"] == "test_graph"
     assert optimized["topologyVersion"] == "test-topology-v1"
     assert optimized["solverVersion"] == "python-heuristic-v2"
+    assert optimized["sourceProfile"] == "test_graph"
+    assert optimized["sourceTimestampMs"] == 123
     assert optimized["queues"][0]["depth"] > 1
     assert optimized["tasks"][0]["trigger"]["interval_ms"] == 3
     report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -142,6 +191,58 @@ def main() -> int:
     )
     assert (output_root / "optimized_slam_session_graph.json").exists()
     assert (output_root / "optimized_slam_session_graph_report.json").exists()
+
+    bad_profile = work_dir / "bad_catalog.json"
+    bad_output = work_dir / "bad_optimized.json"
+    write_bad_catalog_profile(
+        bad_profile,
+        [
+            {
+                "taskType": "TestSourceTask",
+                "role": "source",
+                "resource": "cpu",
+                "budgetUs": 2200,
+                "deadlineUs": 1500,
+            }
+        ],
+    )
+    expect_solver_failure(repo_root, bad_profile, bad_output, "timing invalid")
+    write_bad_catalog_profile(
+        bad_profile,
+        [
+            {
+                "taskType": "TestSourceTask",
+                "role": "source",
+                "resource": "cpu",
+                "budgetUs": 1500,
+                "deadlineUs": 2200,
+            },
+            {
+                "taskType": "TestSourceTask",
+                "role": "source",
+                "resource": "cpu",
+                "budgetUs": 1500,
+                "deadlineUs": 2200,
+            },
+        ],
+    )
+    expect_solver_failure(repo_root, bad_profile, bad_output, "duplicates")
+    write_bad_catalog_profile(bad_profile, [], "MissingTask")
+    expect_solver_failure(repo_root, bad_profile, bad_output, "must not be empty")
+    write_bad_catalog_profile(
+        bad_profile,
+        [
+            {
+                "taskType": "OtherTask",
+                "role": "source",
+                "resource": "cpu",
+                "budgetUs": 1500,
+                "deadlineUs": 2200,
+            }
+        ],
+        "MissingTask",
+    )
+    expect_solver_failure(repo_root, bad_profile, bad_output, "missing catalog")
     return 0
 
 

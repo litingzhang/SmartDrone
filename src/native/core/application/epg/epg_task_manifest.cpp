@@ -8,72 +8,53 @@
 namespace smartdrone::core::application {
 namespace {
 
-constexpr const char *kSystemRuntimeGraphName =
+constexpr const char *SYSTEM_RUNTIME_GRAPH_NAME =
     "cluster_system_runtime_graph";
-constexpr const char *kSlamSessionGraphName = "cluster_slam_session_graph";
-constexpr const char *kCalibSessionGraphName = "cluster_calib_session_graph";
-constexpr const char *kVehicleTelemetryRxTaskType = "VehicleTelemetryRxTask";
-constexpr const char *kLegacyMavlinkRxTaskType = "MavlinkRxTask";
-constexpr const char *kEpgTopologyVersion = "config/epg/epg_topology.dot:v1";
+constexpr const char *SLAM_SESSION_GRAPH_NAME = "cluster_slam_session_graph";
+constexpr const char *CALIB_SESSION_GRAPH_NAME = "cluster_calib_session_graph";
+constexpr const char *VEHICLE_TELEMETRY_RX_TASK_TYPE =
+    "VehicleTelemetryRxTask";
+constexpr const char *LEGACY_MAVLINK_RX_TASK_TYPE = "MavlinkRxTask";
+constexpr const char *EPG_TOPOLOGY_PATH = "config/epg/epg_topology.dot";
+constexpr const char *EPG_TOPOLOGY_REVISION = "v2";
+constexpr const char *EPG_SNAPSHOT_DIR = "/tmp";
+constexpr const char *EPG_OPTIMIZED_DIR = "output/epg";
+const EpgTaskTopologySpec EPG_TOPOLOGY_SPEC{
+    EPG_TOPOLOGY_PATH,
+    EPG_TOPOLOGY_REVISION,
+};
 
-const EpgTaskManifest kSystemRuntimeManifest{
+const EpgTaskManifest SYSTEM_RUNTIME_MANIFEST{
     EpgDomain::SystemRuntime,
-    kSystemRuntimeGraphName,
-    kEpgTopologyVersion,
-    "/tmp/smartdrone_epg_system.json",
-    "/tmp/smartdrone_epg_system_profile.json",
-    "output/epg/optimized_system_runtime_graph.json",
+    SYSTEM_RUNTIME_GRAPH_NAME,
+    EPG_TOPOLOGY_SPEC.path,
+    BuildEpgTaskTopologyVersion(EPG_TOPOLOGY_SPEC),
+    BuildEpgTaskArtifactPaths({"smartdrone_epg_system",
+                               "optimized_system_runtime_graph"}),
     {
-        kVehicleTelemetryRxTaskType,
-        "SetpointStreamTask",
-        "UdpCommandTask",
-        "ManualControlTask",
-        "ForceRestartTask",
-        "RuntimeSupervisorTask",
-        "DiscoveryBeaconTask",
-        "EpgDfxSnapshotTask",
-        "EpgOptimizeTask",
+        {LEGACY_MAVLINK_RX_TASK_TYPE, VEHICLE_TELEMETRY_RX_TASK_TYPE},
     },
     {
-        {kLegacyMavlinkRxTaskType, kVehicleTelemetryRxTaskType},
-    },
-    {
-        {kVehicleTelemetryRxTaskType, "telemetry_rx", "cpu", 1000, 2000, false},
+        {VEHICLE_TELEMETRY_RX_TASK_TYPE, "telemetry_rx", "cpu", 1000, 2000, false},
         {"SetpointStreamTask", "flight_setpoint", "cpu", 1000, 2000, false},
         {"UdpCommandTask", "command_rx", "cpu", 1000, 2000, false},
         {"ManualControlTask", "manual_control", "cpu", 1000, 5000, false},
         {"ForceRestartTask", "restart_guard", "cpu", 1000, 5000, false},
         {"RuntimeSupervisorTask", "session_supervisor", "cpu", 1000, 10000, false},
+        {"EpgRedeployTask", "epg_redeploy", "cpu", 1000, 5000, false},
         {"DiscoveryBeaconTask", "discovery", "cpu", 1000, 10000, false},
         {"EpgDfxSnapshotTask", "dfx_snapshot", "cpu", 2000, 10000, false},
         {"EpgOptimizeTask", "epg_optimizer", "cpu", 5000, 50000, false},
     },
 };
 
-const EpgTaskManifest kSlamSessionManifest{
+const EpgTaskManifest SLAM_SESSION_MANIFEST{
     EpgDomain::SlamSession,
-    kSlamSessionGraphName,
-    kEpgTopologyVersion,
-    "/tmp/smartdrone_epg_slam.json",
-    "/tmp/smartdrone_epg_slam_profile.json",
-    "output/epg/optimized_slam_session_graph.json",
-    {
-        "SlamResourceTask",
-        "SlamClockTask",
-        "SlamImuPollTask",
-        "SlamBackendTickTask",
-        "SlamImuGateTask",
-        "SlamAcquireTask",
-        "SlamTrackingTask",
-        "SlamPosePostprocessTask",
-        "SlamPointCloudTask",
-        "SlamLivePoseTask",
-        "SlamMavlinkTask",
-        "SlamUdpTask",
-        "SlamDfxTask",
-        "SlamMonitorTask",
-        "EpgDfxSnapshotTask",
-    },
+    SLAM_SESSION_GRAPH_NAME,
+    EPG_TOPOLOGY_SPEC.path,
+    BuildEpgTaskTopologyVersion(EPG_TOPOLOGY_SPEC),
+    BuildEpgTaskArtifactPaths({"smartdrone_epg_slam",
+                               "optimized_slam_session_graph"}),
     {},
     {
         {"SlamResourceTask", "resource_open", "cpu", 5000, 50000, false},
@@ -94,26 +75,13 @@ const EpgTaskManifest kSlamSessionManifest{
     },
 };
 
-const EpgTaskManifest kCalibSessionManifest{
+const EpgTaskManifest CALIB_SESSION_MANIFEST{
     EpgDomain::CalibSession,
-    kCalibSessionGraphName,
-    kEpgTopologyVersion,
-    "/tmp/smartdrone_epg_calib.json",
-    "/tmp/smartdrone_epg_calib_profile.json",
-    "output/epg/optimized_calib_session_graph.json",
-    {
-        "CalibResourceTask",
-        "CalibClockTask",
-        "CalibCameraAcquireTask",
-        "CalibPacingFilterTask",
-        "CalibStorageWriteTask",
-        "CalibImuWriterTask",
-        "CalibUdpPreviewTask",
-        "CalibCompletionTask",
-        "CalibFlushSyncTask",
-        "CalibMonitorTask",
-        "EpgDfxSnapshotTask",
-    },
+    CALIB_SESSION_GRAPH_NAME,
+    EPG_TOPOLOGY_SPEC.path,
+    BuildEpgTaskTopologyVersion(EPG_TOPOLOGY_SPEC),
+    BuildEpgTaskArtifactPaths({"smartdrone_epg_calib",
+                               "optimized_calib_session_graph"}),
     {},
     {
         {"CalibResourceTask", "resource_open", "cpu", 5000, 50000, false},
@@ -152,14 +120,32 @@ void ValidateTaskFactory(const EpgTaskFactoryResolver &resolver,
                              taskType);
 }
 
-std::set<std::string> MakeTaskTypeSet(const std::vector<std::string> &taskTypes)
-{
-    return std::set<std::string>(taskTypes.begin(), taskTypes.end());
-}
-
 std::string TaskGraphLabel(const EpgTaskManifest &manifest)
 {
     return "EventPipelineGraph subgraph '" + manifest.subgraphName + "'";
+}
+
+bool ArtifactPathsComplete(const EpgTaskArtifactPaths &paths)
+{
+    return !paths.dfxSnapshotPath.empty() &&
+           !paths.profilePath.empty() &&
+           !paths.optimizedConfigPath.empty() &&
+           !paths.solverReportPath.empty();
+}
+
+void ValidateManifestMetadata(const EpgTaskManifest &manifest)
+{
+    if (manifest.subgraphName.empty()) {
+        throw std::runtime_error("EventPipelineGraph manifest subgraph is empty");
+    }
+    if (manifest.topologyPath.empty() || manifest.topologyVersion.empty()) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " topology metadata is incomplete");
+    }
+    if (!ArtifactPathsComplete(manifest.artifactPaths)) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " artifact paths are incomplete");
+    }
 }
 
 void ValidateGraphTaskTypeAllowed(const EpgTaskManifest &manifest,
@@ -186,31 +172,143 @@ void ValidateManifestTaskTypeUsed(const EpgTaskManifest &manifest,
                              taskType);
 }
 
-void ValidateCatalogCoversTaskType(const EpgTaskManifest &manifest,
-                                   const std::string &taskType,
-                                   const std::set<std::string> &catalogTypes)
+void ValidateCatalogTaskTypeUnique(const EpgTaskManifest &manifest,
+                                   std::set<std::string> &catalogTypes,
+                                   const std::string &taskType)
 {
-    if (catalogTypes.find(taskType) != catalogTypes.end()) {
+    if (catalogTypes.insert(taskType).second) {
         return;
     }
     throw std::runtime_error(TaskGraphLabel(manifest) +
-                             " task type missing catalog metadata: " +
+                             " duplicates catalog task type: " +
                              taskType);
 }
 
+void ValidateCatalogEntrySemantics(const EpgTaskManifest &manifest,
+                                   const EpgTaskCatalogEntry &entry)
+{
+    if (entry.taskType.empty()) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " catalog task type is empty");
+    }
+    if (entry.role.empty() || entry.resource.empty()) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " catalog metadata is incomplete: " +
+                                 entry.taskType);
+    }
+    if (entry.budgetUs == 0 || entry.deadlineUs == 0 ||
+        entry.deadlineUs < entry.budgetUs) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " catalog timing is invalid: " +
+                                 entry.taskType);
+    }
+}
+
+std::set<std::string> ValidateManifestCatalog(
+    const EpgTaskManifest &manifest)
+{
+    if (manifest.catalog.empty()) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " catalog is empty");
+    }
+    std::set<std::string> catalogTypes;
+    for (const auto &entry : manifest.catalog) {
+        ValidateCatalogEntrySemantics(manifest, entry);
+        ValidateCatalogTaskTypeUnique(manifest, catalogTypes, entry.taskType);
+    }
+    return catalogTypes;
+}
+
+void ValidateAliasTargetDeclared(const EpgTaskManifest &manifest,
+                                 const EpgTaskAliasManifestEntry &alias,
+                                 const std::set<std::string> &catalogTypes)
+{
+    if (catalogTypes.find(alias.targetType) != catalogTypes.end()) {
+        return;
+    }
+    throw std::runtime_error(TaskGraphLabel(manifest) +
+                             " alias target outside catalog: " +
+                             alias.alias + " -> " + alias.targetType);
+}
+
+void ValidateAliasNameAvailable(const EpgTaskManifest &manifest,
+                                std::set<std::string> &aliasTypes,
+                                const EpgTaskAliasManifestEntry &alias,
+                                const std::set<std::string> &catalogTypes)
+{
+    if (alias.alias.empty() || alias.targetType.empty()) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " alias metadata is incomplete");
+    }
+    if (catalogTypes.find(alias.alias) != catalogTypes.end()) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " alias shadows catalog task type: " +
+                                 alias.alias);
+    }
+    if (aliasTypes.insert(alias.alias).second) {
+        return;
+    }
+    throw std::runtime_error(TaskGraphLabel(manifest) +
+                             " duplicates task alias: " + alias.alias);
+}
+
+void ValidateManifestAliases(const EpgTaskManifest &manifest,
+                             const std::set<std::string> &catalogTypes)
+{
+    std::set<std::string> aliasTypes;
+    for (const auto &alias : manifest.aliases) {
+        ValidateAliasNameAvailable(manifest, aliasTypes, alias, catalogTypes);
+        ValidateAliasTargetDeclared(manifest, alias, catalogTypes);
+    }
+}
+
+std::string BuildPath(const char *directory, const std::string &stem,
+                      const char *suffix)
+{
+    return std::string(directory) + "/" + stem + suffix;
+}
+
 } // namespace
+
+EpgTaskArtifactPaths BuildEpgTaskArtifactPaths(
+    const EpgTaskArtifactSpec &spec)
+{
+    return {
+        BuildPath(EPG_SNAPSHOT_DIR, spec.snapshotStem, ".json"),
+        BuildPath(EPG_SNAPSHOT_DIR, spec.snapshotStem, "_profile.json"),
+        BuildPath(EPG_OPTIMIZED_DIR, spec.optimizedStem, ".json"),
+        BuildPath(EPG_OPTIMIZED_DIR, spec.optimizedStem, "_report.json"),
+    };
+}
+
+std::string BuildEpgTaskTopologyVersion(
+    const EpgTaskTopologySpec &spec)
+{
+    return spec.path + ":" + spec.revision;
+}
 
 const EpgTaskManifest &EpgManifestForDomain(EpgDomain domain)
 {
     switch (domain) {
     case EpgDomain::SystemRuntime:
-        return kSystemRuntimeManifest;
+        return SYSTEM_RUNTIME_MANIFEST;
     case EpgDomain::SlamSession:
-        return kSlamSessionManifest;
+        return SLAM_SESSION_MANIFEST;
     case EpgDomain::CalibSession:
-        return kCalibSessionManifest;
+        return CALIB_SESSION_MANIFEST;
     }
     throw std::runtime_error("unsupported EPG domain");
+}
+
+std::vector<std::string> EpgTaskCatalogTypes(
+    const EpgTaskManifest &manifest)
+{
+    std::vector<std::string> taskTypes;
+    taskTypes.reserve(manifest.catalog.size());
+    for (const auto &entry : manifest.catalog) {
+        taskTypes.push_back(entry.taskType);
+    }
+    return taskTypes;
 }
 
 std::string EpgTaskCatalogJson(const EpgTaskManifest &manifest)
@@ -234,24 +332,28 @@ std::string EpgTaskCatalogJson(const EpgTaskManifest &manifest)
     return out.str();
 }
 
+void ValidateEpgTaskManifest(
+    const EpgTaskManifest &manifest)
+{
+    ValidateManifestMetadata(manifest);
+    const auto catalogTypes = ValidateManifestCatalog(manifest);
+    ValidateManifestAliases(manifest, catalogTypes);
+}
+
 void ValidateEpgTaskFactoryManifest(
     const EpgTaskManifest &manifest,
     const EpgTaskFactoryResolver &resolver)
 {
+    ValidateManifestMetadata(manifest);
     if (!resolver) {
         throw std::runtime_error(
             "EventPipelineGraph task factory resolver must be callable");
     }
-    for (const auto &taskType : manifest.taskTypes) {
-        ValidateTaskFactory(resolver, taskType);
-    }
-    std::set<std::string> catalogTypes;
+    const auto catalogTypes = ValidateManifestCatalog(manifest);
     for (const auto &entry : manifest.catalog) {
-        catalogTypes.insert(entry.taskType);
+        ValidateTaskFactory(resolver, entry.taskType);
     }
-    for (const auto &taskType : manifest.taskTypes) {
-        ValidateCatalogCoversTaskType(manifest, taskType, catalogTypes);
-    }
+    ValidateManifestAliases(manifest, catalogTypes);
     for (const auto &alias : manifest.aliases) {
         ValidateTaskFactory(resolver, alias.targetType);
     }
@@ -261,16 +363,40 @@ void ValidateEpgTaskGraphManifest(
     const EpgTaskManifest &manifest,
     const epg::GraphConfig &graphConfig)
 {
-    const std::set<std::string> allowedTypes =
-        MakeTaskTypeSet(manifest.taskTypes);
+    ValidateManifestMetadata(manifest);
+    const auto allowedTypes = ValidateManifestCatalog(manifest);
     std::set<std::string> usedTypes;
     for (const auto &task : graphConfig.tasks) {
         ValidateGraphTaskTypeAllowed(manifest, task, allowedTypes);
         usedTypes.insert(task.type);
     }
-    for (const auto &taskType : manifest.taskTypes) {
-        ValidateManifestTaskTypeUsed(manifest, taskType, usedTypes);
+    for (const auto &entry : manifest.catalog) {
+        ValidateManifestTaskTypeUsed(manifest, entry.taskType, usedTypes);
     }
+}
+
+void ValidateEpgOptimizedGraphManifest(
+    const EpgTaskManifest &manifest,
+    const epg::OptimizedGraph &optimizedGraph)
+{
+    const auto &metadata = optimizedGraph.metadata;
+    if (metadata.schema != epg::OPTIMIZED_GRAPH_SCHEMA) {
+        throw std::runtime_error("optimized graph schema mismatch");
+    }
+    if (metadata.targetGraph != manifest.subgraphName) {
+        throw std::runtime_error("optimized graph target mismatch");
+    }
+    if (metadata.topologyVersion != manifest.topologyVersion) {
+        throw std::runtime_error("optimized graph topology version mismatch");
+    }
+    if (metadata.sourceProfile != manifest.subgraphName ||
+        metadata.sourceTimestampMs == 0) {
+        throw std::runtime_error("optimized graph source profile mismatch");
+    }
+    if (metadata.solverVersion.empty()) {
+        throw std::runtime_error("optimized graph solver version missing");
+    }
+    ValidateEpgTaskGraphManifest(manifest, optimizedGraph.config);
 }
 
 } // namespace smartdrone::core::application

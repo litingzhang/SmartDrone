@@ -12,7 +12,7 @@ bool SystemRuntimeStepServices::Valid() const
 {
     return m_config.vehicleTelemetryRx && m_config.setpointStream &&
            m_config.manualControl && m_config.forceRestart &&
-           m_config.sessionSupervisor;
+           m_config.sessionSupervisor && m_config.epgRedeploy;
 }
 
 void SystemRuntimeStepServices::OnVehicleTelemetryRxGraphTick()
@@ -38,6 +38,14 @@ void SystemRuntimeStepServices::OnForceRestartGraphTick()
 void SystemRuntimeStepServices::OnSessionSupervisorGraphTick()
 {
     Call(m_config.sessionSupervisor);
+}
+
+void SystemRuntimeStepServices::OnEpgRedeployGraphTick(
+    EpgRedeployCoordinator &coordinator)
+{
+    if (m_config.epgRedeploy) {
+        m_config.epgRedeploy(coordinator);
+    }
 }
 
 void SystemRuntimeStepServices::Call(const RuntimeGraphStepFn &step)

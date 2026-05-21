@@ -8,6 +8,7 @@
 #include "common/epg/epg.h"
 #include "core/application/runtime/discovery_beacon_runtime.h"
 #include "core/application/runtime/epg_graph_lifecycle.h"
+#include "core/application/runtime/epg_redeploy_coordinator.h"
 #include "core/application/runtime/system_runtime_task_factory.h"
 #include "core/application/epg/epg_registry.h"
 
@@ -22,8 +23,10 @@ bool ConfigValid(const SystemRuntimeGraphConfig &config)
         config.stepManualControl,
         config.stepForceRestart,
         config.stepSessionSupervisor,
+        config.stepEpgRedeploy,
     });
     return services.Valid() &&
+           config.redeployCoordinator &&
            UdpCommandRuntimeConfigValid(config.commandRuntime) &&
            config.aliases.cmdPort > 0 &&
            config.aliases.udpPort > 0 &&
@@ -72,6 +75,7 @@ class SystemRuntimeGraph::Impl final {
                 m_config.stepManualControl,
                 m_config.stepForceRestart,
                 m_config.stepSessionSupervisor,
+                m_config.stepEpgRedeploy,
             });
         auto graphRef = std::make_shared<EpgGraphRef>();
         epg::Registry registry;
@@ -81,6 +85,7 @@ class SystemRuntimeGraph::Impl final {
                              commandRuntime,
                              discoveryRuntime,
                              graphRef,
+                             m_config.redeployCoordinator,
                          }));
         auto graph = std::make_unique<epg::EventPipelineGraph>(registry);
         graphRef->graph = graph.get();

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -29,6 +30,9 @@ namespace smartdrone::app::bootstrap {
 namespace {
 
 using ControllerMode = smartdrone::core::domain::RuntimeMode;
+using EpgRedeployCoordinator =
+    smartdrone::core::application::EpgRedeployCoordinator;
+using EpgRedeployRequest = smartdrone::core::application::EpgRedeployRequest;
 using IVehicleControlPort = smartdrone::core::ports::IVehicleControlPort;
 using LivePoseState = smartdrone::core::application::LivePoseState;
 using LiveRuntimeTuning = smartdrone::core::application::LiveRuntimeTuning;
@@ -49,7 +53,17 @@ using UnifiedRuntimeController = smartdrone::core::application::UnifiedRuntimeCo
 using UnifiedRuntimeControllerConfig = smartdrone::core::application::UnifiedRuntimeControllerConfig;
 using IPosePublisher = smartdrone::core::ports::IPosePublisher;
 using ISlamSessionTelemetryPort = smartdrone::core::ports::ISlamSessionTelemetryPort;
-constexpr int kDiscoveryPort = 15000;
+constexpr int DISCOVERY_PORT = 15000;
+constexpr auto SYSTEM_REDEPLOY_POLL_INTERVAL = std::chrono::milliseconds(100);
+
+struct BuildSystemRuntimeGraphConfigInput {
+    const MainRuntimeAliases &aliases;
+    Px4MavlinkGateway &mav;
+    Px4UdpHooks &hooks;
+    UnifiedRuntimeController &controller;
+    std::shared_ptr<EpgRedeployCoordinator> redeploy;
+    UdpCommandRuntimeConfig commandRuntime;
+};
 
 std::string GetEnvOrDefault(const char *name, const char *fallback)
 {
@@ -183,24 +197,66 @@ UdpCommandRuntimeConfig BuildUdpCommandRuntimeConfig(Px4UdpHooks &hooks, Unified
     return config;
 }
 
-SystemRuntimeGraphConfig BuildSystemRuntimeGraphConfig(const MainRuntimeAliases &aliases, Px4MavlinkGateway &mav,
-                                                       Px4UdpHooks &hooks, UnifiedRuntimeController &controller,
-                                                       UdpCommandRuntimeConfig commandRuntime)
+SystemRuntimeGraphConfig BuildSystemRuntimeGraphConfig(BuildSystemRuntimeGraphConfigInput input)
 {
     return SystemRuntimeGraphConfig{
-        aliases,
-        kDiscoveryPort,
-        [&mav]() { (void)mav.PollRxOnce(0); },
-        [&mav]() { mav.StepSetpointStream(); },
-        [&hooks]() { hooks.StepManualControl(); },
-        [&controller]() { controller.StepForceRestart(); },
-        [&controller]() { controller.OnSessionSupervisorGraphTick(); },
-        std::move(commandRuntime),
+        input.aliases,
+        DISCOVERY_PORT,
+        [&mav = input.mav]() { (void)mav.PollRxOnce(0); },
+        [&mav = input.mav]() { mav.StepSetpointStream(); },
+        [&hooks = input.hooks]() { hooks.StepManualControl(); },
+        [&controller = input.controller]() { controller.StepForceRestart(); },
+        [&controller = input.controller]() { controller.OnSessionSupervisorGraphTick(); },
+        [&controller = input.controller](EpgRedeployCoordinator &coordinator) {
+            controller.StepEpgRedeploy(coordinator);
+        },
+        std::move(input.redeploy),
+        std::move(input.commandRuntime),
         []() { return smartdrone::core::application::BuildCapabilitiesPayload(); },
         [](const UnifiedConfig &currentConfig, ControllerMode currentMode) {
             return smartdrone::core::application::BuildConfigPayload(currentConfig, currentMode);
         },
         [](const UdpPeer &peer) { return UdpPeerToIpString(peer); }};
+}
+
+void LogSystemGraphRedeployRequest(const EpgRedeployRequest &request)
+{
+    std::cerr << "[epg] system graph redeploy requested";
+    if (!request.graphName.empty()) {
+        std::cerr << ": " << request.graphName;
+    }
+    if (!request.reason.empty()) {
+        std::cerr << " (" << request.reason << ")";
+    }
+    std::cerr << "\n";
+}
+
+bool RestartSystemGraph(SystemRuntimeGraph &systemGraph,
+                        const EpgRedeployRequest &request)
+{
+    LogSystemGraphRedeployRequest(request);
+    systemGraph.Stop();
+    if (systemGraph.Start()) {
+        std::cerr << "[epg] system graph redeploy applied\n";
+        return true;
+    }
+    std::cerr << "[runtime] system EPG restart failed\n";
+    smartdrone::common::RequestRuntimeStop();
+    return false;
+}
+
+bool RunSystemGraphUntilStopped(SystemRuntimeGraph &systemGraph,
+                                EpgRedeployCoordinator &redeploy)
+{
+    while (!smartdrone::common::RuntimeStopRequested()) {
+        EpgRedeployRequest request;
+        if (redeploy.TakeSystemRedeployRequest(request) &&
+            !RestartSystemGraph(systemGraph, request)) {
+            return false;
+        }
+        (void)redeploy.WaitForSystemRedeploy(SYSTEM_REDEPLOY_POLL_INTERVAL);
+    }
+    return true;
 }
 
 } // namespace
@@ -223,8 +279,16 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
     Px4UdpHooks hooks(BuildPx4UdpHooksConfig(vehicleControl, livePose));
     UnifiedRuntimeController controller(BuildRuntimeControllerConfig(cfg, tuning, vehicleControl, posePublisher, livePose));
     UdpCommandRuntimeConfig commandRuntime = BuildUdpCommandRuntimeConfig(hooks, controller, livePose);
+    auto redeploy = std::make_shared<EpgRedeployCoordinator>();
     SystemRuntimeGraph systemGraph(
-        BuildSystemRuntimeGraphConfig(aliases, mav, hooks, controller, std::move(commandRuntime)));
+        BuildSystemRuntimeGraphConfig({
+            aliases,
+            mav,
+            hooks,
+            controller,
+            redeploy,
+            std::move(commandRuntime),
+        }));
     if (!systemGraph.Start()) {
         smartdrone::common::RequestRuntimeStop();
         controller.Stop();
@@ -235,12 +299,12 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
         controller.SetMode(autoMode, nullptr);
     }
 
-    smartdrone::common::WaitUntilRuntimeStopRequested();
+    const bool runtimeOk = RunSystemGraphUntilStopped(systemGraph, *redeploy);
 
     systemGraph.Stop();
     controller.Stop();
     mav.StopSetpointStream();
-    return 0;
+    return runtimeOk ? 0 : 1;
 }
 
 } // namespace smartdrone::app::bootstrap

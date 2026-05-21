@@ -8,6 +8,7 @@ namespace smartdrone::core::application {
 
 struct EpgRuntimeOptimizerResult {
     bool optimized{false};
+    bool configChanged{false};
     std::string message;
 };
 

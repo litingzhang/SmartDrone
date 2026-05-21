@@ -125,6 +125,7 @@ set(SMART_DRONE_CORE_APPLICATION_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/mode_manager.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/epg_dfx_snapshot.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/epg_optimize_task.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/epg_redeploy_coordinator.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/payload_builders.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/runtime_aliases.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/runtime_config_frame_codec.cpp"

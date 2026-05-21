@@ -46,6 +46,9 @@ void AddSystemStepTaskFactories(SystemRuntimeTaskFactoryEntries &entries,
     AddFactory<RuntimeSupervisorTask>(entries, catalog, [deps]() {
         return new RuntimeSupervisorTask(deps.stepServices);
     });
+    AddFactory<EpgRedeployTask>(entries, catalog, [deps]() {
+        return new EpgRedeployTask(deps.stepServices, deps.redeploy);
+    });
 }
 
 void AddSystemRuntimeTaskFactories(SystemRuntimeTaskFactoryEntries &entries,
@@ -64,16 +67,17 @@ void AddSystemRuntimeTaskFactories(SystemRuntimeTaskFactoryEntries &entries,
         [target = EpgDfxSnapshotTarget{deps.graphRef, manifest.subgraphName,
                                        manifest.topologyVersion,
                                        EpgTaskCatalogJson(manifest),
-                                       manifest.dfxSnapshotPath,
-                                       manifest.profilePath}]() {
+                                       manifest.artifactPaths.dfxSnapshotPath,
+                                       manifest.artifactPaths.profilePath}]() {
             return new EpgDfxSnapshotTask(target);
         });
-    AddFactory<EpgOptimizeTask>(entries, catalog, []() {
+    AddFactory<EpgOptimizeTask>(entries, catalog, [deps]() {
         return new EpgOptimizeTask({
-            EpgDomain::SystemRuntime,
-            EpgDomain::SlamSession,
-            EpgDomain::CalibSession,
-        });
+                                       EpgDomain::SystemRuntime,
+                                       EpgDomain::SlamSession,
+                                       EpgDomain::CalibSession,
+                                   },
+                                   deps.redeploy);
     });
 }
 
@@ -86,7 +90,7 @@ EpgTaskFactoryResolver MakeSystemRuntimeTaskFactoryResolver(
     const EpgTaskManifest &manifest =
         EpgManifestForDomain(EpgDomain::SystemRuntime);
     SystemRuntimeTaskFactoryEntries entries;
-    entries.reserve(9);
+    entries.reserve(manifest.catalog.size());
     AddSystemStepTaskFactories(entries, catalog, deps);
     AddSystemRuntimeTaskFactories(entries, catalog, deps, manifest);
     auto resolver =

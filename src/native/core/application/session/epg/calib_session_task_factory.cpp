@@ -82,8 +82,8 @@ void AddCalibCompletionTaskFactories(CalibTaskFactoryEntries &entries,
         [target = EpgDfxSnapshotTarget{deps.graphRef, manifest.subgraphName,
                                        manifest.topologyVersion,
                                        EpgTaskCatalogJson(manifest),
-                                       manifest.dfxSnapshotPath,
-                                       manifest.profilePath}]() {
+                                       manifest.artifactPaths.dfxSnapshotPath,
+                                       manifest.artifactPaths.profilePath}]() {
             return new EpgDfxSnapshotTask(target);
         });
 }
@@ -97,7 +97,7 @@ EpgTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
     const EpgTaskManifest &manifest =
         EpgManifestForDomain(EpgDomain::CalibSession);
     CalibTaskFactoryEntries entries;
-    entries.reserve(11);
+    entries.reserve(manifest.catalog.size());
     AddCalibStartupTaskFactories(entries, catalog, deps);
     AddCalibProcessingTaskFactories(entries, catalog, deps);
     AddCalibCompletionTaskFactories(entries, catalog, deps, manifest);

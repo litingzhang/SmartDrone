@@ -17,7 +17,6 @@ class EpgProfileTarget:
     domain: str
     profile_name: str
     config_name: str
-    report_name: str
 
 
 TARGETS = (
@@ -25,21 +24,25 @@ TARGETS = (
         "system",
         "smartdrone_epg_system_profile.json",
         "optimized_system_runtime_graph.json",
-        "optimized_system_runtime_graph_report.json",
     ),
     EpgProfileTarget(
         "slam",
         "smartdrone_epg_slam_profile.json",
         "optimized_slam_session_graph.json",
-        "optimized_slam_session_graph_report.json",
     ),
     EpgProfileTarget(
         "calib",
         "smartdrone_epg_calib_profile.json",
         "optimized_calib_session_graph.json",
-        "optimized_calib_session_graph_report.json",
     ),
 )
+
+
+def report_name_for_config(config_name: str) -> str:
+    config_path = Path(config_name)
+    if config_path.suffix == ".json":
+        return f"{config_path.stem}_report.json"
+    return f"{config_name}_report.json"
 
 
 def solve_target(target: EpgProfileTarget,
@@ -48,7 +51,7 @@ def solve_target(target: EpgProfileTarget,
                  limits: SolverLimits) -> Dict[str, Any]:
     profile_path = profile_root / target.profile_name
     output_path = output_root / target.config_name
-    report_path = output_root / target.report_name
+    report_path = output_root / report_name_for_config(target.config_name)
     if not profile_path.exists():
         return {
             "domain": target.domain,

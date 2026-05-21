@@ -21,25 +21,51 @@ struct EpgTaskCatalogEntry {
     bool replaceable{false};
 };
 
-struct EpgTaskManifest {
-    EpgDomain domain{EpgDomain::SystemRuntime};
-    std::string subgraphName;
-    std::string topologyVersion;
+struct EpgTaskArtifactSpec {
+    std::string snapshotStem;
+    std::string optimizedStem;
+};
+
+struct EpgTaskArtifactPaths {
     std::string dfxSnapshotPath;
     std::string profilePath;
     std::string optimizedConfigPath;
-    std::vector<std::string> taskTypes;
+    std::string solverReportPath;
+};
+
+struct EpgTaskTopologySpec {
+    std::string path;
+    std::string revision;
+};
+
+struct EpgTaskManifest {
+    EpgDomain domain{EpgDomain::SystemRuntime};
+    std::string subgraphName;
+    std::string topologyPath;
+    std::string topologyVersion;
+    EpgTaskArtifactPaths artifactPaths;
     std::vector<EpgTaskAliasManifestEntry> aliases;
     std::vector<EpgTaskCatalogEntry> catalog;
 };
 
+EpgTaskArtifactPaths BuildEpgTaskArtifactPaths(
+    const EpgTaskArtifactSpec &spec);
+std::string BuildEpgTaskTopologyVersion(
+    const EpgTaskTopologySpec &spec);
 const EpgTaskManifest &EpgManifestForDomain(EpgDomain domain);
+std::vector<std::string> EpgTaskCatalogTypes(
+    const EpgTaskManifest &manifest);
 std::string EpgTaskCatalogJson(const EpgTaskManifest &manifest);
+void ValidateEpgTaskManifest(
+    const EpgTaskManifest &manifest);
 void ValidateEpgTaskFactoryManifest(
     const EpgTaskManifest &manifest,
     const EpgTaskFactoryResolver &resolver);
 void ValidateEpgTaskGraphManifest(
     const EpgTaskManifest &manifest,
     const epg::GraphConfig &graphConfig);
+void ValidateEpgOptimizedGraphManifest(
+    const EpgTaskManifest &manifest,
+    const epg::OptimizedGraph &optimizedGraph);
 
 } // namespace smartdrone::core::application

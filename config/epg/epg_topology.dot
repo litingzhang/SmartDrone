@@ -51,6 +51,9 @@ digraph EpgTopology {
     RuntimeSupervisorTask [
       label="{RuntimeSupervisorTask|type=RuntimeSupervisorTask|trigger=periodic|interval_ms=100}"
     ];
+    EpgRedeployTask [
+      label="{EpgRedeployTask|type=EpgRedeployTask|trigger=periodic|interval_ms=500}"
+    ];
     DiscoveryBeaconTask [
       label="{DiscoveryBeaconTask|type=DiscoveryBeaconTask|trigger=periodic|interval_ms=100}"
     ];

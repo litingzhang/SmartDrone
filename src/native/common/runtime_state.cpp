@@ -76,6 +76,11 @@ void RequestRuntimeStop()
     NotifyRuntimeStopWaiter();
 }
 
+bool RuntimeStopRequested()
+{
+    return !g_runningFlag.load(std::memory_order_acquire);
+}
+
 void WaitUntilRuntimeStopRequested()
 {
     EnsureRuntimeStopPipe();

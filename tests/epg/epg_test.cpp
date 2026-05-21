@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -13,7 +14,10 @@
 #include <vector>
 
 #include "core/application/epg/epg_runtime_optimizer.h"
+#include "core/application/epg/epg_task_manifest.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
+#include "core/application/runtime/epg_graph_lifecycle.h"
+#include "core/application/runtime/epg_redeploy_coordinator.h"
 
 namespace {
 
@@ -24,6 +28,10 @@ using epg::Registry;
 using epg::EventPipelineGraph;
 using epg::SpscSharedPtrQueue;
 using epg::TaskContext;
+using smartdrone::core::application::BuildEpgTaskTopologyVersion;
+using smartdrone::core::application::EpgDomain;
+using smartdrone::core::application::EpgTaskCatalogTypes;
+using smartdrone::core::application::EpgManifestForDomain;
 
 struct TestPacket {
     int sequence{};
@@ -310,6 +318,7 @@ Registry MakeSystemShapeRegistry() {
     registry.RegisterTaskFactory("ManualControlTask", {}, {}, factory);
     registry.RegisterTaskFactory("ForceRestartTask", {}, {}, factory);
     registry.RegisterTaskFactory("RuntimeSupervisorTask", {}, {}, factory);
+    registry.RegisterTaskFactory("EpgRedeployTask", {}, {}, factory);
     registry.RegisterTaskFactory("DiscoveryBeaconTask", {}, {}, factory);
     registry.RegisterTaskFactory("EpgDfxSnapshotTask", {}, {}, factory);
     registry.RegisterTaskFactory("EpgOptimizeTask", {}, {}, factory);
@@ -426,6 +435,39 @@ void RunTopologyFromDotFile(const std::string& dotFile,
             registry),
         queues,
         tasks);
+}
+
+std::string RuntimeTopologyPath()
+{
+    return std::string(TEST_EPG_DIR) + "/../../" +
+           EpgManifestForDomain(EpgDomain::SystemRuntime).topologyPath;
+}
+
+smartdrone::core::application::EpgTaskManifest MakeValidTestManifest()
+{
+    smartdrone::core::application::EpgTaskManifest manifest;
+    manifest.subgraphName = "test_graph";
+    manifest.topologyPath = "config/epg/test_topology.dot";
+    manifest.topologyVersion = "config/epg/test_topology.dot:v1";
+    manifest.artifactPaths.dfxSnapshotPath = "/tmp/test_epg.json";
+    manifest.artifactPaths.profilePath = "/tmp/test_epg_profile.json";
+    manifest.artifactPaths.optimizedConfigPath =
+        "output/epg/optimized_test_graph.json";
+    manifest.artifactPaths.solverReportPath =
+        "output/epg/optimized_test_graph_report.json";
+    manifest.catalog.push_back(
+        {"TestSourceTask", "source", "cpu", 1000, 2000, false});
+    return manifest;
+}
+
+Registry::TaskFactory TestSourceFactoryResolver(const std::string &taskType)
+{
+    if (taskType == "TestSourceTask" || taskType == "MissingTask") {
+        return Registry::TaskFactory([]() {
+            return std::unique_ptr<ITask>(new TestSourceTask());
+        });
+    }
+    return Registry::TaskFactory{};
 }
 
 std::string ReadFileText(const std::string& path) {
@@ -735,7 +777,7 @@ flowchart LR
 TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
     auto registry = MakeSlamShapeRegistry();
     const auto config = epg::ParseGraphConfigDotFile(
-        std::string(TEST_EPG_DIR) + "/../../config/epg/epg_topology.dot",
+        RuntimeTopologyPath(),
         "cluster_slam_session_graph",
         registry);
 
@@ -820,11 +862,11 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
 TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology) {
     auto registry = MakeSystemShapeRegistry();
     const auto config = epg::ParseGraphConfigDotFile(
-        std::string(TEST_EPG_DIR) + "/../../config/epg/epg_topology.dot",
+        RuntimeTopologyPath(),
         "cluster_system_runtime_graph",
         registry);
 
-    ASSERT_EQ(config.tasks.size(), 9u);
+    ASSERT_EQ(config.tasks.size(), 10u);
     ASSERT_EQ(config.queues.size(), 0u);
 
     EventPipelineGraph graph(registry);
@@ -859,6 +901,11 @@ TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology)
     ASSERT_NE(supervisor, nullptr);
     EXPECT_EQ(supervisor->trigger.interval, std::chrono::milliseconds(100));
 
+    const auto* redeploy = findTask("EpgRedeployTask");
+    ASSERT_NE(redeploy, nullptr);
+    EXPECT_EQ(redeploy->type, "EpgRedeployTask");
+    EXPECT_EQ(redeploy->trigger.interval, std::chrono::milliseconds(500));
+
     const auto* dfxSnapshot = findTask("EpgDfxSnapshotTask");
     ASSERT_NE(dfxSnapshot, nullptr);
     EXPECT_EQ(dfxSnapshot->type, "EpgDfxSnapshotTask");
@@ -873,7 +920,7 @@ TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology)
 TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology) {
     auto registry = MakeCalibShapeRegistry();
     const auto config = epg::ParseGraphConfigDotFile(
-        std::string(TEST_EPG_DIR) + "/../../config/epg/epg_topology.dot",
+        RuntimeTopologyPath(),
         "cluster_calib_session_graph",
         registry);
 
@@ -916,6 +963,71 @@ TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology) {
     ASSERT_NE(dfxSnapshot, nullptr);
     EXPECT_EQ(dfxSnapshot->type, "EpgDfxSnapshotTask");
     EXPECT_EQ(dfxSnapshot->trigger.interval, std::chrono::milliseconds(500));
+}
+
+TEST(EventPipelineGraphLifecycle, ResetForStartClearsStopRequest) {
+    std::atomic<bool> stop{true};
+    smartdrone::core::application::EpgGraphLifecycle lifecycle({
+        stop,
+        []() { return true; },
+        []() {},
+        []() {},
+    });
+
+    lifecycle.ResetForStart();
+
+    EXPECT_FALSE(stop.load());
+    EXPECT_FALSE(lifecycle.Done());
+    EXPECT_FALSE(lifecycle.StopRequested());
+}
+
+TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently) {
+    smartdrone::core::application::EpgRedeployCoordinator redeploy;
+
+    redeploy.RequestSystemRedeploy({
+        "cluster_system_runtime_graph",
+        "optimized config changed",
+    });
+    EXPECT_TRUE(redeploy.SystemRedeployRequested());
+    EXPECT_FALSE(redeploy.SessionRedeployRequested());
+    smartdrone::core::application::EpgRedeployRequest systemRequest;
+    EXPECT_TRUE(redeploy.TakeSystemRedeployRequest(systemRequest));
+    EXPECT_EQ(systemRequest.graphName, "cluster_system_runtime_graph");
+    EXPECT_EQ(systemRequest.reason, "optimized config changed");
+    EXPECT_FALSE(redeploy.TakeSystemRedeployRequest(systemRequest));
+
+    redeploy.RequestSessionRedeploy({
+        "cluster_slam_session_graph",
+        "optimized config changed",
+    });
+    EXPECT_TRUE(redeploy.SessionRedeployRequested());
+    EXPECT_FALSE(redeploy.SystemRedeployRequested());
+    smartdrone::core::application::EpgRedeployRequest sessionRequest;
+    EXPECT_TRUE(redeploy.TakeSessionRedeployRequest(sessionRequest));
+    EXPECT_EQ(sessionRequest.graphName, "cluster_slam_session_graph");
+    EXPECT_EQ(sessionRequest.reason, "optimized config changed");
+    EXPECT_FALSE(redeploy.TakeSessionRedeployRequest(sessionRequest));
+}
+
+TEST(EventPipelineGraphRedeploy, WaitsForSystemRedeploySignal) {
+    smartdrone::core::application::EpgRedeployCoordinator redeploy;
+    std::atomic<bool> requested{false};
+    std::thread worker([&redeploy, &requested]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        requested.store(true);
+        redeploy.RequestSystemRedeploy({
+            "cluster_system_runtime_graph",
+            "optimized config changed",
+        });
+    });
+
+    EXPECT_TRUE(redeploy.WaitForSystemRedeploy(std::chrono::milliseconds(200)));
+    EXPECT_TRUE(requested.load());
+    smartdrone::core::application::EpgRedeployRequest request;
+    EXPECT_TRUE(redeploy.TakeSystemRedeployRequest(request));
+    EXPECT_EQ(request.graphName, "cluster_system_runtime_graph");
+    EXPECT_EQ(request.reason, "optimized config changed");
+    worker.join();
 }
 
 TEST(EventPipelineGraphDotTopology, RunsBasicTopologyFromDot) {
@@ -1282,6 +1394,245 @@ TEST(EventPipelineGraph, LifecycleStateAndAccessorsBehaveAsExpected) {
     EXPECT_FALSE(graph.Running());
 }
 
+TEST(EventPipelineGraphManifest, BuildsCentralizedArtifactPaths) {
+    using smartdrone::core::application::BuildEpgTaskArtifactPaths;
+
+    const auto paths = BuildEpgTaskArtifactPaths({
+        "smartdrone_epg_unit",
+        "optimized_unit_graph",
+    });
+
+    EXPECT_EQ(paths.dfxSnapshotPath, "/tmp/smartdrone_epg_unit.json");
+    EXPECT_EQ(paths.profilePath, "/tmp/smartdrone_epg_unit_profile.json");
+    EXPECT_EQ(paths.optimizedConfigPath,
+              "output/epg/optimized_unit_graph.json");
+    EXPECT_EQ(paths.solverReportPath,
+              "output/epg/optimized_unit_graph_report.json");
+
+    EXPECT_EQ(BuildEpgTaskTopologyVersion({"config/epg/unit.dot", "v7"}),
+              "config/epg/unit.dot:v7");
+}
+
+TEST(EventPipelineGraphManifest, RuntimeManifestsUseCentralizedArtifacts) {
+    const auto &system = EpgManifestForDomain(EpgDomain::SystemRuntime);
+    const auto systemTaskTypes = EpgTaskCatalogTypes(system);
+    EXPECT_EQ(systemTaskTypes.size(), 10u);
+    EXPECT_EQ(systemTaskTypes.front(), "VehicleTelemetryRxTask");
+    EXPECT_NE(std::find(systemTaskTypes.begin(), systemTaskTypes.end(),
+                        "EpgRedeployTask"),
+              systemTaskTypes.end());
+    EXPECT_EQ(system.topologyPath, "config/epg/epg_topology.dot");
+    EXPECT_EQ(
+        system.topologyVersion,
+        BuildEpgTaskTopologyVersion({system.topologyPath, "v2"}));
+    EXPECT_EQ(system.artifactPaths.dfxSnapshotPath,
+              "/tmp/smartdrone_epg_system.json");
+    EXPECT_EQ(system.artifactPaths.profilePath,
+              "/tmp/smartdrone_epg_system_profile.json");
+    EXPECT_EQ(system.artifactPaths.optimizedConfigPath,
+              "output/epg/optimized_system_runtime_graph.json");
+    EXPECT_EQ(system.artifactPaths.solverReportPath,
+              "output/epg/optimized_system_runtime_graph_report.json");
+
+    const auto &slam = EpgManifestForDomain(EpgDomain::SlamSession);
+    const auto slamTaskTypes = EpgTaskCatalogTypes(slam);
+    EXPECT_EQ(slamTaskTypes.size(), 15u);
+    EXPECT_EQ(slamTaskTypes.back(), "EpgDfxSnapshotTask");
+    EXPECT_EQ(slam.topologyPath, system.topologyPath);
+    EXPECT_EQ(slam.topologyVersion, system.topologyVersion);
+    EXPECT_EQ(slam.artifactPaths.dfxSnapshotPath,
+              "/tmp/smartdrone_epg_slam.json");
+    EXPECT_EQ(slam.artifactPaths.profilePath,
+              "/tmp/smartdrone_epg_slam_profile.json");
+    EXPECT_EQ(slam.artifactPaths.optimizedConfigPath,
+              "output/epg/optimized_slam_session_graph.json");
+    EXPECT_EQ(slam.artifactPaths.solverReportPath,
+              "output/epg/optimized_slam_session_graph_report.json");
+
+    const auto &calib = EpgManifestForDomain(EpgDomain::CalibSession);
+    const auto calibTaskTypes = EpgTaskCatalogTypes(calib);
+    EXPECT_EQ(calibTaskTypes.size(), 11u);
+    EXPECT_EQ(calibTaskTypes.back(), "EpgDfxSnapshotTask");
+    EXPECT_EQ(calib.topologyPath, system.topologyPath);
+    EXPECT_EQ(calib.topologyVersion, system.topologyVersion);
+    EXPECT_EQ(calib.artifactPaths.dfxSnapshotPath,
+              "/tmp/smartdrone_epg_calib.json");
+    EXPECT_EQ(calib.artifactPaths.profilePath,
+              "/tmp/smartdrone_epg_calib_profile.json");
+    EXPECT_EQ(calib.artifactPaths.optimizedConfigPath,
+              "output/epg/optimized_calib_session_graph.json");
+    EXPECT_EQ(calib.artifactPaths.solverReportPath,
+              "output/epg/optimized_calib_session_graph_report.json");
+}
+
+TEST(EventPipelineGraphManifest, RejectsDuplicateCatalogTaskTypes) {
+    auto manifest = MakeValidTestManifest();
+    manifest.catalog.push_back(
+        {"TestSourceTask", "duplicate", "cpu", 1000, 2000, false});
+
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            manifest, TestSourceFactoryResolver),
+        std::runtime_error);
+}
+
+TEST(EventPipelineGraphManifest, RejectsAliasTargetOutsideCatalog) {
+    auto manifest = MakeValidTestManifest();
+    manifest.aliases.push_back({"LegacySourceTask", "MissingTask"});
+
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            manifest, TestSourceFactoryResolver),
+        std::runtime_error);
+}
+
+TEST(EventPipelineGraphManifest, RejectsDuplicateAliases) {
+    auto manifest = MakeValidTestManifest();
+    manifest.aliases.push_back({"LegacySourceTask", "TestSourceTask"});
+    manifest.aliases.push_back({"LegacySourceTask", "TestSourceTask"});
+
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            manifest, TestSourceFactoryResolver),
+        std::runtime_error);
+}
+
+TEST(EventPipelineGraphManifest, RejectsAliasShadowingCatalogType) {
+    auto manifest = MakeValidTestManifest();
+    manifest.aliases.push_back({"TestSourceTask", "TestSourceTask"});
+
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            manifest, TestSourceFactoryResolver),
+        std::runtime_error);
+}
+
+TEST(EventPipelineGraphManifest, RejectsIncompleteAliasMetadata) {
+    auto manifest = MakeValidTestManifest();
+    manifest.aliases.push_back({"", "TestSourceTask"});
+
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            manifest, TestSourceFactoryResolver),
+        std::runtime_error);
+}
+
+TEST(EventPipelineGraphManifest, RejectsEmptyCatalog) {
+    auto manifest = MakeValidTestManifest();
+    manifest.catalog.clear();
+
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            manifest, TestSourceFactoryResolver),
+        std::runtime_error);
+}
+
+TEST(EventPipelineGraphManifest, RejectsIncompleteCatalogMetadata) {
+    auto manifest = MakeValidTestManifest();
+    manifest.catalog[0].role.clear();
+
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            manifest, TestSourceFactoryResolver),
+        std::runtime_error);
+}
+
+TEST(EventPipelineGraphManifest, RejectsInvalidCatalogTiming) {
+    auto manifest = MakeValidTestManifest();
+    manifest.catalog[0].budgetUs = 2000;
+    manifest.catalog[0].deadlineUs = 1000;
+
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            manifest, TestSourceFactoryResolver),
+        std::runtime_error);
+}
+
+TEST(EventPipelineGraphManifest, RejectsIncompleteManifestMetadata) {
+    {
+        auto manifest = MakeValidTestManifest();
+        manifest.subgraphName.clear();
+
+        EXPECT_THROW(
+            smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+                manifest, TestSourceFactoryResolver),
+            std::runtime_error);
+    }
+    {
+        auto manifest = MakeValidTestManifest();
+        manifest.topologyVersion.clear();
+
+        EXPECT_THROW(
+            smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+                manifest, TestSourceFactoryResolver),
+            std::runtime_error);
+    }
+    {
+        auto manifest = MakeValidTestManifest();
+        manifest.artifactPaths.profilePath.clear();
+
+        EXPECT_THROW(
+            smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+                manifest, TestSourceFactoryResolver),
+            std::runtime_error);
+    }
+}
+
+TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
+    auto manifest = MakeValidTestManifest();
+    manifest.topologyVersion = "test-topology";
+    const auto optimized = epg::ParseOptimizedGraphJson(R"({
+      "schema": "smartdrone.epg.optimized_config.v1",
+      "targetGraph": "test_graph",
+      "topologyVersion": "test-topology",
+      "solverVersion": "unit-test",
+      "sourceProfile": "test_graph",
+      "sourceTimestampMs": 123,
+      "queues": [
+        {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "drop_newest"}
+      ],
+      "tasks": [
+        {
+          "name": "source",
+          "type": "TestSourceTask",
+          "trigger": {"mode": "periodic", "interval_ms": 1},
+          "outputs": {"0": "packets"}
+        }
+      ]
+    })");
+    EXPECT_NO_THROW(
+        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+            manifest, optimized));
+
+    auto wrongTarget = optimized;
+    wrongTarget.metadata.targetGraph = "other_graph";
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+            manifest, wrongTarget),
+        std::runtime_error);
+
+    auto wrongTopology = optimized;
+    wrongTopology.metadata.topologyVersion = "other-topology";
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+            manifest, wrongTopology),
+        std::runtime_error);
+
+    auto wrongSource = optimized;
+    wrongSource.metadata.sourceProfile = "other_graph";
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+            manifest, wrongSource),
+        std::runtime_error);
+
+    auto wrongTask = optimized;
+    wrongTask.config.tasks[0].type = "TestSinkTask";
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+            manifest, wrongTask),
+        std::runtime_error);
+}
+
 TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
@@ -1293,8 +1644,9 @@ TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
 
     const std::string profile = graph.ProfileJson(
         "test_graph", 123, "test-topology",
-        R"([{"taskType":"TestSourceTask","role":"source"}])");
-    EXPECT_NE(profile.find("\"schema\": \"smartdrone.epg.profile.v1\""),
+        R"([{"taskType":"TestSourceTask","role":"source","resource":"cpu","budgetUs":1000,"deadlineUs":2000,"replaceable":false}])");
+    EXPECT_NE(profile.find(std::string("\"schema\": \"") +
+                               epg::GRAPH_PROFILE_SCHEMA + "\""),
               std::string::npos);
     EXPECT_NE(profile.find("\"graph\": \"test_graph\""), std::string::npos);
     EXPECT_NE(profile.find("\"topologyVersion\": \"test-topology\""),
@@ -1327,25 +1679,154 @@ TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
     EXPECT_NE(profile.find("\"poppedPerSecond\""), std::string::npos);
     EXPECT_NE(profile.find("\"droppedPerSecond\""), std::string::npos);
     EXPECT_NE(profile.find("\"maxDepthObserved\""), std::string::npos);
+
+    const auto topology = epg::ParseGraphConfigJsonField(profile, "topology");
+    ASSERT_EQ(topology.queues.size(), 1u);
+    ASSERT_EQ(topology.tasks.size(), 2u);
+    EXPECT_EQ(topology.queues.front().name, "packets");
+    EXPECT_EQ(topology.tasks.front().name, "source");
+
+    const auto metadata = epg::ParseGraphProfileMetadataJson(profile);
+    EXPECT_EQ(metadata.schema, epg::GRAPH_PROFILE_SCHEMA);
+    EXPECT_EQ(metadata.graph, "test_graph");
+    EXPECT_EQ(metadata.topologyVersion, "test-topology");
+    EXPECT_EQ(metadata.timestampMs, 123u);
+
+    const auto diagnostics = epg::ParseGraphProfileDiagnosticsJson(profile);
+    ASSERT_EQ(diagnostics.queues.size(), 1u);
+    ASSERT_EQ(diagnostics.tasks.size(), 2u);
+    EXPECT_NE(diagnostics.queues.find("packets"), diagnostics.queues.end());
+    EXPECT_NE(diagnostics.tasks.find("source"), diagnostics.tasks.end());
+
+    const auto parsedProfile = epg::ParseGraphProfileJson(profile);
+    EXPECT_EQ(parsedProfile.metadata.graph, "test_graph");
+    ASSERT_EQ(parsedProfile.taskCatalog.size(), 1u);
+    EXPECT_EQ(parsedProfile.taskCatalog.front().taskType, "TestSourceTask");
+    EXPECT_EQ(parsedProfile.taskCatalog.front().role, "source");
+    EXPECT_EQ(parsedProfile.taskCatalog.front().resource, "cpu");
+    EXPECT_EQ(parsedProfile.taskCatalog.front().budgetUs, 1000u);
+    EXPECT_EQ(parsedProfile.taskCatalog.front().deadlineUs, 2000u);
+    ASSERT_EQ(parsedProfile.topology.queues.size(), 1u);
+    ASSERT_EQ(parsedProfile.diagnostics.tasks.size(), 2u);
+    EXPECT_THROW(
+        epg::ParseGraphProfileJson("{\"schema\":\"smartdrone.epg.profile.v1\",\"graph\":\"missing\"}"),
+        std::runtime_error);
 }
 
 TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
-    auto registry = MakeRegistry();
-    EventPipelineGraph graph(registry);
-    graph.ConfigureJson(MinimalValidJson());
-
     const std::string profilePath = "/tmp/smartdrone_epg_optimizer_test_profile.json";
     const std::string outputPath = "/tmp/smartdrone_epg_optimizer_test_optimized.json";
+    const std::string reportPath =
+        "/tmp/smartdrone_epg_optimizer_test_optimized_report.json";
     const std::uint64_t nowMs = 1000;
     smartdrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
-        graph.ProfileJson("test_graph", nowMs, "test-topology", "[]"));
+        R"({
+          "schema": "smartdrone.epg.profile.v1",
+          "graph": "test_graph",
+          "topologyVersion": "test-topology",
+          "timestampMs": 1000,
+          "taskCatalog": [
+            {
+              "taskType": "TestSourceTask",
+              "role": "source",
+              "resource": "cpu",
+              "budgetUs": 1500,
+              "deadlineUs": 3000,
+              "replaceable": true
+            },
+            {
+              "taskType": "TestSinkTask",
+              "role": "sink",
+              "resource": "cpu",
+              "budgetUs": 1000,
+              "deadlineUs": 3000,
+              "replaceable": false
+            }
+          ],
+          "topology": {
+            "queues": [
+              {
+                "name": "packets",
+                "type": "TestPacket",
+                "depth": 4,
+                "overflow": "drop_newest"
+              }
+            ],
+            "tasks": [
+              {
+                "name": "source",
+                "type": "TestSourceTask",
+                "trigger": {"mode": "periodic", "interval_ms": 1},
+                "outputs": {"0": "packets"}
+              },
+              {
+                "name": "sink",
+                "type": "TestSinkTask",
+                "trigger": {
+                  "mode": "any_queue_ready",
+                  "queues": ["packets"]
+                },
+                "inputs": {"0": "packets"}
+              }
+            ]
+          },
+          "diagnostics": {
+            "graph": "test_graph",
+            "timestampMs": 1000,
+            "queues": {
+              "packets": {
+                "type": "TestPacket",
+                "size": 4,
+                "depth": 4,
+                "pushed": 100,
+                "popped": 70,
+                "droppedNewest": 3,
+                "overwrittenOldest": 0,
+                "wakeups": 70,
+                "maxDepthObserved": 4,
+                "firstActivityMs": 1,
+                "lastActivityMs": 1000,
+                "windowMs": 999,
+                "pushedPerSecond": 100,
+                "poppedPerSecond": 70,
+                "droppedPerSecond": 3
+              }
+            },
+            "tasks": {
+              "source": {
+                "lastLoopUs": 2200,
+                "maxLoopUs": 2600,
+                "p50LoopUs": 2000,
+                "p90LoopUs": 2400,
+                "p99LoopUs": 2600,
+                "totalLoopUs": 2600,
+                "averageLoopUs": 2200,
+                "loopCount": 1,
+                "errorCount": 0,
+                "idleWakeups": 0,
+                "firstLoopMs": 1,
+                "lastLoopMs": 1000,
+                "windowMs": 999,
+                "utilizationPpm": 900000,
+                "budgetOverrunCount": 2,
+                "deadlineMissCount": 0,
+                "schedulingErrorCount": 0,
+                "lastSchedulingError": 0
+              }
+            }
+          }
+        })");
 
-    smartdrone::core::application::EpgTaskManifest manifest;
-    manifest.subgraphName = "test_graph";
+    auto manifest = MakeValidTestManifest();
     manifest.topologyVersion = "test-topology";
-    manifest.profilePath = profilePath;
-    manifest.optimizedConfigPath = outputPath;
+    manifest.artifactPaths.profilePath = profilePath;
+    manifest.artifactPaths.optimizedConfigPath = outputPath;
+    manifest.artifactPaths.solverReportPath = reportPath;
+    manifest.catalog[0] =
+        {"TestSourceTask", "source", "cpu", 1500, 3000, true};
+    manifest.catalog.push_back(
+        {"TestSinkTask", "sink", "cpu", 1000, 3000, false});
 
     const auto result =
         smartdrone::core::application::OptimizeEpgProfileForManifest(
@@ -1353,16 +1834,392 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     EXPECT_TRUE(result.optimized) << result.message;
 
     const std::string optimized = ReadFileText(outputPath);
-    EXPECT_NE(optimized.find("\"schema\": \"smartdrone.epg.optimized_config.v1\""),
+    EXPECT_NE(optimized.find(std::string("\"schema\": \"") +
+                                 epg::OPTIMIZED_GRAPH_SCHEMA + "\""),
               std::string::npos);
     EXPECT_NE(optimized.find("\"targetGraph\": \"test_graph\""),
               std::string::npos);
+    EXPECT_NE(optimized.find("\"sourceProfile\": \"test_graph\""),
+              std::string::npos);
     EXPECT_NE(optimized.find("\"topologyVersion\": \"test-topology\""),
               std::string::npos);
-    EXPECT_NO_THROW(epg::ParseGraphConfigJson(optimized));
+    EXPECT_NE(optimized.find(std::string("\"solverVersion\": \"") +
+                                 epg::NATIVE_HEURISTIC_SOLVER_VERSION + "\""),
+              std::string::npos);
+    EXPECT_NE(optimized.find("\"generatedAtMs\": 1010"),
+              std::string::npos);
+
+    const auto config = epg::ParseGraphConfigJson(optimized);
+    ASSERT_EQ(config.queues.size(), 1u);
+    ASSERT_EQ(config.tasks.size(), 2u);
+    EXPECT_EQ(config.queues.front().depth, 8u);
+    EXPECT_EQ(config.tasks.front().trigger.interval.count(), 3);
+    EXPECT_EQ(config.tasks.front().scheduling.budgetUs, 1500u);
+    EXPECT_EQ(config.tasks.front().scheduling.deadlineUs, 3000u);
+
+    const std::string report = ReadFileText(reportPath);
+    EXPECT_NE(report.find(std::string("\"schema\": \"") +
+                              epg::SOLVER_REPORT_SCHEMA + "\""),
+              std::string::npos);
+    EXPECT_NE(report.find(std::string("\"solverVersion\": \"") +
+                              epg::NATIVE_HEURISTIC_SOLVER_VERSION + "\""),
+              std::string::npos);
+    EXPECT_NE(report.find("\"generatedAtMs\": 1010"), std::string::npos);
+    EXPECT_NE(report.find("\"reason\": \"increase_depth\""),
+              std::string::npos);
+    EXPECT_NE(report.find("\"reason\": \"increase_interval\""),
+              std::string::npos);
+    EXPECT_NE(report.find("\"catalogRole\": \"source\""),
+              std::string::npos);
+    EXPECT_NE(report.find("\"replaceable\": true"), std::string::npos);
+    EXPECT_NE(report.find("\"budgetOverruns\": 2"), std::string::npos);
 
     (void)std::remove(profilePath.c_str());
     (void)std::remove(outputPath.c_str());
+    (void)std::remove(reportPath.c_str());
+}
+
+TEST(EventPipelineGraphOptimizer, RejectsProfileTasksOutsideManifest) {
+    const std::string profilePath =
+        "/tmp/smartdrone_epg_optimizer_outside_manifest_profile.json";
+    const std::string outputPath =
+        "/tmp/smartdrone_epg_optimizer_outside_manifest_optimized.json";
+    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+        profilePath,
+        R"({
+          "schema": "smartdrone.epg.profile.v1",
+          "graph": "test_graph",
+          "topologyVersion": "test-topology",
+          "timestampMs": 1000,
+          "taskCatalog": [
+            {
+              "taskType": "TestSourceTask",
+              "role": "source",
+              "resource": "cpu",
+              "budgetUs": 1000,
+              "deadlineUs": 2000,
+              "replaceable": false
+            }
+          ],
+          "topology": {
+            "queues": [
+              {
+                "name": "packets",
+                "type": "TestPacket",
+                "depth": 4,
+                "overflow": "drop_newest"
+              }
+            ],
+            "tasks": [
+              {
+                "name": "source",
+                "type": "TestSourceTask",
+                "trigger": {"mode": "periodic", "interval_ms": 1},
+                "outputs": {"0": "packets"}
+              },
+              {
+                "name": "sink",
+                "type": "TestSinkTask",
+                "trigger": {
+                  "mode": "any_queue_ready",
+                  "queues": ["packets"]
+                },
+                "inputs": {"0": "packets"}
+              }
+            ]
+          },
+          "diagnostics": {
+            "graph": "test_graph",
+            "timestampMs": 1000,
+            "queues": {},
+            "tasks": {}
+          }
+        })");
+
+    auto manifest = MakeValidTestManifest();
+    manifest.topologyVersion = "test-topology";
+    manifest.artifactPaths.profilePath = profilePath;
+    manifest.artifactPaths.optimizedConfigPath = outputPath;
+
+    const auto result =
+        smartdrone::core::application::OptimizeEpgProfileForManifest(
+            manifest, 1010);
+    EXPECT_FALSE(result.optimized);
+    EXPECT_NE(result.message.find("outside manifest"), std::string::npos);
+
+    (void)std::remove(profilePath.c_str());
+    (void)std::remove(outputPath.c_str());
+}
+
+TEST(EventPipelineGraphOptimizer, RejectsProfileCatalogMismatch) {
+    const std::string profilePath =
+        "/tmp/smartdrone_epg_optimizer_catalog_mismatch_profile.json";
+    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+        profilePath,
+        R"({
+          "schema": "smartdrone.epg.profile.v1",
+          "graph": "test_graph",
+          "topologyVersion": "test-topology",
+          "timestampMs": 1000,
+          "taskCatalog": [
+            {
+              "taskType": "TestSourceTask",
+              "role": "source",
+              "resource": "gpu",
+              "budgetUs": 1000,
+              "deadlineUs": 2000,
+              "replaceable": false
+            }
+          ],
+          "topology": {
+            "queues": [
+              {
+                "name": "packets",
+                "type": "TestPacket",
+                "depth": 4,
+                "overflow": "drop_newest"
+              }
+            ],
+            "tasks": [
+              {
+                "name": "source",
+                "type": "TestSourceTask",
+                "trigger": {"mode": "periodic", "interval_ms": 1},
+                "outputs": {"0": "packets"}
+              }
+            ]
+          },
+          "diagnostics": {
+            "graph": "test_graph",
+            "timestampMs": 1000,
+            "queues": {},
+            "tasks": {}
+          }
+        })");
+
+    auto manifest = MakeValidTestManifest();
+    manifest.topologyVersion = "test-topology";
+    manifest.artifactPaths.profilePath = profilePath;
+
+    const auto result =
+        smartdrone::core::application::OptimizeEpgProfileForManifest(
+            manifest, 1010);
+    EXPECT_FALSE(result.optimized);
+    EXPECT_NE(result.message.find("catalog mismatch"), std::string::npos);
+
+    (void)std::remove(profilePath.c_str());
+}
+
+TEST(EventPipelineGraphOptimizer, CreatesArtifactDirectories) {
+    const std::string profilePath =
+        "/tmp/smartdrone_epg_optimizer_nested_profile.json";
+    const std::string outputDir =
+        "/tmp/smartdrone_epg_optimizer_nested_artifacts";
+    const std::string outputPath = outputDir + "/optimized/config.json";
+    const std::string reportPath = outputDir + "/reports/report.json";
+    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+        profilePath,
+        R"({
+          "schema": "smartdrone.epg.profile.v1",
+          "graph": "test_graph",
+          "topologyVersion": "test-topology",
+          "timestampMs": 1000,
+          "taskCatalog": [
+            {
+              "taskType": "TestSourceTask",
+              "role": "source",
+              "resource": "cpu",
+              "budgetUs": 1000,
+              "deadlineUs": 2000,
+              "replaceable": false
+            }
+          ],
+          "topology": {
+            "queues": [
+              {
+                "name": "packets",
+                "type": "TestPacket",
+                "depth": 4,
+                "overflow": "drop_newest"
+              }
+            ],
+            "tasks": [
+              {
+                "name": "source",
+                "type": "TestSourceTask",
+                "trigger": {"mode": "periodic", "interval_ms": 1},
+                "outputs": {"0": "packets"}
+              }
+            ]
+          },
+          "diagnostics": {
+            "graph": "test_graph",
+            "timestampMs": 1000,
+            "queues": {},
+            "tasks": {}
+          }
+        })");
+
+    auto manifest = MakeValidTestManifest();
+    manifest.topologyVersion = "test-topology";
+    manifest.artifactPaths.profilePath = profilePath;
+    manifest.artifactPaths.optimizedConfigPath = outputPath;
+    manifest.artifactPaths.solverReportPath = reportPath;
+
+    const auto result =
+        smartdrone::core::application::OptimizeEpgProfileForManifest(
+            manifest, 1010);
+    EXPECT_TRUE(result.optimized) << result.message;
+    EXPECT_NE(ReadFileText(outputPath).find(epg::OPTIMIZED_GRAPH_SCHEMA),
+              std::string::npos);
+    EXPECT_NE(ReadFileText(reportPath).find(epg::SOLVER_REPORT_SCHEMA),
+              std::string::npos);
+
+    (void)std::remove(profilePath.c_str());
+    (void)std::remove(outputPath.c_str());
+    (void)std::remove(reportPath.c_str());
+    (void)std::remove((outputDir + "/optimized").c_str());
+    (void)std::remove((outputDir + "/reports").c_str());
+    (void)std::remove(outputDir.c_str());
+}
+
+TEST(EventPipelineGraphOptimizer, ReportsArtifactWriteFailure) {
+    const std::string profilePath =
+        "/tmp/smartdrone_epg_optimizer_write_failure_profile.json";
+    const std::string blockedParent =
+        "/tmp/smartdrone_epg_optimizer_blocked_parent";
+    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+        blockedParent, "{}");
+    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+        profilePath,
+        R"({
+          "schema": "smartdrone.epg.profile.v1",
+          "graph": "test_graph",
+          "topologyVersion": "test-topology",
+          "timestampMs": 1000,
+          "taskCatalog": [
+            {
+              "taskType": "TestSourceTask",
+              "role": "source",
+              "resource": "cpu",
+              "budgetUs": 1000,
+              "deadlineUs": 2000,
+              "replaceable": false
+            }
+          ],
+          "topology": {
+            "queues": [
+              {
+                "name": "packets",
+                "type": "TestPacket",
+                "depth": 4,
+                "overflow": "drop_newest"
+              }
+            ],
+            "tasks": [
+              {
+                "name": "source",
+                "type": "TestSourceTask",
+                "trigger": {"mode": "periodic", "interval_ms": 1},
+                "outputs": {"0": "packets"}
+              }
+            ]
+          },
+          "diagnostics": {
+            "graph": "test_graph",
+            "timestampMs": 1000,
+            "queues": {},
+            "tasks": {}
+          }
+        })");
+
+    auto manifest = MakeValidTestManifest();
+    manifest.topologyVersion = "test-topology";
+    manifest.artifactPaths.profilePath = profilePath;
+    manifest.artifactPaths.optimizedConfigPath = blockedParent + "/config.json";
+    manifest.artifactPaths.solverReportPath = blockedParent + "/report.json";
+
+    const auto result =
+        smartdrone::core::application::OptimizeEpgProfileForManifest(
+            manifest, 1010);
+    EXPECT_FALSE(result.optimized);
+    EXPECT_NE(result.message.find("not a directory"), std::string::npos);
+
+    (void)std::remove(profilePath.c_str());
+    (void)std::remove(blockedParent.c_str());
+}
+
+TEST(EventPipelineGraphOptimizer, ReportsUnchangedConfigWithoutRedeploy) {
+    const std::string profilePath =
+        "/tmp/smartdrone_epg_optimizer_unchanged_profile.json";
+    const std::string outputPath =
+        "/tmp/smartdrone_epg_optimizer_unchanged_optimized.json";
+    const std::uint64_t nowMs = 2000;
+    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+        profilePath,
+        R"({
+          "schema": "smartdrone.epg.profile.v1",
+          "graph": "test_graph",
+          "topologyVersion": "test-topology",
+          "timestampMs": 2000,
+          "taskCatalog": [
+            {
+              "taskType": "TestSourceTask",
+              "role": "source",
+              "resource": "cpu",
+              "budgetUs": 1000,
+              "deadlineUs": 2000,
+              "replaceable": false
+            }
+          ],
+          "topology": {
+            "queues": [
+              {
+                "name": "packets",
+                "type": "TestPacket",
+                "depth": 4,
+                "overflow": "drop_newest"
+              }
+            ],
+            "tasks": [
+              {
+                "name": "source",
+                "type": "TestSourceTask",
+                "trigger": {"mode": "periodic", "interval_ms": 1},
+                "outputs": {"0": "packets"}
+              }
+            ]
+          },
+          "diagnostics": {
+            "graph": "test_graph",
+            "timestampMs": 2000,
+            "queues": {},
+            "tasks": {}
+          }
+        })");
+
+    auto manifest = MakeValidTestManifest();
+    manifest.topologyVersion = "test-topology";
+    manifest.artifactPaths.profilePath = profilePath;
+    manifest.artifactPaths.optimizedConfigPath = outputPath;
+    manifest.artifactPaths.solverReportPath =
+        "/tmp/smartdrone_epg_optimizer_unchanged_optimized_report.json";
+
+    const auto first =
+        smartdrone::core::application::OptimizeEpgProfileForManifest(
+            manifest, nowMs + 10);
+    ASSERT_TRUE(first.optimized) << first.message;
+    EXPECT_TRUE(first.configChanged);
+
+    const auto second =
+        smartdrone::core::application::OptimizeEpgProfileForManifest(
+            manifest, nowMs + 20);
+    EXPECT_TRUE(second.optimized) << second.message;
+    EXPECT_FALSE(second.configChanged);
+
+    (void)std::remove(profilePath.c_str());
+    (void)std::remove(outputPath.c_str());
+    (void)std::remove(manifest.artifactPaths.solverReportPath.c_str());
 }
 
 TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile) {
@@ -1436,6 +2293,84 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     ASSERT_EQ(config.tasks.size(), 2u);
     EXPECT_EQ(config.tasks.front().trigger.interval,
               std::chrono::milliseconds(3));
+
+    const auto metadata = epg::ParseOptimizedGraphMetadataJson(R"({
+      "schema": "smartdrone.epg.optimized_config.v1",
+      "targetGraph": "test_graph",
+      "topologyVersion": "test-topology",
+      "solverVersion": "unit-test",
+      "sourceProfile": "test_graph",
+      "sourceTimestampMs": 123,
+      "queues": [],
+      "tasks": []
+    })");
+    EXPECT_EQ(metadata.schema, epg::OPTIMIZED_GRAPH_SCHEMA);
+    EXPECT_EQ(metadata.targetGraph, "test_graph");
+    EXPECT_EQ(metadata.topologyVersion, "test-topology");
+    EXPECT_EQ(metadata.solverVersion, "unit-test");
+    EXPECT_EQ(metadata.sourceProfile, "test_graph");
+    EXPECT_EQ(metadata.sourceTimestampMs, 123u);
+
+    const auto optimized = epg::ParseOptimizedGraphJson(R"({
+      "schema": "smartdrone.epg.optimized_config.v1",
+      "targetGraph": "test_graph",
+      "topologyVersion": "test-topology",
+      "solverVersion": "unit-test",
+      "sourceProfile": "test_graph",
+      "sourceTimestampMs": 123,
+      "queues": [
+        {"name": "packets", "type": "TestPacket", "depth": 6, "overflow": "drop_newest"}
+      ],
+      "tasks": [
+        {
+          "name": "source",
+          "type": "TestSourceTask",
+          "trigger": {"mode": "periodic", "interval_ms": 3},
+          "outputs": {"0": "packets"}
+        }
+      ]
+    })");
+    EXPECT_EQ(optimized.metadata.targetGraph, "test_graph");
+    ASSERT_EQ(optimized.config.queues.size(), 1u);
+    ASSERT_EQ(optimized.config.tasks.size(), 1u);
+    EXPECT_THROW(
+        epg::ParseOptimizedGraphJson(R"({
+          "schema": "smartdrone.epg.optimized_config.v1",
+          "targetGraph": "test_graph",
+          "topologyVersion": "test-topology",
+          "solverVersion": "unit-test",
+          "queues": [],
+          "tasks": []
+        })"),
+        std::runtime_error);
+}
+
+TEST(GraphConfig, ParsesNestedGraphConfigJsonField) {
+    const auto config = epg::ParseGraphConfigJsonField(R"({
+      "schema": "smartdrone.epg.profile.v1",
+      "topology": {
+        "queues": [
+          {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "drop_newest"}
+        ],
+        "tasks": [
+          {
+            "name": "source",
+            "type": "TestSourceTask",
+            "trigger": {"mode": "periodic", "interval_ms": 1},
+            "outputs": {"0": "packets"}
+          }
+        ]
+      },
+      "diagnostics": {}
+    })", "topology");
+
+    ASSERT_EQ(config.queues.size(), 1u);
+    ASSERT_EQ(config.tasks.size(), 1u);
+    EXPECT_EQ(config.queues.front().name, "packets");
+    EXPECT_EQ(config.tasks.front().name, "source");
+    EXPECT_THROW(
+        epg::ParseGraphConfigJsonField("{\"diagnostics\": {}}", "topology"),
+        std::runtime_error);
 }
 
 TEST(GraphConfig, RejectsInvalidJsonAndUnsupportedEnumValues) {

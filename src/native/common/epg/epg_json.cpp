@@ -333,6 +333,15 @@ std::uint64_t OptionalUInt64(const JsonValue& value,
     return static_cast<std::uint64_t>(child->number);
 }
 
+std::uint64_t RequiredUInt64(const JsonValue& value,
+                             const std::string& field) {
+    const auto& child = value.At(field);
+    if (child.kind != JsonValue::Kind::Number || child.number < 0) {
+        throw std::runtime_error("json field must be non-negative number: " + field);
+    }
+    return static_cast<std::uint64_t>(child.number);
+}
+
 std::string OptionalString(const JsonValue& value,
                            const std::string& field,
                            const std::string& fallback) {
@@ -523,10 +532,89 @@ void AppendTaskConfigs(const JsonValue& tasks, GraphConfig& config) {
     }
 }
 
-} // namespace
+QueueProfileMetrics ParseQueueProfileMetrics(const JsonValue& item)
+{
+    RequireConfigObject(item, "queue profile metrics must be object");
+    QueueProfileMetrics metrics;
+    metrics.maxDepthObserved =
+        OptionalUInt64(item, "maxDepthObserved", metrics.maxDepthObserved);
+    metrics.droppedNewest =
+        OptionalUInt64(item, "droppedNewest", metrics.droppedNewest);
+    metrics.overwrittenOldest =
+        OptionalUInt64(item, "overwrittenOldest", metrics.overwrittenOldest);
+    metrics.pushedPerSecond =
+        OptionalUInt64(item, "pushedPerSecond", metrics.pushedPerSecond);
+    metrics.poppedPerSecond =
+        OptionalUInt64(item, "poppedPerSecond", metrics.poppedPerSecond);
+    metrics.droppedPerSecond =
+        OptionalUInt64(item, "droppedPerSecond", metrics.droppedPerSecond);
+    return metrics;
+}
 
-GraphConfig ParseGraphConfigJson(const std::string& jsonText) {
-    const auto root = JsonParser(jsonText).Parse();
+TaskProfileMetrics ParseTaskProfileMetrics(const JsonValue& item)
+{
+    RequireConfigObject(item, "task profile metrics must be object");
+    TaskProfileMetrics metrics;
+    metrics.maxLoopUs = OptionalUInt64(item, "maxLoopUs", metrics.maxLoopUs);
+    metrics.averageLoopUs =
+        OptionalUInt64(item, "averageLoopUs", metrics.averageLoopUs);
+    metrics.p90LoopUs = OptionalUInt64(item, "p90LoopUs", metrics.p90LoopUs);
+    metrics.p99LoopUs = OptionalUInt64(item, "p99LoopUs", metrics.p99LoopUs);
+    metrics.utilizationPpm =
+        OptionalUInt64(item, "utilizationPpm", metrics.utilizationPpm);
+    metrics.budgetOverrunCount =
+        OptionalUInt64(item, "budgetOverrunCount", metrics.budgetOverrunCount);
+    metrics.deadlineMissCount =
+        OptionalUInt64(item, "deadlineMissCount", metrics.deadlineMissCount);
+    metrics.schedulingErrorCount =
+        OptionalUInt64(item, "schedulingErrorCount",
+                       metrics.schedulingErrorCount);
+    return metrics;
+}
+
+GraphProfileTaskCatalogEntry ParseTaskCatalogEntry(const JsonValue& item)
+{
+    RequireConfigObject(item, "task catalog entry must be object");
+    GraphProfileTaskCatalogEntry entry;
+    entry.taskType = RequiredString(item, "taskType");
+    entry.role = RequiredString(item, "role");
+    entry.resource = RequiredString(item, "resource");
+    entry.budgetUs = RequiredUInt64(item, "budgetUs");
+    entry.deadlineUs = RequiredUInt64(item, "deadlineUs");
+    entry.replaceable = OptionalBool(item, "replaceable", entry.replaceable);
+    return entry;
+}
+
+std::vector<GraphProfileTaskCatalogEntry> ParseTaskCatalogObject(
+    const JsonValue& root)
+{
+    const auto* catalog = root.Find("taskCatalog");
+    if (!catalog) {
+        throw std::runtime_error("missing EventPipelineGraph json field: taskCatalog");
+    }
+    if (catalog->kind != JsonValue::Kind::Array) {
+        throw std::runtime_error("json field must be array: taskCatalog");
+    }
+    std::vector<GraphProfileTaskCatalogEntry> entries;
+    entries.reserve(catalog->array.size());
+    for (const auto& item : catalog->array) {
+        entries.push_back(ParseTaskCatalogEntry(item));
+    }
+    return entries;
+}
+
+const JsonValue* FindObjectField(const JsonValue& value,
+                                 const std::string& field)
+{
+    const auto* child = value.Find(field);
+    if (!child || child->kind != JsonValue::Kind::Object) {
+        return nullptr;
+    }
+    return child;
+}
+
+GraphConfig ParseGraphConfigObject(const JsonValue& root)
+{
     RequireConfigObject(root, "EventPipelineGraph json root must be object");
 
     GraphConfig config;
@@ -535,7 +623,129 @@ GraphConfig ParseGraphConfigJson(const std::string& jsonText) {
     return config;
 }
 
-GraphConfig ParseGraphConfigJsonFile(const std::string& path) {
+GraphProfileMetadata ParseGraphProfileMetadataObject(const JsonValue& root)
+{
+    RequireConfigObject(root, "EventPipelineGraph profile root must be object");
+
+    GraphProfileMetadata metadata;
+    metadata.schema = RequiredString(root, "schema");
+    metadata.graph = RequiredString(root, "graph");
+    metadata.topologyVersion =
+        OptionalString(root, "topologyVersion", metadata.topologyVersion);
+    metadata.timestampMs =
+        OptionalUInt64(root, "timestampMs", metadata.timestampMs);
+    return metadata;
+}
+
+GraphProfileDiagnostics ParseGraphProfileDiagnosticsObject(
+    const JsonValue& root)
+{
+    RequireConfigObject(root, "EventPipelineGraph profile root must be object");
+
+    GraphProfileDiagnostics diagnostics;
+    const auto* diag = FindObjectField(root, "diagnostics");
+    if (!diag) {
+        return diagnostics;
+    }
+    if (const auto* queues = FindObjectField(*diag, "queues")) {
+        for (const auto& item : queues->object) {
+            diagnostics.queues[item.first] =
+                ParseQueueProfileMetrics(item.second);
+        }
+    }
+    if (const auto* tasks = FindObjectField(*diag, "tasks")) {
+        for (const auto& item : tasks->object) {
+            diagnostics.tasks[item.first] =
+                ParseTaskProfileMetrics(item.second);
+        }
+    }
+    return diagnostics;
+}
+
+OptimizedGraphMetadata ParseOptimizedGraphMetadataObject(
+    const JsonValue& root)
+{
+    RequireConfigObject(root, "optimized graph json root must be object");
+
+    OptimizedGraphMetadata metadata;
+    metadata.schema = RequiredString(root, "schema");
+    metadata.targetGraph = RequiredString(root, "targetGraph");
+    metadata.topologyVersion = RequiredString(root, "topologyVersion");
+    metadata.solverVersion = RequiredString(root, "solverVersion");
+    metadata.sourceProfile = RequiredString(root, "sourceProfile");
+    metadata.sourceTimestampMs = RequiredUInt64(root, "sourceTimestampMs");
+    return metadata;
+}
+
+} // namespace
+
+GraphProfile ParseGraphProfileJson(const std::string& jsonText)
+{
+    const auto root = JsonParser(jsonText).Parse();
+    RequireConfigObject(root, "EventPipelineGraph profile root must be object");
+    const auto* topology = root.Find("topology");
+    if (!topology) {
+        throw std::runtime_error("missing EventPipelineGraph json field: topology");
+    }
+    return {
+        ParseGraphProfileMetadataObject(root),
+        ParseTaskCatalogObject(root),
+        ParseGraphConfigObject(*topology),
+        ParseGraphProfileDiagnosticsObject(root),
+    };
+}
+
+GraphProfileMetadata ParseGraphProfileMetadataJson(
+    const std::string& jsonText)
+{
+    const auto root = JsonParser(jsonText).Parse();
+    return ParseGraphProfileMetadataObject(root);
+}
+
+GraphProfileDiagnostics ParseGraphProfileDiagnosticsJson(
+    const std::string& jsonText)
+{
+    const auto root = JsonParser(jsonText).Parse();
+    return ParseGraphProfileDiagnosticsObject(root);
+}
+
+OptimizedGraphMetadata ParseOptimizedGraphMetadataJson(
+    const std::string& jsonText)
+{
+    const auto root = JsonParser(jsonText).Parse();
+    return ParseOptimizedGraphMetadataObject(root);
+}
+
+OptimizedGraph ParseOptimizedGraphJson(const std::string& jsonText)
+{
+    const auto root = JsonParser(jsonText).Parse();
+    return {
+        ParseOptimizedGraphMetadataObject(root),
+        ParseGraphConfigObject(root),
+    };
+}
+
+GraphConfig ParseGraphConfigJson(const std::string& jsonText)
+{
+    const auto root = JsonParser(jsonText).Parse();
+    return ParseGraphConfigObject(root);
+}
+
+GraphConfig ParseGraphConfigJsonField(const std::string& jsonText,
+                                      const std::string& field)
+{
+    const auto root = JsonParser(jsonText).Parse();
+    RequireConfigObject(root, "EventPipelineGraph json root must be object");
+    const auto* child = root.Find(field);
+    if (!child) {
+        throw std::runtime_error("missing EventPipelineGraph json field: " +
+                                 field);
+    }
+    return ParseGraphConfigObject(*child);
+}
+
+GraphConfig ParseGraphConfigJsonFile(const std::string& path)
+{
     std::ifstream input(path);
     if (!input) {
         throw std::runtime_error("failed to open EventPipelineGraph json file: " + path);

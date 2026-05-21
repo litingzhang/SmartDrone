@@ -393,7 +393,8 @@ Throughput control in the current implementation is centered on the following be
 - diagnostics channels: `slam_dfx`, `odom_ts`, ACK logs, timesync logs
 - EPG DFX snapshots and task timing logs
 - EPG graph snapshots are written to `/tmp/smartdrone_epg_system.json`, `/tmp/smartdrone_epg_slam.json`, and `/tmp/smartdrone_epg_calib.json`
-- EPG solver profiles are written beside snapshots as `/tmp/smartdrone_epg_*_profile.json`; `EpgOptimizeTask` runs inside the system EPG graph and refreshes `output/epg/optimized_*_graph.json`, while `tools/epg_solver.py` and `tools/epg_optimize_all.py` provide manual/offline reproduction plus reports with objective, constraints, score, and per-task or per-queue decisions
+- EPG topology metadata and artifact paths are owned by the runtime manifest: the maintained DOT path, topology version, graph-specific snapshot/profile paths, and deployable optimized-config/report paths are declared in one place
+- EPG solver profiles are written beside snapshots as `/tmp/smartdrone_epg_*_profile.json`; `EpgOptimizeTask` runs inside the system EPG graph and refreshes `output/epg/optimized_*_graph.json` plus matching `_report.json` files using profile pressure/overload heuristics; changed Slam/Calib optimized configs request a supervisor-boundary session redeploy through `EpgRedeployTask`, and changed system optimized configs are handed to `RuntimeHost` for an outer-boundary system graph restart; `tools/epg_solver.py` and `tools/epg_optimize_all.py` provide manual/offline reproduction plus reports with objective, constraints, score, and per-task or per-queue decisions
 - EPG task profiles include task catalog metadata, topology version, loop percentiles, utilization, budget/deadline misses, scheduling errors, and queue throughput rates so the solver can tune topology from measured runtime pressure instead of static guesses
 - remote capability and config query endpoints
 

@@ -75,6 +75,18 @@ class RuntimeSupervisorTask final : public epg::ITask {
     std::shared_ptr<SystemRuntimeStepServices> m_services;
 };
 
+class EpgRedeployTask final : public epg::ITask {
+  public:
+    explicit EpgRedeployTask(
+        std::shared_ptr<SystemRuntimeStepServices> services,
+        std::shared_ptr<EpgRedeployCoordinator> redeploy);
+    void OnTick(epg::TaskContext &context) override;
+
+  private:
+    std::shared_ptr<SystemRuntimeStepServices> m_services;
+    std::shared_ptr<EpgRedeployCoordinator> m_redeploy;
+};
+
 class DiscoveryBeaconTask final : public epg::ITask {
   public:
     explicit DiscoveryBeaconTask(

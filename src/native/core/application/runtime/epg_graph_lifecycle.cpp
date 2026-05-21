@@ -24,6 +24,7 @@ bool EpgGraphLifecycle::Done() const { return m_done; }
 
 void EpgGraphLifecycle::ResetForStart()
 {
+    m_stop.store(false, std::memory_order_relaxed);
     m_done = false;
     m_stopRequested = false;
     m_graphStopRequested = false;

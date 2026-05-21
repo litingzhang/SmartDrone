@@ -242,6 +242,38 @@ void UnifiedRuntimeController::StepForceRestart()
     std::raise(SIGKILL);
 }
 
+void UnifiedRuntimeController::StepEpgRedeploy(
+    EpgRedeployCoordinator &coordinator)
+{
+    ApplySessionRedeployRequest(coordinator);
+}
+
+void UnifiedRuntimeController::ApplySessionRedeployRequest(
+    EpgRedeployCoordinator &coordinator)
+{
+    EpgRedeployRequest request;
+    if (!coordinator.TakeSessionRedeployRequest(request)) {
+        return;
+    }
+    if (m_sessionSupervisor.DesiredMode() == ControllerMode::Idle) {
+        std::cerr << "[epg] session graph redeploy skipped while idle";
+        if (!request.graphName.empty()) {
+            std::cerr << ": " << request.graphName;
+        }
+        std::cerr << "\n";
+        return;
+    }
+    m_sessionSupervisor.RequestRestart();
+    std::cerr << "[epg] session graph redeploy requested";
+    if (!request.graphName.empty()) {
+        std::cerr << ": " << request.graphName;
+    }
+    if (!request.reason.empty()) {
+        std::cerr << " (" << request.reason << ")";
+    }
+    std::cerr << "\n";
+}
+
 CommandResult UnifiedRuntimeController::ExecuteAction(const RuntimeAction &action)
 {
     std::string err;

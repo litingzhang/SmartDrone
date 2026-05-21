@@ -4,14 +4,11 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #include "core/application/epg/epg_task_manifest.h"
 
 namespace smartdrone::core::application {
 namespace {
-
-constexpr const char *kEpgTopologyPath = "config/epg/epg_topology.dot";
 
 bool FileReadable(const std::string &path)
 {
@@ -29,48 +26,32 @@ std::string ReadTextFile(const std::string &path)
                        std::istreambuf_iterator<char>());
 }
 
-bool ContainsStringField(const std::string &text,
-                         const std::string &field,
-                         const std::string &value)
-{
-    const std::string needle =
-        "\"" + field + "\": \"" + value + "\"";
-    return text.find(needle) != std::string::npos;
-}
-
 epg::GraphConfig CompileStaticEpgConfig(const EpgTaskManifest &manifest,
                                         epg::Registry &registry)
 {
     return epg::ParseGraphConfigDotFile(
-        kEpgTopologyPath, manifest.subgraphName, registry);
+        manifest.topologyPath, manifest.subgraphName, registry);
 }
 
 epg::GraphConfig CompileOptimizedEpgConfig(const EpgTaskManifest &manifest)
 {
-    const std::string json = ReadTextFile(manifest.optimizedConfigPath);
-    if (!ContainsStringField(json, "schema",
-                             "smartdrone.epg.optimized_config.v1")) {
-        throw std::runtime_error("optimized graph schema mismatch");
-    }
-    if (!ContainsStringField(json, "targetGraph", manifest.subgraphName)) {
-        throw std::runtime_error("optimized graph target mismatch");
-    }
-    if (!ContainsStringField(json, "topologyVersion",
-                             manifest.topologyVersion)) {
-        throw std::runtime_error("optimized graph topology version mismatch");
-    }
-    return epg::ParseGraphConfigJson(json);
+    const auto &paths = manifest.artifactPaths;
+    const std::string json = ReadTextFile(paths.optimizedConfigPath);
+    const auto optimized = epg::ParseOptimizedGraphJson(json);
+    ValidateEpgOptimizedGraphManifest(manifest, optimized);
+    return optimized.config;
 }
 
 bool TryLoadOptimizedEpgConfig(const EpgTaskManifest &manifest,
                                epg::GraphConfig &config)
 {
-    if (!FileReadable(manifest.optimizedConfigPath)) {
+    const auto &paths = manifest.artifactPaths;
+    if (!FileReadable(paths.optimizedConfigPath)) {
         return false;
     }
 
     std::cerr << "[epg] loading optimized graph config: "
-              << manifest.optimizedConfigPath << "\n";
+              << paths.optimizedConfigPath << "\n";
     config = CompileOptimizedEpgConfig(manifest);
     return true;
 }
@@ -99,7 +80,8 @@ void RegisterEpgTypes(epg::Registry &registry,
     const EpgTaskManifest &manifest = EpgManifestForDomain(domain);
     auto &catalog = epg::TypeCatalog::Global();
     catalog.RegisterReflectedMessageTypes(registry);
-    catalog.RegisterReflectedTaskTypes(registry, manifest.taskTypes, resolver);
+    catalog.RegisterReflectedTaskTypes(
+        registry, EpgTaskCatalogTypes(manifest), resolver);
     RegisterManifestAliases(registry, manifest, resolver);
 }
 
@@ -110,7 +92,6 @@ epg::GraphConfig CompileEpgConfig(EpgDomain domain,
     epg::GraphConfig config;
     try {
         if (TryLoadOptimizedEpgConfig(manifest, config)) {
-            ValidateEpgTaskGraphManifest(manifest, config);
             return config;
         }
     } catch (const std::exception &error) {

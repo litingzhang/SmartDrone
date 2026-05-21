@@ -106,6 +106,23 @@ void RuntimeSupervisorTask::OnTick(epg::TaskContext &context)
 
 EPG_REGISTER_TASK_TYPE(RuntimeSupervisorTask, "RuntimeSupervisorTask")
 
+EpgRedeployTask::EpgRedeployTask(
+    std::shared_ptr<SystemRuntimeStepServices> services,
+    std::shared_ptr<EpgRedeployCoordinator> redeploy)
+    : m_services(std::move(services)), m_redeploy(std::move(redeploy))
+{
+}
+
+void EpgRedeployTask::OnTick(epg::TaskContext &context)
+{
+    (void)context;
+    if (m_services && m_redeploy) {
+        m_services->OnEpgRedeployGraphTick(*m_redeploy);
+    }
+}
+
+EPG_REGISTER_TASK_TYPE(EpgRedeployTask, "EpgRedeployTask")
+
 DiscoveryBeaconTask::DiscoveryBeaconTask(
     std::shared_ptr<DiscoveryBeaconRuntime> runtime)
     : m_runtime(std::move(runtime))

@@ -9,6 +9,7 @@
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/runtime_command_service.h"
 #include "core/application/runtime/runtime_config_service.h"
+#include "core/application/runtime/epg_redeploy_coordinator.h"
 #include "core/application/runtime/runtime_session_supervisor.h"
 #include "core/domain/runtime_mode.h"
 
@@ -40,6 +41,7 @@ class UnifiedRuntimeController final : public IRuntimeCommandTarget {
     void OnSessionSupervisorGraphTick();
     void StepSessionSupervisor();
     void StepForceRestart();
+    void StepEpgRedeploy(EpgRedeployCoordinator &coordinator);
     CommandResult ExecuteAction(const RuntimeAction &action) override;
     CommandResult ApplyConfig(const ConfigUpdate &update) override;
 
@@ -48,6 +50,7 @@ class UnifiedRuntimeController final : public IRuntimeCommandTarget {
     CommandResult RequestCalibCleanup();
     CommandResult RunCalibCleanup();
     void StepPendingCalibCleanup();
+    void ApplySessionRedeployRequest(EpgRedeployCoordinator &coordinator);
 
     UnifiedConfig m_config;
     LiveRuntimeTuning &m_tuning;

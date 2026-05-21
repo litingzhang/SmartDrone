@@ -23,6 +23,15 @@ namespace epg {
 
 using PortId = std::uint32_t;
 
+inline constexpr const char *GRAPH_PROFILE_SCHEMA =
+    "smartdrone.epg.profile.v1";
+inline constexpr const char *OPTIMIZED_GRAPH_SCHEMA =
+    "smartdrone.epg.optimized_config.v1";
+inline constexpr const char *SOLVER_REPORT_SCHEMA =
+    "smartdrone.epg.solver_report.v1";
+inline constexpr const char *NATIVE_HEURISTIC_SOLVER_VERSION =
+    "native-heuristic-v2";
+
 enum class OverflowPolicy {
     DropNewest,
     OverwriteOldest
@@ -127,9 +136,81 @@ struct GraphConfig {
     std::vector<TaskConfig> tasks;
 };
 
+struct GraphProfileMetadata {
+    std::string schema;
+    std::string graph;
+    std::string topologyVersion;
+    std::uint64_t timestampMs{};
+};
+
+struct GraphProfileTaskCatalogEntry {
+    std::string taskType;
+    std::string role;
+    std::string resource;
+    std::uint64_t budgetUs{};
+    std::uint64_t deadlineUs{};
+    bool replaceable{false};
+};
+
+struct OptimizedGraphMetadata {
+    std::string schema;
+    std::string targetGraph;
+    std::string topologyVersion;
+    std::string solverVersion;
+    std::string sourceProfile;
+    std::uint64_t sourceTimestampMs{};
+};
+
+struct OptimizedGraph {
+    OptimizedGraphMetadata metadata;
+    GraphConfig config;
+};
+
+struct QueueProfileMetrics {
+    std::uint64_t maxDepthObserved{};
+    std::uint64_t droppedNewest{};
+    std::uint64_t overwrittenOldest{};
+    std::uint64_t pushedPerSecond{};
+    std::uint64_t poppedPerSecond{};
+    std::uint64_t droppedPerSecond{};
+};
+
+struct TaskProfileMetrics {
+    std::uint64_t maxLoopUs{};
+    std::uint64_t averageLoopUs{};
+    std::uint64_t p90LoopUs{};
+    std::uint64_t p99LoopUs{};
+    std::uint64_t utilizationPpm{};
+    std::uint64_t budgetOverrunCount{};
+    std::uint64_t deadlineMissCount{};
+    std::uint64_t schedulingErrorCount{};
+};
+
+struct GraphProfileDiagnostics {
+    std::map<std::string, QueueProfileMetrics> queues;
+    std::map<std::string, TaskProfileMetrics> tasks;
+};
+
+struct GraphProfile {
+    GraphProfileMetadata metadata;
+    std::vector<GraphProfileTaskCatalogEntry> taskCatalog;
+    GraphConfig topology;
+    GraphProfileDiagnostics diagnostics;
+};
+
 class Registry;
 
+GraphProfile ParseGraphProfileJson(const std::string& jsonText);
+GraphProfileMetadata ParseGraphProfileMetadataJson(
+    const std::string& jsonText);
+GraphProfileDiagnostics ParseGraphProfileDiagnosticsJson(
+    const std::string& jsonText);
+OptimizedGraphMetadata ParseOptimizedGraphMetadataJson(
+    const std::string& jsonText);
+OptimizedGraph ParseOptimizedGraphJson(const std::string& jsonText);
 GraphConfig ParseGraphConfigJson(const std::string& jsonText);
+GraphConfig ParseGraphConfigJsonField(const std::string& jsonText,
+                                      const std::string& field);
 GraphConfig ParseGraphConfigJsonFile(const std::string& path);
 GraphConfig ParseGraphConfigMermaid(const std::string& mermaidText);
 GraphConfig ParseGraphConfigMermaidFile(const std::string& path);
