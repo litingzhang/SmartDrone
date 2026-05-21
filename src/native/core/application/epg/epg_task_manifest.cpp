@@ -401,14 +401,61 @@ void ValidateGraphRuntimeTuningDeclared(
     }
 }
 
+std::uint64_t SolverReportTotalPenalty(
+    const epg::SolverReportScore &score)
+{
+    return score.queuePressure * 1000 + score.periodicOverloadUs +
+           score.schedulingErrors * 10000 + score.budgetOverruns * 2000 +
+           score.deadlineMisses * 5000 + score.utilizationOverPpm;
+}
+
+void AddQueueDecisionScore(const epg::SolverReportDecision &decision,
+                           epg::SolverReportScore &score)
+{
+    score.queuePressure += decision.pressureBefore;
+}
+
+void AddTaskDecisionScore(const epg::SolverReportDecision &decision,
+                          epg::SolverReportScore &score)
+{
+    if (decision.effectiveLoopUs > decision.intervalBeforeMs * 1000) {
+        score.periodicOverloadUs +=
+            decision.effectiveLoopUs - decision.intervalBeforeMs * 1000;
+    }
+    score.schedulingErrors += decision.schedulingErrorCount;
+    score.budgetOverruns += decision.budgetOverrunCount;
+    score.deadlineMisses += decision.deadlineMissCount;
+    if (decision.utilizationPpm > decision.targetUtilizationPpm) {
+        score.utilizationOverPpm +=
+            decision.utilizationPpm - decision.targetUtilizationPpm;
+    }
+}
+
+epg::SolverReportScore BuildSolverReportScore(
+    const std::vector<epg::SolverReportDecision> &decisions)
+{
+    epg::SolverReportScore score;
+    for (const auto &decision : decisions) {
+        if (decision.kind == "queue") {
+            AddQueueDecisionScore(decision, score);
+            continue;
+        }
+        AddTaskDecisionScore(decision, score);
+    }
+    score.totalPenalty = SolverReportTotalPenalty(score);
+    return score;
+}
+
 void ValidateSolverReportScore(const epg::SolverReport &report)
 {
-    const auto &score = report.score;
-    const auto weightedPenalty =
-        score.queuePressure * 1000 + score.periodicOverloadUs +
-        score.schedulingErrors * 10000 + score.budgetOverruns * 2000 +
-        score.deadlineMisses * 5000 + score.utilizationOverPpm;
-    if (score.totalPenalty != weightedPenalty) {
+    const auto expected = BuildSolverReportScore(report.decisions);
+    if (report.score.queuePressure != expected.queuePressure ||
+        report.score.periodicOverloadUs != expected.periodicOverloadUs ||
+        report.score.schedulingErrors != expected.schedulingErrors ||
+        report.score.budgetOverruns != expected.budgetOverruns ||
+        report.score.deadlineMisses != expected.deadlineMisses ||
+        report.score.utilizationOverPpm != expected.utilizationOverPpm ||
+        report.score.totalPenalty != expected.totalPenalty) {
         throw std::runtime_error("solver report score mismatch");
     }
 }

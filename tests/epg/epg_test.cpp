@@ -1812,13 +1812,13 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
       "objective": {
         "name": "unit",
         "score": {
-          "queuePressure": 0,
-          "periodicOverloadUs": 0,
-          "schedulingErrors": 0,
-          "budgetOverruns": 0,
-          "deadlineMisses": 0,
-          "utilizationOverPpm": 0,
-          "totalPenalty": 0
+          "queuePressure": 2,
+          "periodicOverloadUs": 500,
+          "schedulingErrors": 1,
+          "budgetOverruns": 2,
+          "deadlineMisses": 3,
+          "utilizationOverPpm": 100000,
+          "totalPenalty": 131500
         }
       },
       "constraints": {
@@ -1832,7 +1832,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
           "name": "packets",
           "depthBefore": 4,
           "depthAfter": 4,
-          "pressureBefore": 0,
+          "pressureBefore": 2,
           "pushedPerSecond": 0,
           "poppedPerSecond": 0,
           "droppedPerSecond": 0,
@@ -1843,20 +1843,20 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
           "name": "source",
           "intervalBeforeMs": 1,
           "intervalAfterMs": 1,
-          "maxLoopUs": 0,
-          "averageLoopUs": 0,
-          "p90LoopUs": 0,
-          "p99LoopUs": 0,
-          "effectiveLoopUs": 0,
-          "utilizationPpm": 0,
+          "maxLoopUs": 1500,
+          "averageLoopUs": 1000,
+          "p90LoopUs": 1200,
+          "p99LoopUs": 1500,
+          "effectiveLoopUs": 1500,
+          "utilizationPpm": 900000,
           "targetUtilizationPpm": 800000,
           "budgetUs": 1000,
           "deadlineUs": 2000,
           "catalogRole": "source",
           "replaceable": false,
-          "budgetOverrunCount": 0,
-          "deadlineMissCount": 0,
-          "schedulingErrorCount": 0,
+          "budgetOverrunCount": 2,
+          "deadlineMissCount": 3,
+          "schedulingErrorCount": 1,
           "reason": "keep"
         }
       ]
@@ -1940,6 +1940,14 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_THROW(
         smartdrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongScore),
+        std::runtime_error);
+
+    auto wrongScoreComponent = report;
+    wrongScoreComponent.score.queuePressure = 1;
+    wrongScoreComponent.score.totalPenalty = 130500;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, wrongScoreComponent),
         std::runtime_error);
 
     auto wrongDecisionDepth = report;

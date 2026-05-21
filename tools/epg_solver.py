@@ -520,14 +520,6 @@ def validate_generated_pair(config: Dict[str, Any],
     for field in SOLVER_CONSTRAINT_FIELDS:
         if integer(constraints.get(field), -1) <= 0:
             raise ValueError(f"EPG solver report constraint invalid: {field}")
-    penalty = (integer(score.get("queuePressure")) * 1000 +
-               integer(score.get("periodicOverloadUs")) +
-               integer(score.get("schedulingErrors")) * 10000 +
-               integer(score.get("budgetOverruns")) * 2000 +
-               integer(score.get("deadlineMisses")) * 5000 +
-               integer(score.get("utilizationOverPpm")))
-    if integer(score.get("totalPenalty")) != penalty:
-        raise ValueError("EPG solver report score mismatch")
     decisions = report.get("decisions")
     if not isinstance(decisions, list):
         raise ValueError("EPG solver report decisions missing")
@@ -568,6 +560,10 @@ def validate_generated_pair(config: Dict[str, Any],
         raise ValueError(f"EPG solver report decision kind unsupported: {kind}")
     if actual != expected:
         raise ValueError("EPG solver report decision coverage mismatch")
+    expected_score = score_decisions(decisions)
+    for field in SOLVER_SCORE_FIELDS:
+        if integer(score.get(field)) != expected_score[field]:
+            raise ValueError(f"EPG solver report score mismatch: {field}")
 
 
 def optimize_profile(profile: Dict[str, Any],
