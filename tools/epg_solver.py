@@ -227,6 +227,17 @@ def target_interval_ms(interval_ms: int,
     return min(max(target, interval_ms), limits.max_periodic_interval_ms)
 
 
+def report_reason(reasons: Set[str],
+                  interval_changed: bool,
+                  replaceable: bool) -> str:
+    if interval_changed:
+        return "increase_interval"
+    reason = "+".join(sorted(reasons)) if reasons else "keep"
+    if replaceable:
+        return reason
+    return "not_replaceable" if reason == "keep" else f"not_replaceable+{reason}"
+
+
 def normalized_task(task: Dict[str, Any], limits: SolverLimits,
                     diagnostics: Dict[str, Dict[str, Any]],
                     catalog: Dict[str, Dict[str, Any]]
@@ -245,8 +256,11 @@ def normalized_task(task: Dict[str, Any], limits: SolverLimits,
     utilization_ppm = integer(diag.get("utilizationPpm"))
     interval_ms = integer(trigger.get("interval_ms"))
     reasons = reason_set(diag, loop_us, utilization_ppm, scheduling, limits)
-    target_interval = target_interval_ms(
-        interval_ms, loop_us, utilization_ppm, limits)
+    replaceable = bool(catalog_item.get("replaceable", False))
+    target_interval = interval_ms
+    if replaceable:
+        target_interval = target_interval_ms(
+            interval_ms, loop_us, utilization_ppm, limits)
     if target_interval != interval_ms:
         trigger["interval_ms"] = target_interval
     result["trigger"] = trigger
@@ -266,15 +280,12 @@ def normalized_task(task: Dict[str, Any], limits: SolverLimits,
         "budgetUs": integer(scheduling.get("budget_us")),
         "deadlineUs": integer(scheduling.get("deadline_us")),
         "catalogRole": catalog_item.get("role", ""),
-        "replaceable": bool(catalog_item.get("replaceable", False)),
+        "replaceable": replaceable,
         "budgetOverrunCount": integer(diag.get("budgetOverrunCount")),
         "deadlineMissCount": integer(diag.get("deadlineMissCount")),
         "schedulingErrorCount": integer(diag.get("schedulingErrorCount")),
-        "reason": (
-            "increase_interval"
-            if target_interval != interval_ms
-            else "+".join(sorted(reasons)) if reasons else "keep"
-        ),
+        "reason": report_reason(
+            reasons, target_interval != interval_ms, replaceable),
     }
     return result, decision
 

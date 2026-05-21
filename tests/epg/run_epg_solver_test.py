@@ -82,6 +82,13 @@ def write_profile(path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def write_non_replaceable_profile(path: Path) -> None:
+    write_profile(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["taskCatalog"][0]["replaceable"] = False
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def expect_solver_failure(repo_root: Path,
                           profile_path: Path,
                           output_path: Path,
@@ -225,6 +232,31 @@ def main() -> int:
     assert report["decisions"][1]["replaceable"] is True
     assert report["decisions"][0]["reason"] == "increase_depth"
     assert report["decisions"][1]["reason"] == "increase_interval"
+    fixed_profile = work_dir / "non_replaceable_profile.json"
+    fixed_output = work_dir / "non_replaceable_optimized.json"
+    fixed_report_path = work_dir / "non_replaceable_report.json"
+    write_non_replaceable_profile(fixed_profile)
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "tools" / "epg_solver.py"),
+            "--profile",
+            str(fixed_profile),
+            "--output",
+            str(fixed_output),
+            "--report",
+            str(fixed_report_path),
+            "--max-queue-depth",
+            "8",
+            "--generated-at-ms",
+            "456",
+        ],
+        check=True,
+    )
+    fixed_optimized = json.loads(fixed_output.read_text(encoding="utf-8"))
+    fixed_report = json.loads(fixed_report_path.read_text(encoding="utf-8"))
+    assert fixed_optimized["tasks"][0]["trigger"]["interval_ms"] == 1
+    assert fixed_report["decisions"][1]["reason"].startswith("not_replaceable+")
     profile_root = work_dir / "profiles"
     output_root = work_dir / "batch"
     profile_root.mkdir(parents=True, exist_ok=True)

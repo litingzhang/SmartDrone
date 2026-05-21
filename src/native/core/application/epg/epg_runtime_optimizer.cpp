@@ -320,6 +320,17 @@ std::string TaskDecisionReason(const epg::TaskConfig &task,
     return reason;
 }
 
+std::string NotReplaceableTaskReason(const epg::TaskConfig &task,
+                                     const epg::TaskProfileMetrics &stats,
+                                     std::uint64_t effectiveLoopUs)
+{
+    const std::string reason = TaskDecisionReason(task, stats, effectiveLoopUs);
+    if (reason == "keep") {
+        return "not_replaceable";
+    }
+    return "not_replaceable+" + reason;
+}
+
 std::uint64_t TargetIntervalMs(const epg::TaskConfig &task,
                                const epg::TaskProfileMetrics &stats,
                                std::uint64_t effectiveLoopUs)
@@ -336,6 +347,19 @@ std::uint64_t TargetIntervalMs(const epg::TaskConfig &task,
     }
     target = std::max(target, intervalMs);
     return std::min(target, MAX_PERIODIC_INTERVAL_MS);
+}
+
+std::uint64_t OptimizedTaskIntervalMs(const epg::TaskConfig &task,
+                                      const epg::TaskProfileMetrics &stats,
+                                      const EpgTaskCatalogEntry *catalog,
+                                      std::uint64_t effectiveLoopUs)
+{
+    const auto intervalMs =
+        static_cast<std::uint64_t>(task.trigger.interval.count());
+    if (!catalog || !catalog->replaceable) {
+        return intervalMs;
+    }
+    return TargetIntervalMs(task, stats, effectiveLoopUs);
 }
 
 std::map<std::string, std::uint64_t>
@@ -394,7 +418,8 @@ void OptimizeTask(epg::TaskConfig &task,
     const auto intervalBefore =
         static_cast<std::uint64_t>(task.trigger.interval.count());
     const auto effectiveLoopUs = EffectiveLoopUs(stats);
-    const auto targetInterval = TargetIntervalMs(task, stats, effectiveLoopUs);
+    const auto targetInterval =
+        OptimizedTaskIntervalMs(task, stats, catalog, effectiveLoopUs);
     if (targetInterval != intervalBefore) {
         task.trigger.interval =
             std::chrono::milliseconds(static_cast<int>(targetInterval));
@@ -405,6 +430,9 @@ void OptimizeTask(epg::TaskConfig &task,
     decision.name = task.name;
     decision.reason = targetInterval != intervalBefore
                           ? "increase_interval"
+                      : catalog && !catalog->replaceable
+                          ? NotReplaceableTaskReason(task, stats,
+                                                     effectiveLoopUs)
                           : TaskDecisionReason(task, stats, effectiveLoopUs);
     decision.catalogRole = catalog ? catalog->role : "";
     decision.replaceable = catalog ? catalog->replaceable : false;

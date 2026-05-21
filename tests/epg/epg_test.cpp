@@ -520,6 +520,58 @@ std::string MissingTaskDiagnosticsProfileJson()
     })";
 }
 
+std::string NonReplaceableTaskProfileJson()
+{
+    return R"({
+      "schema": "smartdrone.epg.profile.v1",
+      "graph": "test_graph",
+      "topologyVersion": "test-topology",
+      "timestampMs": 1000,
+      "taskCatalog": [
+        {
+          "taskType": "TestSourceTask",
+          "role": "source",
+          "resource": "cpu",
+          "budgetUs": 1000,
+          "deadlineUs": 2000,
+          "replaceable": false
+        }
+      ],
+      "topology": {
+        "queues": [
+          {
+            "name": "packets",
+            "type": "TestPacket",
+            "depth": 4,
+            "overflow": "drop_newest"
+          }
+        ],
+        "tasks": [
+          {
+            "name": "source",
+            "type": "TestSourceTask",
+            "trigger": {"mode": "periodic", "interval_ms": 1},
+            "outputs": {"0": "packets"}
+          }
+        ]
+      },
+      "diagnostics": {
+        "queues": {"packets": {}},
+        "tasks": {
+          "source": {
+            "maxLoopUs": 2600,
+            "p90LoopUs": 2400,
+            "p99LoopUs": 2600,
+            "averageLoopUs": 2200,
+            "utilizationPpm": 900000,
+            "budgetOverrunCount": 2,
+            "deadlineMissCount": 1
+          }
+        }
+      }
+    })";
+}
+
 } // namespace
 
 TEST(EventPipelineGraphQueue, DropNewestKeepsOldItemsAndCountsDrops) {
@@ -2036,6 +2088,37 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
               std::string::npos);
     EXPECT_NE(report.find("\"replaceable\": true"), std::string::npos);
     EXPECT_NE(report.find("\"budgetOverruns\": 2"), std::string::npos);
+
+    (void)std::remove(profilePath.c_str());
+    (void)std::remove(outputPath.c_str());
+    (void)std::remove(reportPath.c_str());
+}
+
+TEST(EventPipelineGraphOptimizer, KeepsNonReplaceableTaskInterval) {
+    const std::string profilePath =
+        "/tmp/smartdrone_epg_optimizer_non_replaceable_profile.json";
+    const std::string outputPath =
+        "/tmp/smartdrone_epg_optimizer_non_replaceable_optimized.json";
+    const std::string reportPath =
+        "/tmp/smartdrone_epg_optimizer_non_replaceable_report.json";
+    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+        profilePath, NonReplaceableTaskProfileJson());
+
+    auto manifest = MakeValidTestManifest();
+    manifest.topologyVersion = "test-topology";
+    manifest.artifactPaths.profilePath = profilePath;
+    manifest.artifactPaths.optimizedConfigPath = outputPath;
+    manifest.artifactPaths.solverReportPath = reportPath;
+
+    const auto result =
+        smartdrone::core::application::OptimizeEpgProfileForManifest(
+            manifest, 1010);
+    EXPECT_TRUE(result.optimized) << result.message;
+    const auto config = epg::ParseGraphConfigJson(ReadFileText(outputPath));
+    ASSERT_EQ(config.tasks.size(), 1u);
+    EXPECT_EQ(config.tasks.front().trigger.interval.count(), 1);
+    EXPECT_NE(ReadFileText(reportPath).find("not_replaceable+"),
+              std::string::npos);
 
     (void)std::remove(profilePath.c_str());
     (void)std::remove(outputPath.c_str());
