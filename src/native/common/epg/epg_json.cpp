@@ -678,6 +678,22 @@ OptimizedGraphMetadata ParseOptimizedGraphMetadataObject(
     return metadata;
 }
 
+SolverReportMetadata ParseSolverReportMetadataObject(
+    const JsonValue& root)
+{
+    RequireConfigObject(root, "solver report json root must be object");
+
+    SolverReportMetadata metadata;
+    metadata.schema = RequiredString(root, "schema");
+    metadata.targetGraph = RequiredString(root, "targetGraph");
+    metadata.topologyVersion = RequiredString(root, "topologyVersion");
+    metadata.sourceProfile = RequiredString(root, "sourceProfile");
+    metadata.solverVersion = RequiredString(root, "solverVersion");
+    metadata.sourceTimestampMs = RequiredUInt64(root, "sourceTimestampMs");
+    metadata.generatedAtMs = RequiredUInt64(root, "generatedAtMs");
+    return metadata;
+}
+
 } // namespace
 
 GraphProfile ParseGraphProfileJson(const std::string& jsonText)
@@ -724,6 +740,13 @@ OptimizedGraph ParseOptimizedGraphJson(const std::string& jsonText)
         ParseOptimizedGraphMetadataObject(root),
         ParseGraphConfigObject(root),
     };
+}
+
+SolverReportMetadata ParseSolverReportMetadataJson(
+    const std::string& jsonText)
+{
+    const auto root = JsonParser(jsonText).Parse();
+    return ParseSolverReportMetadataObject(root);
 }
 
 GraphConfig ParseGraphConfigJson(const std::string& jsonText)

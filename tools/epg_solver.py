@@ -366,9 +366,12 @@ def optimize_profile(profile: Dict[str, Any],
     }
     report = {
         "schema": "smartdrone.epg.solver_report.v1",
+        "targetGraph": profile.get("graph", ""),
+        "topologyVersion": profile.get("topologyVersion", ""),
         "sourceProfile": profile.get("graph", ""),
         "sourceTimestampMs": profile.get("timestampMs", 0),
         "generatedAtMs": generated_at_ms,
+        "solverVersion": SOLVER_VERSION,
         "objective": {
             "name": "minimize_epg_pressure_overload_deadline_and_scheduling_penalty",
             "score": score_decisions(decisions),

@@ -522,6 +522,10 @@ std::string BuildSolverReport(const EpgTaskManifest &manifest,
     std::ostringstream out;
     out << "{\n";
     out << "  \"schema\": \"" << epg::SOLVER_REPORT_SCHEMA << "\",\n";
+    out << "  \"targetGraph\": \"" << JsonEscape(manifest.subgraphName)
+        << "\",\n";
+    out << "  \"topologyVersion\": \""
+        << JsonEscape(manifest.topologyVersion) << "\",\n";
     out << "  \"sourceProfile\": \"" << JsonEscape(manifest.subgraphName)
         << "\",\n";
     out << "  \"sourceTimestampMs\": " << metadata.timestampMs << ",\n";

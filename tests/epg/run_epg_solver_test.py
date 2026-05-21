@@ -209,7 +209,12 @@ def main() -> int:
     assert optimized["tasks"][0]["trigger"]["interval_ms"] == 3
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["schema"] == "smartdrone.epg.solver_report.v1"
+    assert report["targetGraph"] == "test_graph"
+    assert report["topologyVersion"] == "test-topology-v1"
+    assert report["sourceProfile"] == "test_graph"
+    assert report["sourceTimestampMs"] == 123
     assert report["generatedAtMs"] == 456
+    assert report["solverVersion"] == "python-heuristic-v2"
     assert report["objective"]["score"]["totalPenalty"] > 0
     assert report["objective"]["score"]["budgetOverruns"] == 2
     assert report["objective"]["score"]["deadlineMisses"] == 1

@@ -466,4 +466,34 @@ void ValidateEpgOptimizedGraphManifest(
     ValidateEpgTaskGraphManifest(manifest, optimizedGraph.config);
 }
 
+void ValidateEpgSolverReportManifest(
+    const EpgTaskManifest &manifest,
+    const epg::OptimizedGraphMetadata &optimizedMetadata,
+    const epg::SolverReportMetadata &reportMetadata)
+{
+    if (reportMetadata.schema != epg::SOLVER_REPORT_SCHEMA) {
+        throw std::runtime_error("solver report schema mismatch");
+    }
+    if (reportMetadata.targetGraph != manifest.subgraphName ||
+        reportMetadata.targetGraph != optimizedMetadata.targetGraph) {
+        throw std::runtime_error("solver report target mismatch");
+    }
+    if (reportMetadata.topologyVersion != manifest.topologyVersion ||
+        reportMetadata.topologyVersion != optimizedMetadata.topologyVersion) {
+        throw std::runtime_error("solver report topology version mismatch");
+    }
+    if (reportMetadata.sourceProfile != optimizedMetadata.sourceProfile ||
+        reportMetadata.sourceProfile != manifest.subgraphName) {
+        throw std::runtime_error("solver report source profile mismatch");
+    }
+    if (reportMetadata.solverVersion != optimizedMetadata.solverVersion) {
+        throw std::runtime_error("solver report version mismatch");
+    }
+    if (reportMetadata.sourceTimestampMs !=
+            optimizedMetadata.sourceTimestampMs ||
+        reportMetadata.generatedAtMs != optimizedMetadata.generatedAtMs) {
+        throw std::runtime_error("solver report provenance mismatch");
+    }
+}
+
 } // namespace smartdrone::core::application

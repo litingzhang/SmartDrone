@@ -1653,6 +1653,21 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_NO_THROW(
         smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, optimized));
+    const auto reportMetadata = epg::ParseSolverReportMetadataJson(R"({
+      "schema": "smartdrone.epg.solver_report.v1",
+      "targetGraph": "test_graph",
+      "topologyVersion": "test-topology",
+      "sourceProfile": "test_graph",
+      "sourceTimestampMs": 123,
+      "generatedAtMs": 456,
+      "solverVersion": "unit-test",
+      "objective": {"name": "unit", "score": {}},
+      "constraints": {},
+      "decisions": []
+    })");
+    EXPECT_NO_THROW(
+        smartdrone::core::application::ValidateEpgSolverReportManifest(
+            manifest, optimized.metadata, reportMetadata));
 
     auto wrongTarget = optimized;
     wrongTarget.metadata.targetGraph = "other_graph";
@@ -1694,6 +1709,20 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_THROW(
         smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, wrongScheduling),
+        std::runtime_error);
+
+    auto wrongReportTime = reportMetadata;
+    wrongReportTime.generatedAtMs = 999;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReportManifest(
+            manifest, optimized.metadata, wrongReportTime),
+        std::runtime_error);
+
+    auto wrongReportVersion = reportMetadata;
+    wrongReportVersion.solverVersion = "other-solver";
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReportManifest(
+            manifest, optimized.metadata, wrongReportVersion),
         std::runtime_error);
 }
 
@@ -1944,6 +1973,10 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     const std::string report = ReadFileText(reportPath);
     EXPECT_NE(report.find(std::string("\"schema\": \"") +
                               epg::SOLVER_REPORT_SCHEMA + "\""),
+              std::string::npos);
+    EXPECT_NE(report.find("\"targetGraph\": \"test_graph\""),
+              std::string::npos);
+    EXPECT_NE(report.find("\"topologyVersion\": \"test-topology\""),
               std::string::npos);
     EXPECT_NE(report.find(std::string("\"solverVersion\": \"") +
                               epg::NATIVE_HEURISTIC_SOLVER_VERSION + "\""),
@@ -2441,6 +2474,25 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     EXPECT_EQ(optimized.metadata.targetGraph, "test_graph");
     ASSERT_EQ(optimized.config.queues.size(), 1u);
     ASSERT_EQ(optimized.config.tasks.size(), 1u);
+    const auto reportMetadata = epg::ParseSolverReportMetadataJson(R"({
+      "schema": "smartdrone.epg.solver_report.v1",
+      "targetGraph": "test_graph",
+      "topologyVersion": "test-topology",
+      "sourceProfile": "test_graph",
+      "sourceTimestampMs": 123,
+      "generatedAtMs": 456,
+      "solverVersion": "unit-test",
+      "objective": {"name": "unit", "score": {}},
+      "constraints": {},
+      "decisions": []
+    })");
+    EXPECT_EQ(reportMetadata.schema, epg::SOLVER_REPORT_SCHEMA);
+    EXPECT_EQ(reportMetadata.targetGraph, "test_graph");
+    EXPECT_EQ(reportMetadata.topologyVersion, "test-topology");
+    EXPECT_EQ(reportMetadata.sourceProfile, "test_graph");
+    EXPECT_EQ(reportMetadata.sourceTimestampMs, 123u);
+    EXPECT_EQ(reportMetadata.generatedAtMs, 456u);
+    EXPECT_EQ(reportMetadata.solverVersion, "unit-test");
     EXPECT_THROW(
         epg::ParseOptimizedGraphJson(R"({
           "schema": "smartdrone.epg.optimized_config.v1",

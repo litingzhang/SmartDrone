@@ -167,6 +167,16 @@ struct OptimizedGraph {
     GraphConfig config;
 };
 
+struct SolverReportMetadata {
+    std::string schema;
+    std::string targetGraph;
+    std::string topologyVersion;
+    std::string sourceProfile;
+    std::string solverVersion;
+    std::uint64_t sourceTimestampMs{};
+    std::uint64_t generatedAtMs{};
+};
+
 struct QueueProfileMetrics {
     std::uint64_t maxDepthObserved{};
     std::uint64_t droppedNewest{};
@@ -209,6 +219,8 @@ GraphProfileDiagnostics ParseGraphProfileDiagnosticsJson(
 OptimizedGraphMetadata ParseOptimizedGraphMetadataJson(
     const std::string& jsonText);
 OptimizedGraph ParseOptimizedGraphJson(const std::string& jsonText);
+SolverReportMetadata ParseSolverReportMetadataJson(
+    const std::string& jsonText);
 GraphConfig ParseGraphConfigJson(const std::string& jsonText);
 GraphConfig ParseGraphConfigJsonField(const std::string& jsonText,
                                       const std::string& field);
