@@ -34,6 +34,7 @@ const EpgTaskManifest SYSTEM_RUNTIME_MANIFEST{
     {
         {LEGACY_MAVLINK_RX_TASK_TYPE, VEHICLE_TELEMETRY_RX_TASK_TYPE},
     },
+    {},
     {
         {VEHICLE_TELEMETRY_RX_TASK_TYPE, "telemetry_rx", "cpu", 1000, 2000, false},
         {"SetpointStreamTask", "flight_setpoint", "cpu", 1000, 2000, false},
@@ -56,6 +57,11 @@ const EpgTaskManifest SLAM_SESSION_MANIFEST{
     BuildEpgTaskArtifactPaths({"smartdrone_epg_slam",
                                "optimized_slam_session_graph"}),
     {},
+    {
+        {"SlamResourceTask", true, false, false},
+        {"SlamClockTask", true, false, false},
+        {"SlamImuPollTask", false, true, true},
+    },
     {
         {"SlamResourceTask", "resource_open", "cpu", 5000, 50000, false},
         {"SlamClockTask", "frame_clock", "cpu", 500, 2000, false},
@@ -82,6 +88,7 @@ const EpgTaskManifest CALIB_SESSION_MANIFEST{
     BuildEpgTaskTopologyVersion(EPG_TOPOLOGY_SPEC),
     BuildEpgTaskArtifactPaths({"smartdrone_epg_calib",
                                "optimized_calib_session_graph"}),
+    {},
     {},
     {
         {"CalibResourceTask", "resource_open", "cpu", 5000, 50000, false},
@@ -309,6 +316,57 @@ void ValidateManifestAliases(const EpgTaskManifest &manifest,
     }
 }
 
+bool RuntimeTuningEnabled(const EpgTaskRuntimeTuningEntry &entry)
+{
+    return entry.interval || entry.realtime || entry.priority;
+}
+
+const EpgTaskRuntimeTuningEntry *FindRuntimeTuning(
+    const std::vector<EpgTaskRuntimeTuningEntry> &entries,
+    const std::string &taskName)
+{
+    for (const auto &entry : entries) {
+        if (entry.taskName == taskName) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+bool GraphUsesTaskName(const epg::GraphConfig &graphConfig,
+                       const std::string &taskName)
+{
+    for (const auto &task : graphConfig.tasks) {
+        if (task.name == taskName) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ValidateRuntimeTuningEntry(const EpgTaskManifest &manifest,
+                                const EpgTaskRuntimeTuningEntry &entry)
+{
+    if (entry.taskName.empty() || !RuntimeTuningEnabled(entry)) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " runtime tuning metadata is incomplete");
+    }
+}
+
+void ValidateRuntimeTuningRequestAllowed(
+    const EpgTaskManifest &manifest,
+    const EpgTaskRuntimeTuningEntry &allowed,
+    const EpgTaskRuntimeTuningEntry &requested)
+{
+    if ((requested.interval && !allowed.interval) ||
+        (requested.realtime && !allowed.realtime) ||
+        (requested.priority && !allowed.priority)) {
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " runtime tuning is not allowed: " +
+                                 requested.taskName);
+    }
+}
+
 std::string BuildPath(const char *directory, const std::string &stem,
                       const char *suffix)
 {
@@ -391,6 +449,30 @@ void ApplyEpgTaskCatalogDefaults(
             continue;
         }
         ApplyCatalogDefaultsToTask(*entry, task);
+    }
+}
+
+void ValidateEpgTaskRuntimeTuning(
+    const EpgTaskManifest &manifest,
+    const epg::GraphConfig &graphConfig,
+    const std::vector<EpgTaskRuntimeTuningEntry> &requestedTuning)
+{
+    ValidateManifestMetadata(manifest);
+    for (const auto &requested : requestedTuning) {
+        ValidateRuntimeTuningEntry(manifest, requested);
+        const auto *allowed =
+            FindRuntimeTuning(manifest.runtimeTuning, requested.taskName);
+        if (!allowed) {
+            throw std::runtime_error(TaskGraphLabel(manifest) +
+                                     " runtime tuning task is not declared: " +
+                                     requested.taskName);
+        }
+        ValidateRuntimeTuningRequestAllowed(manifest, *allowed, requested);
+        if (!GraphUsesTaskName(graphConfig, requested.taskName)) {
+            throw std::runtime_error(TaskGraphLabel(manifest) +
+                                     " runtime tuning task is missing: " +
+                                     requested.taskName);
+        }
     }
 }
 

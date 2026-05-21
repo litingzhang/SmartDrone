@@ -339,8 +339,8 @@ SlamClockTask -> SlamImuGateTask [
 ```
 
 For SLAM, `SlamClockTask` should represent the configured SLAM input cadence, not a busy polling
-tick. The maintained DOT uses a safe default, and the runtime session overrides the compiled
-interval from the active SLAM input FPS before starting the graph.
+tick. The maintained DOT uses a safe default, and the runtime session applies only the runtime
+tuning entries declared by the EPG manifest before starting the graph.
 
 Port ids are unsigned integers. Input ports and output ports are separate
 namespaces per task.

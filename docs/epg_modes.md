@@ -30,7 +30,7 @@ SLAM is graph-backed by a C++-assembled epg. The maintained visual topology is o
 Current responsibility split:
 
 - `SlamResourceTask`: owns the existing `SlamSessionRuntime` lifecycle and emits readiness after startup.
-- `SlamClockTask`: emits the frame tick queue. The static DOT default is 50 ms, and the SLAM session overrides it from the configured SLAM input FPS at startup.
+- `SlamClockTask`: emits the frame tick queue. The static DOT default is 50 ms, and the SLAM session applies the manifest-declared runtime tuning for the configured SLAM input FPS at startup.
 - `SlamImuGateTask`: consumes runtime readiness and ticks, waits for IMU readiness, rate-limits frame readiness from the live SLAM input FPS, and emits `SlamFrameReady`.
 - `SlamAcquireTask`: runs `SlamFrameInputPort::AcquireAndPrepareFrame` and emits `SlamPreparedFrame`.
 - `SlamTrackingTask`: runs `SlamFrameTrackingPort::TrackPreparedFrame` and emits `SlamTrackedFrame`.

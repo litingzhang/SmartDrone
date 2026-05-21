@@ -38,6 +38,13 @@ struct EpgTaskTopologySpec {
     std::string revision;
 };
 
+struct EpgTaskRuntimeTuningEntry {
+    std::string taskName;
+    bool interval{false};
+    bool realtime{false};
+    bool priority{false};
+};
+
 struct EpgTaskManifest {
     EpgDomain domain{EpgDomain::SystemRuntime};
     std::string subgraphName;
@@ -45,6 +52,7 @@ struct EpgTaskManifest {
     std::string topologyVersion;
     EpgTaskArtifactPaths artifactPaths;
     std::vector<EpgTaskAliasManifestEntry> aliases;
+    std::vector<EpgTaskRuntimeTuningEntry> runtimeTuning;
     std::vector<EpgTaskCatalogEntry> catalog;
 };
 
@@ -59,6 +67,10 @@ std::string EpgTaskCatalogJson(const EpgTaskManifest &manifest);
 void ApplyEpgTaskCatalogDefaults(
     const EpgTaskManifest &manifest,
     epg::GraphConfig &graphConfig);
+void ValidateEpgTaskRuntimeTuning(
+    const EpgTaskManifest &manifest,
+    const epg::GraphConfig &graphConfig,
+    const std::vector<EpgTaskRuntimeTuningEntry> &requestedTuning);
 void ValidateEpgTaskManifest(
     const EpgTaskManifest &manifest);
 void ValidateEpgTaskFactoryManifest(

@@ -1492,6 +1492,14 @@ TEST(EventPipelineGraphManifest, RuntimeManifestsUseCentralizedArtifacts) {
               "output/epg/optimized_slam_session_graph.json");
     EXPECT_EQ(slam.artifactPaths.solverReportPath,
               "output/epg/optimized_slam_session_graph_report.json");
+    ASSERT_EQ(slam.runtimeTuning.size(), 3u);
+    EXPECT_EQ(slam.runtimeTuning[0].taskName, "SlamResourceTask");
+    EXPECT_TRUE(slam.runtimeTuning[0].interval);
+    EXPECT_EQ(slam.runtimeTuning[1].taskName, "SlamClockTask");
+    EXPECT_TRUE(slam.runtimeTuning[1].interval);
+    EXPECT_EQ(slam.runtimeTuning[2].taskName, "SlamImuPollTask");
+    EXPECT_TRUE(slam.runtimeTuning[2].realtime);
+    EXPECT_TRUE(slam.runtimeTuning[2].priority);
 
     const auto &calib = EpgManifestForDomain(EpgDomain::CalibSession);
     const auto calibTaskTypes = EpgTaskCatalogTypes(calib);
@@ -1507,6 +1515,25 @@ TEST(EventPipelineGraphManifest, RuntimeManifestsUseCentralizedArtifacts) {
               "output/epg/optimized_calib_session_graph.json");
     EXPECT_EQ(calib.artifactPaths.solverReportPath,
               "output/epg/optimized_calib_session_graph_report.json");
+}
+
+TEST(EventPipelineGraphManifest, ValidatesRuntimeTuningManifest) {
+    auto manifest = MakeValidTestManifest();
+    manifest.runtimeTuning.push_back({"source", true, false, false});
+    epg::GraphConfig config;
+    config.tasks.push_back({"source", "TestSourceTask"});
+
+    EXPECT_NO_THROW(
+        smartdrone::core::application::ValidateEpgTaskRuntimeTuning(
+            manifest, config, {{"source", true, false, false}}));
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskRuntimeTuning(
+            manifest, config, {{"source", false, true, false}}),
+        std::runtime_error);
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskRuntimeTuning(
+            manifest, config, {{"missing", true, false, false}}),
+        std::runtime_error);
 }
 
 TEST(EventPipelineGraphManifest, RejectsDuplicateCatalogTaskTypes) {
