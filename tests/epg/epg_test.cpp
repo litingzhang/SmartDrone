@@ -470,15 +470,67 @@ Registry::TaskFactory TestSourceFactoryResolver(const std::string &taskType)
     return Registry::TaskFactory{};
 }
 
-std::string ReadFileText(const std::string& path) {
+std::string ReadFileText(const std::string& path)
+{
     std::ifstream input(path);
     return std::string(std::istreambuf_iterator<char>(input),
                        std::istreambuf_iterator<char>());
 }
 
-std::string MissingTaskDiagnosticsProfileJson()
+std::string MinimalQueueDiagnosticsJson()
 {
     return R"({
+            "maxDepthObserved": 0,
+            "droppedNewest": 0,
+            "overwrittenOldest": 0,
+            "pushedPerSecond": 0,
+            "poppedPerSecond": 0,
+            "droppedPerSecond": 0
+          })";
+}
+
+std::string MinimalTaskDiagnosticsJson()
+{
+    return R"({
+            "maxLoopUs": 0,
+            "averageLoopUs": 0,
+            "p90LoopUs": 0,
+            "p99LoopUs": 0,
+            "utilizationPpm": 0,
+            "budgetOverrunCount": 0,
+            "deadlineMissCount": 0,
+            "schedulingErrorCount": 0
+          })";
+}
+
+std::string MinimalProfileDiagnosticsJson(std::uint64_t timestampMs)
+{
+    return std::string(R"({
+            "graph": "test_graph",
+            "timestampMs": )") + std::to_string(timestampMs) +
+           R"(,
+            "queues": {"packets": )" + MinimalQueueDiagnosticsJson() +
+           R"(},
+            "tasks": {"source": )" + MinimalTaskDiagnosticsJson() +
+           R"(}
+          })";
+}
+
+std::string MissingTaskProfileDiagnosticsJson(std::uint64_t timestampMs)
+{
+    return std::string(R"({
+            "graph": "test_graph",
+            "timestampMs": )") + std::to_string(timestampMs) +
+           R"(,
+            "queues": {"packets": )" + MinimalQueueDiagnosticsJson() +
+           R"(},
+            "tasks": {}
+          })";
+}
+
+std::string MissingTaskDiagnosticsProfileJson()
+{
+    return std::string(R"({
       "schema": "smartdrone.epg.profile.v1",
       "graph": "test_graph",
       "topologyVersion": "test-topology",
@@ -511,18 +563,14 @@ std::string MissingTaskDiagnosticsProfileJson()
           }
         ]
       },
-      "diagnostics": {
-        "graph": "test_graph",
-        "timestampMs": 1000,
-        "queues": {"packets": {}},
-        "tasks": {}
-      }
+      "diagnostics": )") + MissingTaskProfileDiagnosticsJson(1000) +
+           R"(
     })";
 }
 
 std::string NonReplaceableTaskProfileJson()
 {
-    return R"({
+    return std::string(R"({
       "schema": "smartdrone.epg.profile.v1",
       "graph": "test_graph",
       "topologyVersion": "test-topology",
@@ -556,7 +604,8 @@ std::string NonReplaceableTaskProfileJson()
         ]
       },
       "diagnostics": {
-        "queues": {"packets": {}},
+        "queues": {"packets": )") + MinimalQueueDiagnosticsJson() +
+           R"(},
         "tasks": {
           "source": {
             "maxLoopUs": 2600,
@@ -565,7 +614,8 @@ std::string NonReplaceableTaskProfileJson()
             "averageLoopUs": 2200,
             "utilizationPpm": 900000,
             "budgetOverrunCount": 2,
-            "deadlineMissCount": 1
+            "deadlineMissCount": 1,
+            "schedulingErrorCount": 0
           }
         }
       }
@@ -1904,6 +1954,30 @@ TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
         std::runtime_error);
 }
 
+TEST(EventPipelineGraph, RejectsProfileDiagnosticsMissingMetric)
+{
+    const auto profile = std::string(R"({
+      "diagnostics": {
+        "queues": {
+          "packets": {
+            "maxDepthObserved": 0
+          }
+        },
+        "tasks": {"source": )") + MinimalTaskDiagnosticsJson() +
+        R"(}
+      }
+    })";
+
+    try {
+        (void)epg::ParseGraphProfileDiagnosticsJson(profile);
+        FAIL() << "expected missing diagnostic metric to be rejected";
+    } catch (const std::runtime_error &error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("missing json field: droppedNewest"),
+                  std::string::npos);
+    }
+}
+
 TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     const std::string profilePath = "/tmp/smartdrone_epg_optimizer_test_profile.json";
     const std::string outputPath = "/tmp/smartdrone_epg_optimizer_test_optimized.json";
@@ -2132,7 +2206,7 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileTasksOutsideManifest) {
         "/tmp/smartdrone_epg_optimizer_outside_manifest_optimized.json";
     smartdrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
-        R"({
+        std::string(R"({
           "schema": "smartdrone.epg.profile.v1",
           "graph": "test_graph",
           "topologyVersion": "test-topology",
@@ -2174,12 +2248,8 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileTasksOutsideManifest) {
               }
             ]
           },
-          "diagnostics": {
-            "graph": "test_graph",
-            "timestampMs": 1000,
-            "queues": {"packets": {}},
-            "tasks": {"source": {}}
-          }
+          "diagnostics": )") + MinimalProfileDiagnosticsJson(1000) +
+          R"(
         })");
 
     auto manifest = MakeValidTestManifest();
@@ -2202,7 +2272,7 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileCatalogMismatch) {
         "/tmp/smartdrone_epg_optimizer_catalog_mismatch_profile.json";
     smartdrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
-        R"({
+        std::string(R"({
           "schema": "smartdrone.epg.profile.v1",
           "graph": "test_graph",
           "topologyVersion": "test-topology",
@@ -2235,12 +2305,8 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileCatalogMismatch) {
               }
             ]
           },
-          "diagnostics": {
-            "graph": "test_graph",
-            "timestampMs": 1000,
-            "queues": {"packets": {}},
-            "tasks": {"source": {}}
-          }
+          "diagnostics": )") + MinimalProfileDiagnosticsJson(1000) +
+          R"(
         })");
 
     auto manifest = MakeValidTestManifest();
@@ -2285,7 +2351,7 @@ TEST(EventPipelineGraphOptimizer, CreatesArtifactDirectories) {
     const std::string reportPath = outputDir + "/reports/report.json";
     smartdrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
-        R"({
+        std::string(R"({
           "schema": "smartdrone.epg.profile.v1",
           "graph": "test_graph",
           "topologyVersion": "test-topology",
@@ -2318,12 +2384,8 @@ TEST(EventPipelineGraphOptimizer, CreatesArtifactDirectories) {
               }
             ]
           },
-          "diagnostics": {
-            "graph": "test_graph",
-            "timestampMs": 1000,
-            "queues": {"packets": {}},
-            "tasks": {"source": {}}
-          }
+          "diagnostics": )") + MinimalProfileDiagnosticsJson(1000) +
+          R"(
         })");
 
     auto manifest = MakeValidTestManifest();
@@ -2358,7 +2420,7 @@ TEST(EventPipelineGraphOptimizer, ReportsArtifactWriteFailure) {
         blockedParent, "{}");
     smartdrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
-        R"({
+        std::string(R"({
           "schema": "smartdrone.epg.profile.v1",
           "graph": "test_graph",
           "topologyVersion": "test-topology",
@@ -2391,12 +2453,8 @@ TEST(EventPipelineGraphOptimizer, ReportsArtifactWriteFailure) {
               }
             ]
           },
-          "diagnostics": {
-            "graph": "test_graph",
-            "timestampMs": 1000,
-            "queues": {"packets": {}},
-            "tasks": {"source": {}}
-          }
+          "diagnostics": )") + MinimalProfileDiagnosticsJson(1000) +
+          R"(
         })");
 
     auto manifest = MakeValidTestManifest();
@@ -2423,7 +2481,7 @@ TEST(EventPipelineGraphOptimizer, ReportsUnchangedConfigWithoutRedeploy) {
     const std::uint64_t nowMs = 2000;
     smartdrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
-        R"({
+        std::string(R"({
           "schema": "smartdrone.epg.profile.v1",
           "graph": "test_graph",
           "topologyVersion": "test-topology",
@@ -2456,12 +2514,8 @@ TEST(EventPipelineGraphOptimizer, ReportsUnchangedConfigWithoutRedeploy) {
               }
             ]
           },
-          "diagnostics": {
-            "graph": "test_graph",
-            "timestampMs": 2000,
-            "queues": {"packets": {}},
-            "tasks": {"source": {}}
-          }
+          "diagnostics": )") + MinimalProfileDiagnosticsJson(2000) +
+          R"(
         })");
 
     auto manifest = MakeValidTestManifest();

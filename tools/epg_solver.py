@@ -127,6 +127,40 @@ def require_text(item: Dict[str, Any], field: str, kind: str) -> str:
     return value
 
 
+QUEUE_DIAGNOSTIC_FIELDS = [
+    "maxDepthObserved",
+    "droppedNewest",
+    "overwrittenOldest",
+    "pushedPerSecond",
+    "poppedPerSecond",
+    "droppedPerSecond",
+]
+
+TASK_DIAGNOSTIC_FIELDS = [
+    "maxLoopUs",
+    "averageLoopUs",
+    "p90LoopUs",
+    "p99LoopUs",
+    "utilizationPpm",
+    "budgetOverrunCount",
+    "deadlineMissCount",
+    "schedulingErrorCount",
+]
+
+
+def validate_diagnostic_fields(diag: Dict[str, Any],
+                               fields: List[str],
+                               name: str,
+                               kind: str) -> None:
+    for field in fields:
+        if field not in diag:
+            raise ValueError(
+                f"EPG profile diagnostics {kind} missing {field}: {name}")
+        if integer(diag.get(field), -1) < 0:
+            raise ValueError(
+                f"EPG profile diagnostics {kind} invalid {field}: {name}")
+
+
 def validate_diagnostics_coverage(queues: List[Dict[str, Any]],
                                   tasks: List[Dict[str, Any]],
                                   queue_diag: Dict[str, Dict[str, Any]],
@@ -137,12 +171,16 @@ def validate_diagnostics_coverage(queues: List[Dict[str, Any]],
         name = require_text(queue, "name", "queue")
         if name not in queue_diag:
             raise ValueError(f"EPG profile diagnostics missing queue: {name}")
+        validate_diagnostic_fields(
+            queue_diag[name], QUEUE_DIAGNOSTIC_FIELDS, name, "queue")
     for task in tasks:
         if not isinstance(task, dict):
             continue
         name = require_text(task, "name", "task")
         if name not in task_diag:
             raise ValueError(f"EPG profile diagnostics missing task: {name}")
+        validate_diagnostic_fields(
+            task_diag[name], TASK_DIAGNOSTIC_FIELDS, name, "task")
 
 
 def queue_pressure(depth: int, diag: Dict[str, Any]) -> int:

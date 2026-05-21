@@ -9,6 +9,17 @@ import sys
 from pathlib import Path
 
 
+def minimal_queue_diagnostics() -> dict:
+    return {
+        "maxDepthObserved": 0,
+        "droppedNewest": 0,
+        "overwrittenOldest": 0,
+        "pushedPerSecond": 0,
+        "poppedPerSecond": 0,
+        "droppedPerSecond": 0,
+    }
+
+
 def write_profile(path: Path) -> None:
     payload = {
         "schema": "smartdrone.epg.profile.v1",
@@ -171,10 +182,17 @@ def write_missing_diagnostics_profile(path: Path) -> None:
             ],
         },
         "diagnostics": {
-            "queues": {"packets": {}},
+            "queues": {"packets": minimal_queue_diagnostics()},
             "tasks": {},
         },
     }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def write_missing_diagnostic_field_profile(path: Path) -> None:
+    write_profile(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    del payload["diagnostics"]["tasks"]["source"]["p99LoopUs"]
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -343,6 +361,13 @@ def main() -> int:
         missing_diag_profile,
         bad_output,
         "diagnostics missing task: source")
+    missing_diag_field_profile = work_dir / "missing_diagnostic_field.json"
+    write_missing_diagnostic_field_profile(missing_diag_field_profile)
+    expect_solver_failure(
+        repo_root,
+        missing_diag_field_profile,
+        bad_output,
+        "diagnostics task missing p99LoopUs: source")
     return 0
 
 

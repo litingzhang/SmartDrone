@@ -536,18 +536,12 @@ QueueProfileMetrics ParseQueueProfileMetrics(const JsonValue& item)
 {
     RequireConfigObject(item, "queue profile metrics must be object");
     QueueProfileMetrics metrics;
-    metrics.maxDepthObserved =
-        OptionalUInt64(item, "maxDepthObserved", metrics.maxDepthObserved);
-    metrics.droppedNewest =
-        OptionalUInt64(item, "droppedNewest", metrics.droppedNewest);
-    metrics.overwrittenOldest =
-        OptionalUInt64(item, "overwrittenOldest", metrics.overwrittenOldest);
-    metrics.pushedPerSecond =
-        OptionalUInt64(item, "pushedPerSecond", metrics.pushedPerSecond);
-    metrics.poppedPerSecond =
-        OptionalUInt64(item, "poppedPerSecond", metrics.poppedPerSecond);
-    metrics.droppedPerSecond =
-        OptionalUInt64(item, "droppedPerSecond", metrics.droppedPerSecond);
+    metrics.maxDepthObserved = RequiredUInt64(item, "maxDepthObserved");
+    metrics.droppedNewest = RequiredUInt64(item, "droppedNewest");
+    metrics.overwrittenOldest = RequiredUInt64(item, "overwrittenOldest");
+    metrics.pushedPerSecond = RequiredUInt64(item, "pushedPerSecond");
+    metrics.poppedPerSecond = RequiredUInt64(item, "poppedPerSecond");
+    metrics.droppedPerSecond = RequiredUInt64(item, "droppedPerSecond");
     return metrics;
 }
 
@@ -555,20 +549,15 @@ TaskProfileMetrics ParseTaskProfileMetrics(const JsonValue& item)
 {
     RequireConfigObject(item, "task profile metrics must be object");
     TaskProfileMetrics metrics;
-    metrics.maxLoopUs = OptionalUInt64(item, "maxLoopUs", metrics.maxLoopUs);
-    metrics.averageLoopUs =
-        OptionalUInt64(item, "averageLoopUs", metrics.averageLoopUs);
-    metrics.p90LoopUs = OptionalUInt64(item, "p90LoopUs", metrics.p90LoopUs);
-    metrics.p99LoopUs = OptionalUInt64(item, "p99LoopUs", metrics.p99LoopUs);
-    metrics.utilizationPpm =
-        OptionalUInt64(item, "utilizationPpm", metrics.utilizationPpm);
-    metrics.budgetOverrunCount =
-        OptionalUInt64(item, "budgetOverrunCount", metrics.budgetOverrunCount);
-    metrics.deadlineMissCount =
-        OptionalUInt64(item, "deadlineMissCount", metrics.deadlineMissCount);
+    metrics.maxLoopUs = RequiredUInt64(item, "maxLoopUs");
+    metrics.averageLoopUs = RequiredUInt64(item, "averageLoopUs");
+    metrics.p90LoopUs = RequiredUInt64(item, "p90LoopUs");
+    metrics.p99LoopUs = RequiredUInt64(item, "p99LoopUs");
+    metrics.utilizationPpm = RequiredUInt64(item, "utilizationPpm");
+    metrics.budgetOverrunCount = RequiredUInt64(item, "budgetOverrunCount");
+    metrics.deadlineMissCount = RequiredUInt64(item, "deadlineMissCount");
     metrics.schedulingErrorCount =
-        OptionalUInt64(item, "schedulingErrorCount",
-                       metrics.schedulingErrorCount);
+        RequiredUInt64(item, "schedulingErrorCount");
     return metrics;
 }
 
