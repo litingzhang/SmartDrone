@@ -1864,6 +1864,15 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_NO_THROW(
         smartdrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, report));
+    auto sourceProfile = epg::GraphProfile{};
+    sourceProfile.metadata.schema = epg::GRAPH_PROFILE_SCHEMA;
+    sourceProfile.metadata.graph = "test_graph";
+    sourceProfile.metadata.topologyVersion = "test-topology";
+    sourceProfile.metadata.timestampMs = 123;
+    sourceProfile.topology = optimized.config;
+    EXPECT_NO_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, sourceProfile, optimized, report));
 
     auto wrongTarget = optimized;
     wrongTarget.metadata.targetGraph = "other_graph";
@@ -1990,6 +1999,28 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_THROW(
         smartdrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongReason),
+        std::runtime_error);
+
+    auto wrongSourceProfile = sourceProfile;
+    wrongSourceProfile.metadata.timestampMs = 999;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, wrongSourceProfile, optimized, report),
+        std::runtime_error);
+
+    auto wrongSourceQueue = sourceProfile;
+    wrongSourceQueue.topology.queues[0].depth = 999;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, wrongSourceQueue, optimized, report),
+        std::runtime_error);
+
+    auto wrongSourceTask = sourceProfile;
+    wrongSourceTask.topology.tasks[0].trigger.interval =
+        std::chrono::milliseconds(999);
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, wrongSourceTask, optimized, report),
         std::runtime_error);
 }
 
@@ -2283,9 +2314,11 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     EXPECT_NE(report.find("\"budgetOverruns\": 2"), std::string::npos);
     const auto optimizedGraph = epg::ParseOptimizedGraphJson(optimized);
     const auto parsedReport = epg::ParseSolverReportJson(report);
+    const auto parsedProfile = epg::ParseGraphProfileJson(
+        ReadFileText(profilePath));
     EXPECT_NO_THROW(
         smartdrone::core::application::ValidateEpgSolverReport(
-            manifest, optimizedGraph, parsedReport));
+            manifest, parsedProfile, optimizedGraph, parsedReport));
     EXPECT_EQ(parsedReport.objectiveName,
               "minimize_epg_pressure_overload_deadline_and_scheduling_penalty");
     EXPECT_EQ(parsedReport.constraints.maxQueueDepth, 16u);

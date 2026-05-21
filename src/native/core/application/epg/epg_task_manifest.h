@@ -90,5 +90,10 @@ void ValidateEpgSolverReport(
     const EpgTaskManifest &manifest,
     const epg::OptimizedGraph &optimizedGraph,
     const epg::SolverReport &report);
+void ValidateEpgSolverReport(
+    const EpgTaskManifest &manifest,
+    const epg::GraphProfile &sourceProfile,
+    const epg::OptimizedGraph &optimizedGraph,
+    const epg::SolverReport &report);
 
 } // namespace smartdrone::core::application

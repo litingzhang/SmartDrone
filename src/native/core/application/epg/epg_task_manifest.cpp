@@ -519,6 +519,7 @@ void ValidateSolverReportConstraints(const epg::SolverReport &report)
 }
 
 void ValidateQueueSolverDecision(
+    const epg::GraphConfig *sourceGraphConfig,
     const epg::GraphConfig &graphConfig,
     const epg::SolverReportConstraints &constraints,
     const epg::SolverReportDecision &decision)
@@ -536,6 +537,16 @@ void ValidateQueueSolverDecision(
         decision.depthAfter > constraints.maxQueueDepth) {
         throw std::runtime_error("solver report queue constraint mismatch: " +
                                  decision.name);
+    }
+    if (sourceGraphConfig) {
+        const auto *sourceQueue = FindQueueConfig(*sourceGraphConfig,
+                                                  decision.name);
+        if (!sourceQueue ||
+            decision.depthBefore !=
+                static_cast<std::uint64_t>(sourceQueue->depth)) {
+            throw std::runtime_error("solver report queue source mismatch: " +
+                                     decision.name);
+        }
     }
     const std::string expectedReason =
         decision.depthAfter != decision.depthBefore ? "increase_depth" : "keep";
@@ -594,6 +605,7 @@ std::string ExpectedTaskDecisionReason(
 
 void ValidateTaskSolverDecision(
     const EpgTaskManifest &manifest,
+    const epg::GraphConfig *sourceGraphConfig,
     const epg::GraphConfig &graphConfig,
     const epg::SolverReportConstraints &constraints,
     const epg::SolverReportDecision &decision)
@@ -617,6 +629,17 @@ void ValidateTaskSolverDecision(
         throw std::runtime_error("solver report task decision mismatch: " +
                                  decision.name);
     }
+    if (sourceGraphConfig) {
+        const auto *sourceTask = FindTaskConfig(*sourceGraphConfig,
+                                                decision.name);
+        if (!sourceTask ||
+            decision.intervalBeforeMs !=
+                static_cast<std::uint64_t>(
+                    sourceTask->trigger.interval.count())) {
+            throw std::runtime_error("solver report task source mismatch: " +
+                                     decision.name);
+        }
+    }
     if (decision.catalogRole != catalog.role ||
         decision.replaceable != catalog.replaceable) {
         throw std::runtime_error("solver report task catalog mismatch: " +
@@ -630,6 +653,7 @@ void ValidateTaskSolverDecision(
 
 void ValidateSolverReportDecisionDetails(
     const EpgTaskManifest &manifest,
+    const epg::GraphConfig *sourceGraphConfig,
     const epg::GraphConfig &graphConfig,
     const epg::SolverReport &report)
 {
@@ -637,11 +661,12 @@ void ValidateSolverReportDecisionDetails(
     for (const auto &decision : report.decisions) {
         if (decision.kind == "queue") {
             ValidateQueueSolverDecision(
-                graphConfig, report.constraints, decision);
+                sourceGraphConfig, graphConfig, report.constraints, decision);
             continue;
         }
         ValidateTaskSolverDecision(
-            manifest, graphConfig, report.constraints, decision);
+            manifest, sourceGraphConfig, graphConfig, report.constraints,
+            decision);
     }
 }
 
@@ -862,6 +887,32 @@ void ValidateEpgSolverReportManifest(
     }
 }
 
+void ValidateEpgSolverReportProfile(
+    const EpgTaskManifest &manifest,
+    const epg::GraphProfileMetadata &profileMetadata,
+    const epg::OptimizedGraphMetadata &optimizedMetadata,
+    const epg::SolverReportMetadata &reportMetadata)
+{
+    if (profileMetadata.schema != epg::GRAPH_PROFILE_SCHEMA) {
+        throw std::runtime_error("solver report profile schema mismatch");
+    }
+    if (profileMetadata.graph != manifest.subgraphName ||
+        profileMetadata.graph != optimizedMetadata.sourceProfile ||
+        profileMetadata.graph != reportMetadata.sourceProfile) {
+        throw std::runtime_error("solver report profile graph mismatch");
+    }
+    if (profileMetadata.topologyVersion != manifest.topologyVersion ||
+        profileMetadata.topologyVersion != optimizedMetadata.topologyVersion ||
+        profileMetadata.topologyVersion != reportMetadata.topologyVersion) {
+        throw std::runtime_error("solver report profile topology mismatch");
+    }
+    if (profileMetadata.timestampMs == 0 ||
+        profileMetadata.timestampMs != optimizedMetadata.sourceTimestampMs ||
+        profileMetadata.timestampMs != reportMetadata.sourceTimestampMs) {
+        throw std::runtime_error("solver report profile timestamp mismatch");
+    }
+}
+
 void ValidateEpgSolverReport(
     const EpgTaskManifest &manifest,
     const epg::OptimizedGraph &optimizedGraph,
@@ -875,7 +926,26 @@ void ValidateEpgSolverReport(
     ValidateSolverReportScore(report);
     ValidateSolverReportDecisionCoverage(optimizedGraph.config, report);
     ValidateSolverReportDecisionDetails(
-        manifest, optimizedGraph.config, report);
+        manifest, nullptr, optimizedGraph.config, report);
+}
+
+void ValidateEpgSolverReport(
+    const EpgTaskManifest &manifest,
+    const epg::GraphProfile &sourceProfile,
+    const epg::OptimizedGraph &optimizedGraph,
+    const epg::SolverReport &report)
+{
+    ValidateEpgSolverReportManifest(manifest, optimizedGraph.metadata,
+                                    report.metadata);
+    ValidateEpgSolverReportProfile(manifest, sourceProfile.metadata,
+                                   optimizedGraph.metadata, report.metadata);
+    if (report.objectiveName.empty()) {
+        throw std::runtime_error("solver report objective missing");
+    }
+    ValidateSolverReportScore(report);
+    ValidateSolverReportDecisionCoverage(optimizedGraph.config, report);
+    ValidateSolverReportDecisionDetails(
+        manifest, &sourceProfile.topology, optimizedGraph.config, report);
 }
 
 } // namespace smartdrone::core::application
