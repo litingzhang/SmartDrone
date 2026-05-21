@@ -537,6 +537,59 @@ void ValidateQueueSolverDecision(
         throw std::runtime_error("solver report queue constraint mismatch: " +
                                  decision.name);
     }
+    const std::string expectedReason =
+        decision.depthAfter != decision.depthBefore ? "increase_depth" : "keep";
+    if (decision.reason != expectedReason) {
+        throw std::runtime_error("solver report queue reason mismatch: " +
+                                 decision.name);
+    }
+}
+
+std::vector<std::string> TaskDecisionReasons(
+    const epg::SolverReportDecision &decision)
+{
+    std::vector<std::string> reasons;
+    if (decision.utilizationPpm > decision.targetUtilizationPpm) {
+        reasons.push_back("utilization_over_target");
+    }
+    if (decision.budgetOverrunCount > 0 ||
+        (decision.budgetUs > 0 && decision.effectiveLoopUs > decision.budgetUs)) {
+        reasons.push_back("budget_overrun");
+    }
+    if (decision.deadlineMissCount > 0 ||
+        (decision.deadlineUs > 0 &&
+         decision.effectiveLoopUs > decision.deadlineUs)) {
+        reasons.push_back("deadline_miss");
+    }
+    if (decision.schedulingErrorCount > 0) {
+        reasons.push_back("scheduling_error");
+    }
+    return reasons;
+}
+
+std::string JoinTaskDecisionReasons(const std::vector<std::string> &reasons)
+{
+    if (reasons.empty()) {
+        return "keep";
+    }
+    std::string reason = reasons.front();
+    for (std::size_t index = 1; index < reasons.size(); ++index) {
+        reason += "+" + reasons[index];
+    }
+    return reason;
+}
+
+std::string ExpectedTaskDecisionReason(
+    const epg::SolverReportDecision &decision)
+{
+    if (decision.intervalAfterMs != decision.intervalBeforeMs) {
+        return "increase_interval";
+    }
+    const auto reason = JoinTaskDecisionReasons(TaskDecisionReasons(decision));
+    if (decision.replaceable) {
+        return reason;
+    }
+    return reason == "keep" ? "not_replaceable" : "not_replaceable+" + reason;
 }
 
 void ValidateTaskSolverDecision(
@@ -567,6 +620,10 @@ void ValidateTaskSolverDecision(
     if (decision.catalogRole != catalog.role ||
         decision.replaceable != catalog.replaceable) {
         throw std::runtime_error("solver report task catalog mismatch: " +
+                                 decision.name);
+    }
+    if (decision.reason != ExpectedTaskDecisionReason(decision)) {
+        throw std::runtime_error("solver report task reason mismatch: " +
                                  decision.name);
     }
 }

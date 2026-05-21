@@ -1857,7 +1857,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
           "budgetOverrunCount": 2,
           "deadlineMissCount": 3,
           "schedulingErrorCount": 1,
-          "reason": "keep"
+          "reason": "not_replaceable+utilization_over_target+budget_overrun+deadline_miss+scheduling_error"
         }
       ]
     })");
@@ -1983,6 +1983,13 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_THROW(
         smartdrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongReplaceable),
+        std::runtime_error);
+
+    auto wrongReason = report;
+    wrongReason.decisions[1].reason = "keep";
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, wrongReason),
         std::runtime_error);
 }
 

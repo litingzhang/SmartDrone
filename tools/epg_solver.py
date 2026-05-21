@@ -190,6 +190,13 @@ TASK_DECISION_FIELDS = [
     "schedulingErrorCount",
 ]
 
+TASK_REASON_ORDER = [
+    "utilization_over_target",
+    "budget_overrun",
+    "deadline_miss",
+    "scheduling_error",
+]
+
 
 def validate_diagnostic_fields(diag: Dict[str, Any],
                                fields: List[str],
@@ -254,11 +261,52 @@ def validate_queue_decision(item: Dict[str, Any],
     name = require_text(item, "name", "solver report decision")
     require_non_negative_fields(item, QUEUE_DECISION_FIELDS, "queue", name)
     depth_after = integer(item.get("depthAfter"))
+    expected_reason = (
+        "increase_depth"
+        if depth_after != integer(item.get("depthBefore"))
+        else "keep"
+    )
     if depth_after != integer(queue.get("depth")):
         raise ValueError(f"EPG solver report queue depth mismatch: {name}")
     if depth_after <= 0 or depth_after > integer(constraints.get("maxQueueDepth")):
         raise ValueError(
             f"EPG solver report queue constraint mismatch: {name}")
+    if item.get("reason") != expected_reason:
+        raise ValueError(f"EPG solver report queue reason mismatch: {name}")
+
+
+def decision_reason_set(item: Dict[str, Any]) -> Set[str]:
+    reasons: Set[str] = set()
+    if integer(item.get("utilizationPpm")) > integer(
+            item.get("targetUtilizationPpm")):
+        reasons.add("utilization_over_target")
+    if integer(item.get("budgetOverrunCount")) > 0:
+        reasons.add("budget_overrun")
+    if integer(item.get("budgetUs")) > 0:
+        if integer(item.get("effectiveLoopUs")) > integer(item.get("budgetUs")):
+            reasons.add("budget_overrun")
+    if integer(item.get("deadlineMissCount")) > 0:
+        reasons.add("deadline_miss")
+    if integer(item.get("deadlineUs")) > 0:
+        if integer(item.get("effectiveLoopUs")) > integer(item.get("deadlineUs")):
+            reasons.add("deadline_miss")
+    if integer(item.get("schedulingErrorCount")) > 0:
+        reasons.add("scheduling_error")
+    return reasons
+
+
+def ordered_reason_text(reasons: Set[str]) -> str:
+    ordered = [reason for reason in TASK_REASON_ORDER if reason in reasons]
+    return "+".join(ordered) if ordered else "keep"
+
+
+def expected_task_decision_reason(item: Dict[str, Any]) -> str:
+    if integer(item.get("intervalAfterMs")) != integer(item.get("intervalBeforeMs")):
+        return "increase_interval"
+    reason = ordered_reason_text(decision_reason_set(item))
+    if item.get("replaceable"):
+        return reason
+    return "not_replaceable" if reason == "keep" else f"not_replaceable+{reason}"
 
 
 def validate_task_decision(item: Dict[str, Any],
@@ -294,6 +342,8 @@ def validate_task_decision(item: Dict[str, Any],
             constraints.get("maxPeriodicIntervalMs")):
         raise ValueError(
             f"EPG solver report task interval constraint mismatch: {name}")
+    if item.get("reason") != expected_task_decision_reason(item):
+        raise ValueError(f"EPG solver report task reason mismatch: {name}")
 
 
 def queue_pressure(depth: int, diag: Dict[str, Any]) -> int:
@@ -383,7 +433,7 @@ def report_reason(reasons: Set[str],
                   replaceable: bool) -> str:
     if interval_changed:
         return "increase_interval"
-    reason = "+".join(sorted(reasons)) if reasons else "keep"
+    reason = ordered_reason_text(reasons)
     if replaceable:
         return reason
     return "not_replaceable" if reason == "keep" else f"not_replaceable+{reason}"
