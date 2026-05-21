@@ -263,16 +263,24 @@ def validate_queue_decision(item: Dict[str, Any],
 
 def validate_task_decision(item: Dict[str, Any],
                            task: Dict[str, Any],
-                           constraints: Dict[str, Any]) -> None:
+                           constraints: Dict[str, Any],
+                           catalog: Dict[str, Dict[str, Any]]) -> None:
     name = require_text(item, "name", "solver report decision")
     require_non_negative_fields(item, TASK_DECISION_FIELDS, "task", name)
     trigger = task.get("trigger", {})
     scheduling = task.get("scheduling", {})
     if not isinstance(trigger, dict) or not isinstance(scheduling, dict):
         raise ValueError(f"EPG optimized task config invalid: {name}")
+    catalog_item = catalog.get(str(task.get("type", "")))
+    if not isinstance(catalog_item, dict):
+        raise ValueError(f"EPG solver report task catalog missing: {name}")
     if not isinstance(item.get("replaceable"), bool):
         raise ValueError(f"EPG solver report task replaceable invalid: {name}")
-    require_text(item, "catalogRole", "solver report decision")
+    if require_text(item, "catalogRole", "solver report decision") != str(
+            catalog_item.get("role", "")):
+        raise ValueError(f"EPG solver report task role mismatch: {name}")
+    if item.get("replaceable") != bool(catalog_item.get("replaceable", False)):
+        raise ValueError(f"EPG solver report task replaceable mismatch: {name}")
     if integer(item.get("intervalAfterMs")) != integer(trigger.get("interval_ms")):
         raise ValueError(f"EPG solver report task interval mismatch: {name}")
     if integer(item.get("budgetUs")) != integer(scheduling.get("budget_us")):
@@ -480,6 +488,7 @@ def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
 
 
 def validate_generated_pair(config: Dict[str, Any],
+                            catalog: Dict[str, Dict[str, Any]],
                             report: Dict[str, Any]) -> None:
     fields = [
         "targetGraph",
@@ -553,7 +562,8 @@ def validate_generated_pair(config: Dict[str, Any],
             if name not in task_by_name:
                 raise ValueError(
                     f"EPG solver report task decision target missing: {name}")
-            validate_task_decision(item, task_by_name[name], constraints)
+            validate_task_decision(
+                item, task_by_name[name], constraints, catalog)
             continue
         raise ValueError(f"EPG solver report decision kind unsupported: {kind}")
     if actual != expected:
@@ -618,7 +628,7 @@ def optimize_profile(profile: Dict[str, Any],
         },
         "decisions": decisions,
     }
-    validate_generated_pair(config, report)
+    validate_generated_pair(config, catalog, report)
     return config, report
 
 

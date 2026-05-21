@@ -493,6 +493,7 @@ void ValidateQueueSolverDecision(
 }
 
 void ValidateTaskSolverDecision(
+    const EpgTaskManifest &manifest,
     const epg::GraphConfig &graphConfig,
     const epg::SolverReportConstraints &constraints,
     const epg::SolverReportDecision &decision)
@@ -502,6 +503,7 @@ void ValidateTaskSolverDecision(
         throw std::runtime_error("solver report task decision target missing: " +
                                  decision.name);
     }
+    const auto &catalog = RequireCatalogEntry(manifest, task->type);
     if (decision.intervalAfterMs >
         constraints.maxPeriodicIntervalMs) {
         throw std::runtime_error("solver report task interval constraint mismatch: " +
@@ -515,9 +517,15 @@ void ValidateTaskSolverDecision(
         throw std::runtime_error("solver report task decision mismatch: " +
                                  decision.name);
     }
+    if (decision.catalogRole != catalog.role ||
+        decision.replaceable != catalog.replaceable) {
+        throw std::runtime_error("solver report task catalog mismatch: " +
+                                 decision.name);
+    }
 }
 
 void ValidateSolverReportDecisionDetails(
+    const EpgTaskManifest &manifest,
     const epg::GraphConfig &graphConfig,
     const epg::SolverReport &report)
 {
@@ -528,7 +536,8 @@ void ValidateSolverReportDecisionDetails(
                 graphConfig, report.constraints, decision);
             continue;
         }
-        ValidateTaskSolverDecision(graphConfig, report.constraints, decision);
+        ValidateTaskSolverDecision(
+            manifest, graphConfig, report.constraints, decision);
     }
 }
 
@@ -761,7 +770,8 @@ void ValidateEpgSolverReport(
     }
     ValidateSolverReportScore(report);
     ValidateSolverReportDecisionCoverage(optimizedGraph.config, report);
-    ValidateSolverReportDecisionDetails(optimizedGraph.config, report);
+    ValidateSolverReportDecisionDetails(
+        manifest, optimizedGraph.config, report);
 }
 
 } // namespace smartdrone::core::application

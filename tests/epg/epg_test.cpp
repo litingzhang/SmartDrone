@@ -1962,6 +1962,20 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
         smartdrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongConstraint),
         std::runtime_error);
+
+    auto wrongCatalogRole = report;
+    wrongCatalogRole.decisions[1].catalogRole = "other";
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, wrongCatalogRole),
+        std::runtime_error);
+
+    auto wrongReplaceable = report;
+    wrongReplaceable.decisions[1].replaceable = true;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, wrongReplaceable),
+        std::runtime_error);
 }
 
 TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
