@@ -367,6 +367,40 @@ void ValidateRuntimeTuningRequestAllowed(
     }
 }
 
+void ValidateRuntimeTuningTaskUnique(const EpgTaskManifest &manifest,
+                                     std::set<std::string> &taskNames,
+                                     const std::string &taskName)
+{
+    if (taskNames.insert(taskName).second) {
+        return;
+    }
+    throw std::runtime_error(TaskGraphLabel(manifest) +
+                             " duplicates runtime tuning task: " + taskName);
+}
+
+void ValidateManifestRuntimeTuning(const EpgTaskManifest &manifest)
+{
+    std::set<std::string> taskNames;
+    for (const auto &entry : manifest.runtimeTuning) {
+        ValidateRuntimeTuningEntry(manifest, entry);
+        ValidateRuntimeTuningTaskUnique(manifest, taskNames, entry.taskName);
+    }
+}
+
+void ValidateGraphRuntimeTuningDeclared(
+    const EpgTaskManifest &manifest,
+    const epg::GraphConfig &graphConfig)
+{
+    for (const auto &entry : manifest.runtimeTuning) {
+        if (GraphUsesTaskName(graphConfig, entry.taskName)) {
+            continue;
+        }
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " runtime tuning task is missing: " +
+                                 entry.taskName);
+    }
+}
+
 std::string BuildPath(const char *directory, const std::string &stem,
                       const char *suffix)
 {
@@ -443,6 +477,7 @@ void ApplyEpgTaskCatalogDefaults(
 {
     ValidateManifestMetadata(manifest);
     ValidateManifestCatalog(manifest);
+    ValidateManifestRuntimeTuning(manifest);
     for (auto &task : graphConfig.tasks) {
         const auto *entry = FindCatalogEntry(manifest, task.type);
         if (!entry) {
@@ -458,6 +493,7 @@ void ValidateEpgTaskRuntimeTuning(
     const std::vector<EpgTaskRuntimeTuningEntry> &requestedTuning)
 {
     ValidateManifestMetadata(manifest);
+    ValidateManifestRuntimeTuning(manifest);
     for (const auto &requested : requestedTuning) {
         ValidateRuntimeTuningEntry(manifest, requested);
         const auto *allowed =
@@ -482,6 +518,7 @@ void ValidateEpgTaskManifest(
     ValidateManifestMetadata(manifest);
     const auto catalogTypes = ValidateManifestCatalog(manifest);
     ValidateManifestAliases(manifest, catalogTypes);
+    ValidateManifestRuntimeTuning(manifest);
 }
 
 void ValidateEpgTaskFactoryManifest(
@@ -498,6 +535,7 @@ void ValidateEpgTaskFactoryManifest(
         ValidateTaskFactory(resolver, entry.taskType);
     }
     ValidateManifestAliases(manifest, catalogTypes);
+    ValidateManifestRuntimeTuning(manifest);
     for (const auto &alias : manifest.aliases) {
         ValidateTaskFactory(resolver, alias.targetType);
     }
@@ -509,6 +547,7 @@ void ValidateEpgTaskGraphManifest(
 {
     ValidateManifestMetadata(manifest);
     const auto allowedTypes = ValidateManifestCatalog(manifest);
+    ValidateManifestRuntimeTuning(manifest);
     std::set<std::string> usedTypes;
     for (const auto &task : graphConfig.tasks) {
         ValidateGraphTaskTypeAllowed(manifest, task, allowedTypes);
@@ -518,6 +557,7 @@ void ValidateEpgTaskGraphManifest(
     for (const auto &entry : manifest.catalog) {
         ValidateManifestTaskTypeUsed(manifest, entry.taskType, usedTypes);
     }
+    ValidateGraphRuntimeTuningDeclared(manifest, graphConfig);
 }
 
 void ValidateEpgOptimizedGraphManifest(

@@ -1534,6 +1534,25 @@ TEST(EventPipelineGraphManifest, ValidatesRuntimeTuningManifest) {
         smartdrone::core::application::ValidateEpgTaskRuntimeTuning(
             manifest, config, {{"missing", true, false, false}}),
         std::runtime_error);
+
+    auto duplicate = manifest;
+    duplicate.runtimeTuning.push_back({"source", false, true, false});
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskManifest(duplicate),
+        std::runtime_error);
+
+    auto incomplete = manifest;
+    incomplete.runtimeTuning.push_back({"", false, false, false});
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskManifest(incomplete),
+        std::runtime_error);
+
+    auto missingGraphTask = manifest;
+    missingGraphTask.runtimeTuning.push_back({"missing", true, false, false});
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgTaskGraphManifest(
+            missingGraphTask, config),
+        std::runtime_error);
 }
 
 TEST(EventPipelineGraphManifest, RejectsDuplicateCatalogTaskTypes) {
