@@ -150,6 +150,8 @@ def main() -> int:
             str(report_path),
             "--max-queue-depth",
             "8",
+            "--generated-at-ms",
+            "456",
         ],
         check=True,
     )
@@ -160,10 +162,12 @@ def main() -> int:
     assert optimized["solverVersion"] == "python-heuristic-v2"
     assert optimized["sourceProfile"] == "test_graph"
     assert optimized["sourceTimestampMs"] == 123
+    assert optimized["generatedAtMs"] == 456
     assert optimized["queues"][0]["depth"] > 1
     assert optimized["tasks"][0]["trigger"]["interval_ms"] == 3
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["schema"] == "smartdrone.epg.solver_report.v1"
+    assert report["generatedAtMs"] == 456
     assert report["objective"]["score"]["totalPenalty"] > 0
     assert report["objective"]["score"]["budgetOverruns"] == 2
     assert report["objective"]["score"]["deadlineMisses"] == 1
@@ -186,11 +190,21 @@ def main() -> int:
             str(profile_root),
             "--output-root",
             str(output_root),
+            "--generated-at-ms",
+            "789",
         ],
         check=True,
     )
     assert (output_root / "optimized_slam_session_graph.json").exists()
     assert (output_root / "optimized_slam_session_graph_report.json").exists()
+    batch_optimized = json.loads(
+        (output_root / "optimized_slam_session_graph.json").read_text(
+            encoding="utf-8"))
+    batch_report = json.loads(
+        (output_root / "optimized_slam_session_graph_report.json").read_text(
+            encoding="utf-8"))
+    assert batch_optimized["generatedAtMs"] == 789
+    assert batch_report["generatedAtMs"] == 789
 
     bad_profile = work_dir / "bad_catalog.json"
     bad_output = work_dir / "bad_optimized.json"

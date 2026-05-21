@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
@@ -300,7 +301,8 @@ def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
 
 
 def optimize_profile(profile: Dict[str, Any],
-                     limits: SolverLimits) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+                     limits: SolverLimits,
+                     generated_at_ms: int) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     topology = profile["topology"]
     queues = topology.get("queues", [])
     tasks = topology.get("tasks", [])
@@ -332,6 +334,7 @@ def optimize_profile(profile: Dict[str, Any],
         "solverVersion": SOLVER_VERSION,
         "sourceProfile": profile.get("graph", ""),
         "sourceTimestampMs": profile.get("timestampMs", 0),
+        "generatedAtMs": generated_at_ms,
         "queues": optimized_queues,
         "tasks": optimized_tasks,
     }
@@ -339,6 +342,7 @@ def optimize_profile(profile: Dict[str, Any],
         "schema": "smartdrone.epg.solver_report.v1",
         "sourceProfile": profile.get("graph", ""),
         "sourceTimestampMs": profile.get("timestampMs", 0),
+        "generatedAtMs": generated_at_ms,
         "objective": {
             "name": "minimize_epg_pressure_overload_deadline_and_scheduling_penalty",
             "score": score_decisions(decisions),
@@ -371,6 +375,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-queue-depth", type=int, default=16)
     parser.add_argument("--max-periodic-interval-ms", type=int, default=1000)
     parser.add_argument("--target-utilization-ppm", type=int, default=800000)
+    parser.add_argument("--generated-at-ms", type=int,
+                        help="Override output generation timestamp")
     return parser
 
 
@@ -381,7 +387,11 @@ def main() -> int:
         max_periodic_interval_ms=max(1, args.max_periodic_interval_ms),
         target_utilization_ppm=max(1, args.target_utilization_ppm),
     )
-    optimized, report = optimize_profile(load_profile(args.profile), limits)
+    generated_at_ms = args.generated_at_ms
+    if generated_at_ms is None:
+        generated_at_ms = int(time.time() * 1000)
+    optimized, report = optimize_profile(
+        load_profile(args.profile), limits, generated_at_ms)
     write_json(args.output, optimized)
     if args.report:
         write_json(args.report, report)

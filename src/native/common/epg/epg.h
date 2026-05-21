@@ -159,6 +159,7 @@ struct OptimizedGraphMetadata {
     std::string solverVersion;
     std::string sourceProfile;
     std::uint64_t sourceTimestampMs{};
+    std::uint64_t generatedAtMs{};
 };
 
 struct OptimizedGraph {

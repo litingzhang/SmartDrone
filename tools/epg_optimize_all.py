@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
@@ -48,7 +49,8 @@ def report_name_for_config(config_name: str) -> str:
 def solve_target(target: EpgProfileTarget,
                  profile_root: Path,
                  output_root: Path,
-                 limits: SolverLimits) -> Dict[str, Any]:
+                 limits: SolverLimits,
+                 generated_at_ms: int) -> Dict[str, Any]:
     profile_path = profile_root / target.profile_name
     output_path = output_root / target.config_name
     report_path = output_root / report_name_for_config(target.config_name)
@@ -58,7 +60,8 @@ def solve_target(target: EpgProfileTarget,
             "status": "missing_profile",
             "profile": str(profile_path),
         }
-    optimized, report = optimize_profile(load_profile(profile_path), limits)
+    optimized, report = optimize_profile(
+        load_profile(profile_path), limits, generated_at_ms)
     write_json(output_path, optimized)
     write_json(report_path, report)
     return {
@@ -88,14 +91,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-queue-depth", type=int, default=16)
     parser.add_argument("--max-periodic-interval-ms", type=int, default=1000)
     parser.add_argument("--target-utilization-ppm", type=int, default=800000)
+    parser.add_argument("--generated-at-ms", type=int,
+                        help="Override output generation timestamp")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     limits = build_limits(args)
+    generated_at_ms = args.generated_at_ms
+    if generated_at_ms is None:
+        generated_at_ms = int(time.time() * 1000)
     results: List[Dict[str, Any]] = [
-        solve_target(target, args.profile_root, args.output_root, limits)
+        solve_target(target, args.profile_root, args.output_root, limits,
+                     generated_at_ms)
         for target in TARGETS
     ]
     print(json.dumps({"results": results}, indent=2, sort_keys=False))

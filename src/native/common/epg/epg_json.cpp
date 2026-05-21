@@ -674,6 +674,7 @@ OptimizedGraphMetadata ParseOptimizedGraphMetadataObject(
     metadata.solverVersion = RequiredString(root, "solverVersion");
     metadata.sourceProfile = RequiredString(root, "sourceProfile");
     metadata.sourceTimestampMs = RequiredUInt64(root, "sourceTimestampMs");
+    metadata.generatedAtMs = RequiredUInt64(root, "generatedAtMs");
     return metadata;
 }
 

@@ -456,6 +456,10 @@ void ValidateEpgOptimizedGraphManifest(
         metadata.sourceTimestampMs == 0) {
         throw std::runtime_error("optimized graph source profile mismatch");
     }
+    if (metadata.generatedAtMs == 0 ||
+        metadata.generatedAtMs < metadata.sourceTimestampMs) {
+        throw std::runtime_error("optimized graph generation timestamp invalid");
+    }
     if (metadata.solverVersion.empty()) {
         throw std::runtime_error("optimized graph solver version missing");
     }

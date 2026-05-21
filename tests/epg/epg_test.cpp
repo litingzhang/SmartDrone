@@ -1588,6 +1588,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
       "solverVersion": "unit-test",
       "sourceProfile": "test_graph",
       "sourceTimestampMs": 123,
+      "generatedAtMs": 456,
       "queues": [
         {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "drop_newest"}
       ],
@@ -1628,6 +1629,13 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_THROW(
         smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, wrongSource),
+        std::runtime_error);
+
+    auto wrongGeneration = optimized;
+    wrongGeneration.metadata.generatedAtMs = 1;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+            manifest, wrongGeneration),
         std::runtime_error);
 
     auto wrongTask = optimized;
@@ -2281,6 +2289,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
       "solverVersion": "unit-test",
       "sourceProfile": "test_graph",
       "sourceTimestampMs": 123,
+      "generatedAtMs": 456,
       "queues": [
         {"name": "packets", "type": "TestPacket", "depth": 6, "overflow": "drop_newest"}
       ],
@@ -2313,6 +2322,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
       "solverVersion": "unit-test",
       "sourceProfile": "test_graph",
       "sourceTimestampMs": 123,
+      "generatedAtMs": 456,
       "queues": [],
       "tasks": []
     })");
@@ -2322,6 +2332,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     EXPECT_EQ(metadata.solverVersion, "unit-test");
     EXPECT_EQ(metadata.sourceProfile, "test_graph");
     EXPECT_EQ(metadata.sourceTimestampMs, 123u);
+    EXPECT_EQ(metadata.generatedAtMs, 456u);
 
     const auto optimized = epg::ParseOptimizedGraphJson(R"({
       "schema": "smartdrone.epg.optimized_config.v1",
@@ -2330,6 +2341,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
       "solverVersion": "unit-test",
       "sourceProfile": "test_graph",
       "sourceTimestampMs": 123,
+      "generatedAtMs": 456,
       "queues": [
         {"name": "packets", "type": "TestPacket", "depth": 6, "overflow": "drop_newest"}
       ],
