@@ -221,14 +221,10 @@ SystemRuntimeGraphConfig BuildSystemRuntimeGraphConfig(BuildSystemRuntimeGraphCo
 
 void LogSystemGraphRedeployRequest(const EpgRedeployRequest &request)
 {
-    std::cerr << "[epg] system graph redeploy requested";
-    if (!request.graphName.empty()) {
-        std::cerr << ": " << request.graphName;
-    }
-    if (!request.reason.empty()) {
-        std::cerr << " (" << request.reason << ")";
-    }
-    std::cerr << "\n";
+    std::cerr << "[epg] system graph redeploy requested: "
+              << smartdrone::core::application::DescribeEpgRedeployRequest(
+                     request)
+              << "\n";
 }
 
 bool RestartSystemGraph(SystemRuntimeGraph &systemGraph,

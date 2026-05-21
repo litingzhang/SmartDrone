@@ -10,6 +10,7 @@ struct SlamTaskStepResult {
     bool sessionAvailable{false};
     bool sessionOk{true};
     bool abortRequested{false};
+    std::uint64_t resourceWaitUs{0};
 };
 
 struct SlamPrepareFrameResult : SlamTaskStepResult {

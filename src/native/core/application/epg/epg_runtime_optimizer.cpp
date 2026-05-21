@@ -22,6 +22,9 @@ constexpr std::uint64_t PROFILE_FRESHNESS_MS = 60000;
 constexpr std::size_t MAX_QUEUE_DEPTH = 16;
 constexpr std::uint64_t MAX_PERIODIC_INTERVAL_MS = 1000;
 constexpr std::uint64_t TARGET_UTILIZATION_PPM = 800000;
+constexpr std::uint64_t RESOURCE_WAIT_PRESSURE_US = 1000;
+constexpr int RESOURCE_ISOLATION_CPU_AFFINITY = 2;
+constexpr int RESOURCE_ISOLATION_PRIORITY = 20;
 
 struct SolverDecision {
     std::string kind;
@@ -42,6 +45,10 @@ struct SolverDecision {
     std::uint64_t p90LoopUs{0};
     std::uint64_t p99LoopUs{0};
     std::uint64_t effectiveLoopUs{0};
+    std::uint64_t resourceWaitCount{0};
+    std::uint64_t maxResourceWaitUs{0};
+    std::uint64_t averageResourceWaitUs{0};
+    std::uint64_t totalResourceWaitUs{0};
     std::uint64_t utilizationPpm{0};
     std::uint64_t budgetUs{0};
     std::uint64_t deadlineUs{0};
@@ -53,6 +60,7 @@ struct SolverDecision {
 struct SolverScore {
     std::uint64_t queuePressure{0};
     std::uint64_t periodicOverloadUs{0};
+    std::uint64_t resourceWaitUs{0};
     std::uint64_t schedulingErrors{0};
     std::uint64_t budgetOverruns{0};
     std::uint64_t deadlineMisses{0};
@@ -278,6 +286,13 @@ std::uint64_t EffectiveLoopUs(const epg::TaskProfileMetrics &stats)
                      stats.averageLoopUs});
 }
 
+bool HasResourceWaitPressure(const epg::TaskProfileMetrics &stats)
+{
+    return stats.maxResourceWaitUs > RESOURCE_WAIT_PRESSURE_US ||
+           stats.averageResourceWaitUs > RESOURCE_WAIT_PRESSURE_US ||
+           stats.totalResourceWaitUs > RESOURCE_WAIT_PRESSURE_US;
+}
+
 std::uint64_t QueuePressure(const epg::QueueConfig &queue,
                             const epg::QueueProfileMetrics &stats)
 {
@@ -308,6 +323,9 @@ std::string TaskDecisionReason(const epg::TaskConfig &task,
     }
     if (stats.schedulingErrorCount > 0) {
         reasons.push_back("scheduling_error");
+    }
+    if (HasResourceWaitPressure(stats)) {
+        reasons.push_back("resource_wait");
     }
     if (reasons.empty()) {
         return "keep";
@@ -360,6 +378,22 @@ std::uint64_t OptimizedTaskIntervalMs(const epg::TaskConfig &task,
         return intervalMs;
     }
     return TargetIntervalMs(task, stats, effectiveLoopUs);
+}
+
+void ApplyResourceIsolation(epg::TaskConfig &task,
+                            const epg::TaskProfileMetrics &stats,
+                            const EpgTaskCatalogEntry *catalog)
+{
+    if (!catalog || !catalog->replaceable || !HasResourceWaitPressure(stats)) {
+        return;
+    }
+    if (task.scheduling.cpuAffinity < 0) {
+        task.scheduling.cpuAffinity = RESOURCE_ISOLATION_CPU_AFFINITY;
+    }
+    if (!task.scheduling.realtime && task.trigger.interval.count() > 0) {
+        task.scheduling.realtime = true;
+        task.scheduling.priority = RESOURCE_ISOLATION_PRIORITY;
+    }
 }
 
 std::map<std::string, std::uint64_t>
@@ -424,6 +458,7 @@ void OptimizeTask(epg::TaskConfig &task,
         task.trigger.interval =
             std::chrono::milliseconds(static_cast<int>(targetInterval));
     }
+    ApplyResourceIsolation(task, stats, catalog);
 
     SolverDecision decision;
     decision.kind = "task";
@@ -443,6 +478,10 @@ void OptimizeTask(epg::TaskConfig &task,
     decision.p90LoopUs = stats.p90LoopUs;
     decision.p99LoopUs = stats.p99LoopUs;
     decision.effectiveLoopUs = effectiveLoopUs;
+    decision.resourceWaitCount = stats.resourceWaitCount;
+    decision.maxResourceWaitUs = stats.maxResourceWaitUs;
+    decision.averageResourceWaitUs = stats.averageResourceWaitUs;
+    decision.totalResourceWaitUs = stats.totalResourceWaitUs;
     decision.utilizationPpm = stats.utilizationPpm;
     decision.budgetUs = task.scheduling.budgetUs;
     decision.deadlineUs = task.scheduling.deadlineUs;
@@ -485,6 +524,7 @@ SolverScore ScoreDecisions(const std::vector<SolverDecision> &decisions)
             score.periodicOverloadUs +=
                 decision.effectiveLoopUs - decision.intervalBeforeMs * 1000;
         }
+        score.resourceWaitUs += decision.totalResourceWaitUs;
         score.schedulingErrors += decision.schedulingErrorCount;
         score.budgetOverruns += decision.budgetOverrunCount;
         score.deadlineMisses += decision.deadlineMissCount;
@@ -499,8 +539,9 @@ SolverScore ScoreDecisions(const std::vector<SolverDecision> &decisions)
 std::uint64_t TotalPenalty(const SolverScore &score)
 {
     return score.queuePressure * 1000 + score.periodicOverloadUs +
-           score.schedulingErrors * 10000 + score.budgetOverruns * 2000 +
-           score.deadlineMisses * 5000 + score.utilizationOverPpm;
+           score.resourceWaitUs + score.schedulingErrors * 10000 +
+           score.budgetOverruns * 2000 + score.deadlineMisses * 5000 +
+           score.utilizationOverPpm;
 }
 
 void WriteDecisionJson(std::ostringstream &out, const SolverDecision &decision)
@@ -523,6 +564,12 @@ void WriteDecisionJson(std::ostringstream &out, const SolverDecision &decision)
         out << "\"p90LoopUs\": " << decision.p90LoopUs << ", ";
         out << "\"p99LoopUs\": " << decision.p99LoopUs << ", ";
         out << "\"effectiveLoopUs\": " << decision.effectiveLoopUs << ", ";
+        out << "\"resourceWaitCount\": " << decision.resourceWaitCount << ", ";
+        out << "\"maxResourceWaitUs\": " << decision.maxResourceWaitUs << ", ";
+        out << "\"averageResourceWaitUs\": "
+            << decision.averageResourceWaitUs << ", ";
+        out << "\"totalResourceWaitUs\": " << decision.totalResourceWaitUs
+            << ", ";
         out << "\"utilizationPpm\": " << decision.utilizationPpm << ", ";
         out << "\"targetUtilizationPpm\": " << TARGET_UTILIZATION_PPM << ", ";
         out << "\"budgetUs\": " << decision.budgetUs << ", ";
@@ -567,6 +614,7 @@ std::string BuildSolverReport(const EpgTaskManifest &manifest,
     out << "    \"score\": {";
     out << "\"queuePressure\": " << score.queuePressure << ", ";
     out << "\"periodicOverloadUs\": " << score.periodicOverloadUs << ", ";
+    out << "\"resourceWaitUs\": " << score.resourceWaitUs << ", ";
     out << "\"schedulingErrors\": " << score.schedulingErrors << ", ";
     out << "\"budgetOverruns\": " << score.budgetOverruns << ", ";
     out << "\"deadlineMisses\": " << score.deadlineMisses << ", ";
@@ -621,8 +669,21 @@ EpgRuntimeOptimizerResult WriteOptimizedConfig(const EpgTaskManifest &manifest,
         OptimizedConfigChanged(ReadFile(paths.optimizedConfigPath), json);
     WriteRequiredArtifactFile(paths.solverReportPath, report);
     WriteRequiredArtifactFile(paths.optimizedConfigPath, json);
-    return {true, changed, changed ? "optimized config changed"
-                                   : "optimized config refreshed"};
+    EpgRuntimeOptimizerResult result;
+    result.optimized = true;
+    result.configChanged = changed;
+    result.message = changed ? "optimized config changed"
+                             : "optimized config refreshed";
+    result.targetGraph = manifest.subgraphName;
+    result.topologyVersion = manifest.topologyVersion;
+    result.sourceProfile = manifest.subgraphName;
+    result.sourceProfilePath = paths.profilePath;
+    result.sourceTimestampMs = profile.metadata.timestampMs;
+    result.generatedAtMs = nowMs;
+    result.solverVersion = epg::NATIVE_HEURISTIC_SOLVER_VERSION;
+    result.optimizedConfigPath = paths.optimizedConfigPath;
+    result.solverReportPath = paths.solverReportPath;
+    return result;
 }
 
 } // namespace

@@ -80,6 +80,10 @@ def write_profile(path: Path) -> None:
                     "p90LoopUs": 2100,
                     "p99LoopUs": 2500,
                     "averageLoopUs": 1800,
+                    "resourceWaitCount": 2,
+                    "maxResourceWaitUs": 1500,
+                    "averageResourceWaitUs": 1250,
+                    "totalResourceWaitUs": 2500,
                     "utilizationPpm": 900000,
                     "loopCount": 10,
                     "errorCount": 0,
@@ -226,12 +230,15 @@ def main() -> int:
     assert optimized["schema"] == "smartdrone.epg.optimized_config.v1"
     assert optimized["targetGraph"] == "test_graph"
     assert optimized["topologyVersion"] == "test-topology-v1"
-    assert optimized["solverVersion"] == "python-heuristic-v2"
+    assert optimized["solverVersion"] == "python-heuristic-v3"
     assert optimized["sourceProfile"] == "test_graph"
     assert optimized["sourceTimestampMs"] == 123
     assert optimized["generatedAtMs"] == 456
     assert optimized["queues"][0]["depth"] > 1
     assert optimized["tasks"][0]["trigger"]["interval_ms"] == 3
+    assert optimized["tasks"][0]["scheduling"]["cpu_affinity"] == 2
+    assert optimized["tasks"][0]["scheduling"]["realtime"] is True
+    assert optimized["tasks"][0]["scheduling"]["priority"] == 20
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["schema"] == "smartdrone.epg.solver_report.v1"
     assert report["targetGraph"] == "test_graph"
@@ -239,7 +246,7 @@ def main() -> int:
     assert report["sourceProfile"] == "test_graph"
     assert report["sourceTimestampMs"] == 123
     assert report["generatedAtMs"] == 456
-    assert report["solverVersion"] == "python-heuristic-v2"
+    assert report["solverVersion"] == "python-heuristic-v3"
     for field in [
             "targetGraph",
             "topologyVersion",
@@ -252,12 +259,14 @@ def main() -> int:
     assert report["objective"]["score"]["totalPenalty"] > 0
     assert report["objective"]["score"]["budgetOverruns"] == 2
     assert report["objective"]["score"]["deadlineMisses"] == 1
+    assert report["objective"]["score"]["resourceWaitUs"] == 2500
     assert report["constraints"]["maxQueueDepth"] == 8
     assert report["decisions"][0]["depthAfter"] == optimized["queues"][0]["depth"]
     assert report["decisions"][1]["intervalAfterMs"] == (
         optimized["tasks"][0]["trigger"]["interval_ms"])
     assert report["decisions"][0]["droppedPerSecond"] == 100
     assert report["decisions"][1]["budgetUs"] == 1500
+    assert report["decisions"][1]["totalResourceWaitUs"] == 2500
     assert report["decisions"][1]["catalogRole"] == "source"
     assert report["decisions"][1]["replaceable"] is True
     assert report["decisions"][0]["reason"] == "increase_depth"

@@ -3,7 +3,6 @@
 #include <chrono>
 #include <utility>
 
-#include "core/application/session/slam/slam_runtime_control_port.h"
 #include "core/application/state/frame_timing_tracker.h"
 #include "core/application/session/slam/slam_processing_support.h"
 #include "core/ports/slam_engine.h"
@@ -14,14 +13,6 @@ SlamFrameTrackingPort::SlamFrameTrackingPort(
     SlamFrameTrackingContext &context)
     : m_ctx(context)
 {
-}
-
-SlamFrameStepResult SlamFrameTrackingPort::StepBackend()
-{
-    if (m_ctx.slamControl != nullptr) {
-        m_ctx.slamControl->StepBackend();
-    }
-    return SlamFrameStepResult::Continue;
 }
 
 SlamFrameStepResult SlamFrameTrackingPort::TrackPreparedFrame(

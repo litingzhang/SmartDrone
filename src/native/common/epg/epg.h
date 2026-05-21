@@ -30,7 +30,7 @@ inline constexpr const char *OPTIMIZED_GRAPH_SCHEMA =
 inline constexpr const char *SOLVER_REPORT_SCHEMA =
     "smartdrone.epg.solver_report.v1";
 inline constexpr const char *NATIVE_HEURISTIC_SOLVER_VERSION =
-    "native-heuristic-v2";
+    "native-heuristic-v3";
 
 enum class OverflowPolicy {
     DropNewest,
@@ -73,6 +73,10 @@ struct TaskDiagnostics {
     std::atomic<std::uint64_t> lastLoopUs{0};
     std::atomic<std::uint64_t> maxLoopUs{0};
     std::atomic<std::uint64_t> totalLoopUs{0};
+    std::atomic<std::uint64_t> resourceWaitCount{0};
+    std::atomic<std::uint64_t> lastResourceWaitUs{0};
+    std::atomic<std::uint64_t> maxResourceWaitUs{0};
+    std::atomic<std::uint64_t> totalResourceWaitUs{0};
     std::atomic<std::uint64_t> firstLoopMs{0};
     std::atomic<std::uint64_t> lastLoopMs{0};
     std::atomic<std::uint64_t> budgetOverrunCount{0};
@@ -91,6 +95,10 @@ struct TaskDiagnosticsSnapshot {
     std::uint64_t p90LoopUs{};
     std::uint64_t p99LoopUs{};
     std::uint64_t totalLoopUs{};
+    std::uint64_t resourceWaitCount{};
+    std::uint64_t lastResourceWaitUs{};
+    std::uint64_t maxResourceWaitUs{};
+    std::uint64_t totalResourceWaitUs{};
     std::uint64_t firstLoopMs{};
     std::uint64_t lastLoopMs{};
     std::uint64_t budgetOverrunCount{};
@@ -180,6 +188,7 @@ struct SolverReportMetadata {
 struct SolverReportScore {
     std::uint64_t queuePressure{};
     std::uint64_t periodicOverloadUs{};
+    std::uint64_t resourceWaitUs{};
     std::uint64_t schedulingErrors{};
     std::uint64_t budgetOverruns{};
     std::uint64_t deadlineMisses{};
@@ -212,6 +221,10 @@ struct SolverReportDecision {
     std::uint64_t p90LoopUs{};
     std::uint64_t p99LoopUs{};
     std::uint64_t effectiveLoopUs{};
+    std::uint64_t resourceWaitCount{};
+    std::uint64_t maxResourceWaitUs{};
+    std::uint64_t averageResourceWaitUs{};
+    std::uint64_t totalResourceWaitUs{};
     std::uint64_t utilizationPpm{};
     std::uint64_t targetUtilizationPpm{};
     std::uint64_t budgetUs{};
@@ -243,6 +256,10 @@ struct TaskProfileMetrics {
     std::uint64_t averageLoopUs{};
     std::uint64_t p90LoopUs{};
     std::uint64_t p99LoopUs{};
+    std::uint64_t resourceWaitCount{};
+    std::uint64_t maxResourceWaitUs{};
+    std::uint64_t averageResourceWaitUs{};
+    std::uint64_t totalResourceWaitUs{};
     std::uint64_t utilizationPpm{};
     std::uint64_t budgetOverrunCount{};
     std::uint64_t deadlineMissCount{};
@@ -536,6 +553,8 @@ public:
     bool OutputExists(PortId port) const;
     std::size_t OutputSize(PortId port) const;
     const IQueue* OutputQueueByPort(PortId port) const;
+    void AttachDiagnostics(TaskDiagnostics* diagnostics);
+    void ReportResourceWait(std::uint64_t waitUs);
 
 private:
     template <class T>
@@ -564,6 +583,7 @@ private:
 
     std::unordered_map<PortId, IQueue*> m_inputs;
     std::unordered_map<PortId, IQueue*> m_outputs;
+    TaskDiagnostics* m_diagnostics{nullptr};
 };
 
 class ITask {

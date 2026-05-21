@@ -1,6 +1,7 @@
 #include "core/application/session/slam/slam_session_runtime_service.h"
 
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <utility>
 
@@ -25,8 +26,15 @@ Result RunLockedRuntimeOperation(
         return output;
     }
 
+    const auto waitBegin = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(mutex);
-    return operation(*runtime);
+    const auto waitEnd = std::chrono::steady_clock::now();
+    output = operation(*runtime);
+    output.resourceWaitUs = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            waitEnd - waitBegin)
+            .count());
+    return output;
 }
 
 template <typename Result, typename Payload, typename Operation>
@@ -41,8 +49,15 @@ Result RunLockedPayloadOperation(
         return output;
     }
 
+    const auto waitBegin = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(mutex);
-    return operation(*runtime, std::move(payload));
+    const auto waitEnd = std::chrono::steady_clock::now();
+    output = operation(*runtime, std::move(payload));
+    output.resourceWaitUs = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            waitEnd - waitBegin)
+            .count());
+    return output;
 }
 
 } // namespace

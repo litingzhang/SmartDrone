@@ -14,7 +14,10 @@ from typing import Any, Dict, List, Set, Tuple
 PROFILE_SCHEMA = "smartdrone.epg.profile.v1"
 OPTIMIZED_SCHEMA = "smartdrone.epg.optimized_config.v1"
 SOLVER_REPORT_SCHEMA = "smartdrone.epg.solver_report.v1"
-SOLVER_VERSION = "python-heuristic-v2"
+SOLVER_VERSION = "python-heuristic-v3"
+RESOURCE_WAIT_PRESSURE_US = 1000
+RESOURCE_ISOLATION_CPU_AFFINITY = 2
+RESOURCE_ISOLATION_PRIORITY = 20
 
 
 @dataclass(frozen=True)
@@ -151,6 +154,7 @@ TASK_DIAGNOSTIC_FIELDS = [
 SOLVER_SCORE_FIELDS = [
     "queuePressure",
     "periodicOverloadUs",
+    "resourceWaitUs",
     "schedulingErrors",
     "budgetOverruns",
     "deadlineMisses",
@@ -181,6 +185,10 @@ TASK_DECISION_FIELDS = [
     "p90LoopUs",
     "p99LoopUs",
     "effectiveLoopUs",
+    "resourceWaitCount",
+    "maxResourceWaitUs",
+    "averageResourceWaitUs",
+    "totalResourceWaitUs",
     "utilizationPpm",
     "targetUtilizationPpm",
     "budgetUs",
@@ -195,6 +203,7 @@ TASK_REASON_ORDER = [
     "budget_overrun",
     "deadline_miss",
     "scheduling_error",
+    "resource_wait",
 ]
 
 
@@ -295,6 +304,12 @@ def decision_reason_set(item: Dict[str, Any]) -> Set[str]:
             reasons.add("deadline_miss")
     if integer(item.get("schedulingErrorCount")) > 0:
         reasons.add("scheduling_error")
+    if (integer(item.get("maxResourceWaitUs")) > RESOURCE_WAIT_PRESSURE_US or
+            integer(item.get("averageResourceWaitUs")) >
+            RESOURCE_WAIT_PRESSURE_US or
+            integer(item.get("totalResourceWaitUs")) >
+            RESOURCE_WAIT_PRESSURE_US):
+        reasons.add("resource_wait")
     return reasons
 
 
@@ -400,6 +415,16 @@ def effective_loop_us(diag: Dict[str, Any]) -> int:
     )
 
 
+def has_resource_wait_pressure(diag: Dict[str, Any]) -> bool:
+    return (
+        integer(diag.get("maxResourceWaitUs")) > RESOURCE_WAIT_PRESSURE_US or
+        integer(diag.get("averageResourceWaitUs")) >
+        RESOURCE_WAIT_PRESSURE_US or
+        integer(diag.get("totalResourceWaitUs")) >
+        RESOURCE_WAIT_PRESSURE_US
+    )
+
+
 def reason_set(diag: Dict[str, Any],
                loop_us: int,
                utilization_ppm: int,
@@ -420,6 +445,8 @@ def reason_set(diag: Dict[str, Any],
     if integer(scheduling.get("deadline_us")) > 0:
         if loop_us > integer(scheduling.get("deadline_us")):
             reasons.add("deadline_miss")
+    if has_resource_wait_pressure(diag):
+        reasons.add("resource_wait")
     return reasons
 
 
@@ -449,6 +476,20 @@ def report_reason(reasons: Set[str],
     return "not_replaceable" if reason == "keep" else f"not_replaceable+{reason}"
 
 
+def apply_resource_isolation(scheduling: Dict[str, Any],
+                             trigger: Dict[str, Any],
+                             diag: Dict[str, Any],
+                             replaceable: bool) -> None:
+    if not replaceable or not has_resource_wait_pressure(diag):
+        return
+    if integer(scheduling.get("cpu_affinity"), -1) < 0:
+        scheduling["cpu_affinity"] = RESOURCE_ISOLATION_CPU_AFFINITY
+    if (not bool(scheduling.get("realtime", False)) and
+            integer(trigger.get("interval_ms")) > 0):
+        scheduling["realtime"] = True
+        scheduling["priority"] = RESOURCE_ISOLATION_PRIORITY
+
+
 def normalized_task(task: Dict[str, Any], limits: SolverLimits,
                     diagnostics: Dict[str, Dict[str, Any]],
                     catalog: Dict[str, Dict[str, Any]]
@@ -474,6 +515,7 @@ def normalized_task(task: Dict[str, Any], limits: SolverLimits,
             interval_ms, loop_us, utilization_ppm, limits)
     if target_interval != interval_ms:
         trigger["interval_ms"] = target_interval
+    apply_resource_isolation(scheduling, trigger, diag, replaceable)
     result["trigger"] = trigger
     result["scheduling"] = scheduling
     decision = {
@@ -486,6 +528,11 @@ def normalized_task(task: Dict[str, Any], limits: SolverLimits,
         "p90LoopUs": integer(diag.get("p90LoopUs")),
         "p99LoopUs": integer(diag.get("p99LoopUs")),
         "effectiveLoopUs": loop_us,
+        "resourceWaitCount": integer(diag.get("resourceWaitCount")),
+        "maxResourceWaitUs": integer(diag.get("maxResourceWaitUs")),
+        "averageResourceWaitUs": integer(
+            diag.get("averageResourceWaitUs")),
+        "totalResourceWaitUs": integer(diag.get("totalResourceWaitUs")),
         "utilizationPpm": utilization_ppm,
         "targetUtilizationPpm": limits.target_utilization_ppm,
         "budgetUs": integer(scheduling.get("budget_us")),
@@ -518,6 +565,11 @@ def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
         for item in decisions
         if item.get("kind") == "task"
     )
+    resource_wait_us = sum(
+        integer(item.get("totalResourceWaitUs"))
+        for item in decisions
+        if item.get("kind") == "task"
+    )
     budget_overruns = sum(
         integer(item.get("budgetOverrunCount"))
         for item in decisions
@@ -537,12 +589,13 @@ def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
     return {
         "queuePressure": queue_pressure_sum,
         "periodicOverloadUs": overload_sum,
+        "resourceWaitUs": resource_wait_us,
         "schedulingErrors": scheduling_errors,
         "budgetOverruns": budget_overruns,
         "deadlineMisses": deadline_misses,
         "utilizationOverPpm": utilization_over,
         "totalPenalty": queue_pressure_sum * 1000 + overload_sum +
-        scheduling_errors * 10000 + budget_overruns * 2000 +
+        resource_wait_us + scheduling_errors * 10000 + budget_overruns * 2000 +
         deadline_misses * 5000 + utilization_over,
     }
 

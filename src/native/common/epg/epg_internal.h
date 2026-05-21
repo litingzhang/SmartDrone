@@ -21,6 +21,14 @@ inline TaskDiagnosticsSnapshot SnapshotTaskDiagnostics(const TaskDiagnostics& di
     result.lastLoopUs = diag.lastLoopUs.load(std::memory_order_relaxed);
     result.maxLoopUs = diag.maxLoopUs.load(std::memory_order_relaxed);
     result.totalLoopUs = diag.totalLoopUs.load(std::memory_order_relaxed);
+    result.resourceWaitCount =
+        diag.resourceWaitCount.load(std::memory_order_relaxed);
+    result.lastResourceWaitUs =
+        diag.lastResourceWaitUs.load(std::memory_order_relaxed);
+    result.maxResourceWaitUs =
+        diag.maxResourceWaitUs.load(std::memory_order_relaxed);
+    result.totalResourceWaitUs =
+        diag.totalResourceWaitUs.load(std::memory_order_relaxed);
     result.firstLoopMs = diag.firstLoopMs.load(std::memory_order_relaxed);
     result.lastLoopMs = diag.lastLoopMs.load(std::memory_order_relaxed);
     result.budgetOverrunCount =

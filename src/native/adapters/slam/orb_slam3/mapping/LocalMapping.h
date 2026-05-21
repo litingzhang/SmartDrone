@@ -170,7 +170,7 @@ protected:
 
     std::list<KeyFrame*> mlNewKeyFrames;
 
-    KeyFrame* mpCurrentKeyFrame;
+    KeyFrame* mpCurrentKeyFrame{nullptr};
 
     std::list<MapPoint*> mlpRecentAddedMapPoints;
 

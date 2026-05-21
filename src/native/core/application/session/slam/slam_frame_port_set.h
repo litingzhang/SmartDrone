@@ -8,6 +8,7 @@
 #include "core/application/session/slam/slam_frame_stage_context.h"
 #include "core/application/session/slam/slam_frame_stage_state.h"
 #include "core/application/session/slam/slam_frame_tracking_port.h"
+#include "core/application/session/slam/slam_backend_maintenance_port.h"
 
 namespace smartdrone::core::ports {
 class ISlamSessionTelemetryPort;
@@ -48,6 +49,7 @@ class SlamFramePortSet final {
 
     void Prepare();
     SlamFrameInputPort &InputPort();
+    SlamBackendMaintenancePort &BackendMaintenancePort();
     SlamFrameTrackingPort &TrackingPort();
     SlamFramePosePostprocessPort &PosePostprocessPort();
     SlamFrameOutputPort &OutputPort();
@@ -64,6 +66,7 @@ class SlamFramePortSet final {
     std::unique_ptr<SlamFramePosePostprocessContext> m_posePostprocessContext;
     std::unique_ptr<SlamFrameOutputContext> m_outputContext;
     std::unique_ptr<SlamFrameInputPort> m_inputPort;
+    std::unique_ptr<SlamBackendMaintenancePort> m_backendMaintenancePort;
     std::unique_ptr<SlamFrameTrackingPort> m_trackingPort;
     std::unique_ptr<SlamFramePosePostprocessPort> m_posePostprocessPort;
     std::unique_ptr<SlamFrameOutputPort> m_outputPort;

@@ -57,7 +57,12 @@ std::string DescribeTrackingState(int trackingState)
 
 bool IsIdentityPose(const core::ports::PoseEstimate &pose)
 {
-    return pose.valid && pose.x == 0.0f && pose.y == 0.0f && pose.z == 0.0f && pose.qw == 1.0f &&
+    return pose.valid && HasIdentityPoseValues(pose);
+}
+
+bool HasIdentityPoseValues(const core::ports::PoseEstimate &pose)
+{
+    return pose.x == 0.0f && pose.y == 0.0f && pose.z == 0.0f && pose.qw == 1.0f &&
            pose.qx == 0.0f && pose.qy == 0.0f && pose.qz == 0.0f;
 }
 

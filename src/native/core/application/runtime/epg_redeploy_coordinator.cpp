@@ -1,8 +1,60 @@
 #include "core/application/runtime/epg_redeploy_coordinator.h"
 
+#include <sstream>
 #include <utility>
 
 namespace smartdrone::core::application {
+namespace {
+
+void AppendTextField(std::ostringstream &out,
+                     const char *name,
+                     const std::string &value,
+                     bool &first)
+{
+    if (value.empty()) {
+        return;
+    }
+    if (!first) {
+        out << " ";
+    }
+    out << name << "=" << value;
+    first = false;
+}
+
+void AppendNumberField(std::ostringstream &out,
+                       const char *name,
+                       std::uint64_t value,
+                       bool &first)
+{
+    if (value == 0) {
+        return;
+    }
+    if (!first) {
+        out << " ";
+    }
+    out << name << "=" << value;
+    first = false;
+}
+
+} // namespace
+
+std::string DescribeEpgRedeployRequest(
+    const EpgRedeployRequest &request)
+{
+    std::ostringstream out;
+    bool first = true;
+    AppendTextField(out, "graph", request.graphName, first);
+    AppendTextField(out, "reason", request.reason, first);
+    AppendTextField(out, "topology", request.topologyVersion, first);
+    AppendTextField(out, "source", request.sourceProfile, first);
+    AppendTextField(out, "profile", request.sourceProfilePath, first);
+    AppendNumberField(out, "source_ts_ms", request.sourceTimestampMs, first);
+    AppendNumberField(out, "generated_ms", request.generatedAtMs, first);
+    AppendTextField(out, "solver", request.solverVersion, first);
+    AppendTextField(out, "optimized", request.optimizedConfigPath, first);
+    AppendTextField(out, "report", request.solverReportPath, first);
+    return out.str();
+}
 
 void EpgRedeployCoordinator::RequestSystemRedeploy()
 {

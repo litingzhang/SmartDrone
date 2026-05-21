@@ -24,6 +24,7 @@ bool IsOrbBootstrapState(int trackingState);
 std::string DescribeTrackingState(int trackingState);
 
 bool IsIdentityPose(const core::ports::PoseEstimate &pose);
+bool HasIdentityPoseValues(const core::ports::PoseEstimate &pose);
 bool IsFinitePose(const core::ports::PoseEstimate &pose);
 void NormalizePoseQuaternion(core::ports::PoseEstimate &pose);
 float PoseTranslationDistance(const core::ports::PoseEstimate &a, const core::ports::PoseEstimate &b);

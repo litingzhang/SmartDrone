@@ -18,6 +18,7 @@
 #include "core/application/session/slam/slam_processing_support.h"
 #include "core/application/session/slam/slam_runtime_control_port.h"
 #include "core/application/session/slam/slam_runtime_environment.h"
+#include "core/application/session/slam/slam_session_resource_lifecycle.h"
 #include "core/application/session/slam/slam_session_resource_factory.h"
 #include "core/application/session/slam/slam_settings_loader.h"
 #include "core/application/state/frame_timing_tracker.h"
@@ -115,8 +116,7 @@ private:
 
   std::unique_ptr<smartdrone::core::ports::ISlamEngine> m_slamEngine;
   std::unique_ptr<SlamRuntimeControlPort> m_slamRuntimeControl;
-  std::unique_ptr<ISlamVisualFeatureFrontendSession>
-      m_visualFeatureFrontendSession;
+  std::unique_ptr<SlamSessionResourceLifecycle> m_resourceLifecycle;
   AutoSlamModeController m_autoSlamModeController{};
   StereoBodyExtrinsics m_stereoBodyExtrinsics{};
   SlamPreviewOutputRuntime m_previewOutputRuntime;
@@ -132,25 +132,19 @@ private:
   SlamFramePosePostprocessState m_framePosePostprocessState;
   SlamFrameOutputState m_frameOutputState;
   std::unique_ptr<SlamFramePortSet> m_framePorts;
-  bool m_udpOpen{false};
-  bool m_cameraOpen{false};
-  bool m_slamStarted{false};
   bool m_sessionOk{true};
 
   bool FailStart();
-  bool StartSlamEngine();
   void ConfigureSlamControl();
   void ApplyInitialSlamMode();
   void LoadStereoBodyExtrinsicsIfNeeded();
-  void StartVisualFeatureFrontend();
+  bool StartResources();
+  SlamSessionResourceLifecycleConfig BuildResourceLifecycleConfig();
+  bool StartFrameResources();
   void HandleVisualFeatureFrontendReady(
-      const SlamVisualFeatureFrontendStartResult &startResult);
+      const SlamSessionResourceStartResult &startResult);
   void HandleVisualFeatureFrontendStartFailure(const std::string &featureErr);
   void LogLkFrontendSelection() const;
-  bool OpenUdp();
-  bool StartImuPoller();
-  bool OpenCamera();
-  bool StartOutputAndSensors();
   SlamFramePortSet &FramePorts();
   SlamFrameStageResult MakeStageResult(SlamFrameStepResult stepResult) const;
   void ReleaseResources(bool logProgress);
@@ -190,16 +184,15 @@ bool SlamSessionRuntime::Impl::Start()
   PrintStartupConfig(m_cfg.app, m_aliases, ControllerMode::Slam);
   m_livePose.SetRuntimeMode(RUNTIME_MODE_SLAM);
   Logger::Init("./stereo_vslam.log", 32 * 1024 * 1024, Logger::INFO, true);
-  if (!StartSlamEngine()) {
+  if (!StartResources()) {
     return false;
   }
 
   ConfigureSlamControl();
   ApplyInitialSlamMode();
   LoadStereoBodyExtrinsicsIfNeeded();
-  StartVisualFeatureFrontend();
   LogLkFrontendSelection();
-  if (!StartOutputAndSensors()) {
+  if (!StartFrameResources()) {
     return false;
   }
 
@@ -212,15 +205,6 @@ bool SlamSessionRuntime::Impl::FailStart()
   m_stop.store(true);
   CleanupAfterStartFailure();
   return false;
-}
-
-bool SlamSessionRuntime::Impl::StartSlamEngine()
-{
-  if (m_slamEngine != nullptr && m_slamEngine->Start()) {
-    m_slamStarted = true;
-    return true;
-  }
-  return FailStart();
 }
 
 void SlamSessionRuntime::Impl::ConfigureSlamControl()
@@ -267,35 +251,74 @@ void SlamSessionRuntime::Impl::LoadStereoBodyExtrinsicsIfNeeded()
   }
 }
 
-void SlamSessionRuntime::Impl::StartVisualFeatureFrontend()
+SlamSessionResourceLifecycleConfig
+SlamSessionRuntime::Impl::BuildResourceLifecycleConfig()
 {
-  auto startResult = StartSlamVisualFeatureFrontendSession(m_aliases, m_cfg);
-  if (!startResult.routeAvailable) {
-    return;
+  auto destinationResolver = [this](sockaddr_in &dst) {
+    LivePoseState::Snapshot snapshot{};
+    if (!m_livePose.ReadSnapshot(snapshot) || !snapshot.hasPeer ||
+        !snapshot.peer.valid) {
+      return false;
+    }
+    dst = snapshot.peer.addr;
+    return true;
+  };
+  return {
+      *m_slamEngine,
+      m_cameraProvider.get(),
+      &m_imuPoller,
+      &m_previewOutputRuntime,
+      m_useImu,
+      m_aliases.udpEnable,
+      m_aliases,
+      std::move(destinationResolver),
+      [this]() {
+        return StartSlamVisualFeatureFrontendSession(m_aliases, m_cfg);
+      },
+      [this](smartdrone::core::ports::IVisualFeatureFrontend *frontend) {
+        if (m_slamRuntimeControl != nullptr) {
+          m_slamRuntimeControl->SetVisualFeatureFrontend(frontend);
+        }
+      }};
+}
+
+bool SlamSessionRuntime::Impl::StartResources()
+{
+  if (!m_slamEngine || !m_slamRuntimeControl || !m_cameraProvider) {
+    return FailStart();
   }
-  if (startResult.clientMissing) {
-    std::cerr << "[slam] warning: "
-              << ToFeatureFrontendText(m_aliases.featureFrontend)
-              << " frontend route is available, but no native client is "
-                 "registered\n";
-    return;
+  m_resourceLifecycle =
+      std::make_unique<SlamSessionResourceLifecycle>(
+          BuildResourceLifecycleConfig());
+  return m_resourceLifecycle->StartSlamEngine() ? true : FailStart();
+}
+
+bool SlamSessionRuntime::Impl::StartFrameResources()
+{
+  if (!m_resourceLifecycle) {
+    return FailStart();
   }
-  if (!startResult.started) {
-    HandleVisualFeatureFrontendStartFailure(startResult.error);
-    return;
+  const auto result = m_resourceLifecycle->StartFrameResources();
+  if (result.featureRouteAvailable) {
+    if (result.featureClientMissing) {
+      std::cerr << "[slam] warning: "
+                << ToFeatureFrontendText(m_aliases.featureFrontend)
+                << " frontend route is available, but no native client is "
+                   "registered\n";
+    } else if (!result.featureStarted) {
+      HandleVisualFeatureFrontendStartFailure(result.featureError);
+    } else {
+      HandleVisualFeatureFrontendReady(result);
+    }
   }
-  HandleVisualFeatureFrontendReady(startResult);
-  m_visualFeatureFrontendSession = std::move(startResult.session);
+  return result.ok ? true : FailStart();
 }
 
 void SlamSessionRuntime::Impl::HandleVisualFeatureFrontendReady(
-    const SlamVisualFeatureFrontendStartResult &startResult)
+    const SlamSessionResourceStartResult &startResult)
 {
-  if (m_slamRuntimeControl != nullptr) {
-    m_slamRuntimeControl->SetVisualFeatureFrontend(startResult.frontend);
-  }
   std::cerr << "[slam] " << ToFeatureFrontendText(m_aliases.featureFrontend)
-            << " frontend ready repo=" << startResult.repoPath
+            << " frontend ready repo=" << startResult.featureRepoPath
             << " device=" << m_cfg.app.runtime.visualFeatureDevice
             << " top_k=" << m_cfg.app.runtime.visualFeatureTopK
             << " max_points=" << m_cfg.app.runtime.visualFeatureMaxPoints
@@ -308,7 +331,6 @@ void SlamSessionRuntime::Impl::HandleVisualFeatureFrontendStartFailure(
   std::cerr << "[slam] warning: "
             << ToFeatureFrontendText(m_aliases.featureFrontend)
             << " frontend start failed: " << featureErr << "\n";
-  m_visualFeatureFrontendSession.reset();
 }
 
 void SlamSessionRuntime::Impl::LogLkFrontendSelection() const
@@ -318,96 +340,17 @@ void SlamSessionRuntime::Impl::LogLkFrontendSelection() const
   }
 }
 
-bool SlamSessionRuntime::Impl::OpenUdp()
-{
-  if (!m_aliases.udpEnable) {
-    return true;
-  }
-
-  auto destinationResolver = [this](sockaddr_in &dst) {
-    LivePoseState::Snapshot snapshot{};
-    if (!m_livePose.ReadSnapshot(snapshot) || !snapshot.hasPeer ||
-        !snapshot.peer.valid) {
-      return false;
-    }
-    dst = snapshot.peer.addr;
-    return true;
-  };
-  if (m_previewOutputRuntime.Open(m_aliases, std::move(destinationResolver))) {
-    m_udpOpen = true;
-    return true;
-  }
-
-  std::cerr << "[session] slam udp open failed\n";
-  return FailStart();
-}
-
-bool SlamSessionRuntime::Impl::StartImuPoller()
-{
-  if (!m_useImu) {
-    return true;
-  }
-  if (m_imuPoller.Start()) {
-    return true;
-  }
-  return FailStart();
-}
-
-bool SlamSessionRuntime::Impl::OpenCamera()
-{
-  if (m_cameraProvider != nullptr && m_cameraProvider->Open(m_aliases)) {
-    m_cameraOpen = true;
-    return true;
-  }
-  return FailStart();
-}
-
-bool SlamSessionRuntime::Impl::StartOutputAndSensors()
-{
-  if (!OpenUdp()) {
-    return false;
-  }
-  if (!StartImuPoller()) {
-    return false;
-  }
-  return OpenCamera();
-}
-
 void SlamSessionRuntime::Impl::ReleaseResources(bool logProgress)
 {
   m_telemetry.SetFrameTimingTracker(nullptr);
-  if (m_cameraOpen) {
-    m_cameraProvider->Close();
-    m_cameraOpen = false;
-    if (logProgress) {
-      std::cerr << "[session] slam camera closed\n";
-    }
-  }
-  if (m_useImu) {
-    m_imuPoller.Stop();
-    if (logProgress) {
-      std::cerr << "[session] slam imu stopped\n";
-    }
-  }
-  if (m_udpOpen) {
-    m_previewOutputRuntime.Close();
-    m_udpOpen = false;
-    if (logProgress) {
-      std::cerr << "[session] slam udp closed\n";
-    }
+  if (m_resourceLifecycle) {
+    m_resourceLifecycle->Stop(logProgress);
   }
   m_telemetry.StopSetpointStream();
   if (logProgress) {
     std::cerr << "[session] slam setpoint stopped\n";
   }
-  if (m_slamStarted) {
-    m_slamEngine->Stop();
-    m_slamStarted = false;
-  }
-  if (m_visualFeatureFrontendSession != nullptr) {
-    m_visualFeatureFrontendSession->Stop();
-    m_visualFeatureFrontendSession.reset();
-  }
+  m_resourceLifecycle.reset();
 }
 
 void SlamSessionRuntime::Impl::Stop()
@@ -440,7 +383,7 @@ bool SlamSessionRuntime::Impl::ImuReady() const
 
 SlamFrameStageResult SlamSessionRuntime::Impl::StepBackend()
 {
-  return MakeStageResult(FramePorts().TrackingPort().StepBackend());
+  return MakeStageResult(FramePorts().BackendMaintenancePort().StepBackend());
 }
 
 void SlamSessionRuntime::Impl::PrepareFramePorts()

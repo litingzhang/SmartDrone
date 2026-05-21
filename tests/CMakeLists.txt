@@ -57,6 +57,7 @@ if(ENABLE_OFFLINE_REPLAY)
     euroc/support/replay_dataset.cpp
     euroc/support/replay_slam_runner.cpp
     ../src/native/adapters/slam/dpvo_tensorrt_engine.cpp
+    ../src/native/adapters/slam/dpvo_runtime_options.cpp
     ../src/native/adapters/slam/slam_engine_factory.cpp
     ../src/native/adapters/slam/slam_mode_state.cpp
     ../src/native/adapters/slam/klt_slam_engine.cpp
@@ -82,6 +83,7 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/adapters/slam/visual_pnp_pose_backend.cpp
     ../src/native/adapters/slam/visual_feature_frontend_client.cpp
     ../src/native/adapters/slam/superpoint_native_extractor.cpp
+    ../src/native/adapters/slam/superpoint_runtime_options.cpp
     ../src/native/adapters/slam/superpoint_lightglue_frontend_client.cpp
     ../src/native/core/application/config/app_args.cpp
     ../src/native/core/application/state/frame_timing_tracker.cpp

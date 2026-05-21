@@ -56,6 +56,7 @@ bool StepResultAllowsContinue(epg::TaskContext &context,
                               const SlamTaskStepResult &result,
                               epg::PortId statusPort)
 {
+    context.ReportResourceWait(result.resourceWaitUs);
     if (!result.sessionAvailable) {
         return false;
     }

@@ -240,13 +240,14 @@ bool SlamEngineAdapter::PredictRealtimePose(core::ports::PoseEstimate &pose,
 void SlamEngineAdapter::MaintainRealtimePoseContinuity(
     core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
     int trackingState) {
+  const bool rawFinite = IsFinitePose(pose);
+  const bool rawIdentity = rawFinite && HasIdentityPoseValues(pose);
   pose.valid = poseValid && IsFinitePose(pose);
   if (pose.valid) {
     NormalizePoseQuaternion(pose);
   }
 
   const double dt = StablePoseDeltaTime(timestampSec);
-  const bool rawIdentity = IsIdentityPose(pose);
   if (AcceptStableRealtimePose(pose, poseValid, timestampSec, dt,
                                trackingState)) {
     return;

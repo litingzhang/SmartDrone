@@ -3,6 +3,20 @@
 #include <algorithm>
 
 namespace epg {
+namespace {
+
+void UpdateMaxAtomic(std::atomic<std::uint64_t>& value,
+                     std::uint64_t observed)
+{
+    auto current = value.load(std::memory_order_relaxed);
+    while (observed > current &&
+           !value.compare_exchange_weak(current, observed,
+                                        std::memory_order_relaxed,
+                                        std::memory_order_relaxed)) {
+    }
+}
+
+} // namespace
 
 TaskContext::TaskContext(std::unordered_map<PortId, IQueue*> inputs,
                          std::unordered_map<PortId, IQueue*> outputs)
@@ -40,6 +54,23 @@ std::size_t TaskContext::OutputSize(PortId port) const {
 const IQueue* TaskContext::OutputQueueByPort(PortId port) const {
     const auto it = m_outputs.find(port);
     return it == m_outputs.end() ? nullptr : it->second;
+}
+
+void TaskContext::AttachDiagnostics(TaskDiagnostics* diagnostics)
+{
+    m_diagnostics = diagnostics;
+}
+
+void TaskContext::ReportResourceWait(std::uint64_t waitUs)
+{
+    if (!m_diagnostics || waitUs == 0) {
+        return;
+    }
+    m_diagnostics->resourceWaitCount.fetch_add(1, std::memory_order_relaxed);
+    m_diagnostics->lastResourceWaitUs.store(waitUs, std::memory_order_relaxed);
+    m_diagnostics->totalResourceWaitUs.fetch_add(waitUs,
+                                                 std::memory_order_relaxed);
+    UpdateMaxAtomic(m_diagnostics->maxResourceWaitUs, waitUs);
 }
 
 void Registry::RegisterTaskFactory(const std::string& name,

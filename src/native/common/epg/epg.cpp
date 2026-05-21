@@ -225,6 +225,14 @@ std::uint64_t AverageLoopUs(const TaskDiagnosticsSnapshot& diag)
     return diag.totalLoopUs / diag.loopCount;
 }
 
+std::uint64_t AverageResourceWaitUs(const TaskDiagnosticsSnapshot& diag)
+{
+    if (diag.resourceWaitCount == 0) {
+        return 0;
+    }
+    return diag.totalResourceWaitUs / diag.resourceWaitCount;
+}
+
 std::uint64_t UtilizationPpm(const TaskDiagnosticsSnapshot& diag)
 {
     const std::uint64_t windowMs = ObservationWindowMs(diag);
@@ -283,6 +291,11 @@ void WriteTaskDiagnosticsJson(std::ostringstream& out,
     out << "\"p99LoopUs\": " << diag.p99LoopUs << ", ";
     out << "\"totalLoopUs\": " << diag.totalLoopUs << ", ";
     out << "\"averageLoopUs\": " << AverageLoopUs(diag) << ", ";
+    out << "\"resourceWaitCount\": " << diag.resourceWaitCount << ", ";
+    out << "\"lastResourceWaitUs\": " << diag.lastResourceWaitUs << ", ";
+    out << "\"maxResourceWaitUs\": " << diag.maxResourceWaitUs << ", ";
+    out << "\"totalResourceWaitUs\": " << diag.totalResourceWaitUs << ", ";
+    out << "\"averageResourceWaitUs\": " << AverageResourceWaitUs(diag) << ", ";
     out << "\"loopCount\": " << diag.loopCount << ", ";
     out << "\"errorCount\": " << diag.errorCount << ", ";
     out << "\"idleWakeups\": " << diag.idleWakeups << ", ";

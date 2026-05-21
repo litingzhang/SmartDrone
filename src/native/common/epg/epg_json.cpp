@@ -562,6 +562,14 @@ TaskProfileMetrics ParseTaskProfileMetrics(const JsonValue& item)
     metrics.averageLoopUs = RequiredUInt64(item, "averageLoopUs");
     metrics.p90LoopUs = RequiredUInt64(item, "p90LoopUs");
     metrics.p99LoopUs = RequiredUInt64(item, "p99LoopUs");
+    metrics.resourceWaitCount =
+        OptionalUInt64(item, "resourceWaitCount", metrics.resourceWaitCount);
+    metrics.maxResourceWaitUs =
+        OptionalUInt64(item, "maxResourceWaitUs", metrics.maxResourceWaitUs);
+    metrics.averageResourceWaitUs = OptionalUInt64(
+        item, "averageResourceWaitUs", metrics.averageResourceWaitUs);
+    metrics.totalResourceWaitUs = OptionalUInt64(
+        item, "totalResourceWaitUs", metrics.totalResourceWaitUs);
     metrics.utilizationPpm = RequiredUInt64(item, "utilizationPpm");
     metrics.budgetOverrunCount = RequiredUInt64(item, "budgetOverrunCount");
     metrics.deadlineMissCount = RequiredUInt64(item, "deadlineMissCount");
@@ -698,6 +706,8 @@ SolverReportScore ParseSolverReportScoreObject(const JsonValue& root)
     SolverReportScore score;
     score.queuePressure = RequiredUInt64(root, "queuePressure");
     score.periodicOverloadUs = RequiredUInt64(root, "periodicOverloadUs");
+    score.resourceWaitUs =
+        OptionalUInt64(root, "resourceWaitUs", score.resourceWaitUs);
     score.schedulingErrors = RequiredUInt64(root, "schedulingErrors");
     score.budgetOverruns = RequiredUInt64(root, "budgetOverruns");
     score.deadlineMisses = RequiredUInt64(root, "deadlineMisses");
@@ -755,6 +765,14 @@ void ParseTaskSolverReportDecision(const JsonValue& item,
     decision.p90LoopUs = RequiredUInt64(item, "p90LoopUs");
     decision.p99LoopUs = RequiredUInt64(item, "p99LoopUs");
     decision.effectiveLoopUs = RequiredUInt64(item, "effectiveLoopUs");
+    decision.resourceWaitCount =
+        OptionalUInt64(item, "resourceWaitCount", decision.resourceWaitCount);
+    decision.maxResourceWaitUs = OptionalUInt64(
+        item, "maxResourceWaitUs", decision.maxResourceWaitUs);
+    decision.averageResourceWaitUs = OptionalUInt64(
+        item, "averageResourceWaitUs", decision.averageResourceWaitUs);
+    decision.totalResourceWaitUs = OptionalUInt64(
+        item, "totalResourceWaitUs", decision.totalResourceWaitUs);
     decision.utilizationPpm = RequiredUInt64(item, "utilizationPpm");
     decision.targetUtilizationPpm =
         RequiredUInt64(item, "targetUtilizationPpm");

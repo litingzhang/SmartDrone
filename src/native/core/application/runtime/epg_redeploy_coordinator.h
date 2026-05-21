@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <string>
 
@@ -11,7 +12,18 @@ namespace smartdrone::core::application {
 struct EpgRedeployRequest {
     std::string graphName;
     std::string reason;
+    std::string topologyVersion;
+    std::string sourceProfile;
+    std::string sourceProfilePath;
+    std::uint64_t sourceTimestampMs{0};
+    std::uint64_t generatedAtMs{0};
+    std::string solverVersion;
+    std::string optimizedConfigPath;
+    std::string solverReportPath;
 };
+
+std::string DescribeEpgRedeployRequest(
+    const EpgRedeployRequest &request);
 
 class EpgRedeployCoordinator final {
   public:

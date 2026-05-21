@@ -496,6 +496,10 @@ std::string MinimalTaskDiagnosticsJson()
             "averageLoopUs": 0,
             "p90LoopUs": 0,
             "p99LoopUs": 0,
+            "resourceWaitCount": 0,
+            "maxResourceWaitUs": 0,
+            "averageResourceWaitUs": 0,
+            "totalResourceWaitUs": 0,
             "utilizationPpm": 0,
             "budgetOverrunCount": 0,
             "deadlineMissCount": 0,
@@ -612,6 +616,10 @@ std::string NonReplaceableTaskProfileJson()
             "p90LoopUs": 2400,
             "p99LoopUs": 2600,
             "averageLoopUs": 2200,
+            "resourceWaitCount": 0,
+            "maxResourceWaitUs": 0,
+            "averageResourceWaitUs": 0,
+            "totalResourceWaitUs": 0,
             "utilizationPpm": 900000,
             "budgetOverrunCount": 2,
             "deadlineMissCount": 1,
@@ -1133,6 +1141,14 @@ TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently) {
     redeploy.RequestSystemRedeploy({
         "cluster_system_runtime_graph",
         "optimized config changed",
+        "config/epg/epg_topology.dot:v2",
+        "cluster_system_runtime_graph",
+        "/tmp/smartdrone_epg_system_profile.json",
+        1000,
+        1010,
+        "native-heuristic-v3",
+        "output/epg/optimized_system_runtime_graph.json",
+        "output/epg/optimized_system_runtime_graph_report.json",
     });
     EXPECT_TRUE(redeploy.SystemRedeployRequested());
     EXPECT_FALSE(redeploy.SessionRedeployRequested());
@@ -1140,11 +1156,40 @@ TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently) {
     EXPECT_TRUE(redeploy.TakeSystemRedeployRequest(systemRequest));
     EXPECT_EQ(systemRequest.graphName, "cluster_system_runtime_graph");
     EXPECT_EQ(systemRequest.reason, "optimized config changed");
+    EXPECT_EQ(systemRequest.topologyVersion, "config/epg/epg_topology.dot:v2");
+    EXPECT_EQ(systemRequest.sourceProfile, "cluster_system_runtime_graph");
+    EXPECT_EQ(systemRequest.sourceProfilePath,
+              "/tmp/smartdrone_epg_system_profile.json");
+    EXPECT_EQ(systemRequest.sourceTimestampMs, 1000u);
+    EXPECT_EQ(systemRequest.generatedAtMs, 1010u);
+    EXPECT_EQ(systemRequest.solverVersion, "native-heuristic-v3");
+    EXPECT_EQ(systemRequest.optimizedConfigPath,
+              "output/epg/optimized_system_runtime_graph.json");
+    EXPECT_EQ(systemRequest.solverReportPath,
+              "output/epg/optimized_system_runtime_graph_report.json");
+    const auto description =
+        smartdrone::core::application::DescribeEpgRedeployRequest(
+            systemRequest);
+    EXPECT_NE(description.find("graph=cluster_system_runtime_graph"),
+              std::string::npos);
+    EXPECT_NE(description.find("source_ts_ms=1000"), std::string::npos);
+    EXPECT_NE(
+        description.find(
+            "optimized=output/epg/optimized_system_runtime_graph.json"),
+        std::string::npos);
     EXPECT_FALSE(redeploy.TakeSystemRedeployRequest(systemRequest));
 
     redeploy.RequestSessionRedeploy({
         "cluster_slam_session_graph",
         "optimized config changed",
+        "config/epg/epg_topology.dot:v2",
+        "cluster_slam_session_graph",
+        "/tmp/smartdrone_epg_slam_profile.json",
+        2000,
+        2010,
+        "native-heuristic-v3",
+        "output/epg/optimized_slam_session_graph.json",
+        "output/epg/optimized_slam_session_graph_report.json",
     });
     EXPECT_TRUE(redeploy.SessionRedeployRequested());
     EXPECT_FALSE(redeploy.SystemRedeployRequested());
@@ -1152,6 +1197,12 @@ TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently) {
     EXPECT_TRUE(redeploy.TakeSessionRedeployRequest(sessionRequest));
     EXPECT_EQ(sessionRequest.graphName, "cluster_slam_session_graph");
     EXPECT_EQ(sessionRequest.reason, "optimized config changed");
+    EXPECT_EQ(sessionRequest.sourceTimestampMs, 2000u);
+    EXPECT_EQ(sessionRequest.generatedAtMs, 2010u);
+    EXPECT_EQ(sessionRequest.optimizedConfigPath,
+              "output/epg/optimized_slam_session_graph.json");
+    EXPECT_EQ(sessionRequest.solverReportPath,
+              "output/epg/optimized_slam_session_graph_report.json");
     EXPECT_FALSE(redeploy.TakeSessionRedeployRequest(sessionRequest));
 }
 
@@ -1814,6 +1865,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
         "score": {
           "queuePressure": 2,
           "periodicOverloadUs": 500,
+          "resourceWaitUs": 0,
           "schedulingErrors": 1,
           "budgetOverruns": 2,
           "deadlineMisses": 3,
@@ -1848,6 +1900,10 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
           "p90LoopUs": 1200,
           "p99LoopUs": 1500,
           "effectiveLoopUs": 1500,
+          "resourceWaitCount": 0,
+          "maxResourceWaitUs": 0,
+          "averageResourceWaitUs": 0,
+          "totalResourceWaitUs": 0,
           "utilizationPpm": 900000,
           "targetUtilizationPpm": 800000,
           "budgetUs": 1000,
@@ -2063,6 +2119,9 @@ TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
     EXPECT_NE(profile.find("\"p99LoopUs\""), std::string::npos);
     EXPECT_NE(profile.find("\"windowMs\""), std::string::npos);
     EXPECT_NE(profile.find("\"utilizationPpm\""), std::string::npos);
+    EXPECT_NE(profile.find("\"resourceWaitCount\""), std::string::npos);
+    EXPECT_NE(profile.find("\"maxResourceWaitUs\""), std::string::npos);
+    EXPECT_NE(profile.find("\"averageResourceWaitUs\""), std::string::npos);
     EXPECT_NE(profile.find("\"budgetOverrunCount\""), std::string::npos);
     EXPECT_NE(profile.find("\"deadlineMissCount\""), std::string::npos);
     EXPECT_NE(profile.find("\"schedulingErrorCount\""), std::string::npos);
@@ -2215,9 +2274,14 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
                 "p50LoopUs": 2000,
                 "p90LoopUs": 2400,
                 "p99LoopUs": 2600,
-                "totalLoopUs": 2600,
-                "averageLoopUs": 2200,
-                "loopCount": 1,
+              "totalLoopUs": 2600,
+              "averageLoopUs": 2200,
+              "resourceWaitCount": 2,
+              "lastResourceWaitUs": 1300,
+              "maxResourceWaitUs": 1500,
+              "totalResourceWaitUs": 2500,
+              "averageResourceWaitUs": 1250,
+              "loopCount": 1,
                 "errorCount": 0,
                 "idleWakeups": 0,
                 "firstLoopMs": 1,
@@ -2235,9 +2299,14 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
                 "p50LoopUs": 200,
                 "p90LoopUs": 250,
                 "p99LoopUs": 300,
-                "totalLoopUs": 300,
-                "averageLoopUs": 200,
-                "loopCount": 1,
+              "totalLoopUs": 300,
+              "averageLoopUs": 200,
+              "resourceWaitCount": 0,
+              "lastResourceWaitUs": 0,
+              "maxResourceWaitUs": 0,
+              "totalResourceWaitUs": 0,
+              "averageResourceWaitUs": 0,
+              "loopCount": 1,
                 "errorCount": 0,
                 "idleWakeups": 0,
                 "firstLoopMs": 1,
@@ -2267,6 +2336,16 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
         smartdrone::core::application::OptimizeEpgProfileForManifest(
             manifest, nowMs + 10);
     EXPECT_TRUE(result.optimized) << result.message;
+    EXPECT_TRUE(result.configChanged);
+    EXPECT_EQ(result.targetGraph, "test_graph");
+    EXPECT_EQ(result.topologyVersion, "test-topology");
+    EXPECT_EQ(result.sourceProfile, "test_graph");
+    EXPECT_EQ(result.sourceProfilePath, profilePath);
+    EXPECT_EQ(result.sourceTimestampMs, 1000u);
+    EXPECT_EQ(result.generatedAtMs, 1010u);
+    EXPECT_EQ(result.solverVersion, epg::NATIVE_HEURISTIC_SOLVER_VERSION);
+    EXPECT_EQ(result.optimizedConfigPath, outputPath);
+    EXPECT_EQ(result.solverReportPath, reportPath);
 
     const std::string optimized = ReadFileText(outputPath);
     EXPECT_NE(optimized.find(std::string("\"schema\": \"") +
@@ -2289,6 +2368,9 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     ASSERT_EQ(config.tasks.size(), 2u);
     EXPECT_EQ(config.queues.front().depth, 8u);
     EXPECT_EQ(config.tasks.front().trigger.interval.count(), 3);
+    EXPECT_EQ(config.tasks.front().scheduling.cpuAffinity, 2);
+    EXPECT_TRUE(config.tasks.front().scheduling.realtime);
+    EXPECT_EQ(config.tasks.front().scheduling.priority, 20);
     EXPECT_EQ(config.tasks.front().scheduling.budgetUs, 1500u);
     EXPECT_EQ(config.tasks.front().scheduling.deadlineUs, 3000u);
 
@@ -2307,6 +2389,10 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     EXPECT_NE(report.find("\"reason\": \"increase_depth\""),
               std::string::npos);
     EXPECT_NE(report.find("\"reason\": \"increase_interval\""),
+              std::string::npos);
+    EXPECT_NE(report.find("\"resourceWaitUs\": 2500"),
+              std::string::npos);
+    EXPECT_NE(report.find("\"totalResourceWaitUs\": 2500"),
               std::string::npos);
     EXPECT_NE(report.find("\"catalogRole\": \"source\""),
               std::string::npos);
@@ -2702,6 +2788,12 @@ TEST(EventPipelineGraphOptimizer, ReportsUnchangedConfigWithoutRedeploy) {
             manifest, nowMs + 20);
     EXPECT_TRUE(second.optimized) << second.message;
     EXPECT_FALSE(second.configChanged);
+    EXPECT_EQ(second.targetGraph, "test_graph");
+    EXPECT_EQ(second.sourceProfilePath, profilePath);
+    EXPECT_EQ(second.generatedAtMs, nowMs + 20);
+    EXPECT_EQ(second.optimizedConfigPath, outputPath);
+    EXPECT_EQ(second.solverReportPath,
+              manifest.artifactPaths.solverReportPath);
 
     (void)std::remove(profilePath.c_str());
     (void)std::remove(outputPath.c_str());
@@ -2836,6 +2928,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
         "score": {
           "queuePressure": 0,
           "periodicOverloadUs": 0,
+          "resourceWaitUs": 0,
           "schedulingErrors": 0,
           "budgetOverruns": 0,
           "deadlineMisses": 0,
@@ -2870,6 +2963,10 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
           "p90LoopUs": 0,
           "p99LoopUs": 0,
           "effectiveLoopUs": 0,
+          "resourceWaitCount": 0,
+          "maxResourceWaitUs": 0,
+          "averageResourceWaitUs": 0,
+          "totalResourceWaitUs": 0,
           "utilizationPpm": 0,
           "targetUtilizationPpm": 800000,
           "budgetUs": 0,
@@ -2891,6 +2988,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     EXPECT_EQ(report.metadata.generatedAtMs, 456u);
     EXPECT_EQ(report.metadata.solverVersion, "unit-test");
     EXPECT_EQ(report.objectiveName, "unit");
+    EXPECT_EQ(report.score.resourceWaitUs, 0u);
     EXPECT_EQ(report.score.totalPenalty, 0u);
     EXPECT_EQ(report.constraints.maxQueueDepth, 16u);
     ASSERT_EQ(report.decisions.size(), 2u);

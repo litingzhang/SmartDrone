@@ -36,15 +36,15 @@ const EpgTaskManifest SYSTEM_RUNTIME_MANIFEST{
     },
     {},
     {
-        {VEHICLE_TELEMETRY_RX_TASK_TYPE, "telemetry_rx", "cpu", 1000, 2000, false},
-        {"SetpointStreamTask", "flight_setpoint", "cpu", 1000, 2000, false},
-        {"UdpCommandTask", "command_rx", "cpu", 1000, 2000, false},
-        {"ManualControlTask", "manual_control", "cpu", 1000, 5000, false},
+        {VEHICLE_TELEMETRY_RX_TASK_TYPE, "telemetry_rx", "mavlink", 1000, 2000, false},
+        {"SetpointStreamTask", "flight_setpoint", "mavlink", 1000, 2000, false},
+        {"UdpCommandTask", "command_rx", "udp_command", 1000, 2000, false},
+        {"ManualControlTask", "manual_control", "flight_control", 1000, 5000, false},
         {"ForceRestartTask", "restart_guard", "cpu", 1000, 5000, false},
         {"RuntimeSupervisorTask", "session_supervisor", "cpu", 1000, 10000, false},
         {"EpgRedeployTask", "epg_redeploy", "cpu", 1000, 5000, false},
-        {"DiscoveryBeaconTask", "discovery", "cpu", 1000, 10000, false},
-        {"EpgDfxSnapshotTask", "dfx_snapshot", "cpu", 2000, 10000, false},
+        {"DiscoveryBeaconTask", "discovery", "udp_discovery", 1000, 10000, false},
+        {"EpgDfxSnapshotTask", "dfx_snapshot", "storage", 2000, 10000, false},
         {"EpgOptimizeTask", "epg_optimizer", "cpu", 5000, 50000, false},
     },
 };
@@ -63,21 +63,21 @@ const EpgTaskManifest SLAM_SESSION_MANIFEST{
         {"SlamImuPollTask", false, true, true},
     },
     {
-        {"SlamResourceTask", "resource_open", "cpu", 5000, 50000, false},
+        {"SlamResourceTask", "resource_open", "session_resource", 5000, 50000, false},
         {"SlamClockTask", "frame_clock", "cpu", 500, 2000, false},
-        {"SlamImuPollTask", "imu_poll", "cpu", 1000, 2000, false},
-        {"SlamBackendTickTask", "backend_maintenance", "cpu", 2000, 5000, true},
+        {"SlamImuPollTask", "imu_poll", "imu", 1000, 2000, false},
+        {"SlamBackendTickTask", "backend_maintenance", "slam_backend", 2000, 5000, true},
         {"SlamImuGateTask", "sensor_gate", "cpu", 1000, 2000, false},
-        {"SlamAcquireTask", "frame_acquire", "cpu", 12000, 16000, true},
-        {"SlamTrackingTask", "visual_tracking", "cpu", 24000, 33000, true},
+        {"SlamAcquireTask", "frame_acquire", "camera", 12000, 16000, true},
+        {"SlamTrackingTask", "visual_tracking", "slam_backend", 24000, 33000, true},
         {"SlamPosePostprocessTask", "pose_postprocess", "cpu", 3000, 5000, true},
-        {"SlamPointCloudTask", "point_cloud", "cpu", 5000, 10000, true},
+        {"SlamPointCloudTask", "point_cloud", "slam_backend", 5000, 10000, true},
         {"SlamLivePoseTask", "live_pose", "cpu", 2000, 5000, false},
-        {"SlamMavlinkTask", "pose_publish", "cpu", 2000, 5000, false},
-        {"SlamUdpTask", "preview_stream", "cpu", 10000, 16000, true},
-        {"SlamDfxTask", "slam_dfx", "cpu", 5000, 10000, false},
+        {"SlamMavlinkTask", "pose_publish", "mavlink", 2000, 5000, false},
+        {"SlamUdpTask", "preview_stream", "udp_stream", 10000, 16000, true},
+        {"SlamDfxTask", "slam_dfx", "storage", 5000, 10000, false},
         {"SlamMonitorTask", "session_monitor", "cpu", 2000, 10000, false},
-        {"EpgDfxSnapshotTask", "dfx_snapshot", "cpu", 2000, 10000, false},
+        {"EpgDfxSnapshotTask", "dfx_snapshot", "storage", 2000, 10000, false},
     },
 };
 
@@ -91,17 +91,17 @@ const EpgTaskManifest CALIB_SESSION_MANIFEST{
     {},
     {},
     {
-        {"CalibResourceTask", "resource_open", "cpu", 5000, 50000, false},
+        {"CalibResourceTask", "resource_open", "session_resource", 5000, 50000, false},
         {"CalibClockTask", "capture_clock", "cpu", 500, 2000, false},
-        {"CalibCameraAcquireTask", "frame_acquire", "cpu", 12000, 20000, true},
+        {"CalibCameraAcquireTask", "frame_acquire", "camera", 12000, 20000, true},
         {"CalibPacingFilterTask", "save_pacing", "cpu", 1000, 5000, false},
-        {"CalibStorageWriteTask", "storage_write", "cpu", 20000, 50000, true},
-        {"CalibImuWriterTask", "imu_write", "cpu", 2000, 5000, false},
-        {"CalibUdpPreviewTask", "preview_stream", "cpu", 10000, 16000, true},
+        {"CalibStorageWriteTask", "storage_write", "storage", 20000, 50000, true},
+        {"CalibImuWriterTask", "imu_write", "imu", 2000, 5000, false},
+        {"CalibUdpPreviewTask", "preview_stream", "udp_stream", 10000, 16000, true},
         {"CalibCompletionTask", "completion", "cpu", 1000, 5000, false},
-        {"CalibFlushSyncTask", "flush_sync", "cpu", 50000, 200000, false},
+        {"CalibFlushSyncTask", "flush_sync", "storage", 50000, 200000, false},
         {"CalibMonitorTask", "session_monitor", "cpu", 1000, 5000, false},
-        {"EpgDfxSnapshotTask", "dfx_snapshot", "cpu", 2000, 10000, false},
+        {"EpgDfxSnapshotTask", "dfx_snapshot", "storage", 2000, 10000, false},
     },
 };
 
@@ -405,8 +405,9 @@ std::uint64_t SolverReportTotalPenalty(
     const epg::SolverReportScore &score)
 {
     return score.queuePressure * 1000 + score.periodicOverloadUs +
-           score.schedulingErrors * 10000 + score.budgetOverruns * 2000 +
-           score.deadlineMisses * 5000 + score.utilizationOverPpm;
+           score.resourceWaitUs + score.schedulingErrors * 10000 +
+           score.budgetOverruns * 2000 + score.deadlineMisses * 5000 +
+           score.utilizationOverPpm;
 }
 
 void AddQueueDecisionScore(const epg::SolverReportDecision &decision,
@@ -422,6 +423,7 @@ void AddTaskDecisionScore(const epg::SolverReportDecision &decision,
         score.periodicOverloadUs +=
             decision.effectiveLoopUs - decision.intervalBeforeMs * 1000;
     }
+    score.resourceWaitUs += decision.totalResourceWaitUs;
     score.schedulingErrors += decision.schedulingErrorCount;
     score.budgetOverruns += decision.budgetOverrunCount;
     score.deadlineMisses += decision.deadlineMissCount;
@@ -451,6 +453,7 @@ void ValidateSolverReportScore(const epg::SolverReport &report)
     const auto expected = BuildSolverReportScore(report.decisions);
     if (report.score.queuePressure != expected.queuePressure ||
         report.score.periodicOverloadUs != expected.periodicOverloadUs ||
+        report.score.resourceWaitUs != expected.resourceWaitUs ||
         report.score.schedulingErrors != expected.schedulingErrors ||
         report.score.budgetOverruns != expected.budgetOverruns ||
         report.score.deadlineMisses != expected.deadlineMisses ||
@@ -574,6 +577,11 @@ std::vector<std::string> TaskDecisionReasons(
     }
     if (decision.schedulingErrorCount > 0) {
         reasons.push_back("scheduling_error");
+    }
+    if (decision.maxResourceWaitUs > 1000 ||
+        decision.averageResourceWaitUs > 1000 ||
+        decision.totalResourceWaitUs > 1000) {
+        reasons.push_back("resource_wait");
     }
     return reasons;
 }

@@ -12,7 +12,6 @@ class SlamFrameTrackingPort final {
   public:
     explicit SlamFrameTrackingPort(SlamFrameTrackingContext &context);
 
-    SlamFrameStepResult StepBackend();
     SlamFrameStepResult TrackPreparedFrame(
         std::shared_ptr<SlamPreparedFrameData> frame,
         SlamTrackedFrameData &tracked);

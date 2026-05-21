@@ -77,6 +77,7 @@ EventPipelineGraph::TaskRunner::TaskRunner(TaskConfig config,
       m_task(std::move(task)),
       m_context(std::move(inputs), std::move(outputs)),
       m_triggerQueues(std::move(triggerQueues)) {
+    m_context.AttachDiagnostics(&m_diag);
 }
 
 EventPipelineGraph::TaskRunner::~TaskRunner() {

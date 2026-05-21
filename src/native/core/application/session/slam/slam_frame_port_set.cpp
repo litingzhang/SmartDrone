@@ -37,6 +37,7 @@ SlamFramePortSet::SlamFramePortSet(SlamFramePortSetConfig config)
 void SlamFramePortSet::Prepare()
 {
     (void)InputPort();
+    (void)BackendMaintenancePort();
     (void)TrackingPort();
     (void)PosePostprocessPort();
     (void)OutputPort();
@@ -50,6 +51,15 @@ SlamFrameInputPort &SlamFramePortSet::InputPort()
             m_cfg.outputState);
     }
     return *m_inputPort;
+}
+
+SlamBackendMaintenancePort &SlamFramePortSet::BackendMaintenancePort()
+{
+    if (!m_backendMaintenancePort) {
+        m_backendMaintenancePort =
+            std::make_unique<SlamBackendMaintenancePort>(m_cfg.slamControl);
+    }
+    return *m_backendMaintenancePort;
 }
 
 SlamFrameTrackingPort &SlamFramePortSet::TrackingPort()

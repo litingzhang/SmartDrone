@@ -12,10 +12,20 @@ namespace {
 EpgRedeployRequest MakeRedeployRequest(const EpgTaskManifest &manifest,
                                        const EpgRuntimeOptimizerResult &result)
 {
-    return {
-        manifest.subgraphName,
-        result.message,
-    };
+    EpgRedeployRequest request;
+    request.graphName = result.targetGraph.empty()
+                            ? manifest.subgraphName
+                            : result.targetGraph;
+    request.reason = result.message;
+    request.topologyVersion = result.topologyVersion;
+    request.sourceProfile = result.sourceProfile;
+    request.sourceProfilePath = result.sourceProfilePath;
+    request.sourceTimestampMs = result.sourceTimestampMs;
+    request.generatedAtMs = result.generatedAtMs;
+    request.solverVersion = result.solverVersion;
+    request.optimizedConfigPath = result.optimizedConfigPath;
+    request.solverReportPath = result.solverReportPath;
+    return request;
 }
 
 } // namespace
