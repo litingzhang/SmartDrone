@@ -120,6 +120,31 @@ def validate_task_catalog_coverage(tasks: List[Dict[str, Any]],
                 f"EPG profile task type missing catalog metadata: {task_type}")
 
 
+def require_text(item: Dict[str, Any], field: str, kind: str) -> str:
+    value = str(item.get(field, ""))
+    if not value:
+        raise ValueError(f"EPG profile {kind} missing {field}")
+    return value
+
+
+def validate_diagnostics_coverage(queues: List[Dict[str, Any]],
+                                  tasks: List[Dict[str, Any]],
+                                  queue_diag: Dict[str, Dict[str, Any]],
+                                  task_diag: Dict[str, Dict[str, Any]]) -> None:
+    for queue in queues:
+        if not isinstance(queue, dict):
+            continue
+        name = require_text(queue, "name", "queue")
+        if name not in queue_diag:
+            raise ValueError(f"EPG profile diagnostics missing queue: {name}")
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        name = require_text(task, "name", "task")
+        if name not in task_diag:
+            raise ValueError(f"EPG profile diagnostics missing task: {name}")
+
+
 def queue_pressure(depth: int, diag: Dict[str, Any]) -> int:
     max_depth = integer(diag.get("maxDepthObserved"))
     drops = integer(diag.get("droppedNewest"))
@@ -313,6 +338,7 @@ def optimize_profile(profile: Dict[str, Any],
     task_diag = task_diagnostics(profile)
     catalog = task_catalog(profile)
     validate_task_catalog_coverage(tasks, catalog)
+    validate_diagnostics_coverage(queues, tasks, queue_diag, task_diag)
     optimized_queues = []
     optimized_tasks = []
     decisions = []

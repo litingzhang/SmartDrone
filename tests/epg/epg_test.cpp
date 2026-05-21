@@ -476,6 +476,50 @@ std::string ReadFileText(const std::string& path) {
                        std::istreambuf_iterator<char>());
 }
 
+std::string MissingTaskDiagnosticsProfileJson()
+{
+    return R"({
+      "schema": "smartdrone.epg.profile.v1",
+      "graph": "test_graph",
+      "topologyVersion": "test-topology",
+      "timestampMs": 1000,
+      "taskCatalog": [
+        {
+          "taskType": "TestSourceTask",
+          "role": "source",
+          "resource": "cpu",
+          "budgetUs": 1000,
+          "deadlineUs": 2000,
+          "replaceable": false
+        }
+      ],
+      "topology": {
+        "queues": [
+          {
+            "name": "packets",
+            "type": "TestPacket",
+            "depth": 4,
+            "overflow": "drop_newest"
+          }
+        ],
+        "tasks": [
+          {
+            "name": "source",
+            "type": "TestSourceTask",
+            "trigger": {"mode": "periodic", "interval_ms": 1},
+            "outputs": {"0": "packets"}
+          }
+        ]
+      },
+      "diagnostics": {
+        "graph": "test_graph",
+        "timestampMs": 1000,
+        "queues": {"packets": {}},
+        "tasks": {}
+      }
+    })";
+}
+
 } // namespace
 
 TEST(EventPipelineGraphQueue, DropNewestKeepsOldItemsAndCountsDrops) {
@@ -1833,6 +1877,26 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
                 "deadlineMissCount": 0,
                 "schedulingErrorCount": 0,
                 "lastSchedulingError": 0
+              },
+              "sink": {
+                "lastLoopUs": 200,
+                "maxLoopUs": 300,
+                "p50LoopUs": 200,
+                "p90LoopUs": 250,
+                "p99LoopUs": 300,
+                "totalLoopUs": 300,
+                "averageLoopUs": 200,
+                "loopCount": 1,
+                "errorCount": 0,
+                "idleWakeups": 0,
+                "firstLoopMs": 1,
+                "lastLoopMs": 1000,
+                "windowMs": 999,
+                "utilizationPpm": 100000,
+                "budgetOverrunCount": 0,
+                "deadlineMissCount": 0,
+                "schedulingErrorCount": 0,
+                "lastSchedulingError": 0
               }
             }
           }
@@ -1951,8 +2015,8 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileTasksOutsideManifest) {
           "diagnostics": {
             "graph": "test_graph",
             "timestampMs": 1000,
-            "queues": {},
-            "tasks": {}
+            "queues": {"packets": {}},
+            "tasks": {"source": {}}
           }
         })");
 
@@ -2012,8 +2076,8 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileCatalogMismatch) {
           "diagnostics": {
             "graph": "test_graph",
             "timestampMs": 1000,
-            "queues": {},
-            "tasks": {}
+            "queues": {"packets": {}},
+            "tasks": {"source": {}}
           }
         })");
 
@@ -2026,6 +2090,26 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileCatalogMismatch) {
             manifest, 1010);
     EXPECT_FALSE(result.optimized);
     EXPECT_NE(result.message.find("catalog mismatch"), std::string::npos);
+
+    (void)std::remove(profilePath.c_str());
+}
+
+TEST(EventPipelineGraphOptimizer, RejectsProfileMissingTaskDiagnostics) {
+    const std::string profilePath =
+        "/tmp/smartdrone_epg_optimizer_missing_task_diag_profile.json";
+    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+        profilePath, MissingTaskDiagnosticsProfileJson());
+
+    auto manifest = MakeValidTestManifest();
+    manifest.topologyVersion = "test-topology";
+    manifest.artifactPaths.profilePath = profilePath;
+
+    const auto result =
+        smartdrone::core::application::OptimizeEpgProfileForManifest(
+            manifest, 1010);
+    EXPECT_FALSE(result.optimized);
+    EXPECT_NE(result.message.find("profile diagnostics missing task: source"),
+              std::string::npos);
 
     (void)std::remove(profilePath.c_str());
 }
@@ -2075,8 +2159,8 @@ TEST(EventPipelineGraphOptimizer, CreatesArtifactDirectories) {
           "diagnostics": {
             "graph": "test_graph",
             "timestampMs": 1000,
-            "queues": {},
-            "tasks": {}
+            "queues": {"packets": {}},
+            "tasks": {"source": {}}
           }
         })");
 
@@ -2148,8 +2232,8 @@ TEST(EventPipelineGraphOptimizer, ReportsArtifactWriteFailure) {
           "diagnostics": {
             "graph": "test_graph",
             "timestampMs": 1000,
-            "queues": {},
-            "tasks": {}
+            "queues": {"packets": {}},
+            "tasks": {"source": {}}
           }
         })");
 
@@ -2213,8 +2297,8 @@ TEST(EventPipelineGraphOptimizer, ReportsUnchangedConfigWithoutRedeploy) {
           "diagnostics": {
             "graph": "test_graph",
             "timestampMs": 2000,
-            "queues": {},
-            "tasks": {}
+            "queues": {"packets": {}},
+            "tasks": {"source": {}}
           }
         })");
 

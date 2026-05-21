@@ -238,6 +238,40 @@ void ValidateProfileCatalog(const EpgTaskManifest &manifest,
     }
 }
 
+void ValidateProfileQueueDiagnostics(
+    const epg::GraphConfig &topology,
+    const epg::GraphProfileDiagnostics &diagnostics)
+{
+    for (const auto &queue : topology.queues) {
+        if (diagnostics.queues.find(queue.name) != diagnostics.queues.end()) {
+            continue;
+        }
+        throw std::runtime_error("profile diagnostics missing queue: " +
+                                 queue.name);
+    }
+}
+
+void ValidateProfileTaskDiagnostics(
+    const epg::GraphConfig &topology,
+    const epg::GraphProfileDiagnostics &diagnostics)
+{
+    for (const auto &task : topology.tasks) {
+        if (diagnostics.tasks.find(task.name) != diagnostics.tasks.end()) {
+            continue;
+        }
+        throw std::runtime_error("profile diagnostics missing task: " +
+                                 task.name);
+    }
+}
+
+void ValidateProfileDiagnosticsCoverage(
+    const epg::GraphConfig &topology,
+    const epg::GraphProfileDiagnostics &diagnostics)
+{
+    ValidateProfileQueueDiagnostics(topology, diagnostics);
+    ValidateProfileTaskDiagnostics(topology, diagnostics);
+}
+
 std::uint64_t EffectiveLoopUs(const epg::TaskProfileMetrics &stats)
 {
     return std::max({stats.p99LoopUs, stats.p90LoopUs, stats.maxLoopUs,
@@ -399,21 +433,11 @@ epg::GraphConfig OptimizeGraphConfig(const EpgTaskManifest &manifest,
     ApplyEpgTaskCatalogDefaults(manifest, config);
 
     for (auto &queue : config.queues) {
-        const auto statsIt = diagnostics.queues.find(queue.name);
-        const epg::QueueProfileMetrics stats =
-            statsIt == diagnostics.queues.end()
-                ? epg::QueueProfileMetrics{}
-                : statsIt->second;
-        OptimizeQueue(queue, stats, decisions);
+        OptimizeQueue(queue, diagnostics.queues.at(queue.name), decisions);
     }
     for (auto &task : config.tasks) {
-        const auto statsIt = diagnostics.tasks.find(task.name);
-        const epg::TaskProfileMetrics stats =
-            statsIt == diagnostics.tasks.end()
-                ? epg::TaskProfileMetrics{}
-                : statsIt->second;
-        OptimizeTask(task, stats, FindCatalogEntry(manifest, task.type),
-                     decisions);
+        OptimizeTask(task, diagnostics.tasks.at(task.name),
+                     FindCatalogEntry(manifest, task.type), decisions);
     }
     return config;
 }
@@ -596,6 +620,8 @@ OptimizeEpgProfileForManifest(const EpgTaskManifest &manifest,
         ValidateProfileCatalog(manifest, profile);
         ApplyEpgTaskCatalogDefaults(manifest, profile.topology);
         ValidateEpgTaskGraphManifest(manifest, profile.topology);
+        ValidateProfileDiagnosticsCoverage(profile.topology,
+                                           profile.diagnostics);
         return WriteOptimizedConfig(manifest, profile, nowMs);
     } catch (const std::exception &error) {
         return {false, false, error.what()};

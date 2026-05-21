@@ -129,6 +129,48 @@ def write_bad_catalog_profile(path: Path,
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def write_missing_diagnostics_profile(path: Path) -> None:
+    payload = {
+        "schema": "smartdrone.epg.profile.v1",
+        "graph": "test_graph",
+        "topologyVersion": "test-topology-v1",
+        "timestampMs": 123,
+        "taskCatalog": [
+            {
+                "taskType": "TestSourceTask",
+                "role": "source",
+                "resource": "cpu",
+                "budgetUs": 1500,
+                "deadlineUs": 2200,
+            }
+        ],
+        "topology": {
+            "queues": [
+                {
+                    "name": "packets",
+                    "type": "TestPacket",
+                    "depth": 1,
+                    "overflow": "drop_newest",
+                }
+            ],
+            "tasks": [
+                {
+                    "name": "source",
+                    "type": "TestSourceTask",
+                    "trigger": {"mode": "periodic", "interval_ms": 1},
+                    "inputs": {},
+                    "outputs": {"0": "packets"},
+                }
+            ],
+        },
+        "diagnostics": {
+            "queues": {"packets": {}},
+            "tasks": {},
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def main() -> int:
     repo_root = Path(sys.argv[1])
     work_dir = Path(sys.argv[2])
@@ -257,6 +299,13 @@ def main() -> int:
         "MissingTask",
     )
     expect_solver_failure(repo_root, bad_profile, bad_output, "missing catalog")
+    missing_diag_profile = work_dir / "missing_diagnostics.json"
+    write_missing_diagnostics_profile(missing_diag_profile)
+    expect_solver_failure(
+        repo_root,
+        missing_diag_profile,
+        bad_output,
+        "diagnostics missing task: source")
     return 0
 
 
