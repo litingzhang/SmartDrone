@@ -1801,7 +1801,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_NO_THROW(
         smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, optimized));
-    const auto reportMetadata = epg::ParseSolverReportMetadataJson(R"({
+    const auto report = epg::ParseSolverReportJson(R"({
       "schema": "smartdrone.epg.solver_report.v1",
       "targetGraph": "test_graph",
       "topologyVersion": "test-topology",
@@ -1809,13 +1809,30 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
       "sourceTimestampMs": 123,
       "generatedAtMs": 456,
       "solverVersion": "unit-test",
-      "objective": {"name": "unit", "score": {}},
-      "constraints": {},
-      "decisions": []
+      "objective": {
+        "name": "unit",
+        "score": {
+          "queuePressure": 0,
+          "periodicOverloadUs": 0,
+          "schedulingErrors": 0,
+          "budgetOverruns": 0,
+          "deadlineMisses": 0,
+          "utilizationOverPpm": 0,
+          "totalPenalty": 0
+        }
+      },
+      "constraints": {
+        "maxQueueDepth": 16,
+        "maxPeriodicIntervalMs": 1000,
+        "targetUtilizationPpm": 800000
+      },
+      "decisions": [
+        {"kind": "task", "name": "source", "reason": "keep"}
+      ]
     })");
     EXPECT_NO_THROW(
         smartdrone::core::application::ValidateEpgSolverReportManifest(
-            manifest, optimized.metadata, reportMetadata));
+            manifest, optimized.metadata, report.metadata));
 
     auto wrongTarget = optimized;
     wrongTarget.metadata.targetGraph = "other_graph";
@@ -1859,14 +1876,14 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
             manifest, wrongScheduling),
         std::runtime_error);
 
-    auto wrongReportTime = reportMetadata;
+    auto wrongReportTime = report.metadata;
     wrongReportTime.generatedAtMs = 999;
     EXPECT_THROW(
         smartdrone::core::application::ValidateEpgSolverReportManifest(
             manifest, optimized.metadata, wrongReportTime),
         std::runtime_error);
 
-    auto wrongReportVersion = reportMetadata;
+    auto wrongReportVersion = report.metadata;
     wrongReportVersion.solverVersion = "other-solver";
     EXPECT_THROW(
         smartdrone::core::application::ValidateEpgSolverReportManifest(
@@ -2163,10 +2180,14 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     EXPECT_NE(report.find("\"replaceable\": true"), std::string::npos);
     EXPECT_NE(report.find("\"budgetOverruns\": 2"), std::string::npos);
     const auto optimizedGraph = epg::ParseOptimizedGraphJson(optimized);
-    const auto reportMetadata = epg::ParseSolverReportMetadataJson(report);
+    const auto parsedReport = epg::ParseSolverReportJson(report);
     EXPECT_NO_THROW(
         smartdrone::core::application::ValidateEpgSolverReportManifest(
-            manifest, optimizedGraph.metadata, reportMetadata));
+            manifest, optimizedGraph.metadata, parsedReport.metadata));
+    EXPECT_EQ(parsedReport.objectiveName,
+              "minimize_epg_pressure_overload_deadline_and_scheduling_penalty");
+    EXPECT_EQ(parsedReport.constraints.maxQueueDepth, 16u);
+    ASSERT_EQ(parsedReport.decisions.size(), 3u);
 
     (void)std::remove(profilePath.c_str());
     (void)std::remove(outputPath.c_str());
@@ -2662,7 +2683,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     EXPECT_EQ(optimized.metadata.targetGraph, "test_graph");
     ASSERT_EQ(optimized.config.queues.size(), 1u);
     ASSERT_EQ(optimized.config.tasks.size(), 1u);
-    const auto reportMetadata = epg::ParseSolverReportMetadataJson(R"({
+    const auto report = epg::ParseSolverReportJson(R"({
       "schema": "smartdrone.epg.solver_report.v1",
       "targetGraph": "test_graph",
       "topologyVersion": "test-topology",
@@ -2670,17 +2691,53 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
       "sourceTimestampMs": 123,
       "generatedAtMs": 456,
       "solverVersion": "unit-test",
-      "objective": {"name": "unit", "score": {}},
-      "constraints": {},
-      "decisions": []
+      "objective": {
+        "name": "unit",
+        "score": {
+          "queuePressure": 0,
+          "periodicOverloadUs": 0,
+          "schedulingErrors": 0,
+          "budgetOverruns": 0,
+          "deadlineMisses": 0,
+          "utilizationOverPpm": 0,
+          "totalPenalty": 0
+        }
+      },
+      "constraints": {
+        "maxQueueDepth": 16,
+        "maxPeriodicIntervalMs": 1000,
+        "targetUtilizationPpm": 800000
+      },
+      "decisions": [
+        {"kind": "task", "name": "source", "reason": "keep"}
+      ]
     })");
-    EXPECT_EQ(reportMetadata.schema, epg::SOLVER_REPORT_SCHEMA);
-    EXPECT_EQ(reportMetadata.targetGraph, "test_graph");
-    EXPECT_EQ(reportMetadata.topologyVersion, "test-topology");
-    EXPECT_EQ(reportMetadata.sourceProfile, "test_graph");
-    EXPECT_EQ(reportMetadata.sourceTimestampMs, 123u);
-    EXPECT_EQ(reportMetadata.generatedAtMs, 456u);
-    EXPECT_EQ(reportMetadata.solverVersion, "unit-test");
+    EXPECT_EQ(report.metadata.schema, epg::SOLVER_REPORT_SCHEMA);
+    EXPECT_EQ(report.metadata.targetGraph, "test_graph");
+    EXPECT_EQ(report.metadata.topologyVersion, "test-topology");
+    EXPECT_EQ(report.metadata.sourceProfile, "test_graph");
+    EXPECT_EQ(report.metadata.sourceTimestampMs, 123u);
+    EXPECT_EQ(report.metadata.generatedAtMs, 456u);
+    EXPECT_EQ(report.metadata.solverVersion, "unit-test");
+    EXPECT_EQ(report.objectiveName, "unit");
+    EXPECT_EQ(report.score.totalPenalty, 0u);
+    EXPECT_EQ(report.constraints.maxQueueDepth, 16u);
+    ASSERT_EQ(report.decisions.size(), 1u);
+    EXPECT_EQ(report.decisions.front().name, "source");
+    EXPECT_THROW(
+        epg::ParseSolverReportJson(R"({
+          "schema": "smartdrone.epg.solver_report.v1",
+          "targetGraph": "test_graph",
+          "topologyVersion": "test-topology",
+          "sourceProfile": "test_graph",
+          "sourceTimestampMs": 123,
+          "generatedAtMs": 456,
+          "solverVersion": "unit-test",
+          "objective": {"name": "unit", "score": {}},
+          "constraints": {},
+          "decisions": []
+        })"),
+        std::runtime_error);
     EXPECT_THROW(
         epg::ParseOptimizedGraphJson(R"({
           "schema": "smartdrone.epg.optimized_config.v1",

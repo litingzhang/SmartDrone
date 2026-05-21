@@ -42,8 +42,9 @@ epg::GraphConfig CompileOptimizedEpgConfig(const EpgTaskManifest &manifest)
     const auto optimized = epg::ParseOptimizedGraphJson(json);
     ValidateEpgOptimizedGraphManifest(manifest, optimized);
     const std::string reportJson = ReadTextFile(paths.solverReportPath);
-    const auto report = epg::ParseSolverReportMetadataJson(reportJson);
-    ValidateEpgSolverReportManifest(manifest, optimized.metadata, report);
+    const auto report = epg::ParseSolverReportJson(reportJson);
+    ValidateEpgSolverReportManifest(manifest, optimized.metadata,
+                                    report.metadata);
     return optimized.config;
 }
 

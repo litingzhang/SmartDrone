@@ -596,8 +596,9 @@ epg::OptimizedGraph ValidateGeneratedArtifacts(
 {
     auto optimized = epg::ParseOptimizedGraphJson(optimizedJson);
     ValidateEpgOptimizedGraphManifest(manifest, optimized);
-    const auto report = epg::ParseSolverReportMetadataJson(reportJson);
-    ValidateEpgSolverReportManifest(manifest, optimized.metadata, report);
+    const auto report = epg::ParseSolverReportJson(reportJson);
+    ValidateEpgSolverReportManifest(manifest, optimized.metadata,
+                                    report.metadata);
     return optimized;
 }
 

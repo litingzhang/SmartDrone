@@ -177,6 +177,36 @@ struct SolverReportMetadata {
     std::uint64_t generatedAtMs{};
 };
 
+struct SolverReportScore {
+    std::uint64_t queuePressure{};
+    std::uint64_t periodicOverloadUs{};
+    std::uint64_t schedulingErrors{};
+    std::uint64_t budgetOverruns{};
+    std::uint64_t deadlineMisses{};
+    std::uint64_t utilizationOverPpm{};
+    std::uint64_t totalPenalty{};
+};
+
+struct SolverReportConstraints {
+    std::uint64_t maxQueueDepth{};
+    std::uint64_t maxPeriodicIntervalMs{};
+    std::uint64_t targetUtilizationPpm{};
+};
+
+struct SolverReportDecision {
+    std::string kind;
+    std::string name;
+    std::string reason;
+};
+
+struct SolverReport {
+    SolverReportMetadata metadata;
+    std::string objectiveName;
+    SolverReportScore score;
+    SolverReportConstraints constraints;
+    std::vector<SolverReportDecision> decisions;
+};
+
 struct QueueProfileMetrics {
     std::uint64_t maxDepthObserved{};
     std::uint64_t droppedNewest{};
@@ -221,6 +251,7 @@ OptimizedGraphMetadata ParseOptimizedGraphMetadataJson(
 OptimizedGraph ParseOptimizedGraphJson(const std::string& jsonText);
 SolverReportMetadata ParseSolverReportMetadataJson(
     const std::string& jsonText);
+SolverReport ParseSolverReportJson(const std::string& jsonText);
 GraphConfig ParseGraphConfigJson(const std::string& jsonText);
 GraphConfig ParseGraphConfigJsonField(const std::string& jsonText,
                                       const std::string& field);

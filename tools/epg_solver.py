@@ -148,6 +148,22 @@ TASK_DIAGNOSTIC_FIELDS = [
     "schedulingErrorCount",
 ]
 
+SOLVER_SCORE_FIELDS = [
+    "queuePressure",
+    "periodicOverloadUs",
+    "schedulingErrors",
+    "budgetOverruns",
+    "deadlineMisses",
+    "utilizationOverPpm",
+    "totalPenalty",
+]
+
+SOLVER_CONSTRAINT_FIELDS = [
+    "maxQueueDepth",
+    "maxPeriodicIntervalMs",
+    "targetUtilizationPpm",
+]
+
 
 def validate_diagnostic_fields(diag: Dict[str, Any],
                                fields: List[str],
@@ -392,6 +408,30 @@ def validate_generated_pair(config: Dict[str, Any],
     for field in fields:
         if config.get(field) != report.get(field):
             raise ValueError(f"EPG solver report provenance mismatch: {field}")
+    objective = report.get("objective")
+    if not isinstance(objective, dict) or not objective.get("name"):
+        raise ValueError("EPG solver report objective missing")
+    score = objective.get("score")
+    if not isinstance(score, dict):
+        raise ValueError("EPG solver report score missing")
+    constraints = report.get("constraints")
+    if not isinstance(constraints, dict):
+        raise ValueError("EPG solver report constraints missing")
+    for field in SOLVER_SCORE_FIELDS:
+        if integer(score.get(field), -1) < 0:
+            raise ValueError(f"EPG solver report score invalid: {field}")
+    for field in SOLVER_CONSTRAINT_FIELDS:
+        if integer(constraints.get(field), -1) < 0:
+            raise ValueError(f"EPG solver report constraint invalid: {field}")
+    decisions = report.get("decisions")
+    if not isinstance(decisions, list):
+        raise ValueError("EPG solver report decisions missing")
+    for item in decisions:
+        if not isinstance(item, dict):
+            raise ValueError("EPG solver report decision invalid")
+        require_text(item, "kind", "solver report decision")
+        require_text(item, "name", "solver report decision")
+        require_text(item, "reason", "solver report decision")
 
 
 def optimize_profile(profile: Dict[str, Any],

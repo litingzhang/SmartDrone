@@ -683,6 +683,82 @@ SolverReportMetadata ParseSolverReportMetadataObject(
     return metadata;
 }
 
+SolverReportScore ParseSolverReportScoreObject(const JsonValue& root)
+{
+    RequireConfigObject(root, "solver report score must be object");
+    SolverReportScore score;
+    score.queuePressure = RequiredUInt64(root, "queuePressure");
+    score.periodicOverloadUs = RequiredUInt64(root, "periodicOverloadUs");
+    score.schedulingErrors = RequiredUInt64(root, "schedulingErrors");
+    score.budgetOverruns = RequiredUInt64(root, "budgetOverruns");
+    score.deadlineMisses = RequiredUInt64(root, "deadlineMisses");
+    score.utilizationOverPpm = RequiredUInt64(root, "utilizationOverPpm");
+    score.totalPenalty = RequiredUInt64(root, "totalPenalty");
+    return score;
+}
+
+SolverReportConstraints ParseSolverReportConstraintsObject(
+    const JsonValue& root)
+{
+    RequireConfigObject(root, "solver report constraints must be object");
+    SolverReportConstraints constraints;
+    constraints.maxQueueDepth = RequiredUInt64(root, "maxQueueDepth");
+    constraints.maxPeriodicIntervalMs =
+        RequiredUInt64(root, "maxPeriodicIntervalMs");
+    constraints.targetUtilizationPpm =
+        RequiredUInt64(root, "targetUtilizationPpm");
+    return constraints;
+}
+
+std::string ParseSolverReportObjectiveName(const JsonValue& root)
+{
+    const auto& objective = root.At("objective");
+    RequireConfigObject(objective, "solver report objective must be object");
+    return RequiredString(objective, "name");
+}
+
+SolverReportScore ParseSolverReportObjectiveScore(const JsonValue& root)
+{
+    const auto& objective = root.At("objective");
+    RequireConfigObject(objective, "solver report objective must be object");
+    const auto& score = objective.At("score");
+    return ParseSolverReportScoreObject(score);
+}
+
+SolverReportDecision ParseSolverReportDecision(const JsonValue& item)
+{
+    RequireConfigObject(item, "solver report decision must be object");
+    SolverReportDecision decision;
+    decision.kind = RequiredString(item, "kind");
+    decision.name = RequiredString(item, "name");
+    decision.reason = RequiredString(item, "reason");
+    return decision;
+}
+
+std::vector<SolverReportDecision> ParseSolverReportDecisionsObject(
+    const JsonValue& root)
+{
+    const auto& decisions = RequiredArrayField(root, "decisions");
+    std::vector<SolverReportDecision> result;
+    result.reserve(decisions.array.size());
+    for (const auto& item : decisions.array) {
+        result.push_back(ParseSolverReportDecision(item));
+    }
+    return result;
+}
+
+SolverReport ParseSolverReportObject(const JsonValue& root)
+{
+    RequireConfigObject(root, "solver report json root must be object");
+    return {
+        ParseSolverReportMetadataObject(root),
+        ParseSolverReportObjectiveName(root),
+        ParseSolverReportObjectiveScore(root),
+        ParseSolverReportConstraintsObject(root.At("constraints")),
+        ParseSolverReportDecisionsObject(root),
+    };
+}
+
 } // namespace
 
 GraphProfile ParseGraphProfileJson(const std::string& jsonText)
@@ -736,6 +812,12 @@ SolverReportMetadata ParseSolverReportMetadataJson(
 {
     const auto root = JsonParser(jsonText).Parse();
     return ParseSolverReportMetadataObject(root);
+}
+
+SolverReport ParseSolverReportJson(const std::string& jsonText)
+{
+    const auto root = JsonParser(jsonText).Parse();
+    return ParseSolverReportObject(root);
 }
 
 GraphConfig ParseGraphConfigJson(const std::string& jsonText)
