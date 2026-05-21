@@ -1827,8 +1827,38 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
         "targetUtilizationPpm": 800000
       },
       "decisions": [
-        {"kind": "queue", "name": "packets", "reason": "keep"},
-        {"kind": "task", "name": "source", "reason": "keep"}
+        {
+          "kind": "queue",
+          "name": "packets",
+          "depthBefore": 4,
+          "depthAfter": 4,
+          "pressureBefore": 0,
+          "pushedPerSecond": 0,
+          "poppedPerSecond": 0,
+          "droppedPerSecond": 0,
+          "reason": "keep"
+        },
+        {
+          "kind": "task",
+          "name": "source",
+          "intervalBeforeMs": 1,
+          "intervalAfterMs": 1,
+          "maxLoopUs": 0,
+          "averageLoopUs": 0,
+          "p90LoopUs": 0,
+          "p99LoopUs": 0,
+          "effectiveLoopUs": 0,
+          "utilizationPpm": 0,
+          "targetUtilizationPpm": 800000,
+          "budgetUs": 1000,
+          "deadlineUs": 2000,
+          "catalogRole": "source",
+          "replaceable": false,
+          "budgetOverrunCount": 0,
+          "deadlineMissCount": 0,
+          "schedulingErrorCount": 0,
+          "reason": "keep"
+        }
       ]
     })");
     EXPECT_NO_THROW(
@@ -1910,6 +1940,27 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     EXPECT_THROW(
         smartdrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongScore),
+        std::runtime_error);
+
+    auto wrongDecisionDepth = report;
+    wrongDecisionDepth.decisions[0].depthAfter = 999;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, wrongDecisionDepth),
+        std::runtime_error);
+
+    auto wrongTaskInterval = report;
+    wrongTaskInterval.decisions[1].intervalAfterMs = 999;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, wrongTaskInterval),
+        std::runtime_error);
+
+    auto wrongConstraint = report;
+    wrongConstraint.constraints.maxQueueDepth = 1;
+    EXPECT_THROW(
+        smartdrone::core::application::ValidateEpgSolverReport(
+            manifest, optimized, wrongConstraint),
         std::runtime_error);
 }
 
@@ -2210,6 +2261,11 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
               "minimize_epg_pressure_overload_deadline_and_scheduling_penalty");
     EXPECT_EQ(parsedReport.constraints.maxQueueDepth, 16u);
     ASSERT_EQ(parsedReport.decisions.size(), 3u);
+    EXPECT_EQ(parsedReport.decisions[0].depthAfter,
+              config.queues.front().depth);
+    EXPECT_EQ(parsedReport.decisions[1].intervalAfterMs,
+              static_cast<std::uint64_t>(
+                  config.tasks.front().trigger.interval.count()));
 
     (void)std::remove(profilePath.c_str());
     (void)std::remove(outputPath.c_str());
@@ -2731,8 +2787,38 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
         "targetUtilizationPpm": 800000
       },
       "decisions": [
-        {"kind": "queue", "name": "packets", "reason": "keep"},
-        {"kind": "task", "name": "source", "reason": "keep"}
+        {
+          "kind": "queue",
+          "name": "packets",
+          "depthBefore": 6,
+          "depthAfter": 6,
+          "pressureBefore": 0,
+          "pushedPerSecond": 0,
+          "poppedPerSecond": 0,
+          "droppedPerSecond": 0,
+          "reason": "keep"
+        },
+        {
+          "kind": "task",
+          "name": "source",
+          "intervalBeforeMs": 3,
+          "intervalAfterMs": 3,
+          "maxLoopUs": 0,
+          "averageLoopUs": 0,
+          "p90LoopUs": 0,
+          "p99LoopUs": 0,
+          "effectiveLoopUs": 0,
+          "utilizationPpm": 0,
+          "targetUtilizationPpm": 800000,
+          "budgetUs": 0,
+          "deadlineUs": 0,
+          "catalogRole": "source",
+          "replaceable": false,
+          "budgetOverrunCount": 0,
+          "deadlineMissCount": 0,
+          "schedulingErrorCount": 0,
+          "reason": "keep"
+        }
       ]
     })");
     EXPECT_EQ(report.metadata.schema, epg::SOLVER_REPORT_SCHEMA);
@@ -2747,6 +2833,8 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     EXPECT_EQ(report.constraints.maxQueueDepth, 16u);
     ASSERT_EQ(report.decisions.size(), 2u);
     EXPECT_EQ(report.decisions.front().name, "packets");
+    EXPECT_EQ(report.decisions.front().depthAfter, 6u);
+    EXPECT_EQ(report.decisions.back().intervalAfterMs, 3u);
     EXPECT_THROW(
         epg::ParseSolverReportJson(R"({
           "schema": "smartdrone.epg.solver_report.v1",

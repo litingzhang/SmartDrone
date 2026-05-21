@@ -437,6 +437,101 @@ void ValidateSolverReportDecisionCoverage(
     }
 }
 
+const epg::QueueConfig *FindQueueConfig(
+    const epg::GraphConfig &graphConfig,
+    const std::string &name)
+{
+    for (const auto &queue : graphConfig.queues) {
+        if (queue.name == name) {
+            return &queue;
+        }
+    }
+    return nullptr;
+}
+
+const epg::TaskConfig *FindTaskConfig(
+    const epg::GraphConfig &graphConfig,
+    const std::string &name)
+{
+    for (const auto &task : graphConfig.tasks) {
+        if (task.name == name) {
+            return &task;
+        }
+    }
+    return nullptr;
+}
+
+void ValidateSolverReportConstraints(const epg::SolverReport &report)
+{
+    const auto &constraints = report.constraints;
+    if (constraints.maxQueueDepth == 0 ||
+        constraints.maxPeriodicIntervalMs == 0 ||
+        constraints.targetUtilizationPpm == 0) {
+        throw std::runtime_error("solver report constraint invalid");
+    }
+}
+
+void ValidateQueueSolverDecision(
+    const epg::GraphConfig &graphConfig,
+    const epg::SolverReportConstraints &constraints,
+    const epg::SolverReportDecision &decision)
+{
+    const auto *queue = FindQueueConfig(graphConfig, decision.name);
+    if (!queue) {
+        throw std::runtime_error("solver report queue decision target missing: " +
+                                 decision.name);
+    }
+    if (decision.depthAfter != static_cast<std::uint64_t>(queue->depth)) {
+        throw std::runtime_error("solver report queue depth mismatch: " +
+                                 decision.name);
+    }
+    if (decision.depthAfter == 0 ||
+        decision.depthAfter > constraints.maxQueueDepth) {
+        throw std::runtime_error("solver report queue constraint mismatch: " +
+                                 decision.name);
+    }
+}
+
+void ValidateTaskSolverDecision(
+    const epg::GraphConfig &graphConfig,
+    const epg::SolverReportConstraints &constraints,
+    const epg::SolverReportDecision &decision)
+{
+    const auto *task = FindTaskConfig(graphConfig, decision.name);
+    if (!task) {
+        throw std::runtime_error("solver report task decision target missing: " +
+                                 decision.name);
+    }
+    if (decision.intervalAfterMs >
+        constraints.maxPeriodicIntervalMs) {
+        throw std::runtime_error("solver report task interval constraint mismatch: " +
+                                 decision.name);
+    }
+    if (decision.intervalAfterMs !=
+            static_cast<std::uint64_t>(task->trigger.interval.count()) ||
+        decision.budgetUs != task->scheduling.budgetUs ||
+        decision.deadlineUs != task->scheduling.deadlineUs ||
+        decision.targetUtilizationPpm != constraints.targetUtilizationPpm) {
+        throw std::runtime_error("solver report task decision mismatch: " +
+                                 decision.name);
+    }
+}
+
+void ValidateSolverReportDecisionDetails(
+    const epg::GraphConfig &graphConfig,
+    const epg::SolverReport &report)
+{
+    ValidateSolverReportConstraints(report);
+    for (const auto &decision : report.decisions) {
+        if (decision.kind == "queue") {
+            ValidateQueueSolverDecision(
+                graphConfig, report.constraints, decision);
+            continue;
+        }
+        ValidateTaskSolverDecision(graphConfig, report.constraints, decision);
+    }
+}
+
 std::string BuildPath(const char *directory, const std::string &stem,
                       const char *suffix)
 {
@@ -666,6 +761,7 @@ void ValidateEpgSolverReport(
     }
     ValidateSolverReportScore(report);
     ValidateSolverReportDecisionCoverage(optimizedGraph.config, report);
+    ValidateSolverReportDecisionDetails(optimizedGraph.config, report);
 }
 
 } // namespace smartdrone::core::application

@@ -164,6 +164,32 @@ SOLVER_CONSTRAINT_FIELDS = [
     "targetUtilizationPpm",
 ]
 
+QUEUE_DECISION_FIELDS = [
+    "depthBefore",
+    "depthAfter",
+    "pressureBefore",
+    "pushedPerSecond",
+    "poppedPerSecond",
+    "droppedPerSecond",
+]
+
+TASK_DECISION_FIELDS = [
+    "intervalBeforeMs",
+    "intervalAfterMs",
+    "maxLoopUs",
+    "averageLoopUs",
+    "p90LoopUs",
+    "p99LoopUs",
+    "effectiveLoopUs",
+    "utilizationPpm",
+    "targetUtilizationPpm",
+    "budgetUs",
+    "deadlineUs",
+    "budgetOverrunCount",
+    "deadlineMissCount",
+    "schedulingErrorCount",
+]
+
 
 def validate_diagnostic_fields(diag: Dict[str, Any],
                                fields: List[str],
@@ -198,6 +224,68 @@ def validate_diagnostics_coverage(queues: List[Dict[str, Any]],
             raise ValueError(f"EPG profile diagnostics missing task: {name}")
         validate_diagnostic_fields(
             task_diag[name], TASK_DIAGNOSTIC_FIELDS, name, "task")
+
+
+def config_items_by_name(config: Dict[str, Any],
+                         field: str,
+                         kind: str) -> Dict[str, Dict[str, Any]]:
+    result = {}
+    for item in config.get(field, []):
+        if not isinstance(item, dict):
+            continue
+        name = require_text(item, "name", kind)
+        result[name] = item
+    return result
+
+
+def require_non_negative_fields(item: Dict[str, Any],
+                                fields: List[str],
+                                kind: str,
+                                name: str) -> None:
+    for field in fields:
+        if integer(item.get(field), -1) < 0:
+            raise ValueError(
+                f"EPG solver report {kind} decision invalid {field}: {name}")
+
+
+def validate_queue_decision(item: Dict[str, Any],
+                            queue: Dict[str, Any],
+                            constraints: Dict[str, Any]) -> None:
+    name = require_text(item, "name", "solver report decision")
+    require_non_negative_fields(item, QUEUE_DECISION_FIELDS, "queue", name)
+    depth_after = integer(item.get("depthAfter"))
+    if depth_after != integer(queue.get("depth")):
+        raise ValueError(f"EPG solver report queue depth mismatch: {name}")
+    if depth_after <= 0 or depth_after > integer(constraints.get("maxQueueDepth")):
+        raise ValueError(
+            f"EPG solver report queue constraint mismatch: {name}")
+
+
+def validate_task_decision(item: Dict[str, Any],
+                           task: Dict[str, Any],
+                           constraints: Dict[str, Any]) -> None:
+    name = require_text(item, "name", "solver report decision")
+    require_non_negative_fields(item, TASK_DECISION_FIELDS, "task", name)
+    trigger = task.get("trigger", {})
+    scheduling = task.get("scheduling", {})
+    if not isinstance(trigger, dict) or not isinstance(scheduling, dict):
+        raise ValueError(f"EPG optimized task config invalid: {name}")
+    if not isinstance(item.get("replaceable"), bool):
+        raise ValueError(f"EPG solver report task replaceable invalid: {name}")
+    require_text(item, "catalogRole", "solver report decision")
+    if integer(item.get("intervalAfterMs")) != integer(trigger.get("interval_ms")):
+        raise ValueError(f"EPG solver report task interval mismatch: {name}")
+    if integer(item.get("budgetUs")) != integer(scheduling.get("budget_us")):
+        raise ValueError(f"EPG solver report task budget mismatch: {name}")
+    if integer(item.get("deadlineUs")) != integer(scheduling.get("deadline_us")):
+        raise ValueError(f"EPG solver report task deadline mismatch: {name}")
+    if integer(item.get("targetUtilizationPpm")) != integer(
+            constraints.get("targetUtilizationPpm")):
+        raise ValueError(f"EPG solver report task target mismatch: {name}")
+    if integer(item.get("intervalAfterMs")) > integer(
+            constraints.get("maxPeriodicIntervalMs")):
+        raise ValueError(
+            f"EPG solver report task interval constraint mismatch: {name}")
 
 
 def queue_pressure(depth: int, diag: Dict[str, Any]) -> int:
@@ -421,7 +509,7 @@ def validate_generated_pair(config: Dict[str, Any],
         if integer(score.get(field), -1) < 0:
             raise ValueError(f"EPG solver report score invalid: {field}")
     for field in SOLVER_CONSTRAINT_FIELDS:
-        if integer(constraints.get(field), -1) < 0:
+        if integer(constraints.get(field), -1) <= 0:
             raise ValueError(f"EPG solver report constraint invalid: {field}")
     penalty = (integer(score.get("queuePressure")) * 1000 +
                integer(score.get("periodicOverloadUs")) +
@@ -434,15 +522,15 @@ def validate_generated_pair(config: Dict[str, Any],
     decisions = report.get("decisions")
     if not isinstance(decisions, list):
         raise ValueError("EPG solver report decisions missing")
+    queue_by_name = config_items_by_name(config, "queues", "queue")
+    task_by_name = config_items_by_name(config, "tasks", "task")
     expected = {
         f"queue:{item.get('name', '')}"
-        for item in config.get("queues", [])
-        if isinstance(item, dict)
+        for item in queue_by_name.values()
     }
     expected.update({
         f"task:{item.get('name', '')}"
-        for item in config.get("tasks", [])
-        if isinstance(item, dict)
+        for item in task_by_name.values()
     })
     actual = set()
     for item in decisions:
@@ -455,6 +543,19 @@ def validate_generated_pair(config: Dict[str, Any],
         if key in actual:
             raise ValueError(f"EPG solver report duplicates decision: {key}")
         actual.add(key)
+        if kind == "queue":
+            if name not in queue_by_name:
+                raise ValueError(
+                    f"EPG solver report queue decision target missing: {name}")
+            validate_queue_decision(item, queue_by_name[name], constraints)
+            continue
+        if kind == "task":
+            if name not in task_by_name:
+                raise ValueError(
+                    f"EPG solver report task decision target missing: {name}")
+            validate_task_decision(item, task_by_name[name], constraints)
+            continue
+        raise ValueError(f"EPG solver report decision kind unsupported: {kind}")
     if actual != expected:
         raise ValueError("EPG solver report decision coverage mismatch")
 

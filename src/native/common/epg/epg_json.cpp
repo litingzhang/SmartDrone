@@ -309,6 +309,15 @@ bool OptionalBool(const JsonValue& value, const std::string& field, bool fallbac
     return child->boolean;
 }
 
+bool RequiredBool(const JsonValue& value, const std::string& field)
+{
+    const auto& child = value.At(field);
+    if (child.kind != JsonValue::Kind::Bool) {
+        throw std::runtime_error("json field must be bool: " + field);
+    }
+    return child.boolean;
+}
+
 int OptionalInt(const JsonValue& value, const std::string& field, int fallback) {
     const auto* child = value.Find(field);
     if (!child) {
@@ -725,6 +734,40 @@ SolverReportScore ParseSolverReportObjectiveScore(const JsonValue& root)
     return ParseSolverReportScoreObject(score);
 }
 
+void ParseQueueSolverReportDecision(const JsonValue& item,
+                                    SolverReportDecision& decision)
+{
+    decision.depthBefore = RequiredUInt64(item, "depthBefore");
+    decision.depthAfter = RequiredUInt64(item, "depthAfter");
+    decision.pressureBefore = RequiredUInt64(item, "pressureBefore");
+    decision.pushedPerSecond = RequiredUInt64(item, "pushedPerSecond");
+    decision.poppedPerSecond = RequiredUInt64(item, "poppedPerSecond");
+    decision.droppedPerSecond = RequiredUInt64(item, "droppedPerSecond");
+}
+
+void ParseTaskSolverReportDecision(const JsonValue& item,
+                                   SolverReportDecision& decision)
+{
+    decision.intervalBeforeMs = RequiredUInt64(item, "intervalBeforeMs");
+    decision.intervalAfterMs = RequiredUInt64(item, "intervalAfterMs");
+    decision.maxLoopUs = RequiredUInt64(item, "maxLoopUs");
+    decision.averageLoopUs = RequiredUInt64(item, "averageLoopUs");
+    decision.p90LoopUs = RequiredUInt64(item, "p90LoopUs");
+    decision.p99LoopUs = RequiredUInt64(item, "p99LoopUs");
+    decision.effectiveLoopUs = RequiredUInt64(item, "effectiveLoopUs");
+    decision.utilizationPpm = RequiredUInt64(item, "utilizationPpm");
+    decision.targetUtilizationPpm =
+        RequiredUInt64(item, "targetUtilizationPpm");
+    decision.budgetUs = RequiredUInt64(item, "budgetUs");
+    decision.deadlineUs = RequiredUInt64(item, "deadlineUs");
+    decision.catalogRole = RequiredString(item, "catalogRole");
+    decision.replaceable = RequiredBool(item, "replaceable");
+    decision.budgetOverrunCount = RequiredUInt64(item, "budgetOverrunCount");
+    decision.deadlineMissCount = RequiredUInt64(item, "deadlineMissCount");
+    decision.schedulingErrorCount =
+        RequiredUInt64(item, "schedulingErrorCount");
+}
+
 SolverReportDecision ParseSolverReportDecision(const JsonValue& item)
 {
     RequireConfigObject(item, "solver report decision must be object");
@@ -732,7 +775,16 @@ SolverReportDecision ParseSolverReportDecision(const JsonValue& item)
     decision.kind = RequiredString(item, "kind");
     decision.name = RequiredString(item, "name");
     decision.reason = RequiredString(item, "reason");
-    return decision;
+    if (decision.kind == "queue") {
+        ParseQueueSolverReportDecision(item, decision);
+        return decision;
+    }
+    if (decision.kind == "task") {
+        ParseTaskSolverReportDecision(item, decision);
+        return decision;
+    }
+    throw std::runtime_error("unsupported solver report decision kind: " +
+                             decision.kind);
 }
 
 std::vector<SolverReportDecision> ParseSolverReportDecisionsObject(

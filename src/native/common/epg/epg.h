@@ -197,6 +197,28 @@ struct SolverReportDecision {
     std::string kind;
     std::string name;
     std::string reason;
+    std::string catalogRole;
+    bool replaceable{false};
+    std::uint64_t depthBefore{};
+    std::uint64_t depthAfter{};
+    std::uint64_t pressureBefore{};
+    std::uint64_t pushedPerSecond{};
+    std::uint64_t poppedPerSecond{};
+    std::uint64_t droppedPerSecond{};
+    std::uint64_t intervalBeforeMs{};
+    std::uint64_t intervalAfterMs{};
+    std::uint64_t maxLoopUs{};
+    std::uint64_t averageLoopUs{};
+    std::uint64_t p90LoopUs{};
+    std::uint64_t p99LoopUs{};
+    std::uint64_t effectiveLoopUs{};
+    std::uint64_t utilizationPpm{};
+    std::uint64_t targetUtilizationPpm{};
+    std::uint64_t budgetUs{};
+    std::uint64_t deadlineUs{};
+    std::uint64_t budgetOverrunCount{};
+    std::uint64_t deadlineMissCount{};
+    std::uint64_t schedulingErrorCount{};
 };
 
 struct SolverReport {

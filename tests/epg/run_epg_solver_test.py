@@ -253,6 +253,9 @@ def main() -> int:
     assert report["objective"]["score"]["budgetOverruns"] == 2
     assert report["objective"]["score"]["deadlineMisses"] == 1
     assert report["constraints"]["maxQueueDepth"] == 8
+    assert report["decisions"][0]["depthAfter"] == optimized["queues"][0]["depth"]
+    assert report["decisions"][1]["intervalAfterMs"] == (
+        optimized["tasks"][0]["trigger"]["interval_ms"])
     assert report["decisions"][0]["droppedPerSecond"] == 100
     assert report["decisions"][1]["budgetUs"] == 1500
     assert report["decisions"][1]["catalogRole"] == "source"
