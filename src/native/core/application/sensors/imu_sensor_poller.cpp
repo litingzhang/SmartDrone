@@ -10,11 +10,11 @@
 #include "core/application/sensors/imu_sample_source_provider.h"
 #include "core/application/sensors/imu_runtime_state.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 namespace {
 
-using ImuSampleReadStatus = smartdrone::core::ports::ImuSampleReadStatus;
+using ImuSampleReadStatus = SmartDrone::core::ports::ImuSampleReadStatus;
 
 } // namespace
 
@@ -120,7 +120,7 @@ class ImuSensorPoller::Impl final {
     }
 
     ImuThreadState &m_state;
-    std::unique_ptr<smartdrone::core::ports::IImuSampleSource> m_sampleSource;
+    std::unique_ptr<SmartDrone::core::ports::IImuSampleSource> m_sampleSource;
     std::int64_t m_lastAcceptedTsNs{0};
     std::uint64_t m_lastNonMonotonicLogUs{0};
 };
@@ -153,4 +153,4 @@ bool ImuSensorPoller::Failed() const
     return m_impl->Failed();
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -23,7 +23,7 @@
 
 #include "common/time_utils.h"
 
-namespace smartdrone::adapters::camera {
+namespace SmartDrone::adapters::camera {
 
 namespace {
 
@@ -31,7 +31,10 @@ constexpr size_t kDefaultBufferCount = 4;
 constexpr int32_t kFallbackExposureAbsoluteMax = 10000;
 constexpr int32_t kAutoExposureGainFloor = 32;
 
-uint32_t YuyvFourcc() { return v4l2_fourcc('Y', 'U', 'Y', 'V'); }
+uint32_t YuyvFourcc()
+{
+    return v4l2_fourcc('Y', 'U', 'Y', 'V');
+}
 
 std::string FourccToString(uint32_t fourcc)
 {
@@ -237,40 +240,50 @@ DecodePackedStatus DecodePackedFrame(uint32_t pixelFormat, const PackedDecodeInp
 
 } // namespace
 
-UvcStereoCamera::~UvcStereoCamera() { Close(); }
+UvcStereoCamera::~UvcStereoCamera()
+{
+    Close();
+}
 
-bool UvcStereoCamera::Open(const core::application::MainRuntimeAliases &aliases)
+bool UvcStereoCamera::Open(const core::ports::CameraOpenConfig &config)
 {
     Close();
 
-    if (!aliases.uvcPackedStereo) {
+    if (!config.uvcPackedStereo) {
         std::cerr << "[uvc] unsupported configuration: uvc_stereo_opencv requires camera.uvc_packed_stereo=true\n";
         return false;
     }
 
-    m_deviceIndex = aliases.uvcDeviceIndex;
-    m_width = aliases.uvcEyeWidth;
-    m_height = aliases.uvcEyeHeight;
-    m_swapEyes = aliases.uvcSwapEyes;
+    m_deviceIndex = config.uvcDeviceIndex;
+    m_width = config.uvcEyeWidth;
+    m_height = config.uvcEyeHeight;
+    m_swapEyes = config.uvcSwapEyes;
     if (m_deviceIndex < 0 || m_width <= 0 || m_height <= 0) {
         std::cerr << "[uvc] invalid configuration: device_index=" << m_deviceIndex << " eye=" << m_width << "x"
                   << m_height << "\n";
         return false;
     }
 
-    m_fps = aliases.fps;
+    m_fps = config.fps;
     m_maxQueue = 1;
-    if (aliases.pairQueue > 1) {
+    if (config.pairQueue > 1) {
         std::cerr << "[uvc] forcing packed-stereo frame_queue=1 for lowest-latency capture (requested="
-                  << aliases.pairQueue << ")\n";
+                  << config.pairQueue << ")\n";
     }
     m_sequence = 0;
     m_lastFrameTimestampNs = 0;
     m_lastPairTimestampNs = 0;
 
     const int packedWidth = (m_width > 0) ? (m_width * 2) : 0;
-    const DeviceOpenParams params{m_deviceIndex, packedWidth, m_height, m_fps, aliases.aeDisable, aliases.exposureUs,
-                                  aliases.gain};
+    const DeviceOpenParams params{
+        m_deviceIndex,
+        packedWidth,
+        m_height,
+        m_fps,
+        config.autoExposureDisabled,
+        config.exposureUs,
+        config.gain,
+    };
     if (!OpenDevice(params)) {
         CloseDevice();
         return false;
@@ -313,9 +326,15 @@ void UvcStereoCamera::Close()
     m_diag.pairedQueue = 0;
 }
 
-bool UvcStereoCamera::Start() { return m_open; }
+bool UvcStereoCamera::Start()
+{
+    return m_open;
+}
 
-void UvcStereoCamera::Stop() { Close(); }
+void UvcStereoCamera::Stop()
+{
+    Close();
+}
 
 bool UvcStereoCamera::GrabStereo(core::ports::StereoFrame &out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs)
 {
@@ -829,4 +848,4 @@ void UvcStereoCamera::PushFrame(core::ports::StereoFrame &&frame, uint64_t captu
     m_lastPairTimestampNs = captureTimestampNs;
 }
 
-} // namespace smartdrone::adapters::camera
+} // namespace SmartDrone::adapters::camera

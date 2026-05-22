@@ -6,13 +6,14 @@
 
 #include "core/application/session/epg/slam_session_task_results.h"
 
-namespace smartdrone::core::ports {
+namespace SmartDrone::core::ports {
 class IPosePublisher;
 class ISlamSessionTelemetryPort;
-} // namespace smartdrone::core::ports
+} // namespace SmartDrone::core::ports
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
+struct ApplicationRuntimeFactories;
 struct LivePoseState;
 struct LiveRuntimeTuning;
 struct UnifiedConfig;
@@ -20,11 +21,12 @@ struct UnifiedConfig;
 struct SlamSessionRuntimeServiceConfig {
     const UnifiedConfig &cfg;
     LiveRuntimeTuning &tuning;
-    smartdrone::core::ports::ISlamSessionTelemetryPort &telemetry;
-    smartdrone::core::ports::IPosePublisher &posePublisher;
+    SmartDrone::core::ports::ISlamSessionTelemetryPort &telemetry;
+    SmartDrone::core::ports::IPosePublisher &posePublisher;
     std::atomic<bool> &stop;
     LivePoseState &livePose;
     std::atomic<bool> &runningFlag;
+    const ApplicationRuntimeFactories &factories;
 };
 
 class SlamSessionRuntimeService final {
@@ -65,4 +67,4 @@ class SlamSessionRuntimeService final {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

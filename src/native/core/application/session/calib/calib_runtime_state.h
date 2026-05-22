@@ -8,8 +8,9 @@
 #include "core/application/session/calib/calib_imu_sample_result.h"
 #include "core/application/session/epg/messages/calib_epg_messages.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
+struct ApplicationRuntimeFactories;
 struct LivePoseState;
 struct UnifiedConfig;
 
@@ -17,6 +18,7 @@ struct CalibRuntimeStateConfig {
     const UnifiedConfig &cfg;
     std::atomic<bool> &stop;
     LivePoseState &livePose;
+    const ApplicationRuntimeFactories &factories;
 };
 
 class CalibRuntimeState final {
@@ -40,4 +42,4 @@ class CalibRuntimeState final {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

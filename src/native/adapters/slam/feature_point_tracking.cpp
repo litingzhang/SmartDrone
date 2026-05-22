@@ -4,7 +4,7 @@
 
 #include <opencv2/video/tracking.hpp>
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 bool TrackPointsForwardBackward(const cv::Mat &prevGray, const cv::Mat &currGray,
                                 const std::vector<cv::Point2f> &prevPoints,
@@ -60,4 +60,4 @@ bool DefaultPointTracker2d::TrackForwardBackward(const cv::Mat &prevGray, const 
     return TrackPointsForwardBackward(prevGray, currGray, prevPoints, currPoints, status, options);
 }
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

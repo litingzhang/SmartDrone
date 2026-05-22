@@ -10,11 +10,12 @@
 #include <string>
 #include <utility>
 
+#include "core/application/config/runtime_app_types.h"
 #include "core/application/session/slam/imu_window_filter.h"
 #include "core/application/session/slam/slam_runtime_control_port.h"
 #include "core/application/state/live_pose_state.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 constexpr int64_t kPointCloudUpdateIntervalNs = 200000000LL;
@@ -197,7 +198,7 @@ SlamFrameStageResult SlamFrameInputPort::AcquireAndPrepareFrame(
 void SlamFrameInputPort::SyncRequestedSlamMode()
 {
     const auto configuredSlamMode =
-        static_cast<smartdrone::core::domain::SlamOperationMode>(
+        static_cast<SmartDrone::core::domain::SlamOperationMode>(
             m_ctx.tuning.slamOperationMode.load(std::memory_order_relaxed));
     if (configuredSlamMode == m_sharedState.requestedSlamMode.load()) {
         return;
@@ -206,25 +207,25 @@ void SlamFrameInputPort::SyncRequestedSlamMode()
     m_sharedState.requestedSlamMode.store(configuredSlamMode);
     m_ctx.autoSlamModeController.Reset();
     const auto effectiveSlamMode =
-        configuredSlamMode == smartdrone::core::domain::SlamOperationMode::Auto
-            ? smartdrone::core::domain::SlamOperationMode::Mapping
+        configuredSlamMode == SmartDrone::core::domain::SlamOperationMode::Auto
+            ? SmartDrone::core::domain::SlamOperationMode::Mapping
             : configuredSlamMode;
     m_sharedState.effectiveSlamMode.store(effectiveSlamMode);
     if (m_ctx.slamControl != nullptr) {
         m_ctx.slamControl->SetOperationMode(effectiveSlamMode);
     }
     std::cerr << "[slam] operation_mode -> "
-              << smartdrone::core::domain::ToString(configuredSlamMode);
+              << SmartDrone::core::domain::ToString(configuredSlamMode);
     if (configuredSlamMode ==
-        smartdrone::core::domain::SlamOperationMode::Auto) {
+        SmartDrone::core::domain::SlamOperationMode::Auto) {
         std::cerr << " effective_mode="
-                  << smartdrone::core::domain::ToString(effectiveSlamMode);
+                  << SmartDrone::core::domain::ToString(effectiveSlamMode);
     }
     std::cerr << "\n";
     if (configuredSlamMode ==
-            smartdrone::core::domain::SlamOperationMode::Relocalization ||
+            SmartDrone::core::domain::SlamOperationMode::Relocalization ||
         configuredSlamMode ==
-            smartdrone::core::domain::SlamOperationMode::TrackingOnly) {
+            SmartDrone::core::domain::SlamOperationMode::TrackingOnly) {
         std::cerr << "[slam] note: requested mode currently maps to backend "
                      "localization-only mode\n";
     }
@@ -431,12 +432,12 @@ SlamFrameInputPort::FrameMetadata SlamFrameInputPort::BuildFrameMetadata(
     metadata.extractFeatures =
         metadata.sendFeature ||
         m_sharedState.requestedSlamMode.load() ==
-            smartdrone::core::domain::SlamOperationMode::Auto;
+            SmartDrone::core::domain::SlamOperationMode::Auto;
     metadata.updatePointCloud =
         !metadata.debugRightOnlyFeatures && metadata.sendMap &&
         (metadata.captureTimestampNs -
          m_outputState.lastPointCloudUpdateNs.load()) >=
-        kPointCloudUpdateIntervalNs;
+            kPointCloudUpdateIntervalNs;
     MaybeLogFrameGap(stereoBatch, config, metadata);
     return metadata;
 }
@@ -541,4 +542,4 @@ void SlamFrameInputPort::FillPreparedFrame(
     frame.updatePointCloud = metadata.updatePointCloud;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -9,11 +9,11 @@
 
 #include "common/time_utils.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 namespace {
 
-using PoseEstimate = smartdrone::core::ports::PoseEstimate;
+using PoseEstimate = SmartDrone::core::ports::PoseEstimate;
 
 bool EnvFlagEnabled(const char *name, bool defaultValue)
 {
@@ -311,7 +311,7 @@ PosePostprocessor::OutputGuard::ClampPose(const GuardRequest &request, float raw
 }
 
 void PosePostprocessor::OutputGuard::MaybeLogClamp(int64_t frameNs, float rawStepM, float maxStepM, float rawRotRad,
-                                                  float maxRotRad)
+                                                   float maxRotRad)
 {
     if (!EnvFlagEnabled("SMART_DRONE_ONLINE_POSE_GUARD_DFX", false)) {
         return;
@@ -406,11 +406,11 @@ void PosePostprocessor::OutputGuard::CommitPose(const PoseEstimate &pose, int64_
     haveLastPose = true;
 }
 
-smartdrone::core::ports::VelocityEstimate
+SmartDrone::core::ports::VelocityEstimate
 PosePostprocessor::VelocityTracker::Update(const PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
                                            uint16_t resetMapCount)
 {
-    smartdrone::core::ports::VelocityEstimate out{};
+    SmartDrone::core::ports::VelocityEstimate out{};
     if (ShouldReset(frameNs, quality, resetMapCount)) {
         ResetState(pose, frameNs, quality, resetMapCount);
         return out;
@@ -565,4 +565,4 @@ PosePostprocessor::Result PosePostprocessor::ProcessPose(const ProcessRequest &r
     return prepared.result;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

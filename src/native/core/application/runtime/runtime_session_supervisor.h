@@ -9,13 +9,13 @@
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/mode_manager.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class ISessionGraphRuntime;
 
 class RuntimeSessionSupervisor {
   public:
-    using ControllerMode = smartdrone::core::domain::RuntimeMode;
+    using ControllerMode = SmartDrone::core::domain::RuntimeMode;
     using CurrentConfigFn = std::function<UnifiedConfig()>;
 
     struct IdleStatus {
@@ -75,4 +75,4 @@ class RuntimeSessionSupervisor {
     std::shared_ptr<ISessionGraphRuntime> m_session;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

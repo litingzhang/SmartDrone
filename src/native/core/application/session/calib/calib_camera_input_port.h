@@ -5,13 +5,15 @@
 #include "core/application/session/calib/calib_capture_result.h"
 #include "core/application/session/epg/messages/calib_epg_messages.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
+struct ApplicationRuntimeFactories;
 struct MainRuntimeAliases;
 
 class CalibCameraInputPort final {
   public:
-    explicit CalibCameraInputPort(const MainRuntimeAliases &aliases);
+    CalibCameraInputPort(const MainRuntimeAliases &aliases,
+                         const ApplicationRuntimeFactories &factories);
     ~CalibCameraInputPort();
 
     bool Open();
@@ -24,4 +26,4 @@ class CalibCameraInputPort final {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 constexpr const char *SYSTEM_RUNTIME_GRAPH_NAME =
@@ -16,7 +16,7 @@ constexpr const char *VEHICLE_TELEMETRY_RX_TASK_TYPE =
     "VehicleTelemetryRxTask";
 constexpr const char *LEGACY_MAVLINK_RX_TASK_TYPE = "MavlinkRxTask";
 constexpr const char *EPG_TOPOLOGY_PATH = "config/epg/epg_topology.dot";
-constexpr const char *EPG_TOPOLOGY_REVISION = "v2";
+constexpr const char *EPG_TOPOLOGY_REVISION = "v3";
 constexpr const char *EPG_SNAPSHOT_DIR = "/tmp";
 constexpr const char *EPG_OPTIMIZED_DIR = "output/epg";
 const EpgTaskTopologySpec EPG_TOPOLOGY_SPEC{
@@ -156,7 +156,7 @@ void ValidateManifestMetadata(const EpgTaskManifest &manifest)
 }
 
 void ValidateGraphTaskTypeAllowed(const EpgTaskManifest &manifest,
-                                  const epg::TaskConfig &task,
+                                  const Epg::TaskConfig &task,
                                   const std::set<std::string> &allowedTypes)
 {
     if (allowedTypes.find(task.type) != allowedTypes.end()) {
@@ -193,7 +193,7 @@ const EpgTaskCatalogEntry *FindCatalogEntry(
 }
 
 void ApplyCatalogDefaultsToTask(const EpgTaskCatalogEntry &entry,
-                                epg::TaskConfig &task)
+                                Epg::TaskConfig &task)
 {
     task.scheduling.resource = entry.resource;
     task.scheduling.budgetUs = entry.budgetUs;
@@ -201,7 +201,7 @@ void ApplyCatalogDefaultsToTask(const EpgTaskCatalogEntry &entry,
 }
 
 void ValidateTaskSchedulingCatalogMatch(const EpgTaskManifest &manifest,
-                                        const epg::TaskConfig &task)
+                                        const Epg::TaskConfig &task)
 {
     const auto &entry = RequireCatalogEntry(manifest, task.type);
     const auto &scheduling = task.scheduling;
@@ -333,7 +333,7 @@ const EpgTaskRuntimeTuningEntry *FindRuntimeTuning(
     return nullptr;
 }
 
-bool GraphUsesTaskName(const epg::GraphConfig &graphConfig,
+bool GraphUsesTaskName(const Epg::GraphConfig &graphConfig,
                        const std::string &taskName)
 {
     for (const auto &task : graphConfig.tasks) {
@@ -389,7 +389,7 @@ void ValidateManifestRuntimeTuning(const EpgTaskManifest &manifest)
 
 void ValidateGraphRuntimeTuningDeclared(
     const EpgTaskManifest &manifest,
-    const epg::GraphConfig &graphConfig)
+    const Epg::GraphConfig &graphConfig)
 {
     for (const auto &entry : manifest.runtimeTuning) {
         if (GraphUsesTaskName(graphConfig, entry.taskName)) {
@@ -402,7 +402,7 @@ void ValidateGraphRuntimeTuningDeclared(
 }
 
 std::uint64_t SolverReportTotalPenalty(
-    const epg::SolverReportScore &score)
+    const Epg::SolverReportScore &score)
 {
     return score.queuePressure * 1000 + score.periodicOverloadUs +
            score.resourceWaitUs + score.schedulingErrors * 10000 +
@@ -410,14 +410,14 @@ std::uint64_t SolverReportTotalPenalty(
            score.utilizationOverPpm;
 }
 
-void AddQueueDecisionScore(const epg::SolverReportDecision &decision,
-                           epg::SolverReportScore &score)
+void AddQueueDecisionScore(const Epg::SolverReportDecision &decision,
+                           Epg::SolverReportScore &score)
 {
     score.queuePressure += decision.pressureBefore;
 }
 
-void AddTaskDecisionScore(const epg::SolverReportDecision &decision,
-                          epg::SolverReportScore &score)
+void AddTaskDecisionScore(const Epg::SolverReportDecision &decision,
+                          Epg::SolverReportScore &score)
 {
     if (decision.effectiveLoopUs > decision.intervalBeforeMs * 1000) {
         score.periodicOverloadUs +=
@@ -433,10 +433,10 @@ void AddTaskDecisionScore(const epg::SolverReportDecision &decision,
     }
 }
 
-epg::SolverReportScore BuildSolverReportScore(
-    const std::vector<epg::SolverReportDecision> &decisions)
+Epg::SolverReportScore BuildSolverReportScore(
+    const std::vector<Epg::SolverReportDecision> &decisions)
 {
-    epg::SolverReportScore score;
+    Epg::SolverReportScore score;
     for (const auto &decision : decisions) {
         if (decision.kind == "queue") {
             AddQueueDecisionScore(decision, score);
@@ -448,7 +448,7 @@ epg::SolverReportScore BuildSolverReportScore(
     return score;
 }
 
-void ValidateSolverReportScore(const epg::SolverReport &report)
+void ValidateSolverReportScore(const Epg::SolverReport &report)
 {
     const auto expected = BuildSolverReportScore(report.decisions);
     if (report.score.queuePressure != expected.queuePressure ||
@@ -464,8 +464,8 @@ void ValidateSolverReportScore(const epg::SolverReport &report)
 }
 
 void ValidateSolverReportDecisionCoverage(
-    const epg::GraphConfig &graphConfig,
-    const epg::SolverReport &report)
+    const Epg::GraphConfig &graphConfig,
+    const Epg::SolverReport &report)
 {
     std::set<std::string> expected;
     for (const auto &queue : graphConfig.queues) {
@@ -487,8 +487,8 @@ void ValidateSolverReportDecisionCoverage(
     }
 }
 
-const epg::QueueConfig *FindQueueConfig(
-    const epg::GraphConfig &graphConfig,
+const Epg::QueueConfig *FindQueueConfig(
+    const Epg::GraphConfig &graphConfig,
     const std::string &name)
 {
     for (const auto &queue : graphConfig.queues) {
@@ -499,8 +499,8 @@ const epg::QueueConfig *FindQueueConfig(
     return nullptr;
 }
 
-const epg::TaskConfig *FindTaskConfig(
-    const epg::GraphConfig &graphConfig,
+const Epg::TaskConfig *FindTaskConfig(
+    const Epg::GraphConfig &graphConfig,
     const std::string &name)
 {
     for (const auto &task : graphConfig.tasks) {
@@ -511,7 +511,7 @@ const epg::TaskConfig *FindTaskConfig(
     return nullptr;
 }
 
-void ValidateSolverReportConstraints(const epg::SolverReport &report)
+void ValidateSolverReportConstraints(const Epg::SolverReport &report)
 {
     const auto &constraints = report.constraints;
     if (constraints.maxQueueDepth == 0 ||
@@ -522,10 +522,10 @@ void ValidateSolverReportConstraints(const epg::SolverReport &report)
 }
 
 void ValidateQueueSolverDecision(
-    const epg::GraphConfig *sourceGraphConfig,
-    const epg::GraphConfig &graphConfig,
-    const epg::SolverReportConstraints &constraints,
-    const epg::SolverReportDecision &decision)
+    const Epg::GraphConfig *sourceGraphConfig,
+    const Epg::GraphConfig &graphConfig,
+    const Epg::SolverReportConstraints &constraints,
+    const Epg::SolverReportDecision &decision)
 {
     const auto *queue = FindQueueConfig(graphConfig, decision.name);
     if (!queue) {
@@ -560,7 +560,7 @@ void ValidateQueueSolverDecision(
 }
 
 std::vector<std::string> TaskDecisionReasons(
-    const epg::SolverReportDecision &decision)
+    const Epg::SolverReportDecision &decision)
 {
     std::vector<std::string> reasons;
     if (decision.utilizationPpm > decision.targetUtilizationPpm) {
@@ -599,7 +599,7 @@ std::string JoinTaskDecisionReasons(const std::vector<std::string> &reasons)
 }
 
 std::string ExpectedTaskDecisionReason(
-    const epg::SolverReportDecision &decision)
+    const Epg::SolverReportDecision &decision)
 {
     if (decision.intervalAfterMs != decision.intervalBeforeMs) {
         return "increase_interval";
@@ -613,10 +613,10 @@ std::string ExpectedTaskDecisionReason(
 
 void ValidateTaskSolverDecision(
     const EpgTaskManifest &manifest,
-    const epg::GraphConfig *sourceGraphConfig,
-    const epg::GraphConfig &graphConfig,
-    const epg::SolverReportConstraints &constraints,
-    const epg::SolverReportDecision &decision)
+    const Epg::GraphConfig *sourceGraphConfig,
+    const Epg::GraphConfig &graphConfig,
+    const Epg::SolverReportConstraints &constraints,
+    const Epg::SolverReportDecision &decision)
 {
     const auto *task = FindTaskConfig(graphConfig, decision.name);
     if (!task) {
@@ -661,9 +661,9 @@ void ValidateTaskSolverDecision(
 
 void ValidateSolverReportDecisionDetails(
     const EpgTaskManifest &manifest,
-    const epg::GraphConfig *sourceGraphConfig,
-    const epg::GraphConfig &graphConfig,
-    const epg::SolverReport &report)
+    const Epg::GraphConfig *sourceGraphConfig,
+    const Epg::GraphConfig &graphConfig,
+    const Epg::SolverReport &report)
 {
     ValidateSolverReportConstraints(report);
     for (const auto &decision : report.decisions) {
@@ -750,7 +750,7 @@ std::string EpgTaskCatalogJson(const EpgTaskManifest &manifest)
 
 void ApplyEpgTaskCatalogDefaults(
     const EpgTaskManifest &manifest,
-    epg::GraphConfig &graphConfig)
+    Epg::GraphConfig &graphConfig)
 {
     ValidateManifestMetadata(manifest);
     ValidateManifestCatalog(manifest);
@@ -766,7 +766,7 @@ void ApplyEpgTaskCatalogDefaults(
 
 void ValidateEpgTaskRuntimeTuning(
     const EpgTaskManifest &manifest,
-    const epg::GraphConfig &graphConfig,
+    const Epg::GraphConfig &graphConfig,
     const std::vector<EpgTaskRuntimeTuningEntry> &requestedTuning)
 {
     ValidateManifestMetadata(manifest);
@@ -820,7 +820,7 @@ void ValidateEpgTaskFactoryManifest(
 
 void ValidateEpgTaskGraphManifest(
     const EpgTaskManifest &manifest,
-    const epg::GraphConfig &graphConfig)
+    const Epg::GraphConfig &graphConfig)
 {
     ValidateManifestMetadata(manifest);
     const auto allowedTypes = ValidateManifestCatalog(manifest);
@@ -839,10 +839,10 @@ void ValidateEpgTaskGraphManifest(
 
 void ValidateEpgOptimizedGraphManifest(
     const EpgTaskManifest &manifest,
-    const epg::OptimizedGraph &optimizedGraph)
+    const Epg::OptimizedGraph &optimizedGraph)
 {
     const auto &metadata = optimizedGraph.metadata;
-    if (metadata.schema != epg::OPTIMIZED_GRAPH_SCHEMA) {
+    if (metadata.schema != Epg::OPTIMIZED_GRAPH_SCHEMA) {
         throw std::runtime_error("optimized graph schema mismatch");
     }
     if (metadata.targetGraph != manifest.subgraphName) {
@@ -867,10 +867,10 @@ void ValidateEpgOptimizedGraphManifest(
 
 void ValidateEpgSolverReportManifest(
     const EpgTaskManifest &manifest,
-    const epg::OptimizedGraphMetadata &optimizedMetadata,
-    const epg::SolverReportMetadata &reportMetadata)
+    const Epg::OptimizedGraphMetadata &optimizedMetadata,
+    const Epg::SolverReportMetadata &reportMetadata)
 {
-    if (reportMetadata.schema != epg::SOLVER_REPORT_SCHEMA) {
+    if (reportMetadata.schema != Epg::SOLVER_REPORT_SCHEMA) {
         throw std::runtime_error("solver report schema mismatch");
     }
     if (reportMetadata.targetGraph != manifest.subgraphName ||
@@ -897,11 +897,11 @@ void ValidateEpgSolverReportManifest(
 
 void ValidateEpgSolverReportProfile(
     const EpgTaskManifest &manifest,
-    const epg::GraphProfileMetadata &profileMetadata,
-    const epg::OptimizedGraphMetadata &optimizedMetadata,
-    const epg::SolverReportMetadata &reportMetadata)
+    const Epg::GraphProfileMetadata &profileMetadata,
+    const Epg::OptimizedGraphMetadata &optimizedMetadata,
+    const Epg::SolverReportMetadata &reportMetadata)
 {
-    if (profileMetadata.schema != epg::GRAPH_PROFILE_SCHEMA) {
+    if (profileMetadata.schema != Epg::GRAPH_PROFILE_SCHEMA) {
         throw std::runtime_error("solver report profile schema mismatch");
     }
     if (profileMetadata.graph != manifest.subgraphName ||
@@ -923,8 +923,8 @@ void ValidateEpgSolverReportProfile(
 
 void ValidateEpgSolverReport(
     const EpgTaskManifest &manifest,
-    const epg::OptimizedGraph &optimizedGraph,
-    const epg::SolverReport &report)
+    const Epg::OptimizedGraph &optimizedGraph,
+    const Epg::SolverReport &report)
 {
     ValidateEpgSolverReportManifest(manifest, optimizedGraph.metadata,
                                     report.metadata);
@@ -939,9 +939,9 @@ void ValidateEpgSolverReport(
 
 void ValidateEpgSolverReport(
     const EpgTaskManifest &manifest,
-    const epg::GraphProfile &sourceProfile,
-    const epg::OptimizedGraph &optimizedGraph,
-    const epg::SolverReport &report)
+    const Epg::GraphProfile &sourceProfile,
+    const Epg::OptimizedGraph &optimizedGraph,
+    const Epg::SolverReport &report)
 {
     ValidateEpgSolverReportManifest(manifest, optimizedGraph.metadata,
                                     report.metadata);
@@ -956,4 +956,4 @@ void ValidateEpgSolverReport(
         manifest, &sourceProfile.topology, optimizedGraph.config, report);
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

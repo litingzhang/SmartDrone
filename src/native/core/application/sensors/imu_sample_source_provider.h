@@ -4,11 +4,11 @@
 
 #include "core/ports/imu_sample_source.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct MainRuntimeAliases;
 
-std::unique_ptr<smartdrone::core::ports::IImuSampleSource>
+std::unique_ptr<SmartDrone::core::ports::IImuSampleSource>
 CreateImuSampleSource(const MainRuntimeAliases &aliases);
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

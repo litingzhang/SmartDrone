@@ -9,6 +9,7 @@
 #include "core/application/runtime/epg_graph_lifecycle.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
 #include "core/application/epg/epg_registry.h"
+#include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/state/live_pose_state.h"
 #include "core/application/session/epg/slam_session_task_factory.h"
 #include "core/application/session/epg/slam_session_task_utils.h"
@@ -16,7 +17,7 @@
 #include "core/ports/pose_publisher.h"
 #include "core/ports/slam_session_telemetry.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class SlamSessionGraphRuntime::Impl final {
   public:
@@ -28,6 +29,7 @@ class SlamSessionGraphRuntime::Impl final {
           m_stop(config.stop),
           m_livePose(config.livePose),
           m_runningFlag(config.runningFlag),
+          m_factories(config.factories),
           m_lifecycle(EpgGraphLifecycleConfig{
               m_stop,
               [this]() { return ResourcesStopped(); },
@@ -37,7 +39,10 @@ class SlamSessionGraphRuntime::Impl final {
     {
     }
 
-    ~Impl() { Stop(); }
+    ~Impl()
+    {
+        Stop();
+    }
 
     bool Start()
     {
@@ -58,7 +63,7 @@ class SlamSessionGraphRuntime::Impl final {
                              m_cfg.app.camera.fps,
                              graphRef,
                          }));
-        auto graph = std::make_unique<epg::EventPipelineGraph>(m_registry);
+        auto graph = std::make_unique<Epg::EventPipelineGraph>(m_registry);
         graphRef->graph = graph.get();
         auto graphConfig = CompileEpgConfig(EpgDomain::SlamSession, m_registry);
         ApplySlamRuntimePacing(graphConfig, m_cfg);
@@ -105,7 +110,10 @@ class SlamSessionGraphRuntime::Impl final {
         m_lifecycle.StepStop();
         return m_lifecycle.Done();
     }
-    bool Ok() const { return m_sessionOk.load(std::memory_order_relaxed); }
+    bool Ok() const
+    {
+        return m_sessionOk.load(std::memory_order_relaxed);
+    }
 
   private:
     SlamSessionRuntimeServiceConfig RuntimeConfig()
@@ -118,6 +126,7 @@ class SlamSessionGraphRuntime::Impl final {
             m_stop,
             m_livePose,
             m_runningFlag,
+            m_factories,
         };
     }
 
@@ -140,12 +149,13 @@ class SlamSessionGraphRuntime::Impl final {
 
     UnifiedConfig m_cfg;
     LiveRuntimeTuning &m_tuning;
-    smartdrone::core::ports::ISlamSessionTelemetryPort &m_telemetry;
-    smartdrone::core::ports::IPosePublisher &m_posePublisher;
+    SmartDrone::core::ports::ISlamSessionTelemetryPort &m_telemetry;
+    SmartDrone::core::ports::IPosePublisher &m_posePublisher;
     std::atomic<bool> &m_stop;
     LivePoseState &m_livePose;
     std::atomic<bool> &m_runningFlag;
-    epg::Registry m_registry;
+    const ApplicationRuntimeFactories &m_factories;
+    Epg::Registry m_registry;
     std::shared_ptr<SlamSessionRuntimeService> m_runtimeService;
     EpgGraphLifecycle m_lifecycle;
     std::atomic<bool> m_sessionOk{true};
@@ -158,16 +168,34 @@ SlamSessionGraphRuntime::SlamSessionGraphRuntime(SlamSessionGraphRuntimeConfig c
 
 SlamSessionGraphRuntime::~SlamSessionGraphRuntime() = default;
 
-bool SlamSessionGraphRuntime::Start() { return m_impl->Start(); }
+bool SlamSessionGraphRuntime::Start()
+{
+    return m_impl->Start();
+}
 
-void SlamSessionGraphRuntime::Step() { m_impl->Step(); }
+void SlamSessionGraphRuntime::Step()
+{
+    m_impl->Step();
+}
 
-void SlamSessionGraphRuntime::RequestStop() { m_impl->RequestStop(); }
+void SlamSessionGraphRuntime::RequestStop()
+{
+    m_impl->RequestStop();
+}
 
-void SlamSessionGraphRuntime::Stop() { m_impl->Stop(); }
+void SlamSessionGraphRuntime::Stop()
+{
+    m_impl->Stop();
+}
 
-bool SlamSessionGraphRuntime::Done() { return m_impl->Done(); }
+bool SlamSessionGraphRuntime::Done()
+{
+    return m_impl->Done();
+}
 
-bool SlamSessionGraphRuntime::Ok() const { return m_impl->Ok(); }
+bool SlamSessionGraphRuntime::Ok() const
+{
+    return m_impl->Ok();
+}
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

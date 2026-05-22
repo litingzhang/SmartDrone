@@ -9,25 +9,25 @@
 #include "core/application/runtime/epg_dfx_snapshot.h"
 #include "core/application/session/epg/calib_session_tasks.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 using CalibTaskFactoryEntries =
-    std::vector<epg::TypeCatalog::TaskFactoryEntry>;
+    std::vector<Epg::TypeCatalog::TaskFactoryEntry>;
 
 template <class TaskType, class Factory>
 void AddFactory(CalibTaskFactoryEntries &entries,
-                const epg::TypeCatalog &catalog,
+                const Epg::TypeCatalog &catalog,
                 Factory factory)
 {
     entries.push_back(catalog.MakeTaskFactoryEntry<TaskType>(
         [factory = std::move(factory)]() {
-            return std::unique_ptr<epg::ITask>(factory());
+            return std::unique_ptr<Epg::ITask>(factory());
         }));
 }
 
 void AddCalibStartupTaskFactories(CalibTaskFactoryEntries &entries,
-                                  const epg::TypeCatalog &catalog,
+                                  const Epg::TypeCatalog &catalog,
                                   CalibTaskFactoryDeps deps)
 {
     AddFactory<CalibResourceTask>(entries, catalog, [deps]() {
@@ -40,7 +40,7 @@ void AddCalibStartupTaskFactories(CalibTaskFactoryEntries &entries,
 }
 
 void AddCalibProcessingTaskFactories(CalibTaskFactoryEntries &entries,
-                                     const epg::TypeCatalog &catalog,
+                                     const Epg::TypeCatalog &catalog,
                                      CalibTaskFactoryDeps deps)
 {
     AddFactory<CalibCameraAcquireTask>(entries, catalog, [deps]() {
@@ -63,7 +63,7 @@ void AddCalibProcessingTaskFactories(CalibTaskFactoryEntries &entries,
 }
 
 void AddCalibCompletionTaskFactories(CalibTaskFactoryEntries &entries,
-                                     const epg::TypeCatalog &catalog,
+                                     const Epg::TypeCatalog &catalog,
                                      CalibTaskFactoryDeps deps,
                                      const EpgTaskManifest &manifest)
 {
@@ -93,7 +93,7 @@ void AddCalibCompletionTaskFactories(CalibTaskFactoryEntries &entries,
 EpgTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
     CalibTaskFactoryDeps deps)
 {
-    auto &catalog = epg::TypeCatalog::Global();
+    auto &catalog = Epg::TypeCatalog::Global();
     const EpgTaskManifest &manifest =
         EpgManifestForDomain(EpgDomain::CalibSession);
     CalibTaskFactoryEntries entries;
@@ -102,9 +102,9 @@ EpgTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
     AddCalibProcessingTaskFactories(entries, catalog, deps);
     AddCalibCompletionTaskFactories(entries, catalog, deps, manifest);
     auto resolver =
-        epg::TypeCatalog::MakeTaskFactoryResolver(std::move(entries));
+        Epg::TypeCatalog::MakeTaskFactoryResolver(std::move(entries));
     ValidateEpgTaskFactoryManifest(manifest, resolver);
     return resolver;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

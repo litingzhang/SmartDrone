@@ -5,7 +5,7 @@
 
 #include "core/application/session/slam/slam_frame_stage_data.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct SlamResourceReady {
     bool ready{false};
@@ -58,4 +58,4 @@ struct SlamStatus {
     bool abortRequested{false};
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

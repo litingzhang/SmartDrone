@@ -10,10 +10,12 @@
 #include <string>
 #include <utility>
 
+#include "adapters/runtime/default_application_runtime_factories.h"
 #include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "adapters/telemetry/mavlink_pose_publisher.h"
 #include "adapters/telemetry/px4_vehicle_control_port.h"
 #include "common/runtime_state.h"
+#include "core/application/runtime/application_runtime_factories.h"
 #include "common/tlv/udp_server.h"
 #include "core/application/runtime/payload_builders.h"
 #include "core/application/runtime/px4_udp_hooks.h"
@@ -25,34 +27,36 @@
 #include "core/application/state/live_pose_state.h"
 #include "core/ports/vehicle_control_port.h"
 
-namespace smartdrone::app::bootstrap {
+namespace SmartDrone::app::bootstrap {
 
 namespace {
 
-using ControllerMode = smartdrone::core::domain::RuntimeMode;
+using ControllerMode = SmartDrone::core::domain::RuntimeMode;
+using ApplicationRuntimeFactories =
+    SmartDrone::core::application::ApplicationRuntimeFactories;
 using EpgRedeployCoordinator =
-    smartdrone::core::application::EpgRedeployCoordinator;
-using EpgRedeployRequest = smartdrone::core::application::EpgRedeployRequest;
-using IVehicleControlPort = smartdrone::core::ports::IVehicleControlPort;
-using LivePoseState = smartdrone::core::application::LivePoseState;
-using LiveRuntimeTuning = smartdrone::core::application::LiveRuntimeTuning;
-using MainRuntimeAliases = smartdrone::core::application::MainRuntimeAliases;
-using MavlinkPosePublisher = smartdrone::adapters::telemetry::MavlinkPosePublisher;
-using Px4UdpHooks = smartdrone::core::application::Px4UdpHooks;
-using Px4UdpHooksConfig = smartdrone::core::application::Px4UdpHooksConfig;
-using Px4VehicleControlPort = smartdrone::adapters::telemetry::Px4VehicleControlPort;
-using RuntimeSessionSupervisor = smartdrone::core::application::RuntimeSessionSupervisor;
-using RuntimeGateSnapshot = smartdrone::core::application::RuntimeGateSnapshot;
-using SessionGraphRuntimeFactoryConfig = smartdrone::core::application::SessionGraphRuntimeFactoryConfig;
-using SystemRuntimeGraph = smartdrone::core::application::SystemRuntimeGraph;
-using SystemRuntimeGraphConfig = smartdrone::core::application::SystemRuntimeGraphConfig;
-using UdpCommandRuntimeConfig = smartdrone::core::application::UdpCommandRuntimeConfig;
-using UdpRuntimeStateSnapshot = smartdrone::core::application::UdpRuntimeStateSnapshot;
-using UnifiedConfig = smartdrone::core::application::UnifiedConfig;
-using UnifiedRuntimeController = smartdrone::core::application::UnifiedRuntimeController;
-using UnifiedRuntimeControllerConfig = smartdrone::core::application::UnifiedRuntimeControllerConfig;
-using IPosePublisher = smartdrone::core::ports::IPosePublisher;
-using ISlamSessionTelemetryPort = smartdrone::core::ports::ISlamSessionTelemetryPort;
+    SmartDrone::core::application::EpgRedeployCoordinator;
+using EpgRedeployRequest = SmartDrone::core::application::EpgRedeployRequest;
+using IVehicleControlPort = SmartDrone::core::ports::IVehicleControlPort;
+using LivePoseState = SmartDrone::core::application::LivePoseState;
+using LiveRuntimeTuning = SmartDrone::core::application::LiveRuntimeTuning;
+using MainRuntimeAliases = SmartDrone::core::application::MainRuntimeAliases;
+using MavlinkPosePublisher = SmartDrone::adapters::telemetry::MavlinkPosePublisher;
+using Px4UdpHooks = SmartDrone::core::application::Px4UdpHooks;
+using Px4UdpHooksConfig = SmartDrone::core::application::Px4UdpHooksConfig;
+using Px4VehicleControlPort = SmartDrone::adapters::telemetry::Px4VehicleControlPort;
+using RuntimeSessionSupervisor = SmartDrone::core::application::RuntimeSessionSupervisor;
+using RuntimeGateSnapshot = SmartDrone::core::application::RuntimeGateSnapshot;
+using SessionGraphRuntimeFactoryConfig = SmartDrone::core::application::SessionGraphRuntimeFactoryConfig;
+using SystemRuntimeGraph = SmartDrone::core::application::SystemRuntimeGraph;
+using SystemRuntimeGraphConfig = SmartDrone::core::application::SystemRuntimeGraphConfig;
+using UdpCommandRuntimeConfig = SmartDrone::core::application::UdpCommandRuntimeConfig;
+using UdpRuntimeStateSnapshot = SmartDrone::core::application::UdpRuntimeStateSnapshot;
+using UnifiedConfig = SmartDrone::core::application::UnifiedConfig;
+using UnifiedRuntimeController = SmartDrone::core::application::UnifiedRuntimeController;
+using UnifiedRuntimeControllerConfig = SmartDrone::core::application::UnifiedRuntimeControllerConfig;
+using IPosePublisher = SmartDrone::core::ports::IPosePublisher;
+using ISlamSessionTelemetryPort = SmartDrone::core::ports::ISlamSessionTelemetryPort;
 constexpr int DISCOVERY_PORT = 15000;
 constexpr auto SYSTEM_REDEPLOY_POLL_INTERVAL = std::chrono::milliseconds(100);
 
@@ -61,8 +65,18 @@ struct BuildSystemRuntimeGraphConfigInput {
     Px4MavlinkGateway &mav;
     Px4UdpHooks &hooks;
     UnifiedRuntimeController &controller;
+    const ApplicationRuntimeFactories &factories;
     std::shared_ptr<EpgRedeployCoordinator> redeploy;
     UdpCommandRuntimeConfig commandRuntime;
+};
+
+struct BuildRuntimeControllerConfigInput {
+    const UnifiedConfig &cfg;
+    LiveRuntimeTuning &tuning;
+    ISlamSessionTelemetryPort &telemetry;
+    IPosePublisher &posePublisher;
+    LivePoseState &livePose;
+    const ApplicationRuntimeFactories &factories;
 };
 
 std::string GetEnvOrDefault(const char *name, const char *fallback)
@@ -104,12 +118,14 @@ ControllerMode ParseAutoMode(std::string autoModeText)
 RuntimeSessionSupervisor::CreateSessionFn BuildSessionRuntimeFactory(LiveRuntimeTuning &tuning,
                                                                      ISlamSessionTelemetryPort &telemetry,
                                                                      IPosePublisher &posePublisher,
-                                                                     LivePoseState &livePose)
+                                                                     LivePoseState &livePose,
+                                                                     const ApplicationRuntimeFactories &factories)
 {
-    return [&tuning, &telemetry, &posePublisher, &livePose](
+    return [&tuning, &telemetry, &posePublisher, &livePose, &factories](
                const RuntimeSessionSupervisor::SessionStartRequest &request) {
-        return smartdrone::core::application::CreateSessionGraphRuntime(SessionGraphRuntimeFactoryConfig{
-            request.mode, request.cfg, tuning, telemetry, posePublisher, request.stop, livePose, request.runningFlag});
+        return SmartDrone::core::application::CreateSessionGraphRuntime(SessionGraphRuntimeFactoryConfig{
+            request.mode, request.cfg, tuning, telemetry, posePublisher,
+            request.stop, livePose, request.runningFlag, factories});
     };
 }
 
@@ -166,15 +182,18 @@ Px4UdpHooksConfig BuildPx4UdpHooksConfig(IVehicleControlPort &vehicleControl, Li
         }};
 }
 
-UnifiedRuntimeControllerConfig BuildRuntimeControllerConfig(const UnifiedConfig &cfg, LiveRuntimeTuning &tuning,
-                                                           ISlamSessionTelemetryPort &telemetry,
-                                                           IPosePublisher &posePublisher, LivePoseState &livePose)
+UnifiedRuntimeControllerConfig BuildRuntimeControllerConfig(
+    BuildRuntimeControllerConfigInput input)
 {
     return UnifiedRuntimeControllerConfig{
-        cfg, tuning, smartdrone::common::g_runningFlag,
-        BuildSessionRuntimeFactory(tuning, telemetry, posePublisher, livePose),
-        [&livePose](ControllerMode mode) { livePose.SetRuntimeMode(static_cast<uint8_t>(mode)); },
-        [](const std::string &root) { return smartdrone::core::application::CleanupCalibDataDirs(root); }};
+        input.cfg, input.tuning, SmartDrone::common::g_runningFlag,
+        BuildSessionRuntimeFactory(input.tuning, input.telemetry,
+                                   input.posePublisher, input.livePose,
+                                   input.factories),
+        [&livePose = input.livePose](ControllerMode mode) {
+            livePose.SetRuntimeMode(static_cast<uint8_t>(mode));
+        },
+        [](const std::string &root) { return SmartDrone::core::application::CleanupCalibDataDirs(root); }};
 }
 
 UdpCommandRuntimeConfig BuildUdpCommandRuntimeConfig(Px4UdpHooks &hooks, UnifiedRuntimeController &controller,
@@ -212,9 +231,14 @@ SystemRuntimeGraphConfig BuildSystemRuntimeGraphConfig(BuildSystemRuntimeGraphCo
         },
         std::move(input.redeploy),
         std::move(input.commandRuntime),
-        []() { return smartdrone::core::application::BuildCapabilitiesPayload(); },
-        [](const UnifiedConfig &currentConfig, ControllerMode currentMode) {
-            return smartdrone::core::application::BuildConfigPayload(currentConfig, currentMode);
+        [cameraProvider = input.factories.cameraProvider]() {
+            return SmartDrone::core::application::BuildCapabilitiesPayload(
+                cameraProvider);
+        },
+        [cameraProvider = input.factories.cameraProvider](
+            const UnifiedConfig &currentConfig, ControllerMode currentMode) {
+            return SmartDrone::core::application::BuildConfigPayload(
+                currentConfig, currentMode, cameraProvider);
         },
         [](const UdpPeer &peer) { return UdpPeerToIpString(peer); }};
 }
@@ -222,7 +246,7 @@ SystemRuntimeGraphConfig BuildSystemRuntimeGraphConfig(BuildSystemRuntimeGraphCo
 void LogSystemGraphRedeployRequest(const EpgRedeployRequest &request)
 {
     std::cerr << "[epg] system graph redeploy requested: "
-              << smartdrone::core::application::DescribeEpgRedeployRequest(
+              << SmartDrone::core::application::DescribeEpgRedeployRequest(
                      request)
               << "\n";
 }
@@ -237,14 +261,14 @@ bool RestartSystemGraph(SystemRuntimeGraph &systemGraph,
         return true;
     }
     std::cerr << "[runtime] system EPG restart failed\n";
-    smartdrone::common::RequestRuntimeStop();
+    SmartDrone::common::RequestRuntimeStop();
     return false;
 }
 
 bool RunSystemGraphUntilStopped(SystemRuntimeGraph &systemGraph,
                                 EpgRedeployCoordinator &redeploy)
 {
-    while (!smartdrone::common::RuntimeStopRequested()) {
+    while (!SmartDrone::common::RuntimeStopRequested()) {
         EpgRedeployRequest request;
         if (redeploy.TakeSystemRedeployRequest(request) &&
             !RestartSystemGraph(systemGraph, request)) {
@@ -260,11 +284,19 @@ bool RunSystemGraphUntilStopped(SystemRuntimeGraph &systemGraph,
 int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
 {
     const ControllerMode autoMode = ParseAutoMode(autoModeText);
-    const MainRuntimeAliases aliases = smartdrone::core::application::BuildRuntimeAliases(cfg.app);
-    smartdrone::core::application::PrintStartupConfig(cfg.app, aliases, ControllerMode::Idle);
-
     const std::string mavDev = GetEnvOrDefault("SMART_DRONE_MAVLINK_DEV", "/dev/ttyAMA0");
     const int mavBaud = GetEnvIntOrDefault("SMART_DRONE_MAVLINK_BAUD", 921600);
+    const ApplicationRuntimeFactories factories =
+        SmartDrone::adapters::runtime::CreateDefaultApplicationRuntimeFactories();
+    if (!factories.Valid()) {
+        std::cerr << "[runtime] application runtime factories invalid\n";
+        return 1;
+    }
+    const MainRuntimeAliases aliases =
+        SmartDrone::core::application::BuildRuntimeAliases(cfg.app);
+    SmartDrone::core::application::PrintStartupConfig(
+        cfg.app, aliases, factories.cameraProvider, ControllerMode::Idle);
+
     std::cerr << "[runtime] epg=on\n";
     Px4MavlinkGateway mav(mavDev, mavBaud);
     mav.SetJsonDiagnostics(cfg.app.runtime.jsonDiagnostics);
@@ -273,7 +305,14 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
     LivePoseState livePose;
     LiveRuntimeTuning tuning;
     Px4UdpHooks hooks(BuildPx4UdpHooksConfig(vehicleControl, livePose));
-    UnifiedRuntimeController controller(BuildRuntimeControllerConfig(cfg, tuning, vehicleControl, posePublisher, livePose));
+    UnifiedRuntimeController controller(BuildRuntimeControllerConfig({
+        cfg,
+        tuning,
+        vehicleControl,
+        posePublisher,
+        livePose,
+        factories,
+    }));
     UdpCommandRuntimeConfig commandRuntime = BuildUdpCommandRuntimeConfig(hooks, controller, livePose);
     auto redeploy = std::make_shared<EpgRedeployCoordinator>();
     SystemRuntimeGraph systemGraph(
@@ -282,11 +321,12 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
             mav,
             hooks,
             controller,
+            factories,
             redeploy,
             std::move(commandRuntime),
         }));
     if (!systemGraph.Start()) {
-        smartdrone::common::RequestRuntimeStop();
+        SmartDrone::common::RequestRuntimeStop();
         controller.Stop();
         mav.StopSetpointStream();
         return 1;
@@ -303,4 +343,4 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
     return runtimeOk ? 0 : 1;
 }
 
-} // namespace smartdrone::app::bootstrap
+} // namespace SmartDrone::app::bootstrap

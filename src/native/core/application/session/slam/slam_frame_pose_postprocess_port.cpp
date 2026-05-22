@@ -7,12 +7,13 @@
 
 #include <Eigen/Geometry>
 
+#include "core/application/config/runtime_app_types.h"
 #include "core/application/session/slam/slam_processing_support.h"
 #include "core/application/session/slam/slam_runtime_control_port.h"
 #include "core/application/session/slam/slam_settings_loader.h"
 #include "core/application/state/live_pose_state.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 constexpr uint64_t kPoseAxisLogEveryNFrames = 30;
@@ -228,7 +229,7 @@ void SlamFramePosePostprocessPort::UpdateAutoSlamMode(
     const PosePostprocessor::Result &poseResult, double frameGapMs)
 {
     if (m_sharedState.requestedSlamMode.load() !=
-        smartdrone::core::domain::SlamOperationMode::Auto) {
+        SmartDrone::core::domain::SlamOperationMode::Auto) {
         return;
     }
 
@@ -246,7 +247,7 @@ void SlamFramePosePostprocessPort::UpdateAutoSlamMode(
     }
     m_ctx.livePose.SetSlamMode(ToRuntimeSlamModeValue(autoEffectiveMode));
     std::cerr << "[slam_auto] effective_mode -> "
-              << smartdrone::core::domain::ToString(autoEffectiveMode)
+              << SmartDrone::core::domain::ToString(autoEffectiveMode)
               << " quality=" << static_cast<int>(poseResult.quality)
               << " state=" << tracking.state
               << " featL=" << tracked.slamOutput.leftFeatures.size()
@@ -303,4 +304,4 @@ void SlamFramePosePostprocessPort::FillPublishedFrame(
     published.effectiveResetMapCount = artifacts.effectiveResetMapCount;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -6,7 +6,7 @@
 #include "core/application/session/slam/slam_frame_step_result.h"
 #include "core/application/session/slam/slam_session_runtime.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 struct SlamPreparedFramePayload final : ISlamPreparedFramePayload {
@@ -212,4 +212,4 @@ SlamTaskStepResult SlamSessionProcessingPort::EmitLivePose(
     return MakeStepResult(runtime.EmitLivePose(*published));
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

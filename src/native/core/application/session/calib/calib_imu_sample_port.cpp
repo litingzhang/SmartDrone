@@ -5,11 +5,11 @@
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/sensors/imu_sample_source_provider.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 namespace {
 
-using ImuSampleReadStatus = smartdrone::core::ports::ImuSampleReadStatus;
+using ImuSampleReadStatus = SmartDrone::core::ports::ImuSampleReadStatus;
 
 } // namespace
 
@@ -73,7 +73,7 @@ class CalibImuSamplePort::Impl final {
     }
 
     std::mutex m_mu;
-    std::unique_ptr<smartdrone::core::ports::IImuSampleSource> m_sampleSource;
+    std::unique_ptr<SmartDrone::core::ports::IImuSampleSource> m_sampleSource;
     bool m_opened{false};
     bool m_openFailed{false};
 };
@@ -95,4 +95,4 @@ void CalibImuSamplePort::Stop()
     m_impl->Stop();
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

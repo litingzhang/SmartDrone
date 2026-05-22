@@ -1,8 +1,11 @@
 #include "adapters/telemetry/mavlink_pose_publisher.h"
 
-namespace smartdrone::adapters::telemetry {
+namespace SmartDrone::adapters::telemetry {
 
-MavlinkPosePublisher::MavlinkPosePublisher(Px4MavlinkGateway &serial) : m_serial(serial) {}
+MavlinkPosePublisher::MavlinkPosePublisher(Px4MavlinkGateway &serial)
+    : m_serial(serial)
+{
+}
 
 void MavlinkPosePublisher::PublishPose(uint64_t frameId, const core::ports::PoseEstimate &pose,
                                        const core::ports::VelocityEstimate &velocity, uint8_t resetCounter, uint16_t,
@@ -42,4 +45,4 @@ void MavlinkPosePublisher::PublishPose(uint64_t frameId, const core::ports::Pose
     m_serial.SendOdometry(request);
 }
 
-} // namespace smartdrone::adapters::telemetry
+} // namespace SmartDrone::adapters::telemetry

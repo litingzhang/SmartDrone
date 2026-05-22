@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace smartdrone::core::ports {
+namespace SmartDrone::core::ports {
 
 struct VehicleManualControl {
     float throttleNorm{0.0f};
@@ -67,4 +67,4 @@ class IVehicleControlPort {
     virtual uint8_t OffboardModeId() const = 0;
 };
 
-} // namespace smartdrone::core::ports
+} // namespace SmartDrone::core::ports

@@ -7,7 +7,7 @@
 
 #include "core/domain/runtime_mode.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct RuntimeAction {
     enum class Type : uint8_t {
@@ -53,4 +53,4 @@ class RuntimeCommandService {
     IRuntimeCommandTarget &m_target;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

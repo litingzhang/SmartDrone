@@ -5,7 +5,7 @@
 #include <string>
 #include <sys/types.h>
 
-namespace smartdrone::adapters::telemetry {
+namespace SmartDrone::adapters::telemetry {
 
 class MavlinkSerialTransport {
   public:
@@ -25,4 +25,4 @@ class MavlinkSerialTransport {
     int m_fd{-1};
 };
 
-} // namespace smartdrone::adapters::telemetry
+} // namespace SmartDrone::adapters::telemetry

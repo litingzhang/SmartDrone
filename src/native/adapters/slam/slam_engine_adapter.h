@@ -11,14 +11,14 @@
 #include "core/domain/runtime_mode.h"
 #include "core/ports/slam_engine.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 class SlamEngineAccess;
 class SlamModeStrategy;
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 class SlamEngineAdapter final : public core::ports::ISlamEngine, public ISlamRuntimeControl {
   public:
@@ -104,4 +104,4 @@ class SlamEngineAdapter final : public core::ports::ISlamEngine, public ISlamRun
     std::string m_settingsPath;
 };
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

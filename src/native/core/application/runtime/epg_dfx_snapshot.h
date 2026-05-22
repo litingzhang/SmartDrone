@@ -6,10 +6,10 @@
 
 #include "common/epg/epg.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct EpgGraphRef {
-    epg::EventPipelineGraph *graph{nullptr};
+    Epg::EventPipelineGraph *graph{nullptr};
 };
 
 struct EpgDfxSnapshotTarget {
@@ -21,16 +21,17 @@ struct EpgDfxSnapshotTarget {
     std::string profilePath;
 };
 
-class EpgDfxSnapshotTask final : public epg::ITask {
+class EpgDfxSnapshotTask final : public Epg::ITask {
   public:
     explicit EpgDfxSnapshotTask(EpgDfxSnapshotTarget target);
-    void OnTick(epg::TaskContext &context) override;
+    void OnTick(Epg::TaskContext &context) override;
 
   private:
     EpgDfxSnapshotTarget m_target;
+    std::uint64_t m_pulseSequence{0};
 };
 
 std::uint64_t EpgDfxNowMs();
 void WriteEpgDfxSnapshotFile(const std::string &path, const std::string &json);
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

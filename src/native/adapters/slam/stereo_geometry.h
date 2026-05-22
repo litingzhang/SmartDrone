@@ -6,7 +6,7 @@
 
 #include "core/ports/visual_feature_data.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 constexpr float kStereoMaxEpipolarDeltaPx = 1.5f;
 constexpr float kStereoMinDisparityPx = 0.75f;
@@ -54,4 +54,4 @@ std::vector<core::ports::StereoMatchPair>
 FilterStereoPairsByDisparityConsistency(
     const std::vector<core::ports::StereoMatchPair> &matches);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

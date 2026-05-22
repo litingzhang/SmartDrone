@@ -128,7 +128,7 @@ void KeyFrame::ComputeBoW()
 
     if(mBowVec.empty() || mFeatVec.empty())
     {
-        smartdrone::adapters::slam::TransformOrbDescriptors(*mpORBvocabulary, mDescriptors,
+        SmartDrone::adapters::slam::TransformOrbDescriptors(*mpORBvocabulary, mDescriptors,
                                                             mBowVec, mFeatVec, 4);
     }
 }

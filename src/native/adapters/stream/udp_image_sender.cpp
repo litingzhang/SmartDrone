@@ -141,7 +141,8 @@ void RebuildPreviewLut(PreviewCompressionState &state)
     const double invRange = 255.0 / (state.hi - state.lo);
     for (int i = 0; i < 65536; ++i) {
         const double v = (static_cast<double>(i) - state.lo) * invRange;
-        const int out = (v <= 0.0) ? 0 : (v >= 255.0) ? 255 : static_cast<int>(v + 0.5);
+        const int out = (v <= 0.0) ? 0 : (v >= 255.0) ? 255
+                                                      : static_cast<int>(v + 0.5);
         state.lut[static_cast<size_t>(i)] = static_cast<uint8_t>(out);
     }
 }

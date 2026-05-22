@@ -4,7 +4,7 @@
 
 #include "core/application/session/epg/messages/calib_epg_messages.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 bool CalibShouldRunTask(const std::atomic<bool> &runningFlag,
@@ -23,7 +23,7 @@ CalibResourceTask::CalibResourceTask(
 {
 }
 
-void CalibResourceTask::OnTick(epg::TaskContext &context)
+void CalibResourceTask::OnTick(Epg::TaskContext &context)
 {
     if (!CalibShouldRunTask(m_runningFlag, m_stop)) {
         EmitStopRequest(context, false);
@@ -44,7 +44,7 @@ void CalibResourceTask::OnTick(epg::TaskContext &context)
     m_emitted = cameraOk || imuOk;
 }
 
-void CalibResourceTask::EmitStopRequest(epg::TaskContext &context,
+void CalibResourceTask::EmitStopRequest(Epg::TaskContext &context,
                                         bool sessionOk)
 {
     if (m_stopEmitted) {
@@ -64,7 +64,7 @@ CalibClockTask::CalibClockTask(std::atomic<bool> &stop,
 {
 }
 
-void CalibClockTask::OnTick(epg::TaskContext &context)
+void CalibClockTask::OnTick(Epg::TaskContext &context)
 {
     if (!CalibShouldRunTask(m_runningFlag, m_stop)) {
         return;
@@ -84,7 +84,7 @@ CalibCameraAcquireTask::CalibCameraAcquireTask(
 {
 }
 
-void CalibCameraAcquireTask::OnTick(epg::TaskContext &context)
+void CalibCameraAcquireTask::OnTick(Epg::TaskContext &context)
 {
     if (auto ready = context.TryPopLatest<CalibResourceReady>(0)) {
         m_ready = ready->ready;
@@ -108,7 +108,7 @@ void CalibCameraAcquireTask::OnTick(epg::TaskContext &context)
     context.Push(1, frame);
 }
 
-void CalibCameraAcquireTask::EmitDone(epg::TaskContext &context,
+void CalibCameraAcquireTask::EmitDone(Epg::TaskContext &context,
                                       bool sessionOk)
 {
     if (m_doneEmitted) {
@@ -121,7 +121,7 @@ void CalibCameraAcquireTask::EmitDone(epg::TaskContext &context,
 }
 
 bool CalibCameraAcquireTask::HandleCaptureResult(
-    epg::TaskContext &context,
+    Epg::TaskContext &context,
     CalibFrameCaptureStatus status)
 {
     if (status == CalibFrameCaptureStatus::Captured) {
@@ -141,7 +141,7 @@ CalibPacingFilterTask::CalibPacingFilterTask(
 {
 }
 
-void CalibPacingFilterTask::OnTick(epg::TaskContext &context)
+void CalibPacingFilterTask::OnTick(Epg::TaskContext &context)
 {
     while (auto frame = context.TryPop<CalibStereoFrame>(0)) {
         auto save = context.Make<CalibSavePair>();
@@ -160,7 +160,7 @@ CalibStorageWriteTask::CalibStorageWriteTask(
 {
 }
 
-void CalibStorageWriteTask::OnTick(epg::TaskContext &context)
+void CalibStorageWriteTask::OnTick(Epg::TaskContext &context)
 {
     while (auto save = context.TryPop<CalibSavePair>(0)) {
         auto status = context.Make<CalibStorageStatus>();
@@ -177,7 +177,7 @@ CalibUdpPreviewTask::CalibUdpPreviewTask(
 {
 }
 
-void CalibUdpPreviewTask::OnTick(epg::TaskContext &context)
+void CalibUdpPreviewTask::OnTick(Epg::TaskContext &context)
 {
     while (auto frame = context.TryPopLatest<CalibStereoFrame>(0)) {
         auto status = context.Make<CalibPreviewStatus>();
@@ -196,7 +196,7 @@ CalibImuWriterTask::CalibImuWriterTask(
 {
 }
 
-void CalibImuWriterTask::OnTick(epg::TaskContext &context)
+void CalibImuWriterTask::OnTick(Epg::TaskContext &context)
 {
     if (auto ready = context.TryPopLatest<CalibResourceReady>(0)) {
         m_ready = ready->ready;
@@ -208,7 +208,7 @@ void CalibImuWriterTask::OnTick(epg::TaskContext &context)
     PushResult(context, result.status);
 }
 
-void CalibImuWriterTask::PushResult(epg::TaskContext &context,
+void CalibImuWriterTask::PushResult(Epg::TaskContext &context,
                                     CalibImuSampleStatus status)
 {
     if (status == CalibImuSampleStatus::Pending) {
@@ -227,7 +227,7 @@ CalibCompletionTask::CalibCompletionTask(
 {
 }
 
-void CalibCompletionTask::OnTick(epg::TaskContext &context)
+void CalibCompletionTask::OnTick(Epg::TaskContext &context)
 {
     while (auto status = context.TryPop<CalibStorageStatus>(1)) {
         if (!status->ok) {
@@ -257,7 +257,7 @@ void CalibCompletionTask::OnTick(epg::TaskContext &context)
     }
 }
 
-void CalibCompletionTask::EmitFlush(epg::TaskContext &context)
+void CalibCompletionTask::EmitFlush(Epg::TaskContext &context)
 {
     if (m_flushEmitted) {
         return;
@@ -278,7 +278,7 @@ CalibFlushSyncTask::CalibFlushSyncTask(
 {
 }
 
-void CalibFlushSyncTask::OnTick(epg::TaskContext &context)
+void CalibFlushSyncTask::OnTick(Epg::TaskContext &context)
 {
     if (m_completed.load(std::memory_order_relaxed)) {
         return;
@@ -301,7 +301,7 @@ CalibMonitorTask::CalibMonitorTask(std::atomic<bool> &sessionOk,
 {
 }
 
-void CalibMonitorTask::OnTick(epg::TaskContext &context)
+void CalibMonitorTask::OnTick(Epg::TaskContext &context)
 {
     while (auto status = context.TryPop<CalibStatus>(0)) {
         m_sessionOk.store(status->sessionOk, std::memory_order_relaxed);
@@ -313,4 +313,4 @@ void CalibMonitorTask::OnTick(epg::TaskContext &context)
 
 EPG_REGISTER_TASK_TYPE(CalibMonitorTask, "CalibMonitorTask")
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

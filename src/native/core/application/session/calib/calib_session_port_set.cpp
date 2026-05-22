@@ -5,19 +5,21 @@
 #include <utility>
 
 #include "core/application/config/runtime_app_types.h"
+#include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/session/calib/calib_camera_input_port.h"
 #include "core/application/session/calib/calib_imu_sample_port.h"
 #include "core/application/session/calib/calib_preview_port.h"
 #include "core/application/session/calib/calib_save_pacing_port.h"
 #include "core/application/session/calib/calib_storage_port.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class CalibSessionPortSet::Impl final {
   public:
     explicit Impl(CalibSessionPortSetConfig config)
         : m_aliases(config.aliases),
-          m_root(std::move(config.root))
+          m_root(std::move(config.root)),
+          m_factories(config.factories)
     {
     }
 
@@ -112,13 +114,13 @@ class CalibSessionPortSet::Impl final {
   private:
     bool OpenPreviewPort()
     {
-        m_previewPort.reset(new CalibPreviewPort(m_aliases));
+        m_previewPort.reset(new CalibPreviewPort(m_aliases, m_factories));
         return m_previewPort->Open();
     }
 
     bool OpenCameraPort()
     {
-        m_cameraInput.reset(new CalibCameraInputPort(m_aliases));
+        m_cameraInput.reset(new CalibCameraInputPort(m_aliases, m_factories));
         return m_cameraInput->Open();
     }
 
@@ -191,6 +193,7 @@ class CalibSessionPortSet::Impl final {
 
     MainRuntimeAliases m_aliases;
     std::string m_root;
+    const ApplicationRuntimeFactories &m_factories;
     std::mutex m_cameraPortMu;
     std::mutex m_imuPortMu;
     std::mutex m_previewPortMu;
@@ -257,4 +260,4 @@ void CalibSessionPortSet::LogFinalStatus() const
     m_impl->LogFinalStatus();
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

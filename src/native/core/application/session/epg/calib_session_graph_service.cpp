@@ -8,12 +8,13 @@
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
 #include "core/application/runtime/epg_graph_lifecycle.h"
+#include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/session/calib/calib_runtime_state.h"
 #include "core/application/epg/epg_registry.h"
 #include "core/application/state/live_pose_state.h"
 #include "core/application/session/epg/calib_session_task_factory.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class CalibSessionGraphRuntime::Impl final {
   public:
@@ -22,6 +23,7 @@ class CalibSessionGraphRuntime::Impl final {
           m_stop(config.stop),
           m_livePose(config.livePose),
           m_runningFlag(config.runningFlag),
+          m_factories(config.factories),
           m_lifecycle(EpgGraphLifecycleConfig{
               m_stop,
               [this]() { return ResourcesStopped(); },
@@ -31,7 +33,10 @@ class CalibSessionGraphRuntime::Impl final {
     {
     }
 
-    ~Impl() { Stop(); }
+    ~Impl()
+    {
+        Stop();
+    }
 
     bool Start()
     {
@@ -52,7 +57,7 @@ class CalibSessionGraphRuntime::Impl final {
                              m_completed,
                              graphRef,
                          }));
-        auto graph = std::make_unique<epg::EventPipelineGraph>(m_registry);
+        auto graph = std::make_unique<Epg::EventPipelineGraph>(m_registry);
         graphRef->graph = graph.get();
         graph->Configure(CompileEpgConfig(EpgDomain::CalibSession, m_registry));
         graph->Start();
@@ -97,7 +102,10 @@ class CalibSessionGraphRuntime::Impl final {
         m_lifecycle.StepStop();
         return m_lifecycle.Done();
     }
-    bool Ok() const { return m_sessionOk.load(std::memory_order_relaxed); }
+    bool Ok() const
+    {
+        return m_sessionOk.load(std::memory_order_relaxed);
+    }
 
   private:
     CalibRuntimeStateConfig RuntimeStateConfig()
@@ -106,6 +114,7 @@ class CalibSessionGraphRuntime::Impl final {
             m_cfg,
             m_stop,
             m_livePose,
+            m_factories,
         };
     }
 
@@ -128,7 +137,8 @@ class CalibSessionGraphRuntime::Impl final {
     std::atomic<bool> &m_stop;
     LivePoseState &m_livePose;
     std::atomic<bool> &m_runningFlag;
-    epg::Registry m_registry;
+    const ApplicationRuntimeFactories &m_factories;
+    Epg::Registry m_registry;
     std::shared_ptr<CalibRuntimeState> m_state;
     EpgGraphLifecycle m_lifecycle;
     std::atomic<bool> m_sessionOk{true};
@@ -142,16 +152,34 @@ CalibSessionGraphRuntime::CalibSessionGraphRuntime(CalibSessionGraphRuntimeConfi
 
 CalibSessionGraphRuntime::~CalibSessionGraphRuntime() = default;
 
-bool CalibSessionGraphRuntime::Start() { return m_impl->Start(); }
+bool CalibSessionGraphRuntime::Start()
+{
+    return m_impl->Start();
+}
 
-void CalibSessionGraphRuntime::Step() { m_impl->Step(); }
+void CalibSessionGraphRuntime::Step()
+{
+    m_impl->Step();
+}
 
-void CalibSessionGraphRuntime::RequestStop() { m_impl->RequestStop(); }
+void CalibSessionGraphRuntime::RequestStop()
+{
+    m_impl->RequestStop();
+}
 
-void CalibSessionGraphRuntime::Stop() { m_impl->Stop(); }
+void CalibSessionGraphRuntime::Stop()
+{
+    m_impl->Stop();
+}
 
-bool CalibSessionGraphRuntime::Done() { return m_impl->Done(); }
+bool CalibSessionGraphRuntime::Done()
+{
+    return m_impl->Done();
+}
 
-bool CalibSessionGraphRuntime::Ok() const { return m_impl->Ok(); }
+bool CalibSessionGraphRuntime::Ok() const
+{
+    return m_impl->Ok();
+}
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

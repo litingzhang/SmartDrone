@@ -4,13 +4,13 @@
 
 #include "adapters/camera/libcamera_ov9281/stereo_ov9281.h"
 
-namespace smartdrone::adapters::camera {
+namespace SmartDrone::adapters::camera {
 
 class LibcameraStereoCamera final : public core::ports::ICameraProvider {
   public:
     LibcameraStereoCamera() = default;
 
-    bool Open(const smartdrone::core::application::MainRuntimeAliases &aliases) override;
+    bool Open(const core::ports::CameraOpenConfig &config) override;
     void Close() override;
     bool Start() override;
     void Stop() override;
@@ -24,4 +24,4 @@ class LibcameraStereoCamera final : public core::ports::ICameraProvider {
     LibcameraStereoOV9281_TsPair m_impl;
 };
 
-} // namespace smartdrone::adapters::camera
+} // namespace SmartDrone::adapters::camera

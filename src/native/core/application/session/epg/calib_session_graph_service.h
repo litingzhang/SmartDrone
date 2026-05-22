@@ -5,8 +5,9 @@
 
 #include "core/application/session/epg/session_graph_runtime.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
+struct ApplicationRuntimeFactories;
 struct LivePoseState;
 struct UnifiedConfig;
 
@@ -15,6 +16,7 @@ struct CalibSessionGraphRuntimeConfig {
     std::atomic<bool> &stop;
     LivePoseState &livePose;
     std::atomic<bool> &runningFlag;
+    const ApplicationRuntimeFactories &factories;
 };
 
 class CalibSessionGraphRuntime final : public ISessionGraphRuntime {
@@ -35,4 +37,4 @@ class CalibSessionGraphRuntime final : public ISessionGraphRuntime {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

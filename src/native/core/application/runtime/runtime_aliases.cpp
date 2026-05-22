@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <iostream>
 
-#include "core/application/sensors/camera_runtime_provider.h"
+#include "core/application/runtime/runtime_provider_metadata.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 namespace {
 
@@ -79,14 +79,17 @@ void ApplyImuAliases(MainRuntimeAliases &aliases, const AppConfig &config)
     aliases.imuStartReg = config.imu.imuStartReg;
 }
 
-void PrintCameraConfig(const MainRuntimeAliases &aliases)
+void PrintCameraConfig(const MainRuntimeAliases &aliases,
+                       const CameraRuntimeProviderMetadata &cameraProvider)
 {
-    const bool packedStereo = CompiledCameraProviderUsesPackedStereo();
     std::cerr << "sensor_mode=" << ToSensorModeText(aliases.sensorMode) << "\n";
     std::cerr << "cam " << aliases.width << "x" << aliases.height << " @" << aliases.fps
               << " aeDisable=" << (aliases.aeDisable ? "true" : "false")
               << " exp_us=" << aliases.exposureUs << " gain=" << aliases.gain
-              << " pixelFormat=" << (packedStereo ? "YUYV_packed_stereo" : "R16") << "\n";
+              << " pixelFormat="
+              << (cameraProvider.usesPackedStereo ? "YUYV_packed_stereo"
+                                                  : "R16")
+              << "\n";
     std::cerr << "cam_select left_index=" << aliases.leftCamIndex
               << " right_index=" << aliases.rightCamIndex
               << " uvc_device_index=" << aliases.uvcDeviceIndex << "\n";
@@ -96,7 +99,7 @@ void PrintCameraConfig(const MainRuntimeAliases &aliases)
               << " pair_window_ms=" << aliases.pairMs
               << " keep_window_ms=" << aliases.keepMs
               << " frame_queue=" << aliases.pairQueue << "\n";
-    if (packedStereo) {
+    if (cameraProvider.usesPackedStereo) {
         std::cerr << "stereo_input_note=single_uvc_frame_split_left_right_no_timestamp_pairing\n";
     }
 }
@@ -141,7 +144,7 @@ void PrintRuntimeFeatureConfig(const AppConfig &app, const MainRuntimeAliases &a
 {
     std::cerr << "slam_input_fps=" << aliases.slamInputFps << " camera_fps=" << aliases.fps
               << " frame_drop=" << (aliases.slamInputFps < aliases.fps ? "Y" : "N") << "\n";
-    std::cerr << "slam_mode=" << smartdrone::core::domain::ToString(aliases.slamOperationMode) << "\n";
+    std::cerr << "slam_mode=" << SmartDrone::core::domain::ToString(aliases.slamOperationMode) << "\n";
     PrintBackendConfig(app, aliases);
     PrintOrbConfig(app, aliases);
     std::cerr << "lk seed=gftt"
@@ -188,12 +191,13 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &config)
 }
 
 void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &aliases,
-                        smartdrone::core::domain::RuntimeMode mode)
+                        const CameraRuntimeProviderMetadata &cameraProvider,
+                        SmartDrone::core::domain::RuntimeMode mode)
 {
-    std::cerr << "mode=" << smartdrone::core::domain::ToString(mode) << "\n";
-    PrintCameraConfig(aliases);
+    std::cerr << "mode=" << SmartDrone::core::domain::ToString(mode) << "\n";
+    PrintCameraConfig(aliases, cameraProvider);
     PrintRuntimeFeatureConfig(app, aliases);
     PrintDiagnosticsConfig(app, aliases);
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

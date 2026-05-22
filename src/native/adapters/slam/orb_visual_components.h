@@ -10,7 +10,7 @@ namespace ORB_SLAM3 {
 class ORBextractor;
 }
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 std::unique_ptr<core::ports::IVisualFeatureFrontend>
 CreateOrbVisualFeatureFrontend(const OrbFeatureExtractorOptions &options = {});
@@ -20,4 +20,4 @@ CreateOrbDescriptorProvider(ORB_SLAM3::ORBextractor *extractor);
 
 std::unique_ptr<core::ports::IVisualVocabulary> CreateOrbVisualVocabulary();
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

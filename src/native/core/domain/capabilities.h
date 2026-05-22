@@ -5,7 +5,7 @@
 
 #include "runtime_mode.h"
 
-namespace smartdrone::core::domain {
+namespace SmartDrone::core::domain {
 
 struct ConfigDescriptor {
     std::string key;
@@ -27,4 +27,4 @@ struct RuntimeCapabilities {
     std::vector<ConfigDescriptor> configKeys;
 };
 
-} // namespace smartdrone::core::domain
+} // namespace SmartDrone::core::domain

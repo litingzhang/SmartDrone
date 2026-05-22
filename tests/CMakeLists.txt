@@ -16,6 +16,7 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/core/application/runtime/epg_dfx_snapshot.cpp
     ../src/native/core/application/runtime/epg_graph_lifecycle.cpp
     ../src/native/core/application/runtime/epg_redeploy_coordinator.cpp
+    ../src/native/core/application/runtime/system_runtime_messages.cpp
   )
 
   target_include_directories(epg_tests PRIVATE

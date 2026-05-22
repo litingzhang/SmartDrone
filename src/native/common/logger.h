@@ -22,7 +22,11 @@
 
 class Logger {
   public:
-    enum Level : int { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3, OFF = 99 };
+    enum Level : int { DEBUG = 0,
+                       INFO = 1,
+                       WARN = 2,
+                       ERROR = 3,
+                       OFF = 99 };
 
     // Initialize ring log file.
     // maxBytes: fixed file size (depth). Must be > 4KB recommended.
@@ -72,10 +76,16 @@ class Logger {
         CloseLocked();
     }
 
-    static void SetLevel(Level level) { s_level().store(level, std::memory_order_relaxed); }
+    static void SetLevel(Level level)
+    {
+        s_level().store(level, std::memory_order_relaxed);
+    }
 
     // Get current write position in ring file (0..maxBytes-1)
-    static size_t Tell() { return s_writePosAtomic().load(std::memory_order_relaxed); }
+    static size_t Tell()
+    {
+        return s_writePosAtomic().load(std::memory_order_relaxed);
+    }
 
     static void Logf(Level lvl, const char *fmt, ...)
     {
@@ -159,9 +169,10 @@ class Logger {
         if (!out || cap == 0)
             return 0;
 
-        // monotonic time ms (good enough for ordering within a run)
-        using namespace std::chrono;
-        uint64_t ms = (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+        const uint64_t ms =
+            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                      std::chrono::steady_clock::now().time_since_epoch())
+                                      .count());
 
         // "[12345678][I] "
         int n = std::snprintf(out, cap, "[%llu][%s] ", (unsigned long long)ms, LvlStr(lvl));
@@ -249,7 +260,10 @@ class Logger {
         return true;
     }
 
-    static std::string PosPathLocked() { return s_path() + ".pos"; }
+    static std::string PosPathLocked()
+    {
+        return s_path() + ".pos";
+    }
 
     static size_t LoadPosLocked()
     {
@@ -337,4 +351,3 @@ class Logger {
         return c;
     }
 };
-

@@ -9,8 +9,9 @@
 #include "core/application/session/calib/calib_imu_sample_result.h"
 #include "core/application/session/epg/messages/calib_epg_messages.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
+struct ApplicationRuntimeFactories;
 struct MainRuntimeAliases;
 
 enum class CalibSessionPortOpenStatus : std::uint8_t {
@@ -27,6 +28,7 @@ struct CalibSessionPortOpenResult {
 struct CalibSessionPortSetConfig {
     const MainRuntimeAliases &aliases;
     std::string root;
+    const ApplicationRuntimeFactories &factories;
 };
 
 class CalibSessionPortSet final {
@@ -50,4 +52,4 @@ class CalibSessionPortSet final {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

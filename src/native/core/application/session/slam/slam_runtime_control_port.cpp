@@ -1,9 +1,9 @@
 #include "core/application/session/slam/slam_runtime_control_port.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 SlamRuntimeControlPort::SlamRuntimeControlPort(
-    smartdrone::core::ports::ISlamRuntimeControl *control)
+    SmartDrone::core::ports::ISlamRuntimeControl *control)
     : m_control(control)
 {
 }
@@ -15,7 +15,7 @@ bool SlamRuntimeControlPort::Available() const
 }
 
 void SlamRuntimeControlPort::SetOperationMode(
-    smartdrone::core::domain::SlamOperationMode mode)
+    SmartDrone::core::domain::SlamOperationMode mode)
 {
     std::lock_guard<std::mutex> lock(m_mu);
     if (m_control == nullptr) {
@@ -34,7 +34,7 @@ void SlamRuntimeControlPort::SetFeatureFrontend(FeatureFrontend frontend)
 }
 
 void SlamRuntimeControlPort::SetVisualFeatureFrontend(
-    smartdrone::core::ports::IVisualFeatureFrontend *frontend)
+    SmartDrone::core::ports::IVisualFeatureFrontend *frontend)
 {
     std::lock_guard<std::mutex> lock(m_mu);
     if (m_control == nullptr) {
@@ -83,4 +83,4 @@ void SlamRuntimeControlPort::StepBackend()
     m_control->StepBackend();
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

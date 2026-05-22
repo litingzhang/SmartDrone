@@ -20,7 +20,10 @@ std::string UdpPeerToIpString(const UdpPeer &peer)
     return std::string(ipText);
 }
 
-UdpServer::~UdpServer() { Close(); }
+UdpServer::~UdpServer()
+{
+    Close();
+}
 
 bool UdpServer::Open(uint16_t port)
 {

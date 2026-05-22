@@ -5,7 +5,7 @@
 
 #include "core/ports/visual_place_recognition.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 using VisualBowVector = core::ports::VisualBowVector;
 using VisualFeatureIndex = core::ports::VisualFeatureIndex;
@@ -28,4 +28,4 @@ class OrbVisualVocabulary final : public core::ports::IVisualVocabulary {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

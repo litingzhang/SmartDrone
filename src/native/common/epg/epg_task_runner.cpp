@@ -4,7 +4,7 @@
 #include <pthread.h>
 #include <sched.h>
 
-namespace epg {
+namespace Epg {
 namespace {
 
 std::uint64_t SteadyNowMs()
@@ -69,26 +69,30 @@ std::uint64_t PercentileValue(std::vector<std::uint64_t> values,
 } // namespace
 
 EventPipelineGraph::TaskRunner::TaskRunner(TaskConfig config,
-                                     std::unique_ptr<ITask> task,
-                                     std::unordered_map<PortId, IQueue*> inputs,
-                                     std::unordered_map<PortId, IQueue*> outputs,
-                                     std::vector<IQueue*> triggerQueues)
+                                           std::unique_ptr<ITask> task,
+                                           std::unordered_map<PortId, IQueue *> inputs,
+                                           std::unordered_map<PortId, IQueue *> outputs,
+                                           std::vector<IQueue *> triggerQueues)
     : m_config(std::move(config)),
       m_task(std::move(task)),
       m_context(std::move(inputs), std::move(outputs)),
-      m_triggerQueues(std::move(triggerQueues)) {
+      m_triggerQueues(std::move(triggerQueues))
+{
     m_context.AttachDiagnostics(&m_diag);
 }
 
-EventPipelineGraph::TaskRunner::~TaskRunner() {
+EventPipelineGraph::TaskRunner::~TaskRunner()
+{
     Stop();
 }
 
-const std::string& EventPipelineGraph::TaskRunner::Name() const {
+const std::string &EventPipelineGraph::TaskRunner::Name() const
+{
     return m_config.name;
 }
 
-void EventPipelineGraph::TaskRunner::Start() {
+void EventPipelineGraph::TaskRunner::Start()
+{
     if (m_running.exchange(true, std::memory_order_acq_rel)) {
         return;
     }
@@ -96,14 +100,16 @@ void EventPipelineGraph::TaskRunner::Start() {
     m_thread = std::thread([this]() { Run(); });
 }
 
-void EventPipelineGraph::TaskRunner::RequestStop() {
+void EventPipelineGraph::TaskRunner::RequestStop()
+{
     if (!m_running.exchange(false, std::memory_order_acq_rel)) {
         return;
     }
     Notify();
 }
 
-bool EventPipelineGraph::TaskRunner::JoinStopped() {
+bool EventPipelineGraph::TaskRunner::JoinStopped()
+{
     if (m_running.load(std::memory_order_acquire)) {
         return false;
     }
@@ -116,27 +122,31 @@ bool EventPipelineGraph::TaskRunner::JoinStopped() {
     return true;
 }
 
-void EventPipelineGraph::TaskRunner::Stop() {
+void EventPipelineGraph::TaskRunner::Stop()
+{
     RequestStop();
     if (m_thread.joinable()) {
         m_thread.join();
     }
 }
 
-void EventPipelineGraph::TaskRunner::Notify() {
+void EventPipelineGraph::TaskRunner::Notify()
+{
     {
         std::lock_guard<std::mutex> lock(m_mutex);
     }
     m_cv.notify_one();
 }
 
-TaskDiagnosticsSnapshot EventPipelineGraph::TaskRunner::Diagnostics() const {
+TaskDiagnosticsSnapshot EventPipelineGraph::TaskRunner::Diagnostics() const
+{
     auto snapshot = SnapshotTaskDiagnostics(m_diag);
     FillLoopPercentiles(snapshot);
     return snapshot;
 }
 
-void EventPipelineGraph::TaskRunner::Run() {
+void EventPipelineGraph::TaskRunner::Run()
+{
     ApplyScheduling();
     while (m_running.load(std::memory_order_acquire)) {
         if (!WaitForTrigger()) {
@@ -233,51 +243,54 @@ void ApplyCpuAffinity(const TaskSchedulingConfig &scheduling,
 
 } // namespace
 
-void EventPipelineGraph::TaskRunner::ApplyScheduling() {
+void EventPipelineGraph::TaskRunner::ApplyScheduling()
+{
     ApplyCpuAffinity(m_config.scheduling, m_diag);
     ApplyRealtimeScheduling(m_config.scheduling, m_diag);
 }
 
-bool EventPipelineGraph::TaskRunner::WaitForTrigger() {
+bool EventPipelineGraph::TaskRunner::WaitForTrigger()
+{
     switch (m_config.trigger.mode) {
-        case TriggerMode::Periodic:
-            if (m_config.trigger.interval.count() > 0) {
-                std::unique_lock<std::mutex> lock(m_mutex);
-                m_cv.wait_for(lock, m_config.trigger.interval,
-                              [this]() { return !m_running.load(std::memory_order_acquire); });
-            }
-            return m_running.load(std::memory_order_acquire);
-
-        case TriggerMode::AnyQueueReady:
-        case TriggerMode::AllQueueReady: {
+    case TriggerMode::Periodic:
+        if (m_config.trigger.interval.count() > 0) {
             std::unique_lock<std::mutex> lock(m_mutex);
-            m_cv.wait(lock, [this]() {
-                return !m_running.load(std::memory_order_acquire) || QueuesReady();
-            });
-            return m_running.load(std::memory_order_acquire);
+            m_cv.wait_for(lock, m_config.trigger.interval,
+                          [this]() { return !m_running.load(std::memory_order_acquire); });
         }
+        return m_running.load(std::memory_order_acquire);
 
-        case TriggerMode::PeriodicOrAnyQueueReady: {
-            std::unique_lock<std::mutex> lock(m_mutex);
-            m_cv.wait_for(lock, m_config.trigger.interval, [this]() {
-                return !m_running.load(std::memory_order_acquire) || QueuesReady();
-            });
-            return m_running.load(std::memory_order_acquire);
-        }
+    case TriggerMode::AnyQueueReady:
+    case TriggerMode::AllQueueReady: {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cv.wait(lock, [this]() {
+            return !m_running.load(std::memory_order_acquire) || QueuesReady();
+        });
+        return m_running.load(std::memory_order_acquire);
+    }
+
+    case TriggerMode::PeriodicOrAnyQueueReady: {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cv.wait_for(lock, m_config.trigger.interval, [this]() {
+            return !m_running.load(std::memory_order_acquire) || QueuesReady();
+        });
+        return m_running.load(std::memory_order_acquire);
+    }
     }
     return false;
 }
 
-bool EventPipelineGraph::TaskRunner::QueuesReady() const {
+bool EventPipelineGraph::TaskRunner::QueuesReady() const
+{
     if (m_triggerQueues.empty()) {
         return false;
     }
     if (m_config.trigger.mode == TriggerMode::AllQueueReady) {
         return std::all_of(m_triggerQueues.begin(), m_triggerQueues.end(),
-                           [](const IQueue* queue) { return !queue->Empty(); });
+                           [](const IQueue *queue) { return !queue->Empty(); });
     }
     return std::any_of(m_triggerQueues.begin(), m_triggerQueues.end(),
-                       [](const IQueue* queue) { return !queue->Empty(); });
+                       [](const IQueue *queue) { return !queue->Empty(); });
 }
 
 bool EventPipelineGraph::TaskRunner::BackpressureBlocked() const
@@ -291,4 +304,4 @@ bool EventPipelineGraph::TaskRunner::BackpressureBlocked() const
     return false;
 }
 
-} // namespace epg
+} // namespace Epg

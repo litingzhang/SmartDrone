@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace smartdrone::core::domain {
+namespace SmartDrone::core::domain {
 
 enum class RuntimeMode : uint8_t {
     Idle = 0,
@@ -37,4 +37,4 @@ const char *ToString(RuntimeMode mode);
 const char *ToString(PerceptionMode mode);
 const char *ToString(SlamOperationMode mode);
 
-} // namespace smartdrone::core::domain
+} // namespace SmartDrone::core::domain

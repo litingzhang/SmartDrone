@@ -5,7 +5,7 @@
 
 #include "core/application/epg/epg_task_manifest.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct EpgRuntimeOptimizerResult {
     bool optimized{false};
@@ -26,4 +26,4 @@ EpgRuntimeOptimizerResult OptimizeEpgProfileForManifest(
     const EpgTaskManifest &manifest,
     std::uint64_t nowMs);
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

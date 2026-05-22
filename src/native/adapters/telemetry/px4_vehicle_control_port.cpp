@@ -1,14 +1,14 @@
 #include "adapters/telemetry/px4_vehicle_control_port.h"
 
-namespace smartdrone::adapters::telemetry {
+namespace SmartDrone::adapters::telemetry {
 
-using smartdrone::core::ports::VehicleDownwardRange;
-using smartdrone::core::ports::VehicleCommandAckKind;
-using smartdrone::core::ports::VehicleFlightMode;
-using smartdrone::core::ports::VehicleLocalPosition;
-using smartdrone::core::ports::VehicleManualControl;
-using smartdrone::core::ports::VehicleSetpointLocalNed;
-using smartdrone::core::ports::SlamRangeSensor;
+using SmartDrone::core::ports::SlamRangeSensor;
+using SmartDrone::core::ports::VehicleCommandAckKind;
+using SmartDrone::core::ports::VehicleDownwardRange;
+using SmartDrone::core::ports::VehicleFlightMode;
+using SmartDrone::core::ports::VehicleLocalPosition;
+using SmartDrone::core::ports::VehicleManualControl;
+using SmartDrone::core::ports::VehicleSetpointLocalNed;
 
 namespace {
 
@@ -51,26 +51,50 @@ uint16_t ToPx4CommandId(VehicleCommandAckKind command)
 
 } // namespace
 
-Px4VehicleControlPort::Px4VehicleControlPort(Px4MavlinkGateway &mavlink) : m_mavlink(mavlink) {}
+Px4VehicleControlPort::Px4VehicleControlPort(Px4MavlinkGateway &mavlink)
+    : m_mavlink(mavlink)
+{
+}
 
-void Px4VehicleControlPort::SetFrameTimingTracker(smartdrone::core::application::FrameTimingTracker *tracker)
+void Px4VehicleControlPort::SetFrameTimingTracker(SmartDrone::core::application::FrameTimingTracker *tracker)
 {
     m_mavlink.SetFrameTimingTracker(tracker);
 }
 
-bool Px4VehicleControlPort::BeginArm(bool arm) { return m_mavlink.BeginArm(arm); }
+bool Px4VehicleControlPort::BeginArm(bool arm)
+{
+    return m_mavlink.BeginArm(arm);
+}
 
-bool Px4VehicleControlPort::BeginEmergencyStop() { return m_mavlink.BeginEmergencyStop(); }
+bool Px4VehicleControlPort::BeginEmergencyStop()
+{
+    return m_mavlink.BeginEmergencyStop();
+}
 
-bool Px4VehicleControlPort::BeginLand() { return m_mavlink.BeginLand(); }
+bool Px4VehicleControlPort::BeginLand()
+{
+    return m_mavlink.BeginLand();
+}
 
-bool Px4VehicleControlPort::BeginSetModePosition() { return m_mavlink.BeginSetModePosition(); }
+bool Px4VehicleControlPort::BeginSetModePosition()
+{
+    return m_mavlink.BeginSetModePosition();
+}
 
-bool Px4VehicleControlPort::BeginSetModeOffboard() { return m_mavlink.BeginSetModeOffboard(); }
+bool Px4VehicleControlPort::BeginSetModeOffboard()
+{
+    return m_mavlink.BeginSetModeOffboard();
+}
 
-void Px4VehicleControlPort::StartSetpointStreamHz(double hz) { m_mavlink.StartSetpointStreamHz(hz); }
+void Px4VehicleControlPort::StartSetpointStreamHz(double hz)
+{
+    m_mavlink.StartSetpointStreamHz(hz);
+}
 
-void Px4VehicleControlPort::StopSetpointStream() { m_mavlink.StopSetpointStream(); }
+void Px4VehicleControlPort::StopSetpointStream()
+{
+    m_mavlink.StopSetpointStream();
+}
 
 void Px4VehicleControlPort::UpdateStreamPosition(float x, float y, float z, float yaw)
 {
@@ -147,4 +171,4 @@ uint8_t Px4VehicleControlPort::OffboardModeId() const
     return Px4MavlinkGateway::PX4_CUSTOM_MAIN_MODE_OFFBOARD;
 }
 
-} // namespace smartdrone::adapters::telemetry
+} // namespace SmartDrone::adapters::telemetry

@@ -4,7 +4,7 @@
 #include <set>
 #include <sstream>
 
-namespace epg {
+namespace Epg {
 namespace {
 
 constexpr int MIN_REALTIME_PRIORITY = 1;
@@ -12,7 +12,8 @@ constexpr int MAX_REALTIME_PRIORITY = 99;
 constexpr std::uint64_t MICROS_PER_MILLI = 1000;
 constexpr std::uint64_t MILLIS_PER_SECOND = 1000;
 
-std::string JsonEscape(const std::string& value) {
+std::string JsonEscape(const std::string &value)
+{
     std::ostringstream out;
     for (const char ch : value) {
         switch (ch) {
@@ -39,8 +40,9 @@ std::string JsonEscape(const std::string& value) {
     return out.str();
 }
 
-void ValidateTaskScheduling(const TaskConfig& taskConfig) {
-    const auto& scheduling = taskConfig.scheduling;
+void ValidateTaskScheduling(const TaskConfig &taskConfig)
+{
+    const auto &scheduling = taskConfig.scheduling;
     if (scheduling.resource.empty()) {
         throw std::runtime_error("task scheduling resource must not be empty: " +
                                  taskConfig.name);
@@ -64,7 +66,7 @@ void ValidateTaskScheduling(const TaskConfig& taskConfig) {
     }
 }
 
-const char* OverflowPolicyName(OverflowPolicy policy)
+const char *OverflowPolicyName(OverflowPolicy policy)
 {
     switch (policy) {
     case OverflowPolicy::DropNewest:
@@ -75,7 +77,7 @@ const char* OverflowPolicyName(OverflowPolicy policy)
     return "unknown";
 }
 
-const char* TriggerModeName(TriggerMode mode)
+const char *TriggerModeName(TriggerMode mode)
 {
     switch (mode) {
     case TriggerMode::Periodic:
@@ -90,8 +92,8 @@ const char* TriggerModeName(TriggerMode mode)
     return "unknown";
 }
 
-void WriteStringArray(std::ostringstream& out,
-                      const std::vector<std::string>& values)
+void WriteStringArray(std::ostringstream &out,
+                      const std::vector<std::string> &values)
 {
     out << "[";
     for (std::size_t i = 0; i < values.size(); ++i) {
@@ -103,12 +105,12 @@ void WriteStringArray(std::ostringstream& out,
     out << "]";
 }
 
-void WritePortMap(std::ostringstream& out,
-                  const std::map<PortId, std::string>& ports)
+void WritePortMap(std::ostringstream &out,
+                  const std::map<PortId, std::string> &ports)
 {
     out << "{";
     bool first = true;
-    for (const auto& port : ports) {
+    for (const auto &port : ports) {
         if (!first) {
             out << ", ";
         }
@@ -118,8 +120,8 @@ void WritePortMap(std::ostringstream& out,
     out << "}";
 }
 
-void WritePortIdArray(std::ostringstream& out,
-                      const std::vector<PortId>& values)
+void WritePortIdArray(std::ostringstream &out,
+                      const std::vector<PortId> &values)
 {
     out << "[";
     for (std::size_t i = 0; i < values.size(); ++i) {
@@ -131,8 +133,8 @@ void WritePortIdArray(std::ostringstream& out,
     out << "]";
 }
 
-void WriteQueueConfigJson(std::ostringstream& out,
-                          const QueueConfig& queueConfig)
+void WriteQueueConfigJson(std::ostringstream &out,
+                          const QueueConfig &queueConfig)
 {
     out << "{";
     out << "\"name\": \"" << JsonEscape(queueConfig.name) << "\", ";
@@ -142,8 +144,8 @@ void WriteQueueConfigJson(std::ostringstream& out,
     out << "}";
 }
 
-void WriteTaskConfigJson(std::ostringstream& out,
-                         const TaskConfig& taskConfig)
+void WriteTaskConfigJson(std::ostringstream &out,
+                         const TaskConfig &taskConfig)
 {
     out << "{";
     out << "\"name\": \"" << JsonEscape(taskConfig.name) << "\", ";
@@ -173,21 +175,21 @@ void WriteTaskConfigJson(std::ostringstream& out,
 }
 
 void WriteJsonMetadata(
-    std::ostringstream& out,
-    const std::map<std::string, std::string>& stringMetadata,
-    const std::map<std::string, std::uint64_t>& numericMetadata)
+    std::ostringstream &out,
+    const std::map<std::string, std::string> &stringMetadata,
+    const std::map<std::string, std::uint64_t> &numericMetadata)
 {
-    for (const auto& item : stringMetadata) {
+    for (const auto &item : stringMetadata) {
         out << "  \"" << JsonEscape(item.first) << "\": \""
             << JsonEscape(item.second) << "\",\n";
     }
-    for (const auto& item : numericMetadata) {
+    for (const auto &item : numericMetadata) {
         out << "  \"" << JsonEscape(item.first) << "\": "
             << item.second << ",\n";
     }
 }
 
-void WriteGraphConfigBody(std::ostringstream& out, const GraphConfig& config)
+void WriteGraphConfigBody(std::ostringstream &out, const GraphConfig &config)
 {
     out << "  \"queues\": [\n";
     for (std::size_t i = 0; i < config.queues.size(); ++i) {
@@ -209,7 +211,7 @@ void WriteGraphConfigBody(std::ostringstream& out, const GraphConfig& config)
     out << "\n  ]\n";
 }
 
-std::uint64_t ObservationWindowMs(const TaskDiagnosticsSnapshot& diag)
+std::uint64_t ObservationWindowMs(const TaskDiagnosticsSnapshot &diag)
 {
     if (diag.firstLoopMs == 0 || diag.lastLoopMs <= diag.firstLoopMs) {
         return 0;
@@ -217,7 +219,7 @@ std::uint64_t ObservationWindowMs(const TaskDiagnosticsSnapshot& diag)
     return diag.lastLoopMs - diag.firstLoopMs;
 }
 
-std::uint64_t AverageLoopUs(const TaskDiagnosticsSnapshot& diag)
+std::uint64_t AverageLoopUs(const TaskDiagnosticsSnapshot &diag)
 {
     if (diag.loopCount == 0) {
         return 0;
@@ -225,7 +227,7 @@ std::uint64_t AverageLoopUs(const TaskDiagnosticsSnapshot& diag)
     return diag.totalLoopUs / diag.loopCount;
 }
 
-std::uint64_t AverageResourceWaitUs(const TaskDiagnosticsSnapshot& diag)
+std::uint64_t AverageResourceWaitUs(const TaskDiagnosticsSnapshot &diag)
 {
     if (diag.resourceWaitCount == 0) {
         return 0;
@@ -233,7 +235,7 @@ std::uint64_t AverageResourceWaitUs(const TaskDiagnosticsSnapshot& diag)
     return diag.totalResourceWaitUs / diag.resourceWaitCount;
 }
 
-std::uint64_t UtilizationPpm(const TaskDiagnosticsSnapshot& diag)
+std::uint64_t UtilizationPpm(const TaskDiagnosticsSnapshot &diag)
 {
     const std::uint64_t windowMs = ObservationWindowMs(diag);
     if (windowMs == 0) {
@@ -242,7 +244,7 @@ std::uint64_t UtilizationPpm(const TaskDiagnosticsSnapshot& diag)
     return (diag.totalLoopUs * MICROS_PER_MILLI) / windowMs;
 }
 
-std::uint64_t QueueObservationWindowMs(const QueueDiagnosticsSnapshot& diag)
+std::uint64_t QueueObservationWindowMs(const QueueDiagnosticsSnapshot &diag)
 {
     if (diag.firstActivityMs == 0 || diag.lastActivityMs <= diag.firstActivityMs) {
         return 0;
@@ -258,9 +260,9 @@ std::uint64_t CounterRatePerSecond(std::uint64_t count, std::uint64_t windowMs)
     return (count * MILLIS_PER_SECOND) / windowMs;
 }
 
-void WriteQueueDiagnosticsJson(std::ostringstream& out,
-                               const IQueue& queue,
-                               const QueueDiagnosticsSnapshot& diag)
+void WriteQueueDiagnosticsJson(std::ostringstream &out,
+                               const IQueue &queue,
+                               const QueueDiagnosticsSnapshot &diag)
 {
     const std::uint64_t windowMs = QueueObservationWindowMs(diag);
     out << "\"type\": \"" << JsonEscape(queue.TypeName()) << "\", ";
@@ -277,12 +279,11 @@ void WriteQueueDiagnosticsJson(std::ostringstream& out,
     out << "\"windowMs\": " << windowMs << ", ";
     out << "\"pushedPerSecond\": " << CounterRatePerSecond(diag.pushed, windowMs) << ", ";
     out << "\"poppedPerSecond\": " << CounterRatePerSecond(diag.popped, windowMs) << ", ";
-    out << "\"droppedPerSecond\": " <<
-        CounterRatePerSecond(diag.droppedNewest + diag.overwrittenOldest, windowMs);
+    out << "\"droppedPerSecond\": " << CounterRatePerSecond(diag.droppedNewest + diag.overwrittenOldest, windowMs);
 }
 
-void WriteTaskDiagnosticsJson(std::ostringstream& out,
-                              const TaskDiagnosticsSnapshot& diag)
+void WriteTaskDiagnosticsJson(std::ostringstream &out,
+                              const TaskDiagnosticsSnapshot &diag)
 {
     out << "\"lastLoopUs\": " << diag.lastLoopUs << ", ";
     out << "\"maxLoopUs\": " << diag.maxLoopUs << ", ";
@@ -312,9 +313,9 @@ void WriteTaskDiagnosticsJson(std::ostringstream& out,
 } // namespace
 
 std::string GraphConfigToJson(
-    const GraphConfig& config,
-    const std::map<std::string, std::string>& stringMetadata,
-    const std::map<std::string, std::uint64_t>& numericMetadata)
+    const GraphConfig &config,
+    const std::map<std::string, std::string> &stringMetadata,
+    const std::map<std::string, std::uint64_t> &numericMetadata)
 {
     std::ostringstream out;
     out << "{\n";
@@ -324,10 +325,13 @@ std::string GraphConfigToJson(
     return out.str();
 }
 
-EventPipelineGraph::EventPipelineGraph(const Registry& registry) : m_registry(registry) {
+EventPipelineGraph::EventPipelineGraph(const Registry &registry)
+    : m_registry(registry)
+{
 }
 
-EventPipelineGraph::~EventPipelineGraph() {
+EventPipelineGraph::~EventPipelineGraph()
+{
     Stop();
 }
 
@@ -338,11 +342,13 @@ struct EventPipelineGraph::ConfigureUsage {
     std::map<std::string, int> consumers;
 };
 
-void EventPipelineGraph::ConfigureJson(const std::string& jsonText) {
+void EventPipelineGraph::ConfigureJson(const std::string &jsonText)
+{
     Configure(ParseGraphConfigJson(jsonText));
 }
 
-void EventPipelineGraph::Configure(const GraphConfig& config) {
+void EventPipelineGraph::Configure(const GraphConfig &config)
+{
     if (m_running) {
         throw std::runtime_error("cannot configure a running EventPipelineGraph");
     }
@@ -358,7 +364,8 @@ void EventPipelineGraph::Configure(const GraphConfig& config) {
     m_configured = true;
 }
 
-void EventPipelineGraph::ResetConfiguredGraph() {
+void EventPipelineGraph::ResetConfiguredGraph()
+{
     m_queues.clear();
     m_runners.clear();
     m_taskProducedQueues.clear();
@@ -366,9 +373,10 @@ void EventPipelineGraph::ResetConfiguredGraph() {
     m_config = {};
 }
 
-void EventPipelineGraph::CreateConfiguredQueues(const GraphConfig& config,
-                                                ConfigureUsage& usage) {
-    for (const auto& queueConfig : config.queues) {
+void EventPipelineGraph::CreateConfiguredQueues(const GraphConfig &config,
+                                                ConfigureUsage &usage)
+{
+    for (const auto &queueConfig : config.queues) {
         if (queueConfig.name.empty()) {
             throw std::runtime_error("queue name must not be empty");
         }
@@ -379,7 +387,7 @@ void EventPipelineGraph::CreateConfiguredQueues(const GraphConfig& config,
             throw std::runtime_error("queue depth must be greater than zero: " +
                                      queueConfig.name);
         }
-        const auto* type = m_registry.FindQueueType(queueConfig.type);
+        const auto *type = m_registry.FindQueueType(queueConfig.type);
         if (!type) {
             throw std::runtime_error("unregistered queue type: " + queueConfig.type);
         }
@@ -387,22 +395,24 @@ void EventPipelineGraph::CreateConfiguredQueues(const GraphConfig& config,
     }
 }
 
-void EventPipelineGraph::ValidateConfiguredTasks(const GraphConfig& config,
-                                                 ConfigureUsage& usage) const {
-    for (const auto& taskConfig : config.tasks) {
+void EventPipelineGraph::ValidateConfiguredTasks(const GraphConfig &config,
+                                                 ConfigureUsage &usage) const
+{
+    for (const auto &taskConfig : config.tasks) {
         ValidateTaskConfig(taskConfig, usage);
     }
 }
 
-void EventPipelineGraph::ValidateTaskConfig(const TaskConfig& taskConfig,
-                                            ConfigureUsage& usage) const {
+void EventPipelineGraph::ValidateTaskConfig(const TaskConfig &taskConfig,
+                                            ConfigureUsage &usage) const
+{
     if (taskConfig.name.empty()) {
         throw std::runtime_error("task name must not be empty");
     }
     if (!usage.taskNames.insert(taskConfig.name).second) {
         throw std::runtime_error("duplicate task name: " + taskConfig.name);
     }
-    const auto* taskType = m_registry.FindTaskType(taskConfig.type);
+    const auto *taskType = m_registry.FindTaskType(taskConfig.type);
     if (!taskType) {
         throw std::runtime_error("unregistered task type: " + taskConfig.type);
     }
@@ -412,18 +422,20 @@ void EventPipelineGraph::ValidateTaskConfig(const TaskConfig& taskConfig,
 }
 
 void EventPipelineGraph::ValidateTaskPorts(
-    const TaskConfig& taskConfig,
-    const Registry::TaskTypeInfo& taskType,
-    ConfigureUsage& usage) const {
+    const TaskConfig &taskConfig,
+    const Registry::TaskTypeInfo &taskType,
+    ConfigureUsage &usage) const
+{
     ValidateTaskInputs(taskConfig, MakePortMap(taskType.inputs), usage);
     ValidateTaskOutputs(taskConfig, MakePortMap(taskType.outputs), usage);
 }
 
 void EventPipelineGraph::ValidateTaskInputs(
-    const TaskConfig& taskConfig,
-    const std::map<PortId, PortSpec>& declaredInputs,
-    ConfigureUsage& usage) const {
-    for (const auto& input : taskConfig.inputs) {
+    const TaskConfig &taskConfig,
+    const std::map<PortId, PortSpec> &declaredInputs,
+    ConfigureUsage &usage) const
+{
+    for (const auto &input : taskConfig.inputs) {
         const auto specIt = declaredInputs.find(input.first);
         if (specIt == declaredInputs.end()) {
             throw std::runtime_error("task input port is not declared: " +
@@ -444,10 +456,11 @@ void EventPipelineGraph::ValidateTaskInputs(
 }
 
 void EventPipelineGraph::ValidateTaskOutputs(
-    const TaskConfig& taskConfig,
-    const std::map<PortId, PortSpec>& declaredOutputs,
-    ConfigureUsage& usage) const {
-    for (const auto& output : taskConfig.outputs) {
+    const TaskConfig &taskConfig,
+    const std::map<PortId, PortSpec> &declaredOutputs,
+    ConfigureUsage &usage) const
+{
+    for (const auto &output : taskConfig.outputs) {
         const auto specIt = declaredOutputs.find(output.first);
         if (specIt == declaredOutputs.end()) {
             throw std::runtime_error("task output port is not declared: " +
@@ -467,7 +480,8 @@ void EventPipelineGraph::ValidateTaskOutputs(
     }
 }
 
-void EventPipelineGraph::ValidateTaskTrigger(const TaskConfig& taskConfig) const {
+void EventPipelineGraph::ValidateTaskTrigger(const TaskConfig &taskConfig) const
+{
     if (taskConfig.trigger.mode == TriggerMode::Periodic ||
         taskConfig.trigger.mode == TriggerMode::PeriodicOrAnyQueueReady) {
         if (taskConfig.trigger.interval.count() <= 0) {
@@ -485,19 +499,20 @@ void EventPipelineGraph::ValidateTaskTrigger(const TaskConfig& taskConfig) const
 }
 
 void EventPipelineGraph::ValidateTriggerQueues(
-    const TaskConfig& taskConfig) const {
+    const TaskConfig &taskConfig) const
+{
     if (taskConfig.trigger.queues.empty()) {
         throw std::runtime_error("queue-triggered task has no trigger queues: " +
                                  taskConfig.name);
     }
-    for (const auto& triggerQueue : taskConfig.trigger.queues) {
+    for (const auto &triggerQueue : taskConfig.trigger.queues) {
         if (m_queues.find(triggerQueue) == m_queues.end()) {
             throw std::runtime_error("task trigger references missing queue: " +
                                      taskConfig.name + " -> " + triggerQueue);
         }
         const auto usedAsInput =
             std::find_if(taskConfig.inputs.begin(), taskConfig.inputs.end(),
-                         [&triggerQueue](const std::pair<const PortId, std::string>& input) {
+                         [&triggerQueue](const std::pair<const PortId, std::string> &input) {
                              return input.second == triggerQueue;
                          }) != taskConfig.inputs.end();
         if (!usedAsInput) {
@@ -507,23 +522,25 @@ void EventPipelineGraph::ValidateTriggerQueues(
     }
 }
 
-void EventPipelineGraph::PublishTaskProducedQueues(const ConfigureUsage& usage) {
-    for (const auto& producer : usage.producers) {
+void EventPipelineGraph::PublishTaskProducedQueues(const ConfigureUsage &usage)
+{
+    for (const auto &producer : usage.producers) {
         if (producer.second > 1) {
             throw std::runtime_error("SPSC queue has multiple producers: " + producer.first);
         }
         m_taskProducedQueues.insert(producer.first);
     }
-    for (const auto& consumer : usage.consumers) {
+    for (const auto &consumer : usage.consumers) {
         if (consumer.second > 1) {
             throw std::runtime_error("SPSC queue has multiple consumers: " + consumer.first);
         }
     }
 }
 
-void EventPipelineGraph::CreateConfiguredTaskRunners(const GraphConfig& config) {
-    for (const auto& taskConfig : config.tasks) {
-        const auto* taskType = m_registry.FindTaskType(taskConfig.type);
+void EventPipelineGraph::CreateConfiguredTaskRunners(const GraphConfig &config)
+{
+    for (const auto &taskConfig : config.tasks) {
+        const auto *taskType = m_registry.FindTaskType(taskConfig.type);
         m_runners.emplace_back(new TaskRunner(
             taskConfig,
             taskType->factory(),
@@ -533,36 +550,40 @@ void EventPipelineGraph::CreateConfiguredTaskRunners(const GraphConfig& config) 
     }
 }
 
-std::unordered_map<PortId, IQueue*>
-EventPipelineGraph::MakeInputQueueBindings(const TaskConfig& taskConfig) const {
-    std::unordered_map<PortId, IQueue*> inputs;
-    for (const auto& input : taskConfig.inputs) {
+std::unordered_map<PortId, IQueue *>
+EventPipelineGraph::MakeInputQueueBindings(const TaskConfig &taskConfig) const
+{
+    std::unordered_map<PortId, IQueue *> inputs;
+    for (const auto &input : taskConfig.inputs) {
         inputs[input.first] = m_queues.at(input.second).get();
     }
     return inputs;
 }
 
-std::unordered_map<PortId, IQueue*>
-EventPipelineGraph::MakeOutputQueueBindings(const TaskConfig& taskConfig) const {
-    std::unordered_map<PortId, IQueue*> outputs;
-    for (const auto& output : taskConfig.outputs) {
+std::unordered_map<PortId, IQueue *>
+EventPipelineGraph::MakeOutputQueueBindings(const TaskConfig &taskConfig) const
+{
+    std::unordered_map<PortId, IQueue *> outputs;
+    for (const auto &output : taskConfig.outputs) {
         outputs[output.first] = m_queues.at(output.second).get();
     }
     return outputs;
 }
 
-std::vector<IQueue*>
-EventPipelineGraph::MakeTriggerQueueBindings(const TaskConfig& taskConfig) const {
-    std::vector<IQueue*> triggerQueues;
-    for (const auto& triggerQueue : taskConfig.trigger.queues) {
+std::vector<IQueue *>
+EventPipelineGraph::MakeTriggerQueueBindings(const TaskConfig &taskConfig) const
+{
+    std::vector<IQueue *> triggerQueues;
+    for (const auto &triggerQueue : taskConfig.trigger.queues) {
         triggerQueues.push_back(m_queues.at(triggerQueue).get());
     }
     return triggerQueues;
 }
 
-void EventPipelineGraph::BindInputNotifiers(const GraphConfig& config) {
-    for (auto& runner : m_runners) {
-        for (const auto& taskConfig : config.tasks) {
+void EventPipelineGraph::BindInputNotifiers(const GraphConfig &config)
+{
+    for (auto &runner : m_runners) {
+        for (const auto &taskConfig : config.tasks) {
             if (taskConfig.name == runner->Name()) {
                 BindTaskInputNotifiers(*runner, taskConfig);
                 break;
@@ -571,17 +592,19 @@ void EventPipelineGraph::BindInputNotifiers(const GraphConfig& config) {
     }
 }
 
-void EventPipelineGraph::BindTaskInputNotifiers(TaskRunner& runner,
-                                                const TaskConfig& taskConfig) {
-    for (const auto& input : taskConfig.inputs) {
-        auto* inputQueue = m_queues.at(input.second).get();
+void EventPipelineGraph::BindTaskInputNotifiers(TaskRunner &runner,
+                                                const TaskConfig &taskConfig)
+{
+    for (const auto &input : taskConfig.inputs) {
+        auto *inputQueue = m_queues.at(input.second).get();
         inputQueue->SetNotifier([runnerPtr = &runner]() {
             runnerPtr->Notify();
         });
     }
 }
 
-void EventPipelineGraph::Start() {
+void EventPipelineGraph::Start()
+{
     if (!m_configured) {
         throw std::runtime_error("EventPipelineGraph must be configured before start");
     }
@@ -589,35 +612,38 @@ void EventPipelineGraph::Start() {
         return;
     }
     m_running = true;
-    for (auto& runner : m_runners) {
+    for (auto &runner : m_runners) {
         runner->Start();
     }
 }
 
-void EventPipelineGraph::Stop() {
+void EventPipelineGraph::Stop()
+{
     if (!m_running) {
         return;
     }
-    for (auto& runner : m_runners) {
+    for (auto &runner : m_runners) {
         runner->Stop();
     }
     m_running = false;
 }
 
-void EventPipelineGraph::RequestStop() {
+void EventPipelineGraph::RequestStop()
+{
     if (!m_running) {
         return;
     }
-    for (auto& runner : m_runners) {
+    for (auto &runner : m_runners) {
         runner->RequestStop();
     }
 }
 
-bool EventPipelineGraph::JoinStopped() {
+bool EventPipelineGraph::JoinStopped()
+{
     if (!m_running) {
         return true;
     }
-    for (auto& runner : m_runners) {
+    for (auto &runner : m_runners) {
         if (!runner->JoinStopped()) {
             return false;
         }
@@ -626,45 +652,51 @@ bool EventPipelineGraph::JoinStopped() {
     return true;
 }
 
-bool EventPipelineGraph::Running() const {
+bool EventPipelineGraph::Running() const
+{
     return m_running;
 }
 
-IQueue* EventPipelineGraph::Queue(const std::string& name) {
+IQueue *EventPipelineGraph::Queue(const std::string &name)
+{
     auto it = m_queues.find(name);
     return it == m_queues.end() ? nullptr : it->second.get();
 }
 
-const IQueue* EventPipelineGraph::Queue(const std::string& name) const {
+const IQueue *EventPipelineGraph::Queue(const std::string &name) const
+{
     auto it = m_queues.find(name);
     return it == m_queues.end() ? nullptr : it->second.get();
 }
 
-std::map<std::string, QueueDiagnosticsSnapshot> EventPipelineGraph::QueueDiagnostics() const {
+std::map<std::string, QueueDiagnosticsSnapshot> EventPipelineGraph::QueueDiagnostics() const
+{
     std::map<std::string, QueueDiagnosticsSnapshot> result;
-    for (const auto& queue : m_queues) {
+    for (const auto &queue : m_queues) {
         result[queue.first] = queue.second->Diagnostics();
     }
     return result;
 }
 
-std::map<std::string, TaskDiagnosticsSnapshot> EventPipelineGraph::TaskDiagnostics() const {
+std::map<std::string, TaskDiagnosticsSnapshot> EventPipelineGraph::TaskDiagnostics() const
+{
     std::map<std::string, TaskDiagnosticsSnapshot> result;
-    for (const auto& runner : m_runners) {
+    for (const auto &runner : m_runners) {
         result[runner->Name()] = runner->Diagnostics();
     }
     return result;
 }
 
-std::string EventPipelineGraph::DfxSnapshotJson(const std::string& graphName,
-                                                std::uint64_t timestampMs) const {
+std::string EventPipelineGraph::DfxSnapshotJson(const std::string &graphName,
+                                                std::uint64_t timestampMs) const
+{
     std::ostringstream out;
     out << "{\n";
     out << "  \"graph\": \"" << JsonEscape(graphName) << "\",\n";
     out << "  \"timestampMs\": " << timestampMs << ",\n";
     out << "  \"queues\": {\n";
     bool first = true;
-    for (const auto& queue : m_queues) {
+    for (const auto &queue : m_queues) {
         const auto diag = queue.second->Diagnostics();
         if (!first) {
             out << ",\n";
@@ -677,7 +709,7 @@ std::string EventPipelineGraph::DfxSnapshotJson(const std::string& graphName,
     out << "\n  },\n";
     out << "  \"tasks\": {\n";
     first = true;
-    for (const auto& runner : m_runners) {
+    for (const auto &runner : m_runners) {
         const auto diag = runner->Diagnostics();
         if (!first) {
             out << ",\n";
@@ -692,10 +724,10 @@ std::string EventPipelineGraph::DfxSnapshotJson(const std::string& graphName,
     return out.str();
 }
 
-std::string EventPipelineGraph::ProfileJson(const std::string& graphName,
+std::string EventPipelineGraph::ProfileJson(const std::string &graphName,
                                             std::uint64_t timestampMs,
-                                            const std::string& topologyVersion,
-                                            const std::string& taskCatalogJson) const
+                                            const std::string &topologyVersion,
+                                            const std::string &taskCatalogJson) const
 {
     std::ostringstream out;
     out << "{\n";
@@ -734,4 +766,4 @@ std::string EventPipelineGraph::ProfileJson(const std::string& graphName,
     return out.str();
 }
 
-} // namespace epg
+} // namespace Epg

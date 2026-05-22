@@ -2,7 +2,7 @@
 
 #include <opencv2/imgproc.hpp>
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 cv::Mat MakeCameraMatrix(float fx, float fy, float cx, float cy)
 {
@@ -41,4 +41,4 @@ cv::Mat EnsureGray8(const cv::Mat &image)
     return gray;
 }
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

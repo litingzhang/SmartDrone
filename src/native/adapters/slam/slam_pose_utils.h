@@ -7,7 +7,7 @@
 
 #include "core/ports/slam_engine.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 constexpr double kPoseStabilizerDefaultDtSec = 1.0 / 20.0;
 constexpr double kPoseStabilizerMinDtSec = 1.0 / 120.0;
@@ -38,4 +38,4 @@ Sophus::SE3f PoseEstimateToSe3(const core::ports::PoseEstimate &pose);
 core::ports::PoseEstimate Se3ToPoseEstimate(const Sophus::SE3f &pose);
 core::ports::PoseEstimate PoseFromTwc(const Sophus::SE3f &twc);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

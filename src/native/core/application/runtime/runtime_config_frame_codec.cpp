@@ -9,7 +9,7 @@
 #include "common/tlv/tlv_protocol.h"
 #include "core/application/config/config_registry.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 SensorMode ParseRuntimeSensorMode(std::uint8_t value)
@@ -89,10 +89,10 @@ SlamBackend ParseRuntimeSlamBackend(std::uint8_t value)
     }
 }
 
-smartdrone::core::domain::SlamOperationMode
+SmartDrone::core::domain::SlamOperationMode
 ParseRuntimeSlamMode(std::uint8_t value)
 {
-    using smartdrone::core::domain::SlamOperationMode;
+    using SmartDrone::core::domain::SlamOperationMode;
     switch (value) {
     case RUNTIME_SLAM_MODE_LOCALIZATION:
         return SlamOperationMode::Localization;
@@ -310,7 +310,7 @@ void AddCameraAndModeConfig(ConfigUpdate &update,
     update.values[std::string(ConfigRegistry::kSlamFeatureFrontend)] =
         std::string(ToFeatureFrontendText(remote.featureFrontend));
     update.values[std::string(ConfigRegistry::kSlamOperationMode)] =
-        std::string(smartdrone::core::domain::ToString(
+        std::string(SmartDrone::core::domain::ToString(
             remote.slamOperationMode));
     update.values[std::string(ConfigRegistry::kSlamPerceptionMode)] =
         std::string(ToSensorModeText(remote.sensorMode));
@@ -446,8 +446,7 @@ std::string BuildRuntimeConfigAckMessage(const std::string &message,
            " backend=" + std::string(ToSlamBackendText(remote.slamBackend)) +
            " frontend=" +
            std::string(ToFeatureFrontendText(remote.featureFrontend)) +
-           " slam_mode=" + std::string(smartdrone::core::domain::ToString(
-                              remote.slamOperationMode)) +
+           " slam_mode=" + std::string(SmartDrone::core::domain::ToString(remote.slamOperationMode)) +
            " img=" + (remote.sendImage ? "on" : "off") +
            " feat=" + (remote.sendFeature ? "on" : "off") +
            " map=" + (remote.sendMap ? "on" : "off") +
@@ -458,4 +457,4 @@ std::string BuildRuntimeConfigAckMessage(const std::string &message,
            " orb_accel=" + remote.orbAcceleration;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

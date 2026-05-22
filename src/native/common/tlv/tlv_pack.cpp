@@ -27,7 +27,10 @@ void WriteF32Le(std::vector<uint8_t> &buffer, float value)
     WriteU32Le(buffer, raw);
 }
 
-uint16_t ReadU16Le(const uint8_t *p) { return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8); }
+uint16_t ReadU16Le(const uint8_t *p)
+{
+    return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+}
 
 uint32_t ReadU32Le(const uint8_t *p)
 {

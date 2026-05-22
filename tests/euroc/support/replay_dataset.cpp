@@ -8,7 +8,7 @@
 
 #include <opencv2/imgcodecs.hpp>
 
-namespace smartdrone::tests {
+namespace SmartDrone::tests {
 namespace {
 
 struct ReplayDatasetPaths {
@@ -205,9 +205,12 @@ ReplayDataset ReplayDataset::Load(const std::filesystem::path &rootDir, size_t m
     return dataset;
 }
 
-ReplayCameraProvider::ReplayCameraProvider(const ReplayDataset &dataset) : m_dataset(dataset) {}
+ReplayCameraProvider::ReplayCameraProvider(const ReplayDataset &dataset)
+    : m_dataset(dataset)
+{
+}
 
-bool ReplayCameraProvider::Open(const smartdrone::core::application::MainRuntimeAliases &)
+bool ReplayCameraProvider::Open(const SmartDrone::core::ports::CameraOpenConfig &)
 {
     m_nextIndex = 0;
     return true;
@@ -232,7 +235,7 @@ void ReplayCameraProvider::Stop()
     m_nextIndex = 0;
 }
 
-bool ReplayCameraProvider::GrabStereo(smartdrone::core::ports::StereoFrame &out, int, bool, uint64_t minTimestampNs)
+bool ReplayCameraProvider::GrabStereo(SmartDrone::core::ports::StereoFrame &out, int, bool, uint64_t minTimestampNs)
 {
     if (!m_started) {
         return false;
@@ -263,25 +266,28 @@ bool ReplayCameraProvider::GrabStereo(smartdrone::core::ports::StereoFrame &out,
     return false;
 }
 
-smartdrone::core::ports::CameraHealth ReplayCameraProvider::GetHealth() const
+SmartDrone::core::ports::CameraHealth ReplayCameraProvider::GetHealth() const
 {
     return {true, 0};
 }
 
-smartdrone::core::ports::CameraDiagnostics ReplayCameraProvider::GetDiagnostics() const
+SmartDrone::core::ports::CameraDiagnostics ReplayCameraProvider::GetDiagnostics() const
 {
-    smartdrone::core::ports::CameraDiagnostics diagnostics{};
+    SmartDrone::core::ports::CameraDiagnostics diagnostics{};
     diagnostics.healthy = true;
     diagnostics.acceptFrames = m_started;
     return diagnostics;
 }
 
-smartdrone::core::ports::CameraProviderSemantics ReplayCameraProvider::Semantics() const
+SmartDrone::core::ports::CameraProviderSemantics ReplayCameraProvider::Semantics() const
 {
-    return smartdrone::core::ports::CameraProviderSemantics::DualStreamPaired;
+    return SmartDrone::core::ports::CameraProviderSemantics::DualStreamPaired;
 }
 
-ReplayImuProvider::ReplayImuProvider(const ReplayDataset &dataset) : m_dataset(dataset) {}
+ReplayImuProvider::ReplayImuProvider(const ReplayDataset &dataset)
+    : m_dataset(dataset)
+{
+}
 
 bool ReplayImuProvider::Start()
 {
@@ -296,11 +302,14 @@ void ReplayImuProvider::Stop()
     m_cursor = 0;
 }
 
-bool ReplayImuProvider::Ready() const { return m_started; }
-
-std::vector<smartdrone::core::ports::ImuReading> ReplayImuProvider::PopWindow(int64_t fromNs, int64_t toNs)
+bool ReplayImuProvider::Ready() const
 {
-    std::vector<smartdrone::core::ports::ImuReading> out;
+    return m_started;
+}
+
+std::vector<SmartDrone::core::ports::ImuReading> ReplayImuProvider::PopWindow(int64_t fromNs, int64_t toNs)
+{
+    std::vector<SmartDrone::core::ports::ImuReading> out;
     if (!m_started || fromNs >= toNs) {
         return out;
     }
@@ -321,4 +330,4 @@ std::vector<smartdrone::core::ports::ImuReading> ReplayImuProvider::PopWindow(in
     return out;
 }
 
-} // namespace smartdrone::tests
+} // namespace SmartDrone::tests

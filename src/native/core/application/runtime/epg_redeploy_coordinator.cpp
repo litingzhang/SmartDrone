@@ -3,7 +3,7 @@
 #include <sstream>
 #include <utility>
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 void AppendTextField(std::ostringstream &out,
@@ -144,4 +144,4 @@ bool EpgRedeployCoordinator::SessionRedeployRequested() const
     return m_sessionRedeployRequested.load(std::memory_order_acquire);
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

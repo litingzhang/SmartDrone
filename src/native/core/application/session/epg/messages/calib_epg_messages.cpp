@@ -2,7 +2,7 @@
 
 #include "common/epg/epg.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 EPG_REGISTER_MESSAGE(CalibResourceReady, "CalibResourceReady")
 EPG_REGISTER_MESSAGE(CalibTick, "CalibTick")
@@ -16,4 +16,4 @@ EPG_REGISTER_MESSAGE(CalibPreviewStatus, "CalibPreviewStatus")
 EPG_REGISTER_MESSAGE(CalibFlushRequest, "CalibFlushRequest")
 EPG_REGISTER_MESSAGE(CalibStatus, "CalibStatus")
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

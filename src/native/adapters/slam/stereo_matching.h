@@ -6,14 +6,14 @@
 
 #include "core/ports/stereo_processing.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 class DefaultStereoMatchSelector final
     : public core::ports::IStereoMatchSelector {
-public:
-  bool
-  SelectMatches(const core::ports::StereoMatchSelectionInput &input,
-                core::ports::StereoMatchSelection &selection) const override;
+  public:
+    bool
+    SelectMatches(const core::ports::StereoMatchSelectionInput &input,
+                  core::ports::StereoMatchSelection &selection) const override;
 };
 
 void CopyMatchedStereoPointsFromPairs(
@@ -27,4 +27,4 @@ bool SelectStereoFeatureMatches(
     const core::ports::StereoMatchSelectionInput &input,
     core::ports::StereoMatchSelection &selection);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

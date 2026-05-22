@@ -21,17 +21,17 @@
 
 namespace {
 
-using epg::ITask;
-using epg::OverflowPolicy;
-using epg::PortSpec;
-using epg::Registry;
-using epg::EventPipelineGraph;
-using epg::SpscSharedPtrQueue;
-using epg::TaskContext;
-using smartdrone::core::application::BuildEpgTaskTopologyVersion;
-using smartdrone::core::application::EpgDomain;
-using smartdrone::core::application::EpgTaskCatalogTypes;
-using smartdrone::core::application::EpgManifestForDomain;
+using Epg::EventPipelineGraph;
+using Epg::ITask;
+using Epg::OverflowPolicy;
+using Epg::PortSpec;
+using Epg::Registry;
+using Epg::SpscSharedPtrQueue;
+using Epg::TaskContext;
+using SmartDrone::core::application::BuildEpgTaskTopologyVersion;
+using SmartDrone::core::application::EpgDomain;
+using SmartDrone::core::application::EpgManifestForDomain;
+using SmartDrone::core::application::EpgTaskCatalogTypes;
 
 struct TestPacket {
     int sequence{};
@@ -65,34 +65,38 @@ struct CalibImuStatus {};
 struct CalibPreviewStatus {};
 struct CalibFlushRequest {};
 struct CalibStatus {};
+struct SystemRuntimePulse {};
 
 class TestSourceTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         auto packet = context.Make<TestPacket>();
         packet->sequence = ++m_sequence;
         context.Push<TestPacket>(0, std::move(packet));
     }
 
-private:
+  private:
     int m_sequence{};
 };
 
 class TestSecondSourceTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         auto packet = context.Make<TestPacket>();
         packet->sequence = ++m_sequence;
         context.Push<TestPacket>(0, std::move(packet));
     }
 
-private:
+  private:
     int m_sequence{};
 };
 
 class TestFanoutSourceTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         ++m_sequence;
 
         auto left = context.Make<TestPacket>();
@@ -104,13 +108,14 @@ public:
         context.Push<TestPacket>(1, std::move(right));
     }
 
-private:
+  private:
     int m_sequence{};
 };
 
 class TestSinkTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         while (auto packet = context.TryPop<TestPacket>(0)) {
             (void)packet;
         }
@@ -118,8 +123,9 @@ public:
 };
 
 class TestForwardTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         while (auto packet = context.TryPop<TestPacket>(0)) {
             auto forwarded = context.Make<TestPacket>();
             forwarded->sequence = packet->sequence;
@@ -129,8 +135,9 @@ public:
 };
 
 class TestAllInputsSinkTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         auto left = context.TryPop<TestPacket>(0);
         auto right = context.TryPop<TestPacket>(1);
         if (!left || !right) {
@@ -140,83 +147,97 @@ public:
 };
 
 class TestHeartbeatTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         (void)context;
     }
 };
 
 class TestThrowingTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         (void)context;
         throw std::runtime_error("expected test exception");
     }
 };
 
 class TestBadContextTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         (void)context.TryPop<TestPacket>(999);
     }
 };
 
 class TestCountingTask final : public ITask {
-public:
-    explicit TestCountingTask(int& ticks) : m_ticks(ticks) {}
+  public:
+    explicit TestCountingTask(int &ticks)
+        : m_ticks(ticks)
+    {
+    }
 
-    void OnTick(TaskContext& context) override {
+    void OnTick(TaskContext &context) override
+    {
         (void)context;
         ++m_ticks;
     }
 
-private:
-    int& m_ticks;
+  private:
+    int &m_ticks;
 };
 
 class TestCountingSinkTask final : public ITask {
-public:
-    explicit TestCountingSinkTask(int& packets) : m_packets(packets) {}
+  public:
+    explicit TestCountingSinkTask(int &packets)
+        : m_packets(packets)
+    {
+    }
 
-    void OnTick(TaskContext& context) override {
+    void OnTick(TaskContext &context) override
+    {
         while (auto packet = context.TryPop<TestPacket>(0)) {
             (void)packet;
             ++m_packets;
         }
     }
 
-private:
-    int& m_packets;
+  private:
+    int &m_packets;
 };
 
 class TestSlowTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         (void)context;
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 };
 
 class ReflectedSourceTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         auto packet = context.Make<ReflectedPacket>();
         packet->sequence = ++m_sequence;
         context.Push(0, std::move(packet));
     }
 
-private:
+  private:
     int m_sequence{};
 };
 EPG_REGISTER_TASK(
     ReflectedSourceTask, "ReflectedSourceTask",
-    std::vector<epg::PortSpec>{},
-    std::vector<epg::PortSpec>{
+    std::vector<Epg::PortSpec>{},
+    std::vector<Epg::PortSpec>{
         EPG_PORT(0, "ReflectedPacket")})
 
 class ReflectedSinkTask final : public ITask {
-public:
-    void OnTick(TaskContext& context) override {
+  public:
+    void OnTick(TaskContext &context) override
+    {
         while (auto packet = context.TryPop<ReflectedPacket>(0)) {
             (void)packet;
         }
@@ -224,11 +245,12 @@ public:
 };
 EPG_REGISTER_TASK(
     ReflectedSinkTask, "ReflectedSinkTask",
-    std::vector<epg::PortSpec>{
+    std::vector<Epg::PortSpec>{
         EPG_PORT(0, "ReflectedPacket")},
-    std::vector<epg::PortSpec>{})
+    std::vector<Epg::PortSpec>{})
 
-Registry MakeRegistry() {
+Registry MakeRegistry()
+{
     Registry registry;
     registry.RegisterMessageType<TestPacket>("TestPacket");
     registry.RegisterMessageType<OtherPacket>("OtherPacket");
@@ -275,7 +297,8 @@ Registry MakeRegistry() {
     return registry;
 }
 
-Registry MakeSlamShapeRegistry() {
+Registry MakeSlamShapeRegistry()
+{
     Registry registry;
     registry.RegisterMessageType<SlamResourceReady>("SlamResourceReady");
     registry.RegisterMessageType<SlamTick>("SlamTick");
@@ -307,8 +330,10 @@ Registry MakeSlamShapeRegistry() {
     return registry;
 }
 
-Registry MakeSystemShapeRegistry() {
+Registry MakeSystemShapeRegistry()
+{
     Registry registry;
+    registry.RegisterMessageType<SystemRuntimePulse>("SystemRuntimePulse");
     const auto factory = []() {
         return std::unique_ptr<ITask>(new TestHeartbeatTask());
     };
@@ -325,7 +350,8 @@ Registry MakeSystemShapeRegistry() {
     return registry;
 }
 
-Registry MakeCalibShapeRegistry() {
+Registry MakeCalibShapeRegistry()
+{
     Registry registry;
     registry.RegisterMessageType<CalibResourceReady>("CalibResourceReady");
     registry.RegisterMessageType<CalibTick>("CalibTick");
@@ -356,7 +382,8 @@ Registry MakeCalibShapeRegistry() {
     return registry;
 }
 
-std::string MinimalValidJson() {
+std::string MinimalValidJson()
+{
     return R"({
       "queues": [
         {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "drop_newest"}
@@ -378,15 +405,17 @@ std::string MinimalValidJson() {
     })";
 }
 
-void ExpectConfigureThrows(const std::string& json) {
+void ExpectConfigureThrows(const std::string &json)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
     EXPECT_THROW(graph.ConfigureJson(json), std::runtime_error);
 }
 
-void RunTopology(const epg::GraphConfig& config,
-                 const std::vector<std::string>& queues,
-                 const std::vector<std::string>& tasks) {
+void RunTopology(const Epg::GraphConfig &config,
+                 const std::vector<std::string> &queues,
+                 const std::vector<std::string> &tasks)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
@@ -397,7 +426,7 @@ void RunTopology(const epg::GraphConfig& config,
     graph.Stop();
 
     const auto queueDiagnostics = graph.QueueDiagnostics();
-    for (const auto& queueName : queues) {
+    for (const auto &queueName : queues) {
         const auto queueIt = queueDiagnostics.find(queueName);
         ASSERT_NE(queueIt, queueDiagnostics.end()) << queueName;
         EXPECT_GT(queueIt->second.pushed, 0u) << queueName;
@@ -406,7 +435,7 @@ void RunTopology(const epg::GraphConfig& config,
     }
 
     const auto taskDiagnostics = graph.TaskDiagnostics();
-    for (const auto& taskName : tasks) {
+    for (const auto &taskName : tasks) {
         const auto taskIt = taskDiagnostics.find(taskName);
         ASSERT_NE(taskIt, taskDiagnostics.end()) << taskName;
         EXPECT_GT(taskIt->second.loopCount, 0u) << taskName;
@@ -414,22 +443,24 @@ void RunTopology(const epg::GraphConfig& config,
     }
 }
 
-void RunTopologyFromJsonFile(const std::string& jsonFile,
-                             const std::vector<std::string>& queues,
-                             const std::vector<std::string>& tasks) {
+void RunTopologyFromJsonFile(const std::string &jsonFile,
+                             const std::vector<std::string> &queues,
+                             const std::vector<std::string> &tasks)
+{
     RunTopology(
-        epg::ParseGraphConfigJsonFile(
+        Epg::ParseGraphConfigJsonFile(
             std::string(TEST_EPG_DIR) + "/" + jsonFile),
         queues,
         tasks);
 }
 
-void RunTopologyFromDotFile(const std::string& dotFile,
-                            const std::vector<std::string>& queues,
-                            const std::vector<std::string>& tasks) {
+void RunTopologyFromDotFile(const std::string &dotFile,
+                            const std::vector<std::string> &queues,
+                            const std::vector<std::string> &tasks)
+{
     auto registry = MakeRegistry();
     RunTopology(
-        epg::ParseGraphConfigDotFile(
+        Epg::ParseGraphConfigDotFile(
             std::string(TEST_EPG_DIR) + "/" + dotFile,
             "cluster_test_graph",
             registry),
@@ -443,9 +474,9 @@ std::string RuntimeTopologyPath()
            EpgManifestForDomain(EpgDomain::SystemRuntime).topologyPath;
 }
 
-smartdrone::core::application::EpgTaskManifest MakeValidTestManifest()
+SmartDrone::core::application::EpgTaskManifest MakeValidTestManifest()
 {
-    smartdrone::core::application::EpgTaskManifest manifest;
+    SmartDrone::core::application::EpgTaskManifest manifest;
     manifest.subgraphName = "test_graph";
     manifest.topologyPath = "config/epg/test_topology.dot";
     manifest.topologyVersion = "config/epg/test_topology.dot:v1";
@@ -470,7 +501,7 @@ Registry::TaskFactory TestSourceFactoryResolver(const std::string &taskType)
     return Registry::TaskFactory{};
 }
 
-std::string ReadFileText(const std::string& path)
+std::string ReadFileText(const std::string &path)
 {
     std::ifstream input(path);
     return std::string(std::istreambuf_iterator<char>(input),
@@ -511,11 +542,14 @@ std::string MinimalProfileDiagnosticsJson(std::uint64_t timestampMs)
 {
     return std::string(R"({
             "graph": "test_graph",
-            "timestampMs": )") + std::to_string(timestampMs) +
+            "timestampMs": )") +
+           std::to_string(timestampMs) +
            R"(,
-            "queues": {"packets": )" + MinimalQueueDiagnosticsJson() +
+            "queues": {"packets": )" +
+           MinimalQueueDiagnosticsJson() +
            R"(},
-            "tasks": {"source": )" + MinimalTaskDiagnosticsJson() +
+            "tasks": {"source": )" +
+           MinimalTaskDiagnosticsJson() +
            R"(}
           })";
 }
@@ -524,9 +558,11 @@ std::string MissingTaskProfileDiagnosticsJson(std::uint64_t timestampMs)
 {
     return std::string(R"({
             "graph": "test_graph",
-            "timestampMs": )") + std::to_string(timestampMs) +
+            "timestampMs": )") +
+           std::to_string(timestampMs) +
            R"(,
-            "queues": {"packets": )" + MinimalQueueDiagnosticsJson() +
+            "queues": {"packets": )" +
+           MinimalQueueDiagnosticsJson() +
            R"(},
             "tasks": {}
           })";
@@ -567,7 +603,8 @@ std::string MissingTaskDiagnosticsProfileJson()
           }
         ]
       },
-      "diagnostics": )") + MissingTaskProfileDiagnosticsJson(1000) +
+      "diagnostics": )") +
+           MissingTaskProfileDiagnosticsJson(1000) +
            R"(
     })";
 }
@@ -608,7 +645,8 @@ std::string NonReplaceableTaskProfileJson()
         ]
       },
       "diagnostics": {
-        "queues": {"packets": )") + MinimalQueueDiagnosticsJson() +
+        "queues": {"packets": )") +
+           MinimalQueueDiagnosticsJson() +
            R"(},
         "tasks": {
           "source": {
@@ -632,7 +670,8 @@ std::string NonReplaceableTaskProfileJson()
 
 } // namespace
 
-TEST(EventPipelineGraphQueue, DropNewestKeepsOldItemsAndCountsDrops) {
+TEST(EventPipelineGraphQueue, DropNewestKeepsOldItemsAndCountsDrops)
+{
     SpscSharedPtrQueue<TestPacket> queue("packets", "TestPacket", 2, OverflowPolicy::DropNewest);
 
     EXPECT_EQ(queue.Name(), "packets");
@@ -657,7 +696,8 @@ TEST(EventPipelineGraphQueue, DropNewestKeepsOldItemsAndCountsDrops) {
     EXPECT_EQ(diag.maxDepthObserved, 2u);
 }
 
-TEST(EventPipelineGraphQueue, OverwriteOldestKeepsNewestItemsAndCountsOverwrites) {
+TEST(EventPipelineGraphQueue, OverwriteOldestKeepsNewestItemsAndCountsOverwrites)
+{
     SpscSharedPtrQueue<TestPacket> queue("packets", "TestPacket", 2, OverflowPolicy::OverwriteOldest);
 
     EXPECT_TRUE(queue.Push(std::make_shared<TestPacket>(TestPacket{1})));
@@ -675,7 +715,8 @@ TEST(EventPipelineGraphQueue, OverwriteOldestKeepsNewestItemsAndCountsOverwrites
     EXPECT_EQ(diag.overwrittenOldest, 1u);
 }
 
-TEST(EventPipelineGraphQueue, TryPopLatestDrainsQueueAndReturnsNewestItem) {
+TEST(EventPipelineGraphQueue, TryPopLatestDrainsQueueAndReturnsNewestItem)
+{
     SpscSharedPtrQueue<TestPacket> queue("packets", "TestPacket", 4, OverflowPolicy::DropNewest);
 
     EXPECT_TRUE(queue.Push(std::make_shared<TestPacket>(TestPacket{1})));
@@ -689,7 +730,8 @@ TEST(EventPipelineGraphQueue, TryPopLatestDrainsQueueAndReturnsNewestItem) {
     EXPECT_EQ(queue.Diagnostics().popped, 3u);
 }
 
-TEST(EventPipelineGraphQueue, NotifierRunsForAcceptedPushesOnly) {
+TEST(EventPipelineGraphQueue, NotifierRunsForAcceptedPushesOnly)
+{
     SpscSharedPtrQueue<TestPacket> queue("packets", "TestPacket", 1, OverflowPolicy::DropNewest);
     int notifications = 0;
     queue.SetNotifier([&notifications]() { ++notifications; });
@@ -701,7 +743,8 @@ TEST(EventPipelineGraphQueue, NotifierRunsForAcceptedPushesOnly) {
     EXPECT_EQ(queue.Diagnostics().wakeups, 1u);
 }
 
-TEST(EventPipelineGraphIngress, ExternalInterruptEventWakesConsumerTask) {
+TEST(EventPipelineGraphIngress, ExternalInterruptEventWakesConsumerTask)
+{
     Registry registry;
     registry.RegisterMessageType<TestPacket>("TestPacket");
     int packets = 0;
@@ -749,7 +792,8 @@ TEST(EventPipelineGraphIngress, ExternalInterruptEventWakesConsumerTask) {
     EXPECT_GT(graph.TaskDiagnostics().at("interrupt_consumer").loopCount, 0u);
 }
 
-TEST(EventPipelineGraphIngress, RejectsTypeMismatchDuplicateIngressAndTaskProducerConflict) {
+TEST(EventPipelineGraphIngress, RejectsTypeMismatchDuplicateIngressAndTaskProducerConflict)
+{
     auto registry = MakeRegistry();
 
     {
@@ -781,11 +825,12 @@ TEST(EventPipelineGraphIngress, RejectsTypeMismatchDuplicateIngressAndTaskProduc
     }
 }
 
-TEST(EventPipelineGraph, RunsPipelineConfiguredFromJsonFile) {
+TEST(EventPipelineGraph, RunsPipelineConfiguredFromJsonFile)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
-    graph.Configure(epg::ParseGraphConfigJsonFile(
+    graph.Configure(Epg::ParseGraphConfigJsonFile(
         std::string(TEST_EPG_DIR) + "/basic_pipeline.json"));
 
     graph.Start();
@@ -806,11 +851,12 @@ TEST(EventPipelineGraph, RunsPipelineConfiguredFromJsonFile) {
     EXPECT_EQ(taskDiagnostics.at("sink").errorCount, 0u);
 }
 
-TEST(EventPipelineGraph, TaskCanPublishToMultipleQueuesForDifferentConsumers) {
+TEST(EventPipelineGraph, TaskCanPublishToMultipleQueuesForDifferentConsumers)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
-    graph.Configure(epg::ParseGraphConfigJsonFile(
+    graph.Configure(Epg::ParseGraphConfigJsonFile(
         std::string(TEST_EPG_DIR) + "/fanout_pipeline.json"));
 
     graph.Start();
@@ -837,37 +883,42 @@ TEST(EventPipelineGraph, TaskCanPublishToMultipleQueuesForDifferentConsumers) {
     EXPECT_EQ(taskDiagnostics.at("right_sink").errorCount, 0u);
 }
 
-TEST(EventPipelineGraphTopology, RunsLinearChainTopologyFromJson) {
+TEST(EventPipelineGraphTopology, RunsLinearChainTopologyFromJson)
+{
     RunTopologyFromJsonFile(
         "chain_pipeline.json",
         {"source_to_forward", "forward_to_sink"},
         {"source", "forward", "sink"});
 }
 
-TEST(EventPipelineGraphTopology, RunsParallelIndependentTopologyFromJson) {
+TEST(EventPipelineGraphTopology, RunsParallelIndependentTopologyFromJson)
+{
     RunTopologyFromJsonFile(
         "parallel_pipeline.json",
         {"left_packets", "right_packets"},
         {"left_source", "left_sink", "right_source", "right_sink"});
 }
 
-TEST(EventPipelineGraphTopology, RunsFanInJoinTopologyFromJson) {
+TEST(EventPipelineGraphTopology, RunsFanInJoinTopologyFromJson)
+{
     RunTopologyFromJsonFile(
         "fanin_pipeline.json",
         {"left_packets", "right_packets"},
         {"left_source", "right_source", "join_sink"});
 }
 
-TEST(EventPipelineGraphTopology, RunsDiamondTopologyFromJson) {
+TEST(EventPipelineGraphTopology, RunsDiamondTopologyFromJson)
+{
     RunTopologyFromJsonFile(
         "diamond_pipeline.json",
         {"left_packets", "right_packets", "forwarded_left_packets"},
         {"fanout_source", "left_forward", "join_sink"});
 }
 
-TEST(EventPipelineGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
+TEST(EventPipelineGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig)
+{
     auto registry = MakeRegistry();
-    const auto config = epg::ParseGraphConfigMermaid(R"(
+    const auto config = Epg::ParseGraphConfigMermaid(R"(
       flowchart LR
         source["type=TestSourceTask; trigger=periodic; interval_ms=1; resource=cpu; cpu_affinity=-1; budget_us=500; deadline_us=900; backpressure_outputs=0; realtime=true; priority=42"]
         forward["type=TestForwardTask; trigger=any_queue_ready"]
@@ -875,7 +926,8 @@ TEST(EventPipelineGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
 
         source -->|"type=TestPacket; depth=8; overflow=drop_newest"| forward
         forward -->|"type=TestPacket; depth=8; overflow=drop_newest"| sink
-    )", registry);
+    )",
+                                                     registry);
 
     ASSERT_EQ(config.queues.size(), 2u);
     EXPECT_EQ(config.queues[0].name, "source_0_to_forward_0");
@@ -890,7 +942,7 @@ TEST(EventPipelineGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
     EXPECT_EQ(config.tasks[0].scheduling.budgetUs, 500u);
     EXPECT_EQ(config.tasks[0].scheduling.deadlineUs, 900u);
     EXPECT_EQ(config.tasks[0].scheduling.backpressureOutputs,
-              std::vector<epg::PortId>{0});
+              std::vector<Epg::PortId>{0});
     EXPECT_TRUE(config.tasks[0].scheduling.realtime);
     EXPECT_EQ(config.tasks[0].scheduling.priority, 42);
     EXPECT_EQ(config.tasks[0].outputs.at(0), "source_0_to_forward_0");
@@ -901,16 +953,18 @@ TEST(EventPipelineGraphMermaid, ConvertsMermaidTopologyToRuntimeConfig) {
     EXPECT_EQ(config.tasks[2].trigger.queues, std::vector<std::string>{"forward_0_to_sink_0"});
 }
 
-TEST(EventPipelineGraphDot, RunsTopologyCompiledFromDotFile) {
+TEST(EventPipelineGraphDot, RunsTopologyCompiledFromDotFile)
+{
     RunTopologyFromDotFile(
         "chain_pipeline.dot",
         {"source_0_to_forward_0", "forward_0_to_sink_0"},
         {"source", "forward", "sink"});
 }
 
-TEST(EventPipelineGraphMermaid, ConvertsMarkdownMermaidBlockToRuntimeConfig) {
+TEST(EventPipelineGraphMermaid, ConvertsMarkdownMermaidBlockToRuntimeConfig)
+{
     auto registry = MakeRegistry();
-    const auto config = epg::ParseGraphConfigMermaid(R"(
+    const auto config = Epg::ParseGraphConfigMermaid(R"(
 # EventPipelineGraph
 
 ```mermaid
@@ -919,7 +973,8 @@ flowchart LR
   sink["type=TestSinkTask; trigger=any_queue_ready"]
   source -->|"type=TestPacket; depth=8; overflow=drop_newest"| sink
 ```
-    )", registry);
+    )",
+                                                     registry);
 
     ASSERT_EQ(config.queues.size(), 1u);
     EXPECT_EQ(config.queues[0].name, "source_0_to_sink_0");
@@ -928,9 +983,10 @@ flowchart LR
     EXPECT_EQ(config.tasks[1].inputs.at(0), "source_0_to_sink_0");
 }
 
-TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
+TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology)
+{
     auto registry = MakeSlamShapeRegistry();
-    const auto config = epg::ParseGraphConfigDotFile(
+    const auto config = Epg::ParseGraphConfigDotFile(
         RuntimeTopologyPath(),
         "cluster_slam_session_graph",
         registry);
@@ -941,8 +997,8 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
     EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));
 
-    auto findTask = [&config](const std::string& name) -> const epg::TaskConfig* {
-        for (const auto& task : config.tasks) {
+    auto findTask = [&config](const std::string &name) -> const Epg::TaskConfig * {
+        for (const auto &task : config.tasks) {
             if (task.name == name) {
                 return &task;
             }
@@ -950,61 +1006,61 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
         return nullptr;
     };
 
-    const auto* resource = findTask("SlamResourceTask");
+    const auto *resource = findTask("SlamResourceTask");
     ASSERT_NE(resource, nullptr);
-    EXPECT_EQ(resource->trigger.mode, epg::TriggerMode::Periodic);
+    EXPECT_EQ(resource->trigger.mode, Epg::TriggerMode::Periodic);
     EXPECT_EQ(resource->trigger.interval, std::chrono::milliseconds(100));
 
-    const auto* clock = findTask("SlamClockTask");
+    const auto *clock = findTask("SlamClockTask");
     ASSERT_NE(clock, nullptr);
-    EXPECT_EQ(clock->trigger.mode, epg::TriggerMode::Periodic);
+    EXPECT_EQ(clock->trigger.mode, Epg::TriggerMode::Periodic);
     EXPECT_EQ(clock->trigger.interval, std::chrono::milliseconds(50));
 
-    const auto* imuPoll = findTask("SlamImuPollTask");
+    const auto *imuPoll = findTask("SlamImuPollTask");
     ASSERT_NE(imuPoll, nullptr);
     EXPECT_EQ(imuPoll->inputs.at(0), "SlamResourceTask_0_to_SlamImuPollTask_0");
-    EXPECT_EQ(imuPoll->trigger.mode, epg::TriggerMode::PeriodicOrAnyQueueReady);
+    EXPECT_EQ(imuPoll->trigger.mode, Epg::TriggerMode::PeriodicOrAnyQueueReady);
     EXPECT_EQ(imuPoll->trigger.interval, std::chrono::milliseconds(1));
     EXPECT_FALSE(imuPoll->scheduling.realtime);
     EXPECT_EQ(imuPoll->scheduling.priority, 0);
     EXPECT_EQ(imuPoll->trigger.queues,
               (std::vector<std::string>{"SlamResourceTask_0_to_SlamImuPollTask_0"}));
 
-    const auto* backendTick = findTask("SlamBackendTickTask");
+    const auto *backendTick = findTask("SlamBackendTickTask");
     ASSERT_NE(backendTick, nullptr);
     EXPECT_TRUE(backendTick->inputs.empty());
-    EXPECT_EQ(backendTick->trigger.mode, epg::TriggerMode::Periodic);
+    EXPECT_EQ(backendTick->trigger.mode, Epg::TriggerMode::Periodic);
     EXPECT_EQ(backendTick->trigger.interval, std::chrono::milliseconds(5));
     EXPECT_TRUE(backendTick->trigger.queues.empty());
 
-    const auto* imuGate = findTask("SlamImuGateTask");
+    const auto *imuGate = findTask("SlamImuGateTask");
     ASSERT_NE(imuGate, nullptr);
     EXPECT_EQ(imuGate->inputs.at(0), "SlamImuPollTask_0_to_SlamImuGateTask_0");
     EXPECT_EQ(imuGate->inputs.at(1), "SlamClockTask_0_to_SlamImuGateTask_1");
     EXPECT_EQ(imuGate->trigger.queues,
               (std::vector<std::string>{"SlamImuPollTask_0_to_SlamImuGateTask_0",
-                                         "SlamClockTask_0_to_SlamImuGateTask_1"}));
+                                        "SlamClockTask_0_to_SlamImuGateTask_1"}));
 
-    const auto* acquire = findTask("SlamAcquireTask");
+    const auto *acquire = findTask("SlamAcquireTask");
     ASSERT_NE(acquire, nullptr);
     EXPECT_EQ(acquire->inputs.at(0),
               "SlamImuGateTask_0_to_SlamAcquireTask_0");
     EXPECT_EQ(acquire->trigger.queues,
               (std::vector<std::string>{"SlamImuGateTask_0_to_SlamAcquireTask_0"}));
 
-    const auto* tracking = findTask("SlamTrackingTask");
+    const auto *tracking = findTask("SlamTrackingTask");
     ASSERT_NE(tracking, nullptr);
     EXPECT_EQ(tracking->inputs.at(0),
               "SlamAcquireTask_0_to_SlamTrackingTask_0");
     EXPECT_EQ(tracking->trigger.queues,
               (std::vector<std::string>{"SlamAcquireTask_0_to_SlamTrackingTask_0"}));
 
-    const auto* dfxSnapshot = findTask("SlamGraphDfxSnapshotTask");
+    const auto *dfxSnapshot = findTask("SlamGraphDfxSnapshotTask");
     ASSERT_NE(dfxSnapshot, nullptr);
     EXPECT_EQ(dfxSnapshot->type, "EpgDfxSnapshotTask");
     EXPECT_EQ(dfxSnapshot->trigger.interval, std::chrono::milliseconds(500));
 
-    const auto* monitor = findTask("SlamMonitorTask");
+    const auto *monitor = findTask("SlamMonitorTask");
     ASSERT_NE(monitor, nullptr);
     EXPECT_EQ(monitor->inputs.at(8), "SlamUdpTask_1_to_SlamMonitorTask_8");
     EXPECT_NE(std::find(monitor->trigger.queues.begin(),
@@ -1013,21 +1069,22 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology) {
               monitor->trigger.queues.end());
 }
 
-TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology) {
+TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology)
+{
     auto registry = MakeSystemShapeRegistry();
-    const auto config = epg::ParseGraphConfigDotFile(
+    const auto config = Epg::ParseGraphConfigDotFile(
         RuntimeTopologyPath(),
         "cluster_system_runtime_graph",
         registry);
 
     ASSERT_EQ(config.tasks.size(), 10u);
-    ASSERT_EQ(config.queues.size(), 0u);
+    ASSERT_EQ(config.queues.size(), 9u);
 
     EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));
 
-    auto findTask = [&config](const std::string& name) -> const epg::TaskConfig* {
-        for (const auto& task : config.tasks) {
+    auto findTask = [&config](const std::string &name) -> const Epg::TaskConfig * {
+        for (const auto &task : config.tasks) {
             if (task.name == name) {
                 return &task;
             }
@@ -1035,45 +1092,69 @@ TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology)
         return nullptr;
     };
 
-    const auto* vehicleTelemetryRx = findTask("VehicleTelemetryRxTask");
+    const auto *vehicleTelemetryRx = findTask("VehicleTelemetryRxTask");
     ASSERT_NE(vehicleTelemetryRx, nullptr);
     EXPECT_EQ(vehicleTelemetryRx->trigger.interval, std::chrono::milliseconds(2));
+    EXPECT_EQ(vehicleTelemetryRx->outputs.at(0),
+              "VehicleTelemetryRxTask_0_to_SetpointStreamTask_0");
 
-    const auto* setpointStream = findTask("SetpointStreamTask");
+    const auto *setpointStream = findTask("SetpointStreamTask");
     ASSERT_NE(setpointStream, nullptr);
     EXPECT_EQ(setpointStream->trigger.interval, std::chrono::milliseconds(5));
+    EXPECT_EQ(setpointStream->inputs.at(0),
+              "VehicleTelemetryRxTask_0_to_SetpointStreamTask_0");
+    EXPECT_EQ(setpointStream->outputs.at(0),
+              "SetpointStreamTask_0_to_UdpCommandTask_0");
 
-    const auto* manualControl = findTask("ManualControlTask");
+    const auto *udpCommand = findTask("UdpCommandTask");
+    ASSERT_NE(udpCommand, nullptr);
+    EXPECT_EQ(udpCommand->inputs.at(0),
+              "SetpointStreamTask_0_to_UdpCommandTask_0");
+    EXPECT_EQ(udpCommand->outputs.at(0),
+              "UdpCommandTask_0_to_ManualControlTask_0");
+
+    const auto *manualControl = findTask("ManualControlTask");
     ASSERT_NE(manualControl, nullptr);
     EXPECT_EQ(manualControl->trigger.interval, std::chrono::milliseconds(50));
+    EXPECT_EQ(manualControl->inputs.at(0),
+              "UdpCommandTask_0_to_ManualControlTask_0");
 
-    const auto* forceRestart = findTask("ForceRestartTask");
+    const auto *forceRestart = findTask("ForceRestartTask");
     ASSERT_NE(forceRestart, nullptr);
     EXPECT_EQ(forceRestart->trigger.interval, std::chrono::milliseconds(50));
 
-    const auto* supervisor = findTask("RuntimeSupervisorTask");
+    const auto *supervisor = findTask("RuntimeSupervisorTask");
     ASSERT_NE(supervisor, nullptr);
     EXPECT_EQ(supervisor->trigger.interval, std::chrono::milliseconds(100));
 
-    const auto* redeploy = findTask("EpgRedeployTask");
+    const auto *redeploy = findTask("EpgRedeployTask");
     ASSERT_NE(redeploy, nullptr);
     EXPECT_EQ(redeploy->type, "EpgRedeployTask");
     EXPECT_EQ(redeploy->trigger.interval, std::chrono::milliseconds(500));
+    EXPECT_EQ(redeploy->inputs.at(0),
+              "RuntimeSupervisorTask_0_to_EpgRedeployTask_0");
 
-    const auto* dfxSnapshot = findTask("EpgDfxSnapshotTask");
+    const auto *dfxSnapshot = findTask("EpgDfxSnapshotTask");
     ASSERT_NE(dfxSnapshot, nullptr);
     EXPECT_EQ(dfxSnapshot->type, "EpgDfxSnapshotTask");
     EXPECT_EQ(dfxSnapshot->trigger.interval, std::chrono::milliseconds(500));
+    EXPECT_EQ(dfxSnapshot->inputs.at(0),
+              "DiscoveryBeaconTask_0_to_EpgDfxSnapshotTask_0");
+    EXPECT_EQ(dfxSnapshot->outputs.at(0),
+              "EpgDfxSnapshotTask_0_to_EpgOptimizeTask_0");
 
-    const auto* optimizer = findTask("EpgOptimizeTask");
+    const auto *optimizer = findTask("EpgOptimizeTask");
     ASSERT_NE(optimizer, nullptr);
     EXPECT_EQ(optimizer->type, "EpgOptimizeTask");
     EXPECT_EQ(optimizer->trigger.interval, std::chrono::milliseconds(5000));
+    EXPECT_EQ(optimizer->inputs.at(0),
+              "EpgDfxSnapshotTask_0_to_EpgOptimizeTask_0");
 }
 
-TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology) {
+TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology)
+{
     auto registry = MakeCalibShapeRegistry();
-    const auto config = epg::ParseGraphConfigDotFile(
+    const auto config = Epg::ParseGraphConfigDotFile(
         RuntimeTopologyPath(),
         "cluster_calib_session_graph",
         registry);
@@ -1084,8 +1165,8 @@ TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology) {
     EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));
 
-    auto findTask = [&config](const std::string& name) -> const epg::TaskConfig* {
-        for (const auto& task : config.tasks) {
+    auto findTask = [&config](const std::string &name) -> const Epg::TaskConfig * {
+        for (const auto &task : config.tasks) {
             if (task.name == name) {
                 return &task;
             }
@@ -1093,35 +1174,36 @@ TEST(EventPipelineGraphDot, CompilesCalibSubgraphFromMaintainedTopology) {
         return nullptr;
     };
 
-    const auto* camera = findTask("CalibCameraAcquireTask");
+    const auto *camera = findTask("CalibCameraAcquireTask");
     ASSERT_NE(camera, nullptr);
     EXPECT_EQ(camera->inputs.at(0), "CalibResourceTask_0_to_CalibCameraAcquireTask_0");
     EXPECT_EQ(camera->inputs.at(1), "CalibClockTask_0_to_CalibCameraAcquireTask_1");
 
-    const auto* pace = findTask("CalibPacingFilterTask");
+    const auto *pace = findTask("CalibPacingFilterTask");
     ASSERT_NE(pace, nullptr);
     EXPECT_EQ(pace->inputs.at(0), "CalibCameraAcquireTask_0_to_CalibPacingFilterTask_0");
 
-    const auto* preview = findTask("CalibUdpPreviewTask");
+    const auto *preview = findTask("CalibUdpPreviewTask");
     ASSERT_NE(preview, nullptr);
     EXPECT_EQ(preview->inputs.at(0), "CalibCameraAcquireTask_1_to_CalibUdpPreviewTask_0");
 
-    const auto* completion = findTask("CalibCompletionTask");
+    const auto *completion = findTask("CalibCompletionTask");
     ASSERT_NE(completion, nullptr);
     EXPECT_EQ(completion->inputs.at(4), "CalibResourceTask_2_to_CalibCompletionTask_4");
     EXPECT_NE(std::find(completion->trigger.queues.begin(), completion->trigger.queues.end(),
                         "CalibResourceTask_2_to_CalibCompletionTask_4"),
               completion->trigger.queues.end());
 
-    const auto* dfxSnapshot = findTask("CalibGraphDfxSnapshotTask");
+    const auto *dfxSnapshot = findTask("CalibGraphDfxSnapshotTask");
     ASSERT_NE(dfxSnapshot, nullptr);
     EXPECT_EQ(dfxSnapshot->type, "EpgDfxSnapshotTask");
     EXPECT_EQ(dfxSnapshot->trigger.interval, std::chrono::milliseconds(500));
 }
 
-TEST(EventPipelineGraphLifecycle, ResetForStartClearsStopRequest) {
+TEST(EventPipelineGraphLifecycle, ResetForStartClearsStopRequest)
+{
     std::atomic<bool> stop{true};
-    smartdrone::core::application::EpgGraphLifecycle lifecycle({
+    SmartDrone::core::application::EpgGraphLifecycle lifecycle({
         stop,
         []() { return true; },
         []() {},
@@ -1135,13 +1217,14 @@ TEST(EventPipelineGraphLifecycle, ResetForStartClearsStopRequest) {
     EXPECT_FALSE(lifecycle.StopRequested());
 }
 
-TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently) {
-    smartdrone::core::application::EpgRedeployCoordinator redeploy;
+TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently)
+{
+    SmartDrone::core::application::EpgRedeployCoordinator redeploy;
 
     redeploy.RequestSystemRedeploy({
         "cluster_system_runtime_graph",
         "optimized config changed",
-        "config/epg/epg_topology.dot:v2",
+        "config/epg/epg_topology.dot:v3",
         "cluster_system_runtime_graph",
         "/tmp/smartdrone_epg_system_profile.json",
         1000,
@@ -1152,11 +1235,11 @@ TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently) {
     });
     EXPECT_TRUE(redeploy.SystemRedeployRequested());
     EXPECT_FALSE(redeploy.SessionRedeployRequested());
-    smartdrone::core::application::EpgRedeployRequest systemRequest;
+    SmartDrone::core::application::EpgRedeployRequest systemRequest;
     EXPECT_TRUE(redeploy.TakeSystemRedeployRequest(systemRequest));
     EXPECT_EQ(systemRequest.graphName, "cluster_system_runtime_graph");
     EXPECT_EQ(systemRequest.reason, "optimized config changed");
-    EXPECT_EQ(systemRequest.topologyVersion, "config/epg/epg_topology.dot:v2");
+    EXPECT_EQ(systemRequest.topologyVersion, "config/epg/epg_topology.dot:v3");
     EXPECT_EQ(systemRequest.sourceProfile, "cluster_system_runtime_graph");
     EXPECT_EQ(systemRequest.sourceProfilePath,
               "/tmp/smartdrone_epg_system_profile.json");
@@ -1168,7 +1251,7 @@ TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently) {
     EXPECT_EQ(systemRequest.solverReportPath,
               "output/epg/optimized_system_runtime_graph_report.json");
     const auto description =
-        smartdrone::core::application::DescribeEpgRedeployRequest(
+        SmartDrone::core::application::DescribeEpgRedeployRequest(
             systemRequest);
     EXPECT_NE(description.find("graph=cluster_system_runtime_graph"),
               std::string::npos);
@@ -1182,7 +1265,7 @@ TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently) {
     redeploy.RequestSessionRedeploy({
         "cluster_slam_session_graph",
         "optimized config changed",
-        "config/epg/epg_topology.dot:v2",
+        "config/epg/epg_topology.dot:v3",
         "cluster_slam_session_graph",
         "/tmp/smartdrone_epg_slam_profile.json",
         2000,
@@ -1193,7 +1276,7 @@ TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently) {
     });
     EXPECT_TRUE(redeploy.SessionRedeployRequested());
     EXPECT_FALSE(redeploy.SystemRedeployRequested());
-    smartdrone::core::application::EpgRedeployRequest sessionRequest;
+    SmartDrone::core::application::EpgRedeployRequest sessionRequest;
     EXPECT_TRUE(redeploy.TakeSessionRedeployRequest(sessionRequest));
     EXPECT_EQ(sessionRequest.graphName, "cluster_slam_session_graph");
     EXPECT_EQ(sessionRequest.reason, "optimized config changed");
@@ -1206,8 +1289,9 @@ TEST(EventPipelineGraphRedeploy, TracksSystemAndSessionRequestsIndependently) {
     EXPECT_FALSE(redeploy.TakeSessionRedeployRequest(sessionRequest));
 }
 
-TEST(EventPipelineGraphRedeploy, WaitsForSystemRedeploySignal) {
-    smartdrone::core::application::EpgRedeployCoordinator redeploy;
+TEST(EventPipelineGraphRedeploy, WaitsForSystemRedeploySignal)
+{
+    SmartDrone::core::application::EpgRedeployCoordinator redeploy;
     std::atomic<bool> requested{false};
     std::thread worker([&redeploy, &requested]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -1220,49 +1304,55 @@ TEST(EventPipelineGraphRedeploy, WaitsForSystemRedeploySignal) {
 
     EXPECT_TRUE(redeploy.WaitForSystemRedeploy(std::chrono::milliseconds(200)));
     EXPECT_TRUE(requested.load());
-    smartdrone::core::application::EpgRedeployRequest request;
+    SmartDrone::core::application::EpgRedeployRequest request;
     EXPECT_TRUE(redeploy.TakeSystemRedeployRequest(request));
     EXPECT_EQ(request.graphName, "cluster_system_runtime_graph");
     EXPECT_EQ(request.reason, "optimized config changed");
     worker.join();
 }
 
-TEST(EventPipelineGraphDotTopology, RunsBasicTopologyFromDot) {
+TEST(EventPipelineGraphDotTopology, RunsBasicTopologyFromDot)
+{
     RunTopologyFromDotFile(
         "basic_pipeline.dot",
         {"source_0_to_sink_0"},
         {"source", "sink"});
 }
 
-TEST(EventPipelineGraphDotTopology, RunsFanoutTopologyFromDot) {
+TEST(EventPipelineGraphDotTopology, RunsFanoutTopologyFromDot)
+{
     RunTopologyFromDotFile(
         "fanout_pipeline.dot",
         {"fanout_source_0_to_left_sink_0", "fanout_source_1_to_right_sink_0"},
         {"fanout_source", "left_sink", "right_sink"});
 }
 
-TEST(EventPipelineGraphDotTopology, RunsLinearChainTopologyFromDot) {
+TEST(EventPipelineGraphDotTopology, RunsLinearChainTopologyFromDot)
+{
     RunTopologyFromDotFile(
         "chain_pipeline.dot",
         {"source_0_to_forward_0", "forward_0_to_sink_0"},
         {"source", "forward", "sink"});
 }
 
-TEST(EventPipelineGraphDotTopology, RunsParallelIndependentTopologyFromDot) {
+TEST(EventPipelineGraphDotTopology, RunsParallelIndependentTopologyFromDot)
+{
     RunTopologyFromDotFile(
         "parallel_pipeline.dot",
         {"left_source_0_to_left_sink_0", "right_source_0_to_right_sink_0"},
         {"left_source", "left_sink", "right_source", "right_sink"});
 }
 
-TEST(EventPipelineGraphDotTopology, RunsFanInJoinTopologyFromDot) {
+TEST(EventPipelineGraphDotTopology, RunsFanInJoinTopologyFromDot)
+{
     RunTopologyFromDotFile(
         "fanin_pipeline.dot",
         {"left_source_0_to_join_sink_0", "right_source_0_to_join_sink_1"},
         {"left_source", "right_source", "join_sink"});
 }
 
-TEST(EventPipelineGraphDotTopology, RunsDiamondTopologyFromDot) {
+TEST(EventPipelineGraphDotTopology, RunsDiamondTopologyFromDot)
+{
     RunTopologyFromDotFile(
         "diamond_pipeline.dot",
         {"fanout_source_0_to_left_forward_0",
@@ -1271,31 +1361,37 @@ TEST(EventPipelineGraphDotTopology, RunsDiamondTopologyFromDot) {
         {"fanout_source", "left_forward", "join_sink"});
 }
 
-TEST(EventPipelineGraphMermaid, RejectsInvalidMermaidTopology) {
-    EXPECT_THROW(epg::ParseGraphConfigMermaid(R"(
+TEST(EventPipelineGraphMermaid, RejectsInvalidMermaidTopology)
+{
+    EXPECT_THROW(Epg::ParseGraphConfigMermaid(R"(
       flowchart LR
         source[type=TestSourceTask; trigger=periodic; interval_ms=1]
         source.out -->|type=TestPacket; depth=8; overflow=drop_newest| missing.in
-    )"), std::runtime_error);
+    )"),
+                 std::runtime_error);
 
-    EXPECT_THROW(epg::ParseGraphConfigMermaid(R"(
+    EXPECT_THROW(Epg::ParseGraphConfigMermaid(R"(
       flowchart LR
         source[type=TestSourceTask; trigger=periodic; interval_ms=1]
         sink[type=TestSinkTask; trigger=any_queue_ready]
         source.out -->|type=TestPacket; overflow=drop_newest| sink.in
-    )"), std::runtime_error);
+    )"),
+                 std::runtime_error);
 
     auto registry = MakeRegistry();
-    EXPECT_THROW(epg::ParseGraphConfigMermaid(R"(
+    EXPECT_THROW(Epg::ParseGraphConfigMermaid(R"(
       flowchart LR
         source["type=TestSourceTask; trigger=periodic; interval_ms=1"]
         sink["type=TestSinkTask; trigger=any_queue_ready; trigger_queues=OtherPacket"]
         source -->|"type=TestPacket; depth=1; overflow=drop_newest"| sink
-    )", registry), std::runtime_error);
+    )",
+                                              registry),
+                 std::runtime_error);
 }
 
-TEST(EventPipelineGraph, RejectsMultipleConsumersForSpscQueue) {
-    const char* json = R"({
+TEST(EventPipelineGraph, RejectsMultipleConsumersForSpscQueue)
+{
+    const char *json = R"({
       "queues": [
         {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "drop_newest"}
       ],
@@ -1324,7 +1420,8 @@ TEST(EventPipelineGraph, RejectsMultipleConsumersForSpscQueue) {
     ExpectConfigureThrows(json);
 }
 
-TEST(EventPipelineGraph, AllQueueReadyWaitsForAllInputs) {
+TEST(EventPipelineGraph, AllQueueReadyWaitsForAllInputs)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
@@ -1364,7 +1461,8 @@ TEST(EventPipelineGraph, AllQueueReadyWaitsForAllInputs) {
     EXPECT_EQ(taskDiagnostics.at("all_sink").errorCount, 0u);
 }
 
-TEST(EventPipelineGraph, PeriodicOrAnyQueueReadyRunsWithQueueTrigger) {
+TEST(EventPipelineGraph, PeriodicOrAnyQueueReadyRunsWithQueueTrigger)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
@@ -1397,7 +1495,8 @@ TEST(EventPipelineGraph, PeriodicOrAnyQueueReadyRunsWithQueueTrigger) {
     EXPECT_EQ(taskDiagnostics.at("hybrid_sink").errorCount, 0u);
 }
 
-TEST(EventPipelineGraph, PeriodicOrAnyQueueReadyRunsWithoutQueuedItems) {
+TEST(EventPipelineGraph, PeriodicOrAnyQueueReadyRunsWithoutQueuedItems)
+{
     auto registry = MakeRegistry();
     int ticks = 0;
     registry.RegisterTaskFactory(
@@ -1427,7 +1526,8 @@ TEST(EventPipelineGraph, PeriodicOrAnyQueueReadyRunsWithoutQueuedItems) {
     EXPECT_EQ(graph.TaskDiagnostics().at("hybrid").errorCount, 0u);
 }
 
-TEST(EventPipelineGraph, PeriodicTaskCanRunWithoutQueues) {
+TEST(EventPipelineGraph, PeriodicTaskCanRunWithoutQueues)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
@@ -1451,7 +1551,8 @@ TEST(EventPipelineGraph, PeriodicTaskCanRunWithoutQueues) {
     EXPECT_EQ(taskDiagnostics.at("heartbeat").errorCount, 0u);
 }
 
-TEST(EventPipelineGraph, SupportsCapturedTaskFactoryForNativeAdapters) {
+TEST(EventPipelineGraph, SupportsCapturedTaskFactoryForNativeAdapters)
+{
     int ticks = 0;
     Registry registry;
     registry.RegisterTaskFactory(
@@ -1482,7 +1583,8 @@ TEST(EventPipelineGraph, SupportsCapturedTaskFactoryForNativeAdapters) {
     EXPECT_GT(graph.TaskDiagnostics().at("counter").loopCount, 0u);
 }
 
-TEST(EventPipelineGraph, TaskExceptionsAreCountedAndRunnerKeepsAlive) {
+TEST(EventPipelineGraph, TaskExceptionsAreCountedAndRunnerKeepsAlive)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
@@ -1506,7 +1608,8 @@ TEST(EventPipelineGraph, TaskExceptionsAreCountedAndRunnerKeepsAlive) {
     EXPECT_EQ(diag.errorCount, diag.loopCount);
 }
 
-TEST(EventPipelineGraph, TaskBudgetAndDeadlineViolationsAreCounted) {
+TEST(EventPipelineGraph, TaskBudgetAndDeadlineViolationsAreCounted)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
@@ -1533,7 +1636,8 @@ TEST(EventPipelineGraph, TaskBudgetAndDeadlineViolationsAreCounted) {
     EXPECT_GT(diag.p50LoopUs, 0u);
 }
 
-TEST(EventPipelineGraph, ContextSlotErrorsAreCountedAsTaskErrors) {
+TEST(EventPipelineGraph, ContextSlotErrorsAreCountedAsTaskErrors)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
@@ -1556,7 +1660,8 @@ TEST(EventPipelineGraph, ContextSlotErrorsAreCountedAsTaskErrors) {
     EXPECT_GT(diag.errorCount, 0u);
 }
 
-TEST(EventPipelineGraph, LifecycleStateAndAccessorsBehaveAsExpected) {
+TEST(EventPipelineGraph, LifecycleStateAndAccessorsBehaveAsExpected)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
@@ -1591,8 +1696,9 @@ TEST(EventPipelineGraph, LifecycleStateAndAccessorsBehaveAsExpected) {
     EXPECT_FALSE(graph.Running());
 }
 
-TEST(EventPipelineGraphManifest, BuildsCentralizedArtifactPaths) {
-    using smartdrone::core::application::BuildEpgTaskArtifactPaths;
+TEST(EventPipelineGraphManifest, BuildsCentralizedArtifactPaths)
+{
+    using SmartDrone::core::application::BuildEpgTaskArtifactPaths;
 
     const auto paths = BuildEpgTaskArtifactPaths({
         "smartdrone_epg_unit",
@@ -1610,7 +1716,8 @@ TEST(EventPipelineGraphManifest, BuildsCentralizedArtifactPaths) {
               "config/epg/unit.dot:v7");
 }
 
-TEST(EventPipelineGraphManifest, RuntimeManifestsUseCentralizedArtifacts) {
+TEST(EventPipelineGraphManifest, RuntimeManifestsUseCentralizedArtifacts)
+{
     const auto &system = EpgManifestForDomain(EpgDomain::SystemRuntime);
     const auto systemTaskTypes = EpgTaskCatalogTypes(system);
     EXPECT_EQ(systemTaskTypes.size(), 10u);
@@ -1621,7 +1728,7 @@ TEST(EventPipelineGraphManifest, RuntimeManifestsUseCentralizedArtifacts) {
     EXPECT_EQ(system.topologyPath, "config/epg/epg_topology.dot");
     EXPECT_EQ(
         system.topologyVersion,
-        BuildEpgTaskTopologyVersion({system.topologyPath, "v2"}));
+        BuildEpgTaskTopologyVersion({system.topologyPath, "v3"}));
     EXPECT_EQ(system.artifactPaths.dfxSnapshotPath,
               "/tmp/smartdrone_epg_system.json");
     EXPECT_EQ(system.artifactPaths.profilePath,
@@ -1670,134 +1777,144 @@ TEST(EventPipelineGraphManifest, RuntimeManifestsUseCentralizedArtifacts) {
               "output/epg/optimized_calib_session_graph_report.json");
 }
 
-TEST(EventPipelineGraphManifest, ValidatesRuntimeTuningManifest) {
+TEST(EventPipelineGraphManifest, ValidatesRuntimeTuningManifest)
+{
     auto manifest = MakeValidTestManifest();
     manifest.runtimeTuning.push_back({"source", true, false, false});
-    epg::GraphConfig config;
+    Epg::GraphConfig config;
     config.tasks.push_back({"source", "TestSourceTask"});
 
     EXPECT_NO_THROW(
-        smartdrone::core::application::ValidateEpgTaskRuntimeTuning(
+        SmartDrone::core::application::ValidateEpgTaskRuntimeTuning(
             manifest, config, {{"source", true, false, false}}));
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskRuntimeTuning(
+        SmartDrone::core::application::ValidateEpgTaskRuntimeTuning(
             manifest, config, {{"source", false, true, false}}),
         std::runtime_error);
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskRuntimeTuning(
+        SmartDrone::core::application::ValidateEpgTaskRuntimeTuning(
             manifest, config, {{"missing", true, false, false}}),
         std::runtime_error);
 
     auto duplicate = manifest;
     duplicate.runtimeTuning.push_back({"source", false, true, false});
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskManifest(duplicate),
+        SmartDrone::core::application::ValidateEpgTaskManifest(duplicate),
         std::runtime_error);
 
     auto incomplete = manifest;
     incomplete.runtimeTuning.push_back({"", false, false, false});
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskManifest(incomplete),
+        SmartDrone::core::application::ValidateEpgTaskManifest(incomplete),
         std::runtime_error);
 
     auto missingGraphTask = manifest;
     missingGraphTask.runtimeTuning.push_back({"missing", true, false, false});
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskGraphManifest(
+        SmartDrone::core::application::ValidateEpgTaskGraphManifest(
             missingGraphTask, config),
         std::runtime_error);
 }
 
-TEST(EventPipelineGraphManifest, RejectsDuplicateCatalogTaskTypes) {
+TEST(EventPipelineGraphManifest, RejectsDuplicateCatalogTaskTypes)
+{
     auto manifest = MakeValidTestManifest();
     manifest.catalog.push_back(
         {"TestSourceTask", "duplicate", "cpu", 1000, 2000, false});
 
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+        SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
             manifest, TestSourceFactoryResolver),
         std::runtime_error);
 }
 
-TEST(EventPipelineGraphManifest, RejectsAliasTargetOutsideCatalog) {
+TEST(EventPipelineGraphManifest, RejectsAliasTargetOutsideCatalog)
+{
     auto manifest = MakeValidTestManifest();
     manifest.aliases.push_back({"LegacySourceTask", "MissingTask"});
 
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+        SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
             manifest, TestSourceFactoryResolver),
         std::runtime_error);
 }
 
-TEST(EventPipelineGraphManifest, RejectsDuplicateAliases) {
+TEST(EventPipelineGraphManifest, RejectsDuplicateAliases)
+{
     auto manifest = MakeValidTestManifest();
     manifest.aliases.push_back({"LegacySourceTask", "TestSourceTask"});
     manifest.aliases.push_back({"LegacySourceTask", "TestSourceTask"});
 
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+        SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
             manifest, TestSourceFactoryResolver),
         std::runtime_error);
 }
 
-TEST(EventPipelineGraphManifest, RejectsAliasShadowingCatalogType) {
+TEST(EventPipelineGraphManifest, RejectsAliasShadowingCatalogType)
+{
     auto manifest = MakeValidTestManifest();
     manifest.aliases.push_back({"TestSourceTask", "TestSourceTask"});
 
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+        SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
             manifest, TestSourceFactoryResolver),
         std::runtime_error);
 }
 
-TEST(EventPipelineGraphManifest, RejectsIncompleteAliasMetadata) {
+TEST(EventPipelineGraphManifest, RejectsIncompleteAliasMetadata)
+{
     auto manifest = MakeValidTestManifest();
     manifest.aliases.push_back({"", "TestSourceTask"});
 
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+        SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
             manifest, TestSourceFactoryResolver),
         std::runtime_error);
 }
 
-TEST(EventPipelineGraphManifest, RejectsEmptyCatalog) {
+TEST(EventPipelineGraphManifest, RejectsEmptyCatalog)
+{
     auto manifest = MakeValidTestManifest();
     manifest.catalog.clear();
 
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+        SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
             manifest, TestSourceFactoryResolver),
         std::runtime_error);
 }
 
-TEST(EventPipelineGraphManifest, RejectsIncompleteCatalogMetadata) {
+TEST(EventPipelineGraphManifest, RejectsIncompleteCatalogMetadata)
+{
     auto manifest = MakeValidTestManifest();
     manifest.catalog[0].role.clear();
 
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+        SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
             manifest, TestSourceFactoryResolver),
         std::runtime_error);
 }
 
-TEST(EventPipelineGraphManifest, RejectsInvalidCatalogTiming) {
+TEST(EventPipelineGraphManifest, RejectsInvalidCatalogTiming)
+{
     auto manifest = MakeValidTestManifest();
     manifest.catalog[0].budgetUs = 2000;
     manifest.catalog[0].deadlineUs = 1000;
 
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+        SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
             manifest, TestSourceFactoryResolver),
         std::runtime_error);
 }
 
-TEST(EventPipelineGraphManifest, RejectsIncompleteManifestMetadata) {
+TEST(EventPipelineGraphManifest, RejectsIncompleteManifestMetadata)
+{
     {
         auto manifest = MakeValidTestManifest();
         manifest.subgraphName.clear();
 
         EXPECT_THROW(
-            smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
                 manifest, TestSourceFactoryResolver),
             std::runtime_error);
     }
@@ -1806,7 +1923,7 @@ TEST(EventPipelineGraphManifest, RejectsIncompleteManifestMetadata) {
         manifest.topologyVersion.clear();
 
         EXPECT_THROW(
-            smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
                 manifest, TestSourceFactoryResolver),
             std::runtime_error);
     }
@@ -1815,16 +1932,17 @@ TEST(EventPipelineGraphManifest, RejectsIncompleteManifestMetadata) {
         manifest.artifactPaths.profilePath.clear();
 
         EXPECT_THROW(
-            smartdrone::core::application::ValidateEpgTaskFactoryManifest(
+            SmartDrone::core::application::ValidateEpgTaskFactoryManifest(
                 manifest, TestSourceFactoryResolver),
             std::runtime_error);
     }
 }
 
-TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
+TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
+{
     auto manifest = MakeValidTestManifest();
     manifest.topologyVersion = "test-topology";
-    const auto optimized = epg::ParseOptimizedGraphJson(R"({
+    const auto optimized = Epg::ParseOptimizedGraphJson(R"({
       "schema": "smartdrone.epg.optimized_config.v1",
       "targetGraph": "test_graph",
       "topologyVersion": "test-topology",
@@ -1850,9 +1968,9 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
       ]
     })");
     EXPECT_NO_THROW(
-        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+        SmartDrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, optimized));
-    const auto report = epg::ParseSolverReportJson(R"({
+    const auto report = Epg::ParseSolverReportJson(R"({
       "schema": "smartdrone.epg.solver_report.v1",
       "targetGraph": "test_graph",
       "topologyVersion": "test-topology",
@@ -1918,92 +2036,92 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
       ]
     })");
     EXPECT_NO_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, report));
-    auto sourceProfile = epg::GraphProfile{};
-    sourceProfile.metadata.schema = epg::GRAPH_PROFILE_SCHEMA;
+    auto sourceProfile = Epg::GraphProfile{};
+    sourceProfile.metadata.schema = Epg::GRAPH_PROFILE_SCHEMA;
     sourceProfile.metadata.graph = "test_graph";
     sourceProfile.metadata.topologyVersion = "test-topology";
     sourceProfile.metadata.timestampMs = 123;
     sourceProfile.topology = optimized.config;
     EXPECT_NO_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, sourceProfile, optimized, report));
 
     auto wrongTarget = optimized;
     wrongTarget.metadata.targetGraph = "other_graph";
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+        SmartDrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, wrongTarget),
         std::runtime_error);
 
     auto wrongTopology = optimized;
     wrongTopology.metadata.topologyVersion = "other-topology";
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+        SmartDrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, wrongTopology),
         std::runtime_error);
 
     auto wrongSource = optimized;
     wrongSource.metadata.sourceProfile = "other_graph";
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+        SmartDrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, wrongSource),
         std::runtime_error);
 
     auto wrongGeneration = optimized;
     wrongGeneration.metadata.generatedAtMs = 1;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+        SmartDrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, wrongGeneration),
         std::runtime_error);
 
     auto wrongTask = optimized;
     wrongTask.config.tasks[0].type = "TestSinkTask";
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+        SmartDrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, wrongTask),
         std::runtime_error);
 
     auto wrongScheduling = optimized;
     wrongScheduling.config.tasks[0].scheduling.budgetUs = 999;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgOptimizedGraphManifest(
+        SmartDrone::core::application::ValidateEpgOptimizedGraphManifest(
             manifest, wrongScheduling),
         std::runtime_error);
 
     auto wrongReportTime = report.metadata;
     wrongReportTime.generatedAtMs = 999;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReportManifest(
+        SmartDrone::core::application::ValidateEpgSolverReportManifest(
             manifest, optimized.metadata, wrongReportTime),
         std::runtime_error);
 
     auto wrongReportVersion = report.metadata;
     wrongReportVersion.solverVersion = "other-solver";
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReportManifest(
+        SmartDrone::core::application::ValidateEpgSolverReportManifest(
             manifest, optimized.metadata, wrongReportVersion),
         std::runtime_error);
 
     auto missingDecision = report;
     missingDecision.decisions.pop_back();
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, missingDecision),
         std::runtime_error);
 
     auto duplicateDecision = report;
     duplicateDecision.decisions.push_back(duplicateDecision.decisions.front());
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, duplicateDecision),
         std::runtime_error);
 
     auto wrongScore = report;
     wrongScore.score.totalPenalty = 1;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongScore),
         std::runtime_error);
 
@@ -2011,63 +2129,63 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     wrongScoreComponent.score.queuePressure = 1;
     wrongScoreComponent.score.totalPenalty = 130500;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongScoreComponent),
         std::runtime_error);
 
     auto wrongDecisionDepth = report;
     wrongDecisionDepth.decisions[0].depthAfter = 999;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongDecisionDepth),
         std::runtime_error);
 
     auto wrongTaskInterval = report;
     wrongTaskInterval.decisions[1].intervalAfterMs = 999;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongTaskInterval),
         std::runtime_error);
 
     auto wrongConstraint = report;
     wrongConstraint.constraints.maxQueueDepth = 1;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongConstraint),
         std::runtime_error);
 
     auto wrongCatalogRole = report;
     wrongCatalogRole.decisions[1].catalogRole = "other";
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongCatalogRole),
         std::runtime_error);
 
     auto wrongReplaceable = report;
     wrongReplaceable.decisions[1].replaceable = true;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongReplaceable),
         std::runtime_error);
 
     auto wrongReason = report;
     wrongReason.decisions[1].reason = "keep";
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, optimized, wrongReason),
         std::runtime_error);
 
     auto wrongSourceProfile = sourceProfile;
     wrongSourceProfile.metadata.timestampMs = 999;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, wrongSourceProfile, optimized, report),
         std::runtime_error);
 
     auto wrongSourceQueue = sourceProfile;
     wrongSourceQueue.topology.queues[0].depth = 999;
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, wrongSourceQueue, optimized, report),
         std::runtime_error);
 
@@ -2075,12 +2193,13 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch) {
     wrongSourceTask.topology.tasks[0].trigger.interval =
         std::chrono::milliseconds(999);
     EXPECT_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, wrongSourceTask, optimized, report),
         std::runtime_error);
 }
 
-TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
+TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics)
+{
     auto registry = MakeRegistry();
     EventPipelineGraph graph(registry);
 
@@ -2093,7 +2212,7 @@ TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
         "test_graph", 123, "test-topology",
         R"([{"taskType":"TestSourceTask","role":"source","resource":"cpu","budgetUs":1000,"deadlineUs":2000,"replaceable":false}])");
     EXPECT_NE(profile.find(std::string("\"schema\": \"") +
-                               epg::GRAPH_PROFILE_SCHEMA + "\""),
+                           Epg::GRAPH_PROFILE_SCHEMA + "\""),
               std::string::npos);
     EXPECT_NE(profile.find("\"graph\": \"test_graph\""), std::string::npos);
     EXPECT_NE(profile.find("\"topologyVersion\": \"test-topology\""),
@@ -2130,25 +2249,25 @@ TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
     EXPECT_NE(profile.find("\"droppedPerSecond\""), std::string::npos);
     EXPECT_NE(profile.find("\"maxDepthObserved\""), std::string::npos);
 
-    const auto topology = epg::ParseGraphConfigJsonField(profile, "topology");
+    const auto topology = Epg::ParseGraphConfigJsonField(profile, "topology");
     ASSERT_EQ(topology.queues.size(), 1u);
     ASSERT_EQ(topology.tasks.size(), 2u);
     EXPECT_EQ(topology.queues.front().name, "packets");
     EXPECT_EQ(topology.tasks.front().name, "source");
 
-    const auto metadata = epg::ParseGraphProfileMetadataJson(profile);
-    EXPECT_EQ(metadata.schema, epg::GRAPH_PROFILE_SCHEMA);
+    const auto metadata = Epg::ParseGraphProfileMetadataJson(profile);
+    EXPECT_EQ(metadata.schema, Epg::GRAPH_PROFILE_SCHEMA);
     EXPECT_EQ(metadata.graph, "test_graph");
     EXPECT_EQ(metadata.topologyVersion, "test-topology");
     EXPECT_EQ(metadata.timestampMs, 123u);
 
-    const auto diagnostics = epg::ParseGraphProfileDiagnosticsJson(profile);
+    const auto diagnostics = Epg::ParseGraphProfileDiagnosticsJson(profile);
     ASSERT_EQ(diagnostics.queues.size(), 1u);
     ASSERT_EQ(diagnostics.tasks.size(), 2u);
     EXPECT_NE(diagnostics.queues.find("packets"), diagnostics.queues.end());
     EXPECT_NE(diagnostics.tasks.find("source"), diagnostics.tasks.end());
 
-    const auto parsedProfile = epg::ParseGraphProfileJson(profile);
+    const auto parsedProfile = Epg::ParseGraphProfileJson(profile);
     EXPECT_EQ(parsedProfile.metadata.graph, "test_graph");
     ASSERT_EQ(parsedProfile.taskCatalog.size(), 1u);
     EXPECT_EQ(parsedProfile.taskCatalog.front().taskType, "TestSourceTask");
@@ -2159,7 +2278,7 @@ TEST(EventPipelineGraph, ProfileJsonIncludesTopologyAndDiagnostics) {
     ASSERT_EQ(parsedProfile.topology.queues.size(), 1u);
     ASSERT_EQ(parsedProfile.diagnostics.tasks.size(), 2u);
     EXPECT_THROW(
-        epg::ParseGraphProfileJson("{\"schema\":\"smartdrone.epg.profile.v1\",\"graph\":\"missing\"}"),
+        Epg::ParseGraphProfileJson("{\"schema\":\"smartdrone.epg.profile.v1\",\"graph\":\"missing\"}"),
         std::runtime_error);
 }
 
@@ -2172,13 +2291,14 @@ TEST(EventPipelineGraph, RejectsProfileDiagnosticsMissingMetric)
             "maxDepthObserved": 0
           }
         },
-        "tasks": {"source": )") + MinimalTaskDiagnosticsJson() +
-        R"(}
+        "tasks": {"source": )") +
+                         MinimalTaskDiagnosticsJson() +
+                         R"(}
       }
     })";
 
     try {
-        (void)epg::ParseGraphProfileDiagnosticsJson(profile);
+        (void)Epg::ParseGraphProfileDiagnosticsJson(profile);
         FAIL() << "expected missing diagnostic metric to be rejected";
     } catch (const std::runtime_error &error) {
         const std::string message = error.what();
@@ -2187,13 +2307,14 @@ TEST(EventPipelineGraph, RejectsProfileDiagnosticsMissingMetric)
     }
 }
 
-TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
+TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile)
+{
     const std::string profilePath = "/tmp/smartdrone_epg_optimizer_test_profile.json";
     const std::string outputPath = "/tmp/smartdrone_epg_optimizer_test_optimized.json";
     const std::string reportPath =
         "/tmp/smartdrone_epg_optimizer_test_optimized_report.json";
     const std::uint64_t nowMs = 1000;
-    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+    SmartDrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
         R"({
           "schema": "smartdrone.epg.profile.v1",
@@ -2333,7 +2454,7 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
         {"TestSinkTask", "sink", "cpu", 1000, 3000, false});
 
     const auto result =
-        smartdrone::core::application::OptimizeEpgProfileForManifest(
+        SmartDrone::core::application::OptimizeEpgProfileForManifest(
             manifest, nowMs + 10);
     EXPECT_TRUE(result.optimized) << result.message;
     EXPECT_TRUE(result.configChanged);
@@ -2343,13 +2464,13 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     EXPECT_EQ(result.sourceProfilePath, profilePath);
     EXPECT_EQ(result.sourceTimestampMs, 1000u);
     EXPECT_EQ(result.generatedAtMs, 1010u);
-    EXPECT_EQ(result.solverVersion, epg::NATIVE_HEURISTIC_SOLVER_VERSION);
+    EXPECT_EQ(result.solverVersion, Epg::NATIVE_HEURISTIC_SOLVER_VERSION);
     EXPECT_EQ(result.optimizedConfigPath, outputPath);
     EXPECT_EQ(result.solverReportPath, reportPath);
 
     const std::string optimized = ReadFileText(outputPath);
     EXPECT_NE(optimized.find(std::string("\"schema\": \"") +
-                                 epg::OPTIMIZED_GRAPH_SCHEMA + "\""),
+                             Epg::OPTIMIZED_GRAPH_SCHEMA + "\""),
               std::string::npos);
     EXPECT_NE(optimized.find("\"targetGraph\": \"test_graph\""),
               std::string::npos);
@@ -2358,12 +2479,12 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     EXPECT_NE(optimized.find("\"topologyVersion\": \"test-topology\""),
               std::string::npos);
     EXPECT_NE(optimized.find(std::string("\"solverVersion\": \"") +
-                                 epg::NATIVE_HEURISTIC_SOLVER_VERSION + "\""),
+                             Epg::NATIVE_HEURISTIC_SOLVER_VERSION + "\""),
               std::string::npos);
     EXPECT_NE(optimized.find("\"generatedAtMs\": 1010"),
               std::string::npos);
 
-    const auto config = epg::ParseGraphConfigJson(optimized);
+    const auto config = Epg::ParseGraphConfigJson(optimized);
     ASSERT_EQ(config.queues.size(), 1u);
     ASSERT_EQ(config.tasks.size(), 2u);
     EXPECT_EQ(config.queues.front().depth, 8u);
@@ -2376,14 +2497,14 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
 
     const std::string report = ReadFileText(reportPath);
     EXPECT_NE(report.find(std::string("\"schema\": \"") +
-                              epg::SOLVER_REPORT_SCHEMA + "\""),
+                          Epg::SOLVER_REPORT_SCHEMA + "\""),
               std::string::npos);
     EXPECT_NE(report.find("\"targetGraph\": \"test_graph\""),
               std::string::npos);
     EXPECT_NE(report.find("\"topologyVersion\": \"test-topology\""),
               std::string::npos);
     EXPECT_NE(report.find(std::string("\"solverVersion\": \"") +
-                              epg::NATIVE_HEURISTIC_SOLVER_VERSION + "\""),
+                          Epg::NATIVE_HEURISTIC_SOLVER_VERSION + "\""),
               std::string::npos);
     EXPECT_NE(report.find("\"generatedAtMs\": 1010"), std::string::npos);
     EXPECT_NE(report.find("\"reason\": \"increase_depth\""),
@@ -2398,12 +2519,12 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
               std::string::npos);
     EXPECT_NE(report.find("\"replaceable\": true"), std::string::npos);
     EXPECT_NE(report.find("\"budgetOverruns\": 2"), std::string::npos);
-    const auto optimizedGraph = epg::ParseOptimizedGraphJson(optimized);
-    const auto parsedReport = epg::ParseSolverReportJson(report);
-    const auto parsedProfile = epg::ParseGraphProfileJson(
+    const auto optimizedGraph = Epg::ParseOptimizedGraphJson(optimized);
+    const auto parsedReport = Epg::ParseSolverReportJson(report);
+    const auto parsedProfile = Epg::ParseGraphProfileJson(
         ReadFileText(profilePath));
     EXPECT_NO_THROW(
-        smartdrone::core::application::ValidateEpgSolverReport(
+        SmartDrone::core::application::ValidateEpgSolverReport(
             manifest, parsedProfile, optimizedGraph, parsedReport));
     EXPECT_EQ(parsedReport.objectiveName,
               "minimize_epg_pressure_overload_deadline_and_scheduling_penalty");
@@ -2420,14 +2541,15 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile) {
     (void)std::remove(reportPath.c_str());
 }
 
-TEST(EventPipelineGraphOptimizer, KeepsNonReplaceableTaskInterval) {
+TEST(EventPipelineGraphOptimizer, KeepsNonReplaceableTaskInterval)
+{
     const std::string profilePath =
         "/tmp/smartdrone_epg_optimizer_non_replaceable_profile.json";
     const std::string outputPath =
         "/tmp/smartdrone_epg_optimizer_non_replaceable_optimized.json";
     const std::string reportPath =
         "/tmp/smartdrone_epg_optimizer_non_replaceable_report.json";
-    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+    SmartDrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath, NonReplaceableTaskProfileJson());
 
     auto manifest = MakeValidTestManifest();
@@ -2437,10 +2559,10 @@ TEST(EventPipelineGraphOptimizer, KeepsNonReplaceableTaskInterval) {
     manifest.artifactPaths.solverReportPath = reportPath;
 
     const auto result =
-        smartdrone::core::application::OptimizeEpgProfileForManifest(
+        SmartDrone::core::application::OptimizeEpgProfileForManifest(
             manifest, 1010);
     EXPECT_TRUE(result.optimized) << result.message;
-    const auto config = epg::ParseGraphConfigJson(ReadFileText(outputPath));
+    const auto config = Epg::ParseGraphConfigJson(ReadFileText(outputPath));
     ASSERT_EQ(config.tasks.size(), 1u);
     EXPECT_EQ(config.tasks.front().trigger.interval.count(), 1);
     EXPECT_NE(ReadFileText(reportPath).find("not_replaceable+"),
@@ -2451,12 +2573,13 @@ TEST(EventPipelineGraphOptimizer, KeepsNonReplaceableTaskInterval) {
     (void)std::remove(reportPath.c_str());
 }
 
-TEST(EventPipelineGraphOptimizer, RejectsProfileTasksOutsideManifest) {
+TEST(EventPipelineGraphOptimizer, RejectsProfileTasksOutsideManifest)
+{
     const std::string profilePath =
         "/tmp/smartdrone_epg_optimizer_outside_manifest_profile.json";
     const std::string outputPath =
         "/tmp/smartdrone_epg_optimizer_outside_manifest_optimized.json";
-    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+    SmartDrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
         std::string(R"({
           "schema": "smartdrone.epg.profile.v1",
@@ -2500,8 +2623,9 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileTasksOutsideManifest) {
               }
             ]
           },
-          "diagnostics": )") + MinimalProfileDiagnosticsJson(1000) +
-          R"(
+          "diagnostics": )") +
+            MinimalProfileDiagnosticsJson(1000) +
+            R"(
         })");
 
     auto manifest = MakeValidTestManifest();
@@ -2510,7 +2634,7 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileTasksOutsideManifest) {
     manifest.artifactPaths.optimizedConfigPath = outputPath;
 
     const auto result =
-        smartdrone::core::application::OptimizeEpgProfileForManifest(
+        SmartDrone::core::application::OptimizeEpgProfileForManifest(
             manifest, 1010);
     EXPECT_FALSE(result.optimized);
     EXPECT_NE(result.message.find("outside manifest"), std::string::npos);
@@ -2519,10 +2643,11 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileTasksOutsideManifest) {
     (void)std::remove(outputPath.c_str());
 }
 
-TEST(EventPipelineGraphOptimizer, RejectsProfileCatalogMismatch) {
+TEST(EventPipelineGraphOptimizer, RejectsProfileCatalogMismatch)
+{
     const std::string profilePath =
         "/tmp/smartdrone_epg_optimizer_catalog_mismatch_profile.json";
-    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+    SmartDrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
         std::string(R"({
           "schema": "smartdrone.epg.profile.v1",
@@ -2557,8 +2682,9 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileCatalogMismatch) {
               }
             ]
           },
-          "diagnostics": )") + MinimalProfileDiagnosticsJson(1000) +
-          R"(
+          "diagnostics": )") +
+            MinimalProfileDiagnosticsJson(1000) +
+            R"(
         })");
 
     auto manifest = MakeValidTestManifest();
@@ -2566,7 +2692,7 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileCatalogMismatch) {
     manifest.artifactPaths.profilePath = profilePath;
 
     const auto result =
-        smartdrone::core::application::OptimizeEpgProfileForManifest(
+        SmartDrone::core::application::OptimizeEpgProfileForManifest(
             manifest, 1010);
     EXPECT_FALSE(result.optimized);
     EXPECT_NE(result.message.find("catalog mismatch"), std::string::npos);
@@ -2574,10 +2700,11 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileCatalogMismatch) {
     (void)std::remove(profilePath.c_str());
 }
 
-TEST(EventPipelineGraphOptimizer, RejectsProfileMissingTaskDiagnostics) {
+TEST(EventPipelineGraphOptimizer, RejectsProfileMissingTaskDiagnostics)
+{
     const std::string profilePath =
         "/tmp/smartdrone_epg_optimizer_missing_task_diag_profile.json";
-    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+    SmartDrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath, MissingTaskDiagnosticsProfileJson());
 
     auto manifest = MakeValidTestManifest();
@@ -2585,7 +2712,7 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileMissingTaskDiagnostics) {
     manifest.artifactPaths.profilePath = profilePath;
 
     const auto result =
-        smartdrone::core::application::OptimizeEpgProfileForManifest(
+        SmartDrone::core::application::OptimizeEpgProfileForManifest(
             manifest, 1010);
     EXPECT_FALSE(result.optimized);
     EXPECT_NE(result.message.find("profile diagnostics missing task: source"),
@@ -2594,14 +2721,15 @@ TEST(EventPipelineGraphOptimizer, RejectsProfileMissingTaskDiagnostics) {
     (void)std::remove(profilePath.c_str());
 }
 
-TEST(EventPipelineGraphOptimizer, CreatesArtifactDirectories) {
+TEST(EventPipelineGraphOptimizer, CreatesArtifactDirectories)
+{
     const std::string profilePath =
         "/tmp/smartdrone_epg_optimizer_nested_profile.json";
     const std::string outputDir =
         "/tmp/smartdrone_epg_optimizer_nested_artifacts";
     const std::string outputPath = outputDir + "/optimized/config.json";
     const std::string reportPath = outputDir + "/reports/report.json";
-    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+    SmartDrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
         std::string(R"({
           "schema": "smartdrone.epg.profile.v1",
@@ -2636,8 +2764,9 @@ TEST(EventPipelineGraphOptimizer, CreatesArtifactDirectories) {
               }
             ]
           },
-          "diagnostics": )") + MinimalProfileDiagnosticsJson(1000) +
-          R"(
+          "diagnostics": )") +
+            MinimalProfileDiagnosticsJson(1000) +
+            R"(
         })");
 
     auto manifest = MakeValidTestManifest();
@@ -2647,12 +2776,12 @@ TEST(EventPipelineGraphOptimizer, CreatesArtifactDirectories) {
     manifest.artifactPaths.solverReportPath = reportPath;
 
     const auto result =
-        smartdrone::core::application::OptimizeEpgProfileForManifest(
+        SmartDrone::core::application::OptimizeEpgProfileForManifest(
             manifest, 1010);
     EXPECT_TRUE(result.optimized) << result.message;
-    EXPECT_NE(ReadFileText(outputPath).find(epg::OPTIMIZED_GRAPH_SCHEMA),
+    EXPECT_NE(ReadFileText(outputPath).find(Epg::OPTIMIZED_GRAPH_SCHEMA),
               std::string::npos);
-    EXPECT_NE(ReadFileText(reportPath).find(epg::SOLVER_REPORT_SCHEMA),
+    EXPECT_NE(ReadFileText(reportPath).find(Epg::SOLVER_REPORT_SCHEMA),
               std::string::npos);
 
     (void)std::remove(profilePath.c_str());
@@ -2663,14 +2792,15 @@ TEST(EventPipelineGraphOptimizer, CreatesArtifactDirectories) {
     (void)std::remove(outputDir.c_str());
 }
 
-TEST(EventPipelineGraphOptimizer, ReportsArtifactWriteFailure) {
+TEST(EventPipelineGraphOptimizer, ReportsArtifactWriteFailure)
+{
     const std::string profilePath =
         "/tmp/smartdrone_epg_optimizer_write_failure_profile.json";
     const std::string blockedParent =
         "/tmp/smartdrone_epg_optimizer_blocked_parent";
-    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+    SmartDrone::core::application::WriteEpgDfxSnapshotFile(
         blockedParent, "{}");
-    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+    SmartDrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
         std::string(R"({
           "schema": "smartdrone.epg.profile.v1",
@@ -2705,8 +2835,9 @@ TEST(EventPipelineGraphOptimizer, ReportsArtifactWriteFailure) {
               }
             ]
           },
-          "diagnostics": )") + MinimalProfileDiagnosticsJson(1000) +
-          R"(
+          "diagnostics": )") +
+            MinimalProfileDiagnosticsJson(1000) +
+            R"(
         })");
 
     auto manifest = MakeValidTestManifest();
@@ -2716,7 +2847,7 @@ TEST(EventPipelineGraphOptimizer, ReportsArtifactWriteFailure) {
     manifest.artifactPaths.solverReportPath = blockedParent + "/report.json";
 
     const auto result =
-        smartdrone::core::application::OptimizeEpgProfileForManifest(
+        SmartDrone::core::application::OptimizeEpgProfileForManifest(
             manifest, 1010);
     EXPECT_FALSE(result.optimized);
     EXPECT_NE(result.message.find("not a directory"), std::string::npos);
@@ -2725,13 +2856,14 @@ TEST(EventPipelineGraphOptimizer, ReportsArtifactWriteFailure) {
     (void)std::remove(blockedParent.c_str());
 }
 
-TEST(EventPipelineGraphOptimizer, ReportsUnchangedConfigWithoutRedeploy) {
+TEST(EventPipelineGraphOptimizer, ReportsUnchangedConfigWithoutRedeploy)
+{
     const std::string profilePath =
         "/tmp/smartdrone_epg_optimizer_unchanged_profile.json";
     const std::string outputPath =
         "/tmp/smartdrone_epg_optimizer_unchanged_optimized.json";
     const std::uint64_t nowMs = 2000;
-    smartdrone::core::application::WriteEpgDfxSnapshotFile(
+    SmartDrone::core::application::WriteEpgDfxSnapshotFile(
         profilePath,
         std::string(R"({
           "schema": "smartdrone.epg.profile.v1",
@@ -2766,8 +2898,9 @@ TEST(EventPipelineGraphOptimizer, ReportsUnchangedConfigWithoutRedeploy) {
               }
             ]
           },
-          "diagnostics": )") + MinimalProfileDiagnosticsJson(2000) +
-          R"(
+          "diagnostics": )") +
+            MinimalProfileDiagnosticsJson(2000) +
+            R"(
         })");
 
     auto manifest = MakeValidTestManifest();
@@ -2778,13 +2911,13 @@ TEST(EventPipelineGraphOptimizer, ReportsUnchangedConfigWithoutRedeploy) {
         "/tmp/smartdrone_epg_optimizer_unchanged_optimized_report.json";
 
     const auto first =
-        smartdrone::core::application::OptimizeEpgProfileForManifest(
+        SmartDrone::core::application::OptimizeEpgProfileForManifest(
             manifest, nowMs + 10);
     ASSERT_TRUE(first.optimized) << first.message;
     EXPECT_TRUE(first.configChanged);
 
     const auto second =
-        smartdrone::core::application::OptimizeEpgProfileForManifest(
+        SmartDrone::core::application::OptimizeEpgProfileForManifest(
             manifest, nowMs + 20);
     EXPECT_TRUE(second.optimized) << second.message;
     EXPECT_FALSE(second.configChanged);
@@ -2800,8 +2933,9 @@ TEST(EventPipelineGraphOptimizer, ReportsUnchangedConfigWithoutRedeploy) {
     (void)std::remove(manifest.artifactPaths.solverReportPath.c_str());
 }
 
-TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile) {
-    const auto config = epg::ParseGraphConfigJson(R"({
+TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile)
+{
+    const auto config = Epg::ParseGraphConfigJson(R"({
       "queues": [
         {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "tail_drop"}
       ],
@@ -2831,16 +2965,17 @@ TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile) {
     EXPECT_EQ(config.tasks.front().scheduling.budgetUs, 500u);
     EXPECT_EQ(config.tasks.front().scheduling.deadlineUs, 900u);
     EXPECT_EQ(config.tasks.front().scheduling.backpressureOutputs,
-              std::vector<epg::PortId>{0});
+              std::vector<Epg::PortId>{0});
     EXPECT_TRUE(config.tasks.front().scheduling.realtime);
     EXPECT_EQ(config.tasks.front().scheduling.priority, 42);
     EXPECT_THROW(
-        epg::ParseGraphConfigJsonFile("/tmp/smart_drone_missing_epg.json"),
+        Epg::ParseGraphConfigJsonFile("/tmp/smart_drone_missing_epg.json"),
         std::runtime_error);
 }
 
-TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
-    const auto config = epg::ParseGraphConfigJson(R"({
+TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson)
+{
+    const auto config = Epg::ParseGraphConfigJson(R"({
       "schema": "smartdrone.epg.optimized_config.v1",
       "targetGraph": "test_graph",
       "topologyVersion": "test-topology",
@@ -2873,7 +3008,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     EXPECT_EQ(config.tasks.front().trigger.interval,
               std::chrono::milliseconds(3));
 
-    const auto metadata = epg::ParseOptimizedGraphMetadataJson(R"({
+    const auto metadata = Epg::ParseOptimizedGraphMetadataJson(R"({
       "schema": "smartdrone.epg.optimized_config.v1",
       "targetGraph": "test_graph",
       "topologyVersion": "test-topology",
@@ -2884,7 +3019,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
       "queues": [],
       "tasks": []
     })");
-    EXPECT_EQ(metadata.schema, epg::OPTIMIZED_GRAPH_SCHEMA);
+    EXPECT_EQ(metadata.schema, Epg::OPTIMIZED_GRAPH_SCHEMA);
     EXPECT_EQ(metadata.targetGraph, "test_graph");
     EXPECT_EQ(metadata.topologyVersion, "test-topology");
     EXPECT_EQ(metadata.solverVersion, "unit-test");
@@ -2892,7 +3027,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     EXPECT_EQ(metadata.sourceTimestampMs, 123u);
     EXPECT_EQ(metadata.generatedAtMs, 456u);
 
-    const auto optimized = epg::ParseOptimizedGraphJson(R"({
+    const auto optimized = Epg::ParseOptimizedGraphJson(R"({
       "schema": "smartdrone.epg.optimized_config.v1",
       "targetGraph": "test_graph",
       "topologyVersion": "test-topology",
@@ -2915,7 +3050,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     EXPECT_EQ(optimized.metadata.targetGraph, "test_graph");
     ASSERT_EQ(optimized.config.queues.size(), 1u);
     ASSERT_EQ(optimized.config.tasks.size(), 1u);
-    const auto report = epg::ParseSolverReportJson(R"({
+    const auto report = Epg::ParseSolverReportJson(R"({
       "schema": "smartdrone.epg.solver_report.v1",
       "targetGraph": "test_graph",
       "topologyVersion": "test-topology",
@@ -2980,7 +3115,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
         }
       ]
     })");
-    EXPECT_EQ(report.metadata.schema, epg::SOLVER_REPORT_SCHEMA);
+    EXPECT_EQ(report.metadata.schema, Epg::SOLVER_REPORT_SCHEMA);
     EXPECT_EQ(report.metadata.targetGraph, "test_graph");
     EXPECT_EQ(report.metadata.topologyVersion, "test-topology");
     EXPECT_EQ(report.metadata.sourceProfile, "test_graph");
@@ -2996,7 +3131,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
     EXPECT_EQ(report.decisions.front().depthAfter, 6u);
     EXPECT_EQ(report.decisions.back().intervalAfterMs, 3u);
     EXPECT_THROW(
-        epg::ParseSolverReportJson(R"({
+        Epg::ParseSolverReportJson(R"({
           "schema": "smartdrone.epg.solver_report.v1",
           "targetGraph": "test_graph",
           "topologyVersion": "test-topology",
@@ -3010,7 +3145,7 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
         })"),
         std::runtime_error);
     EXPECT_THROW(
-        epg::ParseOptimizedGraphJson(R"({
+        Epg::ParseOptimizedGraphJson(R"({
           "schema": "smartdrone.epg.optimized_config.v1",
           "targetGraph": "test_graph",
           "topologyVersion": "test-topology",
@@ -3021,8 +3156,9 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson) {
         std::runtime_error);
 }
 
-TEST(GraphConfig, ParsesNestedGraphConfigJsonField) {
-    const auto config = epg::ParseGraphConfigJsonField(R"({
+TEST(GraphConfig, ParsesNestedGraphConfigJsonField)
+{
+    const auto config = Epg::ParseGraphConfigJsonField(R"({
       "schema": "smartdrone.epg.profile.v1",
       "topology": {
         "queues": [
@@ -3038,26 +3174,29 @@ TEST(GraphConfig, ParsesNestedGraphConfigJsonField) {
         ]
       },
       "diagnostics": {}
-    })", "topology");
+    })",
+                                                       "topology");
 
     ASSERT_EQ(config.queues.size(), 1u);
     ASSERT_EQ(config.tasks.size(), 1u);
     EXPECT_EQ(config.queues.front().name, "packets");
     EXPECT_EQ(config.tasks.front().name, "source");
     EXPECT_THROW(
-        epg::ParseGraphConfigJsonField("{\"diagnostics\": {}}", "topology"),
+        Epg::ParseGraphConfigJsonField("{\"diagnostics\": {}}", "topology"),
         std::runtime_error);
 }
 
-TEST(GraphConfig, RejectsInvalidJsonAndUnsupportedEnumValues) {
-    EXPECT_THROW(epg::ParseGraphConfigJson("{"), std::runtime_error);
-    EXPECT_THROW(epg::ParseGraphConfigJson(R"({
+TEST(GraphConfig, RejectsInvalidJsonAndUnsupportedEnumValues)
+{
+    EXPECT_THROW(Epg::ParseGraphConfigJson("{"), std::runtime_error);
+    EXPECT_THROW(Epg::ParseGraphConfigJson(R"({
       "queues": [
         {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "bad_policy"}
       ],
       "tasks": []
-    })"), std::runtime_error);
-    EXPECT_THROW(epg::ParseGraphConfigJson(R"({
+    })"),
+                 std::runtime_error);
+    EXPECT_THROW(Epg::ParseGraphConfigJson(R"({
       "queues": [],
       "tasks": [
         {
@@ -3066,16 +3205,18 @@ TEST(GraphConfig, RejectsInvalidJsonAndUnsupportedEnumValues) {
           "trigger": {"mode": "bad_trigger"}
         }
       ]
-    })"), std::runtime_error);
+    })"),
+                 std::runtime_error);
 }
 
-TEST(EventPipelineGraphReflection, RegistersMessagesAndTaskPortsFromCatalog) {
+TEST(EventPipelineGraphReflection, RegistersMessagesAndTaskPortsFromCatalog)
+{
     Registry registry;
-    epg::TypeCatalog::Global().RegisterReflectedMessageTypes(registry);
-    epg::TypeCatalog::Global().RegisterReflectedTaskTypes(
+    Epg::TypeCatalog::Global().RegisterReflectedMessageTypes(registry);
+    Epg::TypeCatalog::Global().RegisterReflectedTaskTypes(
         registry,
         {"ReflectedSourceTask", "ReflectedSinkTask"},
-        [](const std::string& type) {
+        [](const std::string &type) {
             if (type == "ReflectedSourceTask") {
                 return Registry::TaskFactory([]() {
                     return std::unique_ptr<ITask>(new ReflectedSourceTask());
@@ -3118,7 +3259,8 @@ TEST(EventPipelineGraphReflection, RegistersMessagesAndTaskPortsFromCatalog) {
     EXPECT_GT(taskDiag.at("sink").loopCount, 0u);
 }
 
-TEST(EventPipelineGraphValidation, RejectsInvalidTopologyConfigurations) {
+TEST(EventPipelineGraphValidation, RejectsInvalidTopologyConfigurations)
+{
     const std::vector<std::string> invalidJsons = {
         R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"},{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[]})",
         R"({"queues":[{"name":"packets","type":"MissingPacket","depth":4,"overflow":"drop_newest"}],"tasks":[]})",
@@ -3140,10 +3282,9 @@ TEST(EventPipelineGraphValidation, RejectsInvalidTopologyConfigurations) {
         R"({"queues":[{"name":"packets","type":"OtherPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["packets"]},"inputs": {"0":"packets"}}]})",
         R"({"queues":[{"name":"packets","type":"OtherPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"source","type":"TestSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs": {"0":"packets"}}]})",
         R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"source_a","type":"TestSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs": {"0":"packets"}},{"name":"source_b","type":"TestSecondSourceTask","trigger":{"mode":"periodic","interval_ms":1},"outputs": {"0":"packets"}}]})",
-        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"},{"name":"other","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["other"]},"inputs": {"0":"packets"}}]})"
-    };
+        R"({"queues":[{"name":"packets","type":"TestPacket","depth":4,"overflow":"drop_newest"},{"name":"other","type":"TestPacket","depth":4,"overflow":"drop_newest"}],"tasks":[{"name":"sink","type":"TestSinkTask","trigger":{"mode":"any_queue_ready","queues":["other"]},"inputs": {"0":"packets"}}]})"};
 
-    for (const auto& json : invalidJsons) {
+    for (const auto &json : invalidJsons) {
         ExpectConfigureThrows(json);
     }
 }

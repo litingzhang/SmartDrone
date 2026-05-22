@@ -6,7 +6,7 @@
 #include "core/application/config/app_args.h"
 #include "core/ports/slam_engine.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 struct DpvoTensorRtConfig {
     std::string repoPath;
@@ -37,4 +37,4 @@ class DpvoTensorRtEngine final : public core::ports::ISlamEngine {
 DpvoTensorRtConfig MakeDpvoTensorRtConfig(const RuntimeConfig &runtime,
                                           const std::string &settingsPath = std::string{});
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

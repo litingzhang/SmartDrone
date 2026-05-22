@@ -2,7 +2,9 @@
 
 #include <utility>
 
-namespace smartdrone::core::application {
+#include "core/application/runtime/system_runtime_messages.h"
+
+namespace SmartDrone::core::application {
 
 VehicleTelemetryRxTask::VehicleTelemetryRxTask(
     std::shared_ptr<SystemRuntimeStepServices> services)
@@ -10,12 +12,13 @@ VehicleTelemetryRxTask::VehicleTelemetryRxTask(
 {
 }
 
-void VehicleTelemetryRxTask::OnTick(epg::TaskContext &context)
+void VehicleTelemetryRxTask::OnTick(Epg::TaskContext &context)
 {
-    (void)context;
+    DrainSystemRuntimePulse(context);
     if (m_services) {
         m_services->OnVehicleTelemetryRxGraphTick();
     }
+    PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
 EPG_REGISTER_TASK_TYPE(VehicleTelemetryRxTask, "VehicleTelemetryRxTask")
@@ -26,12 +29,13 @@ SetpointStreamTask::SetpointStreamTask(
 {
 }
 
-void SetpointStreamTask::OnTick(epg::TaskContext &context)
+void SetpointStreamTask::OnTick(Epg::TaskContext &context)
 {
-    (void)context;
+    DrainSystemRuntimePulse(context);
     if (m_services) {
         m_services->OnSetpointStreamGraphTick();
     }
+    PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
 EPG_REGISTER_TASK_TYPE(SetpointStreamTask, "SetpointStreamTask")
@@ -48,12 +52,13 @@ UdpCommandTask::~UdpCommandTask()
     }
 }
 
-void UdpCommandTask::OnTick(epg::TaskContext &context)
+void UdpCommandTask::OnTick(Epg::TaskContext &context)
 {
-    (void)context;
+    DrainSystemRuntimePulse(context);
     if (m_runtime) {
         m_runtime->OnGraphTick();
     }
+    PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
 EPG_REGISTER_TASK_TYPE(UdpCommandTask, "UdpCommandTask")
@@ -64,12 +69,13 @@ ManualControlTask::ManualControlTask(
 {
 }
 
-void ManualControlTask::OnTick(epg::TaskContext &context)
+void ManualControlTask::OnTick(Epg::TaskContext &context)
 {
-    (void)context;
+    DrainSystemRuntimePulse(context);
     if (m_services) {
         m_services->OnManualControlGraphTick();
     }
+    PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
 EPG_REGISTER_TASK_TYPE(ManualControlTask, "ManualControlTask")
@@ -80,12 +86,13 @@ ForceRestartTask::ForceRestartTask(
 {
 }
 
-void ForceRestartTask::OnTick(epg::TaskContext &context)
+void ForceRestartTask::OnTick(Epg::TaskContext &context)
 {
-    (void)context;
+    DrainSystemRuntimePulse(context);
     if (m_services) {
         m_services->OnForceRestartGraphTick();
     }
+    PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
 EPG_REGISTER_TASK_TYPE(ForceRestartTask, "ForceRestartTask")
@@ -96,12 +103,13 @@ RuntimeSupervisorTask::RuntimeSupervisorTask(
 {
 }
 
-void RuntimeSupervisorTask::OnTick(epg::TaskContext &context)
+void RuntimeSupervisorTask::OnTick(Epg::TaskContext &context)
 {
-    (void)context;
+    DrainSystemRuntimePulse(context);
     if (m_services) {
         m_services->OnSessionSupervisorGraphTick();
     }
+    PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
 EPG_REGISTER_TASK_TYPE(RuntimeSupervisorTask, "RuntimeSupervisorTask")
@@ -113,12 +121,13 @@ EpgRedeployTask::EpgRedeployTask(
 {
 }
 
-void EpgRedeployTask::OnTick(epg::TaskContext &context)
+void EpgRedeployTask::OnTick(Epg::TaskContext &context)
 {
-    (void)context;
+    DrainSystemRuntimePulse(context);
     if (m_services && m_redeploy) {
         m_services->OnEpgRedeployGraphTick(*m_redeploy);
     }
+    PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
 EPG_REGISTER_TASK_TYPE(EpgRedeployTask, "EpgRedeployTask")
@@ -136,14 +145,15 @@ DiscoveryBeaconTask::~DiscoveryBeaconTask()
     }
 }
 
-void DiscoveryBeaconTask::OnTick(epg::TaskContext &context)
+void DiscoveryBeaconTask::OnTick(Epg::TaskContext &context)
 {
-    (void)context;
+    DrainSystemRuntimePulse(context);
     if (m_runtime) {
         m_runtime->OnGraphTick();
     }
+    PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
 EPG_REGISTER_TASK_TYPE(DiscoveryBeaconTask, "DiscoveryBeaconTask")
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

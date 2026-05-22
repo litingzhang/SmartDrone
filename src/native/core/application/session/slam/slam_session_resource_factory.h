@@ -8,7 +8,7 @@
 #include "core/ports/slam_engine.h"
 #include "core/ports/visual_feature_frontend.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct ImuThreadState;
 struct MainRuntimeAliases;
@@ -30,7 +30,7 @@ struct SlamSessionEngineResourceConfig {
 };
 
 struct SlamSessionEngineResources {
-    std::unique_ptr<smartdrone::core::ports::ISlamEngine> engine;
+    std::unique_ptr<SmartDrone::core::ports::ISlamEngine> engine;
     std::unique_ptr<SlamRuntimeControlPort> control;
 };
 
@@ -41,17 +41,7 @@ struct SlamVisualFeatureFrontendStartResult {
     std::string repoPath;
     std::string error;
     std::unique_ptr<ISlamVisualFeatureFrontendSession> session;
-    smartdrone::core::ports::IVisualFeatureFrontend *frontend{nullptr};
+    SmartDrone::core::ports::IVisualFeatureFrontend *frontend{nullptr};
 };
 
-SlamSessionEngineResources CreateSlamSessionEngineResources(
-    const SlamSessionEngineResourceConfig &config);
-std::unique_ptr<smartdrone::core::ports::ICameraProvider>
-CreateSlamSessionCameraProvider();
-std::unique_ptr<smartdrone::core::ports::IImuProvider>
-CreateSlamSessionImuProvider(ImuThreadState &state,
-                             const MainRuntimeAliases &aliases);
-SlamVisualFeatureFrontendStartResult StartSlamVisualFeatureFrontendSession(
-    const MainRuntimeAliases &aliases, const UnifiedConfig &cfg);
-
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

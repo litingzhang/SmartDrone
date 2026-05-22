@@ -7,7 +7,7 @@
 
 #include "core/application/session/slam/slam_settings_loader.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 namespace {
 
@@ -100,7 +100,10 @@ UnifiedRuntimeController::UnifiedRuntimeController(UnifiedRuntimeControllerConfi
     m_tuning.tbcYawDeg.store(m_config.app.runtime.tbcYawDeg, std::memory_order_relaxed);
 }
 
-void UnifiedRuntimeController::Stop() { m_sessionSupervisor.Stop(); }
+void UnifiedRuntimeController::Stop()
+{
+    m_sessionSupervisor.Stop();
+}
 
 bool UnifiedRuntimeController::SetMode(ControllerMode mode, std::string *err)
 {
@@ -273,7 +276,7 @@ CommandResult UnifiedRuntimeController::ExecuteAction(const RuntimeAction &actio
         if (!SetMode(action.selection.runtimeMode, &err)) {
             return {false, err.empty() ? "start runtime failed" : err};
         }
-        return {true, std::string("runtime -> ") + smartdrone::core::domain::ToString(action.selection.runtimeMode)};
+        return {true, std::string("runtime -> ") + SmartDrone::core::domain::ToString(action.selection.runtimeMode)};
     case RuntimeAction::Type::StopRuntime:
         if (!SetMode(ControllerMode::Idle, &err)) {
             return {false, err.empty() ? "stop runtime failed" : err};
@@ -282,11 +285,10 @@ CommandResult UnifiedRuntimeController::ExecuteAction(const RuntimeAction &actio
     case RuntimeAction::Type::CleanCalibration: {
         return RequestCalibCleanup();
     }
-    case RuntimeAction::Type::ForceRestart:
-        {
-            std::lock_guard<std::mutex> lock(m_forceRestartMtx);
-            m_forceRestartAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(150);
-        }
+    case RuntimeAction::Type::ForceRestart: {
+        std::lock_guard<std::mutex> lock(m_forceRestartMtx);
+        m_forceRestartAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(150);
+    }
         return {true, "service restart scheduled"};
     case RuntimeAction::Type::ResetMap:
         return {false, "reset map not implemented"};
@@ -302,6 +304,9 @@ CommandResult UnifiedRuntimeController::ApplyConfig(const ConfigUpdate &update)
     return m_configService.ApplyConfig(update, CurrentConfig());
 }
 
-UnifiedConfig UnifiedRuntimeController::CurrentConfigUnlocked() const { return m_config; }
+UnifiedConfig UnifiedRuntimeController::CurrentConfigUnlocked() const
+{
+    return m_config;
+}
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -10,26 +10,26 @@
 #include "core/application/state/pose_postprocessor.h"
 #include "core/ports/slam_tracking_state.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct SlamFrameSharedState {
     SlamFrameSharedState() = default;
     SlamFrameSharedState(
-        smartdrone::core::domain::SlamOperationMode requestedMode,
-        smartdrone::core::domain::SlamOperationMode effectiveMode)
+        SmartDrone::core::domain::SlamOperationMode requestedMode,
+        SmartDrone::core::domain::SlamOperationMode effectiveMode)
         : requestedSlamMode(requestedMode), effectiveSlamMode(effectiveMode)
     {
     }
 
     std::atomic<bool> lastTrackingUsable{false};
     std::atomic<int> lastTrackingState{
-        smartdrone::core::ports::kSlamTrackingNoImagesYet};
-    std::atomic<smartdrone::core::domain::SlamOperationMode>
+        SmartDrone::core::ports::kSlamTrackingNoImagesYet};
+    std::atomic<SmartDrone::core::domain::SlamOperationMode>
         requestedSlamMode{
-        smartdrone::core::domain::SlamOperationMode::Mapping};
-    std::atomic<smartdrone::core::domain::SlamOperationMode>
+            SmartDrone::core::domain::SlamOperationMode::Mapping};
+    std::atomic<SmartDrone::core::domain::SlamOperationMode>
         effectiveSlamMode{
-        smartdrone::core::domain::SlamOperationMode::Mapping};
+            SmartDrone::core::domain::SlamOperationMode::Mapping};
 };
 
 struct SlamFrameInputState {
@@ -66,4 +66,4 @@ struct SlamFrameOutputState {
     std::atomic<double> smoothedTotalMs{0.0};
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

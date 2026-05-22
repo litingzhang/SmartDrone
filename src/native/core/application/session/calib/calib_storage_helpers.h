@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <string>
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 namespace fs = std::filesystem;
 
@@ -15,4 +15,4 @@ bool TryParseCalibIndex(const std::string &name, int &indexOut);
 std::string MakeCalibSessionDir(const std::string &root);
 int CleanupCalibDataDirs(const std::string &root);
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace smartdrone::core::ports {
+namespace SmartDrone::core::ports {
 
 enum SlamTrackingState : int {
     kSlamTrackingSystemNotReady = -1,
@@ -17,4 +17,4 @@ inline bool IsSlamTrackingPoseUsable(int trackingState)
     return trackingState == kSlamTrackingOk || trackingState == kSlamTrackingOkKlt;
 }
 
-} // namespace smartdrone::core::ports
+} // namespace SmartDrone::core::ports

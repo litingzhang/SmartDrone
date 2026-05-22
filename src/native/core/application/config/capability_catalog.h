@@ -3,11 +3,14 @@
 #include "config_registry.h"
 #include "core/domain/capabilities.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
+
+struct CameraRuntimeProviderMetadata;
 
 class CapabilityCatalog {
   public:
-    static domain::RuntimeCapabilities BuildDefault();
+    static domain::RuntimeCapabilities BuildDefault(
+        const CameraRuntimeProviderMetadata &cameraProvider);
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

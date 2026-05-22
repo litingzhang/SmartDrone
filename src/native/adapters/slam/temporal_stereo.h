@@ -7,7 +7,7 @@
 
 #include "core/ports/stereo_processing.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 using TemporalStereoStateView = core::ports::TemporalStereoStateView;
 using TemporalStereoCarryInput = core::ports::TemporalStereoCarryInput;
@@ -17,13 +17,13 @@ using TemporalStereoSource = core::ports::TemporalStereoSource;
 
 class DefaultTemporalStereoProcessor final
     : public core::ports::ITemporalStereoProcessor {
-public:
-  bool AppendCarry(const TemporalStereoCarryInput &input,
-                   std::vector<cv::Point2f> &matchedLeftPoints,
-                   std::vector<cv::Point2f> &matchedRightPoints,
-                   TemporalStereoCarryResult &result) const override;
-  bool ExtractSource(const TemporalStereoSourceInput &input,
-                     TemporalStereoSource &source) const override;
+  public:
+    bool AppendCarry(const TemporalStereoCarryInput &input,
+                     std::vector<cv::Point2f> &matchedLeftPoints,
+                     std::vector<cv::Point2f> &matchedRightPoints,
+                     TemporalStereoCarryResult &result) const override;
+    bool ExtractSource(const TemporalStereoSourceInput &input,
+                       TemporalStereoSource &source) const override;
 };
 
 size_t AppendTemporalStereoCarry(const TemporalStereoCarryInput &input,
@@ -37,4 +37,4 @@ bool ExtractTemporalStereoSource(
     std::vector<cv::Point2f> &prevLeftPoints,
     std::vector<cv::Point2f> &prevRightPoints);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

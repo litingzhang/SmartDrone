@@ -10,25 +10,25 @@
 #include "core/application/runtime/epg_optimize_task.h"
 #include "core/application/runtime/system_runtime_tasks.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 using SystemRuntimeTaskFactoryEntries =
-    std::vector<epg::TypeCatalog::TaskFactoryEntry>;
+    std::vector<Epg::TypeCatalog::TaskFactoryEntry>;
 
 template <class TaskType, class Factory>
 void AddFactory(SystemRuntimeTaskFactoryEntries &entries,
-                const epg::TypeCatalog &catalog,
+                const Epg::TypeCatalog &catalog,
                 Factory factory)
 {
     entries.push_back(catalog.MakeTaskFactoryEntry<TaskType>(
         [factory = std::move(factory)]() {
-            return std::unique_ptr<epg::ITask>(factory());
+            return std::unique_ptr<Epg::ITask>(factory());
         }));
 }
 
 void AddSystemStepTaskFactories(SystemRuntimeTaskFactoryEntries &entries,
-                                const epg::TypeCatalog &catalog,
+                                const Epg::TypeCatalog &catalog,
                                 SystemRuntimeTaskFactoryDeps deps)
 {
     AddFactory<VehicleTelemetryRxTask>(entries, catalog, [deps]() {
@@ -52,7 +52,7 @@ void AddSystemStepTaskFactories(SystemRuntimeTaskFactoryEntries &entries,
 }
 
 void AddSystemRuntimeTaskFactories(SystemRuntimeTaskFactoryEntries &entries,
-                                   const epg::TypeCatalog &catalog,
+                                   const Epg::TypeCatalog &catalog,
                                    SystemRuntimeTaskFactoryDeps deps,
                                    const EpgTaskManifest &manifest)
 {
@@ -86,7 +86,7 @@ void AddSystemRuntimeTaskFactories(SystemRuntimeTaskFactoryEntries &entries,
 EpgTaskFactoryResolver MakeSystemRuntimeTaskFactoryResolver(
     SystemRuntimeTaskFactoryDeps deps)
 {
-    auto &catalog = epg::TypeCatalog::Global();
+    auto &catalog = Epg::TypeCatalog::Global();
     const EpgTaskManifest &manifest =
         EpgManifestForDomain(EpgDomain::SystemRuntime);
     SystemRuntimeTaskFactoryEntries entries;
@@ -94,9 +94,9 @@ EpgTaskFactoryResolver MakeSystemRuntimeTaskFactoryResolver(
     AddSystemStepTaskFactories(entries, catalog, deps);
     AddSystemRuntimeTaskFactories(entries, catalog, deps, manifest);
     auto resolver =
-        epg::TypeCatalog::MakeTaskFactoryResolver(std::move(entries));
+        Epg::TypeCatalog::MakeTaskFactoryResolver(std::move(entries));
     ValidateEpgTaskFactoryManifest(manifest, resolver);
     return resolver;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

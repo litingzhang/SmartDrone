@@ -6,7 +6,7 @@
 #include "core/application/session/slam/slam_frame_stage_data.h"
 #include "core/application/session/slam/slam_frame_step_result.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class SlamFrameTrackingPort final {
   public:
@@ -20,4 +20,4 @@ class SlamFrameTrackingPort final {
     SlamFrameTrackingContext &m_ctx;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -130,7 +130,10 @@ class TlvParser {
         return kFrameHeaderSize + static_cast<size_t>(payloadLen) + kFrameCrcSize;
     }
 
-    bool FrameAvailable(size_t totalSize) const { return m_size >= totalSize; }
+    bool FrameAvailable(size_t totalSize) const
+    {
+        return m_size >= totalSize;
+    }
 
     bool FrameCrcValid(size_t totalSize) const
     {
@@ -156,7 +159,10 @@ class TlvParser {
         return frame;
     }
 
-    uint8_t ByteAt(size_t offset) const { return m_buffer[(m_head + offset) % kMaxBufferSize]; }
+    uint8_t ByteAt(size_t offset) const
+    {
+        return m_buffer[(m_head + offset) % kMaxBufferSize];
+    }
 
     uint16_t CalcCrc(size_t offset, size_t len) const
     {

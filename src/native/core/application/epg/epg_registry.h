@@ -2,7 +2,7 @@
 
 #include "common/epg/epg.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 enum class EpgDomain {
     SystemRuntime,
@@ -11,13 +11,13 @@ enum class EpgDomain {
 };
 
 using EpgTaskFactoryResolver =
-    epg::TypeCatalog::TaskFactoryResolver;
+    Epg::TypeCatalog::TaskFactoryResolver;
 
-void RegisterEpgTypes(epg::Registry &registry,
+void RegisterEpgTypes(Epg::Registry &registry,
                       EpgDomain domain,
                       const EpgTaskFactoryResolver &resolver);
 
-epg::GraphConfig CompileEpgConfig(EpgDomain domain,
-                                  epg::Registry &registry);
+Epg::GraphConfig CompileEpgConfig(EpgDomain domain,
+                                  Epg::Registry &registry);
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -5,7 +5,7 @@
 #include "core/application/state/imu_buffer.h"
 #include "core/ports/imu_provider.h"
 
-namespace smartdrone::adapters::imu {
+namespace SmartDrone::adapters::imu {
 
 struct Icm42688ImuProviderConfig {
     int64_t slackBeforeNs{5000000};
@@ -26,4 +26,4 @@ class Icm42688ImuProvider final : public core::ports::IImuProvider {
     Icm42688ImuProviderConfig m_cfg;
 };
 
-} // namespace smartdrone::adapters::imu
+} // namespace SmartDrone::adapters::imu

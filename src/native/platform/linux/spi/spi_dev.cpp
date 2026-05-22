@@ -10,7 +10,10 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-SpiDev::SpiDev(std::string devPath) : m_devPath(std::move(devPath)) {}
+SpiDev::SpiDev(std::string devPath)
+    : m_devPath(std::move(devPath))
+{
+}
 
 SpiDev::~SpiDev()
 {

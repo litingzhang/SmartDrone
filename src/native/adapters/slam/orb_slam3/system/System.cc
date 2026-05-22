@@ -578,7 +578,7 @@ System::System(const string &strVocFile, const string &strSettingsFile,
          << "Loading ORB Vocabulary. This could take a while..." << endl;
 
     mpVocabulary = new ORBVocabulary();
-    bool bVocLoad = smartdrone::adapters::slam::LoadOrbVocabularyWithCache(
+    bool bVocLoad = SmartDrone::adapters::slam::LoadOrbVocabularyWithCache(
         strVocFile, *mpVocabulary);
     if (!bVocLoad) {
       cerr << "Wrong path to vocabulary. " << endl;
@@ -599,7 +599,7 @@ System::System(const string &strVocFile, const string &strSettingsFile,
          << "Loading ORB Vocabulary. This could take a while..." << endl;
 
     mpVocabulary = new ORBVocabulary();
-    bool bVocLoad = smartdrone::adapters::slam::LoadOrbVocabularyWithCache(
+    bool bVocLoad = SmartDrone::adapters::slam::LoadOrbVocabularyWithCache(
         strVocFile, *mpVocabulary);
     if (!bVocLoad) {
       cerr << "Wrong path to vocabulary. " << endl;
@@ -1933,7 +1933,7 @@ bool System::OptimizeBackend(const SlamBackendOptimizationRequest &request,
 
   result.accepted = true;
   switch (request.scope) {
-  case smartdrone::core::ports::SlamBackendOptimizationScope::
+  case SmartDrone::core::ports::SlamBackendOptimizationScope::
       GlobalBundleAdjustment: {
     if (!RunSystemGlobalOptimization(mpOptimizationBackend.get(), currentMap,
                                      request)) {
@@ -1963,16 +1963,16 @@ bool System::ApplyLocalMappingOperation(const SlamBackendMappingRequest &request
   result.queuedKeyframeCount = status.keyframesInQueue;
   result.paused = status.stopped;
   switch (request.operation) {
-  case smartdrone::core::ports::SlamBackendMappingOperation::Pause:
+  case SmartDrone::core::ports::SlamBackendMappingOperation::Pause:
     mpLocalMappingBackend->RequestStop();
     result.accepted = true;
     return true;
-  case smartdrone::core::ports::SlamBackendMappingOperation::Resume:
+  case SmartDrone::core::ports::SlamBackendMappingOperation::Resume:
     mpLocalMappingBackend->Release();
     result.accepted = true;
     result.paused = false;
     return true;
-  case smartdrone::core::ports::SlamBackendMappingOperation::Reset:
+  case SmartDrone::core::ports::SlamBackendMappingOperation::Reset:
     if (request.mapId != 0 && mpAtlas != nullptr &&
         mpAtlas->GetCurrentMap() != nullptr &&
         mpAtlas->GetCurrentMap()->GetId() == request.mapId) {
@@ -1983,7 +1983,7 @@ bool System::ApplyLocalMappingOperation(const SlamBackendMappingRequest &request
     }
     result.accepted = true;
     return true;
-  case smartdrone::core::ports::SlamBackendMappingOperation::ProcessQueue:
+  case SmartDrone::core::ports::SlamBackendMappingOperation::ProcessQueue:
     result.accepted = true;
     return true;
   default:
@@ -2000,12 +2000,12 @@ bool System::ApplyLoopClosingOperation(
   }
 
   switch (request.operation) {
-  case smartdrone::core::ports::SlamBackendLoopClosureOperation::
+  case SmartDrone::core::ports::SlamBackendLoopClosureOperation::
       AbortGlobalBundleAdjustment:
     mpLoopClosingBackend->AbortGlobalBundleAdjustment();
     result.accepted = true;
     return true;
-  case smartdrone::core::ports::SlamBackendLoopClosureOperation::Reset:
+  case SmartDrone::core::ports::SlamBackendLoopClosureOperation::Reset:
   {
     Map *mapToReset = nullptr;
     if (request.mapId != 0 && mpAtlas != nullptr &&

@@ -4,13 +4,13 @@
 
 #include "common/epg/epg.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct UnifiedConfig;
 
 constexpr std::chrono::milliseconds kSlamResourcePollInterval{100};
 
 std::chrono::milliseconds SlamInputInterval(int slamInputFps, int cameraFps);
-void ApplySlamRuntimePacing(epg::GraphConfig &config, const UnifiedConfig &cfg);
+void ApplySlamRuntimePacing(Epg::GraphConfig &config, const UnifiedConfig &cfg);
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

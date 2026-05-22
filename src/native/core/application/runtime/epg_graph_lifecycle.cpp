@@ -4,7 +4,7 @@
 
 #include "common/epg/epg.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 EpgGraphLifecycle::EpgGraphLifecycle(EpgGraphLifecycleConfig config)
     : m_stop(config.stop),
@@ -16,11 +16,20 @@ EpgGraphLifecycle::EpgGraphLifecycle(EpgGraphLifecycleConfig config)
 
 EpgGraphLifecycle::~EpgGraphLifecycle() = default;
 
-bool EpgGraphLifecycle::HasGraph() const { return static_cast<bool>(m_graph); }
+bool EpgGraphLifecycle::HasGraph() const
+{
+    return static_cast<bool>(m_graph);
+}
 
-bool EpgGraphLifecycle::StopRequested() const { return m_stopRequested; }
+bool EpgGraphLifecycle::StopRequested() const
+{
+    return m_stopRequested;
+}
 
-bool EpgGraphLifecycle::Done() const { return m_done; }
+bool EpgGraphLifecycle::Done() const
+{
+    return m_done;
+}
 
 void EpgGraphLifecycle::ResetForStart()
 {
@@ -30,7 +39,7 @@ void EpgGraphLifecycle::ResetForStart()
     m_graphStopRequested = false;
 }
 
-void EpgGraphLifecycle::AttachGraph(std::unique_ptr<epg::EventPipelineGraph> graph)
+void EpgGraphLifecycle::AttachGraph(std::unique_ptr<Epg::EventPipelineGraph> graph)
 {
     m_graph = std::move(graph);
 }
@@ -90,4 +99,4 @@ void EpgGraphLifecycle::ResetGraphAndResources()
     m_done = true;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

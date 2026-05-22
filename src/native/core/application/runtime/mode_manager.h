@@ -2,11 +2,11 @@
 
 #include "core/domain/runtime_mode.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class ModeManager {
   public:
-    using RuntimeMode = smartdrone::core::domain::RuntimeMode;
+    using RuntimeMode = SmartDrone::core::domain::RuntimeMode;
 
     RuntimeMode DesiredMode() const;
     RuntimeMode ActiveMode() const;
@@ -23,4 +23,4 @@ class ModeManager {
     bool m_restartRequested{false};
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

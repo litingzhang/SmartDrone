@@ -1,6 +1,6 @@
 #include "core/domain/runtime_mode.h"
 
-namespace smartdrone::core::domain {
+namespace SmartDrone::core::domain {
 
 const char *ToString(RuntimeMode mode)
 {
@@ -54,4 +54,4 @@ const char *ToString(SlamOperationMode mode)
     }
 }
 
-} // namespace smartdrone::core::domain
+} // namespace SmartDrone::core::domain

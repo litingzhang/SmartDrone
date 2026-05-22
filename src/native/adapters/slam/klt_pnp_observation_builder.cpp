@@ -8,7 +8,7 @@
 #include <cmath>
 #include <optional>
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 namespace {
 
 struct KltPerFramePnPCandidate {
@@ -126,10 +126,10 @@ std::vector<KltPerFramePnPCandidate> CollectPerFrameCandidates(
 int PerFrameCandidateBucket(const KltPerFramePnPCandidate &candidate, const cv::Size &previousImageSize)
 {
     const int gridX = std::clamp(static_cast<int>(candidate.previousPoint.x * kLkPerFramePnPSelectGridCols /
-                                                 std::max(1, previousImageSize.width)),
+                                                  std::max(1, previousImageSize.width)),
                                  0, kLkPerFramePnPSelectGridCols - 1);
     const int gridY = std::clamp(static_cast<int>(candidate.previousPoint.y * kLkPerFramePnPSelectGridRows /
-                                                 std::max(1, previousImageSize.height)),
+                                                  std::max(1, previousImageSize.height)),
                                  0, kLkPerFramePnPSelectGridRows - 1);
     return ((gridY * kLkPerFramePnPSelectGridCols) + gridX) * kLkPerFramePnPDepthBins +
            LkPerFrameDepthBin(candidate.depth);
@@ -309,4 +309,4 @@ KltTrackedStereoPnpObservationSet DefaultVisualPnpObservationBuilder::BuildTrack
     return BuildKltTrackedStereoPnpObservations(options);
 }
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

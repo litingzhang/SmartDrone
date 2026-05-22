@@ -6,7 +6,7 @@
 #include "common/tlv/udp_server.h"
 #include "core/ports/command_channel.h"
 
-namespace smartdrone::adapters::command {
+namespace SmartDrone::adapters::command {
 
 class UdpTlvCommandChannel final : public core::ports::ICommandChannel {
   public:
@@ -23,4 +23,4 @@ class UdpTlvCommandChannel final : public core::ports::ICommandChannel {
     UdpServer m_server;
 };
 
-} // namespace smartdrone::adapters::command
+} // namespace SmartDrone::adapters::command

@@ -7,12 +7,12 @@
 
 #include "core/ports/stereo_processing.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 class DefaultStereoPairBuilder final : public core::ports::IStereoPairBuilder {
-public:
-  bool BuildPairs(const core::ports::StereoPairBuildInput &input,
-                  core::ports::StereoPairBuildResult &result) const override;
+  public:
+    bool BuildPairs(const core::ports::StereoPairBuildInput &input,
+                    core::ports::StereoPairBuildResult &result) const override;
 };
 
 bool HasValidVisualFeatureDescriptors(
@@ -32,4 +32,4 @@ void LimitStereoPairsInPlace(std::vector<cv::Point2f> &leftPoints,
                              std::vector<cv::Point2f> &rightPoints,
                              size_t maxCount);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

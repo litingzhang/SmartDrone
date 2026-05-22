@@ -7,10 +7,11 @@
 #include <set>
 #include <sstream>
 
-namespace epg {
+namespace Epg {
 namespace {
 
-std::string Trim(const std::string& value) {
+std::string Trim(const std::string &value)
+{
     auto begin = value.begin();
     while (begin != value.end() && std::isspace(static_cast<unsigned char>(*begin))) {
         ++begin;
@@ -24,7 +25,8 @@ std::string Trim(const std::string& value) {
     return std::string(begin, end);
 }
 
-std::string StripQuotes(std::string value) {
+std::string StripQuotes(std::string value)
+{
     value = Trim(value);
     if (value.size() >= 2 &&
         ((value.front() == '"' && value.back() == '"') ||
@@ -34,9 +36,10 @@ std::string StripQuotes(std::string value) {
     return value;
 }
 
-std::string NormalizeMermaidLabel(std::string value) {
+std::string NormalizeMermaidLabel(std::string value)
+{
     const std::vector<std::string> breaks = {"<br/>", "<br />", "<br>"};
-    for (const auto& marker : breaks) {
+    for (const auto &marker : breaks) {
         std::size_t pos = 0;
         while ((pos = value.find(marker, pos)) != std::string::npos) {
             value.replace(pos, marker.size(), ";");
@@ -46,7 +49,8 @@ std::string NormalizeMermaidLabel(std::string value) {
     return value;
 }
 
-std::vector<std::string> SplitFields(const std::string& text) {
+std::vector<std::string> SplitFields(const std::string &text)
+{
     std::vector<std::string> fields;
     std::string current;
     bool inQuote = false;
@@ -77,7 +81,8 @@ std::vector<std::string> SplitFields(const std::string& text) {
     return fields;
 }
 
-std::vector<std::string> SplitTriggerQueueRefs(const std::string& text) {
+std::vector<std::string> SplitTriggerQueueRefs(const std::string &text)
+{
     std::vector<std::string> refs;
     std::string current;
     for (char c : text) {
@@ -99,9 +104,10 @@ std::vector<std::string> SplitTriggerQueueRefs(const std::string& text) {
     return refs;
 }
 
-std::map<std::string, std::string> ParseFields(const std::string& text) {
+std::map<std::string, std::string> ParseFields(const std::string &text)
+{
     std::map<std::string, std::string> result;
-    for (const auto& field : SplitFields(NormalizeMermaidLabel(text))) {
+    for (const auto &field : SplitFields(NormalizeMermaidLabel(text))) {
         const auto pos = field.find('=');
         if (pos == std::string::npos) {
             throw std::runtime_error("Mermaid field must use key=value: " + field);
@@ -116,7 +122,8 @@ std::map<std::string, std::string> ParseFields(const std::string& text) {
     return result;
 }
 
-OverflowPolicy ParseMermaidOverflow(const std::string& value) {
+OverflowPolicy ParseMermaidOverflow(const std::string &value)
+{
     if (value == "drop_newest" || value == "tail_drop") {
         return OverflowPolicy::DropNewest;
     }
@@ -126,7 +133,8 @@ OverflowPolicy ParseMermaidOverflow(const std::string& value) {
     throw std::runtime_error("unsupported Mermaid queue overflow policy: " + value);
 }
 
-TriggerMode ParseMermaidTriggerMode(const std::string& value) {
+TriggerMode ParseMermaidTriggerMode(const std::string &value)
+{
     if (value == "periodic") {
         return TriggerMode::Periodic;
     }
@@ -142,12 +150,13 @@ TriggerMode ParseMermaidTriggerMode(const std::string& value) {
     throw std::runtime_error("unsupported Mermaid task trigger mode: " + value);
 }
 
-std::size_t ParseSize(const std::string& value, const std::string& field) {
+std::size_t ParseSize(const std::string &value, const std::string &field)
+{
     std::size_t parsedChars = 0;
     std::size_t parsed = 0;
     try {
         parsed = std::stoul(value, &parsedChars, 10);
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
         throw std::runtime_error("Mermaid numeric field is invalid: " + field + "=" + value);
     }
     if (parsedChars != value.size()) {
@@ -156,7 +165,8 @@ std::size_t ParseSize(const std::string& value, const std::string& field) {
     return parsed;
 }
 
-bool ParseBool(const std::string& value, const std::string& field) {
+bool ParseBool(const std::string &value, const std::string &field)
+{
     if (value == "true" || value == "1" || value == "yes") {
         return true;
     }
@@ -166,12 +176,13 @@ bool ParseBool(const std::string& value, const std::string& field) {
     throw std::runtime_error("Mermaid bool field is invalid: " + field + "=" + value);
 }
 
-int ParseInt(const std::string& value, const std::string& field) {
+int ParseInt(const std::string &value, const std::string &field)
+{
     std::size_t parsedChars = 0;
     int parsed = 0;
     try {
         parsed = std::stoi(value, &parsedChars, 10);
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
         throw std::runtime_error("Mermaid integer field is invalid: " +
                                  field + "=" + value);
     }
@@ -182,15 +193,17 @@ int ParseInt(const std::string& value, const std::string& field) {
     return parsed;
 }
 
-bool IsQueueTriggeredMode(TriggerMode mode) {
+bool IsQueueTriggeredMode(TriggerMode mode)
+{
     return mode == TriggerMode::AnyQueueReady ||
            mode == TriggerMode::AllQueueReady ||
            mode == TriggerMode::PeriodicOrAnyQueueReady;
 }
 
-std::string RequireField(const std::map<std::string, std::string>& fields,
-                         const std::string& key,
-                         const std::string& owner) {
+std::string RequireField(const std::map<std::string, std::string> &fields,
+                         const std::string &key,
+                         const std::string &owner)
+{
     const auto it = fields.find(key);
     if (it == fields.end()) {
         throw std::runtime_error("missing Mermaid field '" + key + "' on " + owner);
@@ -198,8 +211,9 @@ std::string RequireField(const std::map<std::string, std::string>& fields,
     return it->second;
 }
 
-std::string SanitizeQueueName(std::string value) {
-    for (auto& c : value) {
+std::string SanitizeQueueName(std::string value)
+{
+    for (auto &c : value) {
         if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
             c = '_';
         }
@@ -213,7 +227,8 @@ struct Endpoint {
     bool hasPort{false};
 };
 
-Endpoint ParseEndpoint(const std::string& value) {
+Endpoint ParseEndpoint(const std::string &value)
+{
     const auto endpoint = Trim(value);
     const auto pos = endpoint.find('.');
     if (pos == std::string::npos) {
@@ -230,12 +245,14 @@ Endpoint ParseEndpoint(const std::string& value) {
                     true};
 }
 
-std::string AutoQueueName(const Endpoint& from, const Endpoint& to) {
+std::string AutoQueueName(const Endpoint &from, const Endpoint &to)
+{
     return SanitizeQueueName(from.node + "_" + std::to_string(from.port) +
                              "_to_" + to.node + "_" + std::to_string(to.port));
 }
 
-TaskConfig ParseNodeLine(const std::string& line) {
+TaskConfig ParseNodeLine(const std::string &line)
+{
     const auto open = line.find('[');
     const auto close = line.rfind(']');
     if (open == std::string::npos || close == std::string::npos || close <= open) {
@@ -291,7 +308,7 @@ TaskConfig ParseNodeLine(const std::string& line) {
     }
     const auto backpressureIt = fields.find("backpressure_outputs");
     if (backpressureIt != fields.end()) {
-        for (const auto& port : SplitTriggerQueueRefs(backpressureIt->second)) {
+        for (const auto &port : SplitTriggerQueueRefs(backpressureIt->second)) {
             task.scheduling.backpressureOutputs.push_back(
                 static_cast<PortId>(ParseSize(port, "backpressure_outputs")));
         }
@@ -311,7 +328,8 @@ struct EdgeLabel {
     std::string right;
 };
 
-bool ParsePortPairField(const std::string& field, PortId& from, PortId& to) {
+bool ParsePortPairField(const std::string &field, PortId &from, PortId &to)
+{
     const auto arrow = field.find("->");
     if (arrow == std::string::npos) {
         return false;
@@ -321,7 +339,8 @@ bool ParsePortPairField(const std::string& field, PortId& from, PortId& to) {
     return true;
 }
 
-EdgeLabel ParseEdgeLabel(const std::string& line, std::size_t labelStart) {
+EdgeLabel ParseEdgeLabel(const std::string &line, std::size_t labelStart)
+{
     EdgeLabel result;
     if (labelStart >= line.size() || line[labelStart] != '|') {
         result.right = line.substr(labelStart);
@@ -337,19 +356,21 @@ EdgeLabel ParseEdgeLabel(const std::string& line, std::size_t labelStart) {
     return result;
 }
 
-void ApplyEdgePortPair(EdgeConfig& edge, PortId fromPort, PortId toPort) {
+void ApplyEdgePortPair(EdgeConfig &edge, PortId fromPort, PortId toPort)
+{
     edge.from.port = fromPort;
     edge.from.hasPort = true;
     edge.to.port = toPort;
     edge.to.hasPort = true;
 }
 
-std::string CollectEdgeMetadataFields(EdgeConfig& edge, const std::string& label) {
+std::string CollectEdgeMetadataFields(EdgeConfig &edge, const std::string &label)
+{
     const auto labelFields = SplitFields(NormalizeMermaidLabel(StripQuotes(label)));
     std::ostringstream metadata;
     bool hasMetadata = false;
 
-    for (const auto& field : labelFields) {
+    for (const auto &field : labelFields) {
         PortId fromPort = 0;
         PortId toPort = 0;
         if (ParsePortPairField(field, fromPort, toPort)) {
@@ -365,7 +386,8 @@ std::string CollectEdgeMetadataFields(EdgeConfig& edge, const std::string& label
     return metadata.str();
 }
 
-void ApplyEdgeQueueFields(EdgeConfig& edge, const std::string& metadata) {
+void ApplyEdgeQueueFields(EdgeConfig &edge, const std::string &metadata)
+{
     const auto fields = ParseFields(metadata);
     const auto nameIt = fields.find("name");
     if (nameIt != fields.end()) {
@@ -376,7 +398,8 @@ void ApplyEdgeQueueFields(EdgeConfig& edge, const std::string& metadata) {
     edge.queue.overflow = ParseMermaidOverflow(RequireField(fields, "overflow", edge.queue.name));
 }
 
-EdgeConfig ParseEdgeLine(const std::string& line) {
+EdgeConfig ParseEdgeLine(const std::string &line)
+{
     const auto arrow = line.find("-->");
     if (arrow == std::string::npos) {
         throw std::runtime_error("Mermaid edge must use -->: " + line);
@@ -391,9 +414,10 @@ EdgeConfig ParseEdgeLine(const std::string& line) {
     return edge;
 }
 
-const Registry::TaskTypeInfo& FindTaskTypeOrThrow(Registry& registry,
-                                                  const TaskConfig& task) {
-    const auto* type = registry.FindTaskType(task.type);
+const Registry::TaskTypeInfo &FindTaskTypeOrThrow(Registry &registry,
+                                                  const TaskConfig &task)
+{
+    const auto *type = registry.FindTaskType(task.type);
     if (!type) {
         throw std::runtime_error("Mermaid node uses unregistered task type: " +
                                  task.name + " type=" + task.type);
@@ -401,10 +425,11 @@ const Registry::TaskTypeInfo& FindTaskTypeOrThrow(Registry& registry,
     return *type;
 }
 
-std::vector<PortSpec> MatchingPorts(const std::vector<PortSpec>& ports,
-                                    const std::string& messageType) {
+std::vector<PortSpec> MatchingPorts(const std::vector<PortSpec> &ports,
+                                    const std::string &messageType)
+{
     std::vector<PortSpec> result;
-    for (const auto& port : ports) {
+    for (const auto &port : ports) {
         if (port.type == messageType) {
             result.push_back(port);
         }
@@ -412,11 +437,12 @@ std::vector<PortSpec> MatchingPorts(const std::vector<PortSpec>& ports,
     return result;
 }
 
-PortId InferPort(const std::vector<PortSpec>& declaredPorts,
-                 const std::set<PortId>& usedPorts,
-                 const std::string& messageType,
-                 const std::string& ownerNode,
-                 const std::string& direction) {
+PortId InferPort(const std::vector<PortSpec> &declaredPorts,
+                 const std::set<PortId> &usedPorts,
+                 const std::string &messageType,
+                 const std::string &ownerNode,
+                 const std::string &direction)
+{
     auto candidates = MatchingPorts(declaredPorts, messageType);
     if (candidates.empty()) {
         throw std::runtime_error("Mermaid cannot infer " + direction +
@@ -425,7 +451,7 @@ PortId InferPort(const std::vector<PortSpec>& declaredPorts,
     }
 
     std::vector<PortSpec> unused;
-    for (const auto& candidate : candidates) {
+    for (const auto &candidate : candidates) {
         if (usedPorts.find(candidate.id) == usedPorts.end()) {
             unused.push_back(candidate);
         }
@@ -442,22 +468,23 @@ PortId InferPort(const std::vector<PortSpec>& declaredPorts,
                              " port for node '" + ownerNode + "': specify a numeric port pair");
 }
 
-void InferMissingPorts(EdgeConfig& edge,
-                       const GraphConfig& config,
-                       const std::map<std::string, std::size_t>& taskIndexByName,
-                       Registry& registry,
-                       const std::map<std::string, std::set<PortId>>& usedOutputs,
-                       const std::map<std::string, std::set<PortId>>& usedInputs) {
-    const auto& fromTask = config.tasks.at(taskIndexByName.at(edge.from.node));
-    const auto& toTask = config.tasks.at(taskIndexByName.at(edge.to.node));
-    const auto& fromType = FindTaskTypeOrThrow(registry, fromTask);
-    const auto& toType = FindTaskTypeOrThrow(registry, toTask);
+void InferMissingPorts(EdgeConfig &edge,
+                       const GraphConfig &config,
+                       const std::map<std::string, std::size_t> &taskIndexByName,
+                       Registry &registry,
+                       const std::map<std::string, std::set<PortId>> &usedOutputs,
+                       const std::map<std::string, std::set<PortId>> &usedInputs)
+{
+    const auto &fromTask = config.tasks.at(taskIndexByName.at(edge.from.node));
+    const auto &toTask = config.tasks.at(taskIndexByName.at(edge.to.node));
+    const auto &fromType = FindTaskTypeOrThrow(registry, fromTask);
+    const auto &toType = FindTaskTypeOrThrow(registry, toTask);
 
     const auto fromUsedIt = usedOutputs.find(edge.from.node);
     const auto toUsedIt = usedInputs.find(edge.to.node);
     const std::set<PortId> noUsedPorts;
-    const auto& fromUsed = fromUsedIt == usedOutputs.end() ? noUsedPorts : fromUsedIt->second;
-    const auto& toUsed = toUsedIt == usedInputs.end() ? noUsedPorts : toUsedIt->second;
+    const auto &fromUsed = fromUsedIt == usedOutputs.end() ? noUsedPorts : fromUsedIt->second;
+    const auto &toUsed = toUsedIt == usedInputs.end() ? noUsedPorts : toUsedIt->second;
 
     if (!edge.from.hasPort) {
         edge.from.port = InferPort(fromType.outputs,
@@ -482,15 +509,16 @@ void InferMissingPorts(EdgeConfig& edge,
 }
 
 std::vector<std::string> ResolveTriggerQueues(
-    const TaskConfig& task,
-    const std::map<std::string, QueueConfig>& queueByName) {
+    const TaskConfig &task,
+    const std::map<std::string, QueueConfig> &queueByName)
+{
     if (!IsQueueTriggeredMode(task.trigger.mode)) {
         return task.trigger.queues;
     }
 
     if (task.trigger.queues.empty()) {
         std::vector<std::string> queues;
-        for (const auto& input : task.inputs) {
+        for (const auto &input : task.inputs) {
             queues.push_back(input.second);
         }
         return queues;
@@ -498,7 +526,7 @@ std::vector<std::string> ResolveTriggerQueues(
 
     std::vector<std::string> queues;
     std::set<std::string> seen;
-    for (const auto& ref : task.trigger.queues) {
+    for (const auto &ref : task.trigger.queues) {
         const auto queueIt = queueByName.find(ref);
         if (queueIt != queueByName.end()) {
             if (seen.insert(ref).second) {
@@ -508,7 +536,7 @@ std::vector<std::string> ResolveTriggerQueues(
         }
 
         bool matched = false;
-        for (const auto& input : task.inputs) {
+        for (const auto &input : task.inputs) {
             const auto inputQueueIt = queueByName.find(input.second);
             if (inputQueueIt == queueByName.end()) {
                 continue;
@@ -529,19 +557,23 @@ std::vector<std::string> ResolveTriggerQueues(
     return queues;
 }
 
-bool IsHeaderLine(const std::string& line) {
+bool IsHeaderLine(const std::string &line)
+{
     return line.find("flowchart") == 0 || line.find("graph") == 0;
 }
 
-bool IsSubgraphLine(const std::string& line) {
+bool IsSubgraphLine(const std::string &line)
+{
     return line.find("subgraph") == 0;
 }
 
-bool IsEndLine(const std::string& line) {
+bool IsEndLine(const std::string &line)
+{
     return line == "end";
 }
 
-std::string ExtractMermaidBlock(const std::string& text) {
+std::string ExtractMermaidBlock(const std::string &text)
+{
     const std::string fence = "```";
     const std::string mermaidFence = "```mermaid";
     const auto begin = text.find(mermaidFence);
@@ -560,12 +592,14 @@ std::string ExtractMermaidBlock(const std::string& text) {
     return text.substr(contentBegin + 1, end - contentBegin - 1);
 }
 
-std::string StripMermaidComment(const std::string& line) {
+std::string StripMermaidComment(const std::string &line)
+{
     const auto comment = line.find("%%");
     return comment == std::string::npos ? line : line.substr(0, comment);
 }
 
-bool SubgraphLineMatches(const std::string& line, const std::string& subgraphName) {
+bool SubgraphLineMatches(const std::string &line, const std::string &subgraphName)
+{
     if (!IsSubgraphLine(line)) {
         return false;
     }
@@ -594,7 +628,7 @@ bool SubgraphLineMatches(const std::string& line, const std::string& subgraphNam
 
 struct MermaidParseState {
     GraphConfig config;
-    Registry* registry{};
+    Registry *registry{};
     std::map<std::string, std::size_t> taskIndexByName;
     std::set<std::string> queueNames;
     std::map<std::string, std::set<PortId>> usedOutputs;
@@ -604,7 +638,8 @@ struct MermaidParseState {
     std::map<std::string, std::vector<PortSpec>> graphOutputsByTaskType;
 };
 
-void AddTaskToState(MermaidParseState& state, TaskConfig task) {
+void AddTaskToState(MermaidParseState &state, TaskConfig task)
+{
     if (state.taskIndexByName.find(task.name) != state.taskIndexByName.end()) {
         throw std::runtime_error("duplicate Mermaid node id: " + task.name);
     }
@@ -612,9 +647,10 @@ void AddTaskToState(MermaidParseState& state, TaskConfig task) {
     state.config.tasks.push_back(std::move(task));
 }
 
-std::size_t RequireTaskIndex(const MermaidParseState& state,
-                             const std::string& node,
-                             const std::string& role) {
+std::size_t RequireTaskIndex(const MermaidParseState &state,
+                             const std::string &node,
+                             const std::string &role)
+{
     const auto task = state.taskIndexByName.find(node);
     if (task == state.taskIndexByName.end()) {
         throw std::runtime_error("Mermaid edge references undefined " + role + " node: " + node);
@@ -622,7 +658,8 @@ std::size_t RequireTaskIndex(const MermaidParseState& state,
     return task->second;
 }
 
-void ResolveEdgePorts(MermaidParseState& state, EdgeConfig& edge) {
+void ResolveEdgePorts(MermaidParseState &state, EdgeConfig &edge)
+{
     if (state.registry) {
         InferMissingPorts(edge,
                           state.config,
@@ -644,12 +681,13 @@ void ResolveEdgePorts(MermaidParseState& state, EdgeConfig& edge) {
     }
 }
 
-void ConnectEdgePorts(MermaidParseState& state,
-                      const EdgeConfig& edge,
+void ConnectEdgePorts(MermaidParseState &state,
+                      const EdgeConfig &edge,
                       std::size_t fromIndex,
-                      std::size_t toIndex) {
-    auto& from = state.config.tasks[fromIndex];
-    auto& to = state.config.tasks[toIndex];
+                      std::size_t toIndex)
+{
+    auto &from = state.config.tasks[fromIndex];
+    auto &to = state.config.tasks[toIndex];
     state.graphOutputsByTaskType[from.type].push_back(PortSpec{edge.from.port, edge.queue.type});
     state.graphInputsByTaskType[to.type].push_back(PortSpec{edge.to.port, edge.queue.type});
     if (!from.outputs.emplace(edge.from.port, edge.queue.name).second) {
@@ -662,7 +700,8 @@ void ConnectEdgePorts(MermaidParseState& state,
     }
 }
 
-void AddEdgeToState(MermaidParseState& state, EdgeConfig edge) {
+void AddEdgeToState(MermaidParseState &state, EdgeConfig edge)
+{
     const auto fromIndex = RequireTaskIndex(state, edge.from.node, "source");
     const auto toIndex = RequireTaskIndex(state, edge.to.node, "target");
     ResolveEdgePorts(state, edge);
@@ -678,7 +717,8 @@ void AddEdgeToState(MermaidParseState& state, EdgeConfig edge) {
     state.usedInputs[edge.to.node].insert(edge.to.port);
 }
 
-void ParseMermaidConfigLine(MermaidParseState& state, const std::string& line) {
+void ParseMermaidConfigLine(MermaidParseState &state, const std::string &line)
+{
     if (line.empty() || IsHeaderLine(line) || IsSubgraphLine(line) || IsEndLine(line)) {
         return;
     }
@@ -689,19 +729,21 @@ void ParseMermaidConfigLine(MermaidParseState& state, const std::string& line) {
     AddTaskToState(state, ParseNodeLine(line));
 }
 
-void ResolveConfigTriggers(MermaidParseState& state) {
-    for (auto& task : state.config.tasks) {
+void ResolveConfigTriggers(MermaidParseState &state)
+{
+    for (auto &task : state.config.tasks) {
         task.trigger.queues = ResolveTriggerQueues(task, state.queueByName);
     }
 }
 
-void MergeRegistryPorts(MermaidParseState& state) {
+void MergeRegistryPorts(MermaidParseState &state)
+{
     if (!state.registry) {
         return;
     }
 
     std::set<std::string> mergedTaskTypes;
-    for (const auto& task : state.config.tasks) {
+    for (const auto &task : state.config.tasks) {
         if (!mergedTaskTypes.insert(task.type).second) {
             continue;
         }
@@ -712,8 +754,9 @@ void MergeRegistryPorts(MermaidParseState& state) {
     }
 }
 
-std::string ExtractMermaidSubgraphBlock(const std::string& mermaidText,
-                                        const std::string& subgraphName) {
+std::string ExtractMermaidSubgraphBlock(const std::string &mermaidText,
+                                        const std::string &subgraphName)
+{
     std::istringstream input(ExtractMermaidBlock(mermaidText));
     std::ostringstream output;
     output << "flowchart LR\n";
@@ -755,8 +798,9 @@ std::string ExtractMermaidSubgraphBlock(const std::string& mermaidText,
 
 } // namespace
 
-GraphConfig ParseGraphConfigMermaidInternal(const std::string& mermaidText,
-                                                          Registry* registry) {
+GraphConfig ParseGraphConfigMermaidInternal(const std::string &mermaidText,
+                                            Registry *registry)
+{
     MermaidParseState state;
     state.registry = registry;
     std::istringstream input(ExtractMermaidBlock(mermaidText));
@@ -771,16 +815,19 @@ GraphConfig ParseGraphConfigMermaidInternal(const std::string& mermaidText,
     return state.config;
 }
 
-GraphConfig ParseGraphConfigMermaid(const std::string& mermaidText) {
+GraphConfig ParseGraphConfigMermaid(const std::string &mermaidText)
+{
     return ParseGraphConfigMermaidInternal(mermaidText, nullptr);
 }
 
-GraphConfig ParseGraphConfigMermaid(const std::string& mermaidText,
-                                                  Registry& registry) {
+GraphConfig ParseGraphConfigMermaid(const std::string &mermaidText,
+                                    Registry &registry)
+{
     return ParseGraphConfigMermaidInternal(mermaidText, &registry);
 }
 
-GraphConfig ParseGraphConfigMermaidFile(const std::string& path) {
+GraphConfig ParseGraphConfigMermaidFile(const std::string &path)
+{
     std::ifstream input(path);
     if (!input) {
         throw std::runtime_error("failed to open EventPipelineGraph Mermaid file: " + path);
@@ -790,8 +837,9 @@ GraphConfig ParseGraphConfigMermaidFile(const std::string& path) {
     return ParseGraphConfigMermaid(buffer.str());
 }
 
-GraphConfig ParseGraphConfigMermaidFile(const std::string& path,
-                                                      Registry& registry) {
+GraphConfig ParseGraphConfigMermaidFile(const std::string &path,
+                                        Registry &registry)
+{
     std::ifstream input(path);
     if (!input) {
         throw std::runtime_error("failed to open EventPipelineGraph Mermaid file: " + path);
@@ -801,15 +849,17 @@ GraphConfig ParseGraphConfigMermaidFile(const std::string& path,
     return ParseGraphConfigMermaid(buffer.str(), registry);
 }
 
-GraphConfig ParseGraphConfigMermaidSubgraph(const std::string& mermaidText,
-                                                          const std::string& subgraphName,
-                                                          Registry& registry) {
+GraphConfig ParseGraphConfigMermaidSubgraph(const std::string &mermaidText,
+                                            const std::string &subgraphName,
+                                            Registry &registry)
+{
     return ParseGraphConfigMermaid(ExtractMermaidSubgraphBlock(mermaidText, subgraphName), registry);
 }
 
-GraphConfig ParseGraphConfigMermaidSubgraphFile(const std::string& path,
-                                                              const std::string& subgraphName,
-                                                              Registry& registry) {
+GraphConfig ParseGraphConfigMermaidSubgraphFile(const std::string &path,
+                                                const std::string &subgraphName,
+                                                Registry &registry)
+{
     std::ifstream input(path);
     if (!input) {
         throw std::runtime_error("failed to open EventPipelineGraph Mermaid file: " + path);
@@ -819,4 +869,4 @@ GraphConfig ParseGraphConfigMermaidSubgraphFile(const std::string& path,
     return ParseGraphConfigMermaidSubgraph(buffer.str(), subgraphName, registry);
 }
 
-} // namespace epg
+} // namespace Epg

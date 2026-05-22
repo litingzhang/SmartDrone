@@ -2,7 +2,7 @@
 
 #include <utility>
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 void LivePoseState::UpdatePeer(const UdpPeer &peer)
 {
@@ -136,4 +136,4 @@ bool LivePoseState::ReadSnapshot(Snapshot &out) const
     return true;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

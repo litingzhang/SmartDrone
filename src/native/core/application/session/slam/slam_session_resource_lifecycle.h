@@ -7,29 +7,32 @@
 
 #include "core/application/session/slam/slam_session_resource_factory.h"
 
-namespace smartdrone::core::ports {
+namespace SmartDrone::core::ports {
 class ICameraProvider;
 class IImuProvider;
 class ISlamEngine;
 class IVisualFeatureFrontend;
-} // namespace smartdrone::core::ports
+} // namespace SmartDrone::core::ports
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class ImuSensorPoller;
-class SlamPreviewOutputRuntime;
+class IPreviewOutputRuntime;
 
 struct SlamSessionResourceLifecycleConfig {
-    smartdrone::core::ports::ISlamEngine &slamEngine;
-    smartdrone::core::ports::ICameraProvider *cameraProvider{nullptr};
+    SmartDrone::core::ports::ISlamEngine &slamEngine;
+    SmartDrone::core::ports::ICameraProvider *cameraProvider{nullptr};
     ImuSensorPoller *imuPoller{nullptr};
-    SlamPreviewOutputRuntime *previewOutput{nullptr};
+    IPreviewOutputRuntime *previewOutput{nullptr};
     bool useImu{false};
     bool udpEnabled{false};
     const MainRuntimeAliases &aliases;
+    std::function<SmartDrone::core::ports::CameraOpenConfig(
+        const MainRuntimeAliases &)>
+        makeCameraOpenConfig;
     std::function<bool(sockaddr_in &)> resolveUdpDestination;
     std::function<SlamVisualFeatureFrontendStartResult()> startVisualFrontend;
-    std::function<void(smartdrone::core::ports::IVisualFeatureFrontend *)>
+    std::function<void(SmartDrone::core::ports::IVisualFeatureFrontend *)>
         attachVisualFrontend;
 };
 
@@ -40,7 +43,7 @@ struct SlamSessionResourceStartResult {
     bool featureStarted{false};
     std::string featureRepoPath;
     std::string featureError;
-    smartdrone::core::ports::IVisualFeatureFrontend *featureFrontend{nullptr};
+    SmartDrone::core::ports::IVisualFeatureFrontend *featureFrontend{nullptr};
 };
 
 class SlamSessionResourceLifecycle final {
@@ -66,4 +69,4 @@ class SlamSessionResourceLifecycle final {
     bool m_cameraOpen{false};
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

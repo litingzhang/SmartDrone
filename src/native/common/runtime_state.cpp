@@ -10,7 +10,7 @@
 #include <atomic>
 #include <mutex>
 
-namespace smartdrone::common {
+namespace SmartDrone::common {
 
 namespace {
 
@@ -102,4 +102,4 @@ void WaitUntilRuntimeStopRequested()
     }
 }
 
-} // namespace smartdrone::common
+} // namespace SmartDrone::common

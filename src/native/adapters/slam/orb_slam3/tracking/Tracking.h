@@ -48,11 +48,11 @@
 
 namespace ORB_SLAM3 {
 
-using smartdrone::core::ports::SlamFrameTrackingStats;
-using smartdrone::core::ports::TrackedFeatureSnapshot;
-using smartdrone::core::ports::TrackedPointCloudSnapshot;
-using smartdrone::core::ports::TrackedVisualData;
-using smartdrone::core::ports::TrackedVisualSummary;
+using SmartDrone::core::ports::SlamFrameTrackingStats;
+using SmartDrone::core::ports::TrackedFeatureSnapshot;
+using SmartDrone::core::ports::TrackedPointCloudSnapshot;
+using SmartDrone::core::ports::TrackedVisualData;
+using SmartDrone::core::ports::TrackedVisualSummary;
 
 // class Viewer;
 // class FrameDrawer;

@@ -4,13 +4,17 @@
 #include <mutex>
 
 #include "core/application/config/runtime_app_types.h"
-#include "core/application/session/slam/slam_preview_output_port.h"
+#include "core/application/runtime/application_runtime_factories.h"
+#include "core/application/session/stream/preview_output_port.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class CalibPreviewPort::Impl final {
   public:
-    explicit Impl(const MainRuntimeAliases &aliases) : m_aliases(aliases)
+    Impl(const MainRuntimeAliases &aliases,
+         const ApplicationRuntimeFactories &factories)
+        : m_aliases(aliases),
+          m_previewOutput(factories.createPreviewOutputRuntime())
     {
     }
 
@@ -20,7 +24,11 @@ class CalibPreviewPort::Impl final {
         if (!m_aliases.udpEnable || !m_aliases.sendImage) {
             return true;
         }
-        m_opened = m_previewOutput.OpenStaticPeer(m_aliases);
+        if (!m_previewOutput) {
+            return false;
+        }
+        m_opened = m_previewOutput->OpenStaticPeer(
+            MakePreviewOutputOpenConfig(m_aliases));
         return m_opened;
     }
 
@@ -33,7 +41,7 @@ class CalibPreviewPort::Impl final {
         if (!m_opened) {
             return false;
         }
-        m_previewOutput.EnqueueCalibStereoFrame(frame);
+        m_previewOutput->EnqueueCalibStereoFrame(frame);
         return true;
     }
 
@@ -43,7 +51,7 @@ class CalibPreviewPort::Impl final {
         if (!m_opened) {
             return;
         }
-        m_previewOutput.Close();
+        m_previewOutput->Close();
         m_opened = false;
         std::cerr << "[session] calib udp closed\n";
     }
@@ -57,12 +65,14 @@ class CalibPreviewPort::Impl final {
   private:
     mutable std::mutex m_mu;
     const MainRuntimeAliases &m_aliases;
-    SlamPreviewOutputRuntime m_previewOutput;
+    std::unique_ptr<IPreviewOutputRuntime> m_previewOutput;
     bool m_opened{false};
 };
 
-CalibPreviewPort::CalibPreviewPort(const MainRuntimeAliases &aliases)
-    : m_impl(new Impl(aliases))
+CalibPreviewPort::CalibPreviewPort(
+    const MainRuntimeAliases &aliases,
+    const ApplicationRuntimeFactories &factories)
+    : m_impl(new Impl(aliases, factories))
 {
 }
 
@@ -88,4 +98,4 @@ bool CalibPreviewPort::Opened() const
     return m_impl->Opened();
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

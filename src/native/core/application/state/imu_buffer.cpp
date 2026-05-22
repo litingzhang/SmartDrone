@@ -18,10 +18,10 @@ void ImuBuffer::Push(const ImuSample &sample)
     }
 }
 
-std::vector<smartdrone::core::ports::ImuReading>
+std::vector<SmartDrone::core::ports::ImuReading>
 ImuBuffer::PopBetweenNs(const ImuTimeRange &range)
 {
-    std::vector<smartdrone::core::ports::ImuReading> out;
+    std::vector<SmartDrone::core::ports::ImuReading> out;
     std::lock_guard<std::mutex> lock(m_mutex);
 
     if (m_queue.empty() || range.endNs < range.startNs) {
@@ -45,7 +45,7 @@ ImuBuffer::PopBetweenNs(const ImuTimeRange &range)
     return out;
 }
 
-std::vector<smartdrone::core::ports::ImuReading>
+std::vector<SmartDrone::core::ports::ImuReading>
 ImuBuffer::PopBetweenNs(int64_t t0Ns, int64_t t1Ns,
                         int64_t slackBeforeNs, int64_t slackAfterNs)
 {
@@ -94,9 +94,9 @@ ImuSample ImuBuffer::InterpolateSample(const ImuSample &a, const ImuSample &b, i
     return out;
 }
 
-smartdrone::core::ports::ImuReading ImuBuffer::ToReading(const ImuSample &sample)
+SmartDrone::core::ports::ImuReading ImuBuffer::ToReading(const ImuSample &sample)
 {
-    smartdrone::core::ports::ImuReading reading{};
+    SmartDrone::core::ports::ImuReading reading{};
     reading.timestampNs = sample.tNs;
     reading.ax = sample.ax;
     reading.ay = sample.ay;
@@ -125,7 +125,7 @@ size_t ImuBuffer::FindSearchBeginIndex(int64_t rangeStartNs) const
 
 void ImuBuffer::AppendLeadingSample(
     const ImuTimeRange &range, int64_t rangeEndNs, size_t &startIdx,
-    std::vector<smartdrone::core::ports::ImuReading> &out) const
+    std::vector<SmartDrone::core::ports::ImuReading> &out) const
 {
     if (startIdx < m_queue.size() && m_queue[startIdx].tNs == range.startNs) {
         out.push_back(ToReading(m_queue[startIdx]));
@@ -148,7 +148,7 @@ void ImuBuffer::AppendLeadingSample(
 
 size_t ImuBuffer::AppendSamplesUntil(
     int64_t startNs, int64_t endNs, size_t beginIdx,
-    std::vector<smartdrone::core::ports::ImuReading> &out) const
+    std::vector<SmartDrone::core::ports::ImuReading> &out) const
 {
     int64_t lastAppendedTsNs =
         out.empty() ? std::numeric_limits<int64_t>::min() : out.back().timestampNs;
@@ -165,7 +165,7 @@ size_t ImuBuffer::AppendSamplesUntil(
 
 void ImuBuffer::AppendTrailingSample(
     const ImuTimeRange &range, int64_t rangeEndNs, size_t cursorIdx,
-    std::vector<smartdrone::core::ports::ImuReading> &out) const
+    std::vector<SmartDrone::core::ports::ImuReading> &out) const
 {
     if (!out.empty() && out.back().timestampNs == range.endNs) {
         return;

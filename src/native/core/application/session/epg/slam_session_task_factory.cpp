@@ -10,23 +10,23 @@
 #include "core/application/session/slam/slam_session_runtime_service.h"
 #include "core/application/session/epg/slam_session_tasks.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
-using EpgTaskFactoryEntries = std::vector<epg::TypeCatalog::TaskFactoryEntry>;
+using EpgTaskFactoryEntries = std::vector<Epg::TypeCatalog::TaskFactoryEntry>;
 
 template <class TaskType, class Factory>
-void AddFactory(EpgTaskFactoryEntries &entries, const epg::TypeCatalog &catalog,
+void AddFactory(EpgTaskFactoryEntries &entries, const Epg::TypeCatalog &catalog,
                 Factory factory)
 {
     entries.push_back(catalog.MakeTaskFactoryEntry<TaskType>(
         [factory = std::move(factory)]() {
-            return std::unique_ptr<epg::ITask>(factory());
+            return std::unique_ptr<Epg::ITask>(factory());
         }));
 }
 
 void AddSlamStartupTaskFactories(EpgTaskFactoryEntries &entries,
-                                 const epg::TypeCatalog &catalog,
+                                 const Epg::TypeCatalog &catalog,
                                  SlamTaskFactoryDeps deps)
 {
     AddFactory<SlamResourceTask>(entries, catalog, [deps]() {
@@ -39,7 +39,7 @@ void AddSlamStartupTaskFactories(EpgTaskFactoryEntries &entries,
 }
 
 void AddSlamProcessingTaskFactories(EpgTaskFactoryEntries &entries,
-                                    const epg::TypeCatalog &catalog,
+                                    const Epg::TypeCatalog &catalog,
                                     SlamTaskFactoryDeps deps)
 {
     AddFactory<SlamImuPollTask>(entries, catalog, [deps]() {
@@ -66,7 +66,7 @@ void AddSlamProcessingTaskFactories(EpgTaskFactoryEntries &entries,
 }
 
 void AddSlamOutputTaskFactories(EpgTaskFactoryEntries &entries,
-                                const epg::TypeCatalog &catalog,
+                                const Epg::TypeCatalog &catalog,
                                 SlamTaskFactoryDeps deps)
 {
     AddFactory<SlamPosePostprocessTask>(entries, catalog, [deps]() {
@@ -94,7 +94,7 @@ void AddSlamOutputTaskFactories(EpgTaskFactoryEntries &entries,
 }
 
 void AddSlamMonitorTaskFactories(EpgTaskFactoryEntries &entries,
-                                 const epg::TypeCatalog &catalog,
+                                 const Epg::TypeCatalog &catalog,
                                  SlamTaskFactoryDeps deps,
                                  const EpgTaskManifest &manifest)
 {
@@ -117,7 +117,7 @@ void AddSlamMonitorTaskFactories(EpgTaskFactoryEntries &entries,
 EpgTaskFactoryResolver MakeSlamGraphTaskFactoryResolver(
     SlamTaskFactoryDeps deps)
 {
-    auto &catalog = epg::TypeCatalog::Global();
+    auto &catalog = Epg::TypeCatalog::Global();
     const EpgTaskManifest &manifest =
         EpgManifestForDomain(EpgDomain::SlamSession);
     EpgTaskFactoryEntries entries;
@@ -127,9 +127,9 @@ EpgTaskFactoryResolver MakeSlamGraphTaskFactoryResolver(
     AddSlamOutputTaskFactories(entries, catalog, deps);
     AddSlamMonitorTaskFactories(entries, catalog, deps, manifest);
     auto resolver =
-        epg::TypeCatalog::MakeTaskFactoryResolver(std::move(entries));
+        Epg::TypeCatalog::MakeTaskFactoryResolver(std::move(entries));
     ValidateEpgTaskFactoryManifest(manifest, resolver);
     return resolver;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

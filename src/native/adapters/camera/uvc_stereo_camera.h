@@ -14,14 +14,14 @@ struct v4l2_buffer;
 struct v4l2_capability;
 struct v4l2_format;
 
-namespace smartdrone::adapters::camera {
+namespace SmartDrone::adapters::camera {
 
 class UvcStereoCamera final : public core::ports::ICameraProvider {
   public:
     UvcStereoCamera() = default;
     ~UvcStereoCamera() override;
 
-    bool Open(const core::application::MainRuntimeAliases &aliases) override;
+    bool Open(const core::ports::CameraOpenConfig &config) override;
     void Close() override;
     bool Start() override;
     void Stop() override;
@@ -113,4 +113,4 @@ class UvcStereoCamera final : public core::ports::ICameraProvider {
     core::ports::CameraDiagnostics m_diag{};
 };
 
-} // namespace smartdrone::adapters::camera
+} // namespace SmartDrone::adapters::camera

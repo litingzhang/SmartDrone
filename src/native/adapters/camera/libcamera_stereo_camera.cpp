@@ -1,30 +1,41 @@
 #include "adapters/camera/libcamera_stereo_camera.h"
 
-namespace smartdrone::adapters::camera {
+namespace SmartDrone::adapters::camera {
 
-bool LibcameraStereoCamera::Open(const smartdrone::core::application::MainRuntimeAliases &aliases)
+bool LibcameraStereoCamera::Open(const core::ports::CameraOpenConfig &config)
 {
-    const StereoCameraOpenParams params{aliases.width,
-                                        aliases.height,
-                                        aliases.fps,
-                                        aliases.aeDisable,
-                                        aliases.exposureUs,
-                                        aliases.gain,
-                                        aliases.requestY8,
-                                        static_cast<int64_t>(aliases.pairMs) * 1000000LL,
-                                        static_cast<int64_t>(aliases.keepMs) * 1000000LL,
-                                        aliases.pairQueue,
-                                        aliases.r16Norm,
-                                        aliases.leftCamIndex,
-                                        aliases.rightCamIndex};
+    const StereoCameraOpenParams params{
+        config.width,
+        config.height,
+        config.fps,
+        config.autoExposureDisabled,
+        config.exposureUs,
+        config.gain,
+        config.requestY8,
+        static_cast<int64_t>(config.pairWindowMs) * 1000000LL,
+        static_cast<int64_t>(config.keepWindowMs) * 1000000LL,
+        config.pairQueue,
+        config.r16Normalize,
+        config.leftCameraIndex,
+        config.rightCameraIndex,
+    };
     return m_impl.Open(params);
 }
 
-void LibcameraStereoCamera::Close() { m_impl.Close(); }
+void LibcameraStereoCamera::Close()
+{
+    m_impl.Close();
+}
 
-bool LibcameraStereoCamera::Start() { return true; }
+bool LibcameraStereoCamera::Start()
+{
+    return true;
+}
 
-void LibcameraStereoCamera::Stop() { Close(); }
+void LibcameraStereoCamera::Stop()
+{
+    Close();
+}
 
 bool LibcameraStereoCamera::GrabStereo(core::ports::StereoFrame &out, int timeoutMs, bool preferLatest,
                                        uint64_t minTimestampNs)
@@ -87,4 +98,4 @@ core::ports::CameraProviderSemantics LibcameraStereoCamera::Semantics() const
     return core::ports::CameraProviderSemantics::DualStreamPaired;
 }
 
-} // namespace smartdrone::adapters::camera
+} // namespace SmartDrone::adapters::camera

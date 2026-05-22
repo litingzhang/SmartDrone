@@ -15,7 +15,7 @@
 #include "common/epg/epg.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 constexpr std::uint64_t PROFILE_FRESHNESS_MS = 60000;
@@ -204,8 +204,8 @@ const EpgTaskCatalogEntry *FindCatalogEntry(const EpgTaskManifest &manifest,
     return nullptr;
 }
 
-const epg::GraphProfileTaskCatalogEntry *FindProfileCatalogEntry(
-    const epg::GraphProfile &profile,
+const Epg::GraphProfileTaskCatalogEntry *FindProfileCatalogEntry(
+    const Epg::GraphProfile &profile,
     const std::string &taskType)
 {
     for (const auto &entry : profile.taskCatalog) {
@@ -217,7 +217,7 @@ const epg::GraphProfileTaskCatalogEntry *FindProfileCatalogEntry(
 }
 
 void ValidateProfileCatalogEntry(const EpgTaskCatalogEntry &manifestEntry,
-                                 const epg::GraphProfileTaskCatalogEntry &entry)
+                                 const Epg::GraphProfileTaskCatalogEntry &entry)
 {
     if (entry.role != manifestEntry.role ||
         entry.resource != manifestEntry.resource ||
@@ -230,7 +230,7 @@ void ValidateProfileCatalogEntry(const EpgTaskCatalogEntry &manifestEntry,
 }
 
 void ValidateProfileCatalog(const EpgTaskManifest &manifest,
-                            const epg::GraphProfile &profile)
+                            const Epg::GraphProfile &profile)
 {
     if (profile.taskCatalog.size() != manifest.catalog.size()) {
         throw std::runtime_error("profile task catalog size mismatch");
@@ -247,8 +247,8 @@ void ValidateProfileCatalog(const EpgTaskManifest &manifest,
 }
 
 void ValidateProfileQueueDiagnostics(
-    const epg::GraphConfig &topology,
-    const epg::GraphProfileDiagnostics &diagnostics)
+    const Epg::GraphConfig &topology,
+    const Epg::GraphProfileDiagnostics &diagnostics)
 {
     for (const auto &queue : topology.queues) {
         if (diagnostics.queues.find(queue.name) != diagnostics.queues.end()) {
@@ -260,8 +260,8 @@ void ValidateProfileQueueDiagnostics(
 }
 
 void ValidateProfileTaskDiagnostics(
-    const epg::GraphConfig &topology,
-    const epg::GraphProfileDiagnostics &diagnostics)
+    const Epg::GraphConfig &topology,
+    const Epg::GraphProfileDiagnostics &diagnostics)
 {
     for (const auto &task : topology.tasks) {
         if (diagnostics.tasks.find(task.name) != diagnostics.tasks.end()) {
@@ -273,28 +273,28 @@ void ValidateProfileTaskDiagnostics(
 }
 
 void ValidateProfileDiagnosticsCoverage(
-    const epg::GraphConfig &topology,
-    const epg::GraphProfileDiagnostics &diagnostics)
+    const Epg::GraphConfig &topology,
+    const Epg::GraphProfileDiagnostics &diagnostics)
 {
     ValidateProfileQueueDiagnostics(topology, diagnostics);
     ValidateProfileTaskDiagnostics(topology, diagnostics);
 }
 
-std::uint64_t EffectiveLoopUs(const epg::TaskProfileMetrics &stats)
+std::uint64_t EffectiveLoopUs(const Epg::TaskProfileMetrics &stats)
 {
     return std::max({stats.p99LoopUs, stats.p90LoopUs, stats.maxLoopUs,
                      stats.averageLoopUs});
 }
 
-bool HasResourceWaitPressure(const epg::TaskProfileMetrics &stats)
+bool HasResourceWaitPressure(const Epg::TaskProfileMetrics &stats)
 {
     return stats.maxResourceWaitUs > RESOURCE_WAIT_PRESSURE_US ||
            stats.averageResourceWaitUs > RESOURCE_WAIT_PRESSURE_US ||
            stats.totalResourceWaitUs > RESOURCE_WAIT_PRESSURE_US;
 }
 
-std::uint64_t QueuePressure(const epg::QueueConfig &queue,
-                            const epg::QueueProfileMetrics &stats)
+std::uint64_t QueuePressure(const Epg::QueueConfig &queue,
+                            const Epg::QueueProfileMetrics &stats)
 {
     const auto depthPressure =
         stats.maxDepthObserved > queue.depth
@@ -303,8 +303,8 @@ std::uint64_t QueuePressure(const epg::QueueConfig &queue,
     return depthPressure + stats.droppedNewest + stats.overwrittenOldest;
 }
 
-std::string TaskDecisionReason(const epg::TaskConfig &task,
-                               const epg::TaskProfileMetrics &stats,
+std::string TaskDecisionReason(const Epg::TaskConfig &task,
+                               const Epg::TaskProfileMetrics &stats,
                                std::uint64_t effectiveLoopUs)
 {
     std::vector<std::string> reasons;
@@ -338,8 +338,8 @@ std::string TaskDecisionReason(const epg::TaskConfig &task,
     return reason;
 }
 
-std::string NotReplaceableTaskReason(const epg::TaskConfig &task,
-                                     const epg::TaskProfileMetrics &stats,
+std::string NotReplaceableTaskReason(const Epg::TaskConfig &task,
+                                     const Epg::TaskProfileMetrics &stats,
                                      std::uint64_t effectiveLoopUs)
 {
     const std::string reason = TaskDecisionReason(task, stats, effectiveLoopUs);
@@ -349,8 +349,8 @@ std::string NotReplaceableTaskReason(const epg::TaskConfig &task,
     return "not_replaceable+" + reason;
 }
 
-std::uint64_t TargetIntervalMs(const epg::TaskConfig &task,
-                               const epg::TaskProfileMetrics &stats,
+std::uint64_t TargetIntervalMs(const Epg::TaskConfig &task,
+                               const Epg::TaskProfileMetrics &stats,
                                std::uint64_t effectiveLoopUs)
 {
     const auto intervalMs =
@@ -367,8 +367,8 @@ std::uint64_t TargetIntervalMs(const epg::TaskConfig &task,
     return std::min(target, MAX_PERIODIC_INTERVAL_MS);
 }
 
-std::uint64_t OptimizedTaskIntervalMs(const epg::TaskConfig &task,
-                                      const epg::TaskProfileMetrics &stats,
+std::uint64_t OptimizedTaskIntervalMs(const Epg::TaskConfig &task,
+                                      const Epg::TaskProfileMetrics &stats,
                                       const EpgTaskCatalogEntry *catalog,
                                       std::uint64_t effectiveLoopUs)
 {
@@ -380,8 +380,8 @@ std::uint64_t OptimizedTaskIntervalMs(const epg::TaskConfig &task,
     return TargetIntervalMs(task, stats, effectiveLoopUs);
 }
 
-void ApplyResourceIsolation(epg::TaskConfig &task,
-                            const epg::TaskProfileMetrics &stats,
+void ApplyResourceIsolation(Epg::TaskConfig &task,
+                            const Epg::TaskProfileMetrics &stats,
                             const EpgTaskCatalogEntry *catalog)
 {
     if (!catalog || !catalog->replaceable || !HasResourceWaitPressure(stats)) {
@@ -397,7 +397,7 @@ void ApplyResourceIsolation(epg::TaskConfig &task,
 }
 
 std::map<std::string, std::uint64_t>
-MakeOptimizerNumbers(const epg::GraphProfileMetadata &metadata,
+MakeOptimizerNumbers(const Epg::GraphProfileMetadata &metadata,
                      std::uint64_t nowMs)
 {
     return {
@@ -410,16 +410,16 @@ std::map<std::string, std::string>
 MakeOptimizerStrings(const EpgTaskManifest &manifest)
 {
     return {
-        {"schema", epg::OPTIMIZED_GRAPH_SCHEMA},
+        {"schema", Epg::OPTIMIZED_GRAPH_SCHEMA},
         {"sourceProfile", manifest.subgraphName},
         {"targetGraph", manifest.subgraphName},
         {"topologyVersion", manifest.topologyVersion},
-        {"solverVersion", epg::NATIVE_HEURISTIC_SOLVER_VERSION},
+        {"solverVersion", Epg::NATIVE_HEURISTIC_SOLVER_VERSION},
     };
 }
 
-void OptimizeQueue(epg::QueueConfig &queue,
-                   const epg::QueueProfileMetrics &stats,
+void OptimizeQueue(Epg::QueueConfig &queue,
+                   const Epg::QueueProfileMetrics &stats,
                    std::vector<SolverDecision> &decisions)
 {
     const auto depthBefore = queue.depth;
@@ -444,8 +444,8 @@ void OptimizeQueue(epg::QueueConfig &queue,
     decisions.push_back(std::move(decision));
 }
 
-void OptimizeTask(epg::TaskConfig &task,
-                  const epg::TaskProfileMetrics &stats,
+void OptimizeTask(Epg::TaskConfig &task,
+                  const Epg::TaskProfileMetrics &stats,
                   const EpgTaskCatalogEntry *catalog,
                   std::vector<SolverDecision> &decisions)
 {
@@ -491,9 +491,9 @@ void OptimizeTask(epg::TaskConfig &task,
     decisions.push_back(std::move(decision));
 }
 
-epg::GraphConfig OptimizeGraphConfig(const EpgTaskManifest &manifest,
-                                     const epg::GraphConfig &profileTopology,
-                                     const epg::GraphProfileDiagnostics &diagnostics,
+Epg::GraphConfig OptimizeGraphConfig(const EpgTaskManifest &manifest,
+                                     const Epg::GraphConfig &profileTopology,
+                                     const Epg::GraphProfileDiagnostics &diagnostics,
                                      std::vector<SolverDecision> &decisions)
 {
     auto config = profileTopology;
@@ -589,14 +589,14 @@ void WriteDecisionJson(std::ostringstream &out, const SolverDecision &decision)
 }
 
 std::string BuildSolverReport(const EpgTaskManifest &manifest,
-                              const epg::GraphProfileMetadata &metadata,
+                              const Epg::GraphProfileMetadata &metadata,
                               std::uint64_t nowMs,
                               const std::vector<SolverDecision> &decisions)
 {
     const auto score = ScoreDecisions(decisions);
     std::ostringstream out;
     out << "{\n";
-    out << "  \"schema\": \"" << epg::SOLVER_REPORT_SCHEMA << "\",\n";
+    out << "  \"schema\": \"" << Epg::SOLVER_REPORT_SCHEMA << "\",\n";
     out << "  \"targetGraph\": \"" << JsonEscape(manifest.subgraphName)
         << "\",\n";
     out << "  \"topologyVersion\": \""
@@ -605,7 +605,7 @@ std::string BuildSolverReport(const EpgTaskManifest &manifest,
         << "\",\n";
     out << "  \"sourceTimestampMs\": " << metadata.timestampMs << ",\n";
     out << "  \"generatedAtMs\": " << nowMs << ",\n";
-    out << "  \"solverVersion\": \"" << epg::NATIVE_HEURISTIC_SOLVER_VERSION
+    out << "  \"solverVersion\": \"" << Epg::NATIVE_HEURISTIC_SOLVER_VERSION
         << "\",\n";
     out << "  \"objective\": {\n";
     out << "    \"name\": "
@@ -637,21 +637,21 @@ std::string BuildSolverReport(const EpgTaskManifest &manifest,
     return out.str();
 }
 
-epg::OptimizedGraph ValidateGeneratedArtifacts(
+Epg::OptimizedGraph ValidateGeneratedArtifacts(
     const EpgTaskManifest &manifest,
-    const epg::GraphProfile &sourceProfile,
+    const Epg::GraphProfile &sourceProfile,
     const std::string &optimizedJson,
     const std::string &reportJson)
 {
-    auto optimized = epg::ParseOptimizedGraphJson(optimizedJson);
+    auto optimized = Epg::ParseOptimizedGraphJson(optimizedJson);
     ValidateEpgOptimizedGraphManifest(manifest, optimized);
-    const auto report = epg::ParseSolverReportJson(reportJson);
+    const auto report = Epg::ParseSolverReportJson(reportJson);
     ValidateEpgSolverReport(manifest, sourceProfile, optimized, report);
     return optimized;
 }
 
 EpgRuntimeOptimizerResult WriteOptimizedConfig(const EpgTaskManifest &manifest,
-                                               const epg::GraphProfile &profile,
+                                               const Epg::GraphProfile &profile,
                                                std::uint64_t nowMs)
 {
     const auto &paths = manifest.artifactPaths;
@@ -660,7 +660,7 @@ EpgRuntimeOptimizerResult WriteOptimizedConfig(const EpgTaskManifest &manifest,
         OptimizeGraphConfig(manifest, profile.topology, profile.diagnostics,
                             decisions);
     const std::string json =
-        epg::GraphConfigToJson(config, MakeOptimizerStrings(manifest),
+        Epg::GraphConfigToJson(config, MakeOptimizerStrings(manifest),
                                MakeOptimizerNumbers(profile.metadata, nowMs));
     const std::string report =
         BuildSolverReport(manifest, profile.metadata, nowMs, decisions);
@@ -680,7 +680,7 @@ EpgRuntimeOptimizerResult WriteOptimizedConfig(const EpgTaskManifest &manifest,
     result.sourceProfilePath = paths.profilePath;
     result.sourceTimestampMs = profile.metadata.timestampMs;
     result.generatedAtMs = nowMs;
-    result.solverVersion = epg::NATIVE_HEURISTIC_SOLVER_VERSION;
+    result.solverVersion = Epg::NATIVE_HEURISTIC_SOLVER_VERSION;
     result.optimizedConfigPath = paths.optimizedConfigPath;
     result.solverReportPath = paths.solverReportPath;
     return result;
@@ -702,14 +702,14 @@ OptimizeEpgProfileForManifest(const EpgTaskManifest &manifest,
     if (profileText.empty()) {
         return {false, false, "profile missing"};
     }
-    epg::GraphProfile profile;
+    Epg::GraphProfile profile;
     try {
-        profile = epg::ParseGraphProfileJson(profileText);
+        profile = Epg::ParseGraphProfileJson(profileText);
     } catch (const std::exception &error) {
         return {false, false, error.what()};
     }
     const auto &metadata = profile.metadata;
-    if (metadata.schema != epg::GRAPH_PROFILE_SCHEMA) {
+    if (metadata.schema != Epg::GRAPH_PROFILE_SCHEMA) {
         return {false, false, "profile schema mismatch"};
     }
     if (metadata.graph != manifest.subgraphName) {
@@ -733,4 +733,4 @@ OptimizeEpgProfileForManifest(const EpgTaskManifest &manifest,
     }
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

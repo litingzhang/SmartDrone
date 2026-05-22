@@ -2,13 +2,13 @@
 
 #include "adapters/imu/icm42688_sample_source.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
-std::unique_ptr<smartdrone::core::ports::IImuSampleSource>
+std::unique_ptr<SmartDrone::core::ports::IImuSampleSource>
 CreateImuSampleSource(const MainRuntimeAliases &aliases)
 {
-    return std::make_unique<smartdrone::adapters::imu::Icm42688SampleSource>(
+    return std::make_unique<SmartDrone::adapters::imu::Icm42688SampleSource>(
         aliases);
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

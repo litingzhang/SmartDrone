@@ -11,4 +11,7 @@ uint16_t Crc16CcittFalseUpdate(uint16_t crc, const uint8_t *data, size_t len)
     return crc;
 }
 
-uint16_t Crc16CcittFalse(const uint8_t *data, size_t len) { return Crc16CcittFalseUpdate(0xFFFF, data, len); }
+uint16_t Crc16CcittFalse(const uint8_t *data, size_t len)
+{
+    return Crc16CcittFalseUpdate(0xFFFF, data, len);
+}

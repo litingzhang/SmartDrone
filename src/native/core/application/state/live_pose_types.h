@@ -4,7 +4,7 @@
 
 #include "common/tlv/tlv_protocol.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 enum class LivePoseQuality : uint8_t {
     Good = 0,
@@ -32,4 +32,4 @@ struct LivePoseUpdate {
     bool poseValid{false};
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

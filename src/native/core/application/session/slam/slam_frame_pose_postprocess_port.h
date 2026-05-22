@@ -14,7 +14,7 @@
 #include "core/application/session/slam/slam_frame_stage_state.h"
 #include "core/application/session/slam/slam_frame_step_result.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class SlamFramePosePostprocessPort final {
   public:
@@ -28,7 +28,7 @@ class SlamFramePosePostprocessPort final {
 
   private:
     struct TrackingContext {
-        int state{smartdrone::core::ports::kSlamTrackingNoImagesYet};
+        int state{SmartDrone::core::ports::kSlamTrackingNoImagesYet};
         bool usable{false};
         unsigned long mapId{PosePostprocessor::ContinuityMapper::kInvalidMapId};
     };
@@ -42,7 +42,7 @@ class SlamFramePosePostprocessPort final {
         PosePostprocessor::Result poseResult{};
         std::chrono::steady_clock::time_point postStartTp;
         std::chrono::steady_clock::time_point postEndTp;
-        int trackingState{smartdrone::core::ports::kSlamTrackingNoImagesYet};
+        int trackingState{SmartDrone::core::ports::kSlamTrackingNoImagesYet};
         bool trackingUsable{false};
         uint8_t effectiveResetCounter{0};
         uint16_t effectiveResetMapCount{0};
@@ -82,4 +82,4 @@ class SlamFramePosePostprocessPort final {
     SlamFrameSharedState &m_sharedState;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

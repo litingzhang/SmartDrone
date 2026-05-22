@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 enum class CalibFrameCaptureStatus : std::uint8_t {
     Captured,
@@ -14,4 +14,4 @@ struct CalibFrameCaptureResult {
     CalibFrameCaptureStatus status{CalibFrameCaptureStatus::Pending};
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

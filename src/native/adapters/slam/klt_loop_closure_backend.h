@@ -8,7 +8,7 @@
 #include "adapters/slam/slam_mode_state.h"
 #include "core/ports/visual_tracking.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 using LkLoopClosureState = core::ports::LoopClosureState;
 
@@ -24,4 +24,4 @@ void ResetKltLoopClosureState(SlamModeSharedState &state);
 Sophus::SE3f ApplyKltLoopClosure(SlamModeSharedState &state, const cv::Mat &leftRect,
                                  uint64_t frameId, const Sophus::SE3f &rawTwc);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

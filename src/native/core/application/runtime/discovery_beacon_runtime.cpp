@@ -8,7 +8,7 @@
 #include <cerrno>
 #include <iostream>
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 constexpr const char *kDiscoveryMagic = "smartdrone_discovery";
@@ -131,4 +131,4 @@ void DiscoveryBeaconRuntime::LogFirstSendResult(ssize_t sent)
               << " cmd=" << m_cmdPort << " video=" << m_videoPort << "\n";
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

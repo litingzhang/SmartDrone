@@ -4,13 +4,13 @@
 #include <utility>
 
 #include "core/application/sensors/imu_sensor_poller.h"
-#include "core/application/session/slam/slam_preview_output_port.h"
+#include "core/application/session/stream/preview_output_port.h"
 #include "core/application/session/slam/slam_runtime_control_port.h"
 #include "core/ports/camera_provider.h"
 #include "core/ports/slam_engine.h"
 #include "core/ports/visual_feature_frontend.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 SlamSessionResourceLifecycle::SlamSessionResourceLifecycle(
     SlamSessionResourceLifecycleConfig config)
@@ -106,8 +106,9 @@ bool SlamSessionResourceLifecycle::OpenUdp()
     if (m_config.previewOutput == nullptr) {
         return false;
     }
-    if (m_config.previewOutput->Open(m_config.aliases,
-                                     m_config.resolveUdpDestination)) {
+    if (m_config.previewOutput->Open(
+            MakePreviewOutputOpenConfig(m_config.aliases),
+            m_config.resolveUdpDestination)) {
         m_udpOpen = true;
         return true;
     }
@@ -126,11 +127,13 @@ bool SlamSessionResourceLifecycle::StartImuPoller()
 bool SlamSessionResourceLifecycle::OpenCamera()
 {
     if (m_config.cameraProvider != nullptr &&
-        m_config.cameraProvider->Open(m_config.aliases)) {
+        m_config.makeCameraOpenConfig &&
+        m_config.cameraProvider->Open(
+            m_config.makeCameraOpenConfig(m_config.aliases))) {
         m_cameraOpen = true;
         return true;
     }
     return false;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -7,7 +7,7 @@
 #include "core/application/session/slam/slam_processing_support.h"
 #include "core/ports/slam_engine.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 SlamFrameTrackingPort::SlamFrameTrackingPort(
     SlamFrameTrackingContext &context)
@@ -36,7 +36,7 @@ SlamFrameStepResult SlamFrameTrackingPort::TrackPreparedFrame(
             .count());
     m_ctx.frameTimingTracker.MarkSlamIn(slamInput.frameId,
                                         slamInputTimestampNs);
-    smartdrone::core::ports::SlamOutput slamOutput{};
+    SmartDrone::core::ports::SlamOutput slamOutput{};
     slamOutput.frameId = slamInput.frameId;
     slamOutput.captureTimestampNs = slamInput.captureTimestampNs;
     if (debugRightOnlyFeatures) {
@@ -61,4 +61,4 @@ SlamFrameStepResult SlamFrameTrackingPort::TrackPreparedFrame(
     return SlamFrameStepResult::Continue;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

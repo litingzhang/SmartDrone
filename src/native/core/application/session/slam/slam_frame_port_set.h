@@ -10,13 +10,13 @@
 #include "core/application/session/slam/slam_frame_tracking_port.h"
 #include "core/application/session/slam/slam_backend_maintenance_port.h"
 
-namespace smartdrone::core::ports {
+namespace SmartDrone::core::ports {
 class ISlamSessionTelemetryPort;
-} // namespace smartdrone::core::ports
+} // namespace SmartDrone::core::ports
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
-class ISlamPreviewOutputPort;
+class IPreviewOutputPort;
 struct StereoBodyExtrinsics;
 
 struct SlamFramePortSetConfig {
@@ -25,13 +25,13 @@ struct SlamFramePortSetConfig {
     bool useImu{false};
     LiveRuntimeTuning &tuning;
     LivePoseState &livePose;
-    smartdrone::core::ports::ISlamSessionTelemetryPort &telemetry;
-    smartdrone::core::ports::ISlamEngine &slamEngine;
+    SmartDrone::core::ports::ISlamSessionTelemetryPort &telemetry;
+    SmartDrone::core::ports::ISlamEngine &slamEngine;
     SlamRuntimeControlPort &slamControl;
-    smartdrone::core::ports::ICameraProvider &cameraProvider;
-    smartdrone::core::ports::IImuProvider &imuProvider;
-    smartdrone::core::ports::IPosePublisher &posePublisher;
-    ISlamPreviewOutputPort &previewOutput;
+    SmartDrone::core::ports::ICameraProvider &cameraProvider;
+    SmartDrone::core::ports::IImuProvider &imuProvider;
+    SmartDrone::core::ports::IPosePublisher &posePublisher;
+    IPreviewOutputPort &previewOutput;
     FrameTimingTracker &frameTimingTracker;
     PerceptionPipeline &perceptionPipeline;
     PosePostprocessor &posePostprocessor;
@@ -72,4 +72,4 @@ class SlamFramePortSet final {
     std::unique_ptr<SlamFrameOutputPort> m_outputPort;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

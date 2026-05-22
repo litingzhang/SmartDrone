@@ -8,7 +8,7 @@
 #include "core/application/runtime/runtime_command_service.h"
 #include "core/application/runtime/udp_command_runtime.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 bool RuntimeConfigPayloadLengthValid(std::uint16_t len);
 RemoteRuntimeConfig ParseRuntimeConfigFrame(const TlvFrame &frame,
@@ -19,4 +19,4 @@ ConfigUpdate BuildRuntimeConfigUpdate(const RemoteRuntimeConfig &remote);
 std::string BuildRuntimeConfigAckMessage(const std::string &message,
                                          const RemoteRuntimeConfig &remote);
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

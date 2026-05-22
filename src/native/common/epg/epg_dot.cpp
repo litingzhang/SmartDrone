@@ -7,10 +7,11 @@
 #include <set>
 #include <sstream>
 
-namespace epg {
+namespace Epg {
 namespace {
 
-std::string Trim(const std::string& value) {
+std::string Trim(const std::string &value)
+{
     auto begin = value.begin();
     while (begin != value.end() && std::isspace(static_cast<unsigned char>(*begin))) {
         ++begin;
@@ -22,7 +23,8 @@ std::string Trim(const std::string& value) {
     return std::string(begin, end);
 }
 
-std::string StripQuotes(std::string value) {
+std::string StripQuotes(std::string value)
+{
     value = Trim(value);
     if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
         value = value.substr(1, value.size() - 2);
@@ -30,12 +32,13 @@ std::string StripQuotes(std::string value) {
     return value;
 }
 
-std::size_t ParseSize(const std::string& value, const std::string& field) {
+std::size_t ParseSize(const std::string &value, const std::string &field)
+{
     std::size_t parsedChars = 0;
     std::size_t parsed = 0;
     try {
         parsed = std::stoul(value, &parsedChars, 10);
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
         throw std::runtime_error("DOT numeric field is invalid: " + field + "=" + value);
     }
     if (parsedChars != value.size()) {
@@ -44,11 +47,13 @@ std::size_t ParseSize(const std::string& value, const std::string& field) {
     return parsed;
 }
 
-PortId ParsePortId(const std::string& value, const std::string& field) {
+PortId ParsePortId(const std::string &value, const std::string &field)
+{
     return static_cast<PortId>(ParseSize(value, field));
 }
 
-bool ParseBool(const std::string& value, const std::string& field) {
+bool ParseBool(const std::string &value, const std::string &field)
+{
     if (value == "true" || value == "1" || value == "yes") {
         return true;
     }
@@ -58,12 +63,13 @@ bool ParseBool(const std::string& value, const std::string& field) {
     throw std::runtime_error("DOT bool field is invalid: " + field + "=" + value);
 }
 
-int ParseInt(const std::string& value, const std::string& field) {
+int ParseInt(const std::string &value, const std::string &field)
+{
     std::size_t parsedChars = 0;
     int parsed = 0;
     try {
         parsed = std::stoi(value, &parsedChars, 10);
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
         throw std::runtime_error("DOT integer field is invalid: " + field + "=" + value);
     }
     if (parsedChars != value.size()) {
@@ -72,7 +78,8 @@ int ParseInt(const std::string& value, const std::string& field) {
     return parsed;
 }
 
-OverflowPolicy ParseDotOverflow(const std::string& value) {
+OverflowPolicy ParseDotOverflow(const std::string &value)
+{
     if (value == "drop_newest" || value == "tail_drop") {
         return OverflowPolicy::DropNewest;
     }
@@ -82,7 +89,8 @@ OverflowPolicy ParseDotOverflow(const std::string& value) {
     throw std::runtime_error("unsupported DOT queue overflow policy: " + value);
 }
 
-TriggerMode ParseDotTriggerMode(const std::string& value) {
+TriggerMode ParseDotTriggerMode(const std::string &value)
+{
     if (value == "periodic") {
         return TriggerMode::Periodic;
     }
@@ -98,7 +106,8 @@ TriggerMode ParseDotTriggerMode(const std::string& value) {
     throw std::runtime_error("unsupported DOT task trigger mode: " + value);
 }
 
-std::vector<std::string> Split(const std::string& text, char delimiter) {
+std::vector<std::string> Split(const std::string &text, char delimiter)
+{
     std::vector<std::string> result;
     std::string current;
     for (char c : text) {
@@ -119,13 +128,15 @@ std::vector<std::string> Split(const std::string& text, char delimiter) {
     return result;
 }
 
-std::vector<std::string> SplitTriggerQueueRefs(const std::string& text) {
+std::vector<std::string> SplitTriggerQueueRefs(const std::string &text)
+{
     return Split(text, '+');
 }
 
-std::map<std::string, std::string> ParseFields(const std::vector<std::string>& fields) {
+std::map<std::string, std::string> ParseFields(const std::vector<std::string> &fields)
+{
     std::map<std::string, std::string> result;
-    for (const auto& field : fields) {
+    for (const auto &field : fields) {
         const auto pos = field.find('=');
         if (pos == std::string::npos) {
             continue;
@@ -140,9 +151,10 @@ std::map<std::string, std::string> ParseFields(const std::vector<std::string>& f
     return result;
 }
 
-std::string RequireField(const std::map<std::string, std::string>& fields,
-                         const std::string& key,
-                         const std::string& owner) {
+std::string RequireField(const std::map<std::string, std::string> &fields,
+                         const std::string &key,
+                         const std::string &owner)
+{
     const auto it = fields.find(key);
     if (it == fields.end()) {
         throw std::runtime_error("missing DOT field '" + key + "' on " + owner);
@@ -150,7 +162,8 @@ std::string RequireField(const std::map<std::string, std::string>& fields,
     return it->second;
 }
 
-std::vector<std::string> ParseRecordLabelFields(std::string label) {
+std::vector<std::string> ParseRecordLabelFields(std::string label)
+{
     label = StripQuotes(std::move(label));
     if (label.size() >= 2 && label.front() == '{' && label.back() == '}') {
         label = label.substr(1, label.size() - 2);
@@ -158,7 +171,8 @@ std::vector<std::string> ParseRecordLabelFields(std::string label) {
     return Split(label, '|');
 }
 
-std::string UnescapeDotLabel(std::string value) {
+std::string UnescapeDotLabel(std::string value)
+{
     std::string result;
     result.reserve(value.size());
     for (std::size_t i = 0; i < value.size(); ++i) {
@@ -186,7 +200,8 @@ std::string UnescapeDotLabel(std::string value) {
     return result;
 }
 
-std::map<std::string, std::string> ParseAttributeBlock(const std::string& text) {
+std::map<std::string, std::string> ParseAttributeBlock(const std::string &text)
+{
     std::map<std::string, std::string> attrs;
     std::string current;
     bool inQuote = false;
@@ -229,8 +244,9 @@ std::map<std::string, std::string> ParseAttributeBlock(const std::string& text) 
     return attrs;
 }
 
-std::string SanitizeQueueName(std::string value) {
-    for (auto& c : value) {
+std::string SanitizeQueueName(std::string value)
+{
+    for (auto &c : value) {
         if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
             c = '_';
         }
@@ -238,29 +254,32 @@ std::string SanitizeQueueName(std::string value) {
     return value;
 }
 
-std::string AutoQueueName(const std::string& fromNode,
+std::string AutoQueueName(const std::string &fromNode,
                           PortId fromPort,
-                          const std::string& toNode,
-                          PortId toPort) {
+                          const std::string &toNode,
+                          PortId toPort)
+{
     return SanitizeQueueName(fromNode + "_" + std::to_string(fromPort) +
                              "_to_" + toNode + "_" + std::to_string(toPort));
 }
 
-bool IsQueueTriggeredMode(TriggerMode mode) {
+bool IsQueueTriggeredMode(TriggerMode mode)
+{
     return mode == TriggerMode::AnyQueueReady ||
            mode == TriggerMode::AllQueueReady ||
            mode == TriggerMode::PeriodicOrAnyQueueReady;
 }
 
 std::vector<std::string> ResolveTriggerQueues(
-    const TaskConfig& task,
-    const std::map<std::string, QueueConfig>& queueByName) {
+    const TaskConfig &task,
+    const std::map<std::string, QueueConfig> &queueByName)
+{
     if (!IsQueueTriggeredMode(task.trigger.mode)) {
         return task.trigger.queues;
     }
     if (task.trigger.queues.empty()) {
         std::vector<std::string> queues;
-        for (const auto& input : task.inputs) {
+        for (const auto &input : task.inputs) {
             queues.push_back(input.second);
         }
         return queues;
@@ -268,7 +287,7 @@ std::vector<std::string> ResolveTriggerQueues(
 
     std::vector<std::string> queues;
     std::set<std::string> seen;
-    for (const auto& ref : task.trigger.queues) {
+    for (const auto &ref : task.trigger.queues) {
         const auto queueIt = queueByName.find(ref);
         if (queueIt != queueByName.end()) {
             if (seen.insert(ref).second) {
@@ -278,7 +297,7 @@ std::vector<std::string> ResolveTriggerQueues(
         }
 
         bool matched = false;
-        for (const auto& input : task.inputs) {
+        for (const auto &input : task.inputs) {
             const auto inputQueueIt = queueByName.find(input.second);
             if (inputQueueIt == queueByName.end()) {
                 continue;
@@ -313,7 +332,8 @@ struct StatementCollector {
     bool inAttributes = false;
 };
 
-void FlushCollectedStatement(StatementCollector& collector) {
+void FlushCollectedStatement(StatementCollector &collector)
+{
     auto statement = Trim(collector.current);
     if (!statement.empty()) {
         collector.statements.push_back(DotStatement{collector.statementDepth, std::move(statement)});
@@ -321,9 +341,10 @@ void FlushCollectedStatement(StatementCollector& collector) {
     collector.current.clear();
 }
 
-bool IsDotLineComment(const std::string& dotText,
+bool IsDotLineComment(const std::string &dotText,
                       std::size_t index,
-                      const StatementCollector& collector) {
+                      const StatementCollector &collector)
+{
     if (collector.inQuote) {
         return false;
     }
@@ -333,13 +354,15 @@ bool IsDotLineComment(const std::string& dotText,
     return dotText[index] == '/' && index + 1 < dotText.size() && dotText[index + 1] == '/';
 }
 
-void SkipDotLineComment(const std::string& dotText, std::size_t& index) {
+void SkipDotLineComment(const std::string &dotText, std::size_t &index)
+{
     while (index < dotText.size() && dotText[index] != '\n') {
         ++index;
     }
 }
 
-void HandleStatementBrace(StatementCollector& collector, char c) {
+void HandleStatementBrace(StatementCollector &collector, char c)
+{
     if (c == '{') {
         ++collector.depth;
         collector.current.clear();
@@ -352,7 +375,8 @@ void HandleStatementBrace(StatementCollector& collector, char c) {
     collector.statementDepth = collector.depth;
 }
 
-bool TryFinishStatement(StatementCollector& collector, char c) {
+bool TryFinishStatement(StatementCollector &collector, char c)
+{
     if (!collector.inQuote && c == '[') {
         collector.inAttributes = true;
         return false;
@@ -368,14 +392,16 @@ bool TryFinishStatement(StatementCollector& collector, char c) {
     return true;
 }
 
-void AppendStatementChar(StatementCollector& collector, char c) {
+void AppendStatementChar(StatementCollector &collector, char c)
+{
     if (collector.current.empty() && !std::isspace(static_cast<unsigned char>(c))) {
         collector.statementDepth = collector.depth;
     }
     collector.current.push_back(c);
 }
 
-std::vector<DotStatement> CollectStatements(const std::string& dotText) {
+std::vector<DotStatement> CollectStatements(const std::string &dotText)
+{
     StatementCollector collector;
     for (std::size_t i = 0; i < dotText.size(); ++i) {
         const char c = dotText[i];
@@ -399,8 +425,9 @@ std::vector<DotStatement> CollectStatements(const std::string& dotText) {
     return collector.statements;
 }
 
-std::size_t FindSubgraphOpenBrace(const std::string& dotText,
-                                  const std::string& subgraphName) {
+std::size_t FindSubgraphOpenBrace(const std::string &dotText,
+                                  const std::string &subgraphName)
+{
     const std::string needle = "subgraph " + subgraphName;
     const auto begin = dotText.find(needle);
     if (begin == std::string::npos) {
@@ -413,9 +440,10 @@ std::size_t FindSubgraphOpenBrace(const std::string& dotText,
     return open;
 }
 
-std::size_t FindMatchingBrace(const std::string& dotText,
+std::size_t FindMatchingBrace(const std::string &dotText,
                               std::size_t open,
-                              const std::string& subgraphName) {
+                              const std::string &subgraphName)
+{
     bool inQuote = false;
     int depth = 0;
     for (std::size_t i = open; i < dotText.size(); ++i) {
@@ -441,15 +469,17 @@ std::size_t FindMatchingBrace(const std::string& dotText,
     throw std::runtime_error("DOT subgraph not closed: " + subgraphName);
 }
 
-std::string ExtractSubgraphBody(const std::string& dotText, const std::string& subgraphName) {
+std::string ExtractSubgraphBody(const std::string &dotText, const std::string &subgraphName)
+{
     const auto open = FindSubgraphOpenBrace(dotText, subgraphName);
     const auto close = FindMatchingBrace(dotText, open, subgraphName);
     return dotText.substr(open + 1, close - open - 1);
 }
 
-bool SplitStatementAndAttributes(const std::string& statement,
-                                 std::string& head,
-                                 std::map<std::string, std::string>& attrs) {
+bool SplitStatementAndAttributes(const std::string &statement,
+                                 std::string &head,
+                                 std::map<std::string, std::string> &attrs)
+{
     const auto open = statement.find('[');
     const auto close = statement.rfind(']');
     if (open == std::string::npos || close == std::string::npos || close <= open) {
@@ -460,8 +490,9 @@ bool SplitStatementAndAttributes(const std::string& statement,
     return true;
 }
 
-TaskConfig ParseTaskStatement(const std::string& head,
-                              const std::map<std::string, std::string>& attrs) {
+TaskConfig ParseTaskStatement(const std::string &head,
+                              const std::map<std::string, std::string> &attrs)
+{
     const auto labelIt = attrs.find("label");
     if (labelIt == attrs.end()) {
         throw std::runtime_error("DOT task node missing label: " + head);
@@ -508,7 +539,7 @@ TaskConfig ParseTaskStatement(const std::string& head,
     }
     const auto backpressureIt = fields.find("backpressure_outputs");
     if (backpressureIt != fields.end()) {
-        for (const auto& port : Split(backpressureIt->second, '+')) {
+        for (const auto &port : Split(backpressureIt->second, '+')) {
             task.scheduling.backpressureOutputs.push_back(
                 ParsePortId(port, "backpressure_outputs"));
         }
@@ -516,10 +547,11 @@ TaskConfig ParseTaskStatement(const std::string& head,
     return task;
 }
 
-void MergePortSpec(std::map<std::string, std::vector<PortSpec>>& byTask,
-                   const std::string& taskType,
+void MergePortSpec(std::map<std::string, std::vector<PortSpec>> &byTask,
+                   const std::string &taskType,
                    PortId port,
-                   const std::string& queueType) {
+                   const std::string &queueType)
+{
     byTask[taskType].push_back(PortSpec{port, queueType});
 }
 
@@ -530,7 +562,7 @@ struct DotParseContext {
     std::set<std::string> queueNames;
     std::map<std::string, std::vector<PortSpec>> graphInputsByTaskType;
     std::map<std::string, std::vector<PortSpec>> graphOutputsByTaskType;
-    Registry& registry;
+    Registry &registry;
 };
 
 struct EdgeEndpoints {
@@ -542,17 +574,20 @@ struct EdgeEndpoints {
     PortId toPort = 0;
 };
 
-bool IsEdgeStatement(const std::string& head) {
+bool IsEdgeStatement(const std::string &head)
+{
     return head.find("->") != std::string::npos;
 }
 
-bool IsGraphDefaultStatement(const std::string& head) {
+bool IsGraphDefaultStatement(const std::string &head)
+{
     return head == "graph" || head == "node" || head == "edge";
 }
 
-std::size_t RequireTaskIndex(const DotParseContext& context,
-                             const std::string& node,
-                             const std::string& direction) {
+std::size_t RequireTaskIndex(const DotParseContext &context,
+                             const std::string &node,
+                             const std::string &direction)
+{
     const auto taskIt = context.taskIndexByName.find(node);
     if (taskIt != context.taskIndexByName.end()) {
         return taskIt->second;
@@ -560,9 +595,10 @@ std::size_t RequireTaskIndex(const DotParseContext& context,
     throw std::runtime_error("DOT edge references undefined " + direction + " node: " + node);
 }
 
-EdgeEndpoints ParseEdgeEndpoints(const DotParseContext& context,
-                                 const std::string& head,
-                                 const std::map<std::string, std::string>& attrs) {
+EdgeEndpoints ParseEdgeEndpoints(const DotParseContext &context,
+                                 const std::string &head,
+                                 const std::map<std::string, std::string> &attrs)
+{
     const auto arrow = head.find("->");
     EdgeEndpoints endpoints;
     endpoints.fromNode = Trim(head.substr(0, arrow));
@@ -574,7 +610,8 @@ EdgeEndpoints ParseEdgeEndpoints(const DotParseContext& context,
     return endpoints;
 }
 
-void ApplyQueueLabelField(QueueConfig& queue, const std::string& field) {
+void ApplyQueueLabelField(QueueConfig &queue, const std::string &field)
+{
     const auto pos = field.find('=');
     if (pos == std::string::npos) {
         queue.overflow = ParseDotOverflow(field);
@@ -590,15 +627,17 @@ void ApplyQueueLabelField(QueueConfig& queue, const std::string& field) {
     }
 }
 
-void ApplyQueueLabelLine(QueueConfig& queue, const std::string& line) {
-    for (const auto& field : Split(line, ' ')) {
+void ApplyQueueLabelLine(QueueConfig &queue, const std::string &line)
+{
+    for (const auto &field : Split(line, ' ')) {
         ApplyQueueLabelField(queue, field);
     }
 }
 
-QueueConfig ParseEdgeQueue(const std::string& head,
-                           const std::map<std::string, std::string>& attrs,
-                           const EdgeEndpoints& endpoints) {
+QueueConfig ParseEdgeQueue(const std::string &head,
+                           const std::map<std::string, std::string> &attrs,
+                           const EdgeEndpoints &endpoints)
+{
     const auto label = UnescapeDotLabel(RequireField(attrs, "label", head));
     const auto labelFields = Split(label, '\n');
     if (labelFields.empty()) {
@@ -618,7 +657,8 @@ QueueConfig ParseEdgeQueue(const std::string& head,
     return queue;
 }
 
-void AddQueue(DotParseContext& context, const QueueConfig& queue) {
+void AddQueue(DotParseContext &context, const QueueConfig &queue)
+{
     if (!context.queueNames.insert(queue.name).second) {
         throw std::runtime_error("duplicate DOT queue name: " + queue.name);
     }
@@ -626,11 +666,12 @@ void AddQueue(DotParseContext& context, const QueueConfig& queue) {
     context.queueByName[queue.name] = queue;
 }
 
-void ConnectEdgePorts(DotParseContext& context,
-                      const EdgeEndpoints& endpoints,
-                      const QueueConfig& queue) {
-    auto& from = context.config.tasks[endpoints.fromTask];
-    auto& to = context.config.tasks[endpoints.toTask];
+void ConnectEdgePorts(DotParseContext &context,
+                      const EdgeEndpoints &endpoints,
+                      const QueueConfig &queue)
+{
+    auto &from = context.config.tasks[endpoints.fromTask];
+    auto &to = context.config.tasks[endpoints.toTask];
     MergePortSpec(context.graphOutputsByTaskType, from.type, endpoints.fromPort, queue.type);
     MergePortSpec(context.graphInputsByTaskType, to.type, endpoints.toPort, queue.type);
     if (!from.outputs.emplace(endpoints.fromPort, queue.name).second) {
@@ -643,18 +684,20 @@ void ConnectEdgePorts(DotParseContext& context,
     }
 }
 
-void ParseEdgeStatement(DotParseContext& context,
-                        const std::string& head,
-                        const std::map<std::string, std::string>& attrs) {
+void ParseEdgeStatement(DotParseContext &context,
+                        const std::string &head,
+                        const std::map<std::string, std::string> &attrs)
+{
     const auto endpoints = ParseEdgeEndpoints(context, head, attrs);
     const auto queue = ParseEdgeQueue(head, attrs, endpoints);
     AddQueue(context, queue);
     ConnectEdgePorts(context, endpoints, queue);
 }
 
-void ParseTaskNodeStatement(DotParseContext& context,
-                            const std::string& head,
-                            const std::map<std::string, std::string>& attrs) {
+void ParseTaskNodeStatement(DotParseContext &context,
+                            const std::string &head,
+                            const std::map<std::string, std::string> &attrs)
+{
     if (attrs.find("label") == attrs.end()) {
         return;
     }
@@ -670,7 +713,8 @@ void ParseTaskNodeStatement(DotParseContext& context,
     context.config.tasks.push_back(std::move(task));
 }
 
-void ParseTopLevelStatement(DotParseContext& context, const DotStatement& statement) {
+void ParseTopLevelStatement(DotParseContext &context, const DotStatement &statement)
+{
     if (statement.depth != 0) {
         return;
     }
@@ -689,15 +733,17 @@ void ParseTopLevelStatement(DotParseContext& context, const DotStatement& statem
     ParseTaskNodeStatement(context, head, attrs);
 }
 
-void ResolveTaskTriggers(DotParseContext& context) {
-    for (auto& task : context.config.tasks) {
+void ResolveTaskTriggers(DotParseContext &context)
+{
+    for (auto &task : context.config.tasks) {
         task.trigger.queues = ResolveTriggerQueues(task, context.queueByName);
     }
 }
 
-void MergeRegisteredTaskPorts(DotParseContext& context) {
+void MergeRegisteredTaskPorts(DotParseContext &context)
+{
     std::set<std::string> mergedTaskTypes;
-    for (const auto& task : context.config.tasks) {
+    for (const auto &task : context.config.tasks) {
         if (!mergedTaskTypes.insert(task.type).second) {
             continue;
         }
@@ -708,10 +754,11 @@ void MergeRegisteredTaskPorts(DotParseContext& context) {
     }
 }
 
-GraphConfig ParseGraphStatements(const std::vector<DotStatement>& statements,
-                                 Registry& registry) {
+GraphConfig ParseGraphStatements(const std::vector<DotStatement> &statements,
+                                 Registry &registry)
+{
     DotParseContext context{{}, {}, {}, {}, {}, {}, registry};
-    for (const auto& statement : statements) {
+    for (const auto &statement : statements) {
         ParseTopLevelStatement(context, statement);
     }
     ResolveTaskTriggers(context);
@@ -721,17 +768,19 @@ GraphConfig ParseGraphStatements(const std::vector<DotStatement>& statements,
 
 } // namespace
 
-GraphConfig ParseGraphConfigDot(const std::string& dotText,
-                                const std::string& subgraphName,
-                                Registry& registry) {
+GraphConfig ParseGraphConfigDot(const std::string &dotText,
+                                const std::string &subgraphName,
+                                Registry &registry)
+{
     const auto body = ExtractSubgraphBody(dotText, subgraphName);
     const auto statements = CollectStatements(body);
     return ParseGraphStatements(statements, registry);
 }
 
-GraphConfig ParseGraphConfigDotFile(const std::string& path,
-                                    const std::string& subgraphName,
-                                    Registry& registry) {
+GraphConfig ParseGraphConfigDotFile(const std::string &path,
+                                    const std::string &subgraphName,
+                                    Registry &registry)
+{
     std::ifstream input(path);
     if (!input) {
         throw std::runtime_error("failed to open EventPipelineGraph DOT file: " + path);
@@ -741,4 +790,4 @@ GraphConfig ParseGraphConfigDotFile(const std::string& path,
     return ParseGraphConfigDot(buffer.str(), subgraphName, registry);
 }
 
-} // namespace epg
+} // namespace Epg

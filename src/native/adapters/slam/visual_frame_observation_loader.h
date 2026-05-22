@@ -2,17 +2,17 @@
 
 #include "core/ports/visual_frame_observation.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 class DefaultVisualFrameObservationLoader final
     : public core::ports::IVisualFrameObservationLoader {
-public:
-  bool LoadMonoObservation(
-      const core::ports::MonoFrameObservationLoadRequest &request,
-      core::ports::VisualFrameObservationData &outData) const override;
-  bool LoadStereoObservation(
-      const core::ports::StereoFrameObservationLoadRequest &request,
-      core::ports::VisualFrameObservationData &outData) const override;
+  public:
+    bool LoadMonoObservation(
+        const core::ports::MonoFrameObservationLoadRequest &request,
+        core::ports::VisualFrameObservationData &outData) const override;
+    bool LoadStereoObservation(
+        const core::ports::StereoFrameObservationLoadRequest &request,
+        core::ports::VisualFrameObservationData &outData) const override;
 };
 
 bool LoadMonoFrameObservation(
@@ -22,4 +22,4 @@ bool LoadStereoFrameObservation(
     const core::ports::StereoFrameObservationLoadRequest &request,
     core::ports::VisualFrameObservationData &outData);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

@@ -8,7 +8,7 @@
 #include "adapters/slam/klt_pnp_observation_builder.h"
 #include "adapters/slam/slam_mode_state.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 struct KltPerFrameFrontendResult {
     bool valid{false};
@@ -38,4 +38,4 @@ bool ShouldRefreshKltPerFrameReference(const SlamModeSharedState &state,
 void UpdateKltPerFrameReferenceFrame(SlamModeSharedState &state,
                                      const KltPerFrameFrontendResult &frontend);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

@@ -3,7 +3,7 @@
 #include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "core/ports/pose_publisher.h"
 
-namespace smartdrone::adapters::telemetry {
+namespace SmartDrone::adapters::telemetry {
 
 class MavlinkPosePublisher final : public core::ports::IPosePublisher {
   public:
@@ -17,4 +17,4 @@ class MavlinkPosePublisher final : public core::ports::IPosePublisher {
     Px4MavlinkGateway &m_serial;
 };
 
-} // namespace smartdrone::adapters::telemetry
+} // namespace SmartDrone::adapters::telemetry

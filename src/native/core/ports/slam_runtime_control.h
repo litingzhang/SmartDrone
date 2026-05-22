@@ -6,7 +6,7 @@
 #include "core/domain/runtime_mode.h"
 #include "core/ports/visual_feature_frontend.h"
 
-namespace smartdrone::core::ports {
+namespace SmartDrone::core::ports {
 
 class ISlamRuntimeControl {
   public:
@@ -20,7 +20,9 @@ class ISlamRuntimeControl {
     virtual void SetStereoVoLoopClosure(bool enabled, float scale = 1.20f,
                                         float relaxation = 1.40f) = 0;
     virtual void SetStereoVoPerFrameAcceleration(std::string acceleration) = 0;
-    virtual void StepBackend() {}
+    virtual void StepBackend()
+    {
+    }
     virtual bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path)
     {
         (void)path;
@@ -28,4 +30,4 @@ class ISlamRuntimeControl {
     }
 };
 
-} // namespace smartdrone::core::ports
+} // namespace SmartDrone::core::ports

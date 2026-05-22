@@ -63,6 +63,34 @@ digraph EpgTopology {
     EpgOptimizeTask [
       label="{EpgOptimizeTask|type=EpgOptimizeTask|trigger=periodic|interval_ms=5000}"
     ];
+
+    VehicleTelemetryRxTask -> SetpointStreamTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SetpointStreamTask -> UdpCommandTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    UdpCommandTask -> ManualControlTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    ManualControlTask -> ForceRestartTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    ForceRestartTask -> RuntimeSupervisorTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    RuntimeSupervisorTask -> EpgRedeployTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    EpgRedeployTask -> DiscoveryBeaconTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    DiscoveryBeaconTask -> EpgDfxSnapshotTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    EpgDfxSnapshotTask -> EpgOptimizeTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
   }
 
   subgraph cluster_slam_session_graph {

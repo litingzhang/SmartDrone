@@ -740,15 +740,15 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp,
 }
 
 void Frame::LoadStereoFeatureFrameData(const StereoFeatureFrameData &features) {
-  smartdrone::core::ports::StereoFrameObservationLoadRequest request;
+  SmartDrone::core::ports::StereoFrameObservationLoadRequest request;
   request.features = &features;
   request.options.baselineFx = mbf;
   request.options.closeDepthThreshold = mThDepth;
   request.options.injectedStereoDepthScale = StereoFeatureDepthScale();
   request.options.injectedKeypointOctave = StereoFeatureKeypointOctave();
   request.options.maxScaleLevel = std::max(0, mnScaleLevels - 1);
-  smartdrone::core::ports::VisualFrameObservationData observation;
-  smartdrone::adapters::slam::LoadStereoFrameObservation(request, observation);
+  SmartDrone::core::ports::VisualFrameObservationData observation;
+  SmartDrone::adapters::slam::LoadStereoFrameObservation(request, observation);
 
   mvKeys = std::move(observation.leftKeypoints);
   mvKeysRight = std::move(observation.rightKeypoints);
@@ -768,10 +768,10 @@ void Frame::LoadStereoFeatureFrameData(const StereoFeatureFrameData &features) {
 }
 
 void Frame::LoadMonoFeatureFrameData(const MonoFeatureFrameData &features) {
-  smartdrone::core::ports::MonoFrameObservationLoadRequest request;
+  SmartDrone::core::ports::MonoFrameObservationLoadRequest request;
   request.features = &features;
-  smartdrone::core::ports::VisualFrameObservationData observation;
-  smartdrone::adapters::slam::LoadMonoFrameObservation(request, observation);
+  SmartDrone::core::ports::VisualFrameObservationData observation;
+  SmartDrone::adapters::slam::LoadMonoFrameObservation(request, observation);
   mvKeys = std::move(observation.leftKeypoints);
   mDescriptors = std::move(observation.leftDescriptors);
   N = observation.featureCount;
@@ -1124,7 +1124,7 @@ void Frame::ComputeBoW() {
   }
 
   if (mBowVec.empty()) {
-    smartdrone::adapters::slam::TransformOrbDescriptors(
+    SmartDrone::adapters::slam::TransformOrbDescriptors(
         *mpORBvocabulary, mDescriptors, mBowVec, mFeatVec, 4);
   }
 }

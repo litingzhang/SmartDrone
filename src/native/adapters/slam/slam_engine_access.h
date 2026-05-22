@@ -2,7 +2,7 @@
 
 #include "adapters/slam/slam_engine_adapter.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 class SlamEngineAccess final {
   public:
@@ -26,9 +26,18 @@ class SlamEngineAccess final {
     {
         return engine.m_trackingBackend.get();
     }
-    static SlamModeSharedState &ModeState(SlamEngineAdapter &engine) { return *engine.m_modeState; }
-    static SlamInputMode InputMode(const SlamEngineAdapter &engine) { return engine.m_inputMode; }
-    static bool UseImu(const SlamEngineAdapter &engine) { return engine.m_useImu; }
+    static SlamModeSharedState &ModeState(SlamEngineAdapter &engine)
+    {
+        return *engine.m_modeState;
+    }
+    static SlamInputMode InputMode(const SlamEngineAdapter &engine)
+    {
+        return engine.m_inputMode;
+    }
+    static bool UseImu(const SlamEngineAdapter &engine)
+    {
+        return engine.m_useImu;
+    }
 
     static void StabilizeOutputPose(SlamEngineAdapter &engine, core::ports::PoseEstimate &pose, bool &poseValid,
                                     double timestampSec, int trackingState)
@@ -48,4 +57,4 @@ class SlamEngineAccess final {
     }
 };
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

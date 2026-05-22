@@ -10,7 +10,7 @@
 #include "core/application/state/pose_postprocessor.h"
 #include "core/ports/slam_engine.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct SlamPreparedFrameData {
     std::chrono::steady_clock::time_point frameStartTp;
@@ -19,7 +19,7 @@ struct SlamPreparedFrameData {
     std::chrono::steady_clock::time_point imuStartTp;
     std::chrono::steady_clock::time_point imuEndTp;
     StereoBatch stereoBatch;
-    smartdrone::core::ports::SlamInputBatch slamInput;
+    SmartDrone::core::ports::SlamInputBatch slamInput;
     int configuredSlamInputFps{0};
     int effectiveSlamInputFps{0};
     bool sendImage{false};
@@ -49,7 +49,7 @@ struct SlamPreparedFrameData {
 
 struct SlamTrackedFrameData {
     std::shared_ptr<SlamPreparedFrameData> frame;
-    smartdrone::core::ports::SlamOutput slamOutput;
+    SmartDrone::core::ports::SlamOutput slamOutput;
     std::chrono::steady_clock::time_point slamStartTp;
     std::chrono::steady_clock::time_point slamEndTp;
 };
@@ -74,4 +74,4 @@ struct SlamPublishedFrameData {
     std::uint16_t effectiveResetMapCount{0};
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

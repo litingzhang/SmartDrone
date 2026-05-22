@@ -5,13 +5,18 @@
 #include <fstream>
 #include <utility>
 
-namespace smartdrone::core::application {
+#include "core/application/runtime/system_runtime_messages.h"
 
-EpgDfxSnapshotTask::EpgDfxSnapshotTask(EpgDfxSnapshotTarget target) : m_target(std::move(target)) {}
+namespace SmartDrone::core::application {
 
-void EpgDfxSnapshotTask::OnTick(epg::TaskContext &context)
+EpgDfxSnapshotTask::EpgDfxSnapshotTask(EpgDfxSnapshotTarget target)
+    : m_target(std::move(target))
 {
-    (void)context;
+}
+
+void EpgDfxSnapshotTask::OnTick(Epg::TaskContext &context)
+{
+    DrainSystemRuntimePulse(context);
     if (!m_target.graphRef || !m_target.graphRef->graph) {
         return;
     }
@@ -24,6 +29,7 @@ void EpgDfxSnapshotTask::OnTick(epg::TaskContext &context)
                                 m_target.graphName, nowMs,
                                 m_target.topologyVersion,
                                 m_target.taskCatalogJson));
+    PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
 EPG_REGISTER_TASK_TYPE(EpgDfxSnapshotTask, "EpgDfxSnapshotTask")
@@ -48,4 +54,4 @@ void WriteEpgDfxSnapshotFile(const std::string &path, const std::string &json)
     (void)std::rename(tempPath.c_str(), path.c_str());
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -13,7 +13,7 @@
 
 #include "core/application/config/runtime_app_types.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 namespace fs = std::filesystem;
@@ -256,4 +256,4 @@ void ApplyOrbAccelerationEnvironment(const std::string &acceleration)
     ResetOrbAccelerationEnvironment();
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

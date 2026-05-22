@@ -5,15 +5,17 @@
 #include <algorithm>
 #include <array>
 
-namespace epg {
+namespace Epg {
 
-inline bool IsQueueTriggeredMode(TriggerMode mode) {
+inline bool IsQueueTriggeredMode(TriggerMode mode)
+{
     return mode == TriggerMode::AnyQueueReady ||
            mode == TriggerMode::AllQueueReady ||
            mode == TriggerMode::PeriodicOrAnyQueueReady;
 }
 
-inline TaskDiagnosticsSnapshot SnapshotTaskDiagnostics(const TaskDiagnostics& diag) {
+inline TaskDiagnosticsSnapshot SnapshotTaskDiagnostics(const TaskDiagnostics &diag)
+{
     TaskDiagnosticsSnapshot result;
     result.loopCount = diag.loopCount.load(std::memory_order_relaxed);
     result.errorCount = diag.errorCount.load(std::memory_order_relaxed);
@@ -42,24 +44,25 @@ inline TaskDiagnosticsSnapshot SnapshotTaskDiagnostics(const TaskDiagnostics& di
     return result;
 }
 
-inline std::map<PortId, PortSpec> MakePortMap(const std::vector<PortSpec>& specs) {
+inline std::map<PortId, PortSpec> MakePortMap(const std::vector<PortSpec> &specs)
+{
     std::map<PortId, PortSpec> result;
-    for (const auto& spec : specs) {
+    for (const auto &spec : specs) {
         result.emplace(spec.id, spec);
     }
     return result;
 }
 
 class EventPipelineGraph::TaskRunner {
-public:
+  public:
     TaskRunner(TaskConfig config,
                std::unique_ptr<ITask> task,
-               std::unordered_map<PortId, IQueue*> inputs,
-               std::unordered_map<PortId, IQueue*> outputs,
-               std::vector<IQueue*> triggerQueues);
+               std::unordered_map<PortId, IQueue *> inputs,
+               std::unordered_map<PortId, IQueue *> outputs,
+               std::vector<IQueue *> triggerQueues);
     ~TaskRunner();
 
-    const std::string& Name() const;
+    const std::string &Name() const;
     void Start();
     void RequestStop();
     bool JoinStopped();
@@ -67,7 +70,7 @@ public:
     void Notify();
     TaskDiagnosticsSnapshot Diagnostics() const;
 
-private:
+  private:
     static constexpr std::size_t LOOP_SAMPLE_CAPACITY = 64;
 
     void Run();
@@ -76,13 +79,13 @@ private:
     bool QueuesReady() const;
     bool BackpressureBlocked() const;
     void StoreLoopSample(std::uint64_t elapsedUs);
-    void FillLoopPercentiles(TaskDiagnosticsSnapshot& snapshot) const;
+    void FillLoopPercentiles(TaskDiagnosticsSnapshot &snapshot) const;
 
     TaskConfig m_config;
     std::unique_ptr<ITask> m_task;
     TaskContext m_context;
-    std::vector<IQueue*> m_triggerQueues;
-    mutable ::epg::TaskDiagnostics m_diag;
+    std::vector<IQueue *> m_triggerQueues;
+    mutable ::Epg::TaskDiagnostics m_diag;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_exited{true};
     std::thread m_thread;
@@ -94,4 +97,4 @@ private:
     std::size_t m_loopSampleCount{};
 };
 
-} // namespace epg
+} // namespace Epg

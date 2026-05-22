@@ -2,7 +2,7 @@
 
 #include "common/epg/epg.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 EPG_REGISTER_MESSAGE(SlamResourceReady, "SlamResourceReady")
 EPG_REGISTER_MESSAGE(SlamTick, "SlamTick")
@@ -13,4 +13,4 @@ EPG_REGISTER_MESSAGE(SlamTrackedFrame, "SlamTrackedFrame")
 EPG_REGISTER_MESSAGE(SlamPublishedFrame, "SlamPublishedFrame")
 EPG_REGISTER_MESSAGE(SlamStatus, "SlamStatus")
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

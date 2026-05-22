@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace smartdrone::core::ports {
+namespace SmartDrone::core::ports {
 
 enum class ImuSampleReadStatus : std::uint8_t {
     Ready,
@@ -10,12 +10,12 @@ enum class ImuSampleReadStatus : std::uint8_t {
     Failed,
 };
 
-} // namespace smartdrone::core::ports
+} // namespace SmartDrone::core::ports
 
 struct ImuSample;
 struct ImuScale;
 
-namespace smartdrone::core::ports {
+namespace SmartDrone::core::ports {
 
 class IImuSampleSource {
   public:
@@ -29,4 +29,4 @@ class IImuSampleSource {
     virtual bool Failed() const = 0;
 };
 
-} // namespace smartdrone::core::ports
+} // namespace SmartDrone::core::ports

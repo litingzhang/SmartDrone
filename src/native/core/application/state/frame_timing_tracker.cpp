@@ -1,8 +1,11 @@
 #include "core/application/state/frame_timing_tracker.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
-FrameTimingTracker::FrameTimingTracker(size_t maxRecords) : m_maxRecords(maxRecords > 0 ? maxRecords : 1) {}
+FrameTimingTracker::FrameTimingTracker(size_t maxRecords)
+    : m_maxRecords(maxRecords > 0 ? maxRecords : 1)
+{
+}
 
 void FrameTimingTracker::UpsertCapture(uint64_t frameId, uint64_t tCamNs, uint64_t tCbNs)
 {
@@ -62,4 +65,4 @@ void FrameTimingTracker::TrimLocked()
     }
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

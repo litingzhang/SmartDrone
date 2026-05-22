@@ -2,9 +2,15 @@
 
 #include <cmath>
 
-bool IsFinite(float value) { return std::isfinite(value); }
+bool IsFinite(float value)
+{
+    return std::isfinite(value);
+}
 
-TlvCmdRouter::TlvCmdRouter(RuntimeCommandHook &commandHook) : m_commandHook(commandHook) {}
+TlvCmdRouter::TlvCmdRouter(RuntimeCommandHook &commandHook)
+    : m_commandHook(commandHook)
+{
+}
 
 void TlvCmdRouter::RegisterDefaults()
 {

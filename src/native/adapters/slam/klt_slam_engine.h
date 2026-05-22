@@ -7,7 +7,7 @@
 #include "adapters/slam/slam_mode_state.h"
 #include "core/ports/slam_engine.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 class KltSlamEngine final : public core::ports::ISlamEngine, public ISlamRuntimeControl {
   public:
@@ -35,4 +35,4 @@ class KltSlamEngine final : public core::ports::ISlamEngine, public ISlamRuntime
     std::string m_settingsPath;
 };
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

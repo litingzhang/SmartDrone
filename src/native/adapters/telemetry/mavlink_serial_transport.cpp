@@ -9,11 +9,17 @@
 #include <termios.h>
 #include <unistd.h>
 
-namespace smartdrone::adapters::telemetry {
+namespace SmartDrone::adapters::telemetry {
 
-MavlinkSerialTransport::MavlinkSerialTransport(const std::string &dev, int baud) { Open(dev, baud); }
+MavlinkSerialTransport::MavlinkSerialTransport(const std::string &dev, int baud)
+{
+    Open(dev, baud);
+}
 
-MavlinkSerialTransport::~MavlinkSerialTransport() { Close(); }
+MavlinkSerialTransport::~MavlinkSerialTransport()
+{
+    Close();
+}
 
 void MavlinkSerialTransport::Open(const std::string &dev, int baud)
 {
@@ -107,4 +113,4 @@ unsigned int MavlinkSerialTransport::BaudToTermios(int baud)
     }
 }
 
-} // namespace smartdrone::adapters::telemetry
+} // namespace SmartDrone::adapters::telemetry

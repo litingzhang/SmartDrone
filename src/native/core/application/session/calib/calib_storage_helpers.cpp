@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <system_error>
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 void EnsureDir(const fs::path &p)
 {
@@ -11,7 +11,10 @@ void EnsureDir(const fs::path &p)
     fs::create_directories(p, ec);
 }
 
-std::string TsToName(int64_t tNs) { return std::to_string(tNs) + ".png"; }
+std::string TsToName(int64_t tNs)
+{
+    return std::to_string(tNs) + ".png";
+}
 
 void SetupFileBuffer(FILE *f, size_t bytes)
 {
@@ -84,4 +87,4 @@ int CleanupCalibDataDirs(const std::string &root)
     return removed;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -5,9 +5,7 @@
 
 #include <opencv2/core/mat.hpp>
 
-#include "core/application/config/runtime_app_types.h"
-
-namespace smartdrone::core::ports {
+namespace SmartDrone::core::ports {
 
 enum class CameraProviderSemantics {
     DualStreamPaired,
@@ -54,11 +52,32 @@ struct CameraDiagnostics {
     int64_t lastPairAgeMs{-1};
 };
 
+struct CameraOpenConfig {
+    int width{0};
+    int height{0};
+    int fps{0};
+    int leftCameraIndex{0};
+    int rightCameraIndex{1};
+    int exposureUs{0};
+    int pairWindowMs{0};
+    int keepWindowMs{0};
+    int pairQueue{0};
+    int uvcDeviceIndex{0};
+    int uvcEyeWidth{0};
+    int uvcEyeHeight{0};
+    bool autoExposureDisabled{false};
+    bool requestY8{false};
+    bool r16Normalize{false};
+    bool uvcPackedStereo{false};
+    bool uvcSwapEyes{false};
+    float gain{0.0F};
+};
+
 class ICameraProvider {
   public:
     virtual ~ICameraProvider() = default;
 
-    virtual bool Open(const smartdrone::core::application::MainRuntimeAliases &aliases) = 0;
+    virtual bool Open(const CameraOpenConfig &config) = 0;
     virtual void Close() = 0;
     virtual bool Start() = 0;
     virtual void Stop() = 0;
@@ -69,4 +88,4 @@ class ICameraProvider {
     virtual CameraProviderSemantics Semantics() const = 0;
 };
 
-} // namespace smartdrone::core::ports
+} // namespace SmartDrone::core::ports

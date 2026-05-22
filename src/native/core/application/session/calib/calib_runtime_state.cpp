@@ -7,15 +7,16 @@
 
 #include "common/tlv/tlv_protocol.h"
 #include "core/application/config/runtime_app_types.h"
+#include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/runtime/runtime_aliases.h"
 #include "core/application/session/calib/calib_session_port_set.h"
 #include "core/application/state/live_pose_state.h"
 #include "core/domain/runtime_mode.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
-using ControllerMode = smartdrone::core::domain::RuntimeMode;
+using ControllerMode = SmartDrone::core::domain::RuntimeMode;
 
 } // namespace
 
@@ -24,7 +25,8 @@ class CalibRuntimeState::Impl final {
     explicit Impl(CalibRuntimeStateConfig config)
         : m_cfg(config.cfg),
           m_stop(config.stop),
-          m_livePose(config.livePose)
+          m_livePose(config.livePose),
+          m_factories(config.factories)
     {
     }
 
@@ -44,7 +46,8 @@ class CalibRuntimeState::Impl final {
         }
 
         m_aliases = BuildRuntimeAliases(m_cfg.app);
-        PrintStartupConfig(m_cfg.app, m_aliases, ControllerMode::Calib);
+        PrintStartupConfig(m_cfg.app, m_aliases, m_factories.cameraProvider,
+                           ControllerMode::Calib);
         m_livePose.SetRuntimeMode(RUNTIME_MODE_CALIB);
 
         const CalibSessionPortOpenResult openResult = OpenPorts();
@@ -135,7 +138,8 @@ class CalibRuntimeState::Impl final {
     CalibSessionPortOpenResult OpenPorts()
     {
         m_ports.reset(
-            new CalibSessionPortSet({m_aliases, m_cfg.calib.root}));
+            new CalibSessionPortSet(
+                {m_aliases, m_cfg.calib.root, m_factories}));
         return m_ports->Open();
     }
 
@@ -169,6 +173,7 @@ class CalibRuntimeState::Impl final {
     UnifiedConfig m_cfg;
     std::atomic<bool> &m_stop;
     LivePoseState &m_livePose;
+    const ApplicationRuntimeFactories &m_factories;
     mutable std::mutex m_mu;
     MainRuntimeAliases m_aliases{};
     std::unique_ptr<CalibSessionPortSet> m_ports;
@@ -232,4 +237,4 @@ void CalibRuntimeState::Finalize(bool sessionOk)
     m_impl->Finalize(sessionOk);
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

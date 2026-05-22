@@ -4,11 +4,11 @@
 #include <functional>
 #include <memory>
 
-namespace epg {
+namespace Epg {
 class EventPipelineGraph;
 }
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct EpgGraphLifecycleConfig {
     std::atomic<bool> &stop;
@@ -26,7 +26,7 @@ class EpgGraphLifecycle final {
     bool StopRequested() const;
     bool Done() const;
     void ResetForStart();
-    void AttachGraph(std::unique_ptr<epg::EventPipelineGraph> graph);
+    void AttachGraph(std::unique_ptr<Epg::EventPipelineGraph> graph);
     void RequestStop();
     void StepStop();
     void StopSynchronously();
@@ -40,10 +40,10 @@ class EpgGraphLifecycle final {
     std::function<bool()> m_resourcesStopped;
     std::function<void()> m_stopResources;
     std::function<void()> m_resetResources;
-    std::unique_ptr<epg::EventPipelineGraph> m_graph;
+    std::unique_ptr<Epg::EventPipelineGraph> m_graph;
     bool m_done{false};
     bool m_stopRequested{false};
     bool m_graphStopRequested{false};
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

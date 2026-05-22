@@ -8,7 +8,7 @@
 
 #include "common/tlv/tlv_protocol.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 double DurationMs(const std::chrono::steady_clock::time_point &start, const std::chrono::steady_clock::time_point &end)
 {
@@ -60,7 +60,10 @@ std::vector<cv::Point2f> ComputeOrbDebugFeatures(const cv::Mat &gray)
     return points;
 }
 
-bool ShouldEnhanceLowLightFrame(double mean, double stddev) { return mean < 35.0 || (mean < 50.0 && stddev < 18.0); }
+bool ShouldEnhanceLowLightFrame(double mean, double stddev)
+{
+    return mean < 35.0 || (mean < 50.0 && stddev < 18.0);
+}
 
 namespace {
 
@@ -87,7 +90,10 @@ cv::Mat ApplyGammaU8(const cv::Mat &gray, double gamma)
     return out;
 }
 
-bool IsLowTextureFrame(double stddev, double sharpness) { return stddev < 14.0 || sharpness < 95.0; }
+bool IsLowTextureFrame(double stddev, double sharpness)
+{
+    return stddev < 14.0 || sharpness < 95.0;
+}
 
 } // namespace
 
@@ -139,18 +145,18 @@ void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, const StereoFram
     out.right.owner.reset();
 }
 
-uint8_t ToRuntimeSlamModeValue(smartdrone::core::domain::SlamOperationMode mode)
+uint8_t ToRuntimeSlamModeValue(SmartDrone::core::domain::SlamOperationMode mode)
 {
     switch (mode) {
-    case smartdrone::core::domain::SlamOperationMode::Localization:
+    case SmartDrone::core::domain::SlamOperationMode::Localization:
         return RUNTIME_SLAM_MODE_LOCALIZATION;
-    case smartdrone::core::domain::SlamOperationMode::Relocalization:
+    case SmartDrone::core::domain::SlamOperationMode::Relocalization:
         return RUNTIME_SLAM_MODE_RELOCALIZATION;
-    case smartdrone::core::domain::SlamOperationMode::TrackingOnly:
+    case SmartDrone::core::domain::SlamOperationMode::TrackingOnly:
         return RUNTIME_SLAM_MODE_TRACKING_ONLY;
-    case smartdrone::core::domain::SlamOperationMode::Auto:
+    case SmartDrone::core::domain::SlamOperationMode::Auto:
         return RUNTIME_SLAM_MODE_AUTO;
-    case smartdrone::core::domain::SlamOperationMode::Mapping:
+    case SmartDrone::core::domain::SlamOperationMode::Mapping:
     default:
         return RUNTIME_SLAM_MODE_MAPPING;
     }
@@ -163,7 +169,10 @@ void AutoSlamModeController::Reset()
     m_weakFrames = 0;
 }
 
-AutoSlamModeController::SlamOperationMode AutoSlamModeController::EffectiveMode() const { return m_effectiveMode; }
+AutoSlamModeController::SlamOperationMode AutoSlamModeController::EffectiveMode() const
+{
+    return m_effectiveMode;
+}
 
 AutoSlamModeController::SlamOperationMode AutoSlamModeController::Observe(bool trackingUsable, PoseQuality quality,
                                                                           double frameGapMs, size_t leftFeatureCount,
@@ -193,4 +202,4 @@ AutoSlamModeController::SlamOperationMode AutoSlamModeController::Observe(bool t
     return m_effectiveMode;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

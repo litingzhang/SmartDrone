@@ -15,7 +15,7 @@ namespace ORB_SLAM3 {
 class ORBVocabulary;
 }
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 bool LoadOrbVocabularyWithCache(const std::string &textPath, ORB_SLAM3::ORBVocabulary &vocabulary);
 
@@ -26,4 +26,4 @@ bool TransformOrbDescriptors(const ORB_SLAM3::ORBVocabulary &vocabulary, const c
 bool TransformOrbDescriptors(const ORB_SLAM3::ORBVocabulary &vocabulary, const cv::Mat &descriptors,
                              core::ports::VisualVocabularyTransform &out, int levelsUp = 4);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

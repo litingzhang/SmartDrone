@@ -5,7 +5,7 @@
 
 #include "core/application/session/calib/calib_output_store.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class CalibStoragePort::Impl final {
   public:
@@ -124,4 +124,4 @@ std::filesystem::path CalibStoragePort::Cam1Dir() const
     return m_impl->Cam1Dir();
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

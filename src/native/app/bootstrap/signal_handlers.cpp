@@ -4,12 +4,12 @@
 
 #include "common/runtime_state.h"
 
-namespace smartdrone::app::bootstrap {
+namespace SmartDrone::app::bootstrap {
 
 void InstallSignalHandlers()
 {
-    signal(SIGINT, smartdrone::common::SigIntHandler);
-    signal(SIGTERM, smartdrone::common::SigIntHandler);
+    signal(SIGINT, SmartDrone::common::SigIntHandler);
+    signal(SIGTERM, SmartDrone::common::SigIntHandler);
 }
 
-} // namespace smartdrone::app::bootstrap
+} // namespace SmartDrone::app::bootstrap

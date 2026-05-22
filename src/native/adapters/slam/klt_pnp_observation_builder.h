@@ -8,7 +8,7 @@
 #include "adapters/slam/slam_mode_state.h"
 #include "core/ports/visual_tracking.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 using KltPerFramePnpObservationBuilderOptions = core::ports::PerFramePnpObservationBuilderOptions;
 using KltPnpObservationSet = core::ports::PnpObservationSet;
@@ -29,4 +29,4 @@ KltPnpObservationSet BuildKltPerFramePnpObservations(
 KltTrackedStereoPnpObservationSet BuildKltTrackedStereoPnpObservations(
     const KltTrackedStereoPnpObservationBuilderOptions &options);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

@@ -4,23 +4,23 @@
 
 #include "core/ports/imu_sample_source.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 struct MainRuntimeAliases;
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application
 
-namespace smartdrone::adapters::imu {
+namespace SmartDrone::adapters::imu {
 
 class Icm42688SampleSource final
-    : public smartdrone::core::ports::IImuSampleSource {
+    : public SmartDrone::core::ports::IImuSampleSource {
   public:
     explicit Icm42688SampleSource(
-        const smartdrone::core::application::MainRuntimeAliases &aliases);
+        const SmartDrone::core::application::MainRuntimeAliases &aliases);
     ~Icm42688SampleSource() override;
 
     bool Start() override;
     bool EnsureOpen() override;
     void Stop() override;
-    smartdrone::core::ports::ImuSampleReadStatus ReadSample(
+    SmartDrone::core::ports::ImuSampleReadStatus ReadSample(
         ImuSample &sample) override;
     ImuScale Scale() const override;
     bool Failed() const override;
@@ -30,4 +30,4 @@ class Icm42688SampleSource final
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace smartdrone::adapters::imu
+} // namespace SmartDrone::adapters::imu

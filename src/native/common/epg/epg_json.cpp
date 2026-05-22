@@ -4,11 +4,11 @@
 #include <fstream>
 #include <sstream>
 
-namespace epg {
+namespace Epg {
 namespace {
 
 class JsonValue {
-public:
+  public:
     enum class Kind {
         Null,
         Bool,
@@ -25,7 +25,8 @@ public:
     std::vector<JsonValue> array;
     std::map<std::string, JsonValue> object;
 
-    const JsonValue& At(const std::string& key) const {
+    const JsonValue &At(const std::string &key) const
+    {
         auto it = object.find(key);
         if (it == object.end()) {
             throw std::runtime_error("missing json field: " + key);
@@ -33,17 +34,22 @@ public:
         return it->second;
     }
 
-    const JsonValue* Find(const std::string& key) const {
+    const JsonValue *Find(const std::string &key) const
+    {
         auto it = object.find(key);
         return it == object.end() ? nullptr : &it->second;
     }
 };
 
 class JsonParser {
-public:
-    explicit JsonParser(const std::string& text) : m_text(text) {}
+  public:
+    explicit JsonParser(const std::string &text)
+        : m_text(text)
+    {
+    }
 
-    JsonValue Parse() {
+    JsonValue Parse()
+    {
         auto value = ParseValue();
         SkipWhitespace();
         if (m_pos != m_text.size()) {
@@ -52,8 +58,9 @@ public:
         return value;
     }
 
-private:
-    JsonValue ParseValue() {
+  private:
+    JsonValue ParseValue()
+    {
         SkipWhitespace();
         if (m_pos >= m_text.size()) {
             Fail("unexpected end of json");
@@ -85,7 +92,8 @@ private:
         return {};
     }
 
-    JsonValue ParseObject() {
+    JsonValue ParseObject()
+    {
         JsonValue value;
         value.kind = JsonValue::Kind::Object;
         Expect('{');
@@ -111,7 +119,8 @@ private:
         return value;
     }
 
-    JsonValue ParseArray() {
+    JsonValue ParseArray()
+    {
         JsonValue value;
         value.kind = JsonValue::Kind::Array;
         Expect('[');
@@ -130,7 +139,8 @@ private:
         return value;
     }
 
-    std::string ParseString() {
+    std::string ParseString()
+    {
         Expect('"');
         std::string result;
         while (m_pos < m_text.size()) {
@@ -144,28 +154,28 @@ private:
                 }
                 const char escaped = m_text[m_pos++];
                 switch (escaped) {
-                    case '"':
-                    case '\\':
-                    case '/':
-                        result.push_back(escaped);
-                        break;
-                    case 'b':
-                        result.push_back('\b');
-                        break;
-                    case 'f':
-                        result.push_back('\f');
-                        break;
-                    case 'n':
-                        result.push_back('\n');
-                        break;
-                    case 'r':
-                        result.push_back('\r');
-                        break;
-                    case 't':
-                        result.push_back('\t');
-                        break;
-                    default:
-                        Fail("unsupported json escape");
+                case '"':
+                case '\\':
+                case '/':
+                    result.push_back(escaped);
+                    break;
+                case 'b':
+                    result.push_back('\b');
+                    break;
+                case 'f':
+                    result.push_back('\f');
+                    break;
+                case 'n':
+                    result.push_back('\n');
+                    break;
+                case 'r':
+                    result.push_back('\r');
+                    break;
+                case 't':
+                    result.push_back('\t');
+                    break;
+                default:
+                    Fail("unsupported json escape");
                 }
             } else {
                 result.push_back(c);
@@ -175,7 +185,8 @@ private:
         return {};
     }
 
-    JsonValue ParseBool() {
+    JsonValue ParseBool()
+    {
         JsonValue value;
         value.kind = JsonValue::Kind::Bool;
         if (Match("true")) {
@@ -190,14 +201,16 @@ private:
         return {};
     }
 
-    JsonValue ParseNull() {
+    JsonValue ParseNull()
+    {
         if (!Match("null")) {
             Fail("invalid json null");
         }
         return {};
     }
 
-    JsonValue ParseNumber() {
+    JsonValue ParseNumber()
+    {
         const auto start = m_pos;
         if (Peek() == '-') {
             ++m_pos;
@@ -227,18 +240,21 @@ private:
         return value;
     }
 
-    void SkipWhitespace() {
+    void SkipWhitespace()
+    {
         while (m_pos < m_text.size() &&
                std::isspace(static_cast<unsigned char>(m_text[m_pos]))) {
             ++m_pos;
         }
     }
 
-    char Peek() const {
+    char Peek() const
+    {
         return m_pos < m_text.size() ? m_text[m_pos] : '\0';
     }
 
-    bool Consume(char expected) {
+    bool Consume(char expected)
+    {
         if (Peek() != expected) {
             return false;
         }
@@ -246,13 +262,15 @@ private:
         return true;
     }
 
-    void Expect(char expected) {
+    void Expect(char expected)
+    {
         if (!Consume(expected)) {
             Fail(std::string("expected '") + expected + "'");
         }
     }
 
-    bool Match(const char* literal) {
+    bool Match(const char *literal)
+    {
         const std::string expected(literal);
         if (m_text.compare(m_pos, expected.size(), expected) != 0) {
             return false;
@@ -261,34 +279,38 @@ private:
         return true;
     }
 
-    [[noreturn]] void Fail(const std::string& message) const {
+    [[noreturn]] void Fail(const std::string &message) const
+    {
         throw std::runtime_error("json parse error at byte " + std::to_string(m_pos) + ": " + message);
     }
 
-    const std::string& m_text;
+    const std::string &m_text;
     std::size_t m_pos{};
 };
 
-std::string RequiredString(const JsonValue& value, const std::string& field) {
-    const auto& child = value.At(field);
+std::string RequiredString(const JsonValue &value, const std::string &field)
+{
+    const auto &child = value.At(field);
     if (child.kind != JsonValue::Kind::String) {
         throw std::runtime_error("json field must be string: " + field);
     }
     return child.string;
 }
 
-std::size_t RequiredSize(const JsonValue& value, const std::string& field) {
-    const auto& child = value.At(field);
+std::size_t RequiredSize(const JsonValue &value, const std::string &field)
+{
+    const auto &child = value.At(field);
     if (child.kind != JsonValue::Kind::Number || child.number < 0) {
         throw std::runtime_error("json field must be non-negative number: " + field);
     }
     return static_cast<std::size_t>(child.number);
 }
 
-std::chrono::milliseconds OptionalMilliseconds(const JsonValue& value,
-                                               const std::string& field,
-                                               std::chrono::milliseconds fallback) {
-    const auto* child = value.Find(field);
+std::chrono::milliseconds OptionalMilliseconds(const JsonValue &value,
+                                               const std::string &field,
+                                               std::chrono::milliseconds fallback)
+{
+    const auto *child = value.Find(field);
     if (!child) {
         return fallback;
     }
@@ -298,8 +320,9 @@ std::chrono::milliseconds OptionalMilliseconds(const JsonValue& value,
     return std::chrono::milliseconds(static_cast<int>(child->number));
 }
 
-bool OptionalBool(const JsonValue& value, const std::string& field, bool fallback) {
-    const auto* child = value.Find(field);
+bool OptionalBool(const JsonValue &value, const std::string &field, bool fallback)
+{
+    const auto *child = value.Find(field);
     if (!child) {
         return fallback;
     }
@@ -309,17 +332,18 @@ bool OptionalBool(const JsonValue& value, const std::string& field, bool fallbac
     return child->boolean;
 }
 
-bool RequiredBool(const JsonValue& value, const std::string& field)
+bool RequiredBool(const JsonValue &value, const std::string &field)
 {
-    const auto& child = value.At(field);
+    const auto &child = value.At(field);
     if (child.kind != JsonValue::Kind::Bool) {
         throw std::runtime_error("json field must be bool: " + field);
     }
     return child.boolean;
 }
 
-int OptionalInt(const JsonValue& value, const std::string& field, int fallback) {
-    const auto* child = value.Find(field);
+int OptionalInt(const JsonValue &value, const std::string &field, int fallback)
+{
+    const auto *child = value.Find(field);
     if (!child) {
         return fallback;
     }
@@ -329,10 +353,11 @@ int OptionalInt(const JsonValue& value, const std::string& field, int fallback) 
     return static_cast<int>(child->number);
 }
 
-std::uint64_t OptionalUInt64(const JsonValue& value,
-                             const std::string& field,
-                             std::uint64_t fallback) {
-    const auto* child = value.Find(field);
+std::uint64_t OptionalUInt64(const JsonValue &value,
+                             const std::string &field,
+                             std::uint64_t fallback)
+{
+    const auto *child = value.Find(field);
     if (!child) {
         return fallback;
     }
@@ -342,19 +367,21 @@ std::uint64_t OptionalUInt64(const JsonValue& value,
     return static_cast<std::uint64_t>(child->number);
 }
 
-std::uint64_t RequiredUInt64(const JsonValue& value,
-                             const std::string& field) {
-    const auto& child = value.At(field);
+std::uint64_t RequiredUInt64(const JsonValue &value,
+                             const std::string &field)
+{
+    const auto &child = value.At(field);
     if (child.kind != JsonValue::Kind::Number || child.number < 0) {
         throw std::runtime_error("json field must be non-negative number: " + field);
     }
     return static_cast<std::uint64_t>(child.number);
 }
 
-std::string OptionalString(const JsonValue& value,
-                           const std::string& field,
-                           const std::string& fallback) {
-    const auto* child = value.Find(field);
+std::string OptionalString(const JsonValue &value,
+                           const std::string &field,
+                           const std::string &fallback)
+{
+    const auto *child = value.Find(field);
     if (!child) {
         return fallback;
     }
@@ -364,16 +391,17 @@ std::string OptionalString(const JsonValue& value,
     return child->string;
 }
 
-std::vector<std::string> OptionalStringArray(const JsonValue& value, const std::string& field) {
+std::vector<std::string> OptionalStringArray(const JsonValue &value, const std::string &field)
+{
     std::vector<std::string> result;
-    const auto* child = value.Find(field);
+    const auto *child = value.Find(field);
     if (!child) {
         return result;
     }
     if (child->kind != JsonValue::Kind::Array) {
         throw std::runtime_error("json field must be string array: " + field);
     }
-    for (const auto& item : child->array) {
+    for (const auto &item : child->array) {
         if (item.kind != JsonValue::Kind::String) {
             throw std::runtime_error("json array item must be string: " + field);
         }
@@ -382,17 +410,18 @@ std::vector<std::string> OptionalStringArray(const JsonValue& value, const std::
     return result;
 }
 
-std::vector<PortId> OptionalPortIdArray(const JsonValue& value,
-                                        const std::string& field) {
+std::vector<PortId> OptionalPortIdArray(const JsonValue &value,
+                                        const std::string &field)
+{
     std::vector<PortId> result;
-    const auto* child = value.Find(field);
+    const auto *child = value.Find(field);
     if (!child) {
         return result;
     }
     if (child->kind != JsonValue::Kind::Array) {
         throw std::runtime_error("json field must be port id array: " + field);
     }
-    for (const auto& item : child->array) {
+    for (const auto &item : child->array) {
         if (item.kind != JsonValue::Kind::Number || item.number < 0) {
             throw std::runtime_error("json array item must be port id: " + field);
         }
@@ -401,9 +430,10 @@ std::vector<PortId> OptionalPortIdArray(const JsonValue& value,
     return result;
 }
 
-TaskSchedulingConfig OptionalScheduling(const JsonValue& value) {
+TaskSchedulingConfig OptionalScheduling(const JsonValue &value)
+{
     TaskSchedulingConfig scheduling;
-    const auto* child = value.Find("scheduling");
+    const auto *child = value.Find("scheduling");
     if (!child) {
         return scheduling;
     }
@@ -424,7 +454,8 @@ TaskSchedulingConfig OptionalScheduling(const JsonValue& value) {
     return scheduling;
 }
 
-PortId ParsePortId(const std::string& value, const std::string& field) {
+PortId ParsePortId(const std::string &value, const std::string &field)
+{
     std::size_t parsedChars = 0;
     const auto parsed = std::stoul(value, &parsedChars, 10);
     if (parsedChars != value.size()) {
@@ -433,16 +464,17 @@ PortId ParsePortId(const std::string& value, const std::string& field) {
     return static_cast<PortId>(parsed);
 }
 
-std::map<PortId, std::string> OptionalPortQueueMap(const JsonValue& value, const std::string& field) {
+std::map<PortId, std::string> OptionalPortQueueMap(const JsonValue &value, const std::string &field)
+{
     std::map<PortId, std::string> result;
-    const auto* child = value.Find(field);
+    const auto *child = value.Find(field);
     if (!child) {
         return result;
     }
     if (child->kind != JsonValue::Kind::Object) {
         throw std::runtime_error("json field must be object: " + field);
     }
-    for (const auto& pair : child->object) {
+    for (const auto &pair : child->object) {
         if (pair.second.kind != JsonValue::Kind::String) {
             throw std::runtime_error("json object value must be string: " + field + "." + pair.first);
         }
@@ -451,7 +483,8 @@ std::map<PortId, std::string> OptionalPortQueueMap(const JsonValue& value, const
     return result;
 }
 
-OverflowPolicy ParseOverflow(const std::string& value) {
+OverflowPolicy ParseOverflow(const std::string &value)
+{
     if (value == "drop_newest" || value == "tail_drop") {
         return OverflowPolicy::DropNewest;
     }
@@ -461,7 +494,8 @@ OverflowPolicy ParseOverflow(const std::string& value) {
     throw std::runtime_error("unsupported queue overflow policy: " + value);
 }
 
-TriggerMode ParseTriggerMode(const std::string& value) {
+TriggerMode ParseTriggerMode(const std::string &value)
+{
     if (value == "periodic") {
         return TriggerMode::Periodic;
     }
@@ -477,22 +511,25 @@ TriggerMode ParseTriggerMode(const std::string& value) {
     throw std::runtime_error("unsupported task trigger mode: " + value);
 }
 
-const JsonValue& RequiredArrayField(const JsonValue& value,
-                                    const std::string& field) {
-    const auto& child = value.At(field);
+const JsonValue &RequiredArrayField(const JsonValue &value,
+                                    const std::string &field)
+{
+    const auto &child = value.At(field);
     if (child.kind != JsonValue::Kind::Array) {
         throw std::runtime_error("json field must be array: " + field);
     }
     return child;
 }
 
-void RequireConfigObject(const JsonValue& value, const std::string& message) {
+void RequireConfigObject(const JsonValue &value, const std::string &message)
+{
     if (value.kind != JsonValue::Kind::Object) {
         throw std::runtime_error(message);
     }
 }
 
-QueueConfig ParseQueueConfig(const JsonValue& item) {
+QueueConfig ParseQueueConfig(const JsonValue &item)
+{
     RequireConfigObject(item, "queue config must be object");
     QueueConfig queue;
     queue.name = RequiredString(item, "name");
@@ -502,9 +539,10 @@ QueueConfig ParseQueueConfig(const JsonValue& item) {
     return queue;
 }
 
-TriggerConfig ParseTaskTriggerConfig(const JsonValue& item,
-                                     const std::string& taskName) {
-    const auto& trigger = item.At("trigger");
+TriggerConfig ParseTaskTriggerConfig(const JsonValue &item,
+                                     const std::string &taskName)
+{
+    const auto &trigger = item.At("trigger");
     if (trigger.kind != JsonValue::Kind::Object) {
         throw std::runtime_error("task trigger must be object: " + taskName);
     }
@@ -517,7 +555,8 @@ TriggerConfig ParseTaskTriggerConfig(const JsonValue& item,
     return config;
 }
 
-TaskConfig ParseTaskConfig(const JsonValue& item) {
+TaskConfig ParseTaskConfig(const JsonValue &item)
+{
     RequireConfigObject(item, "task config must be object");
     TaskConfig task;
     task.name = RequiredString(item, "name");
@@ -529,19 +568,21 @@ TaskConfig ParseTaskConfig(const JsonValue& item) {
     return task;
 }
 
-void AppendQueueConfigs(const JsonValue& queues, GraphConfig& config) {
-    for (const auto& item : queues.array) {
+void AppendQueueConfigs(const JsonValue &queues, GraphConfig &config)
+{
+    for (const auto &item : queues.array) {
         config.queues.push_back(ParseQueueConfig(item));
     }
 }
 
-void AppendTaskConfigs(const JsonValue& tasks, GraphConfig& config) {
-    for (const auto& item : tasks.array) {
+void AppendTaskConfigs(const JsonValue &tasks, GraphConfig &config)
+{
+    for (const auto &item : tasks.array) {
         config.tasks.push_back(ParseTaskConfig(item));
     }
 }
 
-QueueProfileMetrics ParseQueueProfileMetrics(const JsonValue& item)
+QueueProfileMetrics ParseQueueProfileMetrics(const JsonValue &item)
 {
     RequireConfigObject(item, "queue profile metrics must be object");
     QueueProfileMetrics metrics;
@@ -554,7 +595,7 @@ QueueProfileMetrics ParseQueueProfileMetrics(const JsonValue& item)
     return metrics;
 }
 
-TaskProfileMetrics ParseTaskProfileMetrics(const JsonValue& item)
+TaskProfileMetrics ParseTaskProfileMetrics(const JsonValue &item)
 {
     RequireConfigObject(item, "task profile metrics must be object");
     TaskProfileMetrics metrics;
@@ -578,7 +619,7 @@ TaskProfileMetrics ParseTaskProfileMetrics(const JsonValue& item)
     return metrics;
 }
 
-GraphProfileTaskCatalogEntry ParseTaskCatalogEntry(const JsonValue& item)
+GraphProfileTaskCatalogEntry ParseTaskCatalogEntry(const JsonValue &item)
 {
     RequireConfigObject(item, "task catalog entry must be object");
     GraphProfileTaskCatalogEntry entry;
@@ -592,9 +633,9 @@ GraphProfileTaskCatalogEntry ParseTaskCatalogEntry(const JsonValue& item)
 }
 
 std::vector<GraphProfileTaskCatalogEntry> ParseTaskCatalogObject(
-    const JsonValue& root)
+    const JsonValue &root)
 {
-    const auto* catalog = root.Find("taskCatalog");
+    const auto *catalog = root.Find("taskCatalog");
     if (!catalog) {
         throw std::runtime_error("missing EventPipelineGraph json field: taskCatalog");
     }
@@ -603,23 +644,23 @@ std::vector<GraphProfileTaskCatalogEntry> ParseTaskCatalogObject(
     }
     std::vector<GraphProfileTaskCatalogEntry> entries;
     entries.reserve(catalog->array.size());
-    for (const auto& item : catalog->array) {
+    for (const auto &item : catalog->array) {
         entries.push_back(ParseTaskCatalogEntry(item));
     }
     return entries;
 }
 
-const JsonValue* FindObjectField(const JsonValue& value,
-                                 const std::string& field)
+const JsonValue *FindObjectField(const JsonValue &value,
+                                 const std::string &field)
 {
-    const auto* child = value.Find(field);
+    const auto *child = value.Find(field);
     if (!child || child->kind != JsonValue::Kind::Object) {
         return nullptr;
     }
     return child;
 }
 
-GraphConfig ParseGraphConfigObject(const JsonValue& root)
+GraphConfig ParseGraphConfigObject(const JsonValue &root)
 {
     RequireConfigObject(root, "EventPipelineGraph json root must be object");
 
@@ -629,7 +670,7 @@ GraphConfig ParseGraphConfigObject(const JsonValue& root)
     return config;
 }
 
-GraphProfileMetadata ParseGraphProfileMetadataObject(const JsonValue& root)
+GraphProfileMetadata ParseGraphProfileMetadataObject(const JsonValue &root)
 {
     RequireConfigObject(root, "EventPipelineGraph profile root must be object");
 
@@ -644,23 +685,23 @@ GraphProfileMetadata ParseGraphProfileMetadataObject(const JsonValue& root)
 }
 
 GraphProfileDiagnostics ParseGraphProfileDiagnosticsObject(
-    const JsonValue& root)
+    const JsonValue &root)
 {
     RequireConfigObject(root, "EventPipelineGraph profile root must be object");
 
     GraphProfileDiagnostics diagnostics;
-    const auto* diag = FindObjectField(root, "diagnostics");
+    const auto *diag = FindObjectField(root, "diagnostics");
     if (!diag) {
         return diagnostics;
     }
-    if (const auto* queues = FindObjectField(*diag, "queues")) {
-        for (const auto& item : queues->object) {
+    if (const auto *queues = FindObjectField(*diag, "queues")) {
+        for (const auto &item : queues->object) {
             diagnostics.queues[item.first] =
                 ParseQueueProfileMetrics(item.second);
         }
     }
-    if (const auto* tasks = FindObjectField(*diag, "tasks")) {
-        for (const auto& item : tasks->object) {
+    if (const auto *tasks = FindObjectField(*diag, "tasks")) {
+        for (const auto &item : tasks->object) {
             diagnostics.tasks[item.first] =
                 ParseTaskProfileMetrics(item.second);
         }
@@ -669,7 +710,7 @@ GraphProfileDiagnostics ParseGraphProfileDiagnosticsObject(
 }
 
 OptimizedGraphMetadata ParseOptimizedGraphMetadataObject(
-    const JsonValue& root)
+    const JsonValue &root)
 {
     RequireConfigObject(root, "optimized graph json root must be object");
 
@@ -685,7 +726,7 @@ OptimizedGraphMetadata ParseOptimizedGraphMetadataObject(
 }
 
 SolverReportMetadata ParseSolverReportMetadataObject(
-    const JsonValue& root)
+    const JsonValue &root)
 {
     RequireConfigObject(root, "solver report json root must be object");
 
@@ -700,7 +741,7 @@ SolverReportMetadata ParseSolverReportMetadataObject(
     return metadata;
 }
 
-SolverReportScore ParseSolverReportScoreObject(const JsonValue& root)
+SolverReportScore ParseSolverReportScoreObject(const JsonValue &root)
 {
     RequireConfigObject(root, "solver report score must be object");
     SolverReportScore score;
@@ -717,7 +758,7 @@ SolverReportScore ParseSolverReportScoreObject(const JsonValue& root)
 }
 
 SolverReportConstraints ParseSolverReportConstraintsObject(
-    const JsonValue& root)
+    const JsonValue &root)
 {
     RequireConfigObject(root, "solver report constraints must be object");
     SolverReportConstraints constraints;
@@ -729,23 +770,23 @@ SolverReportConstraints ParseSolverReportConstraintsObject(
     return constraints;
 }
 
-std::string ParseSolverReportObjectiveName(const JsonValue& root)
+std::string ParseSolverReportObjectiveName(const JsonValue &root)
 {
-    const auto& objective = root.At("objective");
+    const auto &objective = root.At("objective");
     RequireConfigObject(objective, "solver report objective must be object");
     return RequiredString(objective, "name");
 }
 
-SolverReportScore ParseSolverReportObjectiveScore(const JsonValue& root)
+SolverReportScore ParseSolverReportObjectiveScore(const JsonValue &root)
 {
-    const auto& objective = root.At("objective");
+    const auto &objective = root.At("objective");
     RequireConfigObject(objective, "solver report objective must be object");
-    const auto& score = objective.At("score");
+    const auto &score = objective.At("score");
     return ParseSolverReportScoreObject(score);
 }
 
-void ParseQueueSolverReportDecision(const JsonValue& item,
-                                    SolverReportDecision& decision)
+void ParseQueueSolverReportDecision(const JsonValue &item,
+                                    SolverReportDecision &decision)
 {
     decision.depthBefore = RequiredUInt64(item, "depthBefore");
     decision.depthAfter = RequiredUInt64(item, "depthAfter");
@@ -755,8 +796,8 @@ void ParseQueueSolverReportDecision(const JsonValue& item,
     decision.droppedPerSecond = RequiredUInt64(item, "droppedPerSecond");
 }
 
-void ParseTaskSolverReportDecision(const JsonValue& item,
-                                   SolverReportDecision& decision)
+void ParseTaskSolverReportDecision(const JsonValue &item,
+                                   SolverReportDecision &decision)
 {
     decision.intervalBeforeMs = RequiredUInt64(item, "intervalBeforeMs");
     decision.intervalAfterMs = RequiredUInt64(item, "intervalAfterMs");
@@ -786,7 +827,7 @@ void ParseTaskSolverReportDecision(const JsonValue& item,
         RequiredUInt64(item, "schedulingErrorCount");
 }
 
-SolverReportDecision ParseSolverReportDecision(const JsonValue& item)
+SolverReportDecision ParseSolverReportDecision(const JsonValue &item)
 {
     RequireConfigObject(item, "solver report decision must be object");
     SolverReportDecision decision;
@@ -806,18 +847,18 @@ SolverReportDecision ParseSolverReportDecision(const JsonValue& item)
 }
 
 std::vector<SolverReportDecision> ParseSolverReportDecisionsObject(
-    const JsonValue& root)
+    const JsonValue &root)
 {
-    const auto& decisions = RequiredArrayField(root, "decisions");
+    const auto &decisions = RequiredArrayField(root, "decisions");
     std::vector<SolverReportDecision> result;
     result.reserve(decisions.array.size());
-    for (const auto& item : decisions.array) {
+    for (const auto &item : decisions.array) {
         result.push_back(ParseSolverReportDecision(item));
     }
     return result;
 }
 
-SolverReport ParseSolverReportObject(const JsonValue& root)
+SolverReport ParseSolverReportObject(const JsonValue &root)
 {
     RequireConfigObject(root, "solver report json root must be object");
     return {
@@ -831,11 +872,11 @@ SolverReport ParseSolverReportObject(const JsonValue& root)
 
 } // namespace
 
-GraphProfile ParseGraphProfileJson(const std::string& jsonText)
+GraphProfile ParseGraphProfileJson(const std::string &jsonText)
 {
     const auto root = JsonParser(jsonText).Parse();
     RequireConfigObject(root, "EventPipelineGraph profile root must be object");
-    const auto* topology = root.Find("topology");
+    const auto *topology = root.Find("topology");
     if (!topology) {
         throw std::runtime_error("missing EventPipelineGraph json field: topology");
     }
@@ -848,27 +889,27 @@ GraphProfile ParseGraphProfileJson(const std::string& jsonText)
 }
 
 GraphProfileMetadata ParseGraphProfileMetadataJson(
-    const std::string& jsonText)
+    const std::string &jsonText)
 {
     const auto root = JsonParser(jsonText).Parse();
     return ParseGraphProfileMetadataObject(root);
 }
 
 GraphProfileDiagnostics ParseGraphProfileDiagnosticsJson(
-    const std::string& jsonText)
+    const std::string &jsonText)
 {
     const auto root = JsonParser(jsonText).Parse();
     return ParseGraphProfileDiagnosticsObject(root);
 }
 
 OptimizedGraphMetadata ParseOptimizedGraphMetadataJson(
-    const std::string& jsonText)
+    const std::string &jsonText)
 {
     const auto root = JsonParser(jsonText).Parse();
     return ParseOptimizedGraphMetadataObject(root);
 }
 
-OptimizedGraph ParseOptimizedGraphJson(const std::string& jsonText)
+OptimizedGraph ParseOptimizedGraphJson(const std::string &jsonText)
 {
     const auto root = JsonParser(jsonText).Parse();
     return {
@@ -878,30 +919,30 @@ OptimizedGraph ParseOptimizedGraphJson(const std::string& jsonText)
 }
 
 SolverReportMetadata ParseSolverReportMetadataJson(
-    const std::string& jsonText)
+    const std::string &jsonText)
 {
     const auto root = JsonParser(jsonText).Parse();
     return ParseSolverReportMetadataObject(root);
 }
 
-SolverReport ParseSolverReportJson(const std::string& jsonText)
+SolverReport ParseSolverReportJson(const std::string &jsonText)
 {
     const auto root = JsonParser(jsonText).Parse();
     return ParseSolverReportObject(root);
 }
 
-GraphConfig ParseGraphConfigJson(const std::string& jsonText)
+GraphConfig ParseGraphConfigJson(const std::string &jsonText)
 {
     const auto root = JsonParser(jsonText).Parse();
     return ParseGraphConfigObject(root);
 }
 
-GraphConfig ParseGraphConfigJsonField(const std::string& jsonText,
-                                      const std::string& field)
+GraphConfig ParseGraphConfigJsonField(const std::string &jsonText,
+                                      const std::string &field)
 {
     const auto root = JsonParser(jsonText).Parse();
     RequireConfigObject(root, "EventPipelineGraph json root must be object");
-    const auto* child = root.Find(field);
+    const auto *child = root.Find(field);
     if (!child) {
         throw std::runtime_error("missing EventPipelineGraph json field: " +
                                  field);
@@ -909,7 +950,7 @@ GraphConfig ParseGraphConfigJsonField(const std::string& jsonText,
     return ParseGraphConfigObject(*child);
 }
 
-GraphConfig ParseGraphConfigJsonFile(const std::string& path)
+GraphConfig ParseGraphConfigJsonFile(const std::string &path)
 {
     std::ifstream input(path);
     if (!input) {
@@ -920,4 +961,4 @@ GraphConfig ParseGraphConfigJsonFile(const std::string& path)
     return ParseGraphConfigJson(buffer.str());
 }
 
-} // namespace epg
+} // namespace Epg

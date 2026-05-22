@@ -28,25 +28,25 @@ struct ImuTimeRange {
 class ImuBuffer {
   public:
     void Push(const ImuSample &sample);
-    std::vector<smartdrone::core::ports::ImuReading> PopBetweenNs(const ImuTimeRange &range);
-    std::vector<smartdrone::core::ports::ImuReading> PopBetweenNs(int64_t t0Ns, int64_t t1Ns,
+    std::vector<SmartDrone::core::ports::ImuReading> PopBetweenNs(const ImuTimeRange &range);
+    std::vector<SmartDrone::core::ports::ImuReading> PopBetweenNs(int64_t t0Ns, int64_t t1Ns,
                                                                   int64_t slackBeforeNs, int64_t slackAfterNs);
     size_t Size() const;
     bool PeekFirstLast(int64_t &tFirst, int64_t &tLast) const;
 
   private:
     static ImuSample InterpolateSample(const ImuSample &a, const ImuSample &b, int64_t targetNs);
-    static smartdrone::core::ports::ImuReading ToReading(const ImuSample &sample);
+    static SmartDrone::core::ports::ImuReading ToReading(const ImuSample &sample);
     size_t FindFirstIndexAtOrAfter(int64_t timestampNs, size_t beginIdx) const;
     size_t FindSearchBeginIndex(int64_t rangeStartNs) const;
     void AppendLeadingSample(const ImuTimeRange &range, int64_t rangeEndNs,
                              size_t &startIdx,
-                             std::vector<smartdrone::core::ports::ImuReading> &out) const;
+                             std::vector<SmartDrone::core::ports::ImuReading> &out) const;
     size_t AppendSamplesUntil(int64_t startNs, int64_t endNs, size_t beginIdx,
-                              std::vector<smartdrone::core::ports::ImuReading> &out) const;
+                              std::vector<SmartDrone::core::ports::ImuReading> &out) const;
     void AppendTrailingSample(const ImuTimeRange &range, int64_t rangeEndNs,
                               size_t cursorIdx,
-                              std::vector<smartdrone::core::ports::ImuReading> &out) const;
+                              std::vector<SmartDrone::core::ports::ImuReading> &out) const;
     void UpdateLastUsedIndex(size_t searchBeginIdx, int64_t endNs);
     void PurgeBefore(int64_t purgeBeforeNs);
 

@@ -6,7 +6,7 @@
 #include <opencv2/core/persistence.hpp>
 #include <sophus/se3.hpp>
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct StereoBodyExtrinsics {
     Sophus::SE3f Tbc{Sophus::SE3f()};
@@ -26,4 +26,4 @@ std::optional<Sophus::SE3f> ReadSe3Node(const cv::FileNode &node);
 StereoBodyExtrinsics LoadStereoBodyExtrinsics(const std::string &settingsPath);
 OrbExtractorSettings LoadOrbExtractorSettings(const std::string &settingsPath);
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

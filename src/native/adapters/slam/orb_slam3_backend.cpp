@@ -7,21 +7,22 @@
 #include "adapters/slam/slam_engine_adapter.h"
 #include "adapters/slam/slam_engine_factory.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 namespace {
 
 ControlledSlamEngine
-CreateOrbSlam3SlamEngine(const SlamEngineFactoryConfig &config) {
-  auto backend = std::make_unique<OrbSlam3Runtime>(
-      config.vocabularyPath, config.settingsPath, config.sensorMode,
-      config.useViewer);
-  auto engine = std::make_unique<SlamEngineAdapter>(
-      std::move(backend), config.inputMode, config.useImu, config.settingsPath);
-  ControlledSlamEngine out{};
-  out.control = engine.get();
-  out.engine = std::move(engine);
-  return out;
+CreateOrbSlam3SlamEngine(const SlamEngineFactoryConfig &config)
+{
+    auto backend = std::make_unique<OrbSlam3Runtime>(
+        config.vocabularyPath, config.settingsPath, config.sensorMode,
+        config.useViewer);
+    auto engine = std::make_unique<SlamEngineAdapter>(
+        std::move(backend), config.inputMode, config.useImu, config.settingsPath);
+    ControlledSlamEngine out{};
+    out.control = engine.get();
+    out.engine = std::move(engine);
+    return out;
 }
 
 const SlamEngineFactoryRegistrar
@@ -30,4 +31,4 @@ const SlamEngineFactoryRegistrar
 
 } // namespace
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

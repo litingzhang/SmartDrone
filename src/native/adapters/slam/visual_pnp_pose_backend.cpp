@@ -4,7 +4,7 @@
 #include <cmath>
 #include <iostream>
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 namespace {
 
 bool HasEnoughPnpInput(const std::vector<cv::Point3f> &objectPoints,
@@ -152,4 +152,4 @@ bool DefaultVisualPnpPoseBackend::EstimatePoseRansac(const std::vector<cv::Point
     return EstimateVisualPnpPoseRansac(objectPoints, imagePoints, options, result);
 }
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

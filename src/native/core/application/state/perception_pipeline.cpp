@@ -4,9 +4,12 @@
 #include <cstdio>
 #include <utility>
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
-PerceptionPipeline::PerceptionPipeline(PerceptionPipelineConfig cfg) : m_cfg(cfg) {}
+PerceptionPipeline::PerceptionPipeline(PerceptionPipelineConfig cfg)
+    : m_cfg(cfg)
+{
+}
 
 StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(
     ports::ICameraProvider &camera, int slamInputFps, int timeoutMs,
@@ -46,8 +49,7 @@ uint64_t PerceptionPipeline::ComputeMinCaptureTimestampNs(int slamFrameStepNs) c
 {
     if (m_lastAcceptedCaptureTimestampNs != 0) {
         const int64_t toleranceNs = std::max<int64_t>(2000000LL, slamFrameStepNs / 20);
-        return
-            static_cast<uint64_t>(std::max<int64_t>(0, m_lastAcceptedCaptureTimestampNs + slamFrameStepNs - toleranceNs));
+        return static_cast<uint64_t>(std::max<int64_t>(0, m_lastAcceptedCaptureTimestampNs + slamFrameStepNs - toleranceNs));
     }
     return 0;
 }
@@ -85,18 +87,18 @@ const char *PerceptionPipeline::ClassifyGrabFailureCause(
         return "camera_unhealthy";
     }
     if (packedStereo && diag.lastFrameAgeMsL >= timeoutMs &&
-               diag.lastFrameAgeMsR >= timeoutMs) {
+        diag.lastFrameAgeMsR >= timeoutMs) {
         return "packed_stereo_stream_stalled";
     }
     if (packedStereo && diag.pairedQueue > 0) {
         return "eligible_frame_filter";
     }
     if (!packedStereo && diag.lastFrameAgeMsL >= timeoutMs &&
-               diag.lastFrameAgeMsR < timeoutMs) {
+        diag.lastFrameAgeMsR < timeoutMs) {
         return "left_stream_stalled";
     }
     if (!packedStereo && diag.lastFrameAgeMsR >= timeoutMs &&
-               diag.lastFrameAgeMsL < timeoutMs) {
+        diag.lastFrameAgeMsL < timeoutMs) {
         return "right_stream_stalled";
     }
     if (!packedStereo && diag.pendingL > 0 && diag.pendingR == 0) {
@@ -106,7 +108,7 @@ const char *PerceptionPipeline::ClassifyGrabFailureCause(
         return "waiting_left_frame";
     }
     if (!packedStereo && diag.pendingL > 0 && diag.pendingR > 0 &&
-               diag.pairedQueue == 0) {
+        diag.pairedQueue == 0) {
         return "pairing_threshold_or_min_ts";
     }
     if (!packedStereo && diag.pairedQueue > 0) {
@@ -202,4 +204,4 @@ int PerceptionPipeline::ClampTargetFps(int requestedFps) const
     return std::clamp(requestedFps, 1, std::max(1, m_cfg.cameraFps));
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

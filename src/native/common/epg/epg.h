@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-namespace epg {
+namespace Epg {
 
 using PortId = std::uint32_t;
 
@@ -280,43 +280,43 @@ struct GraphProfile {
 
 class Registry;
 
-GraphProfile ParseGraphProfileJson(const std::string& jsonText);
+GraphProfile ParseGraphProfileJson(const std::string &jsonText);
 GraphProfileMetadata ParseGraphProfileMetadataJson(
-    const std::string& jsonText);
+    const std::string &jsonText);
 GraphProfileDiagnostics ParseGraphProfileDiagnosticsJson(
-    const std::string& jsonText);
+    const std::string &jsonText);
 OptimizedGraphMetadata ParseOptimizedGraphMetadataJson(
-    const std::string& jsonText);
-OptimizedGraph ParseOptimizedGraphJson(const std::string& jsonText);
+    const std::string &jsonText);
+OptimizedGraph ParseOptimizedGraphJson(const std::string &jsonText);
 SolverReportMetadata ParseSolverReportMetadataJson(
-    const std::string& jsonText);
-SolverReport ParseSolverReportJson(const std::string& jsonText);
-GraphConfig ParseGraphConfigJson(const std::string& jsonText);
-GraphConfig ParseGraphConfigJsonField(const std::string& jsonText,
-                                      const std::string& field);
-GraphConfig ParseGraphConfigJsonFile(const std::string& path);
-GraphConfig ParseGraphConfigMermaid(const std::string& mermaidText);
-GraphConfig ParseGraphConfigMermaidFile(const std::string& path);
-GraphConfig ParseGraphConfigMermaid(const std::string& mermaidText,
-                                                  Registry& registry);
-GraphConfig ParseGraphConfigMermaidFile(const std::string& path,
-                                                      Registry& registry);
-GraphConfig ParseGraphConfigMermaidSubgraph(const std::string& mermaidText,
-                                                          const std::string& subgraphName,
-                                                          Registry& registry);
-GraphConfig ParseGraphConfigMermaidSubgraphFile(const std::string& path,
-                                                              const std::string& subgraphName,
-                                                              Registry& registry);
-GraphConfig ParseGraphConfigDot(const std::string& dotText,
-                                              const std::string& subgraphName,
-                                              Registry& registry);
-GraphConfig ParseGraphConfigDotFile(const std::string& path,
-                                                  const std::string& subgraphName,
-                                                  Registry& registry);
+    const std::string &jsonText);
+SolverReport ParseSolverReportJson(const std::string &jsonText);
+GraphConfig ParseGraphConfigJson(const std::string &jsonText);
+GraphConfig ParseGraphConfigJsonField(const std::string &jsonText,
+                                      const std::string &field);
+GraphConfig ParseGraphConfigJsonFile(const std::string &path);
+GraphConfig ParseGraphConfigMermaid(const std::string &mermaidText);
+GraphConfig ParseGraphConfigMermaidFile(const std::string &path);
+GraphConfig ParseGraphConfigMermaid(const std::string &mermaidText,
+                                    Registry &registry);
+GraphConfig ParseGraphConfigMermaidFile(const std::string &path,
+                                        Registry &registry);
+GraphConfig ParseGraphConfigMermaidSubgraph(const std::string &mermaidText,
+                                            const std::string &subgraphName,
+                                            Registry &registry);
+GraphConfig ParseGraphConfigMermaidSubgraphFile(const std::string &path,
+                                                const std::string &subgraphName,
+                                                Registry &registry);
+GraphConfig ParseGraphConfigDot(const std::string &dotText,
+                                const std::string &subgraphName,
+                                Registry &registry);
+GraphConfig ParseGraphConfigDotFile(const std::string &path,
+                                    const std::string &subgraphName,
+                                    Registry &registry);
 std::string GraphConfigToJson(
-    const GraphConfig& config,
-    const std::map<std::string, std::string>& stringMetadata = {},
-    const std::map<std::string, std::uint64_t>& numericMetadata = {});
+    const GraphConfig &config,
+    const std::map<std::string, std::string> &stringMetadata = {},
+    const std::map<std::string, std::uint64_t> &numericMetadata = {});
 
 struct PortSpec {
     PortId id{};
@@ -324,10 +324,10 @@ struct PortSpec {
 };
 
 class IQueue {
-public:
+  public:
     virtual ~IQueue() = default;
-    virtual const std::string& Name() const = 0;
-    virtual const std::string& TypeName() const = 0;
+    virtual const std::string &Name() const = 0;
+    virtual const std::string &TypeName() const = 0;
     virtual std::type_index TypeIndex() const = 0;
     virtual std::size_t Depth() const = 0;
     virtual std::size_t Size() const = 0;
@@ -341,7 +341,7 @@ public:
 
 template <class T>
 class SpscSharedPtrQueue final : public IQueue {
-public:
+  public:
     SpscSharedPtrQueue(std::string queueName,
                        std::string queueTypeName,
                        std::size_t queueDepth,
@@ -351,28 +351,44 @@ public:
           m_depth(queueDepth),
           m_capacity(queueDepth + 1),
           m_overflow(overflow),
-          m_slots(m_capacity) {
+          m_slots(m_capacity)
+    {
         if (queueDepth == 0) {
             throw std::invalid_argument("SPSC queue depth must be greater than zero");
         }
     }
 
-    const std::string& Name() const override { return m_name; }
-    const std::string& TypeName() const override { return m_typeName; }
-    std::type_index TypeIndex() const override { return std::type_index(typeid(T)); }
-    std::size_t Depth() const override { return m_depth; }
+    const std::string &Name() const override
+    {
+        return m_name;
+    }
+    const std::string &TypeName() const override
+    {
+        return m_typeName;
+    }
+    std::type_index TypeIndex() const override
+    {
+        return std::type_index(typeid(T));
+    }
+    std::size_t Depth() const override
+    {
+        return m_depth;
+    }
 
-    std::size_t Size() const override {
+    std::size_t Size() const override
+    {
         const auto head = m_head.load(std::memory_order_acquire);
         const auto tail = m_tail.load(std::memory_order_acquire);
         return head >= tail ? head - tail : m_capacity - tail + head;
     }
 
-    bool Empty() const override {
+    bool Empty() const override
+    {
         return m_head.load(std::memory_order_acquire) == m_tail.load(std::memory_order_acquire);
     }
 
-    bool Push(std::shared_ptr<T> item) {
+    bool Push(std::shared_ptr<T> item)
+    {
         auto head = m_head.load(std::memory_order_relaxed);
         auto tail = m_tail.load(std::memory_order_acquire);
         auto next = Increment(head);
@@ -404,7 +420,8 @@ public:
         return true;
     }
 
-    std::shared_ptr<T> TryPop() {
+    std::shared_ptr<T> TryPop()
+    {
         for (;;) {
             auto tail = m_tail.load(std::memory_order_acquire);
             const auto head = m_head.load(std::memory_order_acquire);
@@ -425,7 +442,8 @@ public:
         }
     }
 
-    std::shared_ptr<T> TryPopLatest() {
+    std::shared_ptr<T> TryPopLatest()
+    {
         std::shared_ptr<T> latest;
         while (auto item = TryPop()) {
             latest = std::move(item);
@@ -433,19 +451,23 @@ public:
         return latest;
     }
 
-    bool PushErased(std::shared_ptr<void> item) override {
+    bool PushErased(std::shared_ptr<void> item) override
+    {
         return Push(std::static_pointer_cast<T>(std::move(item)));
     }
 
-    std::shared_ptr<void> TryPopErased() override {
+    std::shared_ptr<void> TryPopErased() override
+    {
         return std::static_pointer_cast<void>(TryPop());
     }
 
-    std::shared_ptr<void> TryPopLatestErased() override {
+    std::shared_ptr<void> TryPopLatestErased() override
+    {
         return std::static_pointer_cast<void>(TryPopLatest());
     }
 
-    QueueDiagnosticsSnapshot Diagnostics() const override {
+    QueueDiagnosticsSnapshot Diagnostics() const override
+    {
         QueueDiagnosticsSnapshot snapshot;
         snapshot.pushed = m_diag.pushed.load(std::memory_order_relaxed);
         snapshot.popped = m_diag.popped.load(std::memory_order_relaxed);
@@ -458,17 +480,20 @@ public:
         return snapshot;
     }
 
-    void SetNotifier(std::function<void()> notifier) override {
+    void SetNotifier(std::function<void()> notifier) override
+    {
         std::lock_guard<std::mutex> lock(m_notifierMutex);
         m_notifier = std::move(notifier);
     }
 
-private:
-    std::size_t Increment(std::size_t value) const {
+  private:
+    std::size_t Increment(std::size_t value) const
+    {
         return (value + 1) % m_capacity;
     }
 
-    void UpdateMaxDepth(std::size_t observed) {
+    void UpdateMaxDepth(std::size_t observed)
+    {
         auto current = m_diag.maxDepthObserved.load(std::memory_order_relaxed);
         while (observed > current &&
                !m_diag.maxDepthObserved.compare_exchange_weak(current, observed,
@@ -477,25 +502,29 @@ private:
         }
     }
 
-    static std::uint64_t SteadyNowMs() {
+    static std::uint64_t SteadyNowMs()
+    {
         const auto now = std::chrono::steady_clock::now().time_since_epoch();
         return static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
     }
 
-    void StoreFirstQueueActivity(std::uint64_t nowMs) {
+    void StoreFirstQueueActivity(std::uint64_t nowMs)
+    {
         std::uint64_t empty = 0;
         (void)m_diag.firstActivityMs.compare_exchange_strong(
             empty, nowMs, std::memory_order_relaxed, std::memory_order_relaxed);
     }
 
-    void StoreQueueActivity() {
+    void StoreQueueActivity()
+    {
         const std::uint64_t nowMs = SteadyNowMs();
         StoreFirstQueueActivity(nowMs);
         m_diag.lastActivityMs.store(nowMs, std::memory_order_relaxed);
     }
 
-    void Notify() {
+    void Notify()
+    {
         std::function<void()> notifier;
         {
             std::lock_guard<std::mutex> lock(m_notifierMutex);
@@ -521,44 +550,50 @@ private:
 };
 
 class TaskContext {
-public:
-    TaskContext(std::unordered_map<PortId, IQueue*> inputs,
-                std::unordered_map<PortId, IQueue*> outputs);
+  public:
+    TaskContext(std::unordered_map<PortId, IQueue *> inputs,
+                std::unordered_map<PortId, IQueue *> outputs);
 
     template <class T, class... Args>
-    std::shared_ptr<T> Make(Args&&... args) {
+    std::shared_ptr<T> Make(Args &&...args)
+    {
         return std::make_shared<T>(std::forward<Args>(args)...);
     }
 
     template <class T>
-    std::shared_ptr<T> TryPop(PortId port) {
-        auto* queue = InputQueue<T>(port);
+    std::shared_ptr<T> TryPop(PortId port)
+    {
+        auto *queue = InputQueue<T>(port);
         return std::static_pointer_cast<T>(queue->TryPopErased());
     }
 
     template <class T>
-    std::shared_ptr<T> TryPopLatest(PortId port) {
-        auto* queue = InputQueue<T>(port);
+    std::shared_ptr<T> TryPopLatest(PortId port)
+    {
+        auto *queue = InputQueue<T>(port);
         return std::static_pointer_cast<T>(queue->TryPopLatestErased());
     }
 
     template <class T>
-    bool Push(PortId port, std::shared_ptr<T> item) {
-        auto* queue = OutputQueue<T>(port);
+    bool Push(PortId port, std::shared_ptr<T> item)
+    {
+        auto *queue = OutputQueue<T>(port);
         return queue->PushErased(std::static_pointer_cast<void>(std::move(item)));
     }
 
     bool InputReady(PortId port) const;
+    bool InputExists(PortId port) const;
     std::size_t InputSize(PortId port) const;
     bool OutputExists(PortId port) const;
     std::size_t OutputSize(PortId port) const;
-    const IQueue* OutputQueueByPort(PortId port) const;
-    void AttachDiagnostics(TaskDiagnostics* diagnostics);
+    const IQueue *OutputQueueByPort(PortId port) const;
+    void AttachDiagnostics(TaskDiagnostics *diagnostics);
     void ReportResourceWait(std::uint64_t waitUs);
 
-private:
+  private:
     template <class T>
-    IQueue* InputQueue(PortId port) {
+    IQueue *InputQueue(PortId port)
+    {
         auto it = m_inputs.find(port);
         if (it == m_inputs.end()) {
             throw std::runtime_error("missing input port: " + std::to_string(port));
@@ -570,7 +605,8 @@ private:
     }
 
     template <class T>
-    IQueue* OutputQueue(PortId port) {
+    IQueue *OutputQueue(PortId port)
+    {
         auto it = m_outputs.find(port);
         if (it == m_outputs.end()) {
             throw std::runtime_error("missing output port: " + std::to_string(port));
@@ -581,20 +617,20 @@ private:
         return it->second;
     }
 
-    std::unordered_map<PortId, IQueue*> m_inputs;
-    std::unordered_map<PortId, IQueue*> m_outputs;
-    TaskDiagnostics* m_diagnostics{nullptr};
+    std::unordered_map<PortId, IQueue *> m_inputs;
+    std::unordered_map<PortId, IQueue *> m_outputs;
+    TaskDiagnostics *m_diagnostics{nullptr};
 };
 
 class ITask {
-public:
+  public:
     virtual ~ITask() = default;
-    virtual void OnTick(TaskContext& context) = 0;
+    virtual void OnTick(TaskContext &context) = 0;
 };
 
 class Registry {
-public:
-    using QueueFactory = std::function<std::unique_ptr<IQueue>(const QueueConfig&)>;
+  public:
+    using QueueFactory = std::function<std::unique_ptr<IQueue>(const QueueConfig &)>;
     using TaskFactory = std::function<std::unique_ptr<ITask>()>;
 
     struct QueueTypeInfo {
@@ -611,11 +647,12 @@ public:
     };
 
     template <class T>
-    void RegisterMessageType(const std::string& name) {
+    void RegisterMessageType(const std::string &name)
+    {
         QueueTypeInfo info;
         info.name = name;
         info.type = std::type_index(typeid(T));
-        info.factory = [name](const QueueConfig& config) {
+        info.factory = [name](const QueueConfig &config) {
             return std::unique_ptr<IQueue>(
                 new SpscSharedPtrQueue<T>(config.name, name, config.depth, config.overflow));
         };
@@ -623,9 +660,10 @@ public:
     }
 
     template <class TTask>
-    void RegisterTaskType(const std::string& name,
+    void RegisterTaskType(const std::string &name,
                           std::vector<PortSpec> inputs,
-                          std::vector<PortSpec> outputs) {
+                          std::vector<PortSpec> outputs)
+    {
         static_assert(std::is_base_of<ITask, TTask>::value,
                       "registered task must derive from ITask");
         TaskTypeInfo info;
@@ -636,33 +674,34 @@ public:
         m_taskTypes[name] = std::move(info);
     }
 
-    void RegisterTaskFactory(const std::string& name,
+    void RegisterTaskFactory(const std::string &name,
                              std::vector<PortSpec> inputs,
                              std::vector<PortSpec> outputs,
                              TaskFactory factory);
-    void MergeTaskPorts(const std::string& name,
-                        const std::vector<PortSpec>& inputs,
-                        const std::vector<PortSpec>& outputs);
+    void MergeTaskPorts(const std::string &name,
+                        const std::vector<PortSpec> &inputs,
+                        const std::vector<PortSpec> &outputs);
 
-    const QueueTypeInfo* FindQueueType(const std::string& name) const;
-    const TaskTypeInfo* FindTaskType(const std::string& name) const;
+    const QueueTypeInfo *FindQueueType(const std::string &name) const;
+    const TaskTypeInfo *FindTaskType(const std::string &name) const;
 
-private:
+  private:
     std::unordered_map<std::string, QueueTypeInfo> m_queueTypes;
     std::unordered_map<std::string, TaskTypeInfo> m_taskTypes;
 };
 
 class TypeCatalog {
-public:
-    using TaskFactoryResolver = std::function<Registry::TaskFactory(const std::string&)>;
+  public:
+    using TaskFactoryResolver = std::function<Registry::TaskFactory(const std::string &)>;
     using TaskFactoryEntry = std::pair<std::string, Registry::TaskFactory>;
 
-    static TypeCatalog& Global();
+    static TypeCatalog &Global();
 
     template <class T>
-    bool RegisterMessage(const std::string& name) {
+    bool RegisterMessage(const std::string &name)
+    {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_messages[name] = [name](Registry& registry) {
+        m_messages[name] = [name](Registry &registry) {
             registry.RegisterMessageType<T>(name);
         };
         return true;
@@ -671,7 +710,8 @@ public:
     template <class TTask>
     bool RegisterTask(std::string name,
                       std::vector<PortSpec> inputs,
-                      std::vector<PortSpec> outputs) {
+                      std::vector<PortSpec> outputs)
+    {
         static_assert(std::is_base_of<ITask, TTask>::value,
                       "reflected task must derive from ITask");
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -686,14 +726,16 @@ public:
     }
 
     template <class TTask>
-    bool RegisterTaskType(std::string name) {
+    bool RegisterTaskType(std::string name)
+    {
         static_assert(std::is_base_of<ITask, TTask>::value,
                       "reflected task must derive from ITask");
         return RegisterTask<TTask>(std::move(name), {}, {});
     }
 
     template <class TTask>
-    std::string ReflectedTaskName() const {
+    std::string ReflectedTaskName() const
+    {
         static_assert(std::is_base_of<ITask, TTask>::value,
                       "reflected task must derive from ITask");
         return ReflectedTaskName(std::type_index(typeid(TTask)));
@@ -702,7 +744,8 @@ public:
     std::string ReflectedTaskName(std::type_index taskType) const;
 
     template <class TTask, class Factory>
-    TaskFactoryEntry MakeTaskFactoryEntry(Factory factory) const {
+    TaskFactoryEntry MakeTaskFactoryEntry(Factory factory) const
+    {
         static_assert(std::is_base_of<ITask, TTask>::value,
                       "reflected task must derive from ITask");
         return {ReflectedTaskName<TTask>(), Registry::TaskFactory(std::move(factory))};
@@ -710,12 +753,12 @@ public:
 
     static TaskFactoryResolver MakeTaskFactoryResolver(std::vector<TaskFactoryEntry> entries);
 
-    void RegisterReflectedMessageTypes(Registry& registry) const;
-    void RegisterReflectedTaskTypes(Registry& registry,
-                                    const std::vector<std::string>& taskTypes,
-                                    const TaskFactoryResolver& resolver) const;
+    void RegisterReflectedMessageTypes(Registry &registry) const;
+    void RegisterReflectedTaskTypes(Registry &registry,
+                                    const std::vector<std::string> &taskTypes,
+                                    const TaskFactoryResolver &resolver) const;
 
-private:
+  private:
     struct TaskReflectionInfo {
         std::string name;
         std::vector<PortSpec> inputs;
@@ -723,42 +766,48 @@ private:
     };
 
     mutable std::mutex m_mutex;
-    std::unordered_map<std::string, std::function<void(Registry&)>> m_messages;
+    std::unordered_map<std::string, std::function<void(Registry &)>> m_messages;
     std::unordered_map<std::string, TaskReflectionInfo> m_tasks;
     std::unordered_map<std::type_index, std::string> m_taskNamesByType;
 };
 
 #define EPG_PORT(portId, portType) \
-    epg::PortSpec{portId, portType}
-
-#define EPG_REGISTER_MESSAGE(messageType, messageName) \
-    namespace { \
-    const bool kEventPipelineGraphMessageRegistration_##messageType = \
-        epg::TypeCatalog::Global().RegisterMessage<messageType>(messageName); \
+    Epg::PortSpec                  \
+    {                              \
+        portId, portType           \
     }
 
-#define EPG_REGISTER_TASK(taskType, taskName, ...) \
-    namespace { \
-    const bool kEventPipelineGraphTaskRegistration_##taskType = \
-        epg::TypeCatalog::Global().RegisterTask<taskType>( \
-            taskName, __VA_ARGS__); \
+#define EPG_REGISTER_MESSAGE(messageType, messageName)                        \
+    namespace {                                                               \
+    const bool kEventPipelineGraphMessageRegistration_##messageType =         \
+        Epg::TypeCatalog::Global().RegisterMessage<messageType>(messageName); \
     }
 
-#define EPG_REGISTER_TASK_TYPE(taskType, taskName) \
-    namespace { \
+#define EPG_REGISTER_TASK(taskType, taskName, ...)              \
+    namespace {                                                 \
     const bool kEventPipelineGraphTaskRegistration_##taskType = \
-        epg::TypeCatalog::Global().RegisterTaskType<taskType>(taskName); \
+        Epg::TypeCatalog::Global().RegisterTask<taskType>(      \
+            taskName, __VA_ARGS__);                             \
+    }
+
+#define EPG_REGISTER_TASK_TYPE(taskType, taskName)                       \
+    namespace {                                                          \
+    const bool kEventPipelineGraphTaskRegistration_##taskType =          \
+        Epg::TypeCatalog::Global().RegisterTaskType<taskType>(taskName); \
     }
 
 class EventPipelineGraph {
-public:
+  public:
     template <class T>
     class ExternalIngress {
-    public:
+      public:
         ExternalIngress() = default;
 
-        bool Valid() const { return m_queue != nullptr; }
-        const std::string& QueueName() const
+        bool Valid() const
+        {
+            return m_queue != nullptr;
+        }
+        const std::string &QueueName() const
         {
             static const std::string kEmpty;
             return m_queue ? m_queue->Name() : kEmpty;
@@ -773,26 +822,29 @@ public:
         }
 
         template <class... Args>
-        bool Emplace(Args&&... args) const
+        bool Emplace(Args &&...args) const
         {
             return TryPush(std::make_shared<T>(std::forward<Args>(args)...));
         }
 
-    private:
+      private:
         friend class EventPipelineGraph;
-        explicit ExternalIngress(IQueue* queue) : m_queue(queue) {}
+        explicit ExternalIngress(IQueue *queue)
+            : m_queue(queue)
+        {
+        }
 
-        IQueue* m_queue{nullptr};
+        IQueue *m_queue{nullptr};
     };
 
-    explicit EventPipelineGraph(const Registry& registry);
+    explicit EventPipelineGraph(const Registry &registry);
     ~EventPipelineGraph();
 
-    EventPipelineGraph(const EventPipelineGraph&) = delete;
-    EventPipelineGraph& operator=(const EventPipelineGraph&) = delete;
+    EventPipelineGraph(const EventPipelineGraph &) = delete;
+    EventPipelineGraph &operator=(const EventPipelineGraph &) = delete;
 
-    void Configure(const GraphConfig& config);
-    void ConfigureJson(const std::string& jsonText);
+    void Configure(const GraphConfig &config);
+    void ConfigureJson(const std::string &jsonText);
     void Start();
     void RequestStop();
     bool JoinStopped();
@@ -800,13 +852,13 @@ public:
     bool Running() const;
 
     template <class T>
-    ExternalIngress<T> CreateExternalIngress(const std::string& queueName)
+    ExternalIngress<T> CreateExternalIngress(const std::string &queueName)
     {
         auto it = m_queues.find(queueName);
         if (it == m_queues.end()) {
             throw std::runtime_error("EventPipelineGraph ingress queue not found: " + queueName);
         }
-        IQueue* queue = it->second.get();
+        IQueue *queue = it->second.get();
         if (queue->TypeIndex() != std::type_index(typeid(T))) {
             throw std::runtime_error("EventPipelineGraph ingress queue type mismatch: " + queueName);
         }
@@ -819,52 +871,52 @@ public:
         return ExternalIngress<T>(queue);
     }
 
-    IQueue* Queue(const std::string& name);
-    const IQueue* Queue(const std::string& name) const;
+    IQueue *Queue(const std::string &name);
+    const IQueue *Queue(const std::string &name) const;
     std::map<std::string, QueueDiagnosticsSnapshot> QueueDiagnostics() const;
     std::map<std::string, TaskDiagnosticsSnapshot> TaskDiagnostics() const;
-    std::string DfxSnapshotJson(const std::string& graphName,
+    std::string DfxSnapshotJson(const std::string &graphName,
                                 std::uint64_t timestampMs) const;
-    std::string ProfileJson(const std::string& graphName,
+    std::string ProfileJson(const std::string &graphName,
                             std::uint64_t timestampMs,
-                            const std::string& topologyVersion = {},
-                            const std::string& taskCatalogJson = {}) const;
+                            const std::string &topologyVersion = {},
+                            const std::string &taskCatalogJson = {}) const;
 
-private:
+  private:
     class TaskRunner;
     struct ConfigureUsage;
 
     void ResetConfiguredGraph();
-    void CreateConfiguredQueues(const GraphConfig& config,
-                                ConfigureUsage& usage);
-    void ValidateConfiguredTasks(const GraphConfig& config,
-                                  ConfigureUsage& usage) const;
-    void ValidateTaskConfig(const TaskConfig& taskConfig,
-                            ConfigureUsage& usage) const;
-    void ValidateTaskPorts(const TaskConfig& taskConfig,
-                           const Registry::TaskTypeInfo& taskType,
-                           ConfigureUsage& usage) const;
-    void ValidateTaskInputs(const TaskConfig& taskConfig,
-                            const std::map<PortId, PortSpec>& declaredInputs,
-                            ConfigureUsage& usage) const;
-    void ValidateTaskOutputs(const TaskConfig& taskConfig,
-                             const std::map<PortId, PortSpec>& declaredOutputs,
-                             ConfigureUsage& usage) const;
-    void ValidateTaskTrigger(const TaskConfig& taskConfig) const;
-    void ValidateTriggerQueues(const TaskConfig& taskConfig) const;
-    void PublishTaskProducedQueues(const ConfigureUsage& usage);
-    void CreateConfiguredTaskRunners(const GraphConfig& config);
-    std::unordered_map<PortId, IQueue*>
-    MakeInputQueueBindings(const TaskConfig& taskConfig) const;
-    std::unordered_map<PortId, IQueue*>
-    MakeOutputQueueBindings(const TaskConfig& taskConfig) const;
-    std::vector<IQueue*>
-    MakeTriggerQueueBindings(const TaskConfig& taskConfig) const;
-    void BindInputNotifiers(const GraphConfig& config);
-    void BindTaskInputNotifiers(TaskRunner& runner,
-                                const TaskConfig& taskConfig);
+    void CreateConfiguredQueues(const GraphConfig &config,
+                                ConfigureUsage &usage);
+    void ValidateConfiguredTasks(const GraphConfig &config,
+                                 ConfigureUsage &usage) const;
+    void ValidateTaskConfig(const TaskConfig &taskConfig,
+                            ConfigureUsage &usage) const;
+    void ValidateTaskPorts(const TaskConfig &taskConfig,
+                           const Registry::TaskTypeInfo &taskType,
+                           ConfigureUsage &usage) const;
+    void ValidateTaskInputs(const TaskConfig &taskConfig,
+                            const std::map<PortId, PortSpec> &declaredInputs,
+                            ConfigureUsage &usage) const;
+    void ValidateTaskOutputs(const TaskConfig &taskConfig,
+                             const std::map<PortId, PortSpec> &declaredOutputs,
+                             ConfigureUsage &usage) const;
+    void ValidateTaskTrigger(const TaskConfig &taskConfig) const;
+    void ValidateTriggerQueues(const TaskConfig &taskConfig) const;
+    void PublishTaskProducedQueues(const ConfigureUsage &usage);
+    void CreateConfiguredTaskRunners(const GraphConfig &config);
+    std::unordered_map<PortId, IQueue *>
+    MakeInputQueueBindings(const TaskConfig &taskConfig) const;
+    std::unordered_map<PortId, IQueue *>
+    MakeOutputQueueBindings(const TaskConfig &taskConfig) const;
+    std::vector<IQueue *>
+    MakeTriggerQueueBindings(const TaskConfig &taskConfig) const;
+    void BindInputNotifiers(const GraphConfig &config);
+    void BindTaskInputNotifiers(TaskRunner &runner,
+                                const TaskConfig &taskConfig);
 
-    const Registry& m_registry;
+    const Registry &m_registry;
     bool m_configured{false};
     bool m_running{false};
     GraphConfig m_config;
@@ -874,4 +926,4 @@ private:
     std::vector<std::unique_ptr<TaskRunner>> m_runners;
 };
 
-} // namespace epg
+} // namespace Epg

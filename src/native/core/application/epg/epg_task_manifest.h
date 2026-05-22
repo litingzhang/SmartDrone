@@ -5,7 +5,7 @@
 
 #include "core/application/epg/epg_registry.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct EpgTaskAliasManifestEntry {
     std::string alias;
@@ -66,10 +66,10 @@ std::vector<std::string> EpgTaskCatalogTypes(
 std::string EpgTaskCatalogJson(const EpgTaskManifest &manifest);
 void ApplyEpgTaskCatalogDefaults(
     const EpgTaskManifest &manifest,
-    epg::GraphConfig &graphConfig);
+    Epg::GraphConfig &graphConfig);
 void ValidateEpgTaskRuntimeTuning(
     const EpgTaskManifest &manifest,
-    const epg::GraphConfig &graphConfig,
+    const Epg::GraphConfig &graphConfig,
     const std::vector<EpgTaskRuntimeTuningEntry> &requestedTuning);
 void ValidateEpgTaskManifest(
     const EpgTaskManifest &manifest);
@@ -78,22 +78,22 @@ void ValidateEpgTaskFactoryManifest(
     const EpgTaskFactoryResolver &resolver);
 void ValidateEpgTaskGraphManifest(
     const EpgTaskManifest &manifest,
-    const epg::GraphConfig &graphConfig);
+    const Epg::GraphConfig &graphConfig);
 void ValidateEpgOptimizedGraphManifest(
     const EpgTaskManifest &manifest,
-    const epg::OptimizedGraph &optimizedGraph);
+    const Epg::OptimizedGraph &optimizedGraph);
 void ValidateEpgSolverReportManifest(
     const EpgTaskManifest &manifest,
-    const epg::OptimizedGraphMetadata &optimizedMetadata,
-    const epg::SolverReportMetadata &reportMetadata);
+    const Epg::OptimizedGraphMetadata &optimizedMetadata,
+    const Epg::SolverReportMetadata &reportMetadata);
 void ValidateEpgSolverReport(
     const EpgTaskManifest &manifest,
-    const epg::OptimizedGraph &optimizedGraph,
-    const epg::SolverReport &report);
+    const Epg::OptimizedGraph &optimizedGraph,
+    const Epg::SolverReport &report);
 void ValidateEpgSolverReport(
     const EpgTaskManifest &manifest,
-    const epg::GraphProfile &sourceProfile,
-    const epg::OptimizedGraph &optimizedGraph,
-    const epg::SolverReport &report);
+    const Epg::GraphProfile &sourceProfile,
+    const Epg::OptimizedGraph &optimizedGraph,
+    const Epg::SolverReport &report);
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

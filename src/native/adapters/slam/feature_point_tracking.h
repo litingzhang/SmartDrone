@@ -4,7 +4,7 @@
 
 #include "core/ports/visual_tracking.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 using ForwardBackwardTrackingOptions = core::ports::ForwardBackwardTrackingOptions;
 
@@ -23,4 +23,4 @@ bool TrackPointsForwardBackward(const cv::Mat &prevGray, const cv::Mat &currGray
                                 std::vector<uchar> &status,
                                 const ForwardBackwardTrackingOptions &options = {});
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

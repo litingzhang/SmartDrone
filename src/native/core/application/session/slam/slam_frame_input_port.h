@@ -10,7 +10,7 @@
 #include "core/application/session/slam/slam_frame_stage_state.h"
 #include "core/application/session/slam/slam_frame_step_result.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class SlamFrameInputPort final {
   public:
@@ -68,7 +68,7 @@ class SlamFrameInputPort final {
         bool ready{false};
         std::chrono::steady_clock::time_point imuStartTp;
         std::chrono::steady_clock::time_point imuEndTp;
-        smartdrone::core::ports::SlamInputBatch slamInput;
+        SmartDrone::core::ports::SlamInputBatch slamInput;
     };
 
     void SyncRequestedSlamMode();
@@ -97,4 +97,4 @@ class SlamFrameInputPort final {
     SlamFrameOutputState &m_outputState;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

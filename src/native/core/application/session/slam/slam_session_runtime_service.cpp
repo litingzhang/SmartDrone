@@ -6,13 +6,14 @@
 #include <utility>
 
 #include "core/application/config/runtime_app_types.h"
+#include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/session/slam/slam_session_processing_port.h"
 #include "core/application/session/slam/slam_session_runtime.h"
 #include "core/application/state/live_pose_state.h"
 #include "core/ports/pose_publisher.h"
 #include "core/ports/slam_session_telemetry.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 template <typename Result, typename Operation>
@@ -101,11 +102,12 @@ class SlamSessionRuntimeService::Impl final {
 
     UnifiedConfig m_cfg;
     LiveRuntimeTuning &m_tuning;
-    smartdrone::core::ports::ISlamSessionTelemetryPort &m_telemetry;
-    smartdrone::core::ports::IPosePublisher &m_posePublisher;
+    SmartDrone::core::ports::ISlamSessionTelemetryPort &m_telemetry;
+    SmartDrone::core::ports::IPosePublisher &m_posePublisher;
     std::atomic<bool> &m_stop;
     LivePoseState &m_livePose;
     std::atomic<bool> &m_runningFlag;
+    const ApplicationRuntimeFactories &m_factories;
     mutable std::mutex m_mu;
     mutable std::mutex m_inputStageMu;
     mutable std::mutex m_trackingStageMu;
@@ -132,6 +134,7 @@ SlamSessionRuntimeService::Impl::Impl(
       m_stop(config.stop),
       m_livePose(config.livePose),
       m_runningFlag(config.runningFlag),
+      m_factories(config.factories),
       m_processingPort(std::make_unique<SlamSessionProcessingPort>())
 {
 }
@@ -159,6 +162,7 @@ bool SlamSessionRuntimeService::Impl::EnsureStarted()
         m_livePose,
         m_stop,
         m_runningFlag,
+        m_factories,
     });
     m_stopped.store(false, std::memory_order_release);
     if (!m_runtime->Start()) {
@@ -441,4 +445,4 @@ SlamTaskStepResult SlamSessionRuntimeService::EmitLivePose(
     return m_impl->EmitLivePose(sessionId, frame);
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

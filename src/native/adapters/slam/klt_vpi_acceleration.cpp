@@ -22,7 +22,7 @@
 #include "adapters/slam/klt_mode_utils.h"
 #include "adapters/slam/slam_env.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 #if SMART_DRONE_HAS_VPI
 struct LkPerFrameVpiState {
@@ -145,7 +145,7 @@ bool FillVpiWarpMapFromOpenCvMaps(const cv::Mat &mapX, const cv::Mat &mapY, VPIW
     }
     for (int y = 0; y < mapX.rows; ++y) {
         auto *row = reinterpret_cast<VPIKeypointF32 *>(reinterpret_cast<uint8_t *>(warp.keypoints) +
-                                                      static_cast<size_t>(y) * warp.pitchBytes);
+                                                       static_cast<size_t>(y) * warp.pitchBytes);
         for (int x = 0; x < mapX.cols; ++x) {
             row[x].x = mapX.at<float>(y, x);
             row[x].y = mapY.at<float>(y, x);
@@ -692,7 +692,7 @@ bool HasVpiPreviousRectified(const std::shared_ptr<LkPerFrameVpiState> &state)
 }
 
 bool ComputeVpiCudaPreviousRectifiedDisparity(const cv::Size &size, cv::Mat &disp,
-                                             std::shared_ptr<LkPerFrameVpiState> &state)
+                                              std::shared_ptr<LkPerFrameVpiState> &state)
 {
     if (!HasVpiPreviousRectified(state)) {
         return false;
@@ -741,7 +741,7 @@ bool HasVpiPreviousRectified(const std::shared_ptr<LkPerFrameVpiState> &)
 }
 
 bool ComputeVpiCudaPreviousRectifiedDisparity(const cv::Size &, cv::Mat &,
-                                             std::shared_ptr<LkPerFrameVpiState> &)
+                                              std::shared_ptr<LkPerFrameVpiState> &)
 {
     return false;
 }
@@ -754,4 +754,4 @@ bool ComputeVpiCudaCurrentPyrLk(const cv::Mat &, const std::vector<cv::Point2f> 
 }
 #endif
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

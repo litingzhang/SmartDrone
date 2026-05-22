@@ -9,41 +9,41 @@
 #include "core/application/config/app_args.h"
 #include "core/ports/slam_engine.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 class SlamEngineAdapter;
 
 class SlamModeStrategy {
-public:
-  virtual ~SlamModeStrategy() = default;
+  public:
+    virtual ~SlamModeStrategy() = default;
 
-  virtual FeatureFrontend Frontend() const = 0;
-  virtual core::ports::SlamOutput
-  Process(SlamEngineAdapter &engine, const core::ports::SlamInputBatch &input,
-          bool extractFeatures, bool extractPointCloud) = 0;
+    virtual FeatureFrontend Frontend() const = 0;
+    virtual core::ports::SlamOutput
+    Process(SlamEngineAdapter &engine, const core::ports::SlamInputBatch &input,
+            bool extractFeatures, bool extractPointCloud) = 0;
 };
 
 class OrbModeStrategy final : public SlamModeStrategy {
-public:
-  FeatureFrontend Frontend() const override;
-  core::ports::SlamOutput Process(SlamEngineAdapter &engine,
-                                  const core::ports::SlamInputBatch &input,
-                                  bool extractFeatures,
-                                  bool extractPointCloud) override;
+  public:
+    FeatureFrontend Frontend() const override;
+    core::ports::SlamOutput Process(SlamEngineAdapter &engine,
+                                    const core::ports::SlamInputBatch &input,
+                                    bool extractFeatures,
+                                    bool extractPointCloud) override;
 };
 
 class VisualFeatureLightGlueModeStrategy final : public SlamModeStrategy {
-public:
-  explicit VisualFeatureLightGlueModeStrategy(FeatureFrontend frontend);
+  public:
+    explicit VisualFeatureLightGlueModeStrategy(FeatureFrontend frontend);
 
-  FeatureFrontend Frontend() const override;
-  core::ports::SlamOutput Process(SlamEngineAdapter &engine,
-                                  const core::ports::SlamInputBatch &input,
-                                  bool extractFeatures,
-                                  bool extractPointCloud) override;
+    FeatureFrontend Frontend() const override;
+    core::ports::SlamOutput Process(SlamEngineAdapter &engine,
+                                    const core::ports::SlamInputBatch &input,
+                                    bool extractFeatures,
+                                    bool extractPointCloud) override;
 
-private:
-  FeatureFrontend m_frontend;
+  private:
+    FeatureFrontend m_frontend;
 };
 
 using SlamModeStrategyFactory = std::unique_ptr<SlamModeStrategy> (*)();
@@ -52,9 +52,9 @@ void RegisterSlamModeStrategy(FeatureFrontend frontend,
                               SlamModeStrategyFactory factory);
 
 class SlamModeStrategyRegistrar {
-public:
-  SlamModeStrategyRegistrar(FeatureFrontend frontend,
-                            SlamModeStrategyFactory factory);
+  public:
+    SlamModeStrategyRegistrar(FeatureFrontend frontend,
+                              SlamModeStrategyFactory factory);
 };
 
 std::unique_ptr<SlamModeStrategy>
@@ -63,4 +63,4 @@ std::unique_ptr<SlamModeStrategy> CreateOrbModeStrategy();
 std::unique_ptr<SlamModeStrategy> CreateSuperPointLightGlueModeStrategy();
 std::unique_ptr<SlamModeStrategy> CreateXFeatLightGlueModeStrategy();
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

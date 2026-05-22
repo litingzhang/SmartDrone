@@ -6,10 +6,10 @@
 #include <utility>
 
 #include "core/application/config/runtime_app_types.h"
-#include "core/application/sensors/camera_runtime_provider.h"
+#include "core/application/runtime/application_runtime_factories.h"
 #include "core/ports/camera_provider.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 constexpr std::int64_t NANOSECONDS_PER_MILLISECOND = 1000000LL;
@@ -24,8 +24,10 @@ std::int64_t MaxPairDeltaNs(const MainRuntimeAliases &aliases)
 
 class CalibCameraInputPort::Impl final {
   public:
-    explicit Impl(MainRuntimeAliases aliases)
+    Impl(MainRuntimeAliases aliases,
+         const ApplicationRuntimeFactories &factories)
         : m_aliases(std::move(aliases)),
+          m_factories(factories),
           m_maxPairDeltaNs(MaxPairDeltaNs(m_aliases))
     {
     }
@@ -40,8 +42,10 @@ class CalibCameraInputPort::Impl final {
         if (m_opened) {
             return true;
         }
-        m_cameraProvider = CreateCameraProvider();
-        m_opened = m_cameraProvider && m_cameraProvider->Open(m_aliases);
+        m_cameraProvider = m_factories.createCameraProvider();
+        m_opened = m_cameraProvider &&
+                   m_cameraProvider->Open(
+                       m_factories.makeCameraOpenConfig(m_aliases));
         return m_opened;
     }
 
@@ -91,7 +95,7 @@ class CalibCameraInputPort::Impl final {
     bool AcceptFrameTiming(const CalibStereoFrame &frame)
     {
         if (m_cameraProvider->Semantics() !=
-            smartdrone::core::ports::CameraProviderSemantics::DualStreamPaired) {
+            SmartDrone::core::ports::CameraProviderSemantics::DualStreamPaired) {
             return true;
         }
         const std::int64_t absDtLr = FrameTimestampDeltaNs(frame);
@@ -123,7 +127,8 @@ class CalibCameraInputPort::Impl final {
     }
 
     MainRuntimeAliases m_aliases{};
-    std::unique_ptr<smartdrone::core::ports::ICameraProvider>
+    const ApplicationRuntimeFactories &m_factories;
+    std::unique_ptr<SmartDrone::core::ports::ICameraProvider>
         m_cameraProvider;
     std::int64_t m_maxPairDeltaNs{0};
     int m_droppedWide{0};
@@ -131,8 +136,9 @@ class CalibCameraInputPort::Impl final {
 };
 
 CalibCameraInputPort::CalibCameraInputPort(
-    const MainRuntimeAliases &aliases)
-    : m_impl(new Impl(aliases))
+    const MainRuntimeAliases &aliases,
+    const ApplicationRuntimeFactories &factories)
+    : m_impl(new Impl(aliases, factories))
 {
 }
 
@@ -159,4 +165,4 @@ bool CalibCameraInputPort::Opened() const
     return m_impl->Opened();
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -5,8 +5,9 @@
 
 #include "core/application/epg/epg_runtime_optimizer.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
+#include "core/application/runtime/system_runtime_messages.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 EpgRedeployRequest MakeRedeployRequest(const EpgTaskManifest &manifest,
@@ -42,9 +43,9 @@ EpgOptimizeTask::EpgOptimizeTask(
 {
 }
 
-void EpgOptimizeTask::OnTick(epg::TaskContext &context)
+void EpgOptimizeTask::OnTick(Epg::TaskContext &context)
 {
-    (void)context;
+    DrainSystemRuntimePulse(context);
     const std::uint64_t nowMs = EpgDfxNowMs();
     for (const auto domain : m_domains) {
         const auto &manifest = EpgManifestForDomain(domain);
@@ -70,4 +71,4 @@ void EpgOptimizeTask::OnTick(epg::TaskContext &context)
 
 EPG_REGISTER_TASK_TYPE(EpgOptimizeTask, "EpgOptimizeTask")
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

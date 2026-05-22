@@ -40,7 +40,10 @@ void MUnmap(void *p, size_t len)
     }
 }
 
-int64_t Abs64(int64_t x) { return x < 0 ? -x : x; }
+int64_t Abs64(int64_t x)
+{
+    return x < 0 ? -x : x;
+}
 
 int64_t NowNs()
 {
@@ -140,7 +143,8 @@ void RebuildR16Lut(R16CompressionState &state)
     const double invRange = 255.0 / (state.hi - state.lo);
     for (int i = 0; i < 65536; ++i) {
         const double v = (static_cast<double>(i) - state.lo) * invRange;
-        const int out = (v <= 0.0) ? 0 : (v >= 255.0) ? 255 : static_cast<int>(v + 0.5);
+        const int out = (v <= 0.0) ? 0 : (v >= 255.0) ? 255
+                                                      : static_cast<int>(v + 0.5);
         state.lut[static_cast<size_t>(i)] = static_cast<uint8_t>(out);
     }
 }
@@ -452,17 +456,33 @@ void LibcameraMonoCam::SetSink(std::function<void(FrameItem &&)> sink)
     m_sink = std::move(sink);
 }
 
-libcamera::PixelFormat LibcameraMonoCam::PixelFmt() const { return m_config->at(0).pixelFormat; }
+libcamera::PixelFormat LibcameraMonoCam::PixelFmt() const
+{
+    return m_config->at(0).pixelFormat;
+}
 
-libcamera::Size LibcameraMonoCam::SizeWH() const { return m_config->at(0).size; }
+libcamera::Size LibcameraMonoCam::SizeWH() const
+{
+    return m_config->at(0).size;
+}
 
-int LibcameraMonoCam::Stride() const { return m_config->at(0).stride; }
+int LibcameraMonoCam::Stride() const
+{
+    return m_config->at(0).stride;
+}
 
-void LibcameraMonoCam::SetR16Normalize(bool on) { m_r16Normalize = on; }
+void LibcameraMonoCam::SetR16Normalize(bool on)
+{
+    m_r16Normalize = on;
+}
 
-bool LibcameraMonoCam::Healthy() const { return !m_streamFault.load(std::memory_order_relaxed); }
+bool LibcameraMonoCam::Healthy() const
+{
+    return !m_streamFault.load(std::memory_order_relaxed);
+}
 
-LibcameraMonoCam::CallbackScope::CallbackScope(LibcameraMonoCam *owner) : self(owner)
+LibcameraMonoCam::CallbackScope::CallbackScope(LibcameraMonoCam *owner)
+    : self(owner)
 {
     if (!self) {
         return;
@@ -487,7 +507,10 @@ LibcameraMonoCam::CallbackScope::~CallbackScope()
     }
 }
 
-bool LibcameraMonoCam::CallbackScope::Active() const { return armed; }
+bool LibcameraMonoCam::CallbackScope::Active() const
+{
+    return armed;
+}
 
 void LibcameraMonoCam::WaitForCallbacks()
 {
@@ -817,7 +840,7 @@ bool LibcameraStereoOV9281_TsPair::GrabPair(FrameItem &L, FrameItem &R, int time
         return TryGrabPairLocked(L, R, preferLatest, minTimestampNs);
     }
     if (!m_cvPair.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&] {
-            return HasEligiblePairLocked(minTimestampNs) || !smartdrone::common::g_runningFlag.load() ||
+            return HasEligiblePairLocked(minTimestampNs) || !SmartDrone::common::g_runningFlag.load() ||
                    !m_acceptFrames.load(std::memory_order_relaxed);
         })) {
         return false;
@@ -855,17 +878,35 @@ bool LibcameraStereoOV9281_TsPair::TryGrabPairLocked(FrameItem &L, FrameItem &R,
     return true;
 }
 
-int64_t LibcameraStereoOV9281_TsPair::LastDtMs() const { return m_lastDtMs.load(); }
+int64_t LibcameraStereoOV9281_TsPair::LastDtMs() const
+{
+    return m_lastDtMs.load();
+}
 
-uint32_t LibcameraStereoOV9281_TsPair::LastSeq() const { return m_lastSeq.load(); }
+uint32_t LibcameraStereoOV9281_TsPair::LastSeq() const
+{
+    return m_lastSeq.load();
+}
 
-uint32_t LibcameraStereoOV9281_TsPair::LastRawSeqL() const { return m_lastRawSeq[0].load(std::memory_order_relaxed); }
+uint32_t LibcameraStereoOV9281_TsPair::LastRawSeqL() const
+{
+    return m_lastRawSeq[0].load(std::memory_order_relaxed);
+}
 
-uint32_t LibcameraStereoOV9281_TsPair::LastRawSeqR() const { return m_lastRawSeq[1].load(std::memory_order_relaxed); }
+uint32_t LibcameraStereoOV9281_TsPair::LastRawSeqR() const
+{
+    return m_lastRawSeq[1].load(std::memory_order_relaxed);
+}
 
-uint64_t LibcameraStereoOV9281_TsPair::RawCountL() const { return m_rawFrameCount[0].load(std::memory_order_relaxed); }
+uint64_t LibcameraStereoOV9281_TsPair::RawCountL() const
+{
+    return m_rawFrameCount[0].load(std::memory_order_relaxed);
+}
 
-uint64_t LibcameraStereoOV9281_TsPair::RawCountR() const { return m_rawFrameCount[1].load(std::memory_order_relaxed); }
+uint64_t LibcameraStereoOV9281_TsPair::RawCountR() const
+{
+    return m_rawFrameCount[1].load(std::memory_order_relaxed);
+}
 
 int64_t LibcameraStereoOV9281_TsPair::LastRejectDtUs() const
 {
@@ -894,11 +935,20 @@ size_t LibcameraStereoOV9281_TsPair::PendR() const
     return m_qR.size();
 }
 
-int64_t LibcameraStereoOV9281_TsPair::PairTolNs() const { return m_pairThreshNs; }
+int64_t LibcameraStereoOV9281_TsPair::PairTolNs() const
+{
+    return m_pairThreshNs;
+}
 
-uint64_t LibcameraStereoOV9281_TsPair::DroppedPaired() const { return m_droppedPaired.load(std::memory_order_relaxed); }
+uint64_t LibcameraStereoOV9281_TsPair::DroppedPaired() const
+{
+    return m_droppedPaired.load(std::memory_order_relaxed);
+}
 
-bool LibcameraStereoOV9281_TsPair::Healthy() const { return m_left.Healthy() && m_right.Healthy(); }
+bool LibcameraStereoOV9281_TsPair::Healthy() const
+{
+    return m_left.Healthy() && m_right.Healthy();
+}
 
 LibcameraStereoOV9281_TsPair::PairingDiagnostics LibcameraStereoOV9281_TsPair::GetDiagnostics() const
 {

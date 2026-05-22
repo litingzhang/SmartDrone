@@ -5,7 +5,7 @@
 
 #include "core/ports/slam_tracking_state.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 bool TrackingStateCanPublishPose(int trackingState)
 {
@@ -180,4 +180,4 @@ core::ports::PoseEstimate PoseFromTwc(const Sophus::SE3f &twc)
     return pose;
 }
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

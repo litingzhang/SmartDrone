@@ -7,14 +7,14 @@
 
 #include "core/ports/slam_tracking_state.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
-using smartdrone::core::ports::VehicleDownwardRange;
-using smartdrone::core::ports::VehicleCommandAckKind;
-using smartdrone::core::ports::VehicleFlightMode;
-using smartdrone::core::ports::VehicleLocalPosition;
-using smartdrone::core::ports::VehicleManualControl;
-using smartdrone::core::ports::VehicleSetpointLocalNed;
+using SmartDrone::core::ports::VehicleCommandAckKind;
+using SmartDrone::core::ports::VehicleDownwardRange;
+using SmartDrone::core::ports::VehicleFlightMode;
+using SmartDrone::core::ports::VehicleLocalPosition;
+using SmartDrone::core::ports::VehicleManualControl;
+using SmartDrone::core::ports::VehicleSetpointLocalNed;
 
 Px4UdpHooks::Px4UdpHooks(Px4UdpHooksConfig config)
     : m_vehicleControl(config.vehicleControl), m_readRuntimeGate(std::move(config.readRuntimeGate)),
@@ -26,14 +26,20 @@ Px4UdpHooks::~Px4UdpHooks()
 {
 }
 
-float Px4UdpHooks::ClampSignedUnit(float value) { return std::max(-1.0f, std::min(1.0f, value)); }
+float Px4UdpHooks::ClampSignedUnit(float value)
+{
+    return std::max(-1.0f, std::min(1.0f, value));
+}
 
 bool Px4UdpHooks::IsTrackingPoseUsable(int trackingState)
 {
     return ports::IsSlamTrackingPoseUsable(trackingState);
 }
 
-bool Px4UdpHooks::IsPoseQualityUsable(LivePoseQuality quality) { return quality != LivePoseQuality::Lost; }
+bool Px4UdpHooks::IsPoseQualityUsable(LivePoseQuality quality)
+{
+    return quality != LivePoseQuality::Lost;
+}
 
 RuntimeCommandGate Px4UdpHooks::ReadCommandGate() const
 {
@@ -322,7 +328,10 @@ bool Px4UdpHooks::EnsureSetpointStream()
     return true;
 }
 
-void Px4UdpHooks::EnsureManualControlStream() { m_manualControlStreaming.store(true, std::memory_order_relaxed); }
+void Px4UdpHooks::EnsureManualControlStream()
+{
+    m_manualControlStreaming.store(true, std::memory_order_relaxed);
+}
 
 void Px4UdpHooks::DisableRemoteControl(bool stopManualStream)
 {
@@ -545,4 +554,4 @@ void Px4UdpHooks::StepManualControl()
     EnsurePositionMode(false, nullptr);
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

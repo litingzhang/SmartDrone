@@ -2,7 +2,7 @@
 
 #include <memory>
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 struct ImuThreadState;
 struct MainRuntimeAliases;
@@ -22,4 +22,4 @@ class ImuSensorPoller {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

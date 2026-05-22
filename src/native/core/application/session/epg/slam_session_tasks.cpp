@@ -4,20 +4,29 @@
 #include <cstdint>
 #include <utility>
 
+#include "core/application/config/runtime_app_types.h"
 #include "core/application/session/epg/messages/slam_epg_messages.h"
 #include "core/application/session/slam/slam_session_runtime_service.h"
 #include "core/application/session/epg/slam_session_task_utils.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
-constexpr epg::PortId STATUS_OUTPUT_PORT = 1;
-constexpr epg::PortId POSE_POSTPROCESS_STATUS_OUTPUT_PORT = 4;
-constexpr epg::PortId DFX_STATUS_OUTPUT_PORT = 0;
-constexpr std::array<epg::PortId, 4> PUBLISHED_FRAME_FAN_OUT_PORTS{
+constexpr Epg::PortId STATUS_OUTPUT_PORT = 1;
+constexpr Epg::PortId POSE_POSTPROCESS_STATUS_OUTPUT_PORT = 4;
+constexpr Epg::PortId DFX_STATUS_OUTPUT_PORT = 0;
+constexpr std::array<Epg::PortId, 4> PUBLISHED_FRAME_FAN_OUT_PORTS{
     0, 1, 2, 3};
-constexpr std::array<epg::PortId, 9> SLAM_MONITOR_STATUS_INPUT_PORTS{
-    0, 1, 2, 3, 4, 5, 6, 7, 8,
+constexpr std::array<Epg::PortId, 9> SLAM_MONITOR_STATUS_INPUT_PORTS{
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
 };
 
 bool ShouldRunTask(const std::atomic<bool> &runningFlag,
@@ -30,9 +39,9 @@ using PublishedOutputFn = SlamTaskStepResult (
     SlamSessionRuntimeService::*)(std::uint64_t,
                                   ISlamPublishedFramePayload &);
 
-void PushSlamStatus(epg::TaskContext &context, bool sessionOk,
+void PushSlamStatus(Epg::TaskContext &context, bool sessionOk,
                     bool abortRequested,
-                    epg::PortId port)
+                    Epg::PortId port)
 {
     auto status = context.Make<SlamStatus>();
     status->sessionOk = sessionOk;
@@ -41,8 +50,8 @@ void PushSlamStatus(epg::TaskContext &context, bool sessionOk,
 }
 
 void PushSlamPublishedFrame(
-    epg::TaskContext &context,
-    epg::PortId port,
+    Epg::TaskContext &context,
+    Epg::PortId port,
     std::uint64_t sessionId,
     const std::shared_ptr<ISlamPublishedFramePayload> &frame)
 {
@@ -52,9 +61,9 @@ void PushSlamPublishedFrame(
     context.Push(port, std::move(published));
 }
 
-bool StepResultAllowsContinue(epg::TaskContext &context,
+bool StepResultAllowsContinue(Epg::TaskContext &context,
                               const SlamTaskStepResult &result,
-                              epg::PortId statusPort)
+                              Epg::PortId statusPort)
 {
     context.ReportResourceWait(result.resourceWaitUs);
     if (!result.sessionAvailable) {
@@ -68,7 +77,7 @@ bool StepResultAllowsContinue(epg::TaskContext &context,
 }
 
 template <typename MessageType, typename FramePayload>
-void PushSlamStageFrame(epg::TaskContext &context, std::uint64_t sessionId,
+void PushSlamStageFrame(Epg::TaskContext &context, std::uint64_t sessionId,
                         FramePayload frame)
 {
     auto message = context.Make<MessageType>();
@@ -105,7 +114,7 @@ void ResetPendingFrames(
     }
 }
 
-void RunPublishedOutputTask(epg::TaskContext &context,
+void RunPublishedOutputTask(Epg::TaskContext &context,
                             SlamSessionRuntimeService &service,
                             PublishedOutputFn outputFn)
 {
@@ -134,7 +143,7 @@ SlamResourceTask::SlamResourceTask(
 {
 }
 
-void SlamResourceTask::OnTick(epg::TaskContext &context)
+void SlamResourceTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         m_service->Stop();
@@ -160,7 +169,7 @@ SlamClockTask::SlamClockTask(std::atomic<bool> &stop,
 {
 }
 
-void SlamClockTask::OnTick(epg::TaskContext &context)
+void SlamClockTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
@@ -178,7 +187,7 @@ SlamImuPollTask::SlamImuPollTask(
 {
 }
 
-void SlamImuPollTask::OnTick(epg::TaskContext &context)
+void SlamImuPollTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
@@ -204,7 +213,7 @@ SlamBackendTickTask::SlamBackendTickTask(
 {
 }
 
-void SlamBackendTickTask::OnTick(epg::TaskContext &context)
+void SlamBackendTickTask::OnTick(Epg::TaskContext &context)
 {
     (void)context;
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
@@ -230,7 +239,7 @@ SlamImuGateTask::SlamImuGateTask(
 {
 }
 
-void SlamImuGateTask::OnTick(epg::TaskContext &context)
+void SlamImuGateTask::OnTick(Epg::TaskContext &context)
 {
     if (auto ready = context.TryPopLatest<SlamImuReady>(0)) {
         m_imuReady = ready->ready;
@@ -277,7 +286,7 @@ SlamAcquireTask::SlamAcquireTask(
 {
 }
 
-void SlamAcquireTask::OnTick(epg::TaskContext &context)
+void SlamAcquireTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
@@ -311,7 +320,7 @@ SlamTrackingTask::SlamTrackingTask(
 {
 }
 
-void SlamTrackingTask::OnTick(epg::TaskContext &context)
+void SlamTrackingTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
@@ -345,7 +354,7 @@ SlamPosePostprocessTask::SlamPosePostprocessTask(
 {
 }
 
-void SlamPosePostprocessTask::OnTick(epg::TaskContext &context)
+void SlamPosePostprocessTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
@@ -366,7 +375,7 @@ void SlamPosePostprocessTask::OnTick(epg::TaskContext &context)
         return;
     }
 
-    for (const epg::PortId port : PUBLISHED_FRAME_FAN_OUT_PORTS) {
+    for (const Epg::PortId port : PUBLISHED_FRAME_FAN_OUT_PORTS) {
         PushSlamPublishedFrame(context, port, tracked->sessionId,
                                result.frame);
     }
@@ -382,7 +391,7 @@ SlamPointCloudTask::SlamPointCloudTask(
 {
 }
 
-void SlamPointCloudTask::OnTick(epg::TaskContext &context)
+void SlamPointCloudTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
@@ -400,12 +409,12 @@ SlamDfxTask::SlamDfxTask(std::shared_ptr<SlamSessionRuntimeService> service,
 {
 }
 
-void SlamDfxTask::OnTick(epg::TaskContext &context)
+void SlamDfxTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
     }
-    for (epg::PortId port = 0; port < m_pendingFrames.size(); ++port) {
+    for (Epg::PortId port = 0; port < m_pendingFrames.size(); ++port) {
         if (auto frame = context.TryPopLatest<SlamPublishedFrame>(port)) {
             m_pendingFrames[port] = std::move(frame);
         }
@@ -431,7 +440,7 @@ SlamUdpTask::SlamUdpTask(std::shared_ptr<SlamSessionRuntimeService> service,
 {
 }
 
-void SlamUdpTask::OnTick(epg::TaskContext &context)
+void SlamUdpTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
@@ -448,7 +457,7 @@ SlamMavlinkTask::SlamMavlinkTask(
 {
 }
 
-void SlamMavlinkTask::OnTick(epg::TaskContext &context)
+void SlamMavlinkTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
@@ -465,7 +474,7 @@ SlamLivePoseTask::SlamLivePoseTask(
 {
 }
 
-void SlamLivePoseTask::OnTick(epg::TaskContext &context)
+void SlamLivePoseTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
@@ -480,9 +489,9 @@ SlamMonitorTask::SlamMonitorTask(std::atomic<bool> &stop,
 {
 }
 
-void SlamMonitorTask::OnTick(epg::TaskContext &context)
+void SlamMonitorTask::OnTick(Epg::TaskContext &context)
 {
-    for (const epg::PortId port : SLAM_MONITOR_STATUS_INPUT_PORTS) {
+    for (const Epg::PortId port : SLAM_MONITOR_STATUS_INPUT_PORTS) {
         while (auto status = context.TryPop<SlamStatus>(port)) {
             m_sessionOk.store(status->sessionOk, std::memory_order_relaxed);
             if (status->abortRequested) {
@@ -507,4 +516,4 @@ EPG_REGISTER_TASK_TYPE(SlamMavlinkTask, "SlamMavlinkTask")
 EPG_REGISTER_TASK_TYPE(SlamLivePoseTask, "SlamLivePoseTask")
 EPG_REGISTER_TASK_TYPE(SlamMonitorTask, "SlamMonitorTask")
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

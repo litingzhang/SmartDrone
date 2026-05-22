@@ -5,7 +5,7 @@
 #include "adapters/slam/klt_pnp_observation_builder.h"
 #include "adapters/slam/slam_mode_state.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 struct KltContinuousFrontendResult {
     bool valid{false};
@@ -19,4 +19,4 @@ struct KltContinuousFrontendResult {
 KltContinuousFrontendResult RunKltContinuousFrontend(
     SlamModeSharedState &state, const cv::Mat &leftRaw, const cv::Mat &rightRaw);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

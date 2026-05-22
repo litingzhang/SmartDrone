@@ -8,7 +8,7 @@
 #include "core/application/epg/epg_task_manifest.h"
 #include "core/application/runtime/runtime_aliases.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 const std::vector<EpgTaskRuntimeTuningEntry> SLAM_RUNTIME_TUNING{
@@ -17,7 +17,7 @@ const std::vector<EpgTaskRuntimeTuningEntry> SLAM_RUNTIME_TUNING{
     {"SlamImuPollTask", false, true, true},
 };
 
-void OverrideTaskInterval(epg::GraphConfig &config, const std::string &taskName,
+void OverrideTaskInterval(Epg::GraphConfig &config, const std::string &taskName,
                           std::chrono::milliseconds interval)
 {
     for (auto &task : config.tasks) {
@@ -28,7 +28,7 @@ void OverrideTaskInterval(epg::GraphConfig &config, const std::string &taskName,
     }
 }
 
-void OverrideTaskScheduling(epg::GraphConfig &config, const std::string &taskName,
+void OverrideTaskScheduling(Epg::GraphConfig &config, const std::string &taskName,
                             bool realtime, int priority)
 {
     for (auto &task : config.tasks) {
@@ -49,7 +49,7 @@ std::chrono::milliseconds SlamInputInterval(int slamInputFps, int cameraFps)
     return std::chrono::milliseconds(intervalMs);
 }
 
-void ApplySlamRuntimePacing(epg::GraphConfig &config, const UnifiedConfig &cfg)
+void ApplySlamRuntimePacing(Epg::GraphConfig &config, const UnifiedConfig &cfg)
 {
     ValidateEpgTaskRuntimeTuning(EpgManifestForDomain(EpgDomain::SlamSession),
                                  config, SLAM_RUNTIME_TUNING);
@@ -61,4 +61,4 @@ void ApplySlamRuntimePacing(epg::GraphConfig &config, const UnifiedConfig &cfg)
                            cfg.app.imu.rtPrio);
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

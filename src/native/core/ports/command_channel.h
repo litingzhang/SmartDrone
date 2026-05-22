@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-namespace smartdrone::core::ports {
+namespace SmartDrone::core::ports {
 
 struct RuntimeActionRequest {
     std::string action;
@@ -19,4 +19,4 @@ class ICommandChannel {
     virtual bool Healthy() const = 0;
 };
 
-} // namespace smartdrone::core::ports
+} // namespace SmartDrone::core::ports

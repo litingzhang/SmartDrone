@@ -8,11 +8,11 @@
 
 #include "core/ports/pose_publisher.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 
 class PosePostprocessor {
   public:
-    using PoseQuality = smartdrone::core::ports::PoseQuality;
+    using PoseQuality = SmartDrone::core::ports::PoseQuality;
 
     struct RangeSensorSnapshot {
         float currentDistance{std::numeric_limits<float>::quiet_NaN()};
@@ -39,8 +39,8 @@ class PosePostprocessor {
             bool outputGuardApplied{false};
         };
 
-        smartdrone::core::ports::PoseEstimate poseEstimate{};
-        smartdrone::core::ports::VelocityEstimate velocityEstimate{};
+        SmartDrone::core::ports::PoseEstimate poseEstimate{};
+        SmartDrone::core::ports::VelocityEstimate velocityEstimate{};
         PoseQuality quality{PoseQuality::Lost};
         uint8_t resetCounter{0};
         uint16_t resetMapCount{0};
@@ -67,16 +67,16 @@ class PosePostprocessor {
     };
 
     struct StartupAligner {
-        smartdrone::core::ports::PoseEstimate AlignPose(const smartdrone::core::ports::PoseEstimate &poseNed,
+        SmartDrone::core::ports::PoseEstimate AlignPose(const SmartDrone::core::ports::PoseEstimate &poseNed,
                                                         bool trackingUsable, const ReadRangeSensorFn &readRangeSensor,
                                                         PoseQuality &outQuality);
-        void SetPublishedPose(const smartdrone::core::ports::PoseEstimate &pose);
+        void SetPublishedPose(const SmartDrone::core::ports::PoseEstimate &pose);
 
       private:
         void RefreshRangeSensor(const ReadRangeSensorFn &readRangeSensor);
         bool HasFreshRange() const;
-        smartdrone::core::ports::PoseEstimate ComputeLostPose(uint64_t nowUs);
-        void ApplyRangeProtection(smartdrone::core::ports::PoseEstimate &pose, uint64_t nowUs);
+        SmartDrone::core::ports::PoseEstimate ComputeLostPose(uint64_t nowUs);
+        void ApplyRangeProtection(SmartDrone::core::ports::PoseEstimate &pose, uint64_t nowUs);
 
         static constexpr uint64_t kWeakHoldUs = 1500000ULL;
         static constexpr float kRangeHardFloorM = 0.35f;
@@ -88,20 +88,20 @@ class PosePostprocessor {
         bool trackingUsablePrev{false};
         bool havePublishedPose{false};
         bool haveLatestRange{false};
-        smartdrone::core::ports::PoseEstimate holdPose{};
+        SmartDrone::core::ports::PoseEstimate holdPose{};
         RangeSensorSnapshot latestRange{};
     };
 
     struct OutputGuard {
         struct GuardRequest {
-            smartdrone::core::ports::PoseEstimate pose{};
+            SmartDrone::core::ports::PoseEstimate pose{};
             int64_t frameNs{0};
             bool trackingUsable{false};
             PoseQuality quality{PoseQuality::Lost};
         };
 
         struct GuardResult {
-            smartdrone::core::ports::PoseEstimate pose{};
+            SmartDrone::core::ports::PoseEstimate pose{};
             PoseQuality quality{PoseQuality::Lost};
             bool guardApplied{false};
             float rawStepM{0.0f};
@@ -113,15 +113,15 @@ class PosePostprocessor {
       private:
         float ComputeAllowedStep(int64_t frameNs) const;
         float ComputeAllowedRotation(int64_t frameNs) const;
-        GuardResult BuildResult(const smartdrone::core::ports::PoseEstimate &pose, PoseQuality quality,
+        GuardResult BuildResult(const SmartDrone::core::ports::PoseEstimate &pose, PoseQuality quality,
                                 bool guardApplied, float rawStepM, float maxStepM) const;
         GuardResult HandleInvalidPose(const GuardRequest &request);
         GuardResult ClampPose(const GuardRequest &request, float rawStepM, float maxStepM, float rawRotRad,
                               float maxRotRad);
         void MaybeLogClamp(int64_t frameNs, float rawStepM, float maxStepM, float rawRotRad, float maxRotRad);
-        void CommitPose(const smartdrone::core::ports::PoseEstimate &pose, int64_t frameNs);
+        void CommitPose(const SmartDrone::core::ports::PoseEstimate &pose, int64_t frameNs);
 
-        smartdrone::core::ports::PoseEstimate lastPose{};
+        SmartDrone::core::ports::PoseEstimate lastPose{};
         int64_t lastFrameNs{0};
         int64_t lastLogFrameNs{0};
         uint64_t guardHitCount{0};
@@ -129,7 +129,7 @@ class PosePostprocessor {
     };
 
     struct VelocityTracker {
-        smartdrone::core::ports::VelocityEstimate Update(const smartdrone::core::ports::PoseEstimate &pose,
+        SmartDrone::core::ports::VelocityEstimate Update(const SmartDrone::core::ports::PoseEstimate &pose,
                                                          int64_t frameNs, PoseQuality quality,
                                                          uint16_t resetMapCount);
 
@@ -141,12 +141,12 @@ class PosePostprocessor {
         };
 
         bool ShouldReset(int64_t frameNs, PoseQuality quality, uint16_t resetMapCount) const;
-        RawVelocity ComputeRawVelocity(const smartdrone::core::ports::PoseEstimate &pose, float dt) const;
+        RawVelocity ComputeRawVelocity(const SmartDrone::core::ports::PoseEstimate &pose, float dt) const;
         bool RawVelocityUsable(const RawVelocity &velocity) const;
         void UpdateFilteredVelocity(const RawVelocity &velocity, float dt);
-        void CommitPoseState(const smartdrone::core::ports::PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
+        void CommitPoseState(const SmartDrone::core::ports::PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
                              uint16_t resetMapCount);
-        void ResetState(const smartdrone::core::ports::PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
+        void ResetState(const SmartDrone::core::ports::PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
                         uint16_t resetMapCount);
 
         static constexpr float kHorizontalTauSec = 0.18f;
@@ -154,8 +154,8 @@ class PosePostprocessor {
         static constexpr float kMaxHorizontalSpeedMps = 8.0f;
         static constexpr float kMaxVerticalSpeedMps = 4.0f;
 
-        smartdrone::core::ports::PoseEstimate lastPose{};
-        smartdrone::core::ports::VelocityEstimate filteredVelocity{};
+        SmartDrone::core::ports::PoseEstimate lastPose{};
+        SmartDrone::core::ports::VelocityEstimate filteredVelocity{};
         int64_t lastFrameNs{0};
         PoseQuality lastQuality{PoseQuality::Lost};
         uint16_t lastResetMapCount{0};
@@ -194,4 +194,4 @@ class PosePostprocessor {
     VelocityTracker m_velocity{};
 };
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

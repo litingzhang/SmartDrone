@@ -10,7 +10,7 @@
 
 #include "ORBVocabulary.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 namespace {
 
@@ -91,7 +91,8 @@ bool LoadOrbVocabularyWithCache(const std::string &textPath, ORB_SLAM3::ORBVocab
     if (hasBin) {
         const bool useBin = !hasText || binTime >= textTime;
         if (useBin && vocabulary.loadFromBinaryFile(binFile)) {
-            std::cout << "Vocabulary loaded from binary cache: " << binFile << std::endl << std::endl;
+            std::cout << "Vocabulary loaded from binary cache: " << binFile << std::endl
+                      << std::endl;
             return true;
         }
         std::cerr << "Binary vocabulary cache load failed, fallback to text: " << binFile << std::endl;
@@ -178,4 +179,4 @@ double OrbVisualVocabulary::Score(const VisualBowVector &left, const VisualBowVe
     return m_impl->vocabulary->score(ToDbowBowVector(left), ToDbowBowVector(right));
 }
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam

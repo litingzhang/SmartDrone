@@ -7,7 +7,7 @@
 
 #include "core/application/epg/epg_task_manifest.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 bool FileReadable(const std::string &path)
@@ -26,26 +26,26 @@ std::string ReadTextFile(const std::string &path)
                        std::istreambuf_iterator<char>());
 }
 
-epg::GraphConfig CompileStaticEpgConfig(const EpgTaskManifest &manifest,
-                                        epg::Registry &registry)
+Epg::GraphConfig CompileStaticEpgConfig(const EpgTaskManifest &manifest,
+                                        Epg::Registry &registry)
 {
-    auto config = epg::ParseGraphConfigDotFile(
+    auto config = Epg::ParseGraphConfigDotFile(
         manifest.topologyPath, manifest.subgraphName, registry);
     ApplyEpgTaskCatalogDefaults(manifest, config);
     return config;
 }
 
-epg::GraphConfig CompileOptimizedEpgConfig(const EpgTaskManifest &manifest)
+Epg::GraphConfig CompileOptimizedEpgConfig(const EpgTaskManifest &manifest)
 {
     const auto &paths = manifest.artifactPaths;
     const std::string json = ReadTextFile(paths.optimizedConfigPath);
-    const auto optimized = epg::ParseOptimizedGraphJson(json);
+    const auto optimized = Epg::ParseOptimizedGraphJson(json);
     ValidateEpgOptimizedGraphManifest(manifest, optimized);
     const std::string reportJson = ReadTextFile(paths.solverReportPath);
-    const auto report = epg::ParseSolverReportJson(reportJson);
+    const auto report = Epg::ParseSolverReportJson(reportJson);
     if (FileReadable(paths.profilePath)) {
         const auto profile =
-            epg::ParseGraphProfileJson(ReadTextFile(paths.profilePath));
+            Epg::ParseGraphProfileJson(ReadTextFile(paths.profilePath));
         ValidateEpgSolverReport(manifest, profile, optimized, report);
     } else {
         ValidateEpgSolverReport(manifest, optimized, report);
@@ -54,7 +54,7 @@ epg::GraphConfig CompileOptimizedEpgConfig(const EpgTaskManifest &manifest)
 }
 
 bool TryLoadOptimizedEpgConfig(const EpgTaskManifest &manifest,
-                               epg::GraphConfig &config)
+                               Epg::GraphConfig &config)
 {
     const auto &paths = manifest.artifactPaths;
     if (!FileReadable(paths.optimizedConfigPath)) {
@@ -67,7 +67,7 @@ bool TryLoadOptimizedEpgConfig(const EpgTaskManifest &manifest,
     return true;
 }
 
-void RegisterManifestAliases(epg::Registry &registry,
+void RegisterManifestAliases(Epg::Registry &registry,
                              const EpgTaskManifest &manifest,
                              const EpgTaskFactoryResolver &resolver)
 {
@@ -84,23 +84,23 @@ void RegisterManifestAliases(epg::Registry &registry,
 
 } // namespace
 
-void RegisterEpgTypes(epg::Registry &registry,
+void RegisterEpgTypes(Epg::Registry &registry,
                       EpgDomain domain,
                       const EpgTaskFactoryResolver &resolver)
 {
     const EpgTaskManifest &manifest = EpgManifestForDomain(domain);
-    auto &catalog = epg::TypeCatalog::Global();
+    auto &catalog = Epg::TypeCatalog::Global();
     catalog.RegisterReflectedMessageTypes(registry);
     catalog.RegisterReflectedTaskTypes(
         registry, EpgTaskCatalogTypes(manifest), resolver);
     RegisterManifestAliases(registry, manifest, resolver);
 }
 
-epg::GraphConfig CompileEpgConfig(EpgDomain domain,
-                                  epg::Registry &registry)
+Epg::GraphConfig CompileEpgConfig(EpgDomain domain,
+                                  Epg::Registry &registry)
 {
     const EpgTaskManifest &manifest = EpgManifestForDomain(domain);
-    epg::GraphConfig config;
+    Epg::GraphConfig config;
     try {
         if (TryLoadOptimizedEpgConfig(manifest, config)) {
             return config;
@@ -115,4 +115,4 @@ epg::GraphConfig CompileEpgConfig(EpgDomain domain,
     return config;
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

@@ -12,7 +12,7 @@
 #include "core/application/runtime/system_runtime_task_factory.h"
 #include "core/application/epg/epg_registry.h"
 
-namespace smartdrone::core::application {
+namespace SmartDrone::core::application {
 namespace {
 
 bool ConfigValid(const SystemRuntimeGraphConfig &config)
@@ -78,7 +78,7 @@ class SystemRuntimeGraph::Impl final {
                 m_config.stepEpgRedeploy,
             });
         auto graphRef = std::make_shared<EpgGraphRef>();
-        epg::Registry registry;
+        Epg::Registry registry;
         RegisterEpgTypes(registry, EpgDomain::SystemRuntime,
                          MakeSystemRuntimeTaskFactoryResolver({
                              stepServices,
@@ -87,7 +87,7 @@ class SystemRuntimeGraph::Impl final {
                              graphRef,
                              m_config.redeployCoordinator,
                          }));
-        auto graph = std::make_unique<epg::EventPipelineGraph>(registry);
+        auto graph = std::make_unique<Epg::EventPipelineGraph>(registry);
         graphRef->graph = graph.get();
         graph->Configure(CompileEpgConfig(EpgDomain::SystemRuntime, registry));
         graph->Start();
@@ -138,4 +138,4 @@ void SystemRuntimeGraph::Stop()
     m_impl->Stop();
 }
 
-} // namespace smartdrone::core::application
+} // namespace SmartDrone::core::application

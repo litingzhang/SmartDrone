@@ -22,13 +22,34 @@ class MavlinkHooks : public RuntimeCommandHook {
         return runtimeGate;
     }
 
-    bool ArmVehicle(std::string *errorMessage) override { return Arm(errorMessage); }
-    bool DisarmVehicle(std::string *errorMessage) override { return Disarm(errorMessage); }
-    bool StopVehicleImmediately(std::string *errorMessage) override { return EmergencyStop(errorMessage); }
-    bool EnterGuidedControl(std::string *errorMessage) override { return SetOffboard(errorMessage); }
-    bool HoldVehicle(std::string *errorMessage) override { return Hold(errorMessage); }
-    bool EnterPositionControl(std::string *errorMessage) override { return Position(errorMessage); }
-    bool LandVehicle(std::string *errorMessage) override { return Land(errorMessage); }
+    bool ArmVehicle(std::string *errorMessage) override
+    {
+        return Arm(errorMessage);
+    }
+    bool DisarmVehicle(std::string *errorMessage) override
+    {
+        return Disarm(errorMessage);
+    }
+    bool StopVehicleImmediately(std::string *errorMessage) override
+    {
+        return EmergencyStop(errorMessage);
+    }
+    bool EnterGuidedControl(std::string *errorMessage) override
+    {
+        return SetOffboard(errorMessage);
+    }
+    bool HoldVehicle(std::string *errorMessage) override
+    {
+        return Hold(errorMessage);
+    }
+    bool EnterPositionControl(std::string *errorMessage) override
+    {
+        return Position(errorMessage);
+    }
+    bool LandVehicle(std::string *errorMessage) override
+    {
+        return Land(errorMessage);
+    }
     bool ApplyMoveGoal(const MoveGoal &goal, std::string *errorMessage) override
     {
         return SetMoveGoal(goal, errorMessage);

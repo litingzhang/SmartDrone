@@ -6,25 +6,25 @@
 #include "core/application/config/app_args.h"
 #include "core/ports/visual_feature_frontend.h"
 
-namespace smartdrone::adapters::slam {
+namespace SmartDrone::adapters::slam {
 
 struct VisualFeatureFrontendRuntimeConfig {
-  std::string repoPath;
-  std::string device{"auto"};
-  int topK{1024};
-  int maxPoints{512};
-  int inputMaxWidth{640};
-  int inputMaxHeight{409};
+    std::string repoPath;
+    std::string device{"auto"};
+    int topK{1024};
+    int maxPoints{512};
+    int inputMaxWidth{640};
+    int inputMaxHeight{409};
 };
 
 class IManagedVisualFeatureFrontend
     : public core::ports::IVisualFeatureFrontend {
-public:
-  ~IManagedVisualFeatureFrontend() override = default;
+  public:
+    ~IManagedVisualFeatureFrontend() override = default;
 
-  virtual bool Start(const VisualFeatureFrontendRuntimeConfig &config,
-                     std::string *err) = 0;
-  virtual void Stop() = 0;
+    virtual bool Start(const VisualFeatureFrontendRuntimeConfig &config,
+                       std::string *err) = 0;
+    virtual void Stop() = 0;
 };
 
 using VisualFeatureFrontendClientFactory =
@@ -34,9 +34,9 @@ void RegisterVisualFeatureFrontendClient(
     FeatureFrontend frontend, VisualFeatureFrontendClientFactory factory);
 
 class VisualFeatureFrontendClientRegistrar {
-public:
-  VisualFeatureFrontendClientRegistrar(
-      FeatureFrontend frontend, VisualFeatureFrontendClientFactory factory);
+  public:
+    VisualFeatureFrontendClientRegistrar(
+        FeatureFrontend frontend, VisualFeatureFrontendClientFactory factory);
 };
 
 std::unique_ptr<IManagedVisualFeatureFrontend>
@@ -47,4 +47,4 @@ std::string ResolveVisualFeatureFrontendRepo(FeatureFrontend frontend,
 void ConfigureVisualFeatureFrontendDefaults(
     FeatureFrontend frontend, const VisualFeatureFrontendRuntimeConfig &config);
 
-} // namespace smartdrone::adapters::slam
+} // namespace SmartDrone::adapters::slam
