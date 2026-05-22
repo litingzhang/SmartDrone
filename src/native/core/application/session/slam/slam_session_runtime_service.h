@@ -57,6 +57,8 @@ class SlamSessionRuntimeService final {
                                ISlamPublishedFramePayload &frame);
     SlamTaskStepResult EmitUdp(std::uint64_t sessionId,
                                ISlamPublishedFramePayload &frame);
+    SlamTaskStepResult FlushPreview(std::uint64_t sessionId,
+                                    ISlamPublishedFramePayload &frame);
     SlamTaskStepResult EmitMavlink(std::uint64_t sessionId,
                                    ISlamPublishedFramePayload &frame);
     SlamTaskStepResult EmitLivePose(std::uint64_t sessionId,

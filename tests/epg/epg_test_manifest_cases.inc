@@ -22,7 +22,7 @@ TEST(EventPipelineGraphManifest, RuntimeManifestsUseCentralizedArtifacts)
 {
     const auto &system = EpgManifestForDomain(EpgDomain::SystemRuntime);
     const auto systemTaskTypes = EpgTaskCatalogTypes(system);
-    EXPECT_EQ(systemTaskTypes.size(), 10u);
+    EXPECT_EQ(systemTaskTypes.size(), 14u);
     EXPECT_EQ(systemTaskTypes.front(), "VehicleTelemetryRxTask");
     EXPECT_NE(std::find(systemTaskTypes.begin(), systemTaskTypes.end(),
                         "EpgRedeployTask"),
@@ -42,7 +42,7 @@ TEST(EventPipelineGraphManifest, RuntimeManifestsUseCentralizedArtifacts)
 
     const auto &slam = EpgManifestForDomain(EpgDomain::SlamSession);
     const auto slamTaskTypes = EpgTaskCatalogTypes(slam);
-    EXPECT_EQ(slamTaskTypes.size(), 15u);
+    EXPECT_EQ(slamTaskTypes.size(), 16u);
     EXPECT_EQ(slamTaskTypes.back(), "EpgDfxSnapshotTask");
     EXPECT_EQ(slam.topologyPath, system.topologyPath);
     EXPECT_EQ(slam.topologyVersion, system.topologyVersion);

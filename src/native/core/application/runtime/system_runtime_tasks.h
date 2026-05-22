@@ -34,10 +34,59 @@ class SetpointStreamTask final : public Epg::ITask {
     std::uint64_t m_pulseSequence{0};
 };
 
-class UdpCommandTask final : public Epg::ITask {
+class UdpReceiveTask final : public Epg::ITask {
   public:
-    explicit UdpCommandTask(std::shared_ptr<UdpCommandRuntime> runtime);
-    ~UdpCommandTask() override;
+    explicit UdpReceiveTask(std::shared_ptr<UdpCommandRuntime> runtime);
+    ~UdpReceiveTask() override;
+
+    void OnTick(Epg::TaskContext &context) override;
+
+  private:
+    std::shared_ptr<UdpCommandRuntime> m_runtime;
+    std::uint64_t m_pulseSequence{0};
+};
+
+class UdpHeartbeatTxTask final : public Epg::ITask {
+  public:
+    explicit UdpHeartbeatTxTask(std::shared_ptr<UdpCommandRuntime> runtime);
+    ~UdpHeartbeatTxTask() override;
+
+    void OnTick(Epg::TaskContext &context) override;
+
+  private:
+    std::shared_ptr<UdpCommandRuntime> m_runtime;
+    std::uint64_t m_pulseSequence{0};
+};
+
+class UdpHeartbeatTimeoutTask final : public Epg::ITask {
+  public:
+    explicit UdpHeartbeatTimeoutTask(
+        std::shared_ptr<UdpCommandRuntime> runtime);
+    ~UdpHeartbeatTimeoutTask() override;
+
+    void OnTick(Epg::TaskContext &context) override;
+
+  private:
+    std::shared_ptr<UdpCommandRuntime> m_runtime;
+    std::uint64_t m_pulseSequence{0};
+};
+
+class UdpStateTxTask final : public Epg::ITask {
+  public:
+    explicit UdpStateTxTask(std::shared_ptr<UdpCommandRuntime> runtime);
+    ~UdpStateTxTask() override;
+
+    void OnTick(Epg::TaskContext &context) override;
+
+  private:
+    std::shared_ptr<UdpCommandRuntime> m_runtime;
+    std::uint64_t m_pulseSequence{0};
+};
+
+class UdpPointCloudTxTask final : public Epg::ITask {
+  public:
+    explicit UdpPointCloudTxTask(std::shared_ptr<UdpCommandRuntime> runtime);
+    ~UdpPointCloudTxTask() override;
 
     void OnTick(Epg::TaskContext &context) override;
 

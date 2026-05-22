@@ -55,6 +55,7 @@ struct SlamFrameReady {};
 struct SlamPreparedFrame {};
 struct SlamTrackedFrame {};
 struct SlamPublishedFrame {};
+struct SlamPreviewReady {};
 struct SlamStatus {};
 struct CalibResourceReady {};
 struct CalibTick {};
@@ -309,6 +310,7 @@ Registry MakeSlamShapeRegistry()
     registry.RegisterMessageType<SlamPreparedFrame>("SlamPreparedFrame");
     registry.RegisterMessageType<SlamTrackedFrame>("SlamTrackedFrame");
     registry.RegisterMessageType<SlamPublishedFrame>("SlamPublishedFrame");
+    registry.RegisterMessageType<SlamPreviewReady>("SlamPreviewReady");
     registry.RegisterMessageType<SlamStatus>("SlamStatus");
 
     const auto factory = []() {
@@ -326,6 +328,7 @@ Registry MakeSlamShapeRegistry()
     registry.RegisterTaskFactory("SlamLivePoseTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamMavlinkTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamUdpTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamPreviewTxTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamDfxTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamMonitorTask", {}, {}, factory);
     registry.RegisterTaskFactory("EpgDfxSnapshotTask", {}, {}, factory);
@@ -341,7 +344,11 @@ Registry MakeSystemShapeRegistry()
     };
     registry.RegisterTaskFactory("VehicleTelemetryRxTask", {}, {}, factory);
     registry.RegisterTaskFactory("SetpointStreamTask", {}, {}, factory);
-    registry.RegisterTaskFactory("UdpCommandTask", {}, {}, factory);
+    registry.RegisterTaskFactory("UdpReceiveTask", {}, {}, factory);
+    registry.RegisterTaskFactory("UdpHeartbeatTxTask", {}, {}, factory);
+    registry.RegisterTaskFactory("UdpHeartbeatTimeoutTask", {}, {}, factory);
+    registry.RegisterTaskFactory("UdpStateTxTask", {}, {}, factory);
+    registry.RegisterTaskFactory("UdpPointCloudTxTask", {}, {}, factory);
     registry.RegisterTaskFactory("ManualControlTask", {}, {}, factory);
     registry.RegisterTaskFactory("ForceRestartTask", {}, {}, factory);
     registry.RegisterTaskFactory("RuntimeSupervisorTask", {}, {}, factory);

@@ -52,8 +52,7 @@ void AddSlamProcessingTaskFactories(EpgTaskFactoryEntries &entries,
     });
     AddFactory<SlamImuGateTask>(entries, catalog, [deps]() {
         return new SlamImuGateTask(deps.service, deps.stop,
-                                   deps.runningFlag, deps.tuning,
-                                   deps.cameraFps);
+                                   deps.runningFlag);
     });
     AddFactory<SlamAcquireTask>(entries, catalog, [deps]() {
         return new SlamAcquireTask(deps.service, deps.stop,
@@ -87,6 +86,10 @@ void AddSlamOutputTaskFactories(EpgTaskFactoryEntries &entries,
     });
     AddFactory<SlamUdpTask>(entries, catalog, [deps]() {
         return new SlamUdpTask(deps.service, deps.stop, deps.runningFlag);
+    });
+    AddFactory<SlamPreviewTxTask>(entries, catalog, [deps]() {
+        return new SlamPreviewTxTask(deps.service, deps.stop,
+                                     deps.runningFlag);
     });
     AddFactory<SlamDfxTask>(entries, catalog, [deps]() {
         return new SlamDfxTask(deps.service, deps.stop, deps.runningFlag);

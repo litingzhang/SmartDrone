@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 PROFILE_SCHEMA = "smartdrone.epg.profile.v1"
@@ -19,6 +20,7 @@ EXACT_SOLVER_OBJECTIVE = "global_minimize_predicted_epg_penalty_discrete_topolog
 RESOURCE_WAIT_PRESSURE_US = 1000
 RESOURCE_ISOLATION_CPU_AFFINITY = 2
 RESOURCE_ISOLATION_PRIORITY = 20
+MAX_EXACT_TOPOLOGY_CANDIDATES = 200000
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,7 @@ SOLVER_SCORE_FIELDS = [
     "budgetOverruns",
     "deadlineMisses",
     "utilizationOverPpm",
+    "topologyPenalty",
     "totalPenalty",
 ]
 
@@ -201,6 +204,7 @@ TASK_DECISION_FIELDS = [
     "budgetOverrunCount",
     "deadlineMissCount",
     "schedulingErrorCount",
+    "topologyPenalty",
 ]
 
 TASK_REASON_ORDER = [
@@ -324,8 +328,14 @@ def ordered_reason_text(reasons: Set[str]) -> str:
 
 
 def expected_task_decision_reason(item: Dict[str, Any]) -> str:
+    topology_reasons = []
     if integer(item.get("intervalAfterMs")) != integer(item.get("intervalBeforeMs")):
-        return "global_optimum_interval"
+        topology_reasons.append("global_optimum_interval")
+    if sorted_ports(item.get("backpressureAfter")) != sorted_ports(
+            item.get("backpressureBefore")):
+        topology_reasons.append("global_optimum_backpressure")
+    if topology_reasons:
+        return "+".join(topology_reasons)
     reason = ordered_reason_text(decision_reason_set(item))
     if item.get("replaceable"):
         return reason
@@ -361,10 +371,19 @@ def validate_task_decision(item: Dict[str, Any],
     if integer(item.get("intervalBeforeMs")) != integer(
             source_trigger.get("interval_ms")):
         raise ValueError(f"EPG solver report task source mismatch: {name}")
+    source_scheduling = source_task.get("scheduling", {})
+    if not isinstance(source_scheduling, dict):
+        source_scheduling = {}
+    if sorted_ports(item.get("backpressureBefore")) != sorted_ports(
+            source_scheduling.get("backpressure_outputs")):
+        raise ValueError(f"EPG solver report task source mismatch: {name}")
     if integer(item.get("budgetUs")) != integer(scheduling.get("budget_us")):
         raise ValueError(f"EPG solver report task budget mismatch: {name}")
     if integer(item.get("deadlineUs")) != integer(scheduling.get("deadline_us")):
         raise ValueError(f"EPG solver report task deadline mismatch: {name}")
+    if sorted_ports(item.get("backpressureAfter")) != sorted_ports(
+            scheduling.get("backpressure_outputs")):
+        raise ValueError(f"EPG solver report task backpressure mismatch: {name}")
     if integer(item.get("targetUtilizationPpm")) != integer(
             constraints.get("targetUtilizationPpm")):
         raise ValueError(f"EPG solver report task target mismatch: {name}")
@@ -387,6 +406,77 @@ def queue_candidate_penalty(depth: int, diag: Dict[str, Any]) -> int:
     return queue_pressure(depth, diag) * 1000 + depth
 
 
+def sorted_ports(value: Any) -> List[int]:
+    if not isinstance(value, list):
+        return []
+    return sorted({integer(item) for item in value})
+
+
+def queue_by_name(queues: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    return {
+        str(queue.get("name", "")): queue
+        for queue in queues
+        if isinstance(queue, dict)
+    }
+
+
+def candidate_backpressure_outputs(task: Dict[str, Any],
+                                   queues: Dict[str, Dict[str, Any]],
+                                   queue_diag: Dict[str, Dict[str, Any]],
+                                   replaceable: bool) -> List[int]:
+    scheduling = task.get("scheduling", {})
+    if not isinstance(scheduling, dict):
+        scheduling = {}
+    ports = sorted_ports(scheduling.get("backpressure_outputs"))
+    if not replaceable:
+        return ports
+    outputs = task.get("outputs", {})
+    if not isinstance(outputs, dict):
+        return ports
+    for port, queue_name in outputs.items():
+        queue = queues.get(str(queue_name))
+        diag = queue_diag.get(str(queue_name), {})
+        if queue and queue_pressure(integer(queue.get("depth")), diag) > 0:
+            ports.append(integer(port))
+    return sorted(set(ports))
+
+
+def backpressure_change_cost(before: List[int],
+                             after: List[int],
+                             total_resource_wait_us: int) -> int:
+    penalty = len(after)
+    before_set = set(before)
+    penalty += sum(10 for port in after if port not in before_set)
+    if total_resource_wait_us == 0 and len(after) > len(before):
+        penalty += 100
+    return penalty
+
+
+def backpressure_topology_penalty(before: List[int],
+                                  after: List[int],
+                                  task: Dict[str, Any],
+                                  queues: Optional[Dict[str, Dict[str, Any]]],
+                                  queue_diag: Optional[Dict[str, Dict[str, Any]]],
+                                  diag: Dict[str, Any],
+                                  replaceable: bool) -> int:
+    penalty = backpressure_change_cost(
+        before, after, integer(diag.get("totalResourceWaitUs")))
+    if not replaceable or queues is None or queue_diag is None:
+        return penalty
+    outputs = task.get("outputs", {})
+    if not isinstance(outputs, dict):
+        return penalty
+    after_set = set(after)
+    for port, queue_name in outputs.items():
+        if integer(port) in after_set:
+            continue
+        queue = queues.get(str(queue_name))
+        qdiag = queue_diag.get(str(queue_name), {})
+        if queue:
+            penalty += queue_pressure(integer(queue.get("depth")), qdiag) * 1000
+    return penalty
+
+
 def queue_candidates(queue: Dict[str, Any],
                      limits: SolverLimits,
                      diag: Dict[str, Any]) -> List[Dict[str, int]]:
@@ -403,7 +493,13 @@ def queue_candidates(queue: Dict[str, Any],
 
 
 def best_candidate_index(candidates: List[Dict[str, int]]) -> int:
-    return min(range(len(candidates)), key=lambda index: candidates[index]["penalty"])
+    return min(
+        range(len(candidates)),
+        key=lambda index: (
+            candidates[index]["penalty"],
+            -len(candidates[index].get("backpressureOutputs", [])),
+        ),
+    )
 
 
 def queue_decision(queue: Dict[str, Any],
@@ -519,7 +615,8 @@ def task_candidate_penalty(interval_before_ms: int,
                            interval_after_ms: int,
                            diag: Dict[str, Any],
                            loop_us: int,
-                           limits: SolverLimits) -> int:
+                           limits: SolverLimits,
+                           topology_penalty: int) -> int:
     return (
         task_periodic_overload_us(interval_after_ms, loop_us) +
         integer(diag.get("totalResourceWaitUs")) +
@@ -532,37 +629,67 @@ def task_candidate_penalty(interval_before_ms: int,
             integer(diag.get("utilizationPpm")),
             limits.target_utilization_ppm,
         ) +
-        interval_after_ms
+        interval_after_ms +
+        topology_penalty
     )
 
 
-def task_candidates(interval_ms: int,
+def task_candidates(task: Dict[str, Any],
+                    queues: Optional[Dict[str, Dict[str, Any]]],
+                    queue_diag: Optional[Dict[str, Dict[str, Any]]],
+                    interval_ms: int,
                     diag: Dict[str, Any],
                     loop_us: int,
                     replaceable: bool,
                     limits: SolverLimits) -> List[Dict[str, int]]:
-    if not replaceable or interval_ms <= 0:
-        return [{
-            "intervalMs": interval_ms,
+    scheduling = task.get("scheduling", {})
+    if not isinstance(scheduling, dict):
+        scheduling = {}
+    backpressure_before = sorted_ports(scheduling.get("backpressure_outputs"))
+    backpressure_optimized = (
+        candidate_backpressure_outputs(task, queues or {}, queue_diag or {},
+                                       replaceable)
+        if queues is not None and queue_diag is not None
+        else backpressure_before
+    )
+
+    def build_candidate(candidate_interval: int,
+                        backpressure_outputs: List[int]) -> Dict[str, int]:
+        topology_penalty = backpressure_topology_penalty(
+            backpressure_before, backpressure_outputs, task, queues,
+            queue_diag, diag, replaceable)
+        return {
+            "intervalMs": candidate_interval,
+            "backpressureOutputs": backpressure_outputs,
+            "topologyPenalty": topology_penalty,
             "penalty": task_candidate_penalty(
-                interval_ms, interval_ms, diag, loop_us, limits),
-        }]
-    max_interval = task_feasible_interval_limit(interval_ms, diag, loop_us, limits)
-    return [
-        {
-            "intervalMs": candidate,
-            "penalty": task_candidate_penalty(
-                interval_ms, candidate, diag, loop_us, limits),
+                interval_ms, candidate_interval, diag, loop_us, limits,
+                topology_penalty),
         }
-        for candidate in range(interval_ms, max_interval + 1)
-    ]
+
+    if not replaceable or interval_ms <= 0:
+        return [build_candidate(interval_ms, backpressure_before)]
+    max_interval = task_feasible_interval_limit(interval_ms, diag, loop_us, limits)
+    candidates = []
+    for candidate_interval in range(interval_ms, max_interval + 1):
+        candidates.append(build_candidate(candidate_interval, backpressure_before))
+        if backpressure_optimized != backpressure_before:
+            candidates.append(build_candidate(
+                candidate_interval, backpressure_optimized))
+    return candidates
 
 
 def report_reason(reasons: Set[str],
                   interval_changed: bool,
+                  backpressure_changed: bool,
                   replaceable: bool) -> str:
+    topology_reasons = []
     if interval_changed:
-        return "global_optimum_interval"
+        topology_reasons.append("global_optimum_interval")
+    if backpressure_changed:
+        topology_reasons.append("global_optimum_backpressure")
+    if topology_reasons:
+        return "+".join(topology_reasons)
     reason = ordered_reason_text(reasons)
     if replaceable:
         return reason
@@ -603,8 +730,11 @@ def task_decision(task: Dict[str, Any],
     reasons = reason_set(diag, loop_us, utilization_ppm, scheduling, limits)
     replaceable = bool(catalog_item.get("replaceable", False))
     target_interval = candidate["intervalMs"]
+    backpressure_before = sorted_ports(scheduling.get("backpressure_outputs"))
+    backpressure_after = sorted_ports(candidate.get("backpressureOutputs"))
     if target_interval != interval_ms:
         trigger["interval_ms"] = target_interval
+    scheduling["backpressure_outputs"] = backpressure_after
     apply_resource_isolation(scheduling, trigger, diag, replaceable)
     result["trigger"] = trigger
     result["scheduling"] = scheduling
@@ -632,8 +762,12 @@ def task_decision(task: Dict[str, Any],
         "budgetOverrunCount": integer(diag.get("budgetOverrunCount")),
         "deadlineMissCount": integer(diag.get("deadlineMissCount")),
         "schedulingErrorCount": integer(diag.get("schedulingErrorCount")),
+        "topologyPenalty": integer(candidate.get("topologyPenalty")),
+        "backpressureBefore": backpressure_before,
+        "backpressureAfter": backpressure_after,
         "reason": report_reason(
-            reasons, target_interval != interval_ms, replaceable),
+            reasons, target_interval != interval_ms,
+            backpressure_after != backpressure_before, replaceable),
     }
     return result, decision
 
@@ -682,6 +816,11 @@ def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
         for item in decisions
         if item.get("kind") == "task"
     )
+    topology_penalty = sum(
+        integer(item.get("topologyPenalty"))
+        for item in decisions
+        if item.get("kind") == "task"
+    )
     return {
         "queuePressure": queue_pressure_sum,
         "periodicOverloadUs": overload_sum,
@@ -690,9 +829,10 @@ def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
         "budgetOverruns": budget_overruns,
         "deadlineMisses": deadline_misses,
         "utilizationOverPpm": utilization_over,
+        "topologyPenalty": topology_penalty,
         "totalPenalty": queue_pressure_sum * 1000 + overload_sum +
         resource_wait_us + scheduling_errors * 10000 + budget_overruns * 2000 +
-        deadline_misses * 5000 + utilization_over,
+        deadline_misses * 5000 + utilization_over + topology_penalty,
     }
 
 
@@ -716,11 +856,14 @@ def build_queue_nodes(queues: List[Dict[str, Any]],
 
 
 def build_task_nodes(tasks: List[Dict[str, Any]],
+                     queues: List[Dict[str, Any]],
                      limits: SolverLimits,
+                     queue_diag: Dict[str, Dict[str, Any]],
                      diagnostics: Dict[str, Dict[str, Any]],
                      catalog: Dict[str, Dict[str, Any]]
                      ) -> List[Dict[str, Any]]:
     nodes = []
+    queues_by_name = queue_by_name(queues)
     for index, task in enumerate(tasks):
         if not isinstance(task, dict):
             continue
@@ -738,7 +881,8 @@ def build_task_nodes(tasks: List[Dict[str, Any]],
             "diag": diag,
             "catalog": catalog_item,
             "candidates": task_candidates(
-                interval_ms, diag, loop_us, replaceable, limits),
+                task, queues_by_name, queue_diag, interval_ms, diag, loop_us,
+                replaceable, limits),
         })
     return nodes
 
@@ -746,7 +890,7 @@ def build_task_nodes(tasks: List[Dict[str, Any]],
 def solve_global_topology(queue_nodes: List[Dict[str, Any]],
                           task_nodes: List[Dict[str, Any]]
                           ) -> Dict[str, List[int]]:
-    return {
+    independent = {
         "queues": [
             best_candidate_index(node["candidates"])
             for node in queue_nodes
@@ -756,6 +900,54 @@ def solve_global_topology(queue_nodes: List[Dict[str, Any]],
             for node in task_nodes
         ],
     }
+    dimensions = [
+        ("queue", index, node["candidates"])
+        for index, node in enumerate(queue_nodes)
+    ]
+    dimensions.extend([
+        ("task", index, node["candidates"])
+        for index, node in enumerate(task_nodes)
+    ])
+    candidate_count = 1
+    for _, _, candidates in dimensions:
+        if not candidates:
+            return independent
+        candidate_count *= len(candidates)
+        if candidate_count > MAX_EXACT_TOPOLOGY_CANDIDATES:
+            return independent
+
+    best_penalty: Optional[int] = None
+    best_backpressure_ports = -1
+    best_indexes: Tuple[int, ...] = ()
+    ranges = [range(len(candidates)) for _, _, candidates in dimensions]
+    for indexes in itertools.product(*ranges):
+        penalty = 0
+        backpressure_ports = 0
+        for dimension_index, candidate_index in enumerate(indexes):
+            kind, _, candidates = dimensions[dimension_index]
+            candidate = candidates[candidate_index]
+            penalty += integer(candidate.get("penalty"))
+            if kind == "task":
+                backpressure_ports += len(
+                    sorted_ports(candidate.get("backpressureOutputs")))
+        if (best_penalty is None or penalty < best_penalty or
+                (penalty == best_penalty and
+                 backpressure_ports > best_backpressure_ports)):
+            best_penalty = penalty
+            best_backpressure_ports = backpressure_ports
+            best_indexes = tuple(indexes)
+
+    if best_penalty is None:
+        return independent
+    solution = {
+        "queues": [0 for _ in queue_nodes],
+        "tasks": [0 for _ in task_nodes],
+    }
+    for dimension_index, candidate_index in enumerate(best_indexes):
+        kind, node_index, _ = dimensions[dimension_index]
+        solution["queues" if kind == "queue" else "tasks"][
+            node_index] = candidate_index
+    return solution
 
 
 def validate_generated_pair(config: Dict[str, Any],
@@ -951,11 +1143,24 @@ def validate_global_optimum(profile: Dict[str, Any],
         )
         actual = task_candidate_penalty(
             interval, integer(decision.get("intervalAfterMs")),
-            diag, loop_us, limits)
+            diag, loop_us, limits, integer(decision.get("topologyPenalty")))
+        topology_penalty = backpressure_topology_penalty(
+            sorted_ports(decision.get("backpressureBefore")),
+            sorted_ports(decision.get("backpressureAfter")),
+            task,
+            queue_by_name(topology.get("queues", [])),
+            queue_diag,
+            diag,
+            replaceable,
+        )
+        if integer(decision.get("topologyPenalty")) != topology_penalty:
+            raise ValueError(
+                f"EPG solver report task topology mismatch: {name}")
         best = min(
             item["penalty"]
-            for item in task_candidates(interval, diag, loop_us,
-                                        replaceable, limits)
+            for item in task_candidates(
+                task, queue_by_name(topology.get("queues", [])), queue_diag,
+                interval, diag, loop_us, replaceable, limits)
         )
         if actual != best:
             raise ValueError(f"EPG solver report task is not optimal: {name}")
@@ -976,7 +1181,8 @@ def optimize_profile(profile: Dict[str, Any],
     validate_task_catalog_coverage(tasks, catalog)
     validate_diagnostics_coverage(queues, tasks, queue_diag, task_diag)
     queue_nodes = build_queue_nodes(queues, limits, queue_diag)
-    task_nodes = build_task_nodes(tasks, limits, task_diag, catalog)
+    task_nodes = build_task_nodes(tasks, queues, limits, queue_diag, task_diag,
+                                  catalog)
     solution = solve_global_topology(queue_nodes, task_nodes)
     optimized_queues = [
         dict(queue)

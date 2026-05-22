@@ -23,6 +23,9 @@ const bool SLAM_TRACKED_FRAME_REGISTERED =
 const bool SLAM_PUBLISHED_FRAME_REGISTERED =
     Epg::TypeCatalog::Global().RegisterMessage<SlamPublishedFrame>(
         "SlamPublishedFrame");
+const bool SLAM_PREVIEW_READY_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamPreviewReady>(
+        "SlamPreviewReady");
 const bool SLAM_STATUS_REGISTERED =
     Epg::TypeCatalog::Global().RegisterMessage<SlamStatus>("SlamStatus");
 

@@ -64,6 +64,11 @@ class UdpPreviewOutputPort final : public IPreviewOutputPort {
         m_udpSender.StepAll();
     }
 
+    void StepOnce() override
+    {
+        m_udpSender.StepOnce();
+    }
+
   private:
     UdpImageSender &m_udpSender;
 };

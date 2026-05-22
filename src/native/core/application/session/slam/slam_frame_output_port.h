@@ -19,6 +19,7 @@ class SlamFrameOutputPort final {
     SlamFrameStepResult EmitLivePose(SlamPublishedFrameData &published);
     SlamFrameStepResult EmitMavlink(SlamPublishedFrameData &published);
     SlamFrameStepResult EmitUdp(SlamPublishedFrameData &published);
+    SlamFrameStepResult FlushPreview(SlamPublishedFrameData &published);
     SlamFrameStepResult EmitDfx(SlamPublishedFrameData &published);
 
   private:

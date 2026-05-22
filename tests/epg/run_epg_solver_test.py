@@ -274,6 +274,7 @@ def main() -> int:
     assert optimized["generatedAtMs"] == 456
     assert optimized["queues"][0]["depth"] == 1
     assert optimized["tasks"][0]["trigger"]["interval_ms"] == 3
+    assert optimized["tasks"][0]["scheduling"]["backpressure_outputs"] == [0]
     assert optimized["tasks"][0]["scheduling"]["cpu_affinity"] == 2
     assert optimized["tasks"][0]["scheduling"]["realtime"] is True
     assert optimized["tasks"][0]["scheduling"]["priority"] == 20
@@ -298,6 +299,7 @@ def main() -> int:
     assert report["objective"]["score"]["budgetOverruns"] == 2
     assert report["objective"]["score"]["deadlineMisses"] == 1
     assert report["objective"]["score"]["resourceWaitUs"] == 2500
+    assert report["objective"]["score"]["topologyPenalty"] == 11
     assert report["constraints"]["maxQueueDepth"] == 8
     assert report["decisions"][0]["depthAfter"] == optimized["queues"][0]["depth"]
     assert report["decisions"][0]["pressureAfter"] == 2
@@ -308,8 +310,12 @@ def main() -> int:
     assert report["decisions"][1]["totalResourceWaitUs"] == 2500
     assert report["decisions"][1]["catalogRole"] == "source"
     assert report["decisions"][1]["replaceable"] is True
+    assert report["decisions"][1]["backpressureBefore"] == []
+    assert report["decisions"][1]["backpressureAfter"] == [0]
+    assert report["decisions"][1]["topologyPenalty"] == 11
     assert report["decisions"][0]["reason"] == "keep"
-    assert report["decisions"][1]["reason"] == "global_optimum_interval"
+    assert report["decisions"][1]["reason"] == (
+        "global_optimum_interval+global_optimum_backpressure")
     fixed_profile = work_dir / "non_replaceable_profile.json"
     fixed_output = work_dir / "non_replaceable_optimized.json"
     fixed_report_path = work_dir / "non_replaceable_report.json"

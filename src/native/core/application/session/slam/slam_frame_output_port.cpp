@@ -164,9 +164,23 @@ SlamFrameStepResult SlamFrameOutputPort::EmitUdp(
                 {1, slamOutput.frameId, R.sequence, frameTime, R.gray,
                  slamOutput.rightFeatures, sendImage, sendFeature});
         }
-        m_ctx.previewOutput.StepAll();
     }
     published.udpStartTp = udpStartTp;
+    published.udpEndTp = std::chrono::steady_clock::now();
+    return SlamFrameStepResult::Continue;
+}
+
+SlamFrameStepResult SlamFrameOutputPort::FlushPreview(
+    SlamPublishedFrameData &published)
+{
+    if (!published.frame || !published.frame->frame) {
+        return SlamFrameStepResult::Continue;
+    }
+    const auto udpStartTp = std::chrono::steady_clock::now();
+    m_ctx.previewOutput.StepOnce();
+    if (published.udpStartTp.time_since_epoch().count() == 0) {
+        published.udpStartTp = udpStartTp;
+    }
     published.udpEndTp = std::chrono::steady_clock::now();
     return SlamFrameStepResult::Continue;
 }
@@ -397,9 +411,7 @@ void SlamFrameOutputPort::AppendDfxJsonFrameStats(
         << ",\"drop_left\":"
         << static_cast<unsigned long long>(frame.dropUnpairedL)
         << ",\"drop_right\":"
-        << static_cast<unsigned long long>(frame.dropUnpairedR)
-        << ",\"rate_drop\":"
-        << static_cast<unsigned long long>(m_state.rateLimitedDrops.load());
+        << static_cast<unsigned long long>(frame.dropUnpairedR);
 }
 
 void SlamFrameOutputPort::AppendDfxJsonTiming(
@@ -513,9 +525,7 @@ void SlamFrameOutputPort::AppendDfxTextFrameStats(
         << " reject_dt=" << frame.rejectDtMs
         << " pend=" << frame.pendingL << "/" << frame.pendingR
         << " drop=" << static_cast<unsigned long long>(frame.dropUnpairedL)
-        << "/" << static_cast<unsigned long long>(frame.dropUnpairedR)
-        << " rate_drop="
-        << static_cast<unsigned long long>(m_state.rateLimitedDrops.load());
+        << "/" << static_cast<unsigned long long>(frame.dropUnpairedR);
 }
 
 void SlamFrameOutputPort::AppendDfxTextTiming(

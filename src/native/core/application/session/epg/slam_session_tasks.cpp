@@ -7,7 +7,6 @@
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/session/epg/messages/slam_epg_messages.h"
 #include "core/application/session/slam/slam_session_runtime_service.h"
-#include "core/application/session/epg/slam_session_task_utils.h"
 
 namespace SmartDrone::Core::Application {
 namespace {
@@ -15,9 +14,10 @@ namespace {
 constexpr Epg::PortId STATUS_OUTPUT_PORT = 1;
 constexpr Epg::PortId POSE_POSTPROCESS_STATUS_OUTPUT_PORT = 4;
 constexpr Epg::PortId DFX_STATUS_OUTPUT_PORT = 0;
+constexpr Epg::PortId PREVIEW_READY_OUTPUT_PORT = 0;
 constexpr std::array<Epg::PortId, 4> PUBLISHED_FRAME_FAN_OUT_PORTS{
     0, 1, 2, 3};
-constexpr std::array<Epg::PortId, 9> SLAM_MONITOR_STATUS_INPUT_PORTS{
+constexpr std::array<Epg::PortId, 10> SLAM_MONITOR_STATUS_INPUT_PORTS{
     0,
     1,
     2,
@@ -27,6 +27,7 @@ constexpr std::array<Epg::PortId, 9> SLAM_MONITOR_STATUS_INPUT_PORTS{
     6,
     7,
     8,
+    9,
 };
 
 bool ShouldRunTask(const std::atomic<bool> &runningFlag,
@@ -59,6 +60,18 @@ void PushSlamPublishedFrame(
     published->sessionId = sessionId;
     published->frame = frame;
     context.Push(port, std::move(published));
+}
+
+void PushSlamPreviewReady(
+    Epg::TaskContext &context,
+    Epg::PortId port,
+    std::uint64_t sessionId,
+    const std::shared_ptr<ISlamPublishedFramePayload> &frame)
+{
+    auto ready = context.Make<SlamPreviewReady>();
+    ready->sessionId = sessionId;
+    ready->frame = frame;
+    context.Push(port, std::move(ready));
 }
 
 bool StepResultAllowsContinue(Epg::TaskContext &context,
@@ -228,14 +241,10 @@ void SlamBackendTickTask::OnTick(Epg::TaskContext &context)
 SlamImuGateTask::SlamImuGateTask(
     std::shared_ptr<SlamSessionRuntimeService> service,
     std::atomic<bool> &stop,
-    std::atomic<bool> &runningFlag,
-    LiveRuntimeTuning &tuning,
-    int cameraFps)
+    std::atomic<bool> &runningFlag)
     : m_service(std::move(service)),
       m_stop(stop),
-      m_runningFlag(runningFlag),
-      m_tuning(tuning),
-      m_cameraFps(cameraFps)
+      m_runningFlag(runningFlag)
 {
 }
 
@@ -256,24 +265,13 @@ void SlamImuGateTask::OnTick(Epg::TaskContext &context)
         return;
     }
 
-    const auto now = std::chrono::steady_clock::now();
-    const auto minInterval =
-        SlamInputInterval(m_tuning.slamInputFps.load(std::memory_order_relaxed),
-                          m_cameraFps);
-    if (m_lastFrameReadyTime.time_since_epoch().count() != 0 &&
-        now - m_lastFrameReadyTime < minInterval) {
-        return;
-    }
-
     const std::uint64_t sessionId = m_service->SessionId();
     if (sessionId == 0) {
         return;
     }
     auto frameReady = context.Make<SlamFrameReady>();
     frameReady->sessionId = sessionId;
-    if (context.Push(0, std::move(frameReady))) {
-        m_lastFrameReadyTime = now;
-    }
+    context.Push(0, std::move(frameReady));
 }
 
 SlamAcquireTask::SlamAcquireTask(
@@ -445,8 +443,48 @@ void SlamUdpTask::OnTick(Epg::TaskContext &context)
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
     }
-    RunPublishedOutputTask(context, *m_service,
-                           &SlamSessionRuntimeService::EmitUdp);
+    const auto published = context.TryPopLatest<SlamPublishedFrame>(0);
+    if (!published || published->sessionId == 0 || !published->frame) {
+        return;
+    }
+
+    const SlamTaskStepResult result =
+        m_service->EmitUdp(published->sessionId, *published->frame);
+    if (!StepResultAllowsContinue(context, result, STATUS_OUTPUT_PORT)) {
+        return;
+    }
+
+    PushSlamPreviewReady(context, PREVIEW_READY_OUTPUT_PORT,
+                         published->sessionId, published->frame);
+    PushSlamStatus(context, result.sessionOk, false, STATUS_OUTPUT_PORT);
+}
+
+SlamPreviewTxTask::SlamPreviewTxTask(
+    std::shared_ptr<SlamSessionRuntimeService> service,
+    std::atomic<bool> &stop,
+    std::atomic<bool> &runningFlag)
+    : m_service(std::move(service)), m_stop(stop), m_runningFlag(runningFlag)
+{
+}
+
+void SlamPreviewTxTask::OnTick(Epg::TaskContext &context)
+{
+    if (!ShouldRunTask(m_runningFlag, m_stop)) {
+        return;
+    }
+    const auto preview = context.TryPopLatest<SlamPreviewReady>(0);
+    if (!preview || preview->sessionId == 0 || !preview->frame) {
+        return;
+    }
+
+    const SlamTaskStepResult result =
+        m_service->FlushPreview(preview->sessionId, *preview->frame);
+    if (!StepResultAllowsContinue(context, result, STATUS_OUTPUT_PORT)) {
+        return;
+    }
+
+    PushSlamPublishedFrame(context, 0, preview->sessionId, preview->frame);
+    PushSlamStatus(context, result.sessionOk, false, STATUS_OUTPUT_PORT);
 }
 
 SlamMavlinkTask::SlamMavlinkTask(
@@ -534,6 +572,9 @@ const bool SLAM_DFX_TASK_REGISTERED =
 const bool SLAM_UDP_TASK_REGISTERED =
     Epg::TypeCatalog::Global().RegisterTaskType<SlamUdpTask>(
         "SlamUdpTask");
+const bool SLAM_PREVIEW_TX_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamPreviewTxTask>(
+        "SlamPreviewTxTask");
 const bool SLAM_MAVLINK_TASK_REGISTERED =
     Epg::TypeCatalog::Global().RegisterTaskType<SlamMavlinkTask>(
         "SlamMavlinkTask");

@@ -56,8 +56,20 @@ void AddSystemRuntimeTaskFactories(SystemRuntimeTaskFactoryEntries &entries,
                                    SystemRuntimeTaskFactoryDeps deps,
                                    const EpgTaskManifest &manifest)
 {
-    AddFactory<UdpCommandTask>(entries, catalog, [deps]() {
-        return new UdpCommandTask(deps.commandRuntime);
+    AddFactory<UdpReceiveTask>(entries, catalog, [deps]() {
+        return new UdpReceiveTask(deps.commandRuntime);
+    });
+    AddFactory<UdpHeartbeatTxTask>(entries, catalog, [deps]() {
+        return new UdpHeartbeatTxTask(deps.commandRuntime);
+    });
+    AddFactory<UdpHeartbeatTimeoutTask>(entries, catalog, [deps]() {
+        return new UdpHeartbeatTimeoutTask(deps.commandRuntime);
+    });
+    AddFactory<UdpStateTxTask>(entries, catalog, [deps]() {
+        return new UdpStateTxTask(deps.commandRuntime);
+    });
+    AddFactory<UdpPointCloudTxTask>(entries, catalog, [deps]() {
+        return new UdpPointCloudTxTask(deps.commandRuntime);
     });
     AddFactory<DiscoveryBeaconTask>(entries, catalog, [deps]() {
         return new DiscoveryBeaconTask(deps.discoveryRuntime);

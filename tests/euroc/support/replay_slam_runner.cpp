@@ -64,11 +64,6 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
             SmartDrone::Core::Application::StereoAcquireStatus::CameraUnhealthy) {
             break;
         }
-        if (acquireStatus == SmartDrone::Core::Application::StereoAcquireStatus::
-                                 DroppedByRateLimiter) {
-            continue;
-        }
-
         SmartDrone::Core::Ports::SlamInputBatch input{};
         input.stereo = batch.stereo;
         input.frameId = batch.frameId;

@@ -373,18 +373,32 @@ void UdpImageSender::StepAll()
     StepCamera(1);
 }
 
+void UdpImageSender::StepOnce()
+{
+    StepCameraOnce(0);
+    StepCameraOnce(1);
+}
+
 void UdpImageSender::StepCamera(int camIndex)
 {
     if (m_sock < 0 || camIndex < 0 || camIndex > 1) {
         return;
     }
-    while (m_sock >= 0) {
-        Slot slot{};
-        if (!PopReadySlot(camIndex, slot)) {
-            return;
-        }
-        SendSlot(slot);
+    while (StepCameraOnce(camIndex)) {
     }
+}
+
+bool UdpImageSender::StepCameraOnce(int camIndex)
+{
+    if (m_sock < 0 || camIndex < 0 || camIndex > 1) {
+        return false;
+    }
+    Slot slot{};
+    if (!PopReadySlot(camIndex, slot)) {
+        return false;
+    }
+    SendSlot(slot);
+    return true;
 }
 
 bool UdpImageSender::PopReadySlot(int camIndex, Slot &slot)

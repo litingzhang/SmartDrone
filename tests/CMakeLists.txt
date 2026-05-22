@@ -12,6 +12,7 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/common/epg/epg_mermaid.cpp
     ../src/native/common/epg/epg_task_runner.cpp
     ../src/native/core/application/epg/epg_runtime_optimizer.cpp
+    ../src/native/core/application/epg/epg_solver_primitives.cpp
     ../src/native/core/application/epg/epg_task_manifest.cpp
     ../src/native/core/application/epg/epg_task_manifest_solver_report.cpp
     ../src/native/core/application/runtime/epg_dfx_snapshot.cpp

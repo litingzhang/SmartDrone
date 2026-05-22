@@ -753,6 +753,8 @@ SolverReportScore ParseSolverReportScoreObject(const JsonValue &root)
     score.budgetOverruns = RequiredUInt64(root, "budgetOverruns");
     score.deadlineMisses = RequiredUInt64(root, "deadlineMisses");
     score.utilizationOverPpm = RequiredUInt64(root, "utilizationOverPpm");
+    score.topologyPenalty =
+        OptionalUInt64(root, "topologyPenalty", score.topologyPenalty);
     score.totalPenalty = RequiredUInt64(root, "totalPenalty");
     return score;
 }
@@ -832,6 +834,12 @@ void ParseTaskSolverReportDecision(const JsonValue &item,
     decision.deadlineMissCount = RequiredUInt64(item, "deadlineMissCount");
     decision.schedulingErrorCount =
         RequiredUInt64(item, "schedulingErrorCount");
+    decision.topologyPenalty =
+        OptionalUInt64(item, "topologyPenalty", decision.topologyPenalty);
+    decision.backpressureBefore =
+        OptionalPortIdArray(item, "backpressureBefore");
+    decision.backpressureAfter =
+        OptionalPortIdArray(item, "backpressureAfter");
 }
 
 SolverReportDecision ParseSolverReportDecision(const JsonValue &item)

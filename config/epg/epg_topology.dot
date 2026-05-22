@@ -39,8 +39,20 @@ digraph EpgTopology {
     SetpointStreamTask [
       label="{SetpointStreamTask|type=SetpointStreamTask|trigger=periodic|interval_ms=5}"
     ];
-    UdpCommandTask [
-      label="{UdpCommandTask|type=UdpCommandTask|trigger=periodic|interval_ms=2}"
+    UdpReceiveTask [
+      label="{UdpReceiveTask|type=UdpReceiveTask|trigger=periodic|interval_ms=2}"
+    ];
+    UdpHeartbeatTxTask [
+      label="{UdpHeartbeatTxTask|type=UdpHeartbeatTxTask|trigger=periodic|interval_ms=500}"
+    ];
+    UdpHeartbeatTimeoutTask [
+      label="{UdpHeartbeatTimeoutTask|type=UdpHeartbeatTimeoutTask|trigger=periodic|interval_ms=100}"
+    ];
+    UdpStateTxTask [
+      label="{UdpStateTxTask|type=UdpStateTxTask|trigger=periodic|interval_ms=100}"
+    ];
+    UdpPointCloudTxTask [
+      label="{UdpPointCloudTxTask|type=UdpPointCloudTxTask|trigger=periodic|interval_ms=100}"
     ];
     ManualControlTask [
       label="{ManualControlTask|type=ManualControlTask|trigger=periodic|interval_ms=50}"
@@ -55,7 +67,7 @@ digraph EpgTopology {
       label="{EpgRedeployTask|type=EpgRedeployTask|trigger=periodic|interval_ms=500}"
     ];
     DiscoveryBeaconTask [
-      label="{DiscoveryBeaconTask|type=DiscoveryBeaconTask|trigger=periodic|interval_ms=100}"
+      label="{DiscoveryBeaconTask|type=DiscoveryBeaconTask|trigger=periodic|interval_ms=1000}"
     ];
     EpgDfxSnapshotTask [
       label="{EpgDfxSnapshotTask|type=EpgDfxSnapshotTask|trigger=periodic|interval_ms=500}"
@@ -67,10 +79,22 @@ digraph EpgTopology {
     VehicleTelemetryRxTask -> SetpointStreamTask [
       taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
     ];
-    SetpointStreamTask -> UdpCommandTask [
+    SetpointStreamTask -> UdpReceiveTask [
       taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
     ];
-    UdpCommandTask -> ManualControlTask [
+    UdpReceiveTask -> UdpHeartbeatTxTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    UdpHeartbeatTxTask -> UdpHeartbeatTimeoutTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    UdpHeartbeatTimeoutTask -> UdpStateTxTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    UdpStateTxTask -> UdpPointCloudTxTask [
+      taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    UdpPointCloudTxTask -> ManualControlTask [
       taillabel="0", headlabel="0", label="SystemRuntimePulse\ndepth=1\noverflow=overwrite_oldest"
     ];
     ManualControlTask -> ForceRestartTask [
@@ -134,6 +158,9 @@ digraph EpgTopology {
     SlamUdpTask [
       label="{SlamUdpTask|type=SlamUdpTask|trigger=any_queue_ready|trigger_queues=SlamPublishedFrame}"
     ];
+    SlamPreviewTxTask [
+      label="{SlamPreviewTxTask|type=SlamPreviewTxTask|trigger=any_queue_ready|trigger_queues=SlamPreviewReady}"
+    ];
     SlamDfxTask [
       label="{SlamDfxTask|type=SlamDfxTask|trigger=any_queue_ready|trigger_queues=SlamPublishedFrame}"
     ];
@@ -183,7 +210,10 @@ digraph EpgTopology {
     SlamMavlinkTask -> SlamDfxTask [
       taillabel="0", headlabel="2", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
     ];
-    SlamUdpTask -> SlamDfxTask [
+    SlamUdpTask -> SlamPreviewTxTask [
+      taillabel="0", headlabel="0", label="SlamPreviewReady\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamPreviewTxTask -> SlamDfxTask [
       taillabel="0", headlabel="3", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
     ];
     SlamDfxTask -> SlamMonitorTask [
@@ -212,6 +242,9 @@ digraph EpgTopology {
     ];
     SlamUdpTask -> SlamMonitorTask [
       taillabel="1", headlabel="8", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamPreviewTxTask -> SlamMonitorTask [
+      taillabel="1", headlabel="9", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
     ];
   }
 

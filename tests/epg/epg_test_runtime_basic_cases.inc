@@ -319,8 +319,8 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology)
         "cluster_slam_session_graph",
         registry);
 
-    ASSERT_EQ(config.tasks.size(), 15u);
-    ASSERT_EQ(config.queues.size(), 23u);
+    ASSERT_EQ(config.tasks.size(), 16u);
+    ASSERT_EQ(config.queues.size(), 25u);
 
     EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));
@@ -391,9 +391,15 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology)
     const auto *monitor = findTask("SlamMonitorTask");
     ASSERT_NE(monitor, nullptr);
     EXPECT_EQ(monitor->inputs.at(8), "SlamUdpTask_1_to_SlamMonitorTask_8");
+    EXPECT_EQ(monitor->inputs.at(9),
+              "SlamPreviewTxTask_1_to_SlamMonitorTask_9");
     EXPECT_NE(std::find(monitor->trigger.queues.begin(),
                         monitor->trigger.queues.end(),
                         "SlamUdpTask_1_to_SlamMonitorTask_8"),
+              monitor->trigger.queues.end());
+    EXPECT_NE(std::find(monitor->trigger.queues.begin(),
+                        monitor->trigger.queues.end(),
+                        "SlamPreviewTxTask_1_to_SlamMonitorTask_9"),
               monitor->trigger.queues.end());
 }
 
@@ -405,8 +411,8 @@ TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology)
         "cluster_system_runtime_graph",
         registry);
 
-    ASSERT_EQ(config.tasks.size(), 10u);
-    ASSERT_EQ(config.queues.size(), 9u);
+    ASSERT_EQ(config.tasks.size(), 14u);
+    ASSERT_EQ(config.queues.size(), 13u);
 
     EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));
@@ -432,20 +438,39 @@ TEST(EventPipelineGraphDot, CompilesSystemRuntimeSubgraphFromMaintainedTopology)
     EXPECT_EQ(setpointStream->inputs.at(0),
               "VehicleTelemetryRxTask_0_to_SetpointStreamTask_0");
     EXPECT_EQ(setpointStream->outputs.at(0),
-              "SetpointStreamTask_0_to_UdpCommandTask_0");
+              "SetpointStreamTask_0_to_UdpReceiveTask_0");
 
-    const auto *udpCommand = findTask("UdpCommandTask");
-    ASSERT_NE(udpCommand, nullptr);
-    EXPECT_EQ(udpCommand->inputs.at(0),
-              "SetpointStreamTask_0_to_UdpCommandTask_0");
-    EXPECT_EQ(udpCommand->outputs.at(0),
-              "UdpCommandTask_0_to_ManualControlTask_0");
+    const auto *udpReceive = findTask("UdpReceiveTask");
+    ASSERT_NE(udpReceive, nullptr);
+    EXPECT_EQ(udpReceive->trigger.interval, std::chrono::milliseconds(2));
+    EXPECT_EQ(udpReceive->inputs.at(0),
+              "SetpointStreamTask_0_to_UdpReceiveTask_0");
+    EXPECT_EQ(udpReceive->outputs.at(0),
+              "UdpReceiveTask_0_to_UdpHeartbeatTxTask_0");
+
+    const auto *udpHeartbeat = findTask("UdpHeartbeatTxTask");
+    ASSERT_NE(udpHeartbeat, nullptr);
+    EXPECT_EQ(udpHeartbeat->trigger.interval, std::chrono::milliseconds(500));
+
+    const auto *udpTimeout = findTask("UdpHeartbeatTimeoutTask");
+    ASSERT_NE(udpTimeout, nullptr);
+    EXPECT_EQ(udpTimeout->trigger.interval, std::chrono::milliseconds(100));
+
+    const auto *udpState = findTask("UdpStateTxTask");
+    ASSERT_NE(udpState, nullptr);
+    EXPECT_EQ(udpState->trigger.interval, std::chrono::milliseconds(100));
+
+    const auto *udpPointCloud = findTask("UdpPointCloudTxTask");
+    ASSERT_NE(udpPointCloud, nullptr);
+    EXPECT_EQ(udpPointCloud->trigger.interval, std::chrono::milliseconds(100));
+    EXPECT_EQ(udpPointCloud->outputs.at(0),
+              "UdpPointCloudTxTask_0_to_ManualControlTask_0");
 
     const auto *manualControl = findTask("ManualControlTask");
     ASSERT_NE(manualControl, nullptr);
     EXPECT_EQ(manualControl->trigger.interval, std::chrono::milliseconds(50));
     EXPECT_EQ(manualControl->inputs.at(0),
-              "UdpCommandTask_0_to_ManualControlTask_0");
+              "UdpPointCloudTxTask_0_to_ManualControlTask_0");
 
     const auto *forceRestart = findTask("ForceRestartTask");
     ASSERT_NE(forceRestart, nullptr);

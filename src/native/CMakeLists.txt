@@ -196,6 +196,7 @@ set(SMART_DRONE_CORE_APPLICATION_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/epg/messages/slam_epg_messages.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_registry.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_runtime_optimizer.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_solver_primitives.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_task_manifest.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_task_manifest_solver_report.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/slam/imu_window_filter.cpp"

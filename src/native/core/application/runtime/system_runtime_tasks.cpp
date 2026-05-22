@@ -5,6 +5,30 @@
 #include "core/application/runtime/system_runtime_messages.h"
 
 namespace SmartDrone::Core::Application {
+namespace {
+
+using UdpPhaseStepFn = void (UdpCommandRuntime::*)();
+
+void RunUdpPhaseTask(Epg::TaskContext &context,
+                     const std::shared_ptr<UdpCommandRuntime> &runtime,
+                     UdpPhaseStepFn step,
+                     std::uint64_t &pulseSequence)
+{
+    DrainSystemRuntimePulse(context);
+    if (runtime) {
+        (runtime.get()->*step)();
+    }
+    PushSystemRuntimePulse(context, pulseSequence);
+}
+
+void StopUdpRuntime(const std::shared_ptr<UdpCommandRuntime> &runtime)
+{
+    if (runtime) {
+        runtime->Stop();
+    }
+}
+
+} // namespace
 
 VehicleTelemetryRxTask::VehicleTelemetryRxTask(
     std::shared_ptr<SystemRuntimeStepServices> services)
@@ -44,30 +68,109 @@ const bool SETPOINT_STREAM_TASK_REGISTERED =
     Epg::TypeCatalog::Global().RegisterTaskType<SetpointStreamTask>(
         "SetpointStreamTask");
 
-UdpCommandTask::UdpCommandTask(std::shared_ptr<UdpCommandRuntime> runtime)
+UdpReceiveTask::UdpReceiveTask(std::shared_ptr<UdpCommandRuntime> runtime)
     : m_runtime(std::move(runtime))
 {
 }
 
-UdpCommandTask::~UdpCommandTask()
+UdpReceiveTask::~UdpReceiveTask()
 {
-    if (m_runtime) {
-        m_runtime->Stop();
-    }
+    StopUdpRuntime(m_runtime);
 }
 
-void UdpCommandTask::OnTick(Epg::TaskContext &context)
+void UdpReceiveTask::OnTick(Epg::TaskContext &context)
 {
-    DrainSystemRuntimePulse(context);
-    if (m_runtime) {
-        m_runtime->OnGraphTick();
-    }
-    PushSystemRuntimePulse(context, m_pulseSequence);
+    RunUdpPhaseTask(context, m_runtime, &UdpCommandRuntime::StepReceive,
+                    m_pulseSequence);
 }
 
-const bool UDP_COMMAND_TASK_REGISTERED =
-    Epg::TypeCatalog::Global().RegisterTaskType<UdpCommandTask>(
-        "UdpCommandTask");
+const bool UDP_RECEIVE_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<UdpReceiveTask>(
+        "UdpReceiveTask");
+
+UdpHeartbeatTxTask::UdpHeartbeatTxTask(
+    std::shared_ptr<UdpCommandRuntime> runtime)
+    : m_runtime(std::move(runtime))
+{
+}
+
+UdpHeartbeatTxTask::~UdpHeartbeatTxTask()
+{
+    StopUdpRuntime(m_runtime);
+}
+
+void UdpHeartbeatTxTask::OnTick(Epg::TaskContext &context)
+{
+    RunUdpPhaseTask(context, m_runtime, &UdpCommandRuntime::StepHeartbeatTx,
+                    m_pulseSequence);
+}
+
+const bool UDP_HEARTBEAT_TX_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<UdpHeartbeatTxTask>(
+        "UdpHeartbeatTxTask");
+
+UdpHeartbeatTimeoutTask::UdpHeartbeatTimeoutTask(
+    std::shared_ptr<UdpCommandRuntime> runtime)
+    : m_runtime(std::move(runtime))
+{
+}
+
+UdpHeartbeatTimeoutTask::~UdpHeartbeatTimeoutTask()
+{
+    StopUdpRuntime(m_runtime);
+}
+
+void UdpHeartbeatTimeoutTask::OnTick(Epg::TaskContext &context)
+{
+    RunUdpPhaseTask(context, m_runtime,
+                    &UdpCommandRuntime::StepHeartbeatTimeout,
+                    m_pulseSequence);
+}
+
+const bool UDP_HEARTBEAT_TIMEOUT_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<UdpHeartbeatTimeoutTask>(
+        "UdpHeartbeatTimeoutTask");
+
+UdpStateTxTask::UdpStateTxTask(std::shared_ptr<UdpCommandRuntime> runtime)
+    : m_runtime(std::move(runtime))
+{
+}
+
+UdpStateTxTask::~UdpStateTxTask()
+{
+    StopUdpRuntime(m_runtime);
+}
+
+void UdpStateTxTask::OnTick(Epg::TaskContext &context)
+{
+    RunUdpPhaseTask(context, m_runtime, &UdpCommandRuntime::StepStateTx,
+                    m_pulseSequence);
+}
+
+const bool UDP_STATE_TX_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<UdpStateTxTask>(
+        "UdpStateTxTask");
+
+UdpPointCloudTxTask::UdpPointCloudTxTask(
+    std::shared_ptr<UdpCommandRuntime> runtime)
+    : m_runtime(std::move(runtime))
+{
+}
+
+UdpPointCloudTxTask::~UdpPointCloudTxTask()
+{
+    StopUdpRuntime(m_runtime);
+}
+
+void UdpPointCloudTxTask::OnTick(Epg::TaskContext &context)
+{
+    RunUdpPhaseTask(context, m_runtime, &UdpCommandRuntime::StepPointCloudTx,
+                    m_pulseSequence);
+}
+
+const bool UDP_POINT_CLOUD_TX_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<UdpPointCloudTxTask>(
+        "UdpPointCloudTxTask");
 
 ManualControlTask::ManualControlTask(
     std::shared_ptr<SystemRuntimeStepServices> services)

@@ -61,6 +61,7 @@ class UdpImageSender {
     void Close();
     void Enqueue(int camIndex, uint64_t frameId, uint32_t seq, double frameTime, const cv::Mat &gray,
                  const std::vector<cv::Point2f> &trackedPoints = {}, bool sendImage = true, bool sendFeature = true);
+    void StepOnce();
     void StepAll();
 
   private:
@@ -81,6 +82,7 @@ class UdpImageSender {
 #pragma pack(pop)
 
     void StepCamera(int camIndex);
+    bool StepCameraOnce(int camIndex);
     bool PopReadySlot(int camIndex, Slot &slot);
     void Enqueue(const EnqueueRequest &request);
     bool AcceptFrameTime(int camIndex, double frameTime);

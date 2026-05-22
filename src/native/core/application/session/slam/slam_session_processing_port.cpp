@@ -190,6 +190,17 @@ SlamTaskStepResult SlamSessionProcessingPort::EmitUdp(
     return MakeStepResult(runtime.EmitUdp(*published));
 }
 
+SlamTaskStepResult SlamSessionProcessingPort::FlushPreview(
+    SlamSessionRuntime &runtime,
+    ISlamPublishedFramePayload &frame)
+{
+    auto published = frame.Frame();
+    if (!published) {
+        return {};
+    }
+    return MakeStepResult(runtime.FlushPreview(*published));
+}
+
 SlamTaskStepResult SlamSessionProcessingPort::EmitMavlink(
     SlamSessionRuntime &runtime,
     ISlamPublishedFramePayload &frame)

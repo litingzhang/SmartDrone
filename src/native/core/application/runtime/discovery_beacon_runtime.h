@@ -28,7 +28,6 @@ class DiscoveryBeaconRuntime final {
     int m_fd{-1};
     sockaddr_in m_dst{};
     std::string m_payload;
-    std::chrono::steady_clock::time_point m_lastSent{};
     std::chrono::steady_clock::time_point m_nextOpenAttempt{};
     bool m_firstLog{true};
 };

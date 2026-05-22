@@ -60,7 +60,6 @@ struct SlamFrameOutputState {
     std::atomic<std::int64_t> lastPointCloudUpdateNs{0};
     std::atomic<std::uint64_t> frameIndex{0};
     std::atomic<std::int64_t> lastPublishedFrameNs{0};
-    std::atomic<std::uint64_t> rateLimitedDrops{0};
     std::atomic<double> smoothedAcquireMs{0.0};
     std::atomic<double> smoothedSlamMs{0.0};
     std::atomic<double> smoothedTotalMs{0.0};

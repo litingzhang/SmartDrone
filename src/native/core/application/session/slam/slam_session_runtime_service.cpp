@@ -91,6 +91,8 @@ class SlamSessionRuntimeService::Impl final {
                                ISlamPublishedFramePayload &frame);
     SlamTaskStepResult EmitUdp(std::uint64_t sessionId,
                                ISlamPublishedFramePayload &frame);
+    SlamTaskStepResult FlushPreview(std::uint64_t sessionId,
+                                    ISlamPublishedFramePayload &frame);
     SlamTaskStepResult EmitMavlink(std::uint64_t sessionId,
                                    ISlamPublishedFramePayload &frame);
     SlamTaskStepResult EmitLivePose(std::uint64_t sessionId,
@@ -117,6 +119,7 @@ class SlamSessionRuntimeService::Impl final {
     mutable std::mutex m_livePoseOutputMu;
     mutable std::mutex m_mavlinkOutputMu;
     mutable std::mutex m_udpOutputMu;
+    mutable std::mutex m_previewOutputMu;
     std::unique_ptr<SlamSessionProcessingPort> m_processingPort;
     std::shared_ptr<SlamSessionRuntime> m_runtime;
     std::atomic<bool> m_stopped{true};
@@ -303,6 +306,17 @@ SlamTaskStepResult SlamSessionRuntimeService::Impl::EmitUdp(
         });
 }
 
+SlamTaskStepResult SlamSessionRuntimeService::Impl::FlushPreview(
+    std::uint64_t sessionId,
+    ISlamPublishedFramePayload &frame)
+{
+    return RunLockedRuntimeOperation<SlamTaskStepResult>(
+        Runtime(sessionId), m_previewOutputMu,
+        [this, &frame](SlamSessionRuntime &runtime) {
+            return m_processingPort->FlushPreview(runtime, frame);
+        });
+}
+
 SlamTaskStepResult SlamSessionRuntimeService::Impl::EmitMavlink(
     std::uint64_t sessionId,
     ISlamPublishedFramePayload &frame)
@@ -429,6 +443,13 @@ SlamTaskStepResult SlamSessionRuntimeService::EmitUdp(
     ISlamPublishedFramePayload &frame)
 {
     return m_impl->EmitUdp(sessionId, frame);
+}
+
+SlamTaskStepResult SlamSessionRuntimeService::FlushPreview(
+    std::uint64_t sessionId,
+    ISlamPublishedFramePayload &frame)
+{
+    return m_impl->FlushPreview(sessionId, frame);
 }
 
 SlamTaskStepResult SlamSessionRuntimeService::EmitMavlink(

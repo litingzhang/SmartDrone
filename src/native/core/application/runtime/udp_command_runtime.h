@@ -82,6 +82,11 @@ class UdpCommandRuntime final {
     void Stop();
     void OnGraphTick();
     void Step();
+    void StepReceive();
+    void StepHeartbeatTx();
+    void StepHeartbeatTimeout();
+    void StepStateTx();
+    void StepPointCloudTx();
 
   private:
     class Impl;

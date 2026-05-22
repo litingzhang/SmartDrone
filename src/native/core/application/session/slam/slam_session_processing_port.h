@@ -25,6 +25,8 @@ class SlamSessionProcessingPort final {
                                ISlamPublishedFramePayload &frame);
     SlamTaskStepResult EmitUdp(SlamSessionRuntime &runtime,
                                ISlamPublishedFramePayload &frame);
+    SlamTaskStepResult FlushPreview(SlamSessionRuntime &runtime,
+                                    ISlamPublishedFramePayload &frame);
     SlamTaskStepResult EmitMavlink(SlamSessionRuntime &runtime,
                                    ISlamPublishedFramePayload &frame);
     SlamTaskStepResult EmitLivePose(SlamSessionRuntime &runtime,

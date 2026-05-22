@@ -12,7 +12,6 @@ namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr const char *kDiscoveryMagic = "smartdrone_discovery";
-constexpr auto kDiscoveryPeriod = std::chrono::seconds(1);
 constexpr auto kDiscoveryOpenRetryPeriod = std::chrono::seconds(1);
 
 bool SetSocketNonBlocking(int fd)
@@ -91,13 +90,6 @@ void DiscoveryBeaconRuntime::OnGraphTick()
         return;
     }
 
-    const auto now = std::chrono::steady_clock::now();
-    if (m_lastSent.time_since_epoch().count() != 0 &&
-        now - m_lastSent < kDiscoveryPeriod) {
-        return;
-    }
-
-    m_lastSent = now;
     const ssize_t sent =
         ::sendto(m_fd, m_payload.data(), m_payload.size(), 0,
                  reinterpret_cast<const sockaddr *>(&m_dst), sizeof(m_dst));

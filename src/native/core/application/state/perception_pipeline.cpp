@@ -24,8 +24,7 @@ StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(
 {
     Ports::StereoFrame stereo{};
     const int clampedSlamInputFps = ClampTargetFps(request.slamInputFps);
-    const int64_t slamFrameStepNs = 1000000000LL / std::max(1, clampedSlamInputFps);
-    const uint64_t minTimestampNs = ComputeMinCaptureTimestampNs(slamFrameStepNs);
+    const uint64_t minTimestampNs = ComputeMinCaptureTimestampNs();
 
     if (!request.camera.GrabStereo(stereo, request.timeoutMs,
                                    m_cfg.preferLatestFrame, minTimestampNs)) {
@@ -35,21 +34,16 @@ StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(
 
     const int64_t frameStepNs = 1000000000LL / std::max(1, m_cfg.cameraFps);
     const StereoFrameTiming timing = BuildStereoFrameTiming(stereo, frameStepNs);
-    const int64_t toleranceNs = std::max<int64_t>(2000000LL, slamFrameStepNs / 20);
-    if (ShouldDropByRateLimiter(timing, toleranceNs)) {
-        return StereoAcquireStatus::DroppedByRateLimiter;
-    }
 
-    AcceptStereoBatch(std::move(stereo), timing, slamFrameStepNs, request.out);
+    AcceptStereoBatch(std::move(stereo), timing, request.out);
     RecordFrameTiming(request.out, request.timingTracker);
     return StereoAcquireStatus::Ok;
 }
 
-uint64_t PerceptionPipeline::ComputeMinCaptureTimestampNs(int slamFrameStepNs) const
+uint64_t PerceptionPipeline::ComputeMinCaptureTimestampNs() const
 {
     if (m_lastAcceptedCaptureTimestampNs != 0) {
-        const int64_t toleranceNs = std::max<int64_t>(2000000LL, slamFrameStepNs / 20);
-        return static_cast<uint64_t>(std::max<int64_t>(0, m_lastAcceptedCaptureTimestampNs + slamFrameStepNs - toleranceNs));
+        return static_cast<uint64_t>(m_lastAcceptedCaptureTimestampNs + 1);
     }
     return 0;
 }
@@ -123,14 +117,14 @@ void PerceptionPipeline::LogGrabFailure(const StereoGrabFailureLog &failure) con
     char line[512];
     std::snprintf(
         line, sizeof(line),
-        "[stereo_timeout] timeout_ms=%d slam_fps=%d min_ts=%llu last_accept_ts=%lld next_logical_ts=%lld "
+        "[stereo_timeout] timeout_ms=%d slam_fps=%d min_ts=%llu last_accept_ts=%lld "
         "accept=%d healthy=%d cause=%s "
         "raw_seq=[%u,%u] raw_count=[%llu,%llu] pending=[%zu,%zu] paired=%zu "
         "drop_pair=%llu drop_unpaired=[%llu,%llu] "
         "pair_tol_ms=%.3f last_pair_dt_ms=%lld last_reject_dt_ms=%.3f age_ms=[%lld,%lld] last_pair_age_ms=%lld",
         failure.timeoutMs, failure.clampedSlamInputFps,
         static_cast<unsigned long long>(failure.minTimestampNs),
-        static_cast<long long>(m_lastAcceptedCaptureTimestampNs), static_cast<long long>(m_nextAcceptedLogicalFrameNs),
+        static_cast<long long>(m_lastAcceptedCaptureTimestampNs),
         diag.acceptFrames ? 1 : 0, diag.healthy ? 1 : 0, failure.likelyCause, static_cast<unsigned>(diag.lastRawSeqL),
         static_cast<unsigned>(diag.lastRawSeqR), static_cast<unsigned long long>(diag.rawCountL),
         static_cast<unsigned long long>(diag.rawCountR), diag.pendingL, diag.pendingR, diag.pairedQueue,
@@ -156,27 +150,12 @@ StereoFrameTiming PerceptionPipeline::BuildStereoFrameTiming(
     return {captureTimestampNs, logicalFrameTimestampNs, frameStepNs};
 }
 
-bool PerceptionPipeline::ShouldDropByRateLimiter(const StereoFrameTiming &timing,
-                                                 int64_t toleranceNs) const
-{
-    if (m_nextAcceptedLogicalFrameNs == 0) {
-        return false;
-    }
-    return timing.logicalFrameTimestampNs + toleranceNs < m_nextAcceptedLogicalFrameNs;
-}
-
 void PerceptionPipeline::AcceptStereoBatch(Ports::StereoFrame stereo,
                                            const StereoFrameTiming &timing,
-                                           int64_t slamFrameStepNs,
                                            StereoBatch &out)
 {
-    if (m_nextAcceptedLogicalFrameNs == 0) {
-        m_nextAcceptedLogicalFrameNs = timing.logicalFrameTimestampNs;
-    }
-
     m_lastDeliveredLogicalFrameNs = timing.logicalFrameTimestampNs;
     m_lastAcceptedCaptureTimestampNs = timing.captureTimestampNs;
-    m_nextAcceptedLogicalFrameNs = timing.logicalFrameTimestampNs + slamFrameStepNs;
 
     out.stereo = std::move(stereo);
     out.frameId = m_nextFrameId++;

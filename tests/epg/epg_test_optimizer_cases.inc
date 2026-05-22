@@ -180,6 +180,8 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile)
     ASSERT_EQ(config.tasks.size(), 2u);
     EXPECT_EQ(config.queues.front().depth, 5u);
     EXPECT_EQ(config.tasks.front().trigger.interval.count(), 3);
+    EXPECT_EQ(config.tasks.front().scheduling.backpressureOutputs,
+              std::vector<Epg::PortId>{0});
     EXPECT_EQ(config.tasks.front().scheduling.cpuAffinity, 2);
     EXPECT_TRUE(config.tasks.front().scheduling.realtime);
     EXPECT_EQ(config.tasks.front().scheduling.priority, 20);
@@ -200,8 +202,12 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile)
     EXPECT_NE(report.find("\"generatedAtMs\": 1010"), std::string::npos);
     EXPECT_NE(report.find("\"reason\": \"global_optimum_depth\""),
               std::string::npos);
-    EXPECT_NE(report.find("\"reason\": \"global_optimum_interval\""),
+    EXPECT_NE(report.find(
+                  "\"reason\": \"global_optimum_interval+global_optimum_backpressure\""),
               std::string::npos);
+    EXPECT_NE(report.find("\"topologyPenalty\": 11"), std::string::npos);
+    EXPECT_NE(report.find("\"backpressureBefore\": []"), std::string::npos);
+    EXPECT_NE(report.find("\"backpressureAfter\": [0]"), std::string::npos);
     EXPECT_NE(report.find("\"pressureAfter\": 0"), std::string::npos);
     EXPECT_NE(report.find("\"resourceWaitUs\": 2500"),
               std::string::npos);
@@ -227,6 +233,8 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile)
     EXPECT_EQ(parsedReport.decisions[1].intervalAfterMs,
               static_cast<std::uint64_t>(
                   config.tasks.front().trigger.interval.count()));
+    EXPECT_EQ(parsedReport.decisions[1].backpressureAfter,
+              std::vector<Epg::PortId>{0});
 
     (void)std::remove(profilePath.c_str());
     (void)std::remove(outputPath.c_str());

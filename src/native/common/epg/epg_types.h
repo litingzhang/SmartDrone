@@ -185,6 +185,7 @@ struct SolverReportScore {
     std::uint64_t budgetOverruns{};
     std::uint64_t deadlineMisses{};
     std::uint64_t utilizationOverPpm{};
+    std::uint64_t topologyPenalty{};
     std::uint64_t totalPenalty{};
 };
 
@@ -228,6 +229,9 @@ struct SolverReportDecision {
     std::uint64_t budgetOverrunCount{};
     std::uint64_t deadlineMissCount{};
     std::uint64_t schedulingErrorCount{};
+    std::uint64_t topologyPenalty{};
+    std::vector<PortId> backpressureBefore;
+    std::vector<PortId> backpressureAfter;
 };
 
 struct SolverReport {

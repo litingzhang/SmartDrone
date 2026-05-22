@@ -2,14 +2,12 @@
 
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <memory>
 
 #include "common/epg/epg.h"
 
 namespace SmartDrone::Core::Application {
 
-struct LiveRuntimeTuning;
 class SlamSessionRuntimeService;
 struct SlamPublishedFrame;
 
@@ -68,18 +66,13 @@ class SlamImuGateTask final : public Epg::ITask {
   public:
     SlamImuGateTask(std::shared_ptr<SlamSessionRuntimeService> service,
                     std::atomic<bool> &stop,
-                    std::atomic<bool> &runningFlag,
-                    LiveRuntimeTuning &tuning,
-                    int cameraFps);
+                    std::atomic<bool> &runningFlag);
     void OnTick(Epg::TaskContext &context) override;
 
   private:
     std::shared_ptr<SlamSessionRuntimeService> m_service;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
-    LiveRuntimeTuning &m_tuning;
-    int m_cameraFps{};
-    std::chrono::steady_clock::time_point m_lastFrameReadyTime{};
     bool m_imuReady{false};
 };
 
@@ -154,6 +147,19 @@ class SlamUdpTask final : public Epg::ITask {
     SlamUdpTask(std::shared_ptr<SlamSessionRuntimeService> service,
                 std::atomic<bool> &stop,
                 std::atomic<bool> &runningFlag);
+    void OnTick(Epg::TaskContext &context) override;
+
+  private:
+    std::shared_ptr<SlamSessionRuntimeService> m_service;
+    std::atomic<bool> &m_stop;
+    std::atomic<bool> &m_runningFlag;
+};
+
+class SlamPreviewTxTask final : public Epg::ITask {
+  public:
+    SlamPreviewTxTask(std::shared_ptr<SlamSessionRuntimeService> service,
+                      std::atomic<bool> &stop,
+                      std::atomic<bool> &runningFlag);
     void OnTick(Epg::TaskContext &context) override;
 
   private:

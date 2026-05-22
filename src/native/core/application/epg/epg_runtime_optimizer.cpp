@@ -12,12 +12,12 @@
 #include <utility>
 #include <vector>
 
+#include "core/application/epg/epg_solver_primitives.h"
 #include "core/application/epg/epg_task_manifest.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
-
 namespace SmartDrone::Core::Application {
 namespace {
-
+namespace Solver = EpgSolverPrimitives;
 constexpr std::uint64_t PROFILE_FRESHNESS_MS = 60000;
 constexpr std::size_t MAX_QUEUE_DEPTH = 16;
 constexpr std::uint64_t MAX_PERIODIC_INTERVAL_MS = 1000;
@@ -25,6 +25,7 @@ constexpr std::uint64_t TARGET_UTILIZATION_PPM = 800000;
 constexpr std::uint64_t RESOURCE_WAIT_PRESSURE_US = 1000;
 constexpr int RESOURCE_ISOLATION_CPU_AFFINITY = 2;
 constexpr int RESOURCE_ISOLATION_PRIORITY = 20;
+constexpr std::uint64_t MAX_EXACT_TOPOLOGY_CANDIDATES = 200000;
 
 struct SolverDecision {
     std::string kind;
@@ -32,68 +33,48 @@ struct SolverDecision {
     std::string reason;
     std::string catalogRole;
     bool replaceable{false};
-    std::uint64_t depthBefore{0};
-    std::uint64_t depthAfter{0};
-    std::uint64_t pressureBefore{0};
-    std::uint64_t pressureAfter{0};
-    std::uint64_t maxDepthObserved{0};
-    std::uint64_t droppedNewest{0};
-    std::uint64_t overwrittenOldest{0};
-    std::uint64_t pushedPerSecond{0};
-    std::uint64_t poppedPerSecond{0};
-    std::uint64_t droppedPerSecond{0};
-    std::uint64_t intervalBeforeMs{0};
-    std::uint64_t intervalAfterMs{0};
-    std::uint64_t maxLoopUs{0};
-    std::uint64_t averageLoopUs{0};
-    std::uint64_t p90LoopUs{0};
-    std::uint64_t p99LoopUs{0};
-    std::uint64_t effectiveLoopUs{0};
-    std::uint64_t resourceWaitCount{0};
-    std::uint64_t maxResourceWaitUs{0};
-    std::uint64_t averageResourceWaitUs{0};
-    std::uint64_t totalResourceWaitUs{0};
-    std::uint64_t utilizationPpm{0};
-    std::uint64_t budgetUs{0};
-    std::uint64_t deadlineUs{0};
-    std::uint64_t budgetOverrunCount{0};
-    std::uint64_t deadlineMissCount{0};
-    std::uint64_t schedulingErrorCount{0};
+    std::uint64_t depthBefore{0}, depthAfter{0};
+    std::uint64_t pressureBefore{0}, pressureAfter{0};
+    std::uint64_t maxDepthObserved{0}, droppedNewest{0};
+    std::uint64_t overwrittenOldest{0}, pushedPerSecond{0};
+    std::uint64_t poppedPerSecond{0}, droppedPerSecond{0};
+    std::uint64_t intervalBeforeMs{0}, intervalAfterMs{0};
+    std::uint64_t maxLoopUs{0}, averageLoopUs{0}, p90LoopUs{0}, p99LoopUs{0};
+    std::uint64_t effectiveLoopUs{0}, resourceWaitCount{0};
+    std::uint64_t maxResourceWaitUs{0}, averageResourceWaitUs{0};
+    std::uint64_t totalResourceWaitUs{0}, utilizationPpm{0};
+    std::uint64_t budgetUs{0}, deadlineUs{0};
+    std::uint64_t budgetOverrunCount{0}, deadlineMissCount{0};
+    std::uint64_t schedulingErrorCount{0}, topologyPenalty{0};
+    std::vector<Epg::PortId> backpressureBefore;
+    std::vector<Epg::PortId> backpressureAfter;
 };
-
 struct SolverScore {
-    std::uint64_t queuePressure{0};
-    std::uint64_t periodicOverloadUs{0};
-    std::uint64_t resourceWaitUs{0};
-    std::uint64_t schedulingErrors{0};
-    std::uint64_t budgetOverruns{0};
-    std::uint64_t deadlineMisses{0};
-    std::uint64_t utilizationOverPpm{0};
+    std::uint64_t queuePressure{0}, periodicOverloadUs{0};
+    std::uint64_t resourceWaitUs{0}, schedulingErrors{0};
+    std::uint64_t budgetOverruns{0}, deadlineMisses{0};
+    std::uint64_t utilizationOverPpm{0}, topologyPenalty{0};
 };
-
 struct QueueCandidate {
-    std::uint64_t depth{0};
-    std::uint64_t pressureAfter{0};
-    std::uint64_t penalty{0};
+    std::uint64_t depth{0}, pressureAfter{0}, penalty{0};
 };
-
 struct TaskCandidate {
     std::uint64_t intervalMs{0};
+    std::vector<Epg::PortId> backpressureOutputs;
+    std::uint64_t topologyPenalty{0};
     std::uint64_t penalty{0};
 };
 
 struct QueueSolverNode {
     std::size_t index{0};
-    std::uint64_t depthBefore{0};
-    std::uint64_t pressureBefore{0};
+    std::uint64_t depthBefore{0}, pressureBefore{0};
     Epg::QueueProfileMetrics stats;
     std::vector<QueueCandidate> candidates;
 };
 
 struct TaskSolverNode {
     std::size_t index{0};
-    std::uint64_t intervalBeforeMs{0};
-    std::uint64_t effectiveLoopUs{0};
+    std::uint64_t intervalBeforeMs{0}, effectiveLoopUs{0};
     const EpgTaskCatalogEntry *catalog{nullptr};
     Epg::TaskProfileMetrics stats;
     std::vector<TaskCandidate> candidates;
@@ -102,7 +83,6 @@ struct TaskSolverNode {
 struct TopologySolution {
     std::vector<std::size_t> queueCandidateIndexes;
     std::vector<std::size_t> taskCandidateIndexes;
-    std::uint64_t totalPenalty{0};
 };
 
 std::string ReadFile(const std::string &path)
@@ -186,34 +166,6 @@ void WriteRequiredArtifactFile(const std::string &path,
     }
 }
 
-std::string JsonEscape(const std::string &value)
-{
-    std::string result;
-    for (const char ch : value) {
-        switch (ch) {
-        case '\\':
-            result += "\\\\";
-            break;
-        case '"':
-            result += "\\\"";
-            break;
-        case '\n':
-            result += "\\n";
-            break;
-        case '\r':
-            result += "\\r";
-            break;
-        case '\t':
-            result += "\\t";
-            break;
-        default:
-            result.push_back(ch);
-            break;
-        }
-    }
-    return result;
-}
-
 std::uint64_t ProfileAgeMs(std::uint64_t nowMs,
                            std::uint64_t profileTimestampMs)
 {
@@ -221,14 +173,6 @@ std::uint64_t ProfileAgeMs(std::uint64_t nowMs,
         return PROFILE_FRESHNESS_MS + 1;
     }
     return nowMs - profileTimestampMs;
-}
-
-std::uint64_t CeilDiv(std::uint64_t numerator, std::uint64_t denominator)
-{
-    if (denominator == 0) {
-        return numerator;
-    }
-    return (numerator + denominator - 1) / denominator;
 }
 
 const EpgTaskCatalogEntry *FindCatalogEntry(const EpgTaskManifest &manifest,
@@ -276,11 +220,11 @@ void ValidateProfileCatalog(const EpgTaskManifest &manifest,
     for (const auto &entry : manifest.catalog) {
         const auto *profileEntry =
             FindProfileCatalogEntry(profile, entry.taskType);
-        if (!profileEntry) {
-            throw std::runtime_error("profile task catalog missing: " +
-                                     entry.taskType);
-        }
-        ValidateProfileCatalogEntry(entry, *profileEntry);
+    if (!profileEntry) {
+        throw std::runtime_error("profile task catalog missing: " +
+                                 entry.taskType);
+    }
+    ValidateProfileCatalogEntry(entry, *profileEntry);
     }
 }
 
@@ -318,98 +262,20 @@ void ValidateProfileDiagnosticsCoverage(
     ValidateProfileTaskDiagnostics(topology, diagnostics);
 }
 
-std::uint64_t EffectiveLoopUs(const Epg::TaskProfileMetrics &stats)
-{
-    return std::max({stats.p99LoopUs, stats.p90LoopUs, stats.maxLoopUs,
-                     stats.averageLoopUs});
-}
-
-bool HasResourceWaitPressure(const Epg::TaskProfileMetrics &stats)
-{
-    return stats.maxResourceWaitUs > RESOURCE_WAIT_PRESSURE_US ||
-           stats.averageResourceWaitUs > RESOURCE_WAIT_PRESSURE_US ||
-           stats.totalResourceWaitUs > RESOURCE_WAIT_PRESSURE_US;
-}
-
-std::uint64_t QueuePressure(const Epg::QueueConfig &queue,
-                            const Epg::QueueProfileMetrics &stats)
-{
-    const auto depthPressure =
-        stats.maxDepthObserved > queue.depth
-            ? stats.maxDepthObserved - static_cast<std::uint64_t>(queue.depth)
-            : 0;
-    return depthPressure + stats.droppedNewest + stats.overwrittenOldest;
-}
-
-std::uint64_t QueuePressureAtDepth(std::uint64_t depth,
-                                   const Epg::QueueProfileMetrics &stats)
-{
-    const auto depthPressure =
-        stats.maxDepthObserved > depth ? stats.maxDepthObserved - depth : 0;
-    return depthPressure + stats.droppedNewest + stats.overwrittenOldest;
-}
-
-std::uint64_t TaskPeriodicOverloadUs(std::uint64_t intervalMs,
-                                     std::uint64_t effectiveLoopUs)
-{
-    const std::uint64_t intervalUs = intervalMs * 1000;
-    if (intervalUs == 0 || effectiveLoopUs <= intervalUs) {
-        return 0;
-    }
-    return effectiveLoopUs - intervalUs;
-}
-
-std::uint64_t TaskUtilizationOverPpm(std::uint64_t intervalBeforeMs,
-                                     std::uint64_t intervalAfterMs,
-                                     std::uint64_t utilizationPpm)
-{
-    if (intervalAfterMs == 0 || utilizationPpm <= TARGET_UTILIZATION_PPM) {
-        return 0;
-    }
-    const auto scaledUtilization =
-        CeilDiv(utilizationPpm * intervalBeforeMs, intervalAfterMs);
-    if (scaledUtilization <= TARGET_UTILIZATION_PPM) {
-        return 0;
-    }
-    return scaledUtilization - TARGET_UTILIZATION_PPM;
-}
-
-std::uint64_t TaskFeasibleIntervalLimit(std::uint64_t intervalBeforeMs,
-                                        const Epg::TaskProfileMetrics &stats,
-                                        std::uint64_t effectiveLoopUs)
-{
-    std::uint64_t limit = intervalBeforeMs;
-    if (intervalBeforeMs > 0 && effectiveLoopUs > intervalBeforeMs * 1000) {
-        limit = std::max(limit, CeilDiv(effectiveLoopUs, 1000));
-    }
-    if (intervalBeforeMs > 0 && stats.utilizationPpm > TARGET_UTILIZATION_PPM) {
-        limit = std::max(
-            limit,
-            CeilDiv(intervalBeforeMs * stats.utilizationPpm,
-                    TARGET_UTILIZATION_PPM));
-    }
-    return std::min(std::max(limit, intervalBeforeMs),
-                    MAX_PERIODIC_INTERVAL_MS);
-}
-
-std::uint64_t QueueCandidatePenalty(std::uint64_t depth,
-                                    const Epg::QueueProfileMetrics &stats)
-{
-    return QueuePressureAtDepth(depth, stats) * 1000 + depth;
-}
-
 std::uint64_t TaskCandidatePenalty(std::uint64_t intervalBeforeMs,
                                    std::uint64_t intervalAfterMs,
                                    const Epg::TaskProfileMetrics &stats,
-                                   std::uint64_t effectiveLoopUs)
+                                   std::uint64_t effectiveLoopUs,
+                                   std::uint64_t topologyPenalty)
 {
-    return TaskPeriodicOverloadUs(intervalAfterMs, effectiveLoopUs) +
+    return Solver::TaskPeriodicOverloadUs(intervalAfterMs, effectiveLoopUs) +
            stats.totalResourceWaitUs + stats.schedulingErrorCount * 10000 +
            stats.budgetOverrunCount * 2000 +
            stats.deadlineMissCount * 5000 +
-           TaskUtilizationOverPpm(intervalBeforeMs, intervalAfterMs,
-                                  stats.utilizationPpm) +
-           intervalAfterMs;
+           Solver::TaskUtilizationOverPpm(intervalBeforeMs, intervalAfterMs,
+                                          stats.utilizationPpm,
+                                          TARGET_UTILIZATION_PPM) +
+           intervalAfterMs + topologyPenalty;
 }
 
 std::vector<QueueCandidate> BuildQueueCandidates(
@@ -423,14 +289,16 @@ std::vector<QueueCandidate> BuildQueueCandidates(
     for (std::uint64_t depth = minDepth; depth <= maxDepth; ++depth) {
         candidates.push_back({
             depth,
-            QueuePressureAtDepth(depth, stats),
-            QueueCandidatePenalty(depth, stats),
+            Solver::QueuePressureAtDepth(depth, stats),
+            Solver::QueueCandidatePenalty(depth, stats),
         });
     }
     return candidates;
 }
 
 std::vector<TaskCandidate> BuildTaskCandidates(
+    const Epg::GraphConfig &config,
+    const Epg::GraphProfileDiagnostics &diagnostics,
     const Epg::TaskConfig &task,
     const Epg::TaskProfileMetrics &stats,
     const EpgTaskCatalogEntry *catalog,
@@ -438,25 +306,47 @@ std::vector<TaskCandidate> BuildTaskCandidates(
 {
     const auto intervalBeforeMs =
         static_cast<std::uint64_t>(task.trigger.interval.count());
+    const auto backpressureBefore =
+        Solver::SortedUniquePorts(task.scheduling.backpressureOutputs);
+    const auto backpressureOptimized =
+        Solver::CandidateBackpressurePorts(config, &diagnostics, task,
+                                           backpressureBefore,
+                                           catalog && catalog->replaceable);
+    const auto appendCandidate =
+        [&](std::vector<TaskCandidate> &candidates,
+            std::uint64_t intervalMs,
+            const std::vector<Epg::PortId> &backpressureOutputs) {
+            const auto topologyPenalty =
+                Solver::BackpressureTopologyPenalty(
+                    &config, &diagnostics, task, backpressureBefore,
+                    backpressureOutputs, stats.totalResourceWaitUs,
+                    catalog && catalog->replaceable);
+            candidates.push_back({
+                intervalMs,
+                backpressureOutputs,
+                topologyPenalty,
+                TaskCandidatePenalty(intervalBeforeMs, intervalMs, stats,
+                                     effectiveLoopUs, topologyPenalty),
+            });
+        };
+
+    std::vector<TaskCandidate> candidates;
     if (!catalog || !catalog->replaceable || intervalBeforeMs == 0) {
-        return {{
-            intervalBeforeMs,
-            TaskCandidatePenalty(intervalBeforeMs, intervalBeforeMs, stats,
-                                 effectiveLoopUs),
-        }};
+        appendCandidate(candidates, intervalBeforeMs, backpressureBefore);
+        return candidates;
     }
     const auto maxInterval =
-        TaskFeasibleIntervalLimit(intervalBeforeMs, stats, effectiveLoopUs);
-    std::vector<TaskCandidate> candidates;
-    candidates.reserve(static_cast<std::size_t>(maxInterval -
-                                                intervalBeforeMs + 1));
+        Solver::TaskFeasibleIntervalLimit(
+            intervalBeforeMs, stats, effectiveLoopUs, TARGET_UTILIZATION_PPM,
+            MAX_PERIODIC_INTERVAL_MS);
+    candidates.reserve(static_cast<std::size_t>(
+                           (maxInterval - intervalBeforeMs + 1) * 2));
     for (std::uint64_t interval = intervalBeforeMs; interval <= maxInterval;
          ++interval) {
-        candidates.push_back({
-            interval,
-            TaskCandidatePenalty(intervalBeforeMs, interval, stats,
-                                 effectiveLoopUs),
-        });
+        appendCandidate(candidates, interval, backpressureBefore);
+        if (backpressureOptimized != backpressureBefore) {
+            appendCandidate(candidates, interval, backpressureOptimized);
+        }
     }
     return candidates;
 }
@@ -477,15 +367,19 @@ std::size_t BestTaskCandidateIndex(const TaskSolverNode &node)
 {
     std::size_t bestIndex = 0;
     for (std::size_t index = 1; index < node.candidates.size(); ++index) {
-        if (node.candidates[index].penalty <
-            node.candidates[bestIndex].penalty) {
+        const auto &candidate = node.candidates[index];
+        const auto &best = node.candidates[bestIndex];
+        if (candidate.penalty < best.penalty ||
+            (candidate.penalty == best.penalty &&
+             candidate.backpressureOutputs.size() >
+                 best.backpressureOutputs.size())) {
             bestIndex = index;
         }
     }
     return bestIndex;
 }
 
-TopologySolution SolveGlobalTopology(
+TopologySolution SolveIndependentTopology(
     const std::vector<QueueSolverNode> &queues,
     const std::vector<TaskSolverNode> &tasks)
 {
@@ -493,16 +387,71 @@ TopologySolution SolveGlobalTopology(
     solution.queueCandidateIndexes.reserve(queues.size());
     solution.taskCandidateIndexes.reserve(tasks.size());
     for (const auto &queue : queues) {
-        const auto index = BestQueueCandidateIndex(queue);
-        solution.queueCandidateIndexes.push_back(index);
-        solution.totalPenalty += queue.candidates[index].penalty;
+        solution.queueCandidateIndexes.push_back(BestQueueCandidateIndex(queue));
     }
     for (const auto &task : tasks) {
-        const auto index = BestTaskCandidateIndex(task);
-        solution.taskCandidateIndexes.push_back(index);
-        solution.totalPenalty += task.candidates[index].penalty;
+        solution.taskCandidateIndexes.push_back(BestTaskCandidateIndex(task));
     }
     return solution;
+}
+
+std::vector<Solver::DiscreteCandidateSet> BuildGlobalCandidateSets(
+    const std::vector<QueueSolverNode> &queues,
+    const std::vector<TaskSolverNode> &tasks)
+{
+    std::vector<Solver::DiscreteCandidateSet> sets;
+    sets.reserve(queues.size() + tasks.size());
+    for (std::size_t nodeIndex = 0; nodeIndex < queues.size();
+         ++nodeIndex) {
+        Solver::DiscreteCandidateSet set;
+        for (const auto &candidate : queues[nodeIndex].candidates) {
+            set.penalties.push_back(candidate.penalty);
+            set.tieWeights.push_back(0);
+        }
+        sets.push_back(std::move(set));
+    }
+    for (std::size_t nodeIndex = 0; nodeIndex < tasks.size(); ++nodeIndex) {
+        Solver::DiscreteCandidateSet set;
+        for (const auto &candidate : tasks[nodeIndex].candidates) {
+            set.penalties.push_back(candidate.penalty);
+            set.tieWeights.push_back(candidate.backpressureOutputs.size());
+        }
+        sets.push_back(std::move(set));
+    }
+    return sets;
+}
+
+TopologySolution BuildTopologySolutionFromGlobalIndexes(
+    const std::vector<std::size_t> &candidateIndexes,
+    std::size_t queueCount,
+    std::size_t taskCount)
+{
+    TopologySolution solution;
+    solution.queueCandidateIndexes.assign(queueCount, 0);
+    solution.taskCandidateIndexes.assign(taskCount, 0);
+    for (std::size_t index = 0; index < candidateIndexes.size(); ++index) {
+        if (index < queueCount) {
+            solution.queueCandidateIndexes[index] = candidateIndexes[index];
+            continue;
+        }
+        solution.taskCandidateIndexes[index - queueCount] =
+            candidateIndexes[index];
+    }
+    return solution;
+}
+
+TopologySolution SolveGlobalTopology(
+    const std::vector<QueueSolverNode> &queues,
+    const std::vector<TaskSolverNode> &tasks)
+{
+    const auto candidateSets = BuildGlobalCandidateSets(queues, tasks);
+    const auto globalSolution = Solver::SolveDiscreteGlobalTopology(
+        candidateSets, MAX_EXACT_TOPOLOGY_CANDIDATES);
+    if (!globalSolution.exact) {
+        return SolveIndependentTopology(queues, tasks);
+    }
+    return BuildTopologySolutionFromGlobalIndexes(
+        globalSolution.candidateIndexes, queues.size(), tasks.size());
 }
 
 std::string TaskDecisionReason(const Epg::TaskConfig &task,
@@ -526,7 +475,7 @@ std::string TaskDecisionReason(const Epg::TaskConfig &task,
     if (stats.schedulingErrorCount > 0) {
         reasons.push_back("scheduling_error");
     }
-    if (HasResourceWaitPressure(stats)) {
+    if (Solver::HasResourceWaitPressure(stats, RESOURCE_WAIT_PRESSURE_US)) {
         reasons.push_back("resource_wait");
     }
     if (reasons.empty()) {
@@ -551,11 +500,49 @@ std::string NotReplaceableTaskReason(const Epg::TaskConfig &task,
     return "not_replaceable+" + reason;
 }
 
+std::string JoinReasons(const std::vector<std::string> &reasons)
+{
+    if (reasons.empty()) {
+        return {};
+    }
+    std::string reason = reasons.front();
+    for (std::size_t index = 1; index < reasons.size(); ++index) {
+        reason += "+" + reasons[index];
+    }
+    return reason;
+}
+
+std::string OptimizedTaskReason(const Epg::TaskConfig &task,
+                                const Epg::TaskProfileMetrics &stats,
+                                std::uint64_t effectiveLoopUs,
+                                std::uint64_t intervalBeforeMs,
+                                std::uint64_t intervalAfterMs,
+                                const std::vector<Epg::PortId> &backpressureBefore,
+                                const std::vector<Epg::PortId> &backpressureAfter,
+                                const EpgTaskCatalogEntry *catalog)
+{
+    std::vector<std::string> reasons;
+    if (intervalAfterMs != intervalBeforeMs) {
+        reasons.push_back("global_optimum_interval");
+    }
+    if (backpressureAfter != backpressureBefore) {
+        reasons.push_back("global_optimum_backpressure");
+    }
+    if (!reasons.empty()) {
+        return JoinReasons(reasons);
+    }
+    if (catalog && !catalog->replaceable) {
+        return NotReplaceableTaskReason(task, stats, effectiveLoopUs);
+    }
+    return TaskDecisionReason(task, stats, effectiveLoopUs);
+}
+
 void ApplyResourceIsolation(Epg::TaskConfig &task,
                             const Epg::TaskProfileMetrics &stats,
                             const EpgTaskCatalogEntry *catalog)
 {
-    if (!catalog || !catalog->replaceable || !HasResourceWaitPressure(stats)) {
+    if (!catalog || !catalog->replaceable ||
+        !Solver::HasResourceWaitPressure(stats, RESOURCE_WAIT_PRESSURE_US)) {
         return;
     }
     if (task.scheduling.cpuAffinity < 0) {
@@ -597,13 +584,15 @@ QueueSolverNode BuildQueueSolverNode(
     QueueSolverNode node;
     node.index = index;
     node.depthBefore = queue.depth;
-    node.pressureBefore = QueuePressure(queue, stats);
+    node.pressureBefore = Solver::QueuePressure(queue, stats);
     node.stats = stats;
     node.candidates = BuildQueueCandidates(queue, stats);
     return node;
 }
 
 TaskSolverNode BuildTaskSolverNode(std::size_t index,
+                                   const Epg::GraphConfig &config,
+                                   const Epg::GraphProfileDiagnostics &diagnostics,
                                    const Epg::TaskConfig &task,
                                    const Epg::TaskProfileMetrics &stats,
                                    const EpgTaskCatalogEntry *catalog)
@@ -612,11 +601,12 @@ TaskSolverNode BuildTaskSolverNode(std::size_t index,
     node.index = index;
     node.intervalBeforeMs =
         static_cast<std::uint64_t>(task.trigger.interval.count());
-    node.effectiveLoopUs = EffectiveLoopUs(stats);
+    node.effectiveLoopUs = Solver::EffectiveLoopUs(stats);
     node.catalog = catalog;
     node.stats = stats;
     node.candidates =
-        BuildTaskCandidates(task, stats, catalog, node.effectiveLoopUs);
+        BuildTaskCandidates(config, diagnostics, task, stats, catalog,
+                            node.effectiveLoopUs);
     return node;
 }
 
@@ -649,22 +639,24 @@ void ApplyTaskSolution(Epg::TaskConfig &task,
                        const TaskCandidate &candidate,
                        std::vector<SolverDecision> &decisions)
 {
+    const auto backpressureBefore =
+        Solver::SortedUniquePorts(task.scheduling.backpressureOutputs);
     if (candidate.intervalMs != node.intervalBeforeMs) {
         task.trigger.interval =
             std::chrono::milliseconds(static_cast<int>(candidate.intervalMs));
     }
+    task.scheduling.backpressureOutputs =
+        Solver::SortedUniquePorts(candidate.backpressureOutputs);
     ApplyResourceIsolation(task, node.stats, node.catalog);
+    const auto backpressureAfter = task.scheduling.backpressureOutputs;
 
     SolverDecision decision;
     decision.kind = "task";
     decision.name = task.name;
-    decision.reason = candidate.intervalMs != node.intervalBeforeMs
-                          ? "global_optimum_interval"
-                      : node.catalog && !node.catalog->replaceable
-                          ? NotReplaceableTaskReason(task, node.stats,
-                                                     node.effectiveLoopUs)
-                          : TaskDecisionReason(task, node.stats,
-                                               node.effectiveLoopUs);
+    decision.reason = OptimizedTaskReason(
+        task, node.stats, node.effectiveLoopUs, node.intervalBeforeMs,
+        candidate.intervalMs, backpressureBefore, backpressureAfter,
+        node.catalog);
     decision.catalogRole = node.catalog ? node.catalog->role : "";
     decision.replaceable = node.catalog ? node.catalog->replaceable : false;
     decision.intervalBeforeMs = node.intervalBeforeMs;
@@ -684,6 +676,9 @@ void ApplyTaskSolution(Epg::TaskConfig &task,
     decision.budgetOverrunCount = node.stats.budgetOverrunCount;
     decision.deadlineMissCount = node.stats.deadlineMissCount;
     decision.schedulingErrorCount = node.stats.schedulingErrorCount;
+    decision.backpressureBefore = backpressureBefore;
+    decision.backpressureAfter = backpressureAfter;
+    decision.topologyPenalty = candidate.topologyPenalty;
     decisions.push_back(std::move(decision));
 }
 
@@ -712,7 +707,7 @@ std::vector<TaskSolverNode> BuildTaskSolverNodes(
     for (std::size_t index = 0; index < config.tasks.size(); ++index) {
         const auto &task = config.tasks[index];
         nodes.push_back(BuildTaskSolverNode(
-            index, task, diagnostics.tasks.at(task.name),
+            index, config, diagnostics, task, diagnostics.tasks.at(task.name),
             FindCatalogEntry(manifest, task.type)));
     }
     return nodes;
@@ -758,17 +753,31 @@ SolverScore ScoreDecisions(const std::vector<SolverDecision> &decisions)
         if (decision.kind != "task") {
             continue;
         }
-        score.periodicOverloadUs += TaskPeriodicOverloadUs(
+        score.periodicOverloadUs += Solver::TaskPeriodicOverloadUs(
             decision.intervalAfterMs, decision.effectiveLoopUs);
         score.resourceWaitUs += decision.totalResourceWaitUs;
         score.schedulingErrors += decision.schedulingErrorCount;
         score.budgetOverruns += decision.budgetOverrunCount;
         score.deadlineMisses += decision.deadlineMissCount;
-        score.utilizationOverPpm += TaskUtilizationOverPpm(
+        score.utilizationOverPpm += Solver::TaskUtilizationOverPpm(
             decision.intervalBeforeMs, decision.intervalAfterMs,
-            decision.utilizationPpm);
+            decision.utilizationPpm, TARGET_UTILIZATION_PPM);
+        score.topologyPenalty += decision.topologyPenalty;
     }
     return score;
+}
+
+void WritePortArray(std::ostringstream &out,
+                    const std::vector<Epg::PortId> &ports)
+{
+    out << "[";
+    for (std::size_t index = 0; index < ports.size(); ++index) {
+        if (index != 0) {
+            out << ", ";
+        }
+        out << ports[index];
+    }
+    out << "]";
 }
 
 std::uint64_t TotalPenalty(const SolverScore &score)
@@ -776,7 +785,7 @@ std::uint64_t TotalPenalty(const SolverScore &score)
     return score.queuePressure * 1000 + score.periodicOverloadUs +
            score.resourceWaitUs + score.schedulingErrors * 10000 +
            score.budgetOverruns * 2000 + score.deadlineMisses * 5000 +
-           score.utilizationOverPpm;
+           score.utilizationOverPpm + score.topologyPenalty;
 }
 
 void WriteQueueDecisionJson(std::ostringstream &out,
@@ -813,26 +822,34 @@ void WriteTaskDecisionJson(std::ostringstream &out,
     out << "\"targetUtilizationPpm\": " << TARGET_UTILIZATION_PPM << ", ";
     out << "\"budgetUs\": " << decision.budgetUs << ", ";
     out << "\"deadlineUs\": " << decision.deadlineUs << ", ";
-    out << "\"catalogRole\": \"" << JsonEscape(decision.catalogRole) << "\", ";
+    out << "\"catalogRole\": \"" << Solver::JsonEscape(decision.catalogRole)
+        << "\", ";
     out << "\"replaceable\": " << (decision.replaceable ? "true" : "false")
         << ", ";
     out << "\"budgetOverrunCount\": " << decision.budgetOverrunCount << ", ";
     out << "\"deadlineMissCount\": " << decision.deadlineMissCount << ", ";
     out << "\"schedulingErrorCount\": " << decision.schedulingErrorCount
         << ", ";
+    out << "\"topologyPenalty\": " << decision.topologyPenalty << ", ";
+    out << "\"backpressureBefore\": ";
+    WritePortArray(out, decision.backpressureBefore);
+    out << ", ";
+    out << "\"backpressureAfter\": ";
+    WritePortArray(out, decision.backpressureAfter);
+    out << ", ";
 }
 
 void WriteDecisionJson(std::ostringstream &out, const SolverDecision &decision)
 {
     out << "    {";
-    out << "\"kind\": \"" << JsonEscape(decision.kind) << "\", ";
-    out << "\"name\": \"" << JsonEscape(decision.name) << "\", ";
+    out << "\"kind\": \"" << Solver::JsonEscape(decision.kind) << "\", ";
+    out << "\"name\": \"" << Solver::JsonEscape(decision.name) << "\", ";
     if (decision.kind == "queue") {
         WriteQueueDecisionJson(out, decision);
     } else {
         WriteTaskDecisionJson(out, decision);
     }
-    out << "\"reason\": \"" << JsonEscape(decision.reason) << "\"";
+    out << "\"reason\": \"" << Solver::JsonEscape(decision.reason) << "\"";
     out << "}";
 }
 
@@ -845,12 +862,12 @@ std::string BuildSolverReport(const EpgTaskManifest &manifest,
     std::ostringstream out;
     out << "{\n";
     out << "  \"schema\": \"" << Epg::SOLVER_REPORT_SCHEMA << "\",\n";
-    out << "  \"targetGraph\": \"" << JsonEscape(manifest.subgraphName)
+    out << "  \"targetGraph\": \"" << Solver::JsonEscape(manifest.subgraphName)
         << "\",\n";
     out << "  \"topologyVersion\": \""
-        << JsonEscape(manifest.topologyVersion) << "\",\n";
-    out << "  \"sourceProfile\": \"" << JsonEscape(manifest.subgraphName)
-        << "\",\n";
+        << Solver::JsonEscape(manifest.topologyVersion) << "\",\n";
+    out << "  \"sourceProfile\": \""
+        << Solver::JsonEscape(manifest.subgraphName) << "\",\n";
     out << "  \"sourceTimestampMs\": " << metadata.timestampMs << ",\n";
     out << "  \"generatedAtMs\": " << nowMs << ",\n";
     out << "  \"solverVersion\": \"" << Epg::NATIVE_EXACT_SOLVER_VERSION
@@ -865,6 +882,7 @@ std::string BuildSolverReport(const EpgTaskManifest &manifest,
     out << "\"budgetOverruns\": " << score.budgetOverruns << ", ";
     out << "\"deadlineMisses\": " << score.deadlineMisses << ", ";
     out << "\"utilizationOverPpm\": " << score.utilizationOverPpm << ", ";
+    out << "\"topologyPenalty\": " << score.topologyPenalty << ", ";
     out << "\"totalPenalty\": " << TotalPenalty(score) << "}\n";
     out << "  },\n";
     out << "  \"constraints\": {";

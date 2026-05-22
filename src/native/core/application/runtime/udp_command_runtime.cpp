@@ -4,7 +4,6 @@
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <utility>
@@ -19,24 +18,8 @@
 namespace SmartDrone::Core::Application {
 namespace {
 
-constexpr auto kHeartbeatPeriod = std::chrono::milliseconds(500);
 constexpr auto kHeartbeatTimeout = std::chrono::seconds(3);
 constexpr auto kOpenRetryPeriod = std::chrono::seconds(1);
-
-int EnvIntValueClamped(const char *name, int fallback, int minValue,
-                       int maxValue)
-{
-    const char *value = std::getenv(name);
-    if (value == nullptr || value[0] == '\0') {
-        return fallback;
-    }
-    char *end = nullptr;
-    const long parsed = std::strtol(value, &end, 10);
-    if (end == value) {
-        return fallback;
-    }
-    return std::clamp(static_cast<int>(parsed), minValue, maxValue);
-}
 
 RouteResult HandleRuntimeModeFrame(const TlvFrame &frame,
                                    IRuntimeCommandTarget &commandTarget)
@@ -199,9 +182,7 @@ bool UdpCommandRuntimeConfigValid(const UdpCommandRuntimeConfig &config)
 class UdpCommandRuntime::Impl final {
   public:
     explicit Impl(UdpCommandRuntimeConfig config)
-        : m_config(std::move(config)),
-          m_statePeriodMs(EnvIntValueClamped("SMART_DRONE_UDP_STATE_PERIOD_MS",
-                                             100, 20, 1000))
+        : m_config(std::move(config))
     {
     }
 
@@ -242,11 +223,53 @@ class UdpCommandRuntime::Impl final {
 
     void Step()
     {
-        if (!m_started && !Start()) {
+        StepReceive();
+        StepHeartbeatTx();
+        StepHeartbeatTimeout();
+        StepStateTx();
+        StepPointCloudTx();
+    }
+
+    void StepReceive()
+    {
+        if (!EnsureStarted()) {
             return;
         }
         ReceiveOneDatagram();
-        SendPeriodicOutputs();
+    }
+
+    void StepHeartbeatTx()
+    {
+        if (!EnsureStarted()) {
+            return;
+        }
+        SendHeartbeat(std::chrono::steady_clock::now());
+    }
+
+    void StepHeartbeatTimeout()
+    {
+        if (!EnsureStarted()) {
+            return;
+        }
+        HandleHeartbeatTimeout(std::chrono::steady_clock::now());
+    }
+
+    void StepStateTx()
+    {
+        UdpRuntimeStateSnapshot snapshot{};
+        if (!ReadStateSnapshot(snapshot)) {
+            return;
+        }
+        SendState(snapshot);
+    }
+
+    void StepPointCloudTx()
+    {
+        UdpRuntimeStateSnapshot snapshot{};
+        if (!ReadStateSnapshot(snapshot)) {
+            return;
+        }
+        SendPointCloudIfNeeded(snapshot);
     }
 
   private:
@@ -259,6 +282,20 @@ class UdpCommandRuntime::Impl final {
     {
         return m_nextOpenAttempt.time_since_epoch().count() == 0 ||
                now >= m_nextOpenAttempt;
+    }
+
+    bool EnsureStarted()
+    {
+        if (m_started) {
+            return true;
+        }
+        return Start();
+    }
+
+    bool ReadStateSnapshot(UdpRuntimeStateSnapshot &snapshot)
+    {
+        return EnsureStarted() && m_config.readRuntimeState(snapshot) &&
+               snapshot.hasPeer;
     }
 
     void EnsureRouter()
@@ -373,21 +410,9 @@ class UdpCommandRuntime::Impl final {
         m_server.SendTo(peer, responseFrame.data(), responseFrame.size());
     }
 
-    void SendPeriodicOutputs()
-    {
-        const auto now = std::chrono::steady_clock::now();
-        SendHeartbeat(now);
-        HandleHeartbeatTimeout(now);
-        SendStateIfDue(now);
-    }
-
     void SendHeartbeat(std::chrono::steady_clock::time_point now)
     {
         if (!m_activePeer.valid) {
-            return;
-        }
-        if (m_lastHeartbeatTx.time_since_epoch().count() != 0 &&
-            now - m_lastHeartbeatTx < kHeartbeatPeriod) {
             return;
         }
         m_lastHeartbeatTx = now;
@@ -416,20 +441,6 @@ class UdpCommandRuntime::Impl final {
             return;
         }
         std::cerr << "[udp_cmd] heartbeat timeout >3s, LAND triggered\n";
-    }
-
-    void SendStateIfDue(std::chrono::steady_clock::time_point now)
-    {
-        if (now - m_lastStateTx < std::chrono::milliseconds(m_statePeriodMs)) {
-            return;
-        }
-        m_lastStateTx = now;
-        UdpRuntimeStateSnapshot snapshot{};
-        if (!m_config.readRuntimeState(snapshot) || !snapshot.hasPeer) {
-            return;
-        }
-        SendState(snapshot);
-        SendPointCloudIfNeeded(snapshot);
     }
 
     void SendState(const UdpRuntimeStateSnapshot &snapshot)
@@ -520,15 +531,12 @@ class UdpCommandRuntime::Impl final {
     TlvParser m_parser;
     CommandPeerGate m_peerGate;
     std::array<uint8_t, 2048> m_rxBuffer{};
-    std::chrono::steady_clock::time_point m_lastStateTx{
-        std::chrono::steady_clock::now()};
     std::chrono::steady_clock::time_point m_lastHeartbeatTx{};
     std::chrono::steady_clock::time_point m_lastHeartbeatRx{};
     std::chrono::steady_clock::time_point m_lastRejectedPeerLog{};
     std::chrono::steady_clock::time_point m_nextOpenAttempt{};
     uint32_t m_lastSentPointCloudSeq{0};
     UdpPeer m_activePeer{};
-    int m_statePeriodMs{100};
     bool m_haveHeartbeatPeer{false};
     bool m_heartbeatLandTriggered{false};
     bool m_started{false};
@@ -559,6 +567,31 @@ void UdpCommandRuntime::OnGraphTick()
 void UdpCommandRuntime::Step()
 {
     OnGraphTick();
+}
+
+void UdpCommandRuntime::StepReceive()
+{
+    m_impl->StepReceive();
+}
+
+void UdpCommandRuntime::StepHeartbeatTx()
+{
+    m_impl->StepHeartbeatTx();
+}
+
+void UdpCommandRuntime::StepHeartbeatTimeout()
+{
+    m_impl->StepHeartbeatTimeout();
+}
+
+void UdpCommandRuntime::StepStateTx()
+{
+    m_impl->StepStateTx();
+}
+
+void UdpCommandRuntime::StepPointCloudTx()
+{
+    m_impl->StepPointCloudTx();
 }
 
 } // namespace SmartDrone::Core::Application

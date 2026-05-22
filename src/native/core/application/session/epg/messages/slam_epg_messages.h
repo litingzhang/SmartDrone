@@ -53,6 +53,11 @@ struct SlamPublishedFrame {
     std::shared_ptr<ISlamPublishedFramePayload> frame;
 };
 
+struct SlamPreviewReady {
+    std::uint64_t sessionId{0};
+    std::shared_ptr<ISlamPublishedFramePayload> frame;
+};
+
 struct SlamStatus {
     bool sessionOk{true};
     bool abortRequested{false};

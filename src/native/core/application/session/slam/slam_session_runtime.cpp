@@ -98,6 +98,7 @@ class SlamSessionRuntime::Impl final {
     SlamFrameStageResult EmitPointCloud(SlamPublishedFrameData &published);
     SlamFrameStageResult EmitDfx(SlamPublishedFrameData &published);
     SlamFrameStageResult EmitUdp(SlamPublishedFrameData &published);
+    SlamFrameStageResult FlushPreview(SlamPublishedFrameData &published);
     SlamFrameStageResult EmitMavlink(SlamPublishedFrameData &published);
     SlamFrameStageResult EmitLivePose(SlamPublishedFrameData &published);
 
@@ -478,6 +479,12 @@ SlamFrameStageResult SlamSessionRuntime::Impl::EmitUdp(
     return MakeStageResult(FramePorts().OutputPort().EmitUdp(published));
 }
 
+SlamFrameStageResult SlamSessionRuntime::Impl::FlushPreview(
+    SlamPublishedFrameData &published)
+{
+    return MakeStageResult(FramePorts().OutputPort().FlushPreview(published));
+}
+
 SlamFrameStageResult SlamSessionRuntime::Impl::EmitMavlink(
     SlamPublishedFrameData &published)
 {
@@ -569,6 +576,12 @@ SlamFrameStageResult SlamSessionRuntime::EmitUdp(
     SlamPublishedFrameData &published)
 {
     return m_impl->EmitUdp(published);
+}
+
+SlamFrameStageResult SlamSessionRuntime::FlushPreview(
+    SlamPublishedFrameData &published)
+{
+    return m_impl->FlushPreview(published);
 }
 
 SlamFrameStageResult SlamSessionRuntime::EmitMavlink(

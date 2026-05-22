@@ -54,6 +54,7 @@ class SlamSessionRuntime {
     SlamFrameStageResult EmitPointCloud(SlamPublishedFrameData &published);
     SlamFrameStageResult EmitDfx(SlamPublishedFrameData &published);
     SlamFrameStageResult EmitUdp(SlamPublishedFrameData &published);
+    SlamFrameStageResult FlushPreview(SlamPublishedFrameData &published);
     SlamFrameStageResult EmitMavlink(SlamPublishedFrameData &published);
     SlamFrameStageResult EmitLivePose(SlamPublishedFrameData &published);
 

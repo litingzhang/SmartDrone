@@ -46,7 +46,6 @@ struct StereoGrabFailureLog {
 enum class StereoAcquireStatus : uint8_t {
     Ok,
     Timeout,
-    DroppedByRateLimiter,
     CameraUnhealthy,
 };
 
@@ -61,23 +60,20 @@ class PerceptionPipeline {
     int ClampTargetFps(int requestedFps) const;
 
   private:
-    uint64_t ComputeMinCaptureTimestampNs(int slamFrameStepNs) const;
+    uint64_t ComputeMinCaptureTimestampNs() const;
     StereoAcquireStatus HandleGrabFailure(Ports::ICameraProvider &camera, int timeoutMs,
                                           int clampedSlamInputFps, uint64_t minTimestampNs) const;
     const char *ClassifyGrabFailureCause(const StereoGrabFailureLog &failure) const;
     void LogGrabFailure(const StereoGrabFailureLog &failure) const;
     StereoFrameTiming BuildStereoFrameTiming(const Ports::StereoFrame &stereo,
                                              int64_t frameStepNs) const;
-    bool ShouldDropByRateLimiter(const StereoFrameTiming &timing,
-                                 int64_t toleranceNs) const;
     void AcceptStereoBatch(Ports::StereoFrame stereo, const StereoFrameTiming &timing,
-                           int64_t slamFrameStepNs, StereoBatch &out);
+                           StereoBatch &out);
     void RecordFrameTiming(const StereoBatch &out, FrameTimingTracker *timingTracker) const;
 
     PerceptionPipelineConfig m_cfg;
     int64_t m_lastDeliveredLogicalFrameNs{0};
     int64_t m_lastAcceptedCaptureTimestampNs{0};
-    int64_t m_nextAcceptedLogicalFrameNs{0};
     uint64_t m_nextFrameId{1};
 };
 

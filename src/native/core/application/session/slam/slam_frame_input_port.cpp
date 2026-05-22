@@ -2,12 +2,9 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <iostream>
-#include <string>
 #include <utility>
 
 #include "core/application/config/runtime_app_types.h"
@@ -19,76 +16,6 @@ namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr int64_t kPointCloudUpdateIntervalNs = 200000000LL;
-constexpr double kAdaptiveInputFpsHeadroom = 1.25;
-constexpr double kAdaptiveInputExtraOverheadMs = 12.0;
-constexpr int kAdaptiveMinInputFps = 10;
-
-int ComputeAdaptiveSlamInputFps(int configuredFps, int cameraFps,
-                                double smoothedSlamMs)
-{
-    const int cappedConfiguredFps =
-        std::clamp(configuredFps, 1, std::max(1, cameraFps));
-    if (!(smoothedSlamMs > 0.0)) {
-        return cappedConfiguredFps;
-    }
-
-    const double guardedFrameBudgetMs =
-        std::max((smoothedSlamMs + kAdaptiveInputExtraOverheadMs) *
-                     kAdaptiveInputFpsHeadroom,
-                 1.0);
-    const int throughputAlignedFps =
-        static_cast<int>(std::floor(1000.0 / guardedFrameBudgetMs));
-    return std::clamp(throughputAlignedFps, kAdaptiveMinInputFps,
-                      cappedConfiguredFps);
-}
-
-bool DpvoEpgPacingEnabled()
-{
-    const char *value = std::getenv("SMART_DRONE_DPVO_EPG_PACING");
-    if (value == nullptr || value[0] == '\0') {
-        return false;
-    }
-    std::string normalized(value);
-    std::transform(
-        normalized.begin(), normalized.end(), normalized.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return !(normalized == "0" || normalized == "false" ||
-             normalized == "off" || normalized == "no" ||
-             normalized == "disabled");
-}
-
-int ComputeVisualFeatureLoadSheddingLevel(int currentLevel,
-                                          bool visualFeatureEnabled,
-                                          bool lastTrackingUsable,
-                                          double smoothedSlamMs,
-                                          double smoothedTotalMs)
-{
-    if (!visualFeatureEnabled || !lastTrackingUsable) {
-        return 0;
-    }
-
-    if (currentLevel >= 2) {
-        if (smoothedTotalMs < 125.0 && smoothedSlamMs < 120.0) {
-            return 1;
-        }
-        return 2;
-    }
-
-    if (currentLevel == 1) {
-        if (smoothedTotalMs > 155.0 || smoothedSlamMs > 150.0) {
-            return 2;
-        }
-        if (smoothedTotalMs < 105.0 && smoothedSlamMs < 100.0) {
-            return 0;
-        }
-        return 1;
-    }
-
-    if (smoothedTotalMs > 125.0 || smoothedSlamMs > 120.0) {
-        return 1;
-    }
-    return 0;
-}
 
 std::pair<int, int> ComputeVisualFeatureInputBudget(int baseWidth,
                                                     int baseHeight,
@@ -242,29 +169,11 @@ SlamFrameInputPort::ApplyRuntimeFrameConfig()
         m_ctx.tuning.featureFrontend.load(std::memory_order_relaxed);
     config.effectiveFrontend =
         ParseRuntimeFeatureFrontendValue(config.configuredFrontendValue);
-    config.dpvoEpgPacing =
-        m_ctx.aliases.slamBackend == SlamBackend::DpvoTensorRt &&
-        DpvoEpgPacingEnabled();
-    config.effectiveSlamInputFps =
-        config.dpvoEpgPacing
-            ? config.configuredSlamInputFps
-            : ComputeAdaptiveSlamInputFps(config.configuredSlamInputFps,
-                                          m_ctx.aliases.fps,
-                                          m_outputState.smoothedSlamMs.load());
+    config.effectiveSlamInputFps = config.configuredSlamInputFps;
     m_state.adaptiveSlamInputFps = config.effectiveSlamInputFps;
-    config.visualFeatureLoadSheddingLevel =
-        ComputeVisualFeatureLoadSheddingLevel(
-            m_state.visualFeatureLoadSheddingLevel,
-            IsVisualFeatureLightGlueFrontend(config.effectiveFrontend),
-            m_sharedState.lastTrackingUsable.load(),
-            m_outputState.smoothedSlamMs.load(),
-            m_outputState.smoothedTotalMs.load());
-    m_state.visualFeatureLoadSheddingLevel =
-        config.visualFeatureLoadSheddingLevel;
     const auto [budgetWidth, budgetHeight] = ComputeVisualFeatureInputBudget(
         m_ctx.aliases.visualFeatureInputMaxWidth,
-        m_ctx.aliases.visualFeatureInputMaxHeight,
-        config.visualFeatureLoadSheddingLevel);
+        m_ctx.aliases.visualFeatureInputMaxHeight, 0);
     config.visualFeatureBudgetWidth = budgetWidth;
     config.visualFeatureBudgetHeight = budgetHeight;
     ApplySlamControlConfig(config);
@@ -374,10 +283,6 @@ SlamFrameInputPort::AcquireStereoBatch(const RuntimeFrameConfig &config)
         std::cerr << "[slam] camera pipeline unhealthy, aborting session\n";
         result.sessionOk = false;
         result.stepResult = SlamFrameStepResult::SessionAbort;
-        return result;
-    }
-    if (status == StereoAcquireStatus::DroppedByRateLimiter) {
-        m_outputState.rateLimitedDrops.fetch_add(1);
         return result;
     }
     result.hasFrame = true;

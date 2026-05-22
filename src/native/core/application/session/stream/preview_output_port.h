@@ -39,6 +39,7 @@ class IPreviewOutputPort {
     virtual ~IPreviewOutputPort() = default;
 
     virtual void Enqueue(const PreviewOutputFrame &frame) = 0;
+    virtual void StepOnce() = 0;
     virtual void StepAll() = 0;
 };
 
