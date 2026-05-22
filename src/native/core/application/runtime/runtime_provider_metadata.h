@@ -2,11 +2,11 @@
 
 #include <string>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct CameraRuntimeProviderMetadata {
     std::string providerName;
     bool usesPackedStereo{false};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

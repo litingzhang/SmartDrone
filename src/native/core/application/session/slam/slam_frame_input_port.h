@@ -10,7 +10,7 @@
 #include "core/application/session/slam/slam_frame_stage_state.h"
 #include "core/application/session/slam/slam_frame_step_result.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class SlamFrameInputPort final {
   public:
@@ -68,7 +68,7 @@ class SlamFrameInputPort final {
         bool ready{false};
         std::chrono::steady_clock::time_point imuStartTp;
         std::chrono::steady_clock::time_point imuEndTp;
-        SmartDrone::core::ports::SlamInputBatch slamInput;
+        SmartDrone::Core::Ports::SlamInputBatch slamInput;
     };
 
     void SyncRequestedSlamMode();
@@ -80,6 +80,16 @@ class SlamFrameInputPort final {
     StereoAcquireResult AcquireStereoBatch(const RuntimeFrameConfig &config);
     FrameMetadata BuildFrameMetadata(const StereoBatch &stereoBatch,
                                      const RuntimeFrameConfig &config);
+    void PopulateFrameStreamFlags(FrameMetadata &metadata);
+    void PopulateFrameTimingMetadata(
+        FrameMetadata &metadata, const StereoBatch &stereoBatch,
+        const SmartDrone::Core::Ports::ImageFrame &right,
+        const SmartDrone::Core::Ports::CameraDiagnostics &cameraDiag);
+    void PopulateFrameImageQuality(
+        FrameMetadata &metadata,
+        const SmartDrone::Core::Ports::ImageFrame &left,
+        const SmartDrone::Core::Ports::ImageFrame &right);
+    void PopulateFrameProcessingFlags(FrameMetadata &metadata);
     void MaybeLogFrameGap(const StereoBatch &stereoBatch,
                           const RuntimeFrameConfig &config,
                           const FrameMetadata &metadata);
@@ -97,4 +107,4 @@ class SlamFrameInputPort final {
     SlamFrameOutputState &m_outputState;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

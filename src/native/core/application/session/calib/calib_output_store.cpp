@@ -14,7 +14,7 @@
 #include "core/application/session/calib/calib_storage_helpers.h"
 #include "core/ports/camera_provider.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class CalibOutputStore::Impl final {
   public:
@@ -162,8 +162,8 @@ class CalibOutputStore::Impl final {
     }
 
     bool ValidateImagesForSave(
-        const SmartDrone::core::ports::ImageFrame &left,
-        const SmartDrone::core::ports::ImageFrame &right) const
+        const SmartDrone::Core::Ports::ImageFrame &left,
+        const SmartDrone::Core::Ports::ImageFrame &right) const
     {
         if (!left.gray.empty() && !right.gray.empty()) {
             return true;
@@ -178,8 +178,8 @@ class CalibOutputStore::Impl final {
     }
 
     void LogGrayConversion(
-        const SmartDrone::core::ports::ImageFrame &left,
-        const SmartDrone::core::ports::ImageFrame &right,
+        const SmartDrone::Core::Ports::ImageFrame &left,
+        const SmartDrone::Core::Ports::ImageFrame &right,
         bool converted)
     {
         if (!converted) {
@@ -196,8 +196,8 @@ class CalibOutputStore::Impl final {
     }
 
     bool WriteImages(const CalibSavePair &pair,
-                     const SmartDrone::core::ports::ImageFrame &left,
-                     const SmartDrone::core::ports::ImageFrame &right,
+                     const SmartDrone::Core::Ports::ImageFrame &left,
+                     const SmartDrone::Core::Ports::ImageFrame &right,
                      const cv::Mat &leftGray,
                      const cv::Mat &rightGray) const
     {
@@ -342,4 +342,4 @@ std::filesystem::path CalibOutputStore::Cam1Dir() const
     return m_impl->Cam1Dir();
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

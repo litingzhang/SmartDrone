@@ -5,14 +5,14 @@
 #include "core/application/session/slam/slam_processing_support.h"
 #include "core/application/state/pose_postprocessor.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 class ICameraProvider;
 class IImuProvider;
 class IPosePublisher;
 class ISlamEngine;
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class FrameTimingTracker;
 class PerceptionPipeline;
@@ -30,15 +30,15 @@ struct SlamFrameProcessingContext {
     LiveRuntimeTuning &tuning;
     LivePoseState &livePose;
     SlamRuntimeControlPort *slamControl{nullptr};
-    SmartDrone::core::ports::ICameraProvider &cameraProvider;
-    SmartDrone::core::ports::IImuProvider &imuProvider;
+    SmartDrone::Core::Ports::ICameraProvider &cameraProvider;
+    SmartDrone::Core::Ports::IImuProvider &imuProvider;
     FrameTimingTracker &frameTimingTracker;
     PerceptionPipeline &perceptionPipeline;
     AutoSlamModeController &autoSlamModeController;
 };
 
 struct SlamFrameTrackingContext {
-    SmartDrone::core::ports::ISlamEngine &slamEngine;
+    SmartDrone::Core::Ports::ISlamEngine &slamEngine;
     SlamRuntimeControlPort *slamControl{nullptr};
     FrameTimingTracker &frameTimingTracker;
 };
@@ -59,8 +59,8 @@ struct SlamFrameOutputContext {
     const MainRuntimeAliases &aliases;
     bool monoMode{false};
     LivePoseState &livePose;
-    SmartDrone::core::ports::IPosePublisher &posePublisher;
+    SmartDrone::Core::Ports::IPosePublisher &posePublisher;
     IPreviewOutputPort &previewOutput;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

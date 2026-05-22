@@ -14,11 +14,7 @@
 #include "adapters/slam/temporal_stereo.h"
 #include "adapters/slam/visual_pnp_pose_backend.h"
 
-#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
-#include "adapters/slam/slam_engine_adapter.h"
-#endif
-
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -46,21 +42,6 @@ void SyncLegacyStereoCalibrationFields(SlamModeSharedState &state)
 } // namespace
 
 SlamModeSharedState::~SlamModeSharedState() = default;
-
-#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
-void SlamEngineAdapter::SetVisualFeatureFrontend(
-    core::ports::IVisualFeatureFrontend *frontend)
-{
-    m_modeState->m_visualFeatureFrontend = frontend;
-}
-
-void SlamEngineAdapter::SetVisualFeatureInputSizeLimit(int maxWidth,
-                                                       int maxHeight)
-{
-    m_modeState->m_visualFeatureInputMaxWidth = std::max(0, maxWidth);
-    m_modeState->m_visualFeatureInputMaxHeight = std::max(0, maxHeight);
-}
-#endif
 
 bool SlamModeSharedState::LoadStereoCalibration(
     const std::string &settingsPath)
@@ -155,7 +136,7 @@ void SlamModeSharedState::ResetVisualFeatureStats()
 }
 
 void SlamModeSharedState::CopyVisualFeatureStatsToOutput(
-    core::ports::SlamOutput &out) const
+    Core::Ports::SlamOutput &out) const
 {
     out.visualFeatureRawLeftCount = m_lastVisualFeatureRawLeftCount;
     out.visualFeatureRawRightCount = m_lastVisualFeatureRawRightCount;
@@ -174,7 +155,7 @@ void SlamModeSharedState::CopyVisualFeatureStatsToOutput(
     out.visualFeaturePayloadBytes = m_lastVisualFeaturePayloadBytes;
 }
 
-core::ports::IStereoCalibrationLoader &
+Core::Ports::IStereoCalibrationLoader &
 SlamModeSharedState::StereoCalibrationLoader()
 {
     if (!m_stereoCalibrationLoader) {
@@ -184,13 +165,13 @@ SlamModeSharedState::StereoCalibrationLoader()
     return *m_stereoCalibrationLoader;
 }
 
-const core::ports::IStereoCalibrationLoader &
+const Core::Ports::IStereoCalibrationLoader &
 SlamModeSharedState::StereoCalibrationLoader() const
 {
     return const_cast<SlamModeSharedState *>(this)->StereoCalibrationLoader();
 }
 
-core::ports::IStereoRectifier &SlamModeSharedState::StereoRectifier()
+Core::Ports::IStereoRectifier &SlamModeSharedState::StereoRectifier()
 {
     if (!m_stereoRectifier) {
         m_stereoRectifier = std::make_unique<DefaultStereoRectifier>();
@@ -198,13 +179,13 @@ core::ports::IStereoRectifier &SlamModeSharedState::StereoRectifier()
     return *m_stereoRectifier;
 }
 
-const core::ports::IStereoRectifier &
+const Core::Ports::IStereoRectifier &
 SlamModeSharedState::StereoRectifier() const
 {
     return const_cast<SlamModeSharedState *>(this)->StereoRectifier();
 }
 
-core::ports::IStereoFramePreprocessor &
+Core::Ports::IStereoFramePreprocessor &
 SlamModeSharedState::StereoFramePreprocessor()
 {
     if (!m_stereoFramePreprocessor) {
@@ -214,13 +195,13 @@ SlamModeSharedState::StereoFramePreprocessor()
     return *m_stereoFramePreprocessor;
 }
 
-const core::ports::IStereoFramePreprocessor &
+const Core::Ports::IStereoFramePreprocessor &
 SlamModeSharedState::StereoFramePreprocessor() const
 {
     return const_cast<SlamModeSharedState *>(this)->StereoFramePreprocessor();
 }
 
-core::ports::IStereoPairBuilder &SlamModeSharedState::StereoPairBuilder()
+Core::Ports::IStereoPairBuilder &SlamModeSharedState::StereoPairBuilder()
 {
     if (!m_stereoPairBuilder) {
         m_stereoPairBuilder = std::make_unique<DefaultStereoPairBuilder>();
@@ -228,13 +209,13 @@ core::ports::IStereoPairBuilder &SlamModeSharedState::StereoPairBuilder()
     return *m_stereoPairBuilder;
 }
 
-const core::ports::IStereoPairBuilder &
+const Core::Ports::IStereoPairBuilder &
 SlamModeSharedState::StereoPairBuilder() const
 {
     return const_cast<SlamModeSharedState *>(this)->StereoPairBuilder();
 }
 
-core::ports::IStereoMatchSelector &SlamModeSharedState::StereoMatchSelector()
+Core::Ports::IStereoMatchSelector &SlamModeSharedState::StereoMatchSelector()
 {
     if (!m_stereoMatchSelector) {
         m_stereoMatchSelector = std::make_unique<DefaultStereoMatchSelector>();
@@ -242,13 +223,13 @@ core::ports::IStereoMatchSelector &SlamModeSharedState::StereoMatchSelector()
     return *m_stereoMatchSelector;
 }
 
-const core::ports::IStereoMatchSelector &
+const Core::Ports::IStereoMatchSelector &
 SlamModeSharedState::StereoMatchSelector() const
 {
     return const_cast<SlamModeSharedState *>(this)->StereoMatchSelector();
 }
 
-core::ports::ITemporalStereoProcessor &
+Core::Ports::ITemporalStereoProcessor &
 SlamModeSharedState::TemporalStereoProcessor()
 {
     if (!m_temporalStereoProcessor) {
@@ -258,13 +239,13 @@ SlamModeSharedState::TemporalStereoProcessor()
     return *m_temporalStereoProcessor;
 }
 
-const core::ports::ITemporalStereoProcessor &
+const Core::Ports::ITemporalStereoProcessor &
 SlamModeSharedState::TemporalStereoProcessor() const
 {
     return const_cast<SlamModeSharedState *>(this)->TemporalStereoProcessor();
 }
 
-core::ports::IStereoFeaturePacketBuilder &
+Core::Ports::IStereoFeaturePacketBuilder &
 SlamModeSharedState::StereoFeaturePacketBuilder()
 {
     if (!m_stereoFeaturePacketBuilder) {
@@ -274,55 +255,55 @@ SlamModeSharedState::StereoFeaturePacketBuilder()
     return *m_stereoFeaturePacketBuilder;
 }
 
-const core::ports::IStereoFeaturePacketBuilder &
+const Core::Ports::IStereoFeaturePacketBuilder &
 SlamModeSharedState::StereoFeaturePacketBuilder() const
 {
     return const_cast<SlamModeSharedState *>(this)->StereoFeaturePacketBuilder();
 }
 
 void SlamModeSharedState::SetStereoMatchSelector(
-    std::unique_ptr<core::ports::IStereoMatchSelector> selector)
+    std::unique_ptr<Core::Ports::IStereoMatchSelector> selector)
 {
     m_stereoMatchSelector = std::move(selector);
 }
 
 void SlamModeSharedState::SetTemporalStereoProcessor(
-    std::unique_ptr<core::ports::ITemporalStereoProcessor> processor)
+    std::unique_ptr<Core::Ports::ITemporalStereoProcessor> processor)
 {
     m_temporalStereoProcessor = std::move(processor);
 }
 
 void SlamModeSharedState::SetStereoFeaturePacketBuilder(
-    std::unique_ptr<core::ports::IStereoFeaturePacketBuilder> builder)
+    std::unique_ptr<Core::Ports::IStereoFeaturePacketBuilder> builder)
 {
     m_stereoFeaturePacketBuilder = std::move(builder);
 }
 
 void SlamModeSharedState::SetStereoCalibrationLoader(
-    std::unique_ptr<core::ports::IStereoCalibrationLoader> loader)
+    std::unique_ptr<Core::Ports::IStereoCalibrationLoader> loader)
 {
     m_stereoCalibrationLoader = std::move(loader);
 }
 
 void SlamModeSharedState::SetStereoRectifier(
-    std::unique_ptr<core::ports::IStereoRectifier> rectifier)
+    std::unique_ptr<Core::Ports::IStereoRectifier> rectifier)
 {
     m_stereoRectifier = std::move(rectifier);
 }
 
 void SlamModeSharedState::SetStereoFramePreprocessor(
-    std::unique_ptr<core::ports::IStereoFramePreprocessor> preprocessor)
+    std::unique_ptr<Core::Ports::IStereoFramePreprocessor> preprocessor)
 {
     m_stereoFramePreprocessor = std::move(preprocessor);
 }
 
 void SlamModeSharedState::SetStereoPairBuilder(
-    std::unique_ptr<core::ports::IStereoPairBuilder> builder)
+    std::unique_ptr<Core::Ports::IStereoPairBuilder> builder)
 {
     m_stereoPairBuilder = std::move(builder);
 }
 
-core::ports::IVisualPnpObservationBuilder &
+Core::Ports::IVisualPnpObservationBuilder &
 SlamModeSharedState::VisualPnpObservationBuilder()
 {
     if (!m_visualPnpObservationBuilder) {
@@ -332,13 +313,13 @@ SlamModeSharedState::VisualPnpObservationBuilder()
     return *m_visualPnpObservationBuilder;
 }
 
-const core::ports::IVisualPnpObservationBuilder &
+const Core::Ports::IVisualPnpObservationBuilder &
 SlamModeSharedState::VisualPnpObservationBuilder() const
 {
     return const_cast<SlamModeSharedState *>(this)->VisualPnpObservationBuilder();
 }
 
-core::ports::IVisualPnpPoseBackend &
+Core::Ports::IVisualPnpPoseBackend &
 SlamModeSharedState::VisualPnpPoseBackend()
 {
     if (!m_visualPnpPoseBackend) {
@@ -347,25 +328,25 @@ SlamModeSharedState::VisualPnpPoseBackend()
     return *m_visualPnpPoseBackend;
 }
 
-const core::ports::IVisualPnpPoseBackend &
+const Core::Ports::IVisualPnpPoseBackend &
 SlamModeSharedState::VisualPnpPoseBackend() const
 {
     return const_cast<SlamModeSharedState *>(this)->VisualPnpPoseBackend();
 }
 
 void SlamModeSharedState::SetVisualPnpObservationBuilder(
-    std::unique_ptr<core::ports::IVisualPnpObservationBuilder> builder)
+    std::unique_ptr<Core::Ports::IVisualPnpObservationBuilder> builder)
 {
     m_visualPnpObservationBuilder = std::move(builder);
 }
 
 void SlamModeSharedState::SetVisualPnpPoseBackend(
-    std::unique_ptr<core::ports::IVisualPnpPoseBackend> backend)
+    std::unique_ptr<Core::Ports::IVisualPnpPoseBackend> backend)
 {
     m_visualPnpPoseBackend = std::move(backend);
 }
 
-core::ports::IPointTracker2d &SlamModeSharedState::PointTracker2d()
+Core::Ports::IPointTracker2d &SlamModeSharedState::PointTracker2d()
 {
     if (!m_pointTracker2d) {
         m_pointTracker2d = std::make_unique<DefaultPointTracker2d>();
@@ -373,13 +354,13 @@ core::ports::IPointTracker2d &SlamModeSharedState::PointTracker2d()
     return *m_pointTracker2d;
 }
 
-const core::ports::IPointTracker2d &
+const Core::Ports::IPointTracker2d &
 SlamModeSharedState::PointTracker2d() const
 {
     return const_cast<SlamModeSharedState *>(this)->PointTracker2d();
 }
 
-core::ports::IVisualLoopClosureBackend &
+Core::Ports::IVisualLoopClosureBackend &
 SlamModeSharedState::VisualLoopClosureBackend()
 {
     if (!m_visualLoopClosureBackend) {
@@ -389,22 +370,22 @@ SlamModeSharedState::VisualLoopClosureBackend()
     return *m_visualLoopClosureBackend;
 }
 
-const core::ports::IVisualLoopClosureBackend &
+const Core::Ports::IVisualLoopClosureBackend &
 SlamModeSharedState::VisualLoopClosureBackend() const
 {
     return const_cast<SlamModeSharedState *>(this)->VisualLoopClosureBackend();
 }
 
 void SlamModeSharedState::SetPointTracker2d(
-    std::unique_ptr<core::ports::IPointTracker2d> tracker)
+    std::unique_ptr<Core::Ports::IPointTracker2d> tracker)
 {
     m_pointTracker2d = std::move(tracker);
 }
 
 void SlamModeSharedState::SetVisualLoopClosureBackend(
-    std::unique_ptr<core::ports::IVisualLoopClosureBackend> backend)
+    std::unique_ptr<Core::Ports::IVisualLoopClosureBackend> backend)
 {
     m_visualLoopClosureBackend = std::move(backend);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

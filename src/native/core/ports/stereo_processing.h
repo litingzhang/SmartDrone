@@ -9,7 +9,7 @@
 
 #include "core/ports/visual_descriptor.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 class IPointTracker2d;
 class IStereoPairBuilder;
@@ -222,4 +222,4 @@ class ITemporalStereoProcessor {
                                TemporalStereoSource &source) const = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

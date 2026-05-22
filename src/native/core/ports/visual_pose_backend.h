@@ -7,7 +7,7 @@
 #include <opencv2/core.hpp>
 #include <sophus/se3.hpp>
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct VisualPnpPoseBackendOptions {
     cv::Mat cameraMatrix;
@@ -39,4 +39,4 @@ class IVisualPnpPoseBackend {
                                     VisualPnpPoseBackendResult &result) const = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

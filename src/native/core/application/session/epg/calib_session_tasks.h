@@ -7,7 +7,7 @@
 #include "common/epg/epg.h"
 #include "core/application/session/calib/calib_runtime_state.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class CalibResourceTask final : public Epg::ITask {
   public:
@@ -137,4 +137,4 @@ class CalibMonitorTask final : public Epg::ITask {
     std::atomic<bool> &m_completed;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

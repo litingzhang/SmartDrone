@@ -7,7 +7,10 @@
 
 #include <cstring>
 
-UdpClient::~UdpClient() { Close(); }
+UdpClient::~UdpClient()
+{
+    Close();
+}
 
 bool UdpClient::Open(const std::string &ip, uint16_t sendPort, uint16_t bindPort)
 {

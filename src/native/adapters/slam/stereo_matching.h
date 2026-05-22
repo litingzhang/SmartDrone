@@ -6,25 +6,25 @@
 
 #include "core/ports/stereo_processing.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 class DefaultStereoMatchSelector final
-    : public core::ports::IStereoMatchSelector {
+    : public Core::Ports::IStereoMatchSelector {
   public:
     bool
-    SelectMatches(const core::ports::StereoMatchSelectionInput &input,
-                  core::ports::StereoMatchSelection &selection) const override;
+    SelectMatches(const Core::Ports::StereoMatchSelectionInput &input,
+                  Core::Ports::StereoMatchSelection &selection) const override;
 };
 
 void CopyMatchedStereoPointsFromPairs(
-    const core::ports::VisualFeatureSet &leftFeatures,
-    const core::ports::VisualFeatureSet &rightFeatures,
-    const std::vector<core::ports::StereoMatchPair> &matches,
+    const Core::Ports::VisualFeatureSet &leftFeatures,
+    const Core::Ports::VisualFeatureSet &rightFeatures,
+    const std::vector<Core::Ports::StereoMatchPair> &matches,
     std::vector<cv::Point2f> &leftPoints,
     std::vector<cv::Point2f> &rightPoints);
 
 bool SelectStereoFeatureMatches(
-    const core::ports::StereoMatchSelectionInput &input,
-    core::ports::StereoMatchSelection &selection);
+    const Core::Ports::StereoMatchSelectionInput &input,
+    Core::Ports::StereoMatchSelection &selection);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

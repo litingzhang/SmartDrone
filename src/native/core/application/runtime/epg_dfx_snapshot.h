@@ -6,7 +6,7 @@
 
 #include "common/epg/epg.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct EpgGraphRef {
     Epg::EventPipelineGraph *graph{nullptr};
@@ -34,4 +34,4 @@ class EpgDfxSnapshotTask final : public Epg::ITask {
 std::uint64_t EpgDfxNowMs();
 void WriteEpgDfxSnapshotFile(const std::string &path, const std::string &json);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

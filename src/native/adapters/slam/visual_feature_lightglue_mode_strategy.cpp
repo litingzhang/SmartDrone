@@ -20,7 +20,7 @@
 #include "adapters/slam/temporal_stereo.h"
 #include "core/ports/slam_tracking_state.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -43,20 +43,20 @@ const SlamModeStrategyRegistrar kXFeatLightGlueModeStrategyRegistration(
     FeatureFrontend::XFeatLightGlue,
     &CreateRegisteredXFeatLightGlueModeStrategy);
 
-core::ports::SlamOutput
+Core::Ports::SlamOutput
 MakeVisualFeatureFailureOutput(SlamEngineAdapter &engine,
                                SlamModeSharedState &state,
-                               const core::ports::SlamInputBatch &input)
+                               const Core::Ports::SlamInputBatch &input)
 {
-    core::ports::SlamOutput out = MakePoseLostSlamOutput(
-        &engine, input, core::ports::kSlamTrackingRecentlyLost, true, true);
+    Core::Ports::SlamOutput out = MakePoseLostSlamOutput(
+        &engine, input, Core::Ports::kSlamTrackingRecentlyLost, true, true);
     state.CopyVisualFeatureStatsToOutput(out);
     return out;
 }
 
 int ChooseLightGlueCadence(
     const SlamModeSharedState &state,
-    const core::ports::ISlamTrackingStatusProvider &trackingStatus)
+    const Core::Ports::ISlamTrackingStatusProvider &trackingStatus)
 {
     const int baseEveryN =
         EnvIntValueClamped("SMART_DRONE_LIGHTGLUE_EVERY_N", 4, 1, 120);
@@ -77,7 +77,7 @@ int ChooseLightGlueCadence(
         EnvIntValueClamped("SMART_DRONE_SP_LG_STABLE_OK_STREAK", 120, 1, 100000);
     const int trackedMapPointMin =
         EnvIntValueClamped("SMART_DRONE_SP_LG_STABLE_TRACKED_MPS", 96, 1, 100000);
-    if (trackingState == core::ports::kSlamTrackingOk &&
+    if (trackingState == Core::Ports::kSlamTrackingOk &&
         state.m_visualFeatureLightGlueOkStreak >= okStreakMin &&
         trackedMapPoints >= trackedMapPointMin) {
         return stableEveryN;
@@ -86,7 +86,7 @@ int ChooseLightGlueCadence(
 }
 
 void UpdateLightGlueCadenceState(SlamModeSharedState &state,
-                                 const core::ports::SlamOutput &out)
+                                 const Core::Ports::SlamOutput &out)
 {
     const int trackedMapPointMin =
         EnvIntValueClamped("SMART_DRONE_SP_LG_STABLE_TRACKED_MPS", 96, 1, 100000);
@@ -102,7 +102,7 @@ void UpdateLightGlueCadenceState(SlamModeSharedState &state,
     const bool holdMatureBootstrapTrust =
         bootstrapTrustAlreadyMature &&
         trackedMapPoints >= bootstrapTrustHoldTrackedMapMin;
-    if (out.trackingState == core::ports::kSlamTrackingOk &&
+    if (out.trackingState == Core::Ports::kSlamTrackingOk &&
         (trackedMapPoints >= trackedMapPointMin || holdMatureBootstrapTrust)) {
         ++state.m_visualFeatureLightGlueOkStreak;
     } else {
@@ -184,13 +184,13 @@ size_t RefineSelectedRightPointsByZncc(const cv::Mat &leftPrepared,
 void StoreTemporalCarrySource(
     SlamModeSharedState &state, const cv::Mat &leftPrepared,
     const cv::Mat &rightPrepared,
-    const core::ports::StereoFeatureObservationPacket &stereoData)
+    const Core::Ports::StereoFeatureObservationPacket &stereoData)
 {
-    core::ports::TemporalStereoSourceInput sourceInput;
+    Core::Ports::TemporalStereoSourceInput sourceInput;
     sourceInput.leftPrepared = &leftPrepared;
     sourceInput.rightPrepared = &rightPrepared;
     sourceInput.observations = &stereoData;
-    core::ports::TemporalStereoSource source;
+    Core::Ports::TemporalStereoSource source;
     if (!state.TemporalStereoProcessor().ExtractSource(sourceInput, source)) {
         state.m_visualFeatureTemporalHavePrevStereo = false;
         state.m_visualFeatureTemporalPrevLeftPoints.clear();
@@ -220,18 +220,18 @@ FeatureFrontend VisualFeatureLightGlueModeStrategy::Frontend() const
     return m_frontend;
 }
 
-core::ports::SlamOutput VisualFeatureLightGlueModeStrategy::Process(
-    SlamEngineAdapter &engine, const core::ports::SlamInputBatch &input,
+Core::Ports::SlamOutput VisualFeatureLightGlueModeStrategy::Process(
+    SlamEngineAdapter &engine, const Core::Ports::SlamInputBatch &input,
     bool extractFeatures, bool extractPointCloud)
 {
-    core::ports::ISlamTrackingBackend *backend =
+    Core::Ports::ISlamTrackingBackend *backend =
         SlamEngineAccess::TrackingBackend(engine);
     if (backend == nullptr || !backend->Available()) {
         return {};
     }
-    core::ports::ISlamTrackingStatusProvider *trackingStatus =
+    Core::Ports::ISlamTrackingStatusProvider *trackingStatus =
         SlamEngineAccess::TrackingStatus(engine);
-    core::ports::ISlamDescriptorProviderSource *descriptorProviders =
+    Core::Ports::ISlamDescriptorProviderSource *descriptorProviders =
         SlamEngineAccess::DescriptorProviders(engine);
     if (trackingStatus == nullptr || descriptorProviders == nullptr) {
         return {};
@@ -259,10 +259,10 @@ core::ports::SlamOutput VisualFeatureLightGlueModeStrategy::Process(
     }
 
     if (EnvFlagEnabled("SMART_DRONE_SP_LG_USE_ORB_PREPARED_IMAGES", false)) {
-        core::ports::StereoPreprocessRequest preprocessRequest;
+        Core::Ports::StereoPreprocessRequest preprocessRequest;
         preprocessRequest.left = &input.stereo.left.gray;
         preprocessRequest.right = &input.stereo.right.gray;
-        core::ports::StereoPreprocessResult preprocessResult;
+        Core::Ports::StereoPreprocessResult preprocessResult;
         if (!backend->PrepareStereoImagesForTracking(preprocessRequest,
                                                      preprocessResult)) {
             return MakeVisualFeatureFailureOutput(engine, state, input);
@@ -299,11 +299,11 @@ core::ports::SlamOutput VisualFeatureLightGlueModeStrategy::Process(
         return MakeVisualFeatureFailureOutput(engine, state, input);
     }
 
-    core::ports::VisualFeatureSet leftFeatures =
+    Core::Ports::VisualFeatureSet leftFeatures =
         std::move(frontendResult.leftFeatures);
-    core::ports::VisualFeatureSet rightFeatures =
+    Core::Ports::VisualFeatureSet rightFeatures =
         std::move(frontendResult.rightFeatures);
-    const core::ports::IVisualFeatureFrontend::Stats &stats =
+    const Core::Ports::IVisualFeatureFrontend::Stats &stats =
         frontendResult.stats;
     state.m_lastVisualFeaturePrepareMs = stats.prepareMs;
     state.m_lastVisualFeatureInputMs = stats.inputMs;
@@ -336,7 +336,7 @@ core::ports::SlamOutput VisualFeatureLightGlueModeStrategy::Process(
              trustFrontendOkStreak) &&
         EnvFlagEnabled("SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_FRONTEND_PAIRS", false);
 
-    core::ports::StereoMatchSelectionInput matchInput;
+    Core::Ports::StereoMatchSelectionInput matchInput;
     matchInput.leftFeatures = &leftFeatures;
     matchInput.rightFeatures = &rightFeatures;
     matchInput.leftPrepared = &leftPrepared;
@@ -349,7 +349,7 @@ core::ports::SlamOutput VisualFeatureLightGlueModeStrategy::Process(
     matchInput.trustFrontendBootstrapPairs = trustFrontendBootstrapPairs;
     matchInput.previousFrameWeak = PreviousFrameWasWeak(state);
 
-    core::ports::StereoMatchSelection matchSelection;
+    Core::Ports::StereoMatchSelection matchSelection;
     if (!state.StereoMatchSelector().SelectMatches(matchInput, matchSelection)) {
         return MakeVisualFeatureFailureOutput(engine, state, input);
     }
@@ -373,7 +373,7 @@ core::ports::SlamOutput VisualFeatureLightGlueModeStrategy::Process(
     temporalInput.pointTracker = &state.PointTracker2d();
     temporalInput.initializing = initializingStereoFeature;
     temporalInput.recovering = recoveringStereoFeature;
-    core::ports::TemporalStereoCarryResult temporalResult;
+    Core::Ports::TemporalStereoCarryResult temporalResult;
     if (!state.TemporalStereoProcessor().AppendCarry(
             temporalInput, matchedLeftPoints, matchedRightPoints,
             temporalResult)) {
@@ -389,7 +389,7 @@ core::ports::SlamOutput VisualFeatureLightGlueModeStrategy::Process(
         static_cast<int>(matchedLeftPoints.size());
 
     const auto packStartTp = std::chrono::steady_clock::now();
-    core::ports::StereoFeaturePacketBuildInput packetInput;
+    Core::Ports::StereoFeaturePacketBuildInput packetInput;
     packetInput.leftPrepared = &leftPrepared;
     packetInput.rightPrepared = &rightPrepared;
     packetInput.matchedLeftPoints = &matchedLeftPoints;
@@ -406,8 +406,8 @@ core::ports::SlamOutput VisualFeatureLightGlueModeStrategy::Process(
         trackingStatus->HasTrackingInitialized();
     packetInput.stableOkStreak = state.m_visualFeatureLightGlueOkStreak;
 
-    core::ports::StereoFeaturePacket packet;
-    core::ports::IStereoFeaturePacketBuilder &packetBuilder =
+    Core::Ports::StereoFeaturePacket packet;
+    Core::Ports::IStereoFeaturePacketBuilder &packetBuilder =
         state.StereoFeaturePacketBuilder();
     if (!packetBuilder.BuildPacket(packetInput, packet)) {
         CopyMatchedStereoPointsFromPairs(leftFeatures, rightFeatures,
@@ -487,7 +487,7 @@ core::ports::SlamOutput VisualFeatureLightGlueModeStrategy::Process(
     StoreTemporalCarrySource(state, request.leftPrepared, request.rightPrepared,
                              request.observations);
 
-    core::ports::SlamOutput out = RunSlamTrackingBackend(
+    Core::Ports::SlamOutput out = RunSlamTrackingBackend(
         engine, input, extractFeatures, extractPointCloud, &request);
     UpdateLightGlueCadenceState(state, out);
     UpdateBootstrapTrustState(
@@ -510,4 +510,4 @@ std::unique_ptr<SlamModeStrategy> CreateXFeatLightGlueModeStrategy()
         FeatureFrontend::XFeatLightGlue);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

@@ -7,7 +7,7 @@
 #include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/session/stream/preview_output_port.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class CalibPreviewPort::Impl final {
   public:
@@ -98,4 +98,4 @@ bool CalibPreviewPort::Opened() const
     return m_impl->Opened();
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

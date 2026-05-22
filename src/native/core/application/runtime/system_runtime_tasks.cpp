@@ -4,7 +4,7 @@
 
 #include "core/application/runtime/system_runtime_messages.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 VehicleTelemetryRxTask::VehicleTelemetryRxTask(
     std::shared_ptr<SystemRuntimeStepServices> services)
@@ -21,7 +21,9 @@ void VehicleTelemetryRxTask::OnTick(Epg::TaskContext &context)
     PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
-EPG_REGISTER_TASK_TYPE(VehicleTelemetryRxTask, "VehicleTelemetryRxTask")
+const bool VEHICLE_TELEMETRY_RX_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<VehicleTelemetryRxTask>(
+        "VehicleTelemetryRxTask");
 
 SetpointStreamTask::SetpointStreamTask(
     std::shared_ptr<SystemRuntimeStepServices> services)
@@ -38,7 +40,9 @@ void SetpointStreamTask::OnTick(Epg::TaskContext &context)
     PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
-EPG_REGISTER_TASK_TYPE(SetpointStreamTask, "SetpointStreamTask")
+const bool SETPOINT_STREAM_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SetpointStreamTask>(
+        "SetpointStreamTask");
 
 UdpCommandTask::UdpCommandTask(std::shared_ptr<UdpCommandRuntime> runtime)
     : m_runtime(std::move(runtime))
@@ -61,7 +65,9 @@ void UdpCommandTask::OnTick(Epg::TaskContext &context)
     PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
-EPG_REGISTER_TASK_TYPE(UdpCommandTask, "UdpCommandTask")
+const bool UDP_COMMAND_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<UdpCommandTask>(
+        "UdpCommandTask");
 
 ManualControlTask::ManualControlTask(
     std::shared_ptr<SystemRuntimeStepServices> services)
@@ -78,7 +84,9 @@ void ManualControlTask::OnTick(Epg::TaskContext &context)
     PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
-EPG_REGISTER_TASK_TYPE(ManualControlTask, "ManualControlTask")
+const bool MANUAL_CONTROL_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<ManualControlTask>(
+        "ManualControlTask");
 
 ForceRestartTask::ForceRestartTask(
     std::shared_ptr<SystemRuntimeStepServices> services)
@@ -95,7 +103,9 @@ void ForceRestartTask::OnTick(Epg::TaskContext &context)
     PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
-EPG_REGISTER_TASK_TYPE(ForceRestartTask, "ForceRestartTask")
+const bool FORCE_RESTART_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<ForceRestartTask>(
+        "ForceRestartTask");
 
 RuntimeSupervisorTask::RuntimeSupervisorTask(
     std::shared_ptr<SystemRuntimeStepServices> services)
@@ -112,7 +122,9 @@ void RuntimeSupervisorTask::OnTick(Epg::TaskContext &context)
     PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
-EPG_REGISTER_TASK_TYPE(RuntimeSupervisorTask, "RuntimeSupervisorTask")
+const bool RUNTIME_SUPERVISOR_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<RuntimeSupervisorTask>(
+        "RuntimeSupervisorTask");
 
 EpgRedeployTask::EpgRedeployTask(
     std::shared_ptr<SystemRuntimeStepServices> services,
@@ -130,7 +142,9 @@ void EpgRedeployTask::OnTick(Epg::TaskContext &context)
     PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
-EPG_REGISTER_TASK_TYPE(EpgRedeployTask, "EpgRedeployTask")
+const bool EPG_REDEPLOY_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<EpgRedeployTask>(
+        "EpgRedeployTask");
 
 DiscoveryBeaconTask::DiscoveryBeaconTask(
     std::shared_ptr<DiscoveryBeaconRuntime> runtime)
@@ -154,6 +168,8 @@ void DiscoveryBeaconTask::OnTick(Epg::TaskContext &context)
     PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
-EPG_REGISTER_TASK_TYPE(DiscoveryBeaconTask, "DiscoveryBeaconTask")
+const bool DISCOVERY_BEACON_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<DiscoveryBeaconTask>(
+        "DiscoveryBeaconTask");
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

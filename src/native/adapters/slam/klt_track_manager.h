@@ -8,7 +8,7 @@
 #include "adapters/slam/slam_mode_state.h"
 #include "core/ports/slam_engine.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 std::vector<cv::Point2f> ExtractLkTrackLeftPoints(const std::vector<LkStereoTrack> &tracks);
 std::vector<cv::Point2f> ExtractLkTrackRightPoints(const std::vector<LkStereoTrack> &tracks);
@@ -24,6 +24,6 @@ void UpdateLkTracksAfterPoseEstimate(SlamModeSharedState &state, const cv::Mat &
                                      std::vector<LkStereoTrack> trackedTracks, int inlierCount);
 
 void CopyLkTrackFeaturesToOutput(const std::vector<LkStereoTrack> &tracks,
-                                 core::ports::SlamOutput &out);
+                                 Core::Ports::SlamOutput &out);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

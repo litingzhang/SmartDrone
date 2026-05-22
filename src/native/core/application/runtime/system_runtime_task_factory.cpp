@@ -10,7 +10,7 @@
 #include "core/application/runtime/epg_optimize_task.h"
 #include "core/application/runtime/system_runtime_tasks.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 using SystemRuntimeTaskFactoryEntries =
@@ -99,4 +99,4 @@ EpgTaskFactoryResolver MakeSystemRuntimeTaskFactoryResolver(
     return resolver;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

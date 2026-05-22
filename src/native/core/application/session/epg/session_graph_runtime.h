@@ -1,6 +1,6 @@
 #pragma once
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class ISessionGraphRuntime {
   public:
@@ -14,4 +14,4 @@ class ISessionGraphRuntime {
     virtual bool Ok() const = 0;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

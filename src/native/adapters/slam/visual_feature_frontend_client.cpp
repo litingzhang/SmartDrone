@@ -8,7 +8,7 @@
 #include <system_error>
 #include <vector>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -236,4 +236,4 @@ void ConfigureVisualFeatureFrontendDefaults(
     }
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

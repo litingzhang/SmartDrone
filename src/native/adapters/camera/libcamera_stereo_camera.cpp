@@ -1,8 +1,8 @@
 #include "adapters/camera/libcamera_stereo_camera.h"
 
-namespace SmartDrone::adapters::camera {
+namespace SmartDrone::Adapters::Camera {
 
-bool LibcameraStereoCamera::Open(const core::ports::CameraOpenConfig &config)
+bool LibcameraStereoCamera::Open(const Core::Ports::CameraOpenConfig &config)
 {
     const StereoCameraOpenParams params{
         config.width,
@@ -37,7 +37,7 @@ void LibcameraStereoCamera::Stop()
     Close();
 }
 
-bool LibcameraStereoCamera::GrabStereo(core::ports::StereoFrame &out, int timeoutMs, bool preferLatest,
+bool LibcameraStereoCamera::GrabStereo(Core::Ports::StereoFrame &out, int timeoutMs, bool preferLatest,
                                        uint64_t minTimestampNs)
 {
     FrameItem left;
@@ -60,18 +60,18 @@ bool LibcameraStereoCamera::GrabStereo(core::ports::StereoFrame &out, int timeou
     return true;
 }
 
-core::ports::CameraHealth LibcameraStereoCamera::GetHealth() const
+Core::Ports::CameraHealth LibcameraStereoCamera::GetHealth() const
 {
-    core::ports::CameraHealth health{};
+    Core::Ports::CameraHealth health{};
     health.healthy = m_impl.Healthy();
     health.droppedPairs = m_impl.DroppedPaired();
     return health;
 }
 
-core::ports::CameraDiagnostics LibcameraStereoCamera::GetDiagnostics() const
+Core::Ports::CameraDiagnostics LibcameraStereoCamera::GetDiagnostics() const
 {
     const auto diag = m_impl.GetDiagnostics();
-    core::ports::CameraDiagnostics out{};
+    Core::Ports::CameraDiagnostics out{};
     out.healthy = diag.healthy;
     out.acceptFrames = diag.acceptFrames;
     out.lastRawSeqL = diag.lastRawSeqL;
@@ -93,9 +93,9 @@ core::ports::CameraDiagnostics LibcameraStereoCamera::GetDiagnostics() const
     return out;
 }
 
-core::ports::CameraProviderSemantics LibcameraStereoCamera::Semantics() const
+Core::Ports::CameraProviderSemantics LibcameraStereoCamera::Semantics() const
 {
-    return core::ports::CameraProviderSemantics::DualStreamPaired;
+    return Core::Ports::CameraProviderSemantics::DualStreamPaired;
 }
 
-} // namespace SmartDrone::adapters::camera
+} // namespace SmartDrone::Adapters::Camera

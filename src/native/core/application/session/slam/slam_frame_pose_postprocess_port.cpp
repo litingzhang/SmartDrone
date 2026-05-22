@@ -13,7 +13,7 @@
 #include "core/application/session/slam/slam_settings_loader.h"
 #include "core/application/state/live_pose_state.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr uint64_t kPoseAxisLogEveryNFrames = 30;
@@ -105,10 +105,10 @@ SlamFramePosePostprocessPort::ResolveTrackingContext(
 {
     const bool debugRightOnlyFeatures = tracked.frame->debugRightOnlyFeatures;
     TrackingContext tracking{};
-    tracking.state = debugRightOnlyFeatures ? ports::kSlamTrackingLost
+    tracking.state = debugRightOnlyFeatures ? Ports::kSlamTrackingLost
                                             : tracked.slamOutput.trackingState;
     tracking.usable = !debugRightOnlyFeatures &&
-                      ports::IsSlamTrackingPoseUsable(tracking.state);
+                      Ports::IsSlamTrackingPoseUsable(tracking.state);
     tracking.mapId = debugRightOnlyFeatures ? 0UL : tracked.slamOutput.mapId;
     m_sharedState.lastTrackingState.store(tracking.state);
     m_sharedState.lastTrackingUsable.store(tracking.usable);
@@ -229,7 +229,7 @@ void SlamFramePosePostprocessPort::UpdateAutoSlamMode(
     const PosePostprocessor::Result &poseResult, double frameGapMs)
 {
     if (m_sharedState.requestedSlamMode.load() !=
-        SmartDrone::core::domain::SlamOperationMode::Auto) {
+        SmartDrone::Core::Domain::SlamOperationMode::Auto) {
         return;
     }
 
@@ -247,7 +247,7 @@ void SlamFramePosePostprocessPort::UpdateAutoSlamMode(
     }
     m_ctx.livePose.SetSlamMode(ToRuntimeSlamModeValue(autoEffectiveMode));
     std::cerr << "[slam_auto] effective_mode -> "
-              << SmartDrone::core::domain::ToString(autoEffectiveMode)
+              << SmartDrone::Core::Domain::ToString(autoEffectiveMode)
               << " quality=" << static_cast<int>(poseResult.quality)
               << " state=" << tracking.state
               << " featL=" << tracked.slamOutput.leftFeatures.size()
@@ -304,4 +304,4 @@ void SlamFramePosePostprocessPort::FillPublishedFrame(
     published.effectiveResetMapCount = artifacts.effectiveResetMapCount;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

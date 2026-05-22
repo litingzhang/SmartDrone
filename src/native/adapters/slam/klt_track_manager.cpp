@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 std::vector<cv::Point2f> ExtractLkTrackLeftPoints(const std::vector<LkStereoTrack> &tracks)
 {
@@ -76,9 +76,9 @@ void UpdateLkTracksAfterPoseEstimate(SlamModeSharedState &state, const cv::Mat &
 }
 
 void CopyLkTrackFeaturesToOutput(const std::vector<LkStereoTrack> &tracks,
-                                 core::ports::SlamOutput &out)
+                                 Core::Ports::SlamOutput &out)
 {
-    core::ports::CopyStereoTracksToOutput(tracks, out);
+    Core::Ports::CopyStereoTracksToOutput(tracks, out);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

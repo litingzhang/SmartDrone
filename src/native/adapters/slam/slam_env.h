@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <string>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 inline const char *EnvValueWithStereoFeatureFallback(const char *name)
 {
@@ -112,4 +112,4 @@ inline float EnvFloatValueClamped(const char *name, float defaultValue,
     return std::clamp(parsed, minValue, maxValue);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

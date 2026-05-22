@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <cmath>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
-using ImuReading = SmartDrone::core::ports::ImuReading;
+using ImuReading = SmartDrone::Core::Ports::ImuReading;
 
 constexpr float kMaxAccelNormMps2 = 200.0f;
 constexpr float kMaxGyroNormRadps = 40.0f;
@@ -102,14 +102,14 @@ bool ValidateImuWindowCoverage(double expectedImuDtSec,
 
 } // namespace
 
-bool IsFiniteImuReading(const SmartDrone::core::ports::ImuReading &reading)
+bool IsFiniteImuReading(const SmartDrone::Core::Ports::ImuReading &reading)
 {
     return std::isfinite(reading.ax) && std::isfinite(reading.ay) &&
            std::isfinite(reading.az) && std::isfinite(reading.gx) &&
            std::isfinite(reading.gy) && std::isfinite(reading.gz);
 }
 
-bool SanitizeImuWindow(std::vector<SmartDrone::core::ports::ImuReading> &vImu,
+bool SanitizeImuWindow(std::vector<SmartDrone::Core::Ports::ImuReading> &vImu,
                        double prevFrameTime, double frameTime,
                        double expectedImuDtSec, ImuWindowValidation &stats)
 {
@@ -126,4 +126,4 @@ bool SanitizeImuWindow(std::vector<SmartDrone::core::ports::ImuReading> &vImu,
     return ValidateImuWindowCoverage(expectedImuDtSec, stats);
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

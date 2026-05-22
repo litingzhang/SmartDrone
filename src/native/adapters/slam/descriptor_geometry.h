@@ -4,7 +4,7 @@
 
 #include <opencv2/core.hpp>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 constexpr int kDescriptorPatchBorder = 19;
 
@@ -14,4 +14,4 @@ bool IsPointNearExistingKeypoint(const cv::Point2f &pt,
                                  const std::vector<cv::KeyPoint> &existing,
                                  float minDistancePx = 4.0f);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

@@ -7,7 +7,7 @@
 
 #include "core/application/epg/epg_task_manifest.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 bool FileReadable(const std::string &path)
@@ -115,4 +115,4 @@ Epg::GraphConfig CompileEpgConfig(EpgDomain domain,
     return config;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -7,7 +7,7 @@
 
 #include "core/application/session/slam/slam_settings_loader.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 namespace {
 
@@ -276,7 +276,7 @@ CommandResult UnifiedRuntimeController::ExecuteAction(const RuntimeAction &actio
         if (!SetMode(action.selection.runtimeMode, &err)) {
             return {false, err.empty() ? "start runtime failed" : err};
         }
-        return {true, std::string("runtime -> ") + SmartDrone::core::domain::ToString(action.selection.runtimeMode)};
+        return {true, std::string("runtime -> ") + SmartDrone::Core::Domain::ToString(action.selection.runtimeMode)};
     case RuntimeAction::Type::StopRuntime:
         if (!SetMode(ControllerMode::Idle, &err)) {
             return {false, err.empty() ? "stop runtime failed" : err};
@@ -309,4 +309,4 @@ UnifiedConfig UnifiedRuntimeController::CurrentConfigUnlocked() const
     return m_config;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

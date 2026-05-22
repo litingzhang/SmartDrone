@@ -14,7 +14,8 @@ from typing import Any, Dict, List, Set, Tuple
 PROFILE_SCHEMA = "smartdrone.epg.profile.v1"
 OPTIMIZED_SCHEMA = "smartdrone.epg.optimized_config.v1"
 SOLVER_REPORT_SCHEMA = "smartdrone.epg.solver_report.v1"
-SOLVER_VERSION = "python-heuristic-v3"
+SOLVER_VERSION = "python-exact-v1"
+EXACT_SOLVER_OBJECTIVE = "global_minimize_predicted_epg_penalty_discrete_topology"
 RESOURCE_WAIT_PRESSURE_US = 1000
 RESOURCE_ISOLATION_CPU_AFFINITY = 2
 RESOURCE_ISOLATION_PRIORITY = 20
@@ -172,6 +173,10 @@ QUEUE_DECISION_FIELDS = [
     "depthBefore",
     "depthAfter",
     "pressureBefore",
+    "pressureAfter",
+    "maxDepthObserved",
+    "droppedNewest",
+    "overwrittenOldest",
     "pushedPerSecond",
     "poppedPerSecond",
     "droppedPerSecond",
@@ -272,7 +277,7 @@ def validate_queue_decision(item: Dict[str, Any],
     require_non_negative_fields(item, QUEUE_DECISION_FIELDS, "queue", name)
     depth_after = integer(item.get("depthAfter"))
     expected_reason = (
-        "increase_depth"
+        "global_optimum_depth"
         if depth_after != integer(item.get("depthBefore"))
         else "keep"
     )
@@ -320,7 +325,7 @@ def ordered_reason_text(reasons: Set[str]) -> str:
 
 def expected_task_decision_reason(item: Dict[str, Any]) -> str:
     if integer(item.get("intervalAfterMs")) != integer(item.get("intervalBeforeMs")):
-        return "increase_interval"
+        return "global_optimum_interval"
     reason = ordered_reason_text(decision_reason_set(item))
     if item.get("replaceable"):
         return reason
@@ -378,30 +383,55 @@ def queue_pressure(depth: int, diag: Dict[str, Any]) -> int:
     return max(max_depth - depth, 0) + drops + overwrites
 
 
-def normalized_queue(queue: Dict[str, Any], limits: SolverLimits,
-                     diagnostics: Dict[str, Dict[str, Any]]
-                     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def queue_candidate_penalty(depth: int, diag: Dict[str, Any]) -> int:
+    return queue_pressure(depth, diag) * 1000 + depth
+
+
+def queue_candidates(queue: Dict[str, Any],
+                     limits: SolverLimits,
+                     diag: Dict[str, Any]) -> List[Dict[str, int]]:
+    depth = max(1, integer(queue.get("depth"), 1))
+    max_depth = max(depth, limits.max_queue_depth)
+    return [
+        {
+            "depth": candidate,
+            "pressureAfter": queue_pressure(candidate, diag),
+            "penalty": queue_candidate_penalty(candidate, diag),
+        }
+        for candidate in range(depth, max_depth + 1)
+    ]
+
+
+def best_candidate_index(candidates: List[Dict[str, int]]) -> int:
+    return min(range(len(candidates)), key=lambda index: candidates[index]["penalty"])
+
+
+def queue_decision(queue: Dict[str, Any],
+                   diag: Dict[str, Any],
+                   candidate: Dict[str, int]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     result = dict(queue)
     name = str(result.get("name", ""))
     depth = integer(result.get("depth"), 1)
-    diag = diagnostics.get(name, {})
-    max_depth = integer(diag.get("maxDepthObserved"))
-    pressure = queue_pressure(depth, diag)
-
-    target_depth = depth
-    if pressure > 0:
-        target_depth = max(depth + 1, max_depth * 2, 2)
-    result["depth"] = min(max(target_depth, 1), limits.max_queue_depth)
+    pressure_before = queue_pressure(depth, diag)
+    result["depth"] = candidate["depth"]
     decision = {
         "kind": "queue",
         "name": name,
         "depthBefore": depth,
         "depthAfter": result["depth"],
-        "pressureBefore": pressure,
+        "pressureBefore": pressure_before,
+        "pressureAfter": candidate["pressureAfter"],
+        "maxDepthObserved": integer(diag.get("maxDepthObserved")),
+        "droppedNewest": integer(diag.get("droppedNewest")),
+        "overwrittenOldest": integer(diag.get("overwrittenOldest")),
         "pushedPerSecond": integer(diag.get("pushedPerSecond")),
         "poppedPerSecond": integer(diag.get("poppedPerSecond")),
         "droppedPerSecond": integer(diag.get("droppedPerSecond")),
-        "reason": "increase_depth" if result["depth"] != depth else "keep",
+        "reason": (
+            "global_optimum_depth"
+            if result["depth"] != depth
+            else "keep"
+        ),
     }
     return result, decision
 
@@ -450,26 +480,89 @@ def reason_set(diag: Dict[str, Any],
     return reasons
 
 
-def target_interval_ms(interval_ms: int,
-                       loop_us: int,
-                       utilization_ppm: int,
-                       limits: SolverLimits) -> int:
-    target = interval_ms
+def task_periodic_overload_us(interval_ms: int, loop_us: int) -> int:
+    interval_us = interval_ms * 1000
+    if interval_us <= 0 or loop_us <= interval_us:
+        return 0
+    return loop_us - interval_us
+
+
+def task_utilization_over_ppm(interval_before_ms: int,
+                              interval_after_ms: int,
+                              utilization_ppm: int,
+                              target_utilization_ppm: int) -> int:
+    if interval_after_ms <= 0 or utilization_ppm <= target_utilization_ppm:
+        return 0
+    scaled_utilization = ceil_div(
+        utilization_ppm * interval_before_ms, interval_after_ms)
+    return max(scaled_utilization - target_utilization_ppm, 0)
+
+
+def task_feasible_interval_limit(interval_ms: int,
+                                 diag: Dict[str, Any],
+                                 loop_us: int,
+                                 limits: SolverLimits) -> int:
+    limit = interval_ms
     if interval_ms > 0 and loop_us > interval_ms * 1000:
-        target = max(target, ceil_div(loop_us, 1000))
+        limit = max(limit, ceil_div(loop_us, 1000))
+    utilization_ppm = integer(diag.get("utilizationPpm"))
     if interval_ms > 0 and utilization_ppm > limits.target_utilization_ppm:
-        target = max(
-            target,
-            ceil_div(interval_ms * utilization_ppm, limits.target_utilization_ppm),
+        limit = max(
+            limit,
+            ceil_div(interval_ms * utilization_ppm,
+                     limits.target_utilization_ppm),
         )
-    return min(max(target, interval_ms), limits.max_periodic_interval_ms)
+    return min(max(limit, interval_ms), limits.max_periodic_interval_ms)
+
+
+def task_candidate_penalty(interval_before_ms: int,
+                           interval_after_ms: int,
+                           diag: Dict[str, Any],
+                           loop_us: int,
+                           limits: SolverLimits) -> int:
+    return (
+        task_periodic_overload_us(interval_after_ms, loop_us) +
+        integer(diag.get("totalResourceWaitUs")) +
+        integer(diag.get("schedulingErrorCount")) * 10000 +
+        integer(diag.get("budgetOverrunCount")) * 2000 +
+        integer(diag.get("deadlineMissCount")) * 5000 +
+        task_utilization_over_ppm(
+            interval_before_ms,
+            interval_after_ms,
+            integer(diag.get("utilizationPpm")),
+            limits.target_utilization_ppm,
+        ) +
+        interval_after_ms
+    )
+
+
+def task_candidates(interval_ms: int,
+                    diag: Dict[str, Any],
+                    loop_us: int,
+                    replaceable: bool,
+                    limits: SolverLimits) -> List[Dict[str, int]]:
+    if not replaceable or interval_ms <= 0:
+        return [{
+            "intervalMs": interval_ms,
+            "penalty": task_candidate_penalty(
+                interval_ms, interval_ms, diag, loop_us, limits),
+        }]
+    max_interval = task_feasible_interval_limit(interval_ms, diag, loop_us, limits)
+    return [
+        {
+            "intervalMs": candidate,
+            "penalty": task_candidate_penalty(
+                interval_ms, candidate, diag, loop_us, limits),
+        }
+        for candidate in range(interval_ms, max_interval + 1)
+    ]
 
 
 def report_reason(reasons: Set[str],
                   interval_changed: bool,
                   replaceable: bool) -> str:
     if interval_changed:
-        return "increase_interval"
+        return "global_optimum_interval"
     reason = ordered_reason_text(reasons)
     if replaceable:
         return reason
@@ -490,16 +583,16 @@ def apply_resource_isolation(scheduling: Dict[str, Any],
         scheduling["priority"] = RESOURCE_ISOLATION_PRIORITY
 
 
-def normalized_task(task: Dict[str, Any], limits: SolverLimits,
-                    diagnostics: Dict[str, Dict[str, Any]],
-                    catalog: Dict[str, Dict[str, Any]]
-                    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def task_decision(task: Dict[str, Any],
+                  limits: SolverLimits,
+                  diag: Dict[str, Any],
+                  catalog_item: Dict[str, Any],
+                  candidate: Dict[str, int]
+                  ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     result = dict(task)
     trigger = dict(result.get("trigger", {}))
     scheduling = dict(result.get("scheduling", {}))
     name = str(result.get("name", ""))
-    diag = diagnostics.get(name, {})
-    catalog_item = catalog.get(str(result.get("type", "")), {})
     scheduling["budget_us"] = integer(catalog_item.get("budgetUs"))
     scheduling["deadline_us"] = integer(catalog_item.get("deadlineUs"))
     scheduling["resource"] = catalog_item.get("resource")
@@ -509,10 +602,7 @@ def normalized_task(task: Dict[str, Any], limits: SolverLimits,
     interval_ms = integer(trigger.get("interval_ms"))
     reasons = reason_set(diag, loop_us, utilization_ppm, scheduling, limits)
     replaceable = bool(catalog_item.get("replaceable", False))
-    target_interval = interval_ms
-    if replaceable:
-        target_interval = target_interval_ms(
-            interval_ms, loop_us, utilization_ppm, limits)
+    target_interval = candidate["intervalMs"]
     if target_interval != interval_ms:
         trigger["interval_ms"] = target_interval
     apply_resource_isolation(scheduling, trigger, diag, replaceable)
@@ -550,13 +640,15 @@ def normalized_task(task: Dict[str, Any], limits: SolverLimits,
 
 def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
     queue_pressure_sum = sum(
-        integer(item.get("pressureBefore"))
+        integer(item.get("pressureAfter"))
         for item in decisions
         if item.get("kind") == "queue"
     )
     overload_sum = sum(
-        max(integer(item.get("effectiveLoopUs")) -
-            integer(item.get("intervalBeforeMs")) * 1000, 0)
+        task_periodic_overload_us(
+            integer(item.get("intervalAfterMs")),
+            integer(item.get("effectiveLoopUs")),
+        )
         for item in decisions
         if item.get("kind") == "task"
     )
@@ -581,8 +673,12 @@ def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
         if item.get("kind") == "task"
     )
     utilization_over = sum(
-        max(integer(item.get("utilizationPpm")) -
-            integer(item.get("targetUtilizationPpm")), 0)
+        task_utilization_over_ppm(
+            integer(item.get("intervalBeforeMs")),
+            integer(item.get("intervalAfterMs")),
+            integer(item.get("utilizationPpm")),
+            integer(item.get("targetUtilizationPpm")),
+        )
         for item in decisions
         if item.get("kind") == "task"
     )
@@ -597,6 +693,68 @@ def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
         "totalPenalty": queue_pressure_sum * 1000 + overload_sum +
         resource_wait_us + scheduling_errors * 10000 + budget_overruns * 2000 +
         deadline_misses * 5000 + utilization_over,
+    }
+
+
+def build_queue_nodes(queues: List[Dict[str, Any]],
+                      limits: SolverLimits,
+                      diagnostics: Dict[str, Dict[str, Any]]
+                      ) -> List[Dict[str, Any]]:
+    nodes = []
+    for index, queue in enumerate(queues):
+        if not isinstance(queue, dict):
+            continue
+        name = str(queue.get("name", ""))
+        diag = diagnostics.get(name, {})
+        nodes.append({
+            "index": index,
+            "queue": queue,
+            "diag": diag,
+            "candidates": queue_candidates(queue, limits, diag),
+        })
+    return nodes
+
+
+def build_task_nodes(tasks: List[Dict[str, Any]],
+                     limits: SolverLimits,
+                     diagnostics: Dict[str, Dict[str, Any]],
+                     catalog: Dict[str, Dict[str, Any]]
+                     ) -> List[Dict[str, Any]]:
+    nodes = []
+    for index, task in enumerate(tasks):
+        if not isinstance(task, dict):
+            continue
+        name = str(task.get("name", ""))
+        diag = diagnostics.get(name, {})
+        catalog_item = catalog.get(str(task.get("type", "")), {})
+        trigger = task.get("trigger", {})
+        interval_ms = integer(trigger.get("interval_ms")) if isinstance(
+            trigger, dict) else 0
+        replaceable = bool(catalog_item.get("replaceable", False))
+        loop_us = effective_loop_us(diag)
+        nodes.append({
+            "index": index,
+            "task": task,
+            "diag": diag,
+            "catalog": catalog_item,
+            "candidates": task_candidates(
+                interval_ms, diag, loop_us, replaceable, limits),
+        })
+    return nodes
+
+
+def solve_global_topology(queue_nodes: List[Dict[str, Any]],
+                          task_nodes: List[Dict[str, Any]]
+                          ) -> Dict[str, List[int]]:
+    return {
+        "queues": [
+            best_candidate_index(node["candidates"])
+            for node in queue_nodes
+        ],
+        "tasks": [
+            best_candidate_index(node["candidates"])
+            for node in task_nodes
+        ],
     }
 
 
@@ -631,6 +789,8 @@ def validate_generated_pair(config: Dict[str, Any],
     objective = report.get("objective")
     if not isinstance(objective, dict) or not objective.get("name"):
         raise ValueError("EPG solver report objective missing")
+    if objective.get("name") != EXACT_SOLVER_OBJECTIVE:
+        raise ValueError("EPG solver report objective mismatch")
     score = objective.get("score")
     if not isinstance(score, dict):
         raise ValueError("EPG solver report score missing")
@@ -702,6 +862,103 @@ def validate_generated_pair(config: Dict[str, Any],
     for field in SOLVER_SCORE_FIELDS:
         if integer(score.get(field)) != expected_score[field]:
             raise ValueError(f"EPG solver report score mismatch: {field}")
+    validate_global_optimum(profile, report)
+
+
+def decision_by_key(report: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return {
+        f"{item.get('kind')}:{item.get('name')}": item
+        for item in report.get("decisions", [])
+        if isinstance(item, dict)
+    }
+
+
+def validate_global_optimum(profile: Dict[str, Any],
+                            report: Dict[str, Any]) -> None:
+    topology = profile.get("topology", {})
+    constraints = report.get("constraints", {})
+    decisions = decision_by_key(report)
+    queue_diag = queue_diagnostics(profile)
+    task_diag = task_diagnostics(profile)
+    for queue in topology.get("queues", []):
+        if not isinstance(queue, dict):
+            continue
+        name = str(queue.get("name", ""))
+        decision = decisions[f"queue:{name}"]
+        diag = queue_diag[name]
+        if (integer(decision.get("pressureBefore")) !=
+                queue_pressure(integer(decision.get("depthBefore")), diag) or
+                integer(decision.get("pressureAfter")) !=
+                queue_pressure(integer(decision.get("depthAfter")), diag) or
+                integer(decision.get("maxDepthObserved")) !=
+                integer(diag.get("maxDepthObserved")) or
+                integer(decision.get("droppedNewest")) !=
+                integer(diag.get("droppedNewest")) or
+                integer(decision.get("overwrittenOldest")) !=
+                integer(diag.get("overwrittenOldest")) or
+                integer(decision.get("pushedPerSecond")) !=
+                integer(diag.get("pushedPerSecond")) or
+                integer(decision.get("poppedPerSecond")) !=
+                integer(diag.get("poppedPerSecond")) or
+                integer(decision.get("droppedPerSecond")) !=
+                integer(diag.get("droppedPerSecond"))):
+            raise ValueError(f"EPG solver report queue metrics mismatch: {name}")
+        actual = queue_candidate_penalty(integer(decision.get("depthAfter")), diag)
+        best = min(
+            queue_candidate_penalty(candidate, diag)
+            for candidate in range(
+                max(1, integer(decision.get("depthBefore"))),
+                max(max(1, integer(decision.get("depthBefore"))),
+                    integer(constraints.get("maxQueueDepth"))) + 1)
+        )
+        if actual != best:
+            raise ValueError(f"EPG solver report queue is not optimal: {name}")
+    for task in topology.get("tasks", []):
+        if not isinstance(task, dict):
+            continue
+        name = str(task.get("name", ""))
+        decision = decisions[f"task:{name}"]
+        diag = task_diag[name]
+        interval = integer(decision.get("intervalBeforeMs"))
+        loop_us = integer(decision.get("effectiveLoopUs"))
+        expected_loop_us = effective_loop_us(diag)
+        for field in [
+                "maxLoopUs",
+                "averageLoopUs",
+                "p90LoopUs",
+                "p99LoopUs",
+                "resourceWaitCount",
+                "maxResourceWaitUs",
+                "averageResourceWaitUs",
+                "totalResourceWaitUs",
+                "utilizationPpm",
+                "budgetOverrunCount",
+                "deadlineMissCount",
+                "schedulingErrorCount",
+        ]:
+            if integer(decision.get(field)) != integer(diag.get(field)):
+                raise ValueError(
+                    f"EPG solver report task metrics mismatch: {name}")
+        if loop_us != expected_loop_us:
+            raise ValueError(f"EPG solver report task metrics mismatch: {name}")
+        replaceable = bool(decision.get("replaceable", False))
+        limits = SolverLimits(
+            max_queue_depth=integer(constraints.get("maxQueueDepth")),
+            max_periodic_interval_ms=integer(
+                constraints.get("maxPeriodicIntervalMs")),
+            target_utilization_ppm=integer(
+                constraints.get("targetUtilizationPpm")),
+        )
+        actual = task_candidate_penalty(
+            interval, integer(decision.get("intervalAfterMs")),
+            diag, loop_us, limits)
+        best = min(
+            item["penalty"]
+            for item in task_candidates(interval, diag, loop_us,
+                                        replaceable, limits)
+        )
+        if actual != best:
+            raise ValueError(f"EPG solver report task is not optimal: {name}")
 
 
 def optimize_profile(profile: Dict[str, Any],
@@ -718,19 +975,32 @@ def optimize_profile(profile: Dict[str, Any],
     catalog = task_catalog(profile)
     validate_task_catalog_coverage(tasks, catalog)
     validate_diagnostics_coverage(queues, tasks, queue_diag, task_diag)
-    optimized_queues = []
-    optimized_tasks = []
+    queue_nodes = build_queue_nodes(queues, limits, queue_diag)
+    task_nodes = build_task_nodes(tasks, limits, task_diag, catalog)
+    solution = solve_global_topology(queue_nodes, task_nodes)
+    optimized_queues = [
+        dict(queue)
+        for queue in queues
+        if isinstance(queue, dict)
+    ]
+    optimized_tasks = [
+        dict(task)
+        for task in tasks
+        if isinstance(task, dict)
+    ]
     decisions = []
-    for queue in queues:
-        if isinstance(queue, dict):
-            optimized, decision = normalized_queue(queue, limits, queue_diag)
-            optimized_queues.append(optimized)
-            decisions.append(decision)
-    for task in tasks:
-        if isinstance(task, dict):
-            optimized, decision = normalized_task(task, limits, task_diag, catalog)
-            optimized_tasks.append(optimized)
-            decisions.append(decision)
+    for node_index, node in enumerate(queue_nodes):
+        candidate = node["candidates"][solution["queues"][node_index]]
+        optimized, decision = queue_decision(
+            node["queue"], node["diag"], candidate)
+        optimized_queues[node_index] = optimized
+        decisions.append(decision)
+    for node_index, node in enumerate(task_nodes):
+        candidate = node["candidates"][solution["tasks"][node_index]]
+        optimized, decision = task_decision(
+            node["task"], limits, node["diag"], node["catalog"], candidate)
+        optimized_tasks[node_index] = optimized
+        decisions.append(decision)
 
     config = {
         "schema": OPTIMIZED_SCHEMA,
@@ -752,7 +1022,7 @@ def optimize_profile(profile: Dict[str, Any],
         "generatedAtMs": generated_at_ms,
         "solverVersion": SOLVER_VERSION,
         "objective": {
-            "name": "minimize_epg_pressure_overload_deadline_and_scheduling_penalty",
+            "name": EXACT_SOLVER_OBJECTIVE,
             "score": score_decisions(decisions),
         },
         "constraints": {
@@ -781,6 +1051,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Output runtime GraphConfig JSON")
     parser.add_argument("--report", type=Path,
                         help="Optional solver report JSON")
+    parser.add_argument("--validate-report", type=Path,
+                        help="Validate an existing solver report JSON")
     parser.add_argument("--max-queue-depth", type=int, default=16)
     parser.add_argument("--max-periodic-interval-ms", type=int, default=1000)
     parser.add_argument("--target-utilization-ppm", type=int, default=800000)
@@ -799,8 +1071,14 @@ def main() -> int:
     generated_at_ms = args.generated_at_ms
     if generated_at_ms is None:
         generated_at_ms = int(time.time() * 1000)
-    optimized, report = optimize_profile(
-        load_profile(args.profile), limits, generated_at_ms)
+    profile = load_profile(args.profile)
+    if args.validate_report:
+        optimized = json.loads(args.output.read_text(encoding="utf-8"))
+        report = json.loads(args.validate_report.read_text(encoding="utf-8"))
+        validate_generated_pair(optimized, profile, task_catalog(profile),
+                                report)
+        return 0
+    optimized, report = optimize_profile(profile, limits, generated_at_ms)
     write_json(args.output, optimized)
     if args.report:
         write_json(args.report, report)

@@ -5,7 +5,7 @@
 
 #include "core/application/runtime/epg_redeploy_coordinator.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 using RuntimeGraphStepFn = std::function<void()>;
 using RuntimeGraphRedeployStepFn =
@@ -38,4 +38,4 @@ class SystemRuntimeStepServices final {
     SystemRuntimeStepServicesConfig m_config;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

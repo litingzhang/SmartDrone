@@ -7,16 +7,16 @@
 #include "adapters/slam/visual_feature_frontend_client.h"
 #include "core/ports/visual_feature_frontend.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 class SuperPointNativeExtractor;
 
-using SuperPointFeatureSet = core::ports::VisualFeatureSet;
+using SuperPointFeatureSet = Core::Ports::VisualFeatureSet;
 
 class SuperPointLightGlueFrontendClient final
     : public IManagedVisualFeatureFrontend {
   public:
-    using Stats = core::ports::IVisualFeatureFrontend::Stats;
+    using Stats = Core::Ports::IVisualFeatureFrontend::Stats;
 
     SuperPointLightGlueFrontendClient();
     ~SuperPointLightGlueFrontendClient() override;
@@ -32,14 +32,14 @@ class SuperPointLightGlueFrontendClient final
                int maxPoints, std::string *err);
     void Stop() override;
     bool Running() const override;
-    bool Detect(const core::ports::VisualFeatureDetectRequest &request,
-                core::ports::VisualFeatureDetectResult &result) override;
+    bool Detect(const Core::Ports::VisualFeatureDetectRequest &request,
+                Core::Ports::VisualFeatureDetectResult &result) override;
     bool DetectAndCompute(
-        const core::ports::VisualFeatureComputeRequest &request,
-        core::ports::VisualFeatureComputeResult &result) override;
+        const Core::Ports::VisualFeatureComputeRequest &request,
+        Core::Ports::VisualFeatureComputeResult &result) override;
     bool DetectAndComputeStereo(
-        const core::ports::StereoVisualFeatureComputeRequest &request,
-        core::ports::StereoVisualFeatureComputeResult &result) override;
+        const Core::Ports::StereoVisualFeatureComputeRequest &request,
+        Core::Ports::StereoVisualFeatureComputeResult &result) override;
     void SetLightGlueEveryNOverride(int everyN) override;
     Stats LastStats() const override;
 
@@ -50,4 +50,4 @@ class SuperPointLightGlueFrontendClient final
     void CopyNativeStats();
 };
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

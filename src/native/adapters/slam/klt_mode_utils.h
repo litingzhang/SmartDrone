@@ -10,7 +10,7 @@
 
 #include "adapters/slam/slam_mode_state.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 inline constexpr float kLkMinDepthMeters = 0.35f;
 inline constexpr float kLkMaxDepthMeters = 12.0f;
@@ -59,4 +59,4 @@ std::vector<LkStereoTrack> BuildLkGfttStereoSeeds(const cv::Mat &leftGray, const
 void AppendLkSeedsForDegradedCells(const std::vector<LkStereoTrack> &seeds, const cv::Size &size,
                                    std::vector<LkStereoTrack> &tracks);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

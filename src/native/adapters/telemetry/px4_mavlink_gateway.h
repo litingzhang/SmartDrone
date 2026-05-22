@@ -103,7 +103,7 @@ class Px4MavlinkGateway {
     ~Px4MavlinkGateway();
 
     void SetJsonDiagnostics(bool enabled);
-    void SetFrameTimingTracker(SmartDrone::core::application::FrameTimingTracker *tracker);
+    void SetFrameTimingTracker(SmartDrone::Core::Application::FrameTimingTracker *tracker);
     int PollRxOnce(int timeoutMs = 0);
     void StepTx();
     uint8_t GetTargetSystem() const;
@@ -164,7 +164,7 @@ class Px4MavlinkGateway {
         OdometryTiming timing{};
     };
 
-    bool LookupFrameTiming(uint64_t frameId, SmartDrone::core::application::FrameTimingRecord &out) const;
+    bool LookupFrameTiming(uint64_t frameId, SmartDrone::Core::Application::FrameTimingRecord &out) const;
     void MarkFrameMavTx(uint64_t frameId, uint64_t tMavTxNs);
     static const char *MavResultToStr(uint8_t r);
     OdometryPacketFields BuildOdometryPacketFields(const OdometryRequest &request) const;
@@ -184,7 +184,7 @@ class Px4MavlinkGateway {
     void MaybeRequestLocalPositionNedStream(uint8_t targetSystem, uint8_t targetComponent);
     void MaybeRequestDistanceSensorStream(uint8_t targetSystem, uint8_t targetComponent);
 
-    SmartDrone::adapters::telemetry::MavlinkSerialTransport m_transport;
+    SmartDrone::Adapters::Telemetry::MavlinkSerialTransport m_transport;
     uint8_t m_sysid;
     uint8_t m_compid;
     std::atomic<bool> m_streaming{false};
@@ -215,6 +215,6 @@ class Px4MavlinkGateway {
     DownwardDistanceSensor m_downwardDistanceSensor{};
     bool m_haveDownwardDistanceSensor{false};
     uint64_t m_lastSentOdomFrameId{0};
-    SmartDrone::core::application::FrameTimingTracker *m_frameTimingTracker{nullptr};
+    SmartDrone::Core::Application::FrameTimingTracker *m_frameTimingTracker{nullptr};
     std::atomic<bool> m_jsonDiagnostics{false};
 };

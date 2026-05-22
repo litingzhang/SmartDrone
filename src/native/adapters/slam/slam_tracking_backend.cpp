@@ -14,38 +14,38 @@
 #include "adapters/slam/slam_pose_utils.h"
 #include "core/ports/slam_tracking_state.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
-void NormalizeRealtimePublishState(core::ports::SlamOutput &out)
+void NormalizeRealtimePublishState(Core::Ports::SlamOutput &out)
 {
     if (!out.poseValid || !out.pose.valid || IsIdentityPose(out.pose) ||
         !EnvFlagEnabled("SMART_DRONE_REALTIME_POSE_CONTINUITY_MARK_RECENTLY_LOST",
                         true)) {
         return;
     }
-    if (out.trackingState != core::ports::kSlamTrackingOk &&
-        out.trackingState != core::ports::kSlamTrackingRecentlyLost) {
-        out.trackingState = core::ports::kSlamTrackingRecentlyLost;
+    if (out.trackingState != Core::Ports::kSlamTrackingOk &&
+        out.trackingState != Core::Ports::kSlamTrackingRecentlyLost) {
+        out.trackingState = Core::Ports::kSlamTrackingRecentlyLost;
     }
 }
 
 } // namespace
 
-core::ports::SlamOutput
+Core::Ports::SlamOutput
 RunSlamTrackingBackend(SlamEngineAdapter &engine,
-                       const core::ports::SlamInputBatch &input,
+                       const Core::Ports::SlamInputBatch &input,
                        bool extractFeatures, bool extractPointCloud,
                        const StereoFeatureTrackRequest *stereoFeatureRequest)
 {
-    core::ports::SlamOutput out{};
-    core::ports::ISlamTrackingBackend *backend =
+    Core::Ports::SlamOutput out{};
+    Core::Ports::ISlamTrackingBackend *backend =
         SlamEngineAccess::TrackingBackend(engine);
     if (backend == nullptr || !backend->Available()) {
         return out;
     }
-    core::ports::ITrackedVisualDataProvider *visualProvider =
+    Core::Ports::ITrackedVisualDataProvider *visualProvider =
         SlamEngineAccess::TrackedVisualDataProvider(engine);
 
     SlamModeSharedState &state = SlamEngineAccess::ModeState(engine);
@@ -80,7 +80,7 @@ RunSlamTrackingBackend(SlamEngineAdapter &engine,
             stereoFeatureRequest->observationHash;
 
         const auto trackStartTp = std::chrono::steady_clock::now();
-        core::ports::PreparedStereoFeatureTrackRequest trackRequest;
+        Core::Ports::PreparedStereoFeatureTrackRequest trackRequest;
         trackRequest.input = &input;
         trackRequest.leftPrepared = &stereoFeatureRequest->leftPrepared;
         trackRequest.rightPrepared = &stereoFeatureRequest->rightPrepared;
@@ -108,7 +108,7 @@ RunSlamTrackingBackend(SlamEngineAdapter &engine,
         out.rightFeatures = stereoFeatureRequest->rightFeaturePoints;
     } else {
         const auto orbTrackStartTp = std::chrono::steady_clock::now();
-        core::ports::SlamTrackRequest trackRequest;
+        Core::Ports::SlamTrackRequest trackRequest;
         trackRequest.input = &input;
         trackRequest.inputMode = inputMode;
         trackRequest.useImu = useImu;
@@ -157,7 +157,7 @@ RunSlamTrackingBackend(SlamEngineAdapter &engine,
             !IsIdentityPose(out.pose) &&
             EnvFlagEnabled(
                 "SMART_DRONE_REALTIME_POSE_CONTINUITY_MARK_RECENTLY_LOST", true)) {
-            out.trackingState = core::ports::kSlamTrackingRecentlyLost;
+            out.trackingState = Core::Ports::kSlamTrackingRecentlyLost;
         }
         out.pose.valid = out.poseValid;
     }
@@ -180,7 +180,7 @@ RunSlamTrackingBackend(SlamEngineAdapter &engine,
     if (visualProvider == nullptr) {
         return out;
     }
-    core::ports::VisualMapSnapshotRequest snapshotRequest;
+    Core::Ports::VisualMapSnapshotRequest snapshotRequest;
     snapshotRequest.leftImageWidth = leftWidth;
     snapshotRequest.leftImageHeight = leftHeight;
     snapshotRequest.rightImageWidth = monoMode ? 0 : input.stereo.right.gray.cols;
@@ -190,7 +190,7 @@ RunSlamTrackingBackend(SlamEngineAdapter &engine,
                                       !out.usedVisualFeatureFrontend;
     snapshotRequest.includePointCloud = extractPointCloud;
     snapshotRequest.maxPointCloudPoints = 120;
-    core::ports::VisualMapSnapshot snapshot =
+    Core::Ports::VisualMapSnapshot snapshot =
         visualProvider->ExtractVisualMapSnapshot(snapshotRequest);
     out.matchesInliers = snapshot.summary.matchesInliers;
     out.trackedMapPointCount = snapshot.summary.trackedMapPointCount;
@@ -214,4 +214,4 @@ RunSlamTrackingBackend(SlamEngineAdapter &engine,
     return out;
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

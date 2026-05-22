@@ -7,7 +7,7 @@
 
 #include "core/domain/runtime_mode.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct RuntimeAction {
     enum class Type : uint8_t {
@@ -20,7 +20,7 @@ struct RuntimeAction {
     };
 
     Type type{Type::StartRuntime};
-    domain::RuntimeSelection selection{};
+    Domain::RuntimeSelection selection{};
 };
 
 using ConfigValue = std::variant<int64_t, double, bool, std::string>;
@@ -53,4 +53,4 @@ class RuntimeCommandService {
     IRuntimeCommandTarget &m_target;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

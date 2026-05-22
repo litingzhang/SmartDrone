@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-namespace SmartDrone::tests {
+namespace SmartDrone::Tests {
 
 namespace {
 
@@ -15,19 +15,19 @@ double DurationMs(const std::chrono::steady_clock::time_point &start,
 } // namespace
 
 ReplaySlamRunner::ReplaySlamRunner(
-    SmartDrone::core::ports::ICameraProvider &camera,
-    SmartDrone::core::ports::IImuProvider &imu,
-    SmartDrone::core::ports::ISlamEngine &slamEngine,
+    SmartDrone::Core::Ports::ICameraProvider &camera,
+    SmartDrone::Core::Ports::IImuProvider &imu,
+    SmartDrone::Core::Ports::ISlamEngine &slamEngine,
     ReplaySlamRunnerConfig cfg)
     : m_camera(camera), m_imu(imu), m_slamEngine(slamEngine), m_cfg(cfg),
-      m_pipeline(SmartDrone::core::application::PerceptionPipelineConfig{
+      m_pipeline(SmartDrone::Core::Application::PerceptionPipelineConfig{
           cfg.cameraFps, cfg.preferLatestFrame})
 {
 }
 
 std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
     size_t maxFrames,
-    SmartDrone::core::application::FrameTimingTracker *timingTracker,
+    SmartDrone::Core::Application::FrameTimingTracker *timingTracker,
     const ReplayPoseSampleCallback &sampleCallback)
 {
     std::vector<ReplayPoseSample> outputs;
@@ -51,31 +51,31 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
     }
 
     while (maxFrames == 0 || outputs.size() < maxFrames) {
-        SmartDrone::core::application::StereoBatch batch{};
+        SmartDrone::Core::Application::StereoBatch batch{};
         const auto acquireStart = std::chrono::steady_clock::now();
         const auto acquireStatus = m_pipeline.AcquireNextStereoBatch(
             m_camera, m_cfg.slamInputFps, m_cfg.timeoutMs, batch, timingTracker);
         const auto acquireEnd = std::chrono::steady_clock::now();
         if (acquireStatus ==
-            SmartDrone::core::application::StereoAcquireStatus::Timeout) {
+            SmartDrone::Core::Application::StereoAcquireStatus::Timeout) {
             break;
         }
         if (acquireStatus ==
-            SmartDrone::core::application::StereoAcquireStatus::CameraUnhealthy) {
+            SmartDrone::Core::Application::StereoAcquireStatus::CameraUnhealthy) {
             break;
         }
-        if (acquireStatus == SmartDrone::core::application::StereoAcquireStatus::
+        if (acquireStatus == SmartDrone::Core::Application::StereoAcquireStatus::
                                  DroppedByRateLimiter) {
             continue;
         }
 
-        SmartDrone::core::ports::SlamInputBatch input{};
+        SmartDrone::Core::Ports::SlamInputBatch input{};
         input.stereo = batch.stereo;
         input.frameId = batch.frameId;
         input.captureTimestampNs = batch.captureTimestampNs;
         input.frameTimeSec = static_cast<double>(batch.captureTimestampNs) * 1e-9;
 
-        std::vector<SmartDrone::core::ports::ImuReading> imuWindow;
+        std::vector<SmartDrone::Core::Ports::ImuReading> imuWindow;
         const auto imuStart = std::chrono::steady_clock::now();
         if (m_cfg.useImu && m_lastFrameNs != 0) {
             imuWindow = m_imu.PopWindow(m_lastFrameNs, batch.captureTimestampNs);
@@ -172,4 +172,4 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
     return outputs;
 }
 
-} // namespace SmartDrone::tests
+} // namespace SmartDrone::Tests

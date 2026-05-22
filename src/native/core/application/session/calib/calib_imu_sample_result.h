@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 enum class CalibImuSampleStatus : std::uint8_t {
     Written,
@@ -14,4 +14,4 @@ struct CalibImuSampleResult {
     CalibImuSampleStatus status{CalibImuSampleStatus::Pending};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

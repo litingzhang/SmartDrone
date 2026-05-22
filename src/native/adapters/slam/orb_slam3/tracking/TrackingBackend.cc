@@ -35,9 +35,9 @@ public:
     return out;
   }
 
-  SmartDrone::core::ports::SlamMapSummary MapSummary(
+  SmartDrone::Core::Ports::SlamMapSummary MapSummary(
       unsigned long mapId) const override {
-    SmartDrone::core::ports::SlamMapSummary out;
+    SmartDrone::Core::Ports::SlamMapSummary out;
     out.mapId = mapId;
     if (m_tracking == nullptr) {
       return out;
@@ -54,10 +54,10 @@ public:
     return out;
   }
 
-  SmartDrone::core::ports::SlamFrameTrackingStats
+  SmartDrone::Core::Ports::SlamFrameTrackingStats
   FrameTrackingStats() const override {
     return m_tracking != nullptr ? m_tracking->GetFrameTrackingStats()
-                                 : SmartDrone::core::ports::
+                                 : SmartDrone::Core::Ports::
                                        SlamFrameTrackingStats{};
   }
 
@@ -81,38 +81,38 @@ public:
     return m_tracking != nullptr ? m_tracking->GetRightORBExtractor() : nullptr;
   }
 
-  SmartDrone::core::ports::TrackedVisualSummary
+  SmartDrone::Core::Ports::TrackedVisualSummary
   TrackedVisualSummarySnapshot() const override {
     return m_tracking != nullptr
                ? m_tracking->GetTrackedVisualSummary()
-               : SmartDrone::core::ports::TrackedVisualSummary{};
+               : SmartDrone::Core::Ports::TrackedVisualSummary{};
   }
 
-  SmartDrone::core::ports::TrackedFeatureSnapshot
+  SmartDrone::Core::Ports::TrackedFeatureSnapshot
   ExtractTrackedFeatures(
       const OrbTrackingVisualDataRequest &request) const override {
     return m_tracking != nullptr
                ? m_tracking->ExtractTrackedFeatures(
                      request.leftImageWidth, request.leftImageHeight,
                      request.rightImageWidth, request.rightImageHeight)
-               : SmartDrone::core::ports::TrackedFeatureSnapshot{};
+               : SmartDrone::Core::Ports::TrackedFeatureSnapshot{};
   }
 
-  SmartDrone::core::ports::TrackedPointCloudSnapshot
+  SmartDrone::Core::Ports::TrackedPointCloudSnapshot
   ExtractTrackedPointCloud(size_t maxPointCloudPoints) const override {
     return m_tracking != nullptr
                ? m_tracking->ExtractTrackedPointCloud(maxPointCloudPoints)
-               : SmartDrone::core::ports::TrackedPointCloudSnapshot{};
+               : SmartDrone::Core::Ports::TrackedPointCloudSnapshot{};
   }
 
-  SmartDrone::core::ports::TrackedVisualData ExtractTrackedVisualData(
+  SmartDrone::Core::Ports::TrackedVisualData ExtractTrackedVisualData(
       const OrbTrackingVisualDataRequest &request) const override {
     return m_tracking != nullptr
                ? m_tracking->ExtractTrackedVisualData(
                      request.leftImageWidth, request.leftImageHeight,
                      request.rightImageWidth, request.rightImageHeight,
                      request.includePointCloud, request.maxPointCloudPoints)
-               : SmartDrone::core::ports::TrackedVisualData{};
+               : SmartDrone::Core::Ports::TrackedVisualData{};
   }
 
   Sophus::SE3f TrackStereo(

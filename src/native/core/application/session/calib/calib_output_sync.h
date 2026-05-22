@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <vector>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct CalibOutputFlushRequest {
     FILE *cam0File;
@@ -21,4 +21,4 @@ void SyncPathFile(const std::filesystem::path &path);
 void SyncDirPath(const std::filesystem::path &path);
 void FlushCalibOutputs(const CalibOutputFlushRequest &request);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -10,7 +10,7 @@
 #include "core/ports/camera_provider.h"
 #include "core/ports/pose_publisher.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 double DurationMs(const std::chrono::steady_clock::time_point &start, const std::chrono::steady_clock::time_point &end);
 void ComputeImageStats(const cv::Mat &gray, double &meanOut, double &stddevOut);
@@ -28,14 +28,14 @@ struct StereoFrameQuality {
     double rightSharpness{0.0};
 };
 
-void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, const StereoFrameQuality &quality,
-                              bool enableLowLightEnhance, ports::StereoFrame &out);
-uint8_t ToRuntimeSlamModeValue(SmartDrone::core::domain::SlamOperationMode mode);
+void PrepareStereoPairForSlam(const Ports::StereoFrame &stereo, const StereoFrameQuality &quality,
+                              bool enableLowLightEnhance, Ports::StereoFrame &out);
+uint8_t ToRuntimeSlamModeValue(SmartDrone::Core::Domain::SlamOperationMode mode);
 
 class AutoSlamModeController {
   public:
-    using SlamOperationMode = SmartDrone::core::domain::SlamOperationMode;
-    using PoseQuality = SmartDrone::core::ports::PoseQuality;
+    using SlamOperationMode = SmartDrone::Core::Domain::SlamOperationMode;
+    using PoseQuality = SmartDrone::Core::Ports::PoseQuality;
 
     void Reset();
     SlamOperationMode EffectiveMode() const;
@@ -56,4 +56,4 @@ class AutoSlamModeController {
     int m_weakFrames{0};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

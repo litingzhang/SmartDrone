@@ -11,7 +11,7 @@
 #include "adapters/slam/slam_env.h"
 #include "adapters/slam/stereo_geometry.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -55,7 +55,7 @@ struct TemporalStereoTrackRequest {
     const std::vector<cv::Point2f> *prevRightPoints{nullptr};
     const cv::Mat *currLeftGray{nullptr};
     const cv::Mat *currRightGray{nullptr};
-    const core::ports::IPointTracker2d *pointTracker{nullptr};
+    const Core::Ports::IPointTracker2d *pointTracker{nullptr};
 };
 
 struct TemporalStereoPairBuildRequest {
@@ -102,7 +102,7 @@ bool TrackTemporalStereoPoints(const TemporalStereoTrackRequest &request,
         kTemporalStereoFlowWindowPx, kTemporalStereoFlowMaxLevel,
         kTemporalStereoForwardBackwardMaxErrorPx};
     DefaultPointTracker2d defaultPointTracker;
-    const core::ports::IPointTracker2d &tracker =
+    const Core::Ports::IPointTracker2d &tracker =
         request.pointTracker != nullptr ? *request.pointTracker
                                         : defaultPointTracker;
     return tracker.TrackForwardBackward(*request.prevLeftGray,
@@ -170,7 +170,7 @@ std::vector<TemporalStereoPair> TrackStereoPairsTemporally(
     const std::vector<cv::Point2f> &prevLeftPoints,
     const std::vector<cv::Point2f> &prevRightPoints,
     const cv::Mat &currLeftGray, const cv::Mat &currRightGray,
-    const core::ports::IPointTracker2d *pointTracker)
+    const Core::Ports::IPointTracker2d *pointTracker)
 {
     std::vector<TemporalStereoPair> trackedPairs;
     if (prevLeftGray.empty() || prevRightGray.empty() || currLeftGray.empty() ||
@@ -396,7 +396,7 @@ bool DefaultTemporalStereoProcessor::AppendCarry(
 
 bool ExtractTemporalStereoSource(
     const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
-    const core::ports::StereoFeatureObservationPacket &stereoData,
+    const Core::Ports::StereoFeatureObservationPacket &stereoData,
     cv::Mat &prevLeft, cv::Mat &prevRight,
     std::vector<cv::Point2f> &prevLeftPoints,
     std::vector<cv::Point2f> &prevRightPoints)
@@ -447,4 +447,4 @@ bool DefaultTemporalStereoProcessor::ExtractSource(
                                        source.prevRightPoints);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

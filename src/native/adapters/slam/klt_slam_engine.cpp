@@ -15,7 +15,7 @@
 #include "adapters/slam/slam_output_utils.h"
 #include "adapters/slam/slam_pose_utils.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -34,18 +34,18 @@ struct ContinuousKltFrameRequest {
     KltContinuousFrontendResult *frontend{nullptr};
     uint64_t frameId{0};
     bool extractFeatures{false};
-    core::ports::SlamOutput *out{nullptr};
+    Core::Ports::SlamOutput *out{nullptr};
 };
 
 struct PerFrameKltTrackingRequest {
     SlamModeSharedState *state{nullptr};
     KltPerFrameFrontendResult *frontend{nullptr};
     bool extractFeatures{false};
-    core::ports::SlamOutput *out{nullptr};
+    Core::Ports::SlamOutput *out{nullptr};
 };
 
 void CopyKltFrontendTimings(const KltPerFrameFrontendResult &frontend,
-                            core::ports::SlamOutput &out)
+                            Core::Ports::SlamOutput &out)
 {
     out.inputPrepareMs = frontend.inputPrepareMs;
     out.lkRectifyMs = frontend.rectifyMs;
@@ -59,7 +59,7 @@ void InitializeContinuousKltFrame(const ContinuousKltFrameRequest &request)
 {
     SlamModeSharedState &state = *request.state;
     KltContinuousFrontendResult &frontend = *request.frontend;
-    core::ports::SlamOutput &out = *request.out;
+    Core::Ports::SlamOutput &out = *request.out;
     RefreshLkStereoSeedsIfNeeded(state, frontend.leftRect, frontend.rightRect,
                                  request.frameId, true);
     state.m_lkTracks =
@@ -80,7 +80,7 @@ void ProcessContinuousKltTrackingFrame(
 {
     SlamModeSharedState &state = *request.state;
     KltContinuousFrontendResult &frontend = *request.frontend;
-    core::ports::SlamOutput &out = *request.out;
+    Core::Ports::SlamOutput &out = *request.out;
     std::vector<cv::Point3f> objectPoints =
         std::move(frontend.observations.pnp.objectPoints);
     std::vector<cv::Point2f> imagePoints =
@@ -160,7 +160,7 @@ void ProcessPerFrameKltTrackingFrame(
 {
     SlamModeSharedState &state = *request.state;
     KltPerFrameFrontendResult &frontend = *request.frontend;
-    core::ports::SlamOutput &out = *request.out;
+    Core::Ports::SlamOutput &out = *request.out;
     std::vector<cv::Point3f> objectPoints =
         std::move(frontend.observations.objectPoints);
     std::vector<cv::Point2f> imagePoints =
@@ -191,7 +191,7 @@ void ProcessPerFrameKltTrackingFrame(
                          std::chrono::steady_clock::now() - updateStartTp)
                          .count();
     if (!poseEstimate.poseUpdated) {
-        MarkSlamOutputPoseLost(out, core::ports::kSlamTrackingLost);
+        MarkSlamOutputPoseLost(out, Core::Ports::kSlamTrackingLost);
     }
     ++state.m_lkFrameCount;
 }
@@ -226,7 +226,7 @@ void KltSlamEngine::Stop()
     }
 }
 
-void KltSlamEngine::SetOperationMode(core::domain::SlamOperationMode mode)
+void KltSlamEngine::SetOperationMode(Core::Domain::SlamOperationMode mode)
 {
     (void)mode;
 }
@@ -244,7 +244,7 @@ void KltSlamEngine::SetFeatureFrontend(FeatureFrontend frontend)
 }
 
 void KltSlamEngine::SetVisualFeatureFrontend(
-    core::ports::IVisualFeatureFrontend *frontend)
+    Core::Ports::IVisualFeatureFrontend *frontend)
 {
     if (m_state != nullptr) {
         m_state->m_visualFeatureFrontend = frontend;
@@ -290,8 +290,8 @@ void KltSlamEngine::SetStereoVoPerFrameAcceleration(std::string acceleration)
     m_state->m_lkPerFrameAccelLogged = false;
 }
 
-core::ports::SlamOutput
-KltSlamEngine::Process(const core::ports::SlamInputBatch &input,
+Core::Ports::SlamOutput
+KltSlamEngine::Process(const Core::Ports::SlamInputBatch &input,
                        bool extractFeatures, bool extractPointCloud)
 {
     (void)extractPointCloud;
@@ -301,18 +301,18 @@ KltSlamEngine::Process(const core::ports::SlamInputBatch &input,
     return ProcessPerFrameKlt(input, extractFeatures);
 }
 
-core::ports::SlamOutput
-KltSlamEngine::ProcessContinuousKlt(const core::ports::SlamInputBatch &input,
+Core::Ports::SlamOutput
+KltSlamEngine::ProcessContinuousKlt(const Core::Ports::SlamInputBatch &input,
                                     bool extractFeatures)
 {
     SlamModeSharedState &state = *m_state;
-    core::ports::SlamOutput out = MakeOkSlamOutput(input);
+    Core::Ports::SlamOutput out = MakeOkSlamOutput(input);
     state.ResetVisualFeatureStats();
 
     KltContinuousFrontendResult frontend = RunKltContinuousFrontend(
         state, input.stereo.left.gray, input.stereo.right.gray);
     if (!frontend.valid) {
-        MarkSlamOutputPoseLost(out, core::ports::kSlamTrackingLost);
+        MarkSlamOutputPoseLost(out, Core::Ports::kSlamTrackingLost);
         return out;
     }
 
@@ -333,12 +333,12 @@ KltSlamEngine::ProcessContinuousKlt(const core::ports::SlamInputBatch &input,
     return out;
 }
 
-core::ports::SlamOutput
-KltSlamEngine::ProcessPerFrameKlt(const core::ports::SlamInputBatch &input,
+Core::Ports::SlamOutput
+KltSlamEngine::ProcessPerFrameKlt(const Core::Ports::SlamInputBatch &input,
                                   bool extractFeatures)
 {
     SlamModeSharedState &state = *m_state;
-    core::ports::SlamOutput out = MakeOkSlamOutput(input);
+    Core::Ports::SlamOutput out = MakeOkSlamOutput(input);
     state.ResetVisualFeatureStats();
 
     KltPerFrameFrontendResult frontend = RunKltPerFrameFrontend(
@@ -346,7 +346,7 @@ KltSlamEngine::ProcessPerFrameKlt(const core::ports::SlamInputBatch &input,
     CopyKltFrontendTimings(frontend, out);
 
     if (!frontend.valid) {
-        MarkSlamOutputPoseLost(out, core::ports::kSlamTrackingLost);
+        MarkSlamOutputPoseLost(out, Core::Ports::kSlamTrackingLost);
         return out;
     }
 
@@ -362,4 +362,4 @@ KltSlamEngine::ProcessPerFrameKlt(const core::ports::SlamInputBatch &input,
     return out;
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

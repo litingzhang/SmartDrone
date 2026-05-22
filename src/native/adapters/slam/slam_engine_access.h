@@ -2,27 +2,27 @@
 
 #include "adapters/slam/slam_engine_adapter.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 class SlamEngineAccess final {
   public:
-    static core::ports::ISlamTrackingBackend *TrackingBackend(SlamEngineAdapter &engine)
+    static Core::Ports::ISlamTrackingBackend *TrackingBackend(SlamEngineAdapter &engine)
     {
         return engine.m_trackingBackend.get();
     }
-    static core::ports::ISlamBackendLifecycle *BackendLifecycle(SlamEngineAdapter &engine)
+    static Core::Ports::ISlamBackendLifecycle *BackendLifecycle(SlamEngineAdapter &engine)
     {
         return engine.m_trackingBackend.get();
     }
-    static core::ports::ISlamTrackingStatusProvider *TrackingStatus(SlamEngineAdapter &engine)
+    static Core::Ports::ISlamTrackingStatusProvider *TrackingStatus(SlamEngineAdapter &engine)
     {
         return engine.m_trackingBackend.get();
     }
-    static core::ports::ISlamDescriptorProviderSource *DescriptorProviders(SlamEngineAdapter &engine)
+    static Core::Ports::ISlamDescriptorProviderSource *DescriptorProviders(SlamEngineAdapter &engine)
     {
         return engine.m_trackingBackend.get();
     }
-    static core::ports::ITrackedVisualDataProvider *TrackedVisualDataProvider(SlamEngineAdapter &engine)
+    static Core::Ports::ITrackedVisualDataProvider *TrackedVisualDataProvider(SlamEngineAdapter &engine)
     {
         return engine.m_trackingBackend.get();
     }
@@ -39,22 +39,22 @@ class SlamEngineAccess final {
         return engine.m_useImu;
     }
 
-    static void StabilizeOutputPose(SlamEngineAdapter &engine, core::ports::PoseEstimate &pose, bool &poseValid,
+    static void StabilizeOutputPose(SlamEngineAdapter &engine, Core::Ports::PoseEstimate &pose, bool &poseValid,
                                     double timestampSec, int trackingState)
     {
         engine.StabilizeOutputPose(pose, poseValid, timestampSec, trackingState);
     }
 
-    static void MaintainRealtimePoseContinuity(SlamEngineAdapter &engine, core::ports::PoseEstimate &pose,
+    static void MaintainRealtimePoseContinuity(SlamEngineAdapter &engine, Core::Ports::PoseEstimate &pose,
                                                bool &poseValid, double timestampSec, int trackingState)
     {
         engine.MaintainRealtimePoseContinuity(pose, poseValid, timestampSec, trackingState);
     }
 
-    static void GateRealtimePoseQuality(SlamEngineAdapter &engine, core::ports::SlamOutput &out, double timestampSec)
+    static void GateRealtimePoseQuality(SlamEngineAdapter &engine, Core::Ports::SlamOutput &out, double timestampSec)
     {
         engine.GateRealtimePoseQuality(out, timestampSec);
     }
 };
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

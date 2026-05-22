@@ -1,6 +1,6 @@
 #include "core/application/runtime/mode_manager.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 ModeManager::RuntimeMode ModeManager::DesiredMode() const
 {
@@ -45,4 +45,4 @@ void ModeManager::MarkSessionLaunching(RuntimeMode mode)
     m_restartRequested = false;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

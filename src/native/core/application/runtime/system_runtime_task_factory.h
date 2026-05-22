@@ -9,7 +9,7 @@
 #include "core/application/runtime/udp_command_runtime.h"
 #include "core/application/epg/epg_registry.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct SystemRuntimeTaskFactoryDeps {
     std::shared_ptr<SystemRuntimeStepServices> stepServices;
@@ -22,4 +22,4 @@ struct SystemRuntimeTaskFactoryDeps {
 EpgTaskFactoryResolver MakeSystemRuntimeTaskFactoryResolver(
     SystemRuntimeTaskFactoryDeps deps);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct ImuReading {
     int64_t timestampNs{0};
@@ -25,4 +25,4 @@ class IImuProvider {
     virtual std::vector<ImuReading> PopWindow(int64_t fromNs, int64_t toNs) = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

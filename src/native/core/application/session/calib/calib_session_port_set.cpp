@@ -12,7 +12,7 @@
 #include "core/application/session/calib/calib_save_pacing_port.h"
 #include "core/application/session/calib/calib_storage_port.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class CalibSessionPortSet::Impl final {
   public:
@@ -260,4 +260,4 @@ void CalibSessionPortSet::LogFinalStatus() const
     m_impl->LogFinalStatus();
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

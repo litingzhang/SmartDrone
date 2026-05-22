@@ -9,7 +9,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-namespace SmartDrone::adapters::telemetry {
+namespace SmartDrone::Adapters::Telemetry {
 
 MavlinkSerialTransport::MavlinkSerialTransport(const std::string &dev, int baud)
 {
@@ -113,4 +113,4 @@ unsigned int MavlinkSerialTransport::BaudToTermios(int baud)
     }
 }
 
-} // namespace SmartDrone::adapters::telemetry
+} // namespace SmartDrone::Adapters::Telemetry

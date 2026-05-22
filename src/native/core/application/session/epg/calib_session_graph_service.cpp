@@ -14,7 +14,7 @@
 #include "core/application/state/live_pose_state.h"
 #include "core/application/session/epg/calib_session_task_factory.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class CalibSessionGraphRuntime::Impl final {
   public:
@@ -182,4 +182,4 @@ bool CalibSessionGraphRuntime::Ok() const
     return m_impl->Ok();
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

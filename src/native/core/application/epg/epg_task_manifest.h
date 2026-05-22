@@ -5,7 +5,7 @@
 
 #include "core/application/epg/epg_registry.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct EpgTaskAliasManifestEntry {
     std::string alias;
@@ -96,4 +96,4 @@ void ValidateEpgSolverReport(
     const Epg::OptimizedGraph &optimizedGraph,
     const Epg::SolverReport &report);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

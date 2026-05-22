@@ -2,7 +2,7 @@
 
 #include <opencv2/imgproc.hpp>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 cv::Mat EnsureCalibGray8(const cv::Mat &src, bool &convertedOut)
 {
@@ -23,4 +23,4 @@ cv::Mat EnsureCalibGray8(const cv::Mat &src, bool &convertedOut)
     return out;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -2,24 +2,24 @@
 
 #include "core/ports/visual_frame_observation.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 class DefaultVisualFrameObservationLoader final
-    : public core::ports::IVisualFrameObservationLoader {
+    : public Core::Ports::IVisualFrameObservationLoader {
   public:
     bool LoadMonoObservation(
-        const core::ports::MonoFrameObservationLoadRequest &request,
-        core::ports::VisualFrameObservationData &outData) const override;
+        const Core::Ports::MonoFrameObservationLoadRequest &request,
+        Core::Ports::VisualFrameObservationData &outData) const override;
     bool LoadStereoObservation(
-        const core::ports::StereoFrameObservationLoadRequest &request,
-        core::ports::VisualFrameObservationData &outData) const override;
+        const Core::Ports::StereoFrameObservationLoadRequest &request,
+        Core::Ports::VisualFrameObservationData &outData) const override;
 };
 
 bool LoadMonoFrameObservation(
-    const core::ports::MonoFrameObservationLoadRequest &request,
-    core::ports::VisualFrameObservationData &outData);
+    const Core::Ports::MonoFrameObservationLoadRequest &request,
+    Core::Ports::VisualFrameObservationData &outData);
 bool LoadStereoFrameObservation(
-    const core::ports::StereoFrameObservationLoadRequest &request,
-    core::ports::VisualFrameObservationData &outData);
+    const Core::Ports::StereoFrameObservationLoadRequest &request,
+    Core::Ports::VisualFrameObservationData &outData);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

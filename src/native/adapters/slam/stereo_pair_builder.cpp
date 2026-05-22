@@ -7,7 +7,7 @@
 #include "adapters/slam/slam_env.h"
 #include "adapters/slam/stereo_geometry.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -25,15 +25,15 @@ struct DescriptorStereoCandidate {
 };
 
 struct DescriptorStereoSelection {
-    std::vector<core::ports::StereoMatchPair> bestForLeft;
+    std::vector<Core::Ports::StereoMatchPair> bestForLeft;
     std::vector<int> bestLeftForRight;
     std::vector<float> bestLeftScore;
     std::vector<float> bestLeftZncc;
 };
 
 struct DescriptorMatchBuildRequest {
-    const core::ports::VisualFeatureSet *left{nullptr};
-    const core::ports::VisualFeatureSet *right{nullptr};
+    const Core::Ports::VisualFeatureSet *left{nullptr};
+    const Core::Ports::VisualFeatureSet *right{nullptr};
     const cv::Mat *leftGray32f{nullptr};
     const cv::Mat *rightGray32f{nullptr};
     int leftIndex{0};
@@ -115,8 +115,8 @@ void UpdateDescriptorCandidate(float score, float disparity, int rightIndex,
 }
 
 DescriptorStereoCandidate FindBestDescriptorCandidate(
-    const core::ports::VisualFeatureSet &left,
-    const core::ports::VisualFeatureSet &right, int leftIndex)
+    const Core::Ports::VisualFeatureSet &left,
+    const Core::Ports::VisualFeatureSet &right, int leftIndex)
 {
     DescriptorStereoCandidate best;
     const cv::Point2f &leftPt = left.keypoints[static_cast<size_t>(leftIndex)];
@@ -138,10 +138,10 @@ DescriptorStereoCandidate FindBestDescriptorCandidate(
 }
 
 bool BuildDescriptorMatchForLeft(const DescriptorMatchBuildRequest &request,
-                                 core::ports::StereoMatchPair &match)
+                                 Core::Ports::StereoMatchPair &match)
 {
-    const core::ports::VisualFeatureSet &left = *request.left;
-    const core::ports::VisualFeatureSet &right = *request.right;
+    const Core::Ports::VisualFeatureSet &left = *request.left;
+    const Core::Ports::VisualFeatureSet &right = *request.right;
     const DescriptorStereoCandidate best =
         FindBestDescriptorCandidate(left, right, request.leftIndex);
     if (best.rightIndex < 0 ||
@@ -167,7 +167,7 @@ bool BuildDescriptorMatchForLeft(const DescriptorMatchBuildRequest &request,
     if (quality < kStereoMinCandidateQuality) {
         return false;
     }
-    match = core::ports::StereoMatchPair{request.leftIndex, best.rightIndex,
+    match = Core::Ports::StereoMatchPair{request.leftIndex, best.rightIndex,
                                          best.bestScore, zncc, best.disparity,
                                          quality};
     return true;
@@ -186,7 +186,7 @@ DescriptorStereoSelection MakeDescriptorStereoSelection(int leftRows,
     return selection;
 }
 
-void UpdateBestRightDescriptorMatch(const core::ports::StereoMatchPair &match,
+void UpdateBestRightDescriptorMatch(const Core::Ports::StereoMatchPair &match,
                                     DescriptorStereoSelection &selection)
 {
     const size_t rightIndex = static_cast<size_t>(match.rightIndex);
@@ -200,12 +200,12 @@ void UpdateBestRightDescriptorMatch(const core::ports::StereoMatchPair &match,
     selection.bestLeftForRight[rightIndex] = match.leftIndex;
 }
 
-std::vector<core::ports::StereoMatchPair> CollectMutualDescriptorMatches(
+std::vector<Core::Ports::StereoMatchPair> CollectMutualDescriptorMatches(
     const DescriptorStereoSelection &selection, int leftRows, int rightRows)
 {
-    std::vector<core::ports::StereoMatchPair> matches;
+    std::vector<Core::Ports::StereoMatchPair> matches;
     matches.reserve(static_cast<size_t>(std::min(leftRows, rightRows)));
-    for (const core::ports::StereoMatchPair &pair : selection.bestForLeft) {
+    for (const Core::Ports::StereoMatchPair &pair : selection.bestForLeft) {
         if (pair.rightIndex < 0) {
             continue;
         }
@@ -217,11 +217,11 @@ std::vector<core::ports::StereoMatchPair> CollectMutualDescriptorMatches(
     return matches;
 }
 
-void SortDescriptorMatches(std::vector<core::ports::StereoMatchPair> &matches)
+void SortDescriptorMatches(std::vector<Core::Ports::StereoMatchPair> &matches)
 {
     std::sort(matches.begin(), matches.end(),
-              [](const core::ports::StereoMatchPair &a,
-                 const core::ports::StereoMatchPair &b) {
+              [](const Core::Ports::StereoMatchPair &a,
+                 const Core::Ports::StereoMatchPair &b) {
                   if (a.descriptorScore != b.descriptorScore) {
                       return a.descriptorScore > b.descriptorScore;
                   }
@@ -236,7 +236,7 @@ void SortDescriptorMatches(std::vector<core::ports::StereoMatchPair> &matches)
 }
 
 bool BuildAlignedStereoMatch(const AlignedStereoMatchBuildRequest &request,
-                             core::ports::StereoMatchPair &match)
+                             Core::Ports::StereoMatchPair &match)
 {
     float yDelta = 0.0f;
     float disparity = 0.0f;
@@ -257,17 +257,17 @@ bool BuildAlignedStereoMatch(const AlignedStereoMatchBuildRequest &request,
     if (quality < kStereoMinCandidateQuality) {
         return false;
     }
-    match = core::ports::StereoMatchPair{
+    match = Core::Ports::StereoMatchPair{
         static_cast<int>(request.index), static_cast<int>(request.index), 1.0f,
         zncc, disparity, quality};
     return true;
 }
 
-void SortAlignedMatches(std::vector<core::ports::StereoMatchPair> &matches)
+void SortAlignedMatches(std::vector<Core::Ports::StereoMatchPair> &matches)
 {
     std::sort(matches.begin(), matches.end(),
-              [](const core::ports::StereoMatchPair &a,
-                 const core::ports::StereoMatchPair &b) {
+              [](const Core::Ports::StereoMatchPair &a,
+                 const Core::Ports::StereoMatchPair &b) {
                   if (a.quality != b.quality) {
                       return a.quality > b.quality;
                   }
@@ -278,8 +278,8 @@ void SortAlignedMatches(std::vector<core::ports::StereoMatchPair> &matches)
               });
 }
 
-std::vector<core::ports::StereoMatchPair> SelectGridBalancedPairs(
-    const std::vector<core::ports::StereoMatchPair> &matches,
+std::vector<Core::Ports::StereoMatchPair> SelectGridBalancedPairs(
+    const std::vector<Core::Ports::StereoMatchPair> &matches,
     const std::vector<cv::Point2f> &leftKeypoints, int imageWidth,
     int imageHeight)
 {
@@ -296,10 +296,10 @@ std::vector<core::ports::StereoMatchPair> SelectGridBalancedPairs(
         1, kStereoMaxPairsPerCellLimit);
     std::vector<int> cellCounts(
         static_cast<size_t>(kStereoGridCols * kStereoGridRows), 0);
-    std::vector<core::ports::StereoMatchPair> selected;
+    std::vector<Core::Ports::StereoMatchPair> selected;
     selected.reserve(matches.size());
 
-    for (const core::ports::StereoMatchPair &match : matches) {
+    for (const Core::Ports::StereoMatchPair &match : matches) {
         const cv::Point2f &pt = leftKeypoints[static_cast<size_t>(match.leftIndex)];
         const int col =
             std::clamp(static_cast<int>(pt.x) / cellWidth, 0, kStereoGridCols - 1);
@@ -318,7 +318,7 @@ std::vector<core::ports::StereoMatchPair> SelectGridBalancedPairs(
 } // namespace
 
 bool HasValidVisualFeatureDescriptors(
-    const core::ports::VisualFeatureSet &features)
+    const Core::Ports::VisualFeatureSet &features)
 {
     return !features.descriptors.empty() &&
            features.descriptors.type() == CV_32F &&
@@ -328,15 +328,15 @@ bool HasValidVisualFeatureDescriptors(
 }
 
 bool DefaultStereoPairBuilder::BuildPairs(
-    const core::ports::StereoPairBuildInput &input,
-    core::ports::StereoPairBuildResult &result) const
+    const Core::Ports::StereoPairBuildInput &input,
+    Core::Ports::StereoPairBuildResult &result) const
 {
-    result = core::ports::StereoPairBuildResult{};
+    result = Core::Ports::StereoPairBuildResult{};
     if (input.leftFeatures == nullptr || input.rightFeatures == nullptr ||
         input.leftPrepared == nullptr || input.rightPrepared == nullptr) {
         return false;
     }
-    if (input.mode == core::ports::StereoPairBuildMode::DescriptorSearch) {
+    if (input.mode == Core::Ports::StereoPairBuildMode::DescriptorSearch) {
         result.matches =
             MatchStereoPairs(*input.leftFeatures, *input.rightFeatures,
                              *input.leftPrepared, *input.rightPrepared);
@@ -358,12 +358,12 @@ void LimitStereoPairsInPlace(std::vector<cv::Point2f> &leftPoints,
     rightPoints.resize(limitedCount);
 }
 
-std::vector<core::ports::StereoMatchPair>
-MatchStereoPairs(const core::ports::VisualFeatureSet &left,
-                 const core::ports::VisualFeatureSet &right,
+std::vector<Core::Ports::StereoMatchPair>
+MatchStereoPairs(const Core::Ports::VisualFeatureSet &left,
+                 const Core::Ports::VisualFeatureSet &right,
                  const cv::Mat &leftGray, const cv::Mat &rightGray)
 {
-    std::vector<core::ports::StereoMatchPair> matches;
+    std::vector<Core::Ports::StereoMatchPair> matches;
     if (!HasValidVisualFeatureDescriptors(left) ||
         !HasValidVisualFeatureDescriptors(right) || left.keypoints.empty() ||
         right.keypoints.empty()) {
@@ -378,7 +378,7 @@ MatchStereoPairs(const core::ports::VisualFeatureSet &left,
     DescriptorStereoSelection selection = MakeDescriptorStereoSelection(
         left.descriptors.rows, right.descriptors.rows);
     for (int li = 0; li < left.descriptors.rows; ++li) {
-        core::ports::StereoMatchPair match;
+        Core::Ports::StereoMatchPair match;
         const DescriptorMatchBuildRequest request{&left, &right, &leftGray32f,
                                                   &rightGray32f, li};
         if (!BuildDescriptorMatchForLeft(request, match)) {
@@ -395,12 +395,12 @@ MatchStereoPairs(const core::ports::VisualFeatureSet &left,
                                    leftGray.rows);
 }
 
-std::vector<core::ports::StereoMatchPair>
-BuildAlignedStereoPairs(const core::ports::VisualFeatureSet &left,
-                        const core::ports::VisualFeatureSet &right,
+std::vector<Core::Ports::StereoMatchPair>
+BuildAlignedStereoPairs(const Core::Ports::VisualFeatureSet &left,
+                        const Core::Ports::VisualFeatureSet &right,
                         const cv::Mat &leftGray, const cv::Mat &rightGray)
 {
-    std::vector<core::ports::StereoMatchPair> matches;
+    std::vector<Core::Ports::StereoMatchPair> matches;
     const size_t pairCount =
         std::min(left.keypoints.size(), right.keypoints.size());
     if (pairCount == 0 || leftGray.empty() || rightGray.empty()) {
@@ -414,7 +414,7 @@ BuildAlignedStereoPairs(const core::ports::VisualFeatureSet &left,
 
     matches.reserve(pairCount);
     for (size_t i = 0; i < pairCount; ++i) {
-        core::ports::StereoMatchPair match;
+        Core::Ports::StereoMatchPair match;
         const AlignedStereoMatchBuildRequest request{
             &leftGray32f, &rightGray32f, left.keypoints[i], right.keypoints[i], i};
         if (BuildAlignedStereoMatch(request, match)) {
@@ -427,4 +427,4 @@ BuildAlignedStereoPairs(const core::ports::VisualFeatureSet &left,
                                    leftGray.rows);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

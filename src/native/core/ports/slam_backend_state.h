@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct SlamMapSummary {
     unsigned long mapId{0};
@@ -56,4 +56,4 @@ class ISlamBackendStateProvider {
     virtual SlamBackendStats GetBackendStats() const = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

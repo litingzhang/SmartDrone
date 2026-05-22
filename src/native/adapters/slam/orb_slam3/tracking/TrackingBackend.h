@@ -62,7 +62,7 @@ struct OrbStereoTrackRequest {
 struct OrbStereoFeatureTrackRequest {
   const cv::Mat *left{nullptr};
   const cv::Mat *right{nullptr};
-  const SmartDrone::core::ports::StereoFeatureObservationPacket
+  const SmartDrone::Core::Ports::StereoFeatureObservationPacket
       *features{nullptr};
   double timestamp{0.0};
   std::string filename;
@@ -83,7 +83,7 @@ struct OrbMonocularTrackRequest {
 
 struct OrbMonocularFeatureTrackRequest {
   const cv::Mat *image{nullptr};
-  const SmartDrone::core::ports::VisualKeypointFeatureSet *features{nullptr};
+  const SmartDrone::Core::Ports::VisualKeypointFeatureSet *features{nullptr};
   double timestamp{0.0};
   std::string filename;
 };
@@ -110,9 +110,9 @@ public:
   virtual ~IOrbTrackingBackend() = default;
 
   virtual OrbTrackingStatus Status() const = 0;
-  virtual SmartDrone::core::ports::SlamMapSummary MapSummary(
+  virtual SmartDrone::Core::Ports::SlamMapSummary MapSummary(
       unsigned long mapId) const = 0;
-  virtual SmartDrone::core::ports::SlamFrameTrackingStats
+  virtual SmartDrone::Core::Ports::SlamFrameTrackingStats
   FrameTrackingStats() const = 0;
   virtual std::vector<OrbFrameTrajectoryEntry>
   FrameTrajectorySnapshot() const = 0;
@@ -120,14 +120,14 @@ public:
       OrbFrameTrajectoryEntry &entry) const = 0;
   virtual ORBextractor *LeftORBExtractor() const = 0;
   virtual ORBextractor *RightORBExtractor() const = 0;
-  virtual SmartDrone::core::ports::TrackedVisualSummary
+  virtual SmartDrone::Core::Ports::TrackedVisualSummary
   TrackedVisualSummarySnapshot() const = 0;
-  virtual SmartDrone::core::ports::TrackedFeatureSnapshot
+  virtual SmartDrone::Core::Ports::TrackedFeatureSnapshot
   ExtractTrackedFeatures(
       const OrbTrackingVisualDataRequest &request) const = 0;
-  virtual SmartDrone::core::ports::TrackedPointCloudSnapshot
+  virtual SmartDrone::Core::Ports::TrackedPointCloudSnapshot
   ExtractTrackedPointCloud(size_t maxPointCloudPoints) const = 0;
-  virtual SmartDrone::core::ports::TrackedVisualData
+  virtual SmartDrone::Core::Ports::TrackedVisualData
   ExtractTrackedVisualData(
       const OrbTrackingVisualDataRequest &request) const = 0;
   virtual Sophus::SE3f TrackStereo(

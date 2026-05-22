@@ -5,7 +5,7 @@
 
 #include "core/application/state/imu_buffer.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct ImuThreadState {
     ImuBuffer imuBuffer;
@@ -16,4 +16,4 @@ struct ImuThreadState {
     std::atomic<float> gyroLsbPerDps{0.0f};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

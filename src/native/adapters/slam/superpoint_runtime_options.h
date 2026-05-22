@@ -1,6 +1,6 @@
 #pragma once
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 struct SuperPointTensorRtRuntimeOptions {
     int inputMaxWidth{640};
@@ -17,4 +17,4 @@ struct SuperPointTensorRtRuntimeOptions {
 
 SuperPointTensorRtRuntimeOptions LoadSuperPointTensorRtRuntimeOptions();
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

@@ -12,7 +12,7 @@
 #include "core/ports/camera_provider.h"
 #include "core/ports/imu_provider.h"
 
-namespace SmartDrone::tests {
+namespace SmartDrone::Tests {
 
 struct ReplayImageSample {
     uint64_t timestampNs{0};
@@ -56,19 +56,19 @@ class ReplayDataset {
     std::vector<ReplayImuSample> m_imuSamples;
 };
 
-class ReplayCameraProvider final : public SmartDrone::core::ports::ICameraProvider {
+class ReplayCameraProvider final : public SmartDrone::Core::Ports::ICameraProvider {
   public:
     explicit ReplayCameraProvider(const ReplayDataset &dataset);
 
-    bool Open(const SmartDrone::core::ports::CameraOpenConfig &config) override;
+    bool Open(const SmartDrone::Core::Ports::CameraOpenConfig &config) override;
     void Close() override;
     bool Start() override;
     void Stop() override;
-    bool GrabStereo(SmartDrone::core::ports::StereoFrame &out, int timeoutMs, bool preferLatest,
+    bool GrabStereo(SmartDrone::Core::Ports::StereoFrame &out, int timeoutMs, bool preferLatest,
                     uint64_t minTimestampNs) override;
-    SmartDrone::core::ports::CameraHealth GetHealth() const override;
-    SmartDrone::core::ports::CameraDiagnostics GetDiagnostics() const override;
-    SmartDrone::core::ports::CameraProviderSemantics Semantics() const override;
+    SmartDrone::Core::Ports::CameraHealth GetHealth() const override;
+    SmartDrone::Core::Ports::CameraDiagnostics GetDiagnostics() const override;
+    SmartDrone::Core::Ports::CameraProviderSemantics Semantics() const override;
 
   private:
     const ReplayDataset &m_dataset;
@@ -76,14 +76,14 @@ class ReplayCameraProvider final : public SmartDrone::core::ports::ICameraProvid
     bool m_started{false};
 };
 
-class ReplayImuProvider final : public SmartDrone::core::ports::IImuProvider {
+class ReplayImuProvider final : public SmartDrone::Core::Ports::IImuProvider {
   public:
     explicit ReplayImuProvider(const ReplayDataset &dataset);
 
     bool Start() override;
     void Stop() override;
     bool Ready() const override;
-    std::vector<SmartDrone::core::ports::ImuReading> PopWindow(int64_t fromNs, int64_t toNs) override;
+    std::vector<SmartDrone::Core::Ports::ImuReading> PopWindow(int64_t fromNs, int64_t toNs) override;
 
   private:
     const ReplayDataset &m_dataset;
@@ -91,4 +91,4 @@ class ReplayImuProvider final : public SmartDrone::core::ports::IImuProvider {
     size_t m_cursor{0};
 };
 
-} // namespace SmartDrone::tests
+} // namespace SmartDrone::Tests

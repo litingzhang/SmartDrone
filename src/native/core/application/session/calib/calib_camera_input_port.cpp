@@ -9,7 +9,7 @@
 #include "core/application/runtime/application_runtime_factories.h"
 #include "core/ports/camera_provider.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr std::int64_t NANOSECONDS_PER_MILLISECOND = 1000000LL;
@@ -95,7 +95,7 @@ class CalibCameraInputPort::Impl final {
     bool AcceptFrameTiming(const CalibStereoFrame &frame)
     {
         if (m_cameraProvider->Semantics() !=
-            SmartDrone::core::ports::CameraProviderSemantics::DualStreamPaired) {
+            SmartDrone::Core::Ports::CameraProviderSemantics::DualStreamPaired) {
             return true;
         }
         const std::int64_t absDtLr = FrameTimestampDeltaNs(frame);
@@ -128,7 +128,7 @@ class CalibCameraInputPort::Impl final {
 
     MainRuntimeAliases m_aliases{};
     const ApplicationRuntimeFactories &m_factories;
-    std::unique_ptr<SmartDrone::core::ports::ICameraProvider>
+    std::unique_ptr<SmartDrone::Core::Ports::ICameraProvider>
         m_cameraProvider;
     std::int64_t m_maxPairDeltaNs{0};
     int m_droppedWide{0};
@@ -165,4 +165,4 @@ bool CalibCameraInputPort::Opened() const
     return m_impl->Opened();
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

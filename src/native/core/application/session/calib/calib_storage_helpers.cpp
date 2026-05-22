@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <system_error>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 void EnsureDir(const fs::path &p)
 {
@@ -87,4 +87,4 @@ int CleanupCalibDataDirs(const std::string &root)
     return removed;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

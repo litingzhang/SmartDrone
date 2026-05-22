@@ -14,7 +14,7 @@
 #include "core/application/runtime/runtime_command_service.h"
 #include "core/domain/runtime_mode.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 constexpr uint8_t kCmdPointCloud = 0xF2;
 constexpr uint8_t kCmdHeartbeat = CMD_HEARTBEAT;
@@ -26,10 +26,10 @@ constexpr size_t kMaxPointCloudPointsPerFrame =
 
 using BuildCapabilitiesPayloadFn = std::function<std::vector<uint8_t>()>;
 using BuildConfigPayloadFn =
-    std::function<std::vector<uint8_t>(const UnifiedConfig &, SmartDrone::core::domain::RuntimeMode)>;
+    std::function<std::vector<uint8_t>(const UnifiedConfig &, SmartDrone::Core::Domain::RuntimeMode)>;
 using PeerToIpStringFn = std::function<std::string(const UdpPeer &)>;
 using CurrentConfigFn = std::function<UnifiedConfig()>;
-using CurrentRuntimeModeFn = std::function<SmartDrone::core::domain::RuntimeMode()>;
+using CurrentRuntimeModeFn = std::function<SmartDrone::Core::Domain::RuntimeMode()>;
 using UpdateCommandPeerFn = std::function<void(const UdpPeer &)>;
 
 struct UdpRuntimeStateSnapshot {
@@ -89,4 +89,4 @@ class UdpCommandRuntime final {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

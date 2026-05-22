@@ -3,25 +3,31 @@
 #include "core/ports/slam_backend_state.h"
 #include "core/ports/slam_engine.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 class SlamEngineAdapter;
 
-core::ports::SlamOutput MakeOkSlamOutput(const core::ports::SlamInputBatch &input,
+Core::Ports::SlamOutput MakeOkSlamOutput(const Core::Ports::SlamInputBatch &input,
                                          unsigned long mapId = 1);
 
-void MarkSlamOutputPoseLost(core::ports::SlamOutput &out, int trackingState);
+void MarkSlamOutputPoseLost(Core::Ports::SlamOutput &out, int trackingState);
 
-void CopyMapSummaryToOutput(const core::ports::SlamMapSummary &summary,
-                            core::ports::SlamOutput &out);
+void CopyMapSummaryToOutput(const Core::Ports::SlamMapSummary &summary,
+                            Core::Ports::SlamOutput &out);
 
-void CopyBackendStatsToOutput(const core::ports::SlamBackendStats &stats,
-                              core::ports::SlamOutput &out);
+void CopyBackendStatsToOutput(const Core::Ports::SlamBackendStats &stats,
+                              Core::Ports::SlamOutput &out);
 
-core::ports::SlamOutput MakePoseLostSlamOutput(SlamEngineAdapter *engine,
-                                               const core::ports::SlamInputBatch &input,
+void CopyOptionalMapSummary(SlamEngineAdapter *engine,
+                            Core::Ports::SlamOutput &out);
+void MaintainOptionalRealtimeContinuity(
+    SlamEngineAdapter *engine, Core::Ports::SlamOutput &out,
+    const Core::Ports::SlamInputBatch &input);
+
+Core::Ports::SlamOutput MakePoseLostSlamOutput(SlamEngineAdapter *engine,
+                                               const Core::Ports::SlamInputBatch &input,
                                                int trackingState,
                                                bool copyOrbMapSummary = false,
                                                bool maintainRealtimeContinuity = false);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

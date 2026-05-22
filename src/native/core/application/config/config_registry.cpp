@@ -2,18 +2,18 @@
 
 #include <string>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
-using DescriptorList = std::vector<domain::ConfigDescriptor>;
+using DescriptorList = std::vector<Domain::ConfigDescriptor>;
 
-domain::ConfigDescriptor Make(std::string_view key,
+Domain::ConfigDescriptor Make(std::string_view key,
                               std::string_view description,
                               bool hotReloadable,
                               bool requiresPipelineRestart,
                               bool requiresDeviceRestart)
 {
-    domain::ConfigDescriptor out{};
+    Domain::ConfigDescriptor out{};
     out.key = std::string(key);
     out.description = std::string(description);
     out.hotReloadable = hotReloadable;
@@ -185,7 +185,7 @@ DescriptorList StreamDescriptors()
 
 } // namespace
 
-std::vector<domain::ConfigDescriptor> ConfigRegistry::DefaultDescriptors()
+std::vector<Domain::ConfigDescriptor> ConfigRegistry::DefaultDescriptors()
 {
     DescriptorList descriptors;
     AppendDescriptors(descriptors, CameraDescriptors());
@@ -198,4 +198,4 @@ std::vector<domain::ConfigDescriptor> ConfigRegistry::DefaultDescriptors()
     return descriptors;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

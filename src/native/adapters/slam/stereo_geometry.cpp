@@ -8,7 +8,7 @@
 
 #include "adapters/slam/slam_env.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -306,9 +306,9 @@ float ComputeStereoCandidateQuality(float descriptorScore, float zncc,
                       0.0f, 1.0f);
 }
 
-std::vector<core::ports::StereoMatchPair>
+std::vector<Core::Ports::StereoMatchPair>
 FilterStereoPairsByDisparityConsistency(
-    const std::vector<core::ports::StereoMatchPair> &matches)
+    const std::vector<Core::Ports::StereoMatchPair> &matches)
 {
     if (matches.size() < 8) {
         return matches;
@@ -316,7 +316,7 @@ FilterStereoPairsByDisparityConsistency(
 
     std::vector<float> disparities;
     disparities.reserve(matches.size());
-    for (const core::ports::StereoMatchPair &match : matches) {
+    for (const Core::Ports::StereoMatchPair &match : matches) {
         disparities.push_back(match.disparity);
     }
 
@@ -341,9 +341,9 @@ FilterStereoPairsByDisparityConsistency(
         std::max(kStereoDisparityMinTolerancePx,
                  kStereoDisparityMadScale * std::max(mad, 1.0f));
 
-    std::vector<core::ports::StereoMatchPair> filtered;
+    std::vector<Core::Ports::StereoMatchPair> filtered;
     filtered.reserve(matches.size());
-    for (const core::ports::StereoMatchPair &match : matches) {
+    for (const Core::Ports::StereoMatchPair &match : matches) {
         if (std::fabs(match.disparity - medianDisparity) <= tolerance) {
             filtered.push_back(match);
         }
@@ -354,4 +354,4 @@ FilterStereoPairsByDisparityConsistency(
     return filtered;
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

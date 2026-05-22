@@ -7,7 +7,7 @@
 #include "core/application/epg/epg_task_manifest.h"
 #include "core/application/runtime/epg_redeploy_coordinator.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class EpgOptimizeTask final : public Epg::ITask {
   public:
@@ -21,4 +21,4 @@ class EpgOptimizeTask final : public Epg::ITask {
     std::shared_ptr<EpgRedeployCoordinator> m_redeploy;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

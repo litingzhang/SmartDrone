@@ -6,10 +6,10 @@
 
 #include "core/ports/visual_feature_frontend.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 struct StereoFeatureFrontendRunInput {
-    core::ports::IVisualFeatureFrontend *client{nullptr};
+    Core::Ports::IVisualFeatureFrontend *client{nullptr};
     const cv::Mat *leftPrepared{nullptr};
     const cv::Mat *rightPrepared{nullptr};
     int inputMaxWidth{0};
@@ -17,9 +17,9 @@ struct StereoFeatureFrontendRunInput {
 };
 
 struct StereoFeatureFrontendRunResult {
-    core::ports::VisualFeatureSet leftFeatures;
-    core::ports::VisualFeatureSet rightFeatures;
-    core::ports::VisualFeatureFrontendStats stats;
+    Core::Ports::VisualFeatureSet leftFeatures;
+    Core::Ports::VisualFeatureSet rightFeatures;
+    Core::Ports::VisualFeatureFrontendStats stats;
     double inputBuildMs{0.0};
     double frontendCallMs{0.0};
     float leftScaleX{1.0f};
@@ -32,4 +32,4 @@ struct StereoFeatureFrontendRunResult {
 bool RunStereoFeatureFrontend(const StereoFeatureFrontendRunInput &input,
                               StereoFeatureFrontendRunResult &result);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

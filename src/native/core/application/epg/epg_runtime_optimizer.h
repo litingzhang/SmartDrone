@@ -3,9 +3,14 @@
 #include <cstdint>
 #include <string>
 
-#include "core/application/epg/epg_task_manifest.h"
+#include "common/epg/epg.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
+
+struct EpgTaskManifest;
+
+inline constexpr const char *EPG_EXACT_SOLVER_OBJECTIVE =
+    Epg::EXACT_SOLVER_OBJECTIVE;
 
 struct EpgRuntimeOptimizerResult {
     bool optimized{false};
@@ -26,4 +31,4 @@ EpgRuntimeOptimizerResult OptimizeEpgProfileForManifest(
     const EpgTaskManifest &manifest,
     std::uint64_t nowMs);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

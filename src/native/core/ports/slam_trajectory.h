@@ -4,7 +4,7 @@
 
 #include <sophus/se3.hpp>
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 class ISlamTrajectoryProvider {
   public:
@@ -23,4 +23,4 @@ class ISlamTrajectorySaver {
     virtual bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path) = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

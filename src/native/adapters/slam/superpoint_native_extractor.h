@@ -8,7 +8,7 @@
 
 #include "adapters/slam/superpoint_lightglue_frontend_client.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 class SuperPointNativeExtractor {
   public:
@@ -55,4 +55,4 @@ class SuperPointNativeExtractor {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

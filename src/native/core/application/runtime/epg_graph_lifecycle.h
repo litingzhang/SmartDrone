@@ -8,7 +8,7 @@ namespace Epg {
 class EventPipelineGraph;
 }
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct EpgGraphLifecycleConfig {
     std::atomic<bool> &stop;
@@ -46,4 +46,4 @@ class EpgGraphLifecycle final {
     bool m_graphStopRequested{false};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

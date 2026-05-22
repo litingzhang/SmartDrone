@@ -14,10 +14,10 @@
 #include "adapters/slam/slam_pose_utils.h"
 #include "core/ports/slam_tracking_state.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 SlamEngineAdapter::SlamEngineAdapter(
-    std::unique_ptr<core::ports::ISlamTrackingBackend> backend,
+    std::unique_ptr<Core::Ports::ISlamTrackingBackend> backend,
     SlamInputMode inputMode, bool useImu, std::string settingsPath)
     : m_trackingBackend(std::move(backend)),
       m_modeState(std::make_unique<SlamModeSharedState>()),
@@ -32,7 +32,7 @@ SlamEngineAdapter::~SlamEngineAdapter() = default;
 
 bool SlamEngineAdapter::Start()
 {
-    m_lastStablePose = core::ports::PoseEstimate{};
+    m_lastStablePose = Core::Ports::PoseEstimate{};
     m_haveLastStablePose = false;
     m_lastStableTimestampSec = 0.0;
     ResetRealtimeOutputAlignment();
@@ -46,7 +46,7 @@ bool SlamEngineAdapter::Start()
     return m_trackingBackend && m_trackingBackend->Available();
 }
 
-void SlamEngineAdapter::SetOperationMode(core::domain::SlamOperationMode mode)
+void SlamEngineAdapter::SetOperationMode(Core::Domain::SlamOperationMode mode)
 {
     if (!m_trackingBackend) {
         return;
@@ -65,6 +65,19 @@ void SlamEngineAdapter::SetFeatureFrontend(FeatureFrontend frontend)
     if (!m_modeStrategy) {
         m_modeStrategy = CreateSlamModeStrategy(m_featureFrontend);
     }
+}
+
+void SlamEngineAdapter::SetVisualFeatureFrontend(
+    Core::Ports::IVisualFeatureFrontend *frontend)
+{
+    m_modeState->m_visualFeatureFrontend = frontend;
+}
+
+void SlamEngineAdapter::SetVisualFeatureInputSizeLimit(int maxWidth,
+                                                       int maxHeight)
+{
+    m_modeState->m_visualFeatureInputMaxWidth = std::max(0, maxWidth);
+    m_modeState->m_visualFeatureInputMaxHeight = std::max(0, maxHeight);
 }
 
 void SlamEngineAdapter::SetStereoVoLoopClosure(bool enabled, float scale,
@@ -101,7 +114,7 @@ void SlamEngineAdapter::StepBackend()
 
 void SlamEngineAdapter::Stop()
 {
-    m_lastStablePose = core::ports::PoseEstimate{};
+    m_lastStablePose = Core::Ports::PoseEstimate{};
     m_haveLastStablePose = false;
     m_lastStableTimestampSec = 0.0;
     ResetRealtimeOutputAlignment();
@@ -135,7 +148,7 @@ void SlamEngineAdapter::ResetRealtimeOutputAlignment()
 
 void SlamEngineAdapter::ResetOutputSmoother()
 {
-    m_smoothedOutputPose = core::ports::PoseEstimate{};
+    m_smoothedOutputPose = Core::Ports::PoseEstimate{};
     m_haveSmoothedOutputPose = false;
     m_smoothedOutputTimestampSec = 0.0;
     m_smoothVelX = 0.0f;
@@ -163,7 +176,7 @@ double SlamEngineAdapter::SmoothedPoseDeltaTime(double timestampSec) const
 }
 
 void SlamEngineAdapter::StoreSmoothedPose(
-    const core::ports::PoseEstimate &pose, double timestampSec)
+    const Core::Ports::PoseEstimate &pose, double timestampSec)
 {
     m_smoothedOutputPose = pose;
     m_haveSmoothedOutputPose = true;
@@ -171,11 +184,11 @@ void SlamEngineAdapter::StoreSmoothedPose(
 }
 
 bool SlamEngineAdapter::AcceptStableRealtimePose(
-    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
     double dt, int trackingState)
 {
     if (!pose.valid || IsIdentityPose(pose) ||
-        trackingState != core::ports::kSlamTrackingOk) {
+        trackingState != Core::Ports::kSlamTrackingOk) {
         return false;
     }
     if (m_haveLastStablePose) {
@@ -201,12 +214,12 @@ bool SlamEngineAdapter::AcceptStableRealtimePose(
 }
 
 bool SlamEngineAdapter::AcceptRealtimeBootstrapPose(
-    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
     int trackingState, bool rawIdentity)
 {
     const bool bootstrapFrame =
         !m_haveLastStablePose &&
-        trackingState == core::ports::kSlamTrackingNotInitialized &&
+        trackingState == Core::Ports::kSlamTrackingNotInitialized &&
         IsFinitePose(pose) && rawIdentity;
     if (!bootstrapFrame) {
         return false;
@@ -219,7 +232,7 @@ bool SlamEngineAdapter::AcceptRealtimeBootstrapPose(
     return true;
 }
 
-bool SlamEngineAdapter::PredictRealtimePose(core::ports::PoseEstimate &pose,
+bool SlamEngineAdapter::PredictRealtimePose(Core::Ports::PoseEstimate &pose,
                                             bool &poseValid,
                                             double timestampSec, double dt,
                                             int trackingState,
@@ -231,15 +244,15 @@ bool SlamEngineAdapter::PredictRealtimePose(core::ports::PoseEstimate &pose,
     }
     const bool canPredict =
         !pose.valid || rawIdentity ||
-        trackingState == core::ports::kSlamTrackingRecentlyLost ||
-        trackingState == core::ports::kSlamTrackingOkKlt;
+        trackingState == Core::Ports::kSlamTrackingRecentlyLost ||
+        trackingState == Core::Ports::kSlamTrackingOkKlt;
     if (!canPredict) {
         poseValid = pose.valid;
         return true;
     }
 
     ClampVelocityVector(m_stableVelX, m_stableVelY, m_stableVelZ);
-    core::ports::PoseEstimate predicted = m_lastStablePose;
+    Core::Ports::PoseEstimate predicted = m_lastStablePose;
     predicted.x += m_stableVelX * static_cast<float>(dt);
     predicted.y += m_stableVelY * static_cast<float>(dt);
     predicted.z += m_stableVelZ * static_cast<float>(dt);
@@ -255,7 +268,7 @@ bool SlamEngineAdapter::PredictRealtimePose(core::ports::PoseEstimate &pose,
 }
 
 void SlamEngineAdapter::MaintainRealtimePoseContinuity(
-    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
     int trackingState)
 {
     const bool rawFinite = IsFinitePose(pose);
@@ -278,7 +291,7 @@ void SlamEngineAdapter::MaintainRealtimePoseContinuity(
                               rawIdentity);
 }
 
-bool SlamEngineAdapter::HandleRealtimeMapBridge(core::ports::SlamOutput &out)
+bool SlamEngineAdapter::HandleRealtimeMapBridge(Core::Ports::SlamOutput &out)
 {
     const bool canBridgeMapReset =
         out.poseValid && out.pose.valid && IsFinitePose(out.pose);
@@ -315,7 +328,7 @@ bool SlamEngineAdapter::HandleRealtimeMapBridge(core::ports::SlamOutput &out)
     out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose * rawPose);
     out.poseValid = true;
     out.pose.valid = true;
-    out.trackingState = core::ports::kSlamTrackingRecentlyLost;
+    out.trackingState = Core::Ports::kSlamTrackingRecentlyLost;
     out.realtimePoseQualityGate = true;
     out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
     m_realtimeOutputHaveLastMapId = true;
@@ -324,13 +337,13 @@ bool SlamEngineAdapter::HandleRealtimeMapBridge(core::ports::SlamOutput &out)
 }
 
 bool SlamEngineAdapter::ApplyRealtimeMapContinuity(
-    core::ports::SlamOutput &out)
+    Core::Ports::SlamOutput &out)
 {
     if (!m_realtimeOutputMapContinuityActive || !out.poseValid ||
         !out.pose.valid || !IsFinitePose(out.pose)) {
         return false;
     }
-    const core::ports::PoseEstimate rawPose = out.pose;
+    const Core::Ports::PoseEstimate rawPose = out.pose;
     out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose *
                                  PoseEstimateToSe3(rawPose));
     out.poseValid = true;
@@ -340,15 +353,15 @@ bool SlamEngineAdapter::ApplyRealtimeMapContinuity(
         out.gatedPoseStepMeters =
             PoseTranslationDistance(out.pose, m_lastStablePose);
     }
-    if (out.trackingState != core::ports::kSlamTrackingOk) {
-        out.trackingState = core::ports::kSlamTrackingRecentlyLost;
+    if (out.trackingState != Core::Ports::kSlamTrackingOk) {
+        out.trackingState = Core::Ports::kSlamTrackingRecentlyLost;
     }
     out.realtimePoseQualityGate = true;
     return true;
 }
 
 bool SlamEngineAdapter::ApplyRealtimeResetGuard(
-    core::ports::SlamOutput &out)
+    Core::Ports::SlamOutput &out)
 {
     const bool canMeasurePoseStep = out.poseValid && out.pose.valid &&
                                     IsFinitePose(out.pose) &&
@@ -358,7 +371,7 @@ bool SlamEngineAdapter::ApplyRealtimeResetGuard(
         out.gatedPoseStepMeters = out.rawPoseStepMeters;
     }
     if (!canMeasurePoseStep || !out.usedVisualFeatureFrontend ||
-        out.trackingState != core::ports::kSlamTrackingOk ||
+        out.trackingState != Core::Ports::kSlamTrackingOk ||
         !EnvFlagEnabled("SMART_DRONE_REALTIME_POSE_RESET_GUARD", false)) {
         return canMeasurePoseStep;
     }
@@ -376,14 +389,14 @@ bool SlamEngineAdapter::ApplyRealtimeResetGuard(
     m_realtimeOutputMapContinuityMapId = out.mapId;
     out.pose = Se3ToPoseEstimate(m_realtimeOutputFromRawPose * rawPose);
     out.poseValid = true;
-    out.trackingState = core::ports::kSlamTrackingRecentlyLost;
+    out.trackingState = Core::Ports::kSlamTrackingRecentlyLost;
     out.realtimePoseQualityGate = true;
     out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
     return false;
 }
 
 bool SlamEngineAdapter::ShouldApplyRealtimeFeatureGate(
-    const core::ports::SlamOutput &out) const
+    const Core::Ports::SlamOutput &out) const
 {
     if (!EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_QUALITY_GATE", false)) {
         return false;
@@ -392,7 +405,7 @@ bool SlamEngineAdapter::ShouldApplyRealtimeFeatureGate(
         EnvFlagEnabled("SMART_DRONE_SP_LG_REALTIME_GATE_STABILIZING", false);
     if (!out.usedVisualFeatureFrontend || !out.stereoFeatureInjected ||
         (!gateDuringStabilizing && out.stereoFeatureStabilizing) ||
-        out.trackingState != core::ports::kSlamTrackingOk) {
+        out.trackingState != Core::Ports::kSlamTrackingOk) {
         return false;
     }
     const int minInliers = EnvIntValueClamped(
@@ -407,7 +420,7 @@ bool SlamEngineAdapter::ShouldApplyRealtimeFeatureGate(
 }
 
 void SlamEngineAdapter::ApplyRealtimeInnovationGate(
-    core::ports::SlamOutput &out, double timestampSec, float maxStep)
+    Core::Ports::SlamOutput &out, double timestampSec, float maxStep)
 {
     const double dt = StablePoseDeltaTime(timestampSec);
     float velocityX = m_stableVelX;
@@ -415,7 +428,7 @@ void SlamEngineAdapter::ApplyRealtimeInnovationGate(
     float velocityZ = m_stableVelZ;
     ClampVelocityVector(velocityX, velocityY, velocityZ);
 
-    core::ports::PoseEstimate predicted = m_lastStablePose;
+    Core::Ports::PoseEstimate predicted = m_lastStablePose;
     predicted.x += velocityX * static_cast<float>(dt);
     predicted.y += velocityY * static_cast<float>(dt);
     predicted.z += velocityZ * static_cast<float>(dt);
@@ -430,7 +443,7 @@ void SlamEngineAdapter::ApplyRealtimeInnovationGate(
     }
 
     const float scale = maxInnovation / std::max(innovation, 1.0e-6f);
-    core::ports::PoseEstimate gated = out.pose;
+    Core::Ports::PoseEstimate gated = out.pose;
     gated.x = predicted.x + (out.pose.x - predicted.x) * scale;
     gated.y = predicted.y + (out.pose.y - predicted.y) * scale;
     gated.z = predicted.z + (out.pose.z - predicted.z) * scale;
@@ -445,7 +458,7 @@ void SlamEngineAdapter::ApplyRealtimeInnovationGate(
     out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
 }
 
-void SlamEngineAdapter::ApplyRealtimeStepGate(core::ports::SlamOutput &out,
+void SlamEngineAdapter::ApplyRealtimeStepGate(Core::Ports::SlamOutput &out,
                                               float maxStep)
 {
     const float rawStep = out.rawPoseStepMeters;
@@ -453,7 +466,7 @@ void SlamEngineAdapter::ApplyRealtimeStepGate(core::ports::SlamOutput &out,
         return;
     }
     const float scale = maxStep / std::max(rawStep, 1.0e-6f);
-    core::ports::PoseEstimate gated = out.pose;
+    Core::Ports::PoseEstimate gated = out.pose;
     gated.x = m_lastStablePose.x + (out.pose.x - m_lastStablePose.x) * scale;
     gated.y = m_lastStablePose.y + (out.pose.y - m_lastStablePose.y) * scale;
     gated.z = m_lastStablePose.z + (out.pose.z - m_lastStablePose.z) * scale;
@@ -465,7 +478,7 @@ void SlamEngineAdapter::ApplyRealtimeStepGate(core::ports::SlamOutput &out,
     out.gatedPoseStepMeters = PoseTranslationDistance(out.pose, m_lastStablePose);
 }
 
-void SlamEngineAdapter::GateRealtimePoseQuality(core::ports::SlamOutput &out,
+void SlamEngineAdapter::GateRealtimePoseQuality(Core::Ports::SlamOutput &out,
                                                 double timestampSec)
 {
     if (HandleRealtimeMapBridge(out)) {
@@ -503,7 +516,7 @@ bool SlamEngineAdapter::UseAlphaBetaSmoother() const
 }
 
 void SlamEngineAdapter::PredictInvalidSmoothedPose(
-    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec)
+    Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec)
 {
     if (!m_haveSmoothedOutputPose) {
         poseValid = false;
@@ -518,7 +531,7 @@ void SlamEngineAdapter::PredictInvalidSmoothedPose(
 }
 
 void SlamEngineAdapter::PredictIdentitySmoothedPose(
-    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
     double dt)
 {
     ClampVelocityVector(m_smoothVelX, m_smoothVelY, m_smoothVelZ);
@@ -534,10 +547,10 @@ void SlamEngineAdapter::PredictIdentitySmoothedPose(
     StoreSmoothedPose(pose, timestampSec);
 }
 
-core::ports::PoseEstimate SlamEngineAdapter::PredictSmoothedPose(
+Core::Ports::PoseEstimate SlamEngineAdapter::PredictSmoothedPose(
     double dt) const
 {
-    core::ports::PoseEstimate predicted = m_smoothedOutputPose;
+    Core::Ports::PoseEstimate predicted = m_smoothedOutputPose;
     predicted.x += m_smoothVelX * static_cast<float>(dt);
     predicted.y += m_smoothVelY * static_cast<float>(dt);
     predicted.z += m_smoothVelZ * static_cast<float>(dt);
@@ -562,7 +575,7 @@ void SlamEngineAdapter::ClampInnovationVector(float &innovationX,
     innovationZ *= scale;
 }
 
-void SlamEngineAdapter::LimitSmoothedStep(core::ports::PoseEstimate &pose,
+void SlamEngineAdapter::LimitSmoothedStep(Core::Ports::PoseEstimate &pose,
                                           float maxStep) const
 {
     const float step = PoseTranslationDistance(pose, m_smoothedOutputPose);
@@ -597,7 +610,7 @@ void SlamEngineAdapter::UpdateAlphaBetaVelocity(float innovationX,
 }
 
 void SlamEngineAdapter::ApplyAlphaBetaSmoother(
-    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
     double dt)
 {
     const float alpha = EnvFloatValueClamped(
@@ -613,13 +626,13 @@ void SlamEngineAdapter::ApplyAlphaBetaSmoother(
         EnvFloatValueClamped("SMART_DRONE_POSE_STABILIZER_MAX_STEP_M",
                              kPoseStabilizerMaxStepMeters, 0.005f, 1.0f);
 
-    const core::ports::PoseEstimate predicted = PredictSmoothedPose(dt);
+    const Core::Ports::PoseEstimate predicted = PredictSmoothedPose(dt);
     float innovationX = pose.x - predicted.x;
     float innovationY = pose.y - predicted.y;
     float innovationZ = pose.z - predicted.z;
     ClampInnovationVector(innovationX, innovationY, innovationZ, maxInnovation);
 
-    core::ports::PoseEstimate smoothed = pose;
+    Core::Ports::PoseEstimate smoothed = pose;
     smoothed.x = predicted.x + alpha * innovationX;
     smoothed.y = predicted.y + alpha * innovationY;
     smoothed.z = predicted.z + alpha * innovationZ;
@@ -635,11 +648,11 @@ void SlamEngineAdapter::ApplyAlphaBetaSmoother(
     StoreSmoothedPose(pose, timestampSec);
 }
 
-core::ports::PoseEstimate SlamEngineAdapter::PredictGuardedSmoothedPose(
+Core::Ports::PoseEstimate SlamEngineAdapter::PredictGuardedSmoothedPose(
     double dt, float maxGuardStep, float maxSpeed)
 {
     ClampVelocityVector(m_smoothVelX, m_smoothVelY, m_smoothVelZ);
-    core::ports::PoseEstimate guarded = PredictSmoothedPose(dt);
+    Core::Ports::PoseEstimate guarded = PredictSmoothedPose(dt);
     const float predictedStep =
         PoseTranslationDistance(guarded, m_smoothedOutputPose);
     const float maxPredictedStep =
@@ -652,7 +665,7 @@ core::ports::PoseEstimate SlamEngineAdapter::PredictGuardedSmoothedPose(
 }
 
 void SlamEngineAdapter::UpdateGuardMeasuredVelocity(
-    const core::ports::PoseEstimate &pose, double dt, float maxSpeed)
+    const Core::Ports::PoseEstimate &pose, double dt, float maxSpeed)
 {
     float measuredVelX =
         (pose.x - m_smoothedOutputPose.x) / static_cast<float>(dt);
@@ -679,7 +692,7 @@ void SlamEngineAdapter::UpdateGuardMeasuredVelocity(
 }
 
 void SlamEngineAdapter::ApplyGuardSmoother(
-    core::ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
+    Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
     double dt, int trackingState)
 {
     const float rawStep = PoseTranslationDistance(pose, m_smoothedOutputPose);
@@ -689,10 +702,10 @@ void SlamEngineAdapter::ApplyGuardSmoother(
         EnvFloatValueClamped("SMART_DRONE_POSE_STABILIZER_MAX_SPEED_MPS",
                              kPoseStabilizerMaxSpeedMps, 0.1f, 20.0f);
     const bool rawPoseStuck =
-        trackingState != core::ports::kSlamTrackingOk && rawStep < 1.0e-5f;
+        trackingState != Core::Ports::kSlamTrackingOk && rawStep < 1.0e-5f;
 
     if (rawPoseStuck || rawStep > maxGuardStep) {
-        core::ports::PoseEstimate guarded =
+        Core::Ports::PoseEstimate guarded =
             PredictGuardedSmoothedPose(dt, maxGuardStep, maxSpeed);
         guarded.valid = true;
         pose = guarded;
@@ -710,7 +723,7 @@ void SlamEngineAdapter::ApplyGuardSmoother(
     }
 }
 
-void SlamEngineAdapter::StabilizeOutputPose(core::ports::PoseEstimate &pose,
+void SlamEngineAdapter::StabilizeOutputPose(Core::Ports::PoseEstimate &pose,
                                             bool &poseValid,
                                             double timestampSec,
                                             int trackingState)
@@ -746,4 +759,4 @@ void SlamEngineAdapter::StabilizeOutputPose(core::ports::PoseEstimate &pose,
     ApplyGuardSmoother(pose, poseValid, timestampSec, dt, trackingState);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

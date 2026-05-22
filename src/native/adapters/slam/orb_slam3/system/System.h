@@ -45,22 +45,22 @@
 
 namespace ORB_SLAM3 {
 
-using SmartDrone::core::ports::SlamBackendStats;
-using SmartDrone::core::ports::SlamBackendWaitStats;
-using SmartDrone::core::ports::SlamMapSummary;
-using SmartDrone::core::ports::SlamBackendLoopClosureRequest;
-using SmartDrone::core::ports::SlamBackendLoopClosureResult;
-using SmartDrone::core::ports::SlamBackendMappingRequest;
-using SmartDrone::core::ports::SlamBackendMappingResult;
-using SmartDrone::core::ports::SlamBackendOptimizationRequest;
-using SmartDrone::core::ports::SlamBackendOptimizationResult;
-using SmartDrone::core::ports::TrackedFeatureSnapshot;
-using SmartDrone::core::ports::TrackedPointCloudSnapshot;
-using SmartDrone::core::ports::TrackedVisualData;
-using SmartDrone::core::ports::TrackedVisualSummary;
-using MonoFeatureFrameData = SmartDrone::core::ports::VisualKeypointFeatureSet;
+using SmartDrone::Core::Ports::SlamBackendStats;
+using SmartDrone::Core::Ports::SlamBackendWaitStats;
+using SmartDrone::Core::Ports::SlamMapSummary;
+using SmartDrone::Core::Ports::SlamBackendLoopClosureRequest;
+using SmartDrone::Core::Ports::SlamBackendLoopClosureResult;
+using SmartDrone::Core::Ports::SlamBackendMappingRequest;
+using SmartDrone::Core::Ports::SlamBackendMappingResult;
+using SmartDrone::Core::Ports::SlamBackendOptimizationRequest;
+using SmartDrone::Core::Ports::SlamBackendOptimizationResult;
+using SmartDrone::Core::Ports::TrackedFeatureSnapshot;
+using SmartDrone::Core::Ports::TrackedPointCloudSnapshot;
+using SmartDrone::Core::Ports::TrackedVisualData;
+using SmartDrone::Core::Ports::TrackedVisualSummary;
+using MonoFeatureFrameData = SmartDrone::Core::Ports::VisualKeypointFeatureSet;
 using StereoFeatureFrameData =
-    SmartDrone::core::ports::StereoFeatureObservationPacket;
+    SmartDrone::Core::Ports::StereoFeatureObservationPacket;
 
 // class Viewer;
 // class FrameDrawer;

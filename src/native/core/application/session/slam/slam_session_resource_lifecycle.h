@@ -7,32 +7,32 @@
 
 #include "core/application/session/slam/slam_session_resource_factory.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 class ICameraProvider;
 class IImuProvider;
 class ISlamEngine;
 class IVisualFeatureFrontend;
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class ImuSensorPoller;
 class IPreviewOutputRuntime;
 
 struct SlamSessionResourceLifecycleConfig {
-    SmartDrone::core::ports::ISlamEngine &slamEngine;
-    SmartDrone::core::ports::ICameraProvider *cameraProvider{nullptr};
+    SmartDrone::Core::Ports::ISlamEngine &slamEngine;
+    SmartDrone::Core::Ports::ICameraProvider *cameraProvider{nullptr};
     ImuSensorPoller *imuPoller{nullptr};
     IPreviewOutputRuntime *previewOutput{nullptr};
     bool useImu{false};
     bool udpEnabled{false};
     const MainRuntimeAliases &aliases;
-    std::function<SmartDrone::core::ports::CameraOpenConfig(
+    std::function<SmartDrone::Core::Ports::CameraOpenConfig(
         const MainRuntimeAliases &)>
         makeCameraOpenConfig;
     std::function<bool(sockaddr_in &)> resolveUdpDestination;
     std::function<SlamVisualFeatureFrontendStartResult()> startVisualFrontend;
-    std::function<void(SmartDrone::core::ports::IVisualFeatureFrontend *)>
+    std::function<void(SmartDrone::Core::Ports::IVisualFeatureFrontend *)>
         attachVisualFrontend;
 };
 
@@ -43,7 +43,7 @@ struct SlamSessionResourceStartResult {
     bool featureStarted{false};
     std::string featureRepoPath;
     std::string featureError;
-    SmartDrone::core::ports::IVisualFeatureFrontend *featureFrontend{nullptr};
+    SmartDrone::Core::Ports::IVisualFeatureFrontend *featureFrontend{nullptr};
 };
 
 class SlamSessionResourceLifecycle final {
@@ -69,4 +69,4 @@ class SlamSessionResourceLifecycle final {
     bool m_cameraOpen{false};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

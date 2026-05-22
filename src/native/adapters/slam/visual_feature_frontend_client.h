@@ -6,7 +6,7 @@
 #include "core/application/config/app_args.h"
 #include "core/ports/visual_feature_frontend.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 struct VisualFeatureFrontendRuntimeConfig {
     std::string repoPath;
@@ -18,7 +18,7 @@ struct VisualFeatureFrontendRuntimeConfig {
 };
 
 class IManagedVisualFeatureFrontend
-    : public core::ports::IVisualFeatureFrontend {
+    : public Core::Ports::IVisualFeatureFrontend {
   public:
     ~IManagedVisualFeatureFrontend() override = default;
 
@@ -47,4 +47,4 @@ std::string ResolveVisualFeatureFrontendRepo(FeatureFrontend frontend,
 void ConfigureVisualFeatureFrontendDefaults(
     FeatureFrontend frontend, const VisualFeatureFrontendRuntimeConfig &config);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

@@ -8,7 +8,7 @@
 #include "core/application/runtime/system_runtime_step_services.h"
 #include "core/application/runtime/udp_command_runtime.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class VehicleTelemetryRxTask final : public Epg::ITask {
   public:
@@ -108,4 +108,4 @@ class DiscoveryBeaconTask final : public Epg::ITask {
     std::uint64_t m_pulseSequence{0};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

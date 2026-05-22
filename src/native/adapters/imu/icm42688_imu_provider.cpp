@@ -1,6 +1,6 @@
 #include "adapters/imu/icm42688_imu_provider.h"
 
-namespace SmartDrone::adapters::imu {
+namespace SmartDrone::Adapters::Imu {
 
 Icm42688ImuProvider::Icm42688ImuProvider(ImuBuffer &buffer, Icm42688ImuProviderConfig cfg)
     : m_buffer(buffer), m_cfg(cfg)
@@ -21,9 +21,9 @@ bool Icm42688ImuProvider::Ready() const
     return m_buffer.Size() > 0;
 }
 
-std::vector<core::ports::ImuReading> Icm42688ImuProvider::PopWindow(int64_t fromNs, int64_t toNs)
+std::vector<Core::Ports::ImuReading> Icm42688ImuProvider::PopWindow(int64_t fromNs, int64_t toNs)
 {
     return m_buffer.PopBetweenNs(fromNs, toNs, m_cfg.slackBeforeNs, m_cfg.slackAfterNs);
 }
 
-} // namespace SmartDrone::adapters::imu
+} // namespace SmartDrone::Adapters::Imu

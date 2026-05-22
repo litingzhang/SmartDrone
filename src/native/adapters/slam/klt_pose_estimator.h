@@ -8,7 +8,7 @@
 
 #include "core/ports/visual_pose_backend.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 struct KltPnpCameraIntrinsics {
     float fx{0.0f};
@@ -49,11 +49,11 @@ KltPnpPoseEstimateResult
 EstimateKltPnpPoseDelta(const std::vector<cv::Point3f> &objectPoints,
                         const std::vector<cv::Point2f> &imagePoints,
                         const KltPnpPoseEstimatorOptions &options,
-                        core::ports::IVisualPnpPoseBackend &backend);
+                        Core::Ports::IVisualPnpPoseBackend &backend);
 
 KltPnpPoseEstimateResult
 EstimateKltPnpPoseDelta(const std::vector<cv::Point3f> &objectPoints,
                         const std::vector<cv::Point2f> &imagePoints,
                         const KltPnpPoseEstimatorOptions &options);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

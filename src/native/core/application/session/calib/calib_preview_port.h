@@ -4,7 +4,7 @@
 
 #include "core/application/session/epg/messages/calib_epg_messages.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct ApplicationRuntimeFactories;
 struct MainRuntimeAliases;
@@ -25,4 +25,4 @@ class CalibPreviewPort final {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

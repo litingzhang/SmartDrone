@@ -14,20 +14,13 @@ class DrdyGpio {
 
   private:
     bool OpenChip(const std::string &chipPath);
-#if SMART_DRONE_GPIOD_V2
-    bool OpenLineV2(unsigned lineOffset);
-    bool CreateLineRequestV2(gpiod_line_config *lineConfig);
-    int64_t ReadLatestEventTimestampV2();
-#else
-    bool OpenLineV1(unsigned lineOffset);
-    int64_t ReadLatestEventTimestampV1();
-#endif
+    bool OpenLine(unsigned lineOffset);
+    bool WaitForGpiodEvent(int timeoutMs);
+    void CloseGpiodResources();
+    int64_t ReadLatestEventTimestamp();
 
     gpiod_chip *m_chip{nullptr};
-#if SMART_DRONE_GPIOD_V2
-    gpiod_line_request *m_request{nullptr};
-    gpiod_edge_event_buffer *m_eventBuffer{nullptr};
-#else
-    gpiod_line *m_line{nullptr};
-#endif
+    void *m_request{nullptr};
+    void *m_eventBuffer{nullptr};
+    void *m_line{nullptr};
 };

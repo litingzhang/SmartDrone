@@ -12,11 +12,11 @@
 #include "core/application/state/live_pose_types.h"
 #include "core/ports/vehicle_control_port.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 class IVehicleControlPort;
 }
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct RuntimeGateSnapshot {
     uint8_t runtimeMode{RUNTIME_MODE_IDLE};
@@ -29,7 +29,7 @@ using ReadRuntimeGateFn = std::function<bool(RuntimeGateSnapshot &)>;
 using PublishVehicleFlightStateFn = std::function<void(bool, uint8_t, uint8_t)>;
 
 struct Px4UdpHooksConfig {
-    SmartDrone::core::ports::IVehicleControlPort &vehicleControl;
+    SmartDrone::Core::Ports::IVehicleControlPort &vehicleControl;
     ReadRuntimeGateFn readRuntimeGate;
     PublishVehicleFlightStateFn publishVehicleFlightState;
 };
@@ -62,7 +62,7 @@ class Px4UdpHooks final : public RuntimeCommandHook {
 
     struct PendingCommandAck {
         bool active{false};
-        ports::VehicleCommandAckKind command{ports::VehicleCommandAckKind::ArmDisarm};
+        Ports::VehicleCommandAckKind command{Ports::VehicleCommandAckKind::ArmDisarm};
         std::string label;
         std::chrono::steady_clock::time_point deadline{};
     };
@@ -84,26 +84,26 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     void EnsureManualControlStream();
     void DisableRemoteControl(bool stopManualStream);
     void SetManualControlNeutral();
-    void SetManualControlInput(const SmartDrone::core::ports::VehicleManualControl &input);
-    SmartDrone::core::ports::VehicleManualControl GetManualControlSnapshot() const;
+    void SetManualControlInput(const SmartDrone::Core::Ports::VehicleManualControl &input);
+    SmartDrone::Core::Ports::VehicleManualControl GetManualControlSnapshot() const;
     void SendManualControlSnapshot();
     bool ApplyRcMoveGoal(const MoveGoal &goal);
     bool ApplyOffboardMoveGoal(const MoveGoal &goal, std::string *err);
     bool EnsureOffboardMoveReady(std::string *err);
-    SmartDrone::core::ports::VehicleSetpointLocalNed BuildMoveSetpoint(const MoveGoal &goal) const;
+    SmartDrone::Core::Ports::VehicleSetpointLocalNed BuildMoveSetpoint(const MoveGoal &goal) const;
     bool EnsureOffboardMode(bool force, std::string *err);
     bool EnsureFlightMode(uint8_t mainMode, bool force, std::string *err, const char *modeName);
     bool EnsurePositionMode(bool force, std::string *err);
-    bool PrepareAutoLandingRangeWindow(const SmartDrone::core::ports::VehicleDownwardRange &range,
+    bool PrepareAutoLandingRangeWindow(const SmartDrone::Core::Ports::VehicleDownwardRange &range,
                                        std::chrono::steady_clock::time_point now,
                                        bool &shouldDisarm);
     void UpdateAutoLanding();
     void BeginAutoLandingDisarm();
-    void TrackCommandAck(ports::VehicleCommandAckKind command, const std::string &label);
+    void TrackCommandAck(Ports::VehicleCommandAckKind command, const std::string &label);
     void StepCommandAck();
-    void ClearCommandAckIfCurrent(ports::VehicleCommandAckKind command, const std::string &label);
+    void ClearCommandAckIfCurrent(Ports::VehicleCommandAckKind command, const std::string &label);
 
-    SmartDrone::core::ports::IVehicleControlPort &m_vehicleControl;
+    SmartDrone::Core::Ports::IVehicleControlPort &m_vehicleControl;
     ReadRuntimeGateFn m_readRuntimeGate;
     PublishVehicleFlightStateFn m_publishVehicleFlightState;
     std::atomic<bool> m_streamStarted{false};
@@ -111,7 +111,7 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     std::atomic<bool> m_remoteModeRequested{false};
     std::atomic<bool> m_offboardModeRequested{false};
     mutable std::mutex m_manualControlMtx;
-    SmartDrone::core::ports::VehicleManualControl m_manualControlInput{};
+    SmartDrone::Core::Ports::VehicleManualControl m_manualControlInput{};
     mutable std::mutex m_remoteModeMtx;
     mutable std::mutex m_autoLandingMtx;
     AutoLandingState m_autoLanding{};
@@ -122,4 +122,4 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     std::chrono::steady_clock::time_point m_lastPositionModeRequest{};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

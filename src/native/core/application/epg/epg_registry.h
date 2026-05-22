@@ -2,7 +2,7 @@
 
 #include "common/epg/epg.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 enum class EpgDomain {
     SystemRuntime,
@@ -20,4 +20,4 @@ void RegisterEpgTypes(Epg::Registry &registry,
 Epg::GraphConfig CompileEpgConfig(EpgDomain domain,
                                   Epg::Registry &registry);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

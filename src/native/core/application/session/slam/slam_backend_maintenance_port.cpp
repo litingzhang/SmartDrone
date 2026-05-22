@@ -2,7 +2,7 @@
 
 #include "core/application/session/slam/slam_runtime_control_port.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 SlamBackendMaintenancePort::SlamBackendMaintenancePort(
     SlamRuntimeControlPort &control)
@@ -16,4 +16,4 @@ SlamFrameStepResult SlamBackendMaintenancePort::StepBackend()
     return SlamFrameStepResult::Continue;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -9,7 +9,7 @@
 #include "common/tlv/udp_server.h"
 #include "core/application/state/live_pose_types.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct LivePoseState {
     struct Snapshot {
@@ -62,4 +62,4 @@ struct LivePoseState {
     bool dirty{false};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

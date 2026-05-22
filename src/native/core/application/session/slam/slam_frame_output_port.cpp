@@ -11,7 +11,7 @@
 #include "core/application/session/stream/preview_output_port.h"
 #include "core/application/state/live_pose_state.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr uint64_t kSlamDfxLogEveryNFrames = 30;
@@ -31,12 +31,12 @@ double UpdateEma(double current, double sample)
 }
 
 LivePoseQuality ToLivePoseQuality(
-    SmartDrone::core::ports::PoseQuality quality)
+    SmartDrone::Core::Ports::PoseQuality quality)
 {
-    if (quality == SmartDrone::core::ports::PoseQuality::Good) {
+    if (quality == SmartDrone::Core::Ports::PoseQuality::Good) {
         return LivePoseQuality::Good;
     }
-    if (quality == SmartDrone::core::ports::PoseQuality::Weak) {
+    if (quality == SmartDrone::Core::Ports::PoseQuality::Weak) {
         return LivePoseQuality::Weak;
     }
     return LivePoseQuality::Lost;
@@ -92,7 +92,7 @@ SlamFrameStepResult SlamFrameOutputPort::EmitLivePose(
     const bool livePoseValid =
         slamOutput.poseValid && poseResult.poseEstimate.valid &&
         published.trackingUsable &&
-        poseResult.quality != SmartDrone::core::ports::PoseQuality::Lost;
+        poseResult.quality != SmartDrone::Core::Ports::PoseQuality::Lost;
     LivePoseUpdate update{};
     update.runtimeMode = RUNTIME_MODE_SLAM;
     update.trackingState = static_cast<uint8_t>(published.trackingState);
@@ -539,4 +539,4 @@ void SlamFrameOutputPort::AppendDfxTextTiming(
         << " total=" << timing.totalMs;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

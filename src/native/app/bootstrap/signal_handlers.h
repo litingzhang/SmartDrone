@@ -1,7 +1,7 @@
 #pragma once
 
-namespace SmartDrone::app::bootstrap {
+namespace SmartDrone::App::Bootstrap {
 
 void InstallSignalHandlers();
 
-} // namespace SmartDrone::app::bootstrap
+} // namespace SmartDrone::App::Bootstrap

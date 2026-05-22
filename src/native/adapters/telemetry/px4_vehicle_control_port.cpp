@@ -1,14 +1,14 @@
 #include "adapters/telemetry/px4_vehicle_control_port.h"
 
-namespace SmartDrone::adapters::telemetry {
+namespace SmartDrone::Adapters::Telemetry {
 
-using SmartDrone::core::ports::SlamRangeSensor;
-using SmartDrone::core::ports::VehicleCommandAckKind;
-using SmartDrone::core::ports::VehicleDownwardRange;
-using SmartDrone::core::ports::VehicleFlightMode;
-using SmartDrone::core::ports::VehicleLocalPosition;
-using SmartDrone::core::ports::VehicleManualControl;
-using SmartDrone::core::ports::VehicleSetpointLocalNed;
+using SmartDrone::Core::Ports::SlamRangeSensor;
+using SmartDrone::Core::Ports::VehicleCommandAckKind;
+using SmartDrone::Core::Ports::VehicleDownwardRange;
+using SmartDrone::Core::Ports::VehicleFlightMode;
+using SmartDrone::Core::Ports::VehicleLocalPosition;
+using SmartDrone::Core::Ports::VehicleManualControl;
+using SmartDrone::Core::Ports::VehicleSetpointLocalNed;
 
 namespace {
 
@@ -56,7 +56,7 @@ Px4VehicleControlPort::Px4VehicleControlPort(Px4MavlinkGateway &mavlink)
 {
 }
 
-void Px4VehicleControlPort::SetFrameTimingTracker(SmartDrone::core::application::FrameTimingTracker *tracker)
+void Px4VehicleControlPort::SetFrameTimingTracker(SmartDrone::Core::Application::FrameTimingTracker *tracker)
 {
     m_mavlink.SetFrameTimingTracker(tracker);
 }
@@ -171,4 +171,4 @@ uint8_t Px4VehicleControlPort::OffboardModeId() const
     return Px4MavlinkGateway::PX4_CUSTOM_MAIN_MODE_OFFBOARD;
 }
 
-} // namespace SmartDrone::adapters::telemetry
+} // namespace SmartDrone::Adapters::Telemetry

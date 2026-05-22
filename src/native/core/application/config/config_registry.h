@@ -5,7 +5,7 @@
 
 #include "core/domain/capabilities.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class ConfigRegistry {
   public:
@@ -70,7 +70,7 @@ class ConfigRegistry {
         "slam.lk_per_frame_accel";
     static constexpr std::string_view kSlamOrbAcceleration = "slam.orb_accel";
 
-    static std::vector<domain::ConfigDescriptor> DefaultDescriptors();
+    static std::vector<Domain::ConfigDescriptor> DefaultDescriptors();
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

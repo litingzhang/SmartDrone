@@ -7,7 +7,7 @@
 #include "core/application/runtime/epg_dfx_snapshot.h"
 #include "core/application/runtime/system_runtime_messages.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 EpgRedeployRequest MakeRedeployRequest(const EpgTaskManifest &manifest,
@@ -69,6 +69,8 @@ void EpgOptimizeTask::OnTick(Epg::TaskContext &context)
     }
 }
 
-EPG_REGISTER_TASK_TYPE(EpgOptimizeTask, "EpgOptimizeTask")
+const bool EPG_OPTIMIZE_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<EpgOptimizeTask>(
+        "EpgOptimizeTask");
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

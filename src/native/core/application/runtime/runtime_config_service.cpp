@@ -12,7 +12,7 @@
 #include "core/application/config/config_registry.h"
 #include "core/application/session/slam/slam_settings_loader.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 std::string NormalizeOrbAcceleration(std::string value)
@@ -721,7 +721,7 @@ std::string BuildRuntimeConfigMessage(const RemoteRuntimeConfig &remote,
            " frontend=" +
            std::string(ToFeatureFrontendText(remote.featureFrontend)) +
            " slam_mode=" +
-           std::string(domain::ToString(remote.slamOperationMode)) +
+           std::string(Domain::ToString(remote.slamOperationMode)) +
            " slam_fps=" + std::to_string(clampedSlamFps) +
            " pair_ms=" + std::to_string(remote.pairMs) +
            " provider_specific visual_feature_top_k=" +
@@ -841,4 +841,4 @@ RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig &currentConfig)
     return remote;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

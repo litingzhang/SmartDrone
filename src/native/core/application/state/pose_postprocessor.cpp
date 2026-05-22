@@ -9,11 +9,11 @@
 
 #include "common/time_utils.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 namespace {
 
-using PoseEstimate = SmartDrone::core::ports::PoseEstimate;
+using PoseEstimate = SmartDrone::Core::Ports::PoseEstimate;
 
 bool EnvFlagEnabled(const char *name, bool defaultValue)
 {
@@ -406,11 +406,11 @@ void PosePostprocessor::OutputGuard::CommitPose(const PoseEstimate &pose, int64_
     haveLastPose = true;
 }
 
-SmartDrone::core::ports::VelocityEstimate
+SmartDrone::Core::Ports::VelocityEstimate
 PosePostprocessor::VelocityTracker::Update(const PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
                                            uint16_t resetMapCount)
 {
-    SmartDrone::core::ports::VelocityEstimate out{};
+    SmartDrone::Core::Ports::VelocityEstimate out{};
     if (ShouldReset(frameNs, quality, resetMapCount)) {
         ResetState(pose, frameNs, quality, resetMapCount);
         return out;
@@ -565,4 +565,4 @@ PosePostprocessor::Result PosePostprocessor::ProcessPose(const ProcessRequest &r
     return prepared.result;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

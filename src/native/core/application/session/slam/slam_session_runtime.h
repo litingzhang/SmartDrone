@@ -5,14 +5,14 @@
 
 #include "core/application/session/slam/slam_frame_step_result.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 class IPosePublisher;
 class ISlamSessionTelemetryPort;
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct ApplicationRuntimeFactories;
 struct LivePoseState;
@@ -25,8 +25,8 @@ struct UnifiedConfig;
 struct SlamSessionRuntimeConfig {
     const UnifiedConfig &cfg;
     LiveRuntimeTuning &tuning;
-    SmartDrone::core::ports::ISlamSessionTelemetryPort &telemetry;
-    SmartDrone::core::ports::IPosePublisher &posePublisher;
+    SmartDrone::Core::Ports::ISlamSessionTelemetryPort &telemetry;
+    SmartDrone::Core::Ports::IPosePublisher &posePublisher;
     LivePoseState &livePose;
     std::atomic<bool> &stop;
     std::atomic<bool> &runningFlag;
@@ -62,4 +62,4 @@ class SlamSessionRuntime {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

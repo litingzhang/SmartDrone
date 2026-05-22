@@ -7,12 +7,12 @@
 #include "adapters/slam/stereo_geometry.h"
 #include "adapters/slam/stereo_pair_builder.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
 bool HasStereoFeatureInput(
-    const core::ports::StereoMatchSelectionInput &input)
+    const Core::Ports::StereoMatchSelectionInput &input)
 {
     return input.leftFeatures != nullptr && input.rightFeatures != nullptr &&
            input.leftPrepared != nullptr && input.rightPrepared != nullptr &&
@@ -20,8 +20,8 @@ bool HasStereoFeatureInput(
 }
 
 void AppendAlignedFrontendPairs(
-    const core::ports::VisualFeatureSet &leftFeatures,
-    const core::ports::VisualFeatureSet &rightFeatures,
+    const Core::Ports::VisualFeatureSet &leftFeatures,
+    const Core::Ports::VisualFeatureSet &rightFeatures,
     size_t pairedFeatureCount, std::vector<cv::Point2f> &leftPoints,
     std::vector<cv::Point2f> &rightPoints)
 {
@@ -35,23 +35,23 @@ void AppendAlignedFrontendPairs(
     }
 }
 
-std::vector<core::ports::StereoMatchPair> SelectInitializationTrustedPairs(
-    const core::ports::VisualFeatureSet &leftFeatures,
-    const core::ports::VisualFeatureSet &rightFeatures,
+std::vector<Core::Ports::StereoMatchPair> SelectInitializationTrustedPairs(
+    const Core::Ports::VisualFeatureSet &leftFeatures,
+    const Core::Ports::VisualFeatureSet &rightFeatures,
     const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
-    const core::ports::IStereoPairBuilder &pairBuilder)
+    const Core::Ports::IStereoPairBuilder &pairBuilder)
 {
-    core::ports::StereoPairBuildInput pairInput;
+    Core::Ports::StereoPairBuildInput pairInput;
     pairInput.leftFeatures = &leftFeatures;
     pairInput.rightFeatures = &rightFeatures;
     pairInput.leftPrepared = &leftPrepared;
     pairInput.rightPrepared = &rightPrepared;
-    pairInput.mode = core::ports::StereoPairBuildMode::AlignedFrontendPairs;
-    core::ports::StereoPairBuildResult pairResult;
+    pairInput.mode = Core::Ports::StereoPairBuildMode::AlignedFrontendPairs;
+    Core::Ports::StereoPairBuildResult pairResult;
     if (!pairBuilder.BuildPairs(pairInput, pairResult)) {
         return {};
     }
-    std::vector<core::ports::StereoMatchPair> matches =
+    std::vector<Core::Ports::StereoMatchPair> matches =
         std::move(pairResult.matches);
     if (matches.empty()) {
         return matches;
@@ -60,8 +60,8 @@ std::vector<core::ports::StereoMatchPair> SelectInitializationTrustedPairs(
     const float closeDisparity =
         EnvFloatValue("SMART_DRONE_SP_LG_INIT_CLOSE_DISPARITY", 4.0f);
     std::stable_sort(matches.begin(), matches.end(),
-                     [closeDisparity](const core::ports::StereoMatchPair &lhs,
-                                      const core::ports::StereoMatchPair &rhs) {
+                     [closeDisparity](const Core::Ports::StereoMatchPair &lhs,
+                                      const Core::Ports::StereoMatchPair &rhs) {
                          const bool lhsClose = lhs.disparity >= closeDisparity;
                          const bool rhsClose = rhs.disparity >= closeDisparity;
                          if (lhsClose != rhsClose) {
@@ -85,7 +85,7 @@ std::vector<core::ports::StereoMatchPair> SelectInitializationTrustedPairs(
 }
 
 void BiasInitializationMatches(
-    std::vector<core::ports::StereoMatchPair> &matches)
+    std::vector<Core::Ports::StereoMatchPair> &matches)
 {
     if (matches.empty()) {
         return;
@@ -93,8 +93,8 @@ void BiasInitializationMatches(
     const float closeDisparity =
         EnvFloatValue("SMART_DRONE_SP_LG_INIT_CLOSE_DISPARITY", 4.0f);
     std::stable_sort(matches.begin(), matches.end(),
-                     [closeDisparity](const core::ports::StereoMatchPair &lhs,
-                                      const core::ports::StereoMatchPair &rhs) {
+                     [closeDisparity](const Core::Ports::StereoMatchPair &lhs,
+                                      const Core::Ports::StereoMatchPair &rhs) {
                          const bool lhsClose = lhs.disparity > closeDisparity;
                          const bool rhsClose = rhs.disparity > closeDisparity;
                          if (lhsClose != rhsClose) {
@@ -112,7 +112,7 @@ void BiasInitializationMatches(
 
 void LimitWeakFramePairs(std::vector<cv::Point2f> &leftPoints,
                          std::vector<cv::Point2f> &rightPoints,
-                         const core::ports::StereoMatchSelectionInput &input)
+                         const Core::Ports::StereoMatchSelectionInput &input)
 {
     if (input.initializing || input.recovering ||
         !EnvFlagEnabled("SMART_DRONE_SP_LG_WEAK_FRAME_PAIR_LIMIT", false) ||
@@ -125,13 +125,13 @@ void LimitWeakFramePairs(std::vector<cv::Point2f> &leftPoints,
     LimitStereoPairsInPlace(leftPoints, rightPoints, maxPairs);
 }
 
-std::vector<core::ports::StereoMatchPair> BuildStereoPairsForSelection(
-    const core::ports::VisualFeatureSet &leftFeatures,
-    const core::ports::VisualFeatureSet &rightFeatures,
+std::vector<Core::Ports::StereoMatchPair> BuildStereoPairsForSelection(
+    const Core::Ports::VisualFeatureSet &leftFeatures,
+    const Core::Ports::VisualFeatureSet &rightFeatures,
     const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
-    const core::ports::IStereoPairBuilder &pairBuilder)
+    const Core::Ports::IStereoPairBuilder &pairBuilder)
 {
-    core::ports::StereoPairBuildInput pairInput;
+    Core::Ports::StereoPairBuildInput pairInput;
     pairInput.leftFeatures = &leftFeatures;
     pairInput.rightFeatures = &rightFeatures;
     pairInput.leftPrepared = &leftPrepared;
@@ -139,10 +139,10 @@ std::vector<core::ports::StereoMatchPair> BuildStereoPairsForSelection(
     pairInput.mode =
         EnvFlagEnabled("SMART_DRONE_VISUAL_FEATURE_STEREO_DESCRIPTOR_MATCH",
                        false)
-            ? core::ports::StereoPairBuildMode::DescriptorSearch
-            : core::ports::StereoPairBuildMode::AlignedFrontendPairs;
+            ? Core::Ports::StereoPairBuildMode::DescriptorSearch
+            : Core::Ports::StereoPairBuildMode::AlignedFrontendPairs;
 
-    core::ports::StereoPairBuildResult pairResult;
+    Core::Ports::StereoPairBuildResult pairResult;
     if (!pairBuilder.BuildPairs(pairInput, pairResult)) {
         return {};
     }
@@ -150,10 +150,10 @@ std::vector<core::ports::StereoMatchPair> BuildStereoPairsForSelection(
 }
 
 void InitializeMatchSelectionState(
-    const core::ports::StereoMatchSelectionInput &input,
-    const core::ports::VisualFeatureSet &leftFeatures,
-    const core::ports::VisualFeatureSet &rightFeatures,
-    core::ports::StereoMatchSelection &selection)
+    const Core::Ports::StereoMatchSelectionInput &input,
+    const Core::Ports::VisualFeatureSet &leftFeatures,
+    const Core::Ports::VisualFeatureSet &rightFeatures,
+    Core::Ports::StereoMatchSelection &selection)
 {
     selection.pairedFeatureCount =
         std::min(leftFeatures.keypoints.size(), rightFeatures.keypoints.size());
@@ -167,12 +167,12 @@ void InitializeMatchSelectionState(
 }
 
 void PopulateRawMatches(
-    const core::ports::StereoMatchSelectionInput &input,
-    const core::ports::VisualFeatureSet &leftFeatures,
-    const core::ports::VisualFeatureSet &rightFeatures,
+    const Core::Ports::StereoMatchSelectionInput &input,
+    const Core::Ports::VisualFeatureSet &leftFeatures,
+    const Core::Ports::VisualFeatureSet &rightFeatures,
     const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
-    const core::ports::IStereoPairBuilder &pairBuilder,
-    core::ports::StereoMatchSelection &selection)
+    const Core::Ports::IStereoPairBuilder &pairBuilder,
+    Core::Ports::StereoMatchSelection &selection)
 {
     if (selection.initializationTrustedPairSelection) {
         selection.initializationTrustedMatches = SelectInitializationTrustedPairs(
@@ -189,8 +189,8 @@ void PopulateRawMatches(
 }
 
 void ApplyInitializationStereoBias(
-    const core::ports::StereoMatchSelectionInput &input,
-    core::ports::StereoMatchSelection &selection)
+    const Core::Ports::StereoMatchSelectionInput &input,
+    Core::Ports::StereoMatchSelection &selection)
 {
     selection.initializationStereoBias =
         EnvFlagEnabled("SMART_DRONE_SP_LG_INIT_STEREO_BIAS", false) &&
@@ -201,16 +201,16 @@ void ApplyInitializationStereoBias(
 }
 
 bool UseTrustedInitializationMatches(
-    const core::ports::StereoMatchSelection &selection)
+    const Core::Ports::StereoMatchSelection &selection)
 {
     return selection.initializationTrustedPairSelection &&
            !selection.initializationTrustedMatches.empty();
 }
 
 void CopySelectedStereoPoints(
-    const core::ports::VisualFeatureSet &leftFeatures,
-    const core::ports::VisualFeatureSet &rightFeatures,
-    core::ports::StereoMatchSelection &selection)
+    const Core::Ports::VisualFeatureSet &leftFeatures,
+    const Core::Ports::VisualFeatureSet &rightFeatures,
+    Core::Ports::StereoMatchSelection &selection)
 {
     if (UseTrustedInitializationMatches(selection)) {
         CopyMatchedStereoPointsFromPairs(
@@ -243,7 +243,7 @@ void CopySelectedStereoPoints(
 }
 
 bool HasConsistentMatchedPoints(
-    const core::ports::StereoMatchSelection &selection)
+    const Core::Ports::StereoMatchSelection &selection)
 {
     return !selection.matchedLeftPoints.empty() &&
            selection.matchedLeftPoints.size() == selection.matchedRightPoints.size();
@@ -252,9 +252,9 @@ bool HasConsistentMatchedPoints(
 } // namespace
 
 void CopyMatchedStereoPointsFromPairs(
-    const core::ports::VisualFeatureSet &leftFeatures,
-    const core::ports::VisualFeatureSet &rightFeatures,
-    const std::vector<core::ports::StereoMatchPair> &matches,
+    const Core::Ports::VisualFeatureSet &leftFeatures,
+    const Core::Ports::VisualFeatureSet &rightFeatures,
+    const std::vector<Core::Ports::StereoMatchPair> &matches,
     std::vector<cv::Point2f> &leftPoints,
     std::vector<cv::Point2f> &rightPoints)
 {
@@ -262,7 +262,7 @@ void CopyMatchedStereoPointsFromPairs(
     rightPoints.clear();
     leftPoints.reserve(matches.size());
     rightPoints.reserve(matches.size());
-    for (const core::ports::StereoMatchPair &match : matches) {
+    for (const Core::Ports::StereoMatchPair &match : matches) {
         if (match.leftIndex < 0 || match.rightIndex < 0 ||
             static_cast<size_t>(match.leftIndex) >= leftFeatures.keypoints.size() ||
             static_cast<size_t>(match.rightIndex) >=
@@ -277,20 +277,20 @@ void CopyMatchedStereoPointsFromPairs(
 }
 
 bool SelectStereoFeatureMatches(
-    const core::ports::StereoMatchSelectionInput &input,
-    core::ports::StereoMatchSelection &selection)
+    const Core::Ports::StereoMatchSelectionInput &input,
+    Core::Ports::StereoMatchSelection &selection)
 {
-    selection = core::ports::StereoMatchSelection{};
+    selection = Core::Ports::StereoMatchSelection{};
     if (!HasStereoFeatureInput(input)) {
         return false;
     }
 
-    const core::ports::VisualFeatureSet &leftFeatures = *input.leftFeatures;
-    const core::ports::VisualFeatureSet &rightFeatures = *input.rightFeatures;
+    const Core::Ports::VisualFeatureSet &leftFeatures = *input.leftFeatures;
+    const Core::Ports::VisualFeatureSet &rightFeatures = *input.rightFeatures;
     const cv::Mat &leftPrepared = *input.leftPrepared;
     const cv::Mat &rightPrepared = *input.rightPrepared;
     const DefaultStereoPairBuilder defaultPairBuilder;
-    const core::ports::IStereoPairBuilder &pairBuilder =
+    const Core::Ports::IStereoPairBuilder &pairBuilder =
         input.pairBuilder != nullptr ? *input.pairBuilder : defaultPairBuilder;
 
     InitializeMatchSelectionState(input, leftFeatures, rightFeatures, selection);
@@ -307,10 +307,10 @@ bool SelectStereoFeatureMatches(
 }
 
 bool DefaultStereoMatchSelector::SelectMatches(
-    const core::ports::StereoMatchSelectionInput &input,
-    core::ports::StereoMatchSelection &selection) const
+    const Core::Ports::StereoMatchSelectionInput &input,
+    Core::Ports::StereoMatchSelection &selection) const
 {
     return SelectStereoFeatureMatches(input, selection);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

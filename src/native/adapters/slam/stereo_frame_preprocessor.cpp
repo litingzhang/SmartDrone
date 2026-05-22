@@ -2,7 +2,7 @@
 
 #include "adapters/slam/slam_image_utils.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 bool PrepareStereoFrameForFrontend(const cv::Mat &leftImage,
                                    const cv::Mat &rightImage,
@@ -36,4 +36,4 @@ bool DefaultStereoFramePreprocessor::PrepareForFrontend(
                                          calibration, rectify);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

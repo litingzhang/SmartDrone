@@ -9,18 +9,18 @@
 #include "adapters/slam/slam_env.h"
 #include "adapters/slam/stereo_geometry.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
 constexpr size_t kStereoFeatureMaxLeftFeatures = 1200;
 constexpr size_t kStereoFeatureMaxLeftFeaturesLimit = 2500;
-using core::ports::IVisualDescriptorProvider;
-using core::ports::StereoFeatureObservationPacket;
-using core::ports::StereoFeaturePacket;
-using core::ports::StereoFeaturePacketBuildInput;
-using core::ports::StereoMatchPair;
-using core::ports::VisualFeatureSet;
+using Core::Ports::IVisualDescriptorProvider;
+using Core::Ports::StereoFeatureObservationPacket;
+using Core::Ports::StereoFeaturePacket;
+using Core::Ports::StereoFeaturePacketBuildInput;
+using Core::Ports::StereoMatchPair;
+using Core::Ports::VisualFeatureSet;
 
 struct OrbStereoAugmentCandidate {
     int leftIndex{-1};
@@ -730,7 +730,7 @@ size_t AppendDescriptorStereoAugmentFeatures(
 } // namespace
 
 uint64_t HashStereoFeatureObservations(
-    const core::ports::StereoFeatureObservationPacket &data)
+    const Core::Ports::StereoFeatureObservationPacket &data)
 {
     uint64_t hash = 1469598103934665603ULL;
     hash = HashIntValue(hash, static_cast<int>(data.leftKeypoints.size()));
@@ -756,10 +756,10 @@ uint64_t HashStereoFeatureObservations(
 }
 
 bool BuildStereoFeaturePacket(
-    const core::ports::StereoFeaturePacketBuildInput &input,
-    core::ports::StereoFeaturePacket &packet)
+    const Core::Ports::StereoFeaturePacketBuildInput &input,
+    Core::Ports::StereoFeaturePacket &packet)
 {
-    packet = core::ports::StereoFeaturePacket{};
+    packet = Core::Ports::StereoFeaturePacket{};
     if (!HasInputImages(input) || !HasMatchedPoints(input) ||
         input.leftFeatures == nullptr || input.rightFeatures == nullptr) {
         return false;
@@ -855,16 +855,16 @@ bool BuildStereoFeaturePacket(
 }
 
 bool DefaultStereoFeaturePacketBuilder::BuildPacket(
-    const core::ports::StereoFeaturePacketBuildInput &input,
-    core::ports::StereoFeaturePacket &packet) const
+    const Core::Ports::StereoFeaturePacketBuildInput &input,
+    Core::Ports::StereoFeaturePacket &packet) const
 {
     return BuildStereoFeaturePacket(input, packet);
 }
 
 uint64_t DefaultStereoFeaturePacketBuilder::HashStereoData(
-    const core::ports::StereoFeatureObservationPacket &data) const
+    const Core::Ports::StereoFeatureObservationPacket &data) const
 {
     return HashStereoFeatureObservations(data);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

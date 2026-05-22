@@ -791,6 +791,13 @@ void ParseQueueSolverReportDecision(const JsonValue &item,
     decision.depthBefore = RequiredUInt64(item, "depthBefore");
     decision.depthAfter = RequiredUInt64(item, "depthAfter");
     decision.pressureBefore = RequiredUInt64(item, "pressureBefore");
+    decision.pressureAfter = RequiredUInt64(item, "pressureAfter");
+    decision.maxDepthObserved = OptionalUInt64(
+        item, "maxDepthObserved", decision.maxDepthObserved);
+    decision.droppedNewest = OptionalUInt64(
+        item, "droppedNewest", decision.droppedNewest);
+    decision.overwrittenOldest = OptionalUInt64(
+        item, "overwrittenOldest", decision.overwrittenOldest);
     decision.pushedPerSecond = RequiredUInt64(item, "pushedPerSecond");
     decision.poppedPerSecond = RequiredUInt64(item, "poppedPerSecond");
     decision.droppedPerSecond = RequiredUInt64(item, "droppedPerSecond");

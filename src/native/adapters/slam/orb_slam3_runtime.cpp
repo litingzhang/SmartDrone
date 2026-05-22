@@ -8,7 +8,7 @@
 #include "adapters/slam/orb_visual_components.h"
 #include "core/ports/slam_tracking_state.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -28,11 +28,11 @@ ORB_SLAM3::System::eSensor ResolveOrbSensor(SensorMode sensorMode)
 }
 
 std::vector<ORB_SLAM3::IMU::Point>
-ToOrbImuPoints(const std::vector<core::ports::ImuReading> &readings)
+ToOrbImuPoints(const std::vector<Core::Ports::ImuReading> &readings)
 {
     std::vector<ORB_SLAM3::IMU::Point> out;
     out.reserve(readings.size());
-    for (const core::ports::ImuReading &reading : readings) {
+    for (const Core::Ports::ImuReading &reading : readings) {
         out.emplace_back(cv::Point3f(reading.ax, reading.ay, reading.az),
                          cv::Point3f(reading.gx, reading.gy, reading.gz),
                          static_cast<double>(reading.timestampNs) * 1e-9);
@@ -71,7 +71,7 @@ void OrbSlam3Runtime::StepBackend()
     }
 }
 
-void OrbSlam3Runtime::SetOperationMode(core::domain::SlamOperationMode mode)
+void OrbSlam3Runtime::SetOperationMode(Core::Domain::SlamOperationMode mode)
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
     if (system == nullptr || m_operationMode == mode) {
@@ -79,9 +79,9 @@ void OrbSlam3Runtime::SetOperationMode(core::domain::SlamOperationMode mode)
     }
 
     const bool localizationOnly =
-        mode == core::domain::SlamOperationMode::Localization ||
-        mode == core::domain::SlamOperationMode::Relocalization ||
-        mode == core::domain::SlamOperationMode::TrackingOnly;
+        mode == Core::Domain::SlamOperationMode::Localization ||
+        mode == Core::Domain::SlamOperationMode::Relocalization ||
+        mode == Core::Domain::SlamOperationMode::TrackingOnly;
     if (localizationOnly) {
         system->ActivateLocalizationMode();
     } else {
@@ -107,8 +107,8 @@ bool OrbSlam3Runtime::ShutdownAndSaveTrajectoryEuRoC(const std::string &path)
     return true;
 }
 
-Sophus::SE3f OrbSlam3Runtime::TrackRaw(const core::ports::SlamInputBatch &input,
-                                       core::ports::SlamInputMode inputMode,
+Sophus::SE3f OrbSlam3Runtime::TrackRaw(const Core::Ports::SlamInputBatch &input,
+                                       Core::Ports::SlamInputMode inputMode,
                                        bool useImu)
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
@@ -116,9 +116,9 @@ Sophus::SE3f OrbSlam3Runtime::TrackRaw(const core::ports::SlamInputBatch &input,
         return Sophus::SE3f();
     }
 
-    const bool monoMode = inputMode != core::ports::SlamInputMode::Stereo;
+    const bool monoMode = inputMode != Core::Ports::SlamInputMode::Stereo;
     const cv::Mat &monoImage =
-        (inputMode == core::ports::SlamInputMode::MonoRight)
+        (inputMode == Core::Ports::SlamInputMode::MonoRight)
             ? input.stereo.right.gray
             : input.stereo.left.gray;
 
@@ -139,7 +139,7 @@ Sophus::SE3f OrbSlam3Runtime::TrackRaw(const core::ports::SlamInputBatch &input,
 }
 
 Sophus::SE3f
-OrbSlam3Runtime::TrackRaw(const core::ports::SlamTrackRequest &request)
+OrbSlam3Runtime::TrackRaw(const Core::Ports::SlamTrackRequest &request)
 {
     if (request.input == nullptr) {
         return Sophus::SE3f();
@@ -148,7 +148,7 @@ OrbSlam3Runtime::TrackRaw(const core::ports::SlamTrackRequest &request)
 }
 
 Sophus::SE3f OrbSlam3Runtime::TrackPreparedStereoWithFeatures(
-    const core::ports::PreparedStereoFeatureTrackRequest &request)
+    const Core::Ports::PreparedStereoFeatureTrackRequest &request)
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
     if (system == nullptr || request.input == nullptr ||
@@ -178,8 +178,8 @@ bool OrbSlam3Runtime::PrepareStereoImagesForTracking(
 }
 
 bool OrbSlam3Runtime::PrepareStereoImagesForTracking(
-    const core::ports::StereoPreprocessRequest &request,
-    core::ports::StereoPreprocessResult &result) const
+    const Core::Ports::StereoPreprocessRequest &request,
+    Core::Ports::StereoPreprocessResult &result) const
 {
     result = {};
     if (request.left == nullptr || request.right == nullptr) {
@@ -194,7 +194,7 @@ int OrbSlam3Runtime::TrackingState() const
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
     return system != nullptr ? system->GetTrackingState()
-                             : core::ports::kSlamTrackingNoImagesYet;
+                             : Core::Ports::kSlamTrackingNoImagesYet;
 }
 
 int OrbSlam3Runtime::TrackedMapPointCount() const
@@ -207,15 +207,15 @@ int OrbSlam3Runtime::TrackedMapPointCount() const
 bool OrbSlam3Runtime::IsTrackingInitializing() const
 {
     const int state = TrackingState();
-    return state == core::ports::kSlamTrackingNoImagesYet ||
-           state == core::ports::kSlamTrackingNotInitialized;
+    return state == Core::Ports::kSlamTrackingNoImagesYet ||
+           state == Core::Ports::kSlamTrackingNotInitialized;
 }
 
 bool OrbSlam3Runtime::IsTrackingRecovering() const
 {
     const int state = TrackingState();
-    return state == core::ports::kSlamTrackingRecentlyLost ||
-           state == core::ports::kSlamTrackingLost;
+    return state == Core::Ports::kSlamTrackingRecentlyLost ||
+           state == Core::Ports::kSlamTrackingLost;
 }
 
 bool OrbSlam3Runtime::HasTrackingInitialized() const
@@ -223,7 +223,7 @@ bool OrbSlam3Runtime::HasTrackingInitialized() const
     return !IsTrackingInitializing();
 }
 
-const core::ports::IVisualDescriptorProvider *
+const Core::Ports::IVisualDescriptorProvider *
 OrbSlam3Runtime::LeftDescriptorProvider()
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
@@ -236,7 +236,7 @@ OrbSlam3Runtime::LeftDescriptorProvider()
     return m_leftDescriptorProvider.get();
 }
 
-const core::ports::IVisualDescriptorProvider *
+const Core::Ports::IVisualDescriptorProvider *
 OrbSlam3Runtime::RightDescriptorProvider()
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
@@ -259,7 +259,7 @@ bool OrbSlam3Runtime::GetLatestFrameTrajectoryPoseEuRoC(Sophus::SE3f &twc,
            system->GetLatestFrameTrajectoryPoseEuRoC(twc, timestamp, lost);
 }
 
-core::ports::SlamMapSummary OrbSlam3Runtime::GetMapSummary() const
+Core::Ports::SlamMapSummary OrbSlam3Runtime::GetMapSummary() const
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
     if (system == nullptr) {
@@ -268,7 +268,7 @@ core::ports::SlamMapSummary OrbSlam3Runtime::GetMapSummary() const
     return system->GetMapSummary();
 }
 
-core::ports::SlamBackendStats OrbSlam3Runtime::GetBackendStats() const
+Core::Ports::SlamBackendStats OrbSlam3Runtime::GetBackendStats() const
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
     if (system == nullptr) {
@@ -277,7 +277,7 @@ core::ports::SlamBackendStats OrbSlam3Runtime::GetBackendStats() const
     return system->GetBackendStats();
 }
 
-core::ports::TrackedVisualSummary
+Core::Ports::TrackedVisualSummary
 OrbSlam3Runtime::GetTrackedVisualSummary() const
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
@@ -287,7 +287,7 @@ OrbSlam3Runtime::GetTrackedVisualSummary() const
     return system->GetTrackedVisualSummary();
 }
 
-core::ports::TrackedFeatureSnapshot
+Core::Ports::TrackedFeatureSnapshot
 OrbSlam3Runtime::ExtractTrackedFeatures(int leftImageWidth, int leftImageHeight,
                                         int rightImageWidth,
                                         int rightImageHeight)
@@ -300,7 +300,7 @@ OrbSlam3Runtime::ExtractTrackedFeatures(int leftImageWidth, int leftImageHeight,
                                           rightImageWidth, rightImageHeight);
 }
 
-core::ports::TrackedPointCloudSnapshot
+Core::Ports::TrackedPointCloudSnapshot
 OrbSlam3Runtime::ExtractTrackedPointCloud(size_t maxPointCloudPoints)
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
@@ -310,7 +310,7 @@ OrbSlam3Runtime::ExtractTrackedPointCloud(size_t maxPointCloudPoints)
     return system->ExtractTrackedPointCloud(maxPointCloudPoints);
 }
 
-core::ports::TrackedVisualData OrbSlam3Runtime::ExtractTrackedVisualData(
+Core::Ports::TrackedVisualData OrbSlam3Runtime::ExtractTrackedVisualData(
     int leftImageWidth, int leftImageHeight, int rightImageWidth,
     int rightImageHeight, bool includePointCloud, size_t maxPointCloudPoints)
 {
@@ -323,10 +323,10 @@ core::ports::TrackedVisualData OrbSlam3Runtime::ExtractTrackedVisualData(
         includePointCloud, maxPointCloudPoints);
 }
 
-core::ports::VisualMapSnapshot OrbSlam3Runtime::ExtractVisualMapSnapshot(
-    const core::ports::VisualMapSnapshotRequest &request)
+Core::Ports::VisualMapSnapshot OrbSlam3Runtime::ExtractVisualMapSnapshot(
+    const Core::Ports::VisualMapSnapshotRequest &request)
 {
-    core::ports::VisualMapSnapshot out;
+    Core::Ports::VisualMapSnapshot out;
     out.summary = GetTrackedVisualSummary();
     if (request.includeFeatures) {
         out.features =
@@ -342,7 +342,7 @@ core::ports::VisualMapSnapshot OrbSlam3Runtime::ExtractVisualMapSnapshot(
 
 void OrbSlam3Runtime::LogStereoFeatureDiagnostics(
     uint64_t frameId,
-    const core::ports::StereoFeatureObservationPacket &observations) const
+    const Core::Ports::StereoFeatureObservationPacket &observations) const
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
     if (system == nullptr) {
@@ -352,8 +352,8 @@ void OrbSlam3Runtime::LogStereoFeatureDiagnostics(
 }
 
 bool OrbSlam3Runtime::Optimize(
-    const core::ports::SlamBackendOptimizationRequest &request,
-    core::ports::SlamBackendOptimizationResult &result)
+    const Core::Ports::SlamBackendOptimizationRequest &request,
+    Core::Ports::SlamBackendOptimizationResult &result)
 {
     result = {};
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
@@ -361,8 +361,8 @@ bool OrbSlam3Runtime::Optimize(
 }
 
 bool OrbSlam3Runtime::ApplyMappingOperation(
-    const core::ports::SlamBackendMappingRequest &request,
-    core::ports::SlamBackendMappingResult &result)
+    const Core::Ports::SlamBackendMappingRequest &request,
+    Core::Ports::SlamBackendMappingResult &result)
 {
     result = {};
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
@@ -371,8 +371,8 @@ bool OrbSlam3Runtime::ApplyMappingOperation(
 }
 
 bool OrbSlam3Runtime::ApplyLoopClosureOperation(
-    const core::ports::SlamBackendLoopClosureRequest &request,
-    core::ports::SlamBackendLoopClosureResult &result)
+    const Core::Ports::SlamBackendLoopClosureRequest &request,
+    Core::Ports::SlamBackendLoopClosureResult &result)
 {
     result = {};
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
@@ -380,4 +380,4 @@ bool OrbSlam3Runtime::ApplyLoopClosureOperation(
            system->ApplyLoopClosingOperation(request, result);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

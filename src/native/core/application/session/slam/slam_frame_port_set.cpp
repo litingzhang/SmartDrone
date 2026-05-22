@@ -7,17 +7,17 @@
 #include "core/application/session/slam/slam_settings_loader.h"
 #include "core/ports/slam_session_telemetry.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr uint64_t RANGE_SENSOR_MAX_AGE_US = 200000ULL;
 
 PosePostprocessor::ReadRangeSensorFn
 BuildRangeSensorReader(
-    SmartDrone::core::ports::ISlamSessionTelemetryPort &telemetry)
+    SmartDrone::Core::Ports::ISlamSessionTelemetryPort &telemetry)
 {
     return [&telemetry](PosePostprocessor::RangeSensorSnapshot &snapshot) {
-        SmartDrone::core::ports::SlamRangeSensor range{};
+        SmartDrone::Core::Ports::SlamRangeSensor range{};
         if (!telemetry.GetDownwardRange(range, RANGE_SENSOR_MAX_AGE_US)) {
             return false;
         }
@@ -141,4 +141,4 @@ SlamFrameOutputContext &SlamFramePortSet::OutputContext()
     return *m_outputContext;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

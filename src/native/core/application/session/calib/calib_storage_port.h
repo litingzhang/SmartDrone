@@ -7,7 +7,7 @@
 #include "core/application/session/epg/messages/calib_epg_messages.h"
 #include "core/application/sensors/imu_runtime_state.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct CalibStoragePortConfig {
     std::string root;
@@ -32,4 +32,4 @@ class CalibStoragePort final {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

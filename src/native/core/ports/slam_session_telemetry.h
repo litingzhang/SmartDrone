@@ -3,11 +3,11 @@
 #include <cstdint>
 #include <limits>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 class FrameTimingTracker;
 }
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct SlamRangeSensor {
     float currentDistance{std::numeric_limits<float>::quiet_NaN()};
@@ -18,9 +18,9 @@ class ISlamSessionTelemetryPort {
   public:
     virtual ~ISlamSessionTelemetryPort() = default;
 
-    virtual void SetFrameTimingTracker(SmartDrone::core::application::FrameTimingTracker *tracker) = 0;
+    virtual void SetFrameTimingTracker(SmartDrone::Core::Application::FrameTimingTracker *tracker) = 0;
     virtual bool GetDownwardRange(SlamRangeSensor &out, uint64_t maxAgeUs) const = 0;
     virtual void StopSetpointStream() = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

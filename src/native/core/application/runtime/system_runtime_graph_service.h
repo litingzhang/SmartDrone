@@ -9,7 +9,7 @@
 #include "core/application/runtime/system_runtime_step_services.h"
 #include "core/application/runtime/udp_command_runtime.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct SystemRuntimeGraphConfig {
     MainRuntimeAliases aliases;
@@ -41,4 +41,4 @@ class SystemRuntimeGraph final {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

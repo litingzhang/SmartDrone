@@ -6,7 +6,7 @@
 
 #include "adapters/slam/slam_env.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 namespace {
 
 int EnvIntAtLeastOne(const char *name, int fallback)
@@ -48,4 +48,4 @@ SuperPointTensorRtRuntimeOptions LoadSuperPointTensorRtRuntimeOptions()
     return options;
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

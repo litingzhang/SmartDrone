@@ -1,15 +1,15 @@
 #include "adapters/telemetry/mavlink_pose_publisher.h"
 
-namespace SmartDrone::adapters::telemetry {
+namespace SmartDrone::Adapters::Telemetry {
 
 MavlinkPosePublisher::MavlinkPosePublisher(Px4MavlinkGateway &serial)
     : m_serial(serial)
 {
 }
 
-void MavlinkPosePublisher::PublishPose(uint64_t frameId, const core::ports::PoseEstimate &pose,
-                                       const core::ports::VelocityEstimate &velocity, uint8_t resetCounter, uint16_t,
-                                       int, core::ports::PoseQuality quality)
+void MavlinkPosePublisher::PublishPose(uint64_t frameId, const Core::Ports::PoseEstimate &pose,
+                                       const Core::Ports::VelocityEstimate &velocity, uint8_t resetCounter, uint16_t,
+                                       int, Core::Ports::PoseQuality quality)
 {
     Px4MavlinkGateway::Pose mavPose{};
     mavPose.x = pose.x;
@@ -28,9 +28,9 @@ void MavlinkPosePublisher::PublishPose(uint64_t frameId, const core::ports::Pose
     }
 
     OdomQualityMode odomQuality = OdomQualityMode::GOOD;
-    if (quality == core::ports::PoseQuality::Weak) {
+    if (quality == Core::Ports::PoseQuality::Weak) {
         odomQuality = OdomQualityMode::WEAK;
-    } else if (quality == core::ports::PoseQuality::Lost) {
+    } else if (quality == Core::Ports::PoseQuality::Lost) {
         odomQuality = OdomQualityMode::LOST;
     }
 
@@ -45,4 +45,4 @@ void MavlinkPosePublisher::PublishPose(uint64_t frameId, const core::ports::Pose
     m_serial.SendOdometry(request);
 }
 
-} // namespace SmartDrone::adapters::telemetry
+} // namespace SmartDrone::Adapters::Telemetry

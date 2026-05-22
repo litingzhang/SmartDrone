@@ -79,7 +79,7 @@ void Px4MavlinkGateway::SetJsonDiagnostics(bool enabled)
     m_jsonDiagnostics.store(enabled, std::memory_order_relaxed);
 }
 
-void Px4MavlinkGateway::SetFrameTimingTracker(SmartDrone::core::application::FrameTimingTracker *tracker)
+void Px4MavlinkGateway::SetFrameTimingTracker(SmartDrone::Core::Application::FrameTimingTracker *tracker)
 {
     std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
     m_frameTimingTracker = tracker;
@@ -435,7 +435,7 @@ Px4MavlinkGateway::BuildOdometryPacketFields(const OdometryRequest &request) con
 
 bool Px4MavlinkGateway::PrepareOdometryTiming(uint64_t frameId, OdometryTiming &out)
 {
-    SmartDrone::core::application::FrameTimingRecord timing{};
+    SmartDrone::Core::Application::FrameTimingRecord timing{};
     const bool haveTiming = LookupFrameTiming(frameId, timing);
     if (!haveTiming || timing.tCamNs == 0) {
         printf("[odom_warn] frame=%llu missing capture timestamp; skipping odometry publish\n",
@@ -539,7 +539,7 @@ void Px4MavlinkGateway::NormalizeQuat(float &w, float &x, float &y, float &z)
     }
 }
 
-bool Px4MavlinkGateway::LookupFrameTiming(uint64_t frameId, SmartDrone::core::application::FrameTimingRecord &out) const
+bool Px4MavlinkGateway::LookupFrameTiming(uint64_t frameId, SmartDrone::Core::Application::FrameTimingRecord &out) const
 {
     std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
     return m_frameTimingTracker && m_frameTimingTracker->Lookup(frameId, out);

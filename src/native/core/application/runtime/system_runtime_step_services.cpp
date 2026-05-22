@@ -1,6 +1,6 @@
 #include "core/application/runtime/system_runtime_step_services.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 SystemRuntimeStepServices::SystemRuntimeStepServices(
     SystemRuntimeStepServicesConfig config)
@@ -55,4 +55,4 @@ void SystemRuntimeStepServices::Call(const RuntimeGraphStepFn &step)
     }
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

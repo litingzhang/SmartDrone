@@ -4,7 +4,7 @@
 
 #include "common/epg/epg.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 EpgGraphLifecycle::EpgGraphLifecycle(EpgGraphLifecycleConfig config)
     : m_stop(config.stop),
@@ -99,4 +99,4 @@ void EpgGraphLifecycle::ResetGraphAndResources()
     m_done = true;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

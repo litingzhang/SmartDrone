@@ -7,7 +7,7 @@
 #include <mutex>
 #include <string>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct EpgRedeployRequest {
     std::string graphName;
@@ -50,4 +50,4 @@ class EpgRedeployCoordinator final {
     EpgRedeployRequest m_sessionRequest;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -9,19 +9,19 @@
 #include "core/ports/camera_provider.h"
 #include "core/ports/imu_provider.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct ApplicationRuntimeFactories {
     using CreateCameraProviderFn =
-        std::function<std::unique_ptr<SmartDrone::core::ports::ICameraProvider>()>;
+        std::function<std::unique_ptr<SmartDrone::Core::Ports::ICameraProvider>()>;
     using MakeCameraOpenConfigFn =
-        std::function<SmartDrone::core::ports::CameraOpenConfig(
+        std::function<SmartDrone::Core::Ports::CameraOpenConfig(
             const MainRuntimeAliases &)>;
     using CreateSlamEngineResourcesFn =
         std::function<SlamSessionEngineResources(
             const SlamSessionEngineResourceConfig &)>;
     using CreateImuProviderFn =
-        std::function<std::unique_ptr<SmartDrone::core::ports::IImuProvider>(
+        std::function<std::unique_ptr<SmartDrone::Core::Ports::IImuProvider>(
             ImuThreadState &, const MainRuntimeAliases &)>;
     using StartVisualFeatureFrontendSessionFn =
         std::function<SlamVisualFeatureFrontendStartResult(
@@ -46,4 +46,4 @@ struct ApplicationRuntimeFactories {
     }
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

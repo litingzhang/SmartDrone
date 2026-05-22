@@ -8,7 +8,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 void FlushAndSyncFile(FILE *file, const char *label)
 {
@@ -63,4 +63,4 @@ void FlushCalibOutputs(const CalibOutputFlushRequest &request)
     SyncDirPath(request.root);
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

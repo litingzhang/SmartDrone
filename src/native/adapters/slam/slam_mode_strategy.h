@@ -9,7 +9,7 @@
 #include "core/application/config/app_args.h"
 #include "core/ports/slam_engine.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 class SlamEngineAdapter;
 
@@ -18,16 +18,16 @@ class SlamModeStrategy {
     virtual ~SlamModeStrategy() = default;
 
     virtual FeatureFrontend Frontend() const = 0;
-    virtual core::ports::SlamOutput
-    Process(SlamEngineAdapter &engine, const core::ports::SlamInputBatch &input,
+    virtual Core::Ports::SlamOutput
+    Process(SlamEngineAdapter &engine, const Core::Ports::SlamInputBatch &input,
             bool extractFeatures, bool extractPointCloud) = 0;
 };
 
 class OrbModeStrategy final : public SlamModeStrategy {
   public:
     FeatureFrontend Frontend() const override;
-    core::ports::SlamOutput Process(SlamEngineAdapter &engine,
-                                    const core::ports::SlamInputBatch &input,
+    Core::Ports::SlamOutput Process(SlamEngineAdapter &engine,
+                                    const Core::Ports::SlamInputBatch &input,
                                     bool extractFeatures,
                                     bool extractPointCloud) override;
 };
@@ -37,8 +37,8 @@ class VisualFeatureLightGlueModeStrategy final : public SlamModeStrategy {
     explicit VisualFeatureLightGlueModeStrategy(FeatureFrontend frontend);
 
     FeatureFrontend Frontend() const override;
-    core::ports::SlamOutput Process(SlamEngineAdapter &engine,
-                                    const core::ports::SlamInputBatch &input,
+    Core::Ports::SlamOutput Process(SlamEngineAdapter &engine,
+                                    const Core::Ports::SlamInputBatch &input,
                                     bool extractFeatures,
                                     bool extractPointCloud) override;
 
@@ -63,4 +63,4 @@ std::unique_ptr<SlamModeStrategy> CreateOrbModeStrategy();
 std::unique_ptr<SlamModeStrategy> CreateSuperPointLightGlueModeStrategy();
 std::unique_ptr<SlamModeStrategy> CreateXFeatLightGlueModeStrategy();
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

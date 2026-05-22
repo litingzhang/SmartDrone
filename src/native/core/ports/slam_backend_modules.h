@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 enum class SlamBackendOptimizationScope : uint8_t {
     PoseOnly,
@@ -119,4 +119,4 @@ class ISlamBackendLoopCloser {
         SlamBackendLoopClosureResult &result) = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

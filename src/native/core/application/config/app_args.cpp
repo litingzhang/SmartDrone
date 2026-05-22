@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <vector>
 
+#include "core/application/config/slam_backend_availability.h"
+
 namespace {
 
 std::string
@@ -218,11 +220,9 @@ SlamBackend ParseSlamBackendText(const std::string &text)
 
 SlamBackend NormalizeSlamBackendForBuild(SlamBackend backend)
 {
-#if !defined(SMART_DRONE_ENABLE_ORB_SLAM3)
-    if (backend == SlamBackend::OrbSlam3) {
+    if (backend == SlamBackend::OrbSlam3 && !OrbSlam3BackendAvailable()) {
         return SlamBackend::Klt;
     }
-#endif
     return backend;
 }
 
@@ -239,10 +239,10 @@ const char *ToSlamBackendText(SlamBackend backend)
     }
 }
 
-SmartDrone::core::domain::SlamOperationMode
+SmartDrone::Core::Domain::SlamOperationMode
 ParseSlamOperationModeText(const std::string &text)
 {
-    using SmartDrone::core::domain::SlamOperationMode;
+    using SmartDrone::Core::Domain::SlamOperationMode;
 
     std::string normalized = text;
     std::transform(

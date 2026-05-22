@@ -7,7 +7,7 @@
 
 #include "core/ports/slam_engine.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 constexpr double kPoseStabilizerDefaultDtSec = 1.0 / 20.0;
 constexpr double kPoseStabilizerMinDtSec = 1.0 / 120.0;
@@ -23,19 +23,19 @@ bool IsSuperPointTrackingStateSafe(int trackingState);
 bool IsOrbBootstrapState(int trackingState);
 std::string DescribeTrackingState(int trackingState);
 
-bool IsIdentityPose(const core::ports::PoseEstimate &pose);
-bool HasIdentityPoseValues(const core::ports::PoseEstimate &pose);
-bool IsFinitePose(const core::ports::PoseEstimate &pose);
-void NormalizePoseQuaternion(core::ports::PoseEstimate &pose);
-float PoseTranslationDistance(const core::ports::PoseEstimate &a, const core::ports::PoseEstimate &b);
-Eigen::Quaternionf PoseQuaternion(const core::ports::PoseEstimate &pose);
+bool IsIdentityPose(const Core::Ports::PoseEstimate &pose);
+bool HasIdentityPoseValues(const Core::Ports::PoseEstimate &pose);
+bool IsFinitePose(const Core::Ports::PoseEstimate &pose);
+void NormalizePoseQuaternion(Core::Ports::PoseEstimate &pose);
+float PoseTranslationDistance(const Core::Ports::PoseEstimate &a, const Core::Ports::PoseEstimate &b);
+Eigen::Quaternionf PoseQuaternion(const Core::Ports::PoseEstimate &pose);
 float QuaternionAngleDeg(const Eigen::Quaternionf &a, const Eigen::Quaternionf &b);
-void LimitPoseRotationStep(const core::ports::PoseEstimate &reference, core::ports::PoseEstimate &pose,
+void LimitPoseRotationStep(const Core::Ports::PoseEstimate &reference, Core::Ports::PoseEstimate &pose,
                            float maxRotationStepDeg);
 void ClampVelocityVector(float &vx, float &vy, float &vz, float maxSpeed = kPoseStabilizerMaxSpeedMps);
 
-Sophus::SE3f PoseEstimateToSe3(const core::ports::PoseEstimate &pose);
-core::ports::PoseEstimate Se3ToPoseEstimate(const Sophus::SE3f &pose);
-core::ports::PoseEstimate PoseFromTwc(const Sophus::SE3f &twc);
+Sophus::SE3f PoseEstimateToSe3(const Core::Ports::PoseEstimate &pose);
+Core::Ports::PoseEstimate Se3ToPoseEstimate(const Sophus::SE3f &pose);
+Core::Ports::PoseEstimate PoseFromTwc(const Sophus::SE3f &twc);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

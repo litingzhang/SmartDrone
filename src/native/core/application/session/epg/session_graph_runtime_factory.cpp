@@ -3,11 +3,11 @@
 #include "core/application/session/epg/calib_session_graph_service.h"
 #include "core/application/session/epg/slam_session_graph_service.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 std::unique_ptr<ISessionGraphRuntime> CreateSessionGraphRuntime(const SessionGraphRuntimeFactoryConfig &config)
 {
-    if (config.mode == domain::RuntimeMode::Slam) {
+    if (config.mode == Domain::RuntimeMode::Slam) {
         return std::make_unique<SlamSessionGraphRuntime>(SlamSessionGraphRuntimeConfig{
             config.cfg,
             config.tuning,
@@ -19,7 +19,7 @@ std::unique_ptr<ISessionGraphRuntime> CreateSessionGraphRuntime(const SessionGra
             config.factories,
         });
     }
-    if (config.mode == domain::RuntimeMode::Calib) {
+    if (config.mode == Domain::RuntimeMode::Calib) {
         return std::make_unique<CalibSessionGraphRuntime>(
             CalibSessionGraphRuntimeConfig{
                 config.cfg, config.stop, config.livePose, config.runningFlag,
@@ -28,4 +28,4 @@ std::unique_ptr<ISessionGraphRuntime> CreateSessionGraphRuntime(const SessionGra
     return nullptr;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

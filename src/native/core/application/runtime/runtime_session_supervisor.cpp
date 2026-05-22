@@ -4,7 +4,7 @@
 
 #include "core/application/session/epg/session_graph_runtime.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 RuntimeSessionSupervisor::RuntimeSessionSupervisor(Config config)
     : m_runningFlag(config.runningFlag), m_currentConfig(std::move(config.currentConfig)),
@@ -210,4 +210,4 @@ bool RuntimeSessionSupervisor::SessionIdleUnlocked() const
            m_modeManager.DesiredMode() == ControllerMode::Idle && !m_session;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

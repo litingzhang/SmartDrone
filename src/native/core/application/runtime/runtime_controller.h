@@ -13,9 +13,9 @@
 #include "core/application/runtime/runtime_session_supervisor.h"
 #include "core/domain/runtime_mode.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
-using PublishRuntimeModeFn = std::function<void(domain::RuntimeMode)>;
+using PublishRuntimeModeFn = std::function<void(Domain::RuntimeMode)>;
 
 struct UnifiedRuntimeControllerConfig {
     UnifiedConfig initialConfig;
@@ -28,7 +28,7 @@ struct UnifiedRuntimeControllerConfig {
 
 class UnifiedRuntimeController final : public IRuntimeCommandTarget {
   public:
-    using ControllerMode = SmartDrone::core::domain::RuntimeMode;
+    using ControllerMode = SmartDrone::Core::Domain::RuntimeMode;
     using CleanupCalibDataFn = std::function<int(const std::string &)>;
 
     explicit UnifiedRuntimeController(UnifiedRuntimeControllerConfig config);
@@ -66,4 +66,4 @@ class UnifiedRuntimeController final : public IRuntimeCommandTarget {
     std::chrono::steady_clock::time_point m_calibCleanupDeadline{};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

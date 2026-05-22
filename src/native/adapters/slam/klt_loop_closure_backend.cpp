@@ -4,7 +4,7 @@
 
 #include <iostream>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 namespace {
 
 struct LoopMatch {
@@ -141,4 +141,4 @@ Sophus::SE3f DefaultVisualLoopClosureBackend::Apply(
     return corrected;
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

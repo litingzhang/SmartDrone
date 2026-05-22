@@ -6,7 +6,7 @@
 #include "core/application/config/app_args.h"
 #include "core/ports/slam_engine.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 struct DpvoTensorRtConfig {
     std::string repoPath;
@@ -19,14 +19,14 @@ struct DpvoTensorRtConfig {
     int optimizationWindow{7};
 };
 
-class DpvoTensorRtEngine final : public core::ports::ISlamEngine {
+class DpvoTensorRtEngine final : public Core::Ports::ISlamEngine {
   public:
     explicit DpvoTensorRtEngine(DpvoTensorRtConfig config);
     ~DpvoTensorRtEngine() override;
 
     bool Start() override;
     void Stop() override;
-    core::ports::SlamOutput Process(const core::ports::SlamInputBatch &input, bool extractFeatures,
+    Core::Ports::SlamOutput Process(const Core::Ports::SlamInputBatch &input, bool extractFeatures,
                                     bool extractPointCloud) override;
 
   private:
@@ -37,4 +37,4 @@ class DpvoTensorRtEngine final : public core::ports::ISlamEngine {
 DpvoTensorRtConfig MakeDpvoTensorRtConfig(const RuntimeConfig &runtime,
                                           const std::string &settingsPath = std::string{});
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

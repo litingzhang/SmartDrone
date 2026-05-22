@@ -4,11 +4,11 @@
 
 #include "core/ports/visual_tracking.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
-using ForwardBackwardTrackingOptions = core::ports::ForwardBackwardTrackingOptions;
+using ForwardBackwardTrackingOptions = Core::Ports::ForwardBackwardTrackingOptions;
 
-class DefaultPointTracker2d final : public core::ports::IPointTracker2d {
+class DefaultPointTracker2d final : public Core::Ports::IPointTracker2d {
   public:
     bool TrackForwardBackward(const cv::Mat &prevGray, const cv::Mat &currGray,
                               const std::vector<cv::Point2f> &prevPoints,
@@ -23,4 +23,4 @@ bool TrackPointsForwardBackward(const cv::Mat &prevGray, const cv::Mat &currGray
                                 std::vector<uchar> &status,
                                 const ForwardBackwardTrackingOptions &options = {});
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

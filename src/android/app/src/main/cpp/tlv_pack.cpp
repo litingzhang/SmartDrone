@@ -25,23 +25,22 @@ void WriteF32Le(std::vector<uint8_t> &buffer, float value)
     WriteU32Le(buffer, raw);
 }
 
-std::vector<uint8_t> MakeFrame(uint8_t ver, uint8_t cmd, uint8_t flags, uint32_t seq, uint32_t tMs,
-                               const uint8_t *payload, uint16_t len)
+std::vector<uint8_t> MakeFrame(const TlvFrameRequest &request)
 {
     std::vector<uint8_t> out;
-    out.reserve(static_cast<size_t>(2 + 1 + 1 + 1 + 2 + 4 + 4 + len + 2));
+    out.reserve(static_cast<size_t>(2 + 1 + 1 + 1 + 2 + 4 + 4 + request.len + 2));
 
     out.push_back(0xAA);
     out.push_back(0x55);
-    out.push_back(ver);
-    out.push_back(cmd);
-    out.push_back(flags);
-    WriteU16Le(out, len);
-    WriteU32Le(out, seq);
-    WriteU32Le(out, tMs);
+    out.push_back(request.ver);
+    out.push_back(request.cmd);
+    out.push_back(request.flags);
+    WriteU16Le(out, request.len);
+    WriteU32Le(out, request.seq);
+    WriteU32Le(out, request.tMs);
 
-    if (len > 0 && payload != nullptr) {
-        out.insert(out.end(), payload, payload + len);
+    if (request.len > 0 && request.payload != nullptr) {
+        out.insert(out.end(), request.payload, request.payload + request.len);
     }
 
     const uint8_t *crcBase = out.data() + 2;
@@ -51,28 +50,28 @@ std::vector<uint8_t> MakeFrame(uint8_t ver, uint8_t cmd, uint8_t flags, uint32_t
     return out;
 }
 
-std::vector<uint8_t> MakeMovePayload(uint8_t frame, float valueA, float valueB, float valueC, float valueD, float maxV)
+std::vector<uint8_t> MakeMovePayload(const MovePayloadValues &values)
 {
     std::vector<uint8_t> payload;
     payload.reserve(21);
-    payload.push_back(frame);
-    WriteF32Le(payload, valueA);
-    WriteF32Le(payload, valueB);
-    WriteF32Le(payload, valueC);
-    WriteF32Le(payload, valueD);
-    WriteF32Le(payload, maxV);
+    payload.push_back(values.frame);
+    WriteF32Le(payload, values.valueA);
+    WriteF32Le(payload, values.valueB);
+    WriteF32Le(payload, values.valueC);
+    WriteF32Le(payload, values.valueD);
+    WriteF32Le(payload, values.maxV);
     return payload;
 }
 
-std::vector<uint8_t> MakeMoveRcPayload(uint8_t frame, float throttle, float yaw, float pitch, float roll, float maxV)
+std::vector<uint8_t> MakeMoveRcPayload(const MovePayloadValues &values)
 {
     std::vector<uint8_t> payload;
     payload.reserve(21);
-    payload.push_back(frame);
-    WriteF32Le(payload, throttle);
-    WriteF32Le(payload, yaw);
-    WriteF32Le(payload, pitch);
-    WriteF32Le(payload, roll);
-    WriteF32Le(payload, maxV);
+    payload.push_back(values.frame);
+    WriteF32Le(payload, values.valueA);
+    WriteF32Le(payload, values.valueB);
+    WriteF32Le(payload, values.valueC);
+    WriteF32Le(payload, values.valueD);
+    WriteF32Le(payload, values.maxV);
     return payload;
 }

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 enum class SlamFrameStepResult : std::uint8_t {
     Continue,
@@ -14,4 +14,4 @@ struct SlamFrameStageResult {
     bool sessionOk{true};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

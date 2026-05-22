@@ -1,37 +1,39 @@
 #include "core/application/config/capability_catalog.h"
+#include "core/application/config/slam_backend_availability.h"
 #include "core/application/runtime/runtime_provider_metadata.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
-std::vector<domain::PerceptionMode> DefaultPerceptionModes(
+std::vector<Domain::PerceptionMode> DefaultPerceptionModes(
     const CameraRuntimeProviderMetadata &cameraProvider)
 {
     if (cameraProvider.usesPackedStereo) {
         return {
-            domain::PerceptionMode::Stereo,
+            Domain::PerceptionMode::Stereo,
         };
     }
     return {
-        domain::PerceptionMode::Stereo,
-        domain::PerceptionMode::StereoImu,
-        domain::PerceptionMode::Mono,
-        domain::PerceptionMode::MonoImu,
+        Domain::PerceptionMode::Stereo,
+        Domain::PerceptionMode::StereoImu,
+        Domain::PerceptionMode::Mono,
+        Domain::PerceptionMode::MonoImu,
     };
 }
 
 std::vector<std::string> DefaultSlamEngines()
 {
     std::vector<std::string> engines{"klt", "dpvo_tensorrt"};
-#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
-    engines.push_back("orbslam3");
-#endif
+    if (OrbSlam3BackendAvailable()) {
+        engines.push_back("orbslam3");
+    }
     return engines;
 }
 
 std::vector<std::string> DefaultBehaviorNotes(
     const CameraRuntimeProviderMetadata &cameraProvider)
 {
+    const bool orbAvailable = OrbSlam3BackendAvailable();
     std::vector<std::string> notes{
         std::string("camera.provider.compiled=") +
             cameraProvider.providerName,
@@ -42,20 +44,22 @@ std::vector<std::string> DefaultBehaviorNotes(
         "slam.backend.dpvo_tensorrt=native_cpp_tensorrt_dpvo_backend",
         "slam.feature_frontend.lk=grid_lk_pnp_vo",
         "slam.feature_frontend.lk_gftt_per_frame=klt_tracking_pnp_vo",
-#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
-        "slam.backend.orbslam3=orb_slam3_backend_with_selectable_frontends",
-        "slam.feature_frontend.orb=legacy_orb_slam3_tracking_path",
-        "slam.feature_frontend.superpoint_lightglue=tensorrt_cpp_superpoint_"
-        "stereo_injection",
-        "slam.feature_frontend.xfeat_lightglue=visual_feature_lightglue_slot_"
-        "pending_native_client",
-#else
-        "slam.feature_frontend.orb=disabled_at_build_time",
-        "slam.feature_frontend.superpoint_lightglue=disabled_at_build_time",
-        "slam.feature_frontend.xfeat_lightglue=disabled_at_build_time",
-#endif
         "slam.lk_seed.gftt=shi_tomasi_good_features_to_track",
     };
+    if (orbAvailable) {
+        notes.push_back(
+            "slam.backend.orbslam3=orb_slam3_backend_with_selectable_frontends");
+        notes.push_back("slam.feature_frontend.orb=legacy_orb_slam3_tracking_path");
+        notes.push_back("slam.feature_frontend.superpoint_lightglue="
+                        "tensorrt_cpp_superpoint_stereo_injection");
+        notes.push_back("slam.feature_frontend.xfeat_lightglue="
+                        "visual_feature_lightglue_slot_pending_native_client");
+    } else {
+        notes.push_back("slam.feature_frontend.orb=disabled_at_build_time");
+        notes.push_back(
+            "slam.feature_frontend.superpoint_lightglue=disabled_at_build_time");
+        notes.push_back("slam.feature_frontend.xfeat_lightglue=disabled_at_build_time");
+    }
     if (cameraProvider.usesPackedStereo) {
         notes.push_back(
             "camera.uvc_stereo_v4l2=single_uvc_device_packed_left_right_frame");
@@ -66,21 +70,21 @@ std::vector<std::string> DefaultBehaviorNotes(
     return notes;
 }
 
-void PopulateStaticModes(domain::RuntimeCapabilities &capabilities)
+void PopulateStaticModes(Domain::RuntimeCapabilities &capabilities)
 {
     capabilities.runtimeModes = {
-        domain::RuntimeMode::Idle,
-        domain::RuntimeMode::Slam,
-        domain::RuntimeMode::Calib,
+        Domain::RuntimeMode::Idle,
+        Domain::RuntimeMode::Slam,
+        Domain::RuntimeMode::Calib,
     };
     capabilities.slamModes = {
-        domain::SlamOperationMode::Mapping,
-        domain::SlamOperationMode::Localization,
-        domain::SlamOperationMode::Auto,
+        Domain::SlamOperationMode::Mapping,
+        Domain::SlamOperationMode::Localization,
+        Domain::SlamOperationMode::Auto,
     };
 }
 
-void PopulateProviders(domain::RuntimeCapabilities &capabilities,
+void PopulateProviders(Domain::RuntimeCapabilities &capabilities,
                        const CameraRuntimeProviderMetadata &cameraProvider)
 {
     capabilities.cameraProviders = {cameraProvider.providerName};
@@ -90,10 +94,10 @@ void PopulateProviders(domain::RuntimeCapabilities &capabilities,
 
 } // namespace
 
-domain::RuntimeCapabilities CapabilityCatalog::BuildDefault(
+Domain::RuntimeCapabilities CapabilityCatalog::BuildDefault(
     const CameraRuntimeProviderMetadata &cameraProvider)
 {
-    domain::RuntimeCapabilities capabilities{};
+    Domain::RuntimeCapabilities capabilities{};
     PopulateStaticModes(capabilities);
     PopulateProviders(capabilities, cameraProvider);
     capabilities.perceptionModes = DefaultPerceptionModes(cameraProvider);
@@ -103,4 +107,4 @@ domain::RuntimeCapabilities CapabilityCatalog::BuildDefault(
     return capabilities;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

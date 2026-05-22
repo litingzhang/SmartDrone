@@ -7,14 +7,14 @@
 
 #include "core/ports/slam_tracking_state.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
-using SmartDrone::core::ports::VehicleCommandAckKind;
-using SmartDrone::core::ports::VehicleDownwardRange;
-using SmartDrone::core::ports::VehicleFlightMode;
-using SmartDrone::core::ports::VehicleLocalPosition;
-using SmartDrone::core::ports::VehicleManualControl;
-using SmartDrone::core::ports::VehicleSetpointLocalNed;
+using SmartDrone::Core::Ports::VehicleCommandAckKind;
+using SmartDrone::Core::Ports::VehicleDownwardRange;
+using SmartDrone::Core::Ports::VehicleFlightMode;
+using SmartDrone::Core::Ports::VehicleLocalPosition;
+using SmartDrone::Core::Ports::VehicleManualControl;
+using SmartDrone::Core::Ports::VehicleSetpointLocalNed;
 
 Px4UdpHooks::Px4UdpHooks(Px4UdpHooksConfig config)
     : m_vehicleControl(config.vehicleControl), m_readRuntimeGate(std::move(config.readRuntimeGate)),
@@ -33,7 +33,7 @@ float Px4UdpHooks::ClampSignedUnit(float value)
 
 bool Px4UdpHooks::IsTrackingPoseUsable(int trackingState)
 {
-    return ports::IsSlamTrackingPoseUsable(trackingState);
+    return Ports::IsSlamTrackingPoseUsable(trackingState);
 }
 
 bool Px4UdpHooks::IsPoseQualityUsable(LivePoseQuality quality)
@@ -554,4 +554,4 @@ void Px4UdpHooks::StepManualControl()
     EnsurePositionMode(false, nullptr);
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

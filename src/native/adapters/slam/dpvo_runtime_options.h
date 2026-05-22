@@ -1,6 +1,6 @@
 #pragma once
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 struct DpvoGraphRuntimeOptions {
     bool persistentEdges{false};
@@ -18,4 +18,4 @@ struct DpvoStereoDepthOptions {
 DpvoGraphRuntimeOptions LoadDpvoGraphRuntimeOptions();
 DpvoStereoDepthOptions LoadDpvoStereoDepthOptions(int rightWidth);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

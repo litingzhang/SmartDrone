@@ -7,7 +7,7 @@
 
 #include "adapters/slam/slam_engine_adapter.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -79,8 +79,8 @@ CreateSlamModeStrategy(FeatureFrontend frontend)
     return CreateOrbModeStrategy();
 }
 
-core::ports::SlamOutput
-SlamEngineAdapter::Process(const core::ports::SlamInputBatch &input,
+Core::Ports::SlamOutput
+SlamEngineAdapter::Process(const Core::Ports::SlamInputBatch &input,
                            bool extractFeatures, bool extractPointCloud)
 {
     if (!m_modeStrategy || m_modeStrategy->Frontend() != m_featureFrontend) {
@@ -90,4 +90,4 @@ SlamEngineAdapter::Process(const core::ports::SlamInputBatch &input,
                                    extractPointCloud);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

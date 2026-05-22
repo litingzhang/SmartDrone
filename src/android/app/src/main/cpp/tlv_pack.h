@@ -6,7 +6,26 @@
 void WriteU16Le(std::vector<uint8_t> &buffer, uint16_t value);
 void WriteU32Le(std::vector<uint8_t> &buffer, uint32_t value);
 void WriteF32Le(std::vector<uint8_t> &buffer, float value);
-std::vector<uint8_t> MakeFrame(uint8_t ver, uint8_t cmd, uint8_t flags, uint32_t seq, uint32_t tMs,
-                               const uint8_t *payload, uint16_t len);
-std::vector<uint8_t> MakeMovePayload(uint8_t frame, float valueA, float valueB, float valueC, float valueD, float maxV);
-std::vector<uint8_t> MakeMoveRcPayload(uint8_t frame, float throttle, float yaw, float pitch, float roll, float maxV);
+
+struct TlvFrameRequest {
+    uint8_t ver{1};
+    uint8_t cmd{0};
+    uint8_t flags{0};
+    uint32_t seq{0};
+    uint32_t tMs{0};
+    const uint8_t *payload{nullptr};
+    uint16_t len{0};
+};
+
+struct MovePayloadValues {
+    uint8_t frame{0};
+    float valueA{0.0f};
+    float valueB{0.0f};
+    float valueC{0.0f};
+    float valueD{0.0f};
+    float maxV{0.0f};
+};
+
+std::vector<uint8_t> MakeFrame(const TlvFrameRequest &request);
+std::vector<uint8_t> MakeMovePayload(const MovePayloadValues &values);
+std::vector<uint8_t> MakeMoveRcPayload(const MovePayloadValues &values);

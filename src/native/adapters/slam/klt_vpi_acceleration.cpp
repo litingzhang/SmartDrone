@@ -5,7 +5,6 @@
 #include <memory>
 #include <vector>
 
-#if SMART_DRONE_HAS_VPI
 #include <vpi/Array.h>
 #include <vpi/Image.h>
 #include <vpi/OpenCVInterop.hpp>
@@ -17,14 +16,12 @@
 #include <vpi/algo/OpticalFlowPyrLK.h>
 #include <vpi/algo/Remap.h>
 #include <vpi/algo/StereoDisparity.h>
-#endif
 
 #include "adapters/slam/klt_mode_utils.h"
 #include "adapters/slam/slam_env.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
-#if SMART_DRONE_HAS_VPI
 struct LkPerFrameVpiState {
     ~LkPerFrameVpiState()
     {
@@ -107,7 +104,6 @@ struct LkPerFrameVpiState {
     VPIWarpMap rightWarp{};
     bool hasPrevRect{false};
 };
-#endif
 
 namespace {
 
@@ -117,7 +113,6 @@ constexpr int kVpiStereoP2 = 176;
 constexpr float kVpiStereoUniqueness = 0.38f;
 constexpr int kVpiStereoIncludeDiagonals = 1;
 
-#if SMART_DRONE_HAS_VPI
 const char *VpiStatusName(VPIStatus status)
 {
     const char *name = vpiStatusGetName(status);
@@ -710,48 +705,5 @@ bool ComputeVpiCudaCurrentPyrLk(const cv::Mat &prevLeft, const std::vector<cv::P
     VPIImage prevLeftImage = state->hasPrevRect ? state->prevLeftRect : nullptr;
     return ComputeVpiCudaPyrLk(prevLeft, prevLeftImage, state->leftRect, pts0, pts1, statusOut, state);
 }
-#else
-} // namespace
 
-bool StoreVpiPreviousRectified(std::shared_ptr<LkPerFrameVpiState> &)
-{
-    return false;
-}
-
-bool VpiRemapCurrentStereo(const cv::Mat &, const cv::Mat &, cv::Mat &, cv::Mat &,
-                           std::shared_ptr<LkPerFrameVpiState> &, const cv::Mat &, const cv::Mat &, const cv::Mat &,
-                           const cv::Mat &, bool &)
-{
-    return false;
-}
-
-bool ComputeVpiCudaDisparity(const cv::Mat &, const cv::Mat &, cv::Mat &, std::shared_ptr<LkPerFrameVpiState> &,
-                             bool &logged)
-{
-    if (!logged) {
-        std::cerr << "[lk_per_frame_accel] VPI support not compiled; fallback=cpu_sgbm\n";
-        logged = true;
-    }
-    return false;
-}
-
-bool HasVpiPreviousRectified(const std::shared_ptr<LkPerFrameVpiState> &)
-{
-    return false;
-}
-
-bool ComputeVpiCudaPreviousRectifiedDisparity(const cv::Size &, cv::Mat &,
-                                              std::shared_ptr<LkPerFrameVpiState> &)
-{
-    return false;
-}
-
-bool ComputeVpiCudaCurrentPyrLk(const cv::Mat &, const std::vector<cv::Point2f> &,
-                                std::vector<cv::Point2f> &, std::vector<uint8_t> &,
-                                std::shared_ptr<LkPerFrameVpiState> &)
-{
-    return false;
-}
-#endif
-
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

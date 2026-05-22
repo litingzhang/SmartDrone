@@ -7,7 +7,7 @@
 #include "adapters/slam/slam_engine_adapter.h"
 #include "adapters/slam/slam_engine_factory.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -31,4 +31,4 @@ const SlamEngineFactoryRegistrar
 
 } // namespace
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

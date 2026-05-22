@@ -4,7 +4,7 @@
 
 #include "adapters/slam/slam_env.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 DpvoGraphRuntimeOptions LoadDpvoGraphRuntimeOptions()
 {
@@ -33,4 +33,4 @@ DpvoStereoDepthOptions LoadDpvoStereoDepthOptions(int rightWidth)
     return options;
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

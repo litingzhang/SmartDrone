@@ -8,7 +8,7 @@
 
 #include "common/tlv/tlv_protocol.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 double DurationMs(const std::chrono::steady_clock::time_point &start, const std::chrono::steady_clock::time_point &end)
 {
@@ -109,8 +109,8 @@ cv::Mat EnhanceLowLightGrayForSlam(const cv::Mat &gray)
     return enhanced;
 }
 
-void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, const StereoFrameQuality &quality,
-                              bool enableLowLightEnhance, ports::StereoFrame &out)
+void PrepareStereoPairForSlam(const Ports::StereoFrame &stereo, const StereoFrameQuality &quality,
+                              bool enableLowLightEnhance, Ports::StereoFrame &out)
 {
     out = stereo;
     if (!enableLowLightEnhance) {
@@ -145,18 +145,18 @@ void PrepareStereoPairForSlam(const ports::StereoFrame &stereo, const StereoFram
     out.right.owner.reset();
 }
 
-uint8_t ToRuntimeSlamModeValue(SmartDrone::core::domain::SlamOperationMode mode)
+uint8_t ToRuntimeSlamModeValue(SmartDrone::Core::Domain::SlamOperationMode mode)
 {
     switch (mode) {
-    case SmartDrone::core::domain::SlamOperationMode::Localization:
+    case SmartDrone::Core::Domain::SlamOperationMode::Localization:
         return RUNTIME_SLAM_MODE_LOCALIZATION;
-    case SmartDrone::core::domain::SlamOperationMode::Relocalization:
+    case SmartDrone::Core::Domain::SlamOperationMode::Relocalization:
         return RUNTIME_SLAM_MODE_RELOCALIZATION;
-    case SmartDrone::core::domain::SlamOperationMode::TrackingOnly:
+    case SmartDrone::Core::Domain::SlamOperationMode::TrackingOnly:
         return RUNTIME_SLAM_MODE_TRACKING_ONLY;
-    case SmartDrone::core::domain::SlamOperationMode::Auto:
+    case SmartDrone::Core::Domain::SlamOperationMode::Auto:
         return RUNTIME_SLAM_MODE_AUTO;
-    case SmartDrone::core::domain::SlamOperationMode::Mapping:
+    case SmartDrone::Core::Domain::SlamOperationMode::Mapping:
     default:
         return RUNTIME_SLAM_MODE_MAPPING;
     }
@@ -202,4 +202,4 @@ AutoSlamModeController::SlamOperationMode AutoSlamModeController::Observe(bool t
     return m_effectiveMode;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

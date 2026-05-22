@@ -1,6 +1,6 @@
 #include "adapters/slam/descriptor_geometry.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 cv::KeyPoint MakeDescriptorKeyPoint(const cv::Point2f &pt)
 {
@@ -35,4 +35,4 @@ bool IsPointNearExistingKeypoint(const cv::Point2f &pt,
     return false;
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

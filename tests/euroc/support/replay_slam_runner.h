@@ -10,7 +10,7 @@
 #include "core/ports/imu_provider.h"
 #include "core/ports/slam_engine.h"
 
-namespace SmartDrone::tests {
+namespace SmartDrone::Tests {
 
 struct ReplaySlamRunnerConfig {
     int cameraFps{60};
@@ -29,7 +29,7 @@ struct ReplayPoseSample {
     int trackingState{0};
     unsigned long mapId{0};
     bool poseValid{false};
-    SmartDrone::core::ports::PoseEstimate pose{};
+    SmartDrone::Core::Ports::PoseEstimate pose{};
     size_t imuSampleCount{0};
     bool usedVisualFeatureFrontend{false};
     int visualFeatureRawLeftCount{0};
@@ -93,24 +93,24 @@ using ReplayPoseSampleCallback = std::function<void(const ReplayPoseSample &)>;
 
 class ReplaySlamRunner {
   public:
-    ReplaySlamRunner(SmartDrone::core::ports::ICameraProvider &camera,
-                     SmartDrone::core::ports::IImuProvider &imu,
-                     SmartDrone::core::ports::ISlamEngine &slamEngine,
+    ReplaySlamRunner(SmartDrone::Core::Ports::ICameraProvider &camera,
+                     SmartDrone::Core::Ports::IImuProvider &imu,
+                     SmartDrone::Core::Ports::ISlamEngine &slamEngine,
                      ReplaySlamRunnerConfig cfg);
 
     std::vector<ReplayPoseSample>
     Run(size_t maxFrames,
-        SmartDrone::core::application::FrameTimingTracker *timingTracker =
+        SmartDrone::Core::Application::FrameTimingTracker *timingTracker =
             nullptr,
         const ReplayPoseSampleCallback &sampleCallback = {});
 
   private:
-    SmartDrone::core::ports::ICameraProvider &m_camera;
-    SmartDrone::core::ports::IImuProvider &m_imu;
-    SmartDrone::core::ports::ISlamEngine &m_slamEngine;
+    SmartDrone::Core::Ports::ICameraProvider &m_camera;
+    SmartDrone::Core::Ports::IImuProvider &m_imu;
+    SmartDrone::Core::Ports::ISlamEngine &m_slamEngine;
     ReplaySlamRunnerConfig m_cfg;
-    SmartDrone::core::application::PerceptionPipeline m_pipeline;
+    SmartDrone::Core::Application::PerceptionPipeline m_pipeline;
     int64_t m_lastFrameNs{0};
 };
 
-} // namespace SmartDrone::tests
+} // namespace SmartDrone::Tests

@@ -9,12 +9,12 @@
 
 #include "core/ports/visual_pose_backend.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
-using VisualPnpPoseBackendOptions = core::ports::VisualPnpPoseBackendOptions;
-using VisualPnpPoseBackendResult = core::ports::VisualPnpPoseBackendResult;
+using VisualPnpPoseBackendOptions = Core::Ports::VisualPnpPoseBackendOptions;
+using VisualPnpPoseBackendResult = Core::Ports::VisualPnpPoseBackendResult;
 
-class DefaultVisualPnpPoseBackend final : public core::ports::IVisualPnpPoseBackend {
+class DefaultVisualPnpPoseBackend final : public Core::Ports::IVisualPnpPoseBackend {
   public:
     bool EstimatePoseRansac(const std::vector<cv::Point3f> &objectPoints,
                             const std::vector<cv::Point2f> &imagePoints,
@@ -27,4 +27,4 @@ bool EstimateVisualPnpPoseRansac(const std::vector<cv::Point3f> &objectPoints,
                                  const VisualPnpPoseBackendOptions &options,
                                  VisualPnpPoseBackendResult &result);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

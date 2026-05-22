@@ -33,22 +33,22 @@
 #include "core/ports/slam_engine.h"
 #include "core/ports/slam_session_telemetry.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 namespace {
 
 std::atomic<uint32_t> g_slamSessionResetCounter{0};
 std::atomic<uint32_t> g_slamSessionResetMapCount{0};
 
-using ControllerMode = SmartDrone::core::domain::RuntimeMode;
+using ControllerMode = SmartDrone::Core::Domain::RuntimeMode;
 
 SlamFrameSharedState MakeInitialFrameSharedState(
     const MainRuntimeAliases &aliases)
 {
     const auto requestedSlamMode = aliases.slamOperationMode;
     const auto effectiveSlamMode =
-        requestedSlamMode == SmartDrone::core::domain::SlamOperationMode::Auto
-            ? SmartDrone::core::domain::SlamOperationMode::Mapping
+        requestedSlamMode == SmartDrone::Core::Domain::SlamOperationMode::Auto
+            ? SmartDrone::Core::Domain::SlamOperationMode::Mapping
             : requestedSlamMode;
     return SlamFrameSharedState{requestedSlamMode, effectiveSlamMode};
 }
@@ -104,8 +104,8 @@ class SlamSessionRuntime::Impl final {
   private:
     const UnifiedConfig &m_cfg;
     LiveRuntimeTuning &m_tuning;
-    SmartDrone::core::ports::ISlamSessionTelemetryPort &m_telemetry;
-    SmartDrone::core::ports::IPosePublisher &m_posePublisher;
+    SmartDrone::Core::Ports::ISlamSessionTelemetryPort &m_telemetry;
+    SmartDrone::Core::Ports::IPosePublisher &m_posePublisher;
     LivePoseState &m_livePose;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
@@ -116,7 +116,7 @@ class SlamSessionRuntime::Impl final {
     bool m_useImu{false};
     std::string m_effectiveSettingsPath;
 
-    std::unique_ptr<SmartDrone::core::ports::ISlamEngine> m_slamEngine;
+    std::unique_ptr<SmartDrone::Core::Ports::ISlamEngine> m_slamEngine;
     std::unique_ptr<SlamRuntimeControlPort> m_slamRuntimeControl;
     std::unique_ptr<SlamSessionResourceLifecycle> m_resourceLifecycle;
     AutoSlamModeController m_autoSlamModeController{};
@@ -124,8 +124,8 @@ class SlamSessionRuntime::Impl final {
     std::unique_ptr<IPreviewOutputRuntime> m_previewOutputRuntime;
     ImuThreadState m_imuState{};
     ImuSensorPoller m_imuPoller;
-    std::unique_ptr<SmartDrone::core::ports::ICameraProvider> m_cameraProvider;
-    std::unique_ptr<SmartDrone::core::ports::IImuProvider> m_imuProvider;
+    std::unique_ptr<SmartDrone::Core::Ports::ICameraProvider> m_cameraProvider;
+    std::unique_ptr<SmartDrone::Core::Ports::IImuProvider> m_imuProvider;
     FrameTimingTracker m_frameTimingTracker{};
     PerceptionPipeline m_perceptionPipeline;
     PosePostprocessor m_posePostprocessor{};
@@ -233,18 +233,18 @@ void SlamSessionRuntime::Impl::ConfigureSlamControl()
 void SlamSessionRuntime::Impl::ApplyInitialSlamMode()
 {
     if (m_frameSharedState.requestedSlamMode.load() ==
-        SmartDrone::core::domain::SlamOperationMode::Auto) {
+        SmartDrone::Core::Domain::SlamOperationMode::Auto) {
         std::cerr << "[slam] operation_mode=auto effective_mode=mapping\n";
     }
     m_livePose.SetSlamMode(
         ToRuntimeSlamModeValue(m_frameSharedState.effectiveSlamMode.load()));
     const auto requestedMode = m_frameSharedState.requestedSlamMode.load();
-    if (requestedMode == SmartDrone::core::domain::SlamOperationMode::
+    if (requestedMode == SmartDrone::Core::Domain::SlamOperationMode::
                              Relocalization ||
         requestedMode ==
-            SmartDrone::core::domain::SlamOperationMode::TrackingOnly) {
+            SmartDrone::Core::Domain::SlamOperationMode::TrackingOnly) {
         std::cerr << "[slam] note: slam_mode="
-                  << SmartDrone::core::domain::ToString(m_aliases.slamOperationMode)
+                  << SmartDrone::Core::Domain::ToString(m_aliases.slamOperationMode)
                   << " currently maps to backend localization-only mode\n";
     }
 }
@@ -281,7 +281,7 @@ SlamSessionRuntime::Impl::BuildResourceLifecycleConfig()
         [this]() {
             return m_factories.startVisualFeatureFrontendSession(m_aliases, m_cfg);
         },
-        [this](SmartDrone::core::ports::IVisualFeatureFrontend *frontend) {
+        [this](SmartDrone::Core::Ports::IVisualFeatureFrontend *frontend) {
             if (m_slamRuntimeControl != nullptr) {
                 m_slamRuntimeControl->SetVisualFeatureFrontend(frontend);
             }
@@ -583,4 +583,4 @@ SlamFrameStageResult SlamSessionRuntime::EmitLivePose(
     return m_impl->EmitLivePose(published);
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

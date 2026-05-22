@@ -7,7 +7,7 @@
 #include <opencv2/core/persistence.hpp>
 #include <opencv2/imgproc.hpp>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -24,6 +24,69 @@ cv::Mat MakeDistCoeffsLocal(float k1, float k2, float p1, float p2)
 bool ValidIntrinsics(const StereoCameraIntrinsics &intrinsics)
 {
     return intrinsics.fx > 0.0f && intrinsics.fy > 0.0f && !intrinsics.K.empty();
+}
+
+void LoadCameraIntrinsics(cv::FileStorage &fs, StereoCalibration &calibration)
+{
+    calibration.left.fx = static_cast<float>(fs["Camera1.fx"]);
+    calibration.left.fy = static_cast<float>(fs["Camera1.fy"]);
+    calibration.left.cx = static_cast<float>(fs["Camera1.cx"]);
+    calibration.left.cy = static_cast<float>(fs["Camera1.cy"]);
+    calibration.right.fx = static_cast<float>(fs["Camera2.fx"]);
+    calibration.right.fy = static_cast<float>(fs["Camera2.fy"]);
+    calibration.right.cx = static_cast<float>(fs["Camera2.cx"]);
+    calibration.right.cy = static_cast<float>(fs["Camera2.cy"]);
+}
+
+bool IntrinsicsPositive(const StereoCalibration &calibration)
+{
+    return calibration.left.fx > 0.0f && calibration.left.fy > 0.0f &&
+           calibration.right.fx > 0.0f && calibration.right.fy > 0.0f;
+}
+
+void BuildCalibrationMatrices(cv::FileStorage &fs,
+                              StereoCalibration &calibration)
+{
+    calibration.left.K =
+        MakeCameraMatrixLocal(calibration.left.fx, calibration.left.fy,
+                              calibration.left.cx, calibration.left.cy);
+    calibration.right.K =
+        MakeCameraMatrixLocal(calibration.right.fx, calibration.right.fy,
+                              calibration.right.cx, calibration.right.cy);
+    calibration.left.D =
+        MakeDistCoeffsLocal(static_cast<float>(fs["Camera1.k1"]),
+                            static_cast<float>(fs["Camera1.k2"]),
+                            static_cast<float>(fs["Camera1.p1"]),
+                            static_cast<float>(fs["Camera1.p2"]));
+    calibration.right.D =
+        MakeDistCoeffsLocal(static_cast<float>(fs["Camera2.k1"]),
+                            static_cast<float>(fs["Camera2.k2"]),
+                            static_cast<float>(fs["Camera2.p1"]),
+                            static_cast<float>(fs["Camera2.p2"]));
+}
+
+void LoadStereoTransform(cv::FileStorage &fs, StereoCalibration &calibration)
+{
+    fs["Stereo.T_c1_c2"] >> calibration.T_c1_c2;
+    if (calibration.T_c1_c2.empty() || calibration.T_c1_c2.rows != 4 ||
+        calibration.T_c1_c2.cols != 4) {
+        calibration.T_c1_c2.release();
+        std::cerr << "[stereo_calib] Stereo.T_c1_c2 missing; falling back to "
+                     "Camera.bf baseline\n";
+    }
+}
+
+void LoadStereoBaseline(cv::FileStorage &fs, StereoCalibration &calibration)
+{
+    const float bf = static_cast<float>(fs["Camera.bf"]);
+    calibration.baselineMeters =
+        bf > 0.0f ? bf / calibration.left.fx : 0.0f;
+    if (calibration.T_c1_c2.empty()) {
+        return;
+    }
+    cv::Mat T64;
+    calibration.T_c1_c2.convertTo(T64, CV_64F);
+    calibration.baselineMeters = std::abs(static_cast<float>(T64.at<double>(0, 3)));
 }
 
 } // namespace
@@ -45,53 +108,15 @@ bool LoadStereoCalibrationFromSettings(const std::string &settingsPath,
         return false;
     }
 
-    calibration.left.fx = static_cast<float>(fs["Camera1.fx"]);
-    calibration.left.fy = static_cast<float>(fs["Camera1.fy"]);
-    calibration.left.cx = static_cast<float>(fs["Camera1.cx"]);
-    calibration.left.cy = static_cast<float>(fs["Camera1.cy"]);
-    calibration.right.fx = static_cast<float>(fs["Camera2.fx"]);
-    calibration.right.fy = static_cast<float>(fs["Camera2.fy"]);
-    calibration.right.cx = static_cast<float>(fs["Camera2.cx"]);
-    calibration.right.cy = static_cast<float>(fs["Camera2.cy"]);
-    if (!(calibration.left.fx > 0.0f) || !(calibration.left.fy > 0.0f) ||
-        !(calibration.right.fx > 0.0f) || !(calibration.right.fy > 0.0f)) {
+    LoadCameraIntrinsics(fs, calibration);
+    if (!IntrinsicsPositive(calibration)) {
         std::cerr << "[stereo_calib] invalid camera intrinsics in settings\n";
         return false;
     }
 
-    calibration.left.K =
-        MakeCameraMatrixLocal(calibration.left.fx, calibration.left.fy,
-                              calibration.left.cx, calibration.left.cy);
-    calibration.right.K =
-        MakeCameraMatrixLocal(calibration.right.fx, calibration.right.fy,
-                              calibration.right.cx, calibration.right.cy);
-    calibration.left.D =
-        MakeDistCoeffsLocal(static_cast<float>(fs["Camera1.k1"]),
-                            static_cast<float>(fs["Camera1.k2"]),
-                            static_cast<float>(fs["Camera1.p1"]),
-                            static_cast<float>(fs["Camera1.p2"]));
-    calibration.right.D =
-        MakeDistCoeffsLocal(static_cast<float>(fs["Camera2.k1"]),
-                            static_cast<float>(fs["Camera2.k2"]),
-                            static_cast<float>(fs["Camera2.p1"]),
-                            static_cast<float>(fs["Camera2.p2"]));
-
-    fs["Stereo.T_c1_c2"] >> calibration.T_c1_c2;
-    if (calibration.T_c1_c2.empty() || calibration.T_c1_c2.rows != 4 ||
-        calibration.T_c1_c2.cols != 4) {
-        calibration.T_c1_c2.release();
-        std::cerr << "[stereo_calib] Stereo.T_c1_c2 missing; falling back to "
-                     "Camera.bf baseline\n";
-    }
-
-    const float bf = static_cast<float>(fs["Camera.bf"]);
-    calibration.baselineMeters = bf > 0.0f ? bf / calibration.left.fx : 0.0f;
-    if (!calibration.T_c1_c2.empty()) {
-        cv::Mat T64;
-        calibration.T_c1_c2.convertTo(T64, CV_64F);
-        calibration.baselineMeters =
-            std::abs(static_cast<float>(T64.at<double>(0, 3)));
-    }
+    BuildCalibrationMatrices(fs, calibration);
+    LoadStereoTransform(fs, calibration);
+    LoadStereoBaseline(fs, calibration);
     if (!(calibration.baselineMeters > 0.005f)) {
         std::cerr << "[stereo_calib] invalid stereo baseline\n";
         return false;
@@ -194,4 +219,4 @@ bool DefaultStereoRectifier::ApplyRectification(StereoCalibration &calibration,
                                     rightRect);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

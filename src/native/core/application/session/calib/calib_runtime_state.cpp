@@ -13,10 +13,10 @@
 #include "core/application/state/live_pose_state.h"
 #include "core/domain/runtime_mode.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
-using ControllerMode = SmartDrone::core::domain::RuntimeMode;
+using ControllerMode = SmartDrone::Core::Domain::RuntimeMode;
 
 } // namespace
 
@@ -237,4 +237,4 @@ void CalibRuntimeState::Finalize(bool sessionOk)
     m_impl->Finalize(sessionOk);
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

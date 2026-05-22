@@ -8,7 +8,7 @@
 
 #include <opencv2/imgproc.hpp>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -86,10 +86,10 @@ bool RunStereoFeatureFrontend(const StereoFeatureFrontendRunInput &input,
     const auto inputEndTp = std::chrono::steady_clock::now();
 
     const auto frontendStartTp = std::chrono::steady_clock::now();
-    core::ports::StereoVisualFeatureComputeRequest frontendRequest;
+    Core::Ports::StereoVisualFeatureComputeRequest frontendRequest;
     frontendRequest.leftGray = &leftInput;
     frontendRequest.rightGray = &rightInput;
-    core::ports::StereoVisualFeatureComputeResult frontendResult;
+    Core::Ports::StereoVisualFeatureComputeResult frontendResult;
     if (!input.client->DetectAndComputeStereo(frontendRequest, frontendResult)) {
         result.error = std::move(frontendResult.error);
         return false;
@@ -112,4 +112,4 @@ bool RunStereoFeatureFrontend(const StereoFeatureFrontendRunInput &input,
     return true;
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

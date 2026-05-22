@@ -14,7 +14,7 @@
 #include "core/ports/slam_trajectory.h"
 #include "core/ports/visual_descriptor.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 enum class SlamInputMode : uint8_t {
     Stereo,
@@ -51,7 +51,7 @@ class ISlamBackendLifecycle {
     virtual ~ISlamBackendLifecycle() = default;
 
     virtual bool Available() const = 0;
-    virtual void SetOperationMode(core::domain::SlamOperationMode mode) = 0;
+    virtual void SetOperationMode(Core::Domain::SlamOperationMode mode) = 0;
     virtual void StepBackend()
     {
     }
@@ -128,4 +128,4 @@ class ISlamTrackingBackend : public ISlamBackendLifecycle,
     ~ISlamTrackingBackend() override = default;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

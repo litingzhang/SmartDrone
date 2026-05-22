@@ -13,10 +13,10 @@ namespace ORB_SLAM3 {
 class ORBextractor;
 }
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 class OrbDescriptorProvider final
-    : public core::ports::IVisualDescriptorProvider {
+    : public Core::Ports::IVisualDescriptorProvider {
   public:
     explicit OrbDescriptorProvider(ORB_SLAM3::ORBextractor *extractor = nullptr);
 
@@ -38,24 +38,24 @@ class OrbDescriptorProvider final
 };
 
 class DefaultOrbFeatureFrontend final
-    : public core::ports::IVisualFeatureFrontend,
-      public core::ports::IVisualDescriptorProvider {
+    : public Core::Ports::IVisualFeatureFrontend,
+      public Core::Ports::IVisualDescriptorProvider {
   public:
     explicit DefaultOrbFeatureFrontend(
         const OrbFeatureExtractorOptions &options = {});
     ~DefaultOrbFeatureFrontend() override;
 
     bool Running() const override;
-    bool Detect(const core::ports::VisualFeatureDetectRequest &request,
-                core::ports::VisualFeatureDetectResult &result) override;
+    bool Detect(const Core::Ports::VisualFeatureDetectRequest &request,
+                Core::Ports::VisualFeatureDetectResult &result) override;
     bool DetectAndCompute(
-        const core::ports::VisualFeatureComputeRequest &request,
-        core::ports::VisualFeatureComputeResult &result) override;
+        const Core::Ports::VisualFeatureComputeRequest &request,
+        Core::Ports::VisualFeatureComputeResult &result) override;
     bool DetectAndComputeStereo(
-        const core::ports::StereoVisualFeatureComputeRequest &request,
-        core::ports::StereoVisualFeatureComputeResult &result) override;
+        const Core::Ports::StereoVisualFeatureComputeRequest &request,
+        Core::Ports::StereoVisualFeatureComputeResult &result) override;
     void SetLightGlueEveryNOverride(int everyN) override;
-    core::ports::VisualFeatureFrontendStats LastStats() const override;
+    Core::Ports::VisualFeatureFrontendStats LastStats() const override;
 
     bool ComputeDescriptorsAtPoints(const cv::Mat &gray,
                                     const std::vector<cv::Point2f> &points,
@@ -72,4 +72,4 @@ class DefaultOrbFeatureFrontend final
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

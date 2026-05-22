@@ -7,29 +7,29 @@
 
 #include "core/ports/stereo_processing.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
-class DefaultStereoPairBuilder final : public core::ports::IStereoPairBuilder {
+class DefaultStereoPairBuilder final : public Core::Ports::IStereoPairBuilder {
   public:
-    bool BuildPairs(const core::ports::StereoPairBuildInput &input,
-                    core::ports::StereoPairBuildResult &result) const override;
+    bool BuildPairs(const Core::Ports::StereoPairBuildInput &input,
+                    Core::Ports::StereoPairBuildResult &result) const override;
 };
 
 bool HasValidVisualFeatureDescriptors(
-    const core::ports::VisualFeatureSet &features);
+    const Core::Ports::VisualFeatureSet &features);
 
-std::vector<core::ports::StereoMatchPair>
-MatchStereoPairs(const core::ports::VisualFeatureSet &left,
-                 const core::ports::VisualFeatureSet &right,
+std::vector<Core::Ports::StereoMatchPair>
+MatchStereoPairs(const Core::Ports::VisualFeatureSet &left,
+                 const Core::Ports::VisualFeatureSet &right,
                  const cv::Mat &leftGray, const cv::Mat &rightGray);
 
-std::vector<core::ports::StereoMatchPair>
-BuildAlignedStereoPairs(const core::ports::VisualFeatureSet &left,
-                        const core::ports::VisualFeatureSet &right,
+std::vector<Core::Ports::StereoMatchPair>
+BuildAlignedStereoPairs(const Core::Ports::VisualFeatureSet &left,
+                        const Core::Ports::VisualFeatureSet &right,
                         const cv::Mat &leftGray, const cv::Mat &rightGray);
 
 void LimitStereoPairsInPlace(std::vector<cv::Point2f> &leftPoints,
                              std::vector<cv::Point2f> &rightPoints,
                              size_t maxCount);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

@@ -15,7 +15,7 @@
 #include "core/application/session/slam/slam_runtime_control_port.h"
 #include "core/application/state/live_pose_state.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr int64_t kPointCloudUpdateIntervalNs = 200000000LL;
@@ -198,7 +198,7 @@ SlamFrameStageResult SlamFrameInputPort::AcquireAndPrepareFrame(
 void SlamFrameInputPort::SyncRequestedSlamMode()
 {
     const auto configuredSlamMode =
-        static_cast<SmartDrone::core::domain::SlamOperationMode>(
+        static_cast<SmartDrone::Core::Domain::SlamOperationMode>(
             m_ctx.tuning.slamOperationMode.load(std::memory_order_relaxed));
     if (configuredSlamMode == m_sharedState.requestedSlamMode.load()) {
         return;
@@ -207,25 +207,25 @@ void SlamFrameInputPort::SyncRequestedSlamMode()
     m_sharedState.requestedSlamMode.store(configuredSlamMode);
     m_ctx.autoSlamModeController.Reset();
     const auto effectiveSlamMode =
-        configuredSlamMode == SmartDrone::core::domain::SlamOperationMode::Auto
-            ? SmartDrone::core::domain::SlamOperationMode::Mapping
+        configuredSlamMode == SmartDrone::Core::Domain::SlamOperationMode::Auto
+            ? SmartDrone::Core::Domain::SlamOperationMode::Mapping
             : configuredSlamMode;
     m_sharedState.effectiveSlamMode.store(effectiveSlamMode);
     if (m_ctx.slamControl != nullptr) {
         m_ctx.slamControl->SetOperationMode(effectiveSlamMode);
     }
     std::cerr << "[slam] operation_mode -> "
-              << SmartDrone::core::domain::ToString(configuredSlamMode);
+              << SmartDrone::Core::Domain::ToString(configuredSlamMode);
     if (configuredSlamMode ==
-        SmartDrone::core::domain::SlamOperationMode::Auto) {
+        SmartDrone::Core::Domain::SlamOperationMode::Auto) {
         std::cerr << " effective_mode="
-                  << SmartDrone::core::domain::ToString(effectiveSlamMode);
+                  << SmartDrone::Core::Domain::ToString(effectiveSlamMode);
     }
     std::cerr << "\n";
     if (configuredSlamMode ==
-            SmartDrone::core::domain::SlamOperationMode::Relocalization ||
+            SmartDrone::Core::Domain::SlamOperationMode::Relocalization ||
         configuredSlamMode ==
-            SmartDrone::core::domain::SlamOperationMode::TrackingOnly) {
+            SmartDrone::Core::Domain::SlamOperationMode::TrackingOnly) {
         std::cerr << "[slam] note: requested mode currently maps to backend "
                      "localization-only mode\n";
     }
@@ -391,10 +391,27 @@ SlamFrameInputPort::FrameMetadata SlamFrameInputPort::BuildFrameMetadata(
     const auto &left = stereoBatch.stereo.left;
     const auto &right = stereoBatch.stereo.right;
     const auto cameraDiag = m_ctx.cameraProvider.GetDiagnostics();
+    PopulateFrameStreamFlags(metadata);
+    PopulateFrameTimingMetadata(metadata, stereoBatch, right, cameraDiag);
+    PopulateFrameImageQuality(metadata, left, right);
+    PopulateFrameProcessingFlags(metadata);
+    MaybeLogFrameGap(stereoBatch, config, metadata);
+    return metadata;
+}
+
+void SlamFrameInputPort::PopulateFrameStreamFlags(FrameMetadata &metadata)
+{
     metadata.sendImage = m_ctx.tuning.sendImage.load(std::memory_order_relaxed);
     metadata.sendFeature =
         m_ctx.tuning.sendFeature.load(std::memory_order_relaxed);
     metadata.sendMap = m_ctx.tuning.sendMap.load(std::memory_order_relaxed);
+}
+
+void SlamFrameInputPort::PopulateFrameTimingMetadata(
+    FrameMetadata &metadata, const StereoBatch &stereoBatch,
+    const Core::Ports::ImageFrame &right,
+    const Core::Ports::CameraDiagnostics &cameraDiag)
+{
     metadata.pairDtMs = cameraDiag.lastPairDtMs;
     metadata.rejectDtMs =
         static_cast<double>(cameraDiag.lastRejectDtUs) / 1000.0;
@@ -420,6 +437,12 @@ SlamFrameInputPort::FrameMetadata SlamFrameInputPort::BuildFrameMetadata(
                               : 0.0;
     metadata.monoStepMs =
         static_cast<double>(stereoBatch.monotonicFrameStepNs) * 1e-6;
+}
+
+void SlamFrameInputPort::PopulateFrameImageQuality(
+    FrameMetadata &metadata, const Core::Ports::ImageFrame &left,
+    const Core::Ports::ImageFrame &right)
+{
     ComputeImageStats(left.gray, metadata.stereoQuality.leftMean,
                       metadata.stereoQuality.leftStddev);
     ComputeImageStats(right.gray, metadata.stereoQuality.rightMean,
@@ -428,18 +451,20 @@ SlamFrameInputPort::FrameMetadata SlamFrameInputPort::BuildFrameMetadata(
         ComputeSharpnessLaplacianVar(left.gray);
     metadata.stereoQuality.rightSharpness =
         ComputeSharpnessLaplacianVar(right.gray);
+}
+
+void SlamFrameInputPort::PopulateFrameProcessingFlags(FrameMetadata &metadata)
+{
     metadata.debugRightOnlyFeatures = m_ctx.aliases.debugRightOnlyFeatures;
     metadata.extractFeatures =
         metadata.sendFeature ||
         m_sharedState.requestedSlamMode.load() ==
-            SmartDrone::core::domain::SlamOperationMode::Auto;
+            SmartDrone::Core::Domain::SlamOperationMode::Auto;
     metadata.updatePointCloud =
         !metadata.debugRightOnlyFeatures && metadata.sendMap &&
         (metadata.captureTimestampNs -
          m_outputState.lastPointCloudUpdateNs.load()) >=
             kPointCloudUpdateIntervalNs;
-    MaybeLogFrameGap(stereoBatch, config, metadata);
-    return metadata;
 }
 
 void SlamFrameInputPort::MaybeLogFrameGap(
@@ -542,4 +567,4 @@ void SlamFrameInputPort::FillPreparedFrame(
     frame.updatePointCloud = metadata.updatePointCloud;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

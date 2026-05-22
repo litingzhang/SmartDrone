@@ -12,7 +12,7 @@
 #include "core/application/runtime/system_runtime_task_factory.h"
 #include "core/application/epg/epg_registry.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 bool ConfigValid(const SystemRuntimeGraphConfig &config)
@@ -138,4 +138,4 @@ void SystemRuntimeGraph::Stop()
     m_impl->Stop();
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

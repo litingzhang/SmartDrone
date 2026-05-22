@@ -23,7 +23,7 @@
 
 #include "common/time_utils.h"
 
-namespace SmartDrone::adapters::camera {
+namespace SmartDrone::Adapters::Camera {
 
 namespace {
 
@@ -245,34 +245,60 @@ UvcStereoCamera::~UvcStereoCamera()
     Close();
 }
 
-bool UvcStereoCamera::Open(const core::ports::CameraOpenConfig &config)
+bool UvcStereoCamera::ApplyOpenConfig(
+    const Core::Ports::CameraOpenConfig &config)
 {
-    Close();
-
     if (!config.uvcPackedStereo) {
-        std::cerr << "[uvc] unsupported configuration: uvc_stereo_opencv requires camera.uvc_packed_stereo=true\n";
+        std::cerr << "[uvc] unsupported configuration: uvc_stereo_opencv "
+                     "requires camera.uvc_packed_stereo=true\n";
         return false;
     }
-
     m_deviceIndex = config.uvcDeviceIndex;
     m_width = config.uvcEyeWidth;
     m_height = config.uvcEyeHeight;
     m_swapEyes = config.uvcSwapEyes;
-    if (m_deviceIndex < 0 || m_width <= 0 || m_height <= 0) {
-        std::cerr << "[uvc] invalid configuration: device_index=" << m_deviceIndex << " eye=" << m_width << "x"
-                  << m_height << "\n";
-        return false;
+    if (m_deviceIndex >= 0 && m_width > 0 && m_height > 0) {
+        return true;
     }
+    std::cerr << "[uvc] invalid configuration: device_index=" << m_deviceIndex
+              << " eye=" << m_width << "x" << m_height << "\n";
+    return false;
+}
 
+void UvcStereoCamera::ResetOpenState(
+    const Core::Ports::CameraOpenConfig &config)
+{
     m_fps = config.fps;
     m_maxQueue = 1;
     if (config.pairQueue > 1) {
-        std::cerr << "[uvc] forcing packed-stereo frame_queue=1 for lowest-latency capture (requested="
+        std::cerr << "[uvc] forcing packed-stereo frame_queue=1 for "
+                     "lowest-latency capture (requested="
                   << config.pairQueue << ")\n";
     }
     m_sequence = 0;
     m_lastFrameTimestampNs = 0;
     m_lastPairTimestampNs = 0;
+}
+
+void UvcStereoCamera::MarkOpenHealthy()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_open = true;
+    m_running = true;
+    m_diag = {};
+    m_diag.healthy = true;
+    m_diag.acceptFrames = true;
+    m_diag.pairTolNs = 0;
+}
+
+bool UvcStereoCamera::Open(const Core::Ports::CameraOpenConfig &config)
+{
+    Close();
+
+    if (!ApplyOpenConfig(config)) {
+        return false;
+    }
+    ResetOpenState(config);
 
     const int packedWidth = (m_width > 0) ? (m_width * 2) : 0;
     const DeviceOpenParams params{
@@ -289,16 +315,7 @@ bool UvcStereoCamera::Open(const core::ports::CameraOpenConfig &config)
         return false;
     }
 
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_open = true;
-        m_running = true;
-        m_diag = {};
-        m_diag.healthy = true;
-        m_diag.acceptFrames = true;
-        m_diag.pairTolNs = 0;
-    }
-
+    MarkOpenHealthy();
     return true;
 }
 
@@ -336,7 +353,7 @@ void UvcStereoCamera::Stop()
     Close();
 }
 
-bool UvcStereoCamera::GrabStereo(core::ports::StereoFrame &out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs)
+bool UvcStereoCamera::GrabStereo(Core::Ports::StereoFrame &out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs)
 {
     std::lock_guard<std::mutex> captureLock(m_captureMu);
     if (TryPopOrStop(out, preferLatest, minTimestampNs)) {
@@ -354,7 +371,7 @@ bool UvcStereoCamera::GrabStereo(core::ports::StereoFrame &out, int timeoutMs, b
     return TryPopOrStop(out, preferLatest, minTimestampNs);
 }
 
-bool UvcStereoCamera::TryPopOrStop(core::ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs)
+bool UvcStereoCamera::TryPopOrStop(Core::Ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (PopCandidateLocked(out, preferLatest, minTimestampNs)) {
@@ -372,7 +389,7 @@ void UvcStereoCamera::DrainReadyFrames()
     }
 }
 
-bool UvcStereoCamera::PopCandidateLocked(core::ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs)
+bool UvcStereoCamera::PopCandidateLocked(Core::Ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs)
 {
     auto candidate = m_queue.end();
     if (preferLatest) {
@@ -514,12 +531,12 @@ UvcStereoCamera::CaptureStatus UvcStereoCamera::DecodeCaptureBuffer(int fd, v4l2
     return CaptureStatus::Frame;
 }
 
-core::ports::StereoFrame UvcStereoCamera::BuildStereoFrame(const cv::Mat &packed, uint64_t captureTimestampNs,
+Core::Ports::StereoFrame UvcStereoCamera::BuildStereoFrame(const cv::Mat &packed, uint64_t captureTimestampNs,
                                                            uint64_t arriveNs)
 {
     const int halfWidth = packed.cols / 2;
     const int packedHeight = packed.rows;
-    core::ports::StereoFrame stereo{};
+    Core::Ports::StereoFrame stereo{};
     stereo.left.cameraId = 0;
     stereo.right.cameraId = 1;
     stereo.left.timestampNs = captureTimestampNs;
@@ -548,16 +565,16 @@ void UvcStereoCamera::MarkCaptureFault(bool acceptingFrames)
     }
 }
 
-core::ports::CameraHealth UvcStereoCamera::GetHealth() const
+Core::Ports::CameraHealth UvcStereoCamera::GetHealth() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return {m_diag.healthy, m_diag.droppedPairs};
 }
 
-core::ports::CameraDiagnostics UvcStereoCamera::GetDiagnostics() const
+Core::Ports::CameraDiagnostics UvcStereoCamera::GetDiagnostics() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    core::ports::CameraDiagnostics out = m_diag;
+    Core::Ports::CameraDiagnostics out = m_diag;
     const uint64_t nowNs = MonoTimeUs() * 1000ULL;
     out.lastFrameAgeMsL =
         m_lastFrameTimestampNs > 0 ? static_cast<int64_t>((nowNs - m_lastFrameTimestampNs) / 1000000ULL) : -1;
@@ -567,9 +584,9 @@ core::ports::CameraDiagnostics UvcStereoCamera::GetDiagnostics() const
     return out;
 }
 
-core::ports::CameraProviderSemantics UvcStereoCamera::Semantics() const
+Core::Ports::CameraProviderSemantics UvcStereoCamera::Semantics() const
 {
-    return core::ports::CameraProviderSemantics::PackedStereoSingleDevice;
+    return Core::Ports::CameraProviderSemantics::PackedStereoSingleDevice;
 }
 
 bool UvcStereoCamera::OpenDevice(const DeviceOpenParams &params)
@@ -817,7 +834,7 @@ void UvcStereoCamera::CloseDevice()
     }
 }
 
-void UvcStereoCamera::PushFrame(core::ports::StereoFrame &&frame, uint64_t captureTimestampNs)
+void UvcStereoCamera::PushFrame(Core::Ports::StereoFrame &&frame, uint64_t captureTimestampNs)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_running) {
@@ -848,4 +865,4 @@ void UvcStereoCamera::PushFrame(core::ports::StereoFrame &&frame, uint64_t captu
     m_lastPairTimestampNs = captureTimestampNs;
 }
 
-} // namespace SmartDrone::adapters::camera
+} // namespace SmartDrone::Adapters::Camera

@@ -6,14 +6,14 @@
 
 int main(int argc, char **argv)
 {
-    SmartDrone::app::bootstrap::InstallSignalHandlers();
-    SmartDrone::core::application::UnifiedConfig cfg{};
+    SmartDrone::App::Bootstrap::InstallSignalHandlers();
+    SmartDrone::Core::Application::UnifiedConfig cfg{};
     cfg.app = ParseAppConfig(argc, argv);
     ArgReader args(argc, argv);
     cfg.calib.root = args.GetString("--calib-root", "./calib_runs");
     cfg.calib.maxFrames = args.GetInt("--calib-max-frames", 0);
     const std::string autoModeText = args.GetString("--auto-mode", "idle");
 
-    SmartDrone::app::bootstrap::RuntimeHost runtimeHost;
+    SmartDrone::App::Bootstrap::RuntimeHost runtimeHost;
     return runtimeHost.Run(cfg, autoModeText);
 }

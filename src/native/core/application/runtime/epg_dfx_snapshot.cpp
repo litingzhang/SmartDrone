@@ -7,7 +7,7 @@
 
 #include "core/application/runtime/system_runtime_messages.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 EpgDfxSnapshotTask::EpgDfxSnapshotTask(EpgDfxSnapshotTarget target)
     : m_target(std::move(target))
@@ -32,7 +32,9 @@ void EpgDfxSnapshotTask::OnTick(Epg::TaskContext &context)
     PushSystemRuntimePulse(context, m_pulseSequence);
 }
 
-EPG_REGISTER_TASK_TYPE(EpgDfxSnapshotTask, "EpgDfxSnapshotTask")
+const bool EPG_DFX_SNAPSHOT_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<EpgDfxSnapshotTask>(
+        "EpgDfxSnapshotTask");
 
 std::uint64_t EpgDfxNowMs()
 {
@@ -54,4 +56,4 @@ void WriteEpgDfxSnapshotFile(const std::string &path, const std::string &json)
     (void)std::rename(tempPath.c_str(), path.c_str());
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

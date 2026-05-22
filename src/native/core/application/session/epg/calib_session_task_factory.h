@@ -6,7 +6,7 @@
 #include "core/application/session/calib/calib_runtime_state.h"
 #include "core/application/epg/epg_registry.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct EpgGraphRef;
 
@@ -22,4 +22,4 @@ struct CalibTaskFactoryDeps {
 EpgTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
     CalibTaskFactoryDeps deps);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

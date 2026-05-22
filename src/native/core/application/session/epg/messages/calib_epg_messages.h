@@ -7,7 +7,7 @@
 
 #include "core/ports/camera_provider.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct CalibResourceReady {
     bool ready{false};
@@ -18,7 +18,7 @@ struct CalibTick {
 };
 
 struct CalibStereoFrame {
-    SmartDrone::core::ports::StereoFrame stereo;
+    SmartDrone::Core::Ports::StereoFrame stereo;
 };
 
 struct CalibSavePair {
@@ -58,4 +58,4 @@ struct CalibStatus {
     bool completed{false};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

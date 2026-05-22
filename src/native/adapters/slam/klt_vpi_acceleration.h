@@ -7,7 +7,7 @@
 
 #include "adapters/slam/slam_mode_state.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 bool StoreVpiPreviousRectified(std::shared_ptr<LkPerFrameVpiState> &state);
 bool VpiRemapCurrentStereo(const cv::Mat &leftRaw, const cv::Mat &rightRaw, cv::Mat &leftRect, cv::Mat &rightRect,
@@ -22,4 +22,4 @@ bool ComputeVpiCudaCurrentPyrLk(const cv::Mat &prevLeft, const std::vector<cv::P
                                 std::vector<cv::Point2f> &pts1, std::vector<uint8_t> &statusOut,
                                 std::shared_ptr<LkPerFrameVpiState> &state);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

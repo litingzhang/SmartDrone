@@ -9,7 +9,7 @@
 
 #include "core/ports/slam_engine.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct ForwardBackwardTrackingOptions {
     int windowSizePx{21};
@@ -127,4 +127,4 @@ inline void CopyStereoTracksToOutput(const std::vector<StereoTrack> &tracks,
     }
 }
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

@@ -52,9 +52,9 @@ class ConstraintPoseImu;
 class GeometricCamera;
 class ORBextractor;
 
-using MonoFeatureFrameData = SmartDrone::core::ports::VisualKeypointFeatureSet;
+using MonoFeatureFrameData = SmartDrone::Core::Ports::VisualKeypointFeatureSet;
 using StereoFeatureFrameData =
-    SmartDrone::core::ports::StereoFeatureObservationPacket;
+    SmartDrone::Core::Ports::StereoFeatureObservationPacket;
 
 class Frame {
 public:

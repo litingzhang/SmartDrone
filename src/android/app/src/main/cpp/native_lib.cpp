@@ -28,6 +28,39 @@ static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
 static constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 110;
 
+struct RuntimeConfigJniArgs {
+    jint exposureUs{};
+    jfloat gain{};
+    jint pairMs{};
+    jint slamFps{};
+    jint slamMode{};
+    jint sensorMode{};
+    jboolean sendImage{};
+    jboolean sendFeature{};
+    jboolean sendMap{};
+    jboolean autoExposure{};
+    jboolean useCustomTbc{};
+    jfloat tbcTx{};
+    jfloat tbcTy{};
+    jfloat tbcTz{};
+    jfloat tbcRollDeg{};
+    jfloat tbcPitchDeg{};
+    jfloat tbcYawDeg{};
+    jint orbNFeatures{};
+    jfloat orbScaleFactor{};
+    jint orbNLevels{};
+    jint orbIniThFAST{};
+    jint orbMinThFAST{};
+    jint featureFrontend{};
+    jint superpointTopK{};
+    jint superpointMaxPoints{};
+    jint superpointInputMaxWidth{};
+    jint superpointInputMaxHeight{};
+    jint lkPerFrameAcceleration{};
+    jint orbAcceleration{};
+    jint slamBackend{};
+};
+
 static uint32_t NowMs32()
 {
     using namespace std::chrono;
@@ -46,6 +79,128 @@ static void WriteF32LeAt(std::vector<uint8_t> &payload, size_t offset, float val
     payload[offset + 1] = static_cast<uint8_t>((raw >> 8) & 0xFFu);
     payload[offset + 2] = static_cast<uint8_t>((raw >> 16) & 0xFFu);
     payload[offset + 3] = static_cast<uint8_t>((raw >> 24) & 0xFFu);
+}
+
+static std::vector<uint8_t> BuildFrame(uint8_t cmd, uint8_t flags, uint32_t seq,
+                                       const uint8_t *payload, uint16_t len)
+{
+    return MakeFrame({.ver = 1,
+                      .cmd = cmd,
+                      .flags = flags,
+                      .seq = seq,
+                      .tMs = NowMs32(),
+                      .payload = payload,
+                      .len = len});
+}
+
+static jint SendFrame(uint8_t cmd, uint8_t flags, const uint8_t *payload,
+                      uint16_t len)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const uint32_t seq = g_seqCounter.fetch_add(1);
+    const std::vector<uint8_t> frame = BuildFrame(cmd, flags, seq, payload, len);
+    const bool ok = g_udpClient.Send(frame.data(), frame.size());
+    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+}
+
+static jint SendMoveFrame(uint8_t flags, const MovePayloadValues &values)
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const uint32_t seq = g_seqCounter.fetch_add(1);
+    const std::vector<uint8_t> payload = MakeMovePayload(values);
+    const std::vector<uint8_t> frame =
+        BuildFrame(CMD_MOVE, flags, seq, payload.data(),
+                   static_cast<uint16_t>(payload.size()));
+    const bool ok = g_udpClient.Send(frame.data(), frame.size());
+    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+}
+
+static uint8_t RuntimeStreamFlags(const RuntimeConfigJniArgs &args)
+{
+    uint8_t streamFlags = 0;
+    if (args.sendImage == JNI_TRUE) {
+        streamFlags |= RUNTIME_CFG_FLAG_SEND_IMAGE;
+    }
+    if (args.sendFeature == JNI_TRUE) {
+        streamFlags |= RUNTIME_CFG_FLAG_SEND_FEATURE;
+    }
+    if (args.sendMap == JNI_TRUE) {
+        streamFlags |= RUNTIME_CFG_FLAG_SEND_MAP;
+    }
+    return streamFlags;
+}
+
+static void WriteRuntimeConfigPrefix(std::vector<uint8_t> &payload,
+                                     const RuntimeConfigJniArgs &args)
+{
+    WriteU32Le(payload, static_cast<uint32_t>(args.exposureUs));
+    WriteF32Le(payload, static_cast<float>(args.gain));
+    payload.push_back(static_cast<uint8_t>(args.sensorMode));
+    payload.push_back(RuntimeStreamFlags(args));
+    WriteU16Le(payload, static_cast<uint16_t>(args.pairMs > 0 ? args.pairMs : 0));
+    payload.resize(RUNTIME_CONFIG_PAYLOAD_LEN, 0);
+}
+
+static void WriteRuntimeConfigCore(std::vector<uint8_t> &payload,
+                                   const RuntimeConfigJniArgs &args)
+{
+    const uint16_t slamFpsValue =
+        static_cast<uint16_t>(args.slamFps > 0 ? args.slamFps : 0);
+    payload[40] = static_cast<uint8_t>(slamFpsValue & 0xFF);
+    payload[41] = static_cast<uint8_t>((slamFpsValue >> 8) & 0xFF);
+    payload[42] = static_cast<uint8_t>(args.slamMode);
+    payload[43] = static_cast<uint8_t>(args.autoExposure == JNI_TRUE ? 1 : 0);
+    payload[44] = static_cast<uint8_t>(args.useCustomTbc == JNI_TRUE ? 1 : 0);
+}
+
+static void WriteRuntimeConfigTbc(std::vector<uint8_t> &payload,
+                                  const RuntimeConfigJniArgs &args)
+{
+    WriteF32LeAt(payload, 45, args.tbcTx);
+    WriteF32LeAt(payload, 49, args.tbcTy);
+    WriteF32LeAt(payload, 53, args.tbcTz);
+    WriteF32LeAt(payload, 57, args.tbcPitchDeg);
+    WriteF32LeAt(payload, 61, args.tbcRollDeg);
+    WriteF32LeAt(payload, 65, args.tbcYawDeg);
+}
+
+static void WriteRuntimeConfigOrb(std::vector<uint8_t> &payload,
+                                  const RuntimeConfigJniArgs &args)
+{
+    WriteF32LeAt(payload, 69, static_cast<float>(args.orbNFeatures));
+    WriteF32LeAt(payload, 73, args.orbScaleFactor);
+    WriteF32LeAt(payload, 77, static_cast<float>(args.orbNLevels));
+    WriteF32LeAt(payload, 81, static_cast<float>(args.orbIniThFAST));
+    WriteF32LeAt(payload, 85, static_cast<float>(args.orbMinThFAST));
+}
+
+static void WriteRuntimeConfigFeature(std::vector<uint8_t> &payload,
+                                      const RuntimeConfigJniArgs &args)
+{
+    payload[89] = static_cast<uint8_t>(args.featureFrontend);
+    WriteF32LeAt(payload, 90, static_cast<float>(args.superpointTopK));
+    WriteF32LeAt(payload, 94, static_cast<float>(args.superpointMaxPoints));
+    WriteF32LeAt(payload, 98,
+                 static_cast<float>(args.superpointInputMaxWidth));
+    WriteF32LeAt(payload, 102,
+                 static_cast<float>(args.superpointInputMaxHeight));
+    payload[106] = 0;
+    payload[107] = static_cast<uint8_t>(args.lkPerFrameAcceleration);
+    payload[108] = static_cast<uint8_t>(args.orbAcceleration);
+    payload[109] = static_cast<uint8_t>(args.slamBackend);
+}
+
+static std::vector<uint8_t> MakeRuntimeConfigPayload(
+    const RuntimeConfigJniArgs &args)
+{
+    std::vector<uint8_t> payload;
+    payload.reserve(RUNTIME_CONFIG_PAYLOAD_LEN);
+    WriteRuntimeConfigPrefix(payload, args);
+    WriteRuntimeConfigCore(payload, args);
+    WriteRuntimeConfigTbc(payload, args);
+    WriteRuntimeConfigOrb(payload, args);
+    WriteRuntimeConfigFeature(payload, args);
+    return payload;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_com_example_smartdrone_NativeUdp_init(JNIEnv *env, jclass, jstring ip,
@@ -68,26 +223,14 @@ extern "C" JNIEXPORT void JNICALL Java_com_example_smartdrone_NativeUdp_close(JN
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendCmd(JNIEnv *, jclass, jint cmd)
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    const uint32_t seq = g_seqCounter.fetch_add(1);
-    const std::vector<uint8_t> frame = MakeFrame(1, static_cast<uint8_t>(cmd), 0, seq, NowMs32(), nullptr, 0);
-    const bool ok = g_udpClient.Send(frame.data(), frame.size());
-    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+    return SendFrame(static_cast<uint8_t>(cmd), 0, nullptr, 0);
 }
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendMove(JNIEnv *, jclass, jint frameType,
                                                                                  jfloat x, jfloat y, jfloat z,
                                                                                  jfloat yaw, jfloat maxV)
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    const uint32_t seq = g_seqCounter.fetch_add(1);
-
-    const std::vector<uint8_t> payload = MakeMovePayload(static_cast<uint8_t>(frameType), x, y, z, yaw, maxV);
-    const std::vector<uint8_t> frame =
-        MakeFrame(1, CMD_MOVE, 0, seq, NowMs32(), payload.data(), static_cast<uint16_t>(payload.size()));
-
-    const bool ok = g_udpClient.Send(frame.data(), frame.size());
-    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+    return SendMoveFrame(0, {static_cast<uint8_t>(frameType), x, y, z, yaw, maxV});
 }
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendMoveVelocity(JNIEnv *, jclass,
@@ -95,30 +238,17 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendMove
                                                                                          jfloat vy, jfloat vz,
                                                                                          jfloat yawRate, jfloat maxV)
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    const uint32_t seq = g_seqCounter.fetch_add(1);
-
-    const std::vector<uint8_t> payload = MakeMovePayload(static_cast<uint8_t>(frameType), vx, vy, vz, yawRate, maxV);
-    const std::vector<uint8_t> frame = MakeFrame(1, CMD_MOVE, MOVE_FLAG_VELOCITY, seq, NowMs32(), payload.data(),
-                                                 static_cast<uint16_t>(payload.size()));
-
-    const bool ok = g_udpClient.Send(frame.data(), frame.size());
-    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+    return SendMoveFrame(MOVE_FLAG_VELOCITY,
+                         {static_cast<uint8_t>(frameType), vx, vy, vz,
+                          yawRate, maxV});
 }
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendMoveRcJoystick(
     JNIEnv *, jclass, jint frameType, jfloat throttle, jfloat yaw, jfloat pitch, jfloat roll, jfloat maxV)
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    const uint32_t seq = g_seqCounter.fetch_add(1);
-
-    const std::vector<uint8_t> payload =
-        MakeMoveRcPayload(static_cast<uint8_t>(frameType), throttle, yaw, pitch, roll, maxV);
-    const std::vector<uint8_t> frame = MakeFrame(1, CMD_MOVE, MOVE_FLAG_RC_JOYSTICK, seq, NowMs32(), payload.data(),
-                                                 static_cast<uint16_t>(payload.size()));
-
-    const bool ok = g_udpClient.Send(frame.data(), frame.size());
-    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+    return SendMoveFrame(MOVE_FLAG_RC_JOYSTICK,
+                         {static_cast<uint8_t>(frameType), throttle, yaw, pitch,
+                          roll, maxV});
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL Java_com_example_smartdrone_NativeUdp_pollRecv(JNIEnv *env, jclass)
@@ -140,40 +270,23 @@ extern "C" JNIEXPORT jbyteArray JNICALL Java_com_example_smartdrone_NativeUdp_po
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRuntimeMode(JNIEnv *, jclass, jint mode)
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    const uint32_t seq = g_seqCounter.fetch_add(1);
     const uint8_t payload[RUNTIME_MODE_PAYLOAD_LEN] = {static_cast<uint8_t>(mode)};
-    const std::vector<uint8_t> frame =
-        MakeFrame(1, CMD_RUNTIME_MODE, 0, seq, NowMs32(), payload, RUNTIME_MODE_PAYLOAD_LEN);
-    const bool ok = g_udpClient.Send(frame.data(), frame.size());
-    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+    return SendFrame(CMD_RUNTIME_MODE, 0, payload, RUNTIME_MODE_PAYLOAD_LEN);
 }
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendGetCapabilities(JNIEnv *, jclass)
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    const uint32_t seq = g_seqCounter.fetch_add(1);
-    const std::vector<uint8_t> frame = MakeFrame(1, CMD_GET_CAPABILITIES, 0, seq, NowMs32(), nullptr, 0);
-    const bool ok = g_udpClient.Send(frame.data(), frame.size());
-    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+    return SendFrame(CMD_GET_CAPABILITIES, 0, nullptr, 0);
 }
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendGetConfig(JNIEnv *, jclass)
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    const uint32_t seq = g_seqCounter.fetch_add(1);
-    const std::vector<uint8_t> frame = MakeFrame(1, CMD_GET_CONFIG, 0, seq, NowMs32(), nullptr, 0);
-    const bool ok = g_udpClient.Send(frame.data(), frame.size());
-    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+    return SendFrame(CMD_GET_CONFIG, 0, nullptr, 0);
 }
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendHeartbeat(JNIEnv *, jclass)
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    const uint32_t seq = g_seqCounter.fetch_add(1);
-    const std::vector<uint8_t> frame = MakeFrame(1, CMD_HEARTBEAT, 0, seq, NowMs32(), nullptr, 0);
-    const bool ok = g_udpClient.Send(frame.data(), frame.size());
-    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+    return SendFrame(CMD_HEARTBEAT, 0, nullptr, 0);
 }
 
 extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRuntimeConfig(
@@ -184,52 +297,14 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
     jint featureFrontend, jint superpointTopK, jint superpointMaxPoints, jint superpointInputMaxWidth, jint superpointInputMaxHeight,
     jint lkPerFrameAcceleration, jint orbAcceleration, jint slamBackend)
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    const uint32_t seq = g_seqCounter.fetch_add(1);
-    std::vector<uint8_t> payload;
-    payload.reserve(RUNTIME_CONFIG_PAYLOAD_LEN);
-    WriteU32Le(payload, static_cast<uint32_t>(exposureUs));
-    WriteF32Le(payload, static_cast<float>(gain));
-    payload.push_back(static_cast<uint8_t>(sensorMode));
-    uint8_t streamFlags = 0;
-    if (sendImage == JNI_TRUE)
-        streamFlags |= RUNTIME_CFG_FLAG_SEND_IMAGE;
-    if (sendFeature == JNI_TRUE)
-        streamFlags |= RUNTIME_CFG_FLAG_SEND_FEATURE;
-    if (sendMap == JNI_TRUE)
-        streamFlags |= RUNTIME_CFG_FLAG_SEND_MAP;
-    payload.push_back(streamFlags);
-    WriteU16Le(payload, static_cast<uint16_t>(pairMs > 0 ? pairMs : 0));
-    payload.resize(RUNTIME_CONFIG_PAYLOAD_LEN, 0);
-    const uint16_t slamFpsValue = static_cast<uint16_t>(slamFps > 0 ? slamFps : 0);
-    payload[40] = static_cast<uint8_t>(slamFpsValue & 0xFF);
-    payload[41] = static_cast<uint8_t>((slamFpsValue >> 8) & 0xFF);
-    payload[42] = static_cast<uint8_t>(slamMode);
-    payload[43] = static_cast<uint8_t>(autoExposure == JNI_TRUE ? 1 : 0);
-    payload[44] = static_cast<uint8_t>(useCustomTbc == JNI_TRUE ? 1 : 0);
-    WriteF32LeAt(payload, 45, tbcTx);
-    WriteF32LeAt(payload, 49, tbcTy);
-    WriteF32LeAt(payload, 53, tbcTz);
-    WriteF32LeAt(payload, 57, tbcPitchDeg);
-    WriteF32LeAt(payload, 61, tbcRollDeg);
-    WriteF32LeAt(payload, 65, tbcYawDeg);
-    WriteF32LeAt(payload, 69, static_cast<float>(orbNFeatures));
-    WriteF32LeAt(payload, 73, orbScaleFactor);
-    WriteF32LeAt(payload, 77, static_cast<float>(orbNLevels));
-    WriteF32LeAt(payload, 81, static_cast<float>(orbIniThFAST));
-    WriteF32LeAt(payload, 85, static_cast<float>(orbMinThFAST));
-    payload[89] = static_cast<uint8_t>(featureFrontend);
-    WriteF32LeAt(payload, 90, static_cast<float>(superpointTopK));
-    WriteF32LeAt(payload, 94, static_cast<float>(superpointMaxPoints));
-    WriteF32LeAt(payload, 98, static_cast<float>(superpointInputMaxWidth));
-    WriteF32LeAt(payload, 102, static_cast<float>(superpointInputMaxHeight));
-    payload[106] = 0;
-    payload[107] = static_cast<uint8_t>(lkPerFrameAcceleration);
-    payload[108] = static_cast<uint8_t>(orbAcceleration);
-    payload[109] = static_cast<uint8_t>(slamBackend);
-
-    const std::vector<uint8_t> frame =
-        MakeFrame(1, CMD_RUNTIME_CONFIG, 0, seq, NowMs32(), payload.data(), static_cast<uint16_t>(payload.size()));
-    const bool ok = g_udpClient.Send(frame.data(), frame.size());
-    return ok ? static_cast<jint>(seq) : static_cast<jint>(-1);
+    const RuntimeConfigJniArgs args{
+        exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
+        sendFeature, sendMap, autoExposure, useCustomTbc, tbcTx, tbcTy, tbcTz,
+        tbcRollDeg, tbcPitchDeg, tbcYawDeg, orbNFeatures, orbScaleFactor,
+        orbNLevels, orbIniThFAST, orbMinThFAST, featureFrontend, superpointTopK,
+        superpointMaxPoints, superpointInputMaxWidth, superpointInputMaxHeight,
+        lkPerFrameAcceleration, orbAcceleration, slamBackend};
+    const std::vector<uint8_t> payload = MakeRuntimeConfigPayload(args);
+    return SendFrame(CMD_RUNTIME_CONFIG, 0, payload.data(),
+                     static_cast<uint16_t>(payload.size()));
 }

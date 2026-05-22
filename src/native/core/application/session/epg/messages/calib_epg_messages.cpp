@@ -2,18 +2,38 @@
 
 #include "common/epg/epg.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
-EPG_REGISTER_MESSAGE(CalibResourceReady, "CalibResourceReady")
-EPG_REGISTER_MESSAGE(CalibTick, "CalibTick")
-EPG_REGISTER_MESSAGE(CalibStereoFrame, "CalibStereoFrame")
-EPG_REGISTER_MESSAGE(CalibSavePair, "CalibSavePair")
-EPG_REGISTER_MESSAGE(CalibCaptureDone, "CalibCaptureDone")
-EPG_REGISTER_MESSAGE(CalibStopRequest, "CalibStopRequest")
-EPG_REGISTER_MESSAGE(CalibStorageStatus, "CalibStorageStatus")
-EPG_REGISTER_MESSAGE(CalibImuStatus, "CalibImuStatus")
-EPG_REGISTER_MESSAGE(CalibPreviewStatus, "CalibPreviewStatus")
-EPG_REGISTER_MESSAGE(CalibFlushRequest, "CalibFlushRequest")
-EPG_REGISTER_MESSAGE(CalibStatus, "CalibStatus")
+const bool CALIB_RESOURCE_READY_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibResourceReady>(
+        "CalibResourceReady");
+const bool CALIB_TICK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibTick>("CalibTick");
+const bool CALIB_STEREO_FRAME_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibStereoFrame>(
+        "CalibStereoFrame");
+const bool CALIB_SAVE_PAIR_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibSavePair>(
+        "CalibSavePair");
+const bool CALIB_CAPTURE_DONE_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibCaptureDone>(
+        "CalibCaptureDone");
+const bool CALIB_STOP_REQUEST_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibStopRequest>(
+        "CalibStopRequest");
+const bool CALIB_STORAGE_STATUS_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibStorageStatus>(
+        "CalibStorageStatus");
+const bool CALIB_IMU_STATUS_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibImuStatus>(
+        "CalibImuStatus");
+const bool CALIB_PREVIEW_STATUS_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibPreviewStatus>(
+        "CalibPreviewStatus");
+const bool CALIB_FLUSH_REQUEST_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibFlushRequest>(
+        "CalibFlushRequest");
+const bool CALIB_STATUS_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<CalibStatus>("CalibStatus");
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

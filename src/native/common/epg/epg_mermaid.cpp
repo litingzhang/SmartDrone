@@ -251,7 +251,12 @@ std::string AutoQueueName(const Endpoint &from, const Endpoint &to)
                              "_to_" + to.node + "_" + std::to_string(to.port));
 }
 
-TaskConfig ParseNodeLine(const std::string &line)
+struct NodeLineParts {
+    std::string name;
+    std::map<std::string, std::string> fields;
+};
+
+NodeLineParts ParseNodeLineParts(const std::string &line)
 {
     const auto open = line.find('[');
     const auto close = line.rfind(']');
@@ -259,16 +264,18 @@ TaskConfig ParseNodeLine(const std::string &line)
         throw std::runtime_error("Mermaid node must use id[key=value; ...]: " + line);
     }
 
-    TaskConfig task;
-    task.name = Trim(line.substr(0, open));
-    if (task.name.empty()) {
+    NodeLineParts parts;
+    parts.name = Trim(line.substr(0, open));
+    if (parts.name.empty()) {
         throw std::runtime_error("Mermaid node id must not be empty: " + line);
     }
+    parts.fields = ParseFields(StripQuotes(line.substr(open + 1, close - open - 1)));
+    return parts;
+}
 
-    const auto fields = ParseFields(StripQuotes(line.substr(open + 1, close - open - 1)));
-    task.type = RequireField(fields, "type", task.name);
-    task.trigger.mode = ParseMermaidTriggerMode(RequireField(fields, "trigger", task.name));
-
+void ApplyNodeTriggerFields(TaskConfig &task,
+                            const std::map<std::string, std::string> &fields)
+{
     const auto intervalIt = fields.find("interval_ms");
     if (intervalIt != fields.end()) {
         task.trigger.interval = std::chrono::milliseconds(
@@ -282,6 +289,11 @@ TaskConfig ParseNodeLine(const std::string &line)
             throw std::runtime_error("Mermaid trigger_queues must not be empty: " + task.name);
         }
     }
+}
+
+void ApplyNodeSchedulingFields(TaskConfig &task,
+                               const std::map<std::string, std::string> &fields)
+{
     const auto realtimeIt = fields.find("realtime");
     if (realtimeIt != fields.end()) {
         task.scheduling.realtime = ParseBool(realtimeIt->second, "realtime");
@@ -313,6 +325,18 @@ TaskConfig ParseNodeLine(const std::string &line)
                 static_cast<PortId>(ParseSize(port, "backpressure_outputs")));
         }
     }
+}
+
+TaskConfig ParseNodeLine(const std::string &line)
+{
+    const NodeLineParts parts = ParseNodeLineParts(line);
+    TaskConfig task;
+    task.name = parts.name;
+    task.type = RequireField(parts.fields, "type", task.name);
+    task.trigger.mode =
+        ParseMermaidTriggerMode(RequireField(parts.fields, "trigger", task.name));
+    ApplyNodeTriggerFields(task, parts.fields);
+    ApplyNodeSchedulingFields(task, parts.fields);
 
     return task;
 }
@@ -468,23 +492,36 @@ PortId InferPort(const std::vector<PortSpec> &declaredPorts,
                              " port for node '" + ownerNode + "': specify a numeric port pair");
 }
 
-void InferMissingPorts(EdgeConfig &edge,
-                       const GraphConfig &config,
-                       const std::map<std::string, std::size_t> &taskIndexByName,
-                       Registry &registry,
-                       const std::map<std::string, std::set<PortId>> &usedOutputs,
-                       const std::map<std::string, std::set<PortId>> &usedInputs)
-{
-    const auto &fromTask = config.tasks.at(taskIndexByName.at(edge.from.node));
-    const auto &toTask = config.tasks.at(taskIndexByName.at(edge.to.node));
-    const auto &fromType = FindTaskTypeOrThrow(registry, fromTask);
-    const auto &toType = FindTaskTypeOrThrow(registry, toTask);
+struct PortInferenceContext {
+    const GraphConfig &config;
+    const std::map<std::string, std::size_t> &taskIndexByName;
+    Registry &registry;
+    const std::map<std::string, std::set<PortId>> &usedOutputs;
+    const std::map<std::string, std::set<PortId>> &usedInputs;
+};
 
-    const auto fromUsedIt = usedOutputs.find(edge.from.node);
-    const auto toUsedIt = usedInputs.find(edge.to.node);
+const std::set<PortId> &UsedPortsOrEmpty(
+    const std::map<std::string, std::set<PortId>> &usedByNode,
+    const std::string &node,
+    const std::set<PortId> &emptyPorts)
+{
+    const auto it = usedByNode.find(node);
+    return it == usedByNode.end() ? emptyPorts : it->second;
+}
+
+void InferMissingPorts(EdgeConfig &edge, const PortInferenceContext &context)
+{
+    const auto &fromTask =
+        context.config.tasks.at(context.taskIndexByName.at(edge.from.node));
+    const auto &toTask =
+        context.config.tasks.at(context.taskIndexByName.at(edge.to.node));
+    const auto &fromType = FindTaskTypeOrThrow(context.registry, fromTask);
+    const auto &toType = FindTaskTypeOrThrow(context.registry, toTask);
     const std::set<PortId> noUsedPorts;
-    const auto &fromUsed = fromUsedIt == usedOutputs.end() ? noUsedPorts : fromUsedIt->second;
-    const auto &toUsed = toUsedIt == usedInputs.end() ? noUsedPorts : toUsedIt->second;
+    const auto &fromUsed =
+        UsedPortsOrEmpty(context.usedOutputs, edge.from.node, noUsedPorts);
+    const auto &toUsed =
+        UsedPortsOrEmpty(context.usedInputs, edge.to.node, noUsedPorts);
 
     if (!edge.from.hasPort) {
         edge.from.port = InferPort(fromType.outputs,
@@ -661,12 +698,13 @@ std::size_t RequireTaskIndex(const MermaidParseState &state,
 void ResolveEdgePorts(MermaidParseState &state, EdgeConfig &edge)
 {
     if (state.registry) {
-        InferMissingPorts(edge,
-                          state.config,
-                          state.taskIndexByName,
-                          *state.registry,
-                          state.usedOutputs,
-                          state.usedInputs);
+        InferMissingPorts(edge, PortInferenceContext{
+                                    state.config,
+                                    state.taskIndexByName,
+                                    *state.registry,
+                                    state.usedOutputs,
+                                    state.usedInputs,
+                                });
         return;
     }
 

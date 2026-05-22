@@ -104,6 +104,44 @@ def write_non_replaceable_profile(path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def write_depth_optimization_profile(path: Path) -> None:
+    write_profile(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["topology"]["queues"][0]["depth"] = 1
+    payload["diagnostics"]["queues"]["packets"]["maxDepthObserved"] = 5
+    payload["diagnostics"]["queues"]["packets"]["droppedNewest"] = 0
+    payload["diagnostics"]["queues"]["packets"]["overwrittenOldest"] = 0
+    payload["diagnostics"]["queues"]["packets"]["droppedPerSecond"] = 0
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def expect_report_failure(repo_root: Path,
+                          profile_path: Path,
+                          output_path: Path,
+                          report_path: Path,
+                          validate_report_path: Path,
+                          expected: str) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "tools" / "epg_solver.py"),
+            "--profile",
+            str(profile_path),
+            "--output",
+            str(output_path),
+            "--validate-report",
+            str(validate_report_path),
+            "--generated-at-ms",
+            "456",
+        ],
+        check=False,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert expected in result.stderr
+
+
 def expect_solver_failure(repo_root: Path,
                           profile_path: Path,
                           output_path: Path,
@@ -230,11 +268,11 @@ def main() -> int:
     assert optimized["schema"] == "smartdrone.epg.optimized_config.v1"
     assert optimized["targetGraph"] == "test_graph"
     assert optimized["topologyVersion"] == "test-topology-v1"
-    assert optimized["solverVersion"] == "python-heuristic-v3"
+    assert optimized["solverVersion"] == "python-exact-v1"
     assert optimized["sourceProfile"] == "test_graph"
     assert optimized["sourceTimestampMs"] == 123
     assert optimized["generatedAtMs"] == 456
-    assert optimized["queues"][0]["depth"] > 1
+    assert optimized["queues"][0]["depth"] == 1
     assert optimized["tasks"][0]["trigger"]["interval_ms"] == 3
     assert optimized["tasks"][0]["scheduling"]["cpu_affinity"] == 2
     assert optimized["tasks"][0]["scheduling"]["realtime"] is True
@@ -246,7 +284,7 @@ def main() -> int:
     assert report["sourceProfile"] == "test_graph"
     assert report["sourceTimestampMs"] == 123
     assert report["generatedAtMs"] == 456
-    assert report["solverVersion"] == "python-heuristic-v3"
+    assert report["solverVersion"] == "python-exact-v1"
     for field in [
             "targetGraph",
             "topologyVersion",
@@ -262,6 +300,7 @@ def main() -> int:
     assert report["objective"]["score"]["resourceWaitUs"] == 2500
     assert report["constraints"]["maxQueueDepth"] == 8
     assert report["decisions"][0]["depthAfter"] == optimized["queues"][0]["depth"]
+    assert report["decisions"][0]["pressureAfter"] == 2
     assert report["decisions"][1]["intervalAfterMs"] == (
         optimized["tasks"][0]["trigger"]["interval_ms"])
     assert report["decisions"][0]["droppedPerSecond"] == 100
@@ -269,8 +308,8 @@ def main() -> int:
     assert report["decisions"][1]["totalResourceWaitUs"] == 2500
     assert report["decisions"][1]["catalogRole"] == "source"
     assert report["decisions"][1]["replaceable"] is True
-    assert report["decisions"][0]["reason"] == "increase_depth"
-    assert report["decisions"][1]["reason"] == "increase_interval"
+    assert report["decisions"][0]["reason"] == "keep"
+    assert report["decisions"][1]["reason"] == "global_optimum_interval"
     fixed_profile = work_dir / "non_replaceable_profile.json"
     fixed_output = work_dir / "non_replaceable_optimized.json"
     fixed_report_path = work_dir / "non_replaceable_report.json"
@@ -296,6 +335,49 @@ def main() -> int:
     fixed_report = json.loads(fixed_report_path.read_text(encoding="utf-8"))
     assert fixed_optimized["tasks"][0]["trigger"]["interval_ms"] == 1
     assert fixed_report["decisions"][1]["reason"].startswith("not_replaceable+")
+    depth_profile = work_dir / "depth_profile.json"
+    depth_output = work_dir / "depth_optimized.json"
+    depth_report_path = work_dir / "depth_report.json"
+    write_depth_optimization_profile(depth_profile)
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "tools" / "epg_solver.py"),
+            "--profile",
+            str(depth_profile),
+            "--output",
+            str(depth_output),
+            "--report",
+            str(depth_report_path),
+            "--max-queue-depth",
+            "8",
+            "--generated-at-ms",
+            "456",
+        ],
+        check=True,
+    )
+    depth_optimized = json.loads(depth_output.read_text(encoding="utf-8"))
+    depth_report = json.loads(depth_report_path.read_text(encoding="utf-8"))
+    assert depth_optimized["queues"][0]["depth"] == 5
+    assert depth_report["decisions"][0]["pressureAfter"] == 0
+    assert depth_report["decisions"][0]["reason"] == "global_optimum_depth"
+    stale_report_profile = work_dir / "stale_report_profile.json"
+    stale_output = work_dir / "stale_report_optimized.json"
+    stale_report_path = work_dir / "stale_report_report.json"
+    write_depth_optimization_profile(stale_report_profile)
+    stale_output.write_text(depth_output.read_text(encoding="utf-8"),
+                            encoding="utf-8")
+    stale_report_path.write_text(json.dumps(depth_report), encoding="utf-8")
+    stale_payload = json.loads(stale_report_profile.read_text(encoding="utf-8"))
+    stale_payload["diagnostics"]["queues"]["packets"]["maxDepthObserved"] = 6
+    stale_report_profile.write_text(json.dumps(stale_payload), encoding="utf-8")
+    expect_report_failure(
+        repo_root,
+        stale_report_profile,
+        stale_output,
+        stale_report_path,
+        stale_report_path,
+        "queue metrics mismatch: packets")
     profile_root = work_dir / "profiles"
     output_root = work_dir / "batch"
     profile_root.mkdir(parents=True, exist_ok=True)

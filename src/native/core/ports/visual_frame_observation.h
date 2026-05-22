@@ -7,7 +7,7 @@
 
 #include "core/ports/visual_feature_data.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct VisualFrameObservationLoadOptions {
     float baselineFx{0.0f};
@@ -49,4 +49,4 @@ class IVisualFrameObservationLoader {
         VisualFrameObservationData &outData) const = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

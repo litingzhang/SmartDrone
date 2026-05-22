@@ -5,7 +5,7 @@
 #include "core/application/state/frame_timing_tracker.h"
 #include "core/ports/camera_provider.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct PerceptionPipelineConfig {
     int cameraFps{60};
@@ -13,7 +13,7 @@ struct PerceptionPipelineConfig {
 };
 
 struct StereoBatch {
-    ports::StereoFrame stereo;
+    Ports::StereoFrame stereo;
     uint64_t frameId{0};
     int64_t captureTimestampNs{0};
     int64_t logicalFrameTimestampNs{0};
@@ -21,7 +21,7 @@ struct StereoBatch {
 };
 
 struct StereoAcquireRequest {
-    ports::ICameraProvider &camera;
+    Ports::ICameraProvider &camera;
     int slamInputFps{};
     int timeoutMs{};
     StereoBatch &out;
@@ -35,7 +35,7 @@ struct StereoFrameTiming {
 };
 
 struct StereoGrabFailureLog {
-    ports::CameraDiagnostics diagnostics;
+    Ports::CameraDiagnostics diagnostics;
     uint64_t minTimestampNs{};
     int timeoutMs{};
     int clampedSlamInputFps{};
@@ -54,7 +54,7 @@ class PerceptionPipeline {
   public:
     explicit PerceptionPipeline(PerceptionPipelineConfig cfg);
 
-    StereoAcquireStatus AcquireNextStereoBatch(ports::ICameraProvider &camera, int slamInputFps, int timeoutMs,
+    StereoAcquireStatus AcquireNextStereoBatch(Ports::ICameraProvider &camera, int slamInputFps, int timeoutMs,
                                                StereoBatch &out, FrameTimingTracker *timingTracker = nullptr);
     StereoAcquireStatus AcquireNextStereoBatch(const StereoAcquireRequest &request);
 
@@ -62,15 +62,15 @@ class PerceptionPipeline {
 
   private:
     uint64_t ComputeMinCaptureTimestampNs(int slamFrameStepNs) const;
-    StereoAcquireStatus HandleGrabFailure(ports::ICameraProvider &camera, int timeoutMs,
+    StereoAcquireStatus HandleGrabFailure(Ports::ICameraProvider &camera, int timeoutMs,
                                           int clampedSlamInputFps, uint64_t minTimestampNs) const;
     const char *ClassifyGrabFailureCause(const StereoGrabFailureLog &failure) const;
     void LogGrabFailure(const StereoGrabFailureLog &failure) const;
-    StereoFrameTiming BuildStereoFrameTiming(const ports::StereoFrame &stereo,
+    StereoFrameTiming BuildStereoFrameTiming(const Ports::StereoFrame &stereo,
                                              int64_t frameStepNs) const;
     bool ShouldDropByRateLimiter(const StereoFrameTiming &timing,
                                  int64_t toleranceNs) const;
-    void AcceptStereoBatch(ports::StereoFrame stereo, const StereoFrameTiming &timing,
+    void AcceptStereoBatch(Ports::StereoFrame stereo, const StereoFrameTiming &timing,
                            int64_t slamFrameStepNs, StereoBatch &out);
     void RecordFrameTiming(const StereoBatch &out, FrameTimingTracker *timingTracker) const;
 
@@ -81,4 +81,4 @@ class PerceptionPipeline {
     uint64_t m_nextFrameId{1};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -17,7 +17,7 @@
 #include "core/ports/pose_publisher.h"
 #include "core/ports/slam_session_telemetry.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class SlamSessionGraphRuntime::Impl final {
   public:
@@ -149,8 +149,8 @@ class SlamSessionGraphRuntime::Impl final {
 
     UnifiedConfig m_cfg;
     LiveRuntimeTuning &m_tuning;
-    SmartDrone::core::ports::ISlamSessionTelemetryPort &m_telemetry;
-    SmartDrone::core::ports::IPosePublisher &m_posePublisher;
+    SmartDrone::Core::Ports::ISlamSessionTelemetryPort &m_telemetry;
+    SmartDrone::Core::Ports::IPosePublisher &m_posePublisher;
     std::atomic<bool> &m_stop;
     LivePoseState &m_livePose;
     std::atomic<bool> &m_runningFlag;
@@ -198,4 +198,4 @@ bool SlamSessionGraphRuntime::Ok() const
     return m_impl->Ok();
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

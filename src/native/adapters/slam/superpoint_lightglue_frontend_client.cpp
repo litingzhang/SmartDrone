@@ -4,7 +4,7 @@
 
 #include <utility>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -97,8 +97,8 @@ void SuperPointLightGlueFrontendClient::CopyNativeStats()
 }
 
 bool SuperPointLightGlueFrontendClient::Detect(
-    const core::ports::VisualFeatureDetectRequest &request,
-    core::ports::VisualFeatureDetectResult &result)
+    const Core::Ports::VisualFeatureDetectRequest &request,
+    Core::Ports::VisualFeatureDetectResult &result)
 {
     result = {};
     if (!m_superPointNativeExtractor) {
@@ -117,8 +117,8 @@ bool SuperPointLightGlueFrontendClient::Detect(
 }
 
 bool SuperPointLightGlueFrontendClient::DetectAndCompute(
-    const core::ports::VisualFeatureComputeRequest &request,
-    core::ports::VisualFeatureComputeResult &result)
+    const Core::Ports::VisualFeatureComputeRequest &request,
+    Core::Ports::VisualFeatureComputeResult &result)
 {
     result = {};
     if (!m_superPointNativeExtractor) {
@@ -136,8 +136,8 @@ bool SuperPointLightGlueFrontendClient::DetectAndCompute(
 }
 
 bool SuperPointLightGlueFrontendClient::DetectAndComputeStereo(
-    const core::ports::StereoVisualFeatureComputeRequest &request,
-    core::ports::StereoVisualFeatureComputeResult &result)
+    const Core::Ports::StereoVisualFeatureComputeRequest &request,
+    Core::Ports::StereoVisualFeatureComputeResult &result)
 {
     result = {};
     if (!m_superPointNativeExtractor) {
@@ -162,4 +162,4 @@ void SuperPointLightGlueFrontendClient::SetLightGlueEveryNOverride(int everyN)
     }
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

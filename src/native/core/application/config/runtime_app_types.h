@@ -6,7 +6,7 @@
 #include "core/application/config/app_args.h"
 #include "core/domain/runtime_mode.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct CalibConfig {
     std::string root{"./calib_runs"};
@@ -28,8 +28,8 @@ struct RemoteRuntimeConfig {
     bool uvcPackedStereo{true};
     bool autoExposureEnabled{true};
     int slamInputFps{30};
-    domain::SlamOperationMode slamOperationMode{
-        domain::SlamOperationMode::Mapping};
+    Domain::SlamOperationMode slamOperationMode{
+        Domain::SlamOperationMode::Mapping};
     SlamBackend slamBackend{SlamBackend::Klt};
     FeatureFrontend featureFrontend{FeatureFrontend::LkGfttPerFrame};
     std::string udpIp;
@@ -63,8 +63,8 @@ struct RemoteRuntimeConfig {
 
 struct MainRuntimeAliases {
     SensorMode sensorMode{SensorMode::Stereo};
-    domain::SlamOperationMode slamOperationMode{
-        domain::SlamOperationMode::Mapping};
+    Domain::SlamOperationMode slamOperationMode{
+        Domain::SlamOperationMode::Mapping};
     SlamBackend slamBackend{SlamBackend::Klt};
     FeatureFrontend featureFrontend{FeatureFrontend::LkGfttPerFrame};
     int width{}, height{}, fps{}, slamInputFps{}, leftCamIndex{}, rightCamIndex{},
@@ -91,7 +91,7 @@ struct MainRuntimeAliases {
 struct LiveRuntimeTuning {
     std::atomic<int> slamInputFps{30};
     std::atomic<uint8_t> slamOperationMode{
-        static_cast<uint8_t>(domain::SlamOperationMode::Mapping)};
+        static_cast<uint8_t>(Domain::SlamOperationMode::Mapping)};
     std::atomic<uint8_t> featureFrontend{
         static_cast<uint8_t>(FeatureFrontend::LkGfttPerFrame)};
     std::atomic<bool> sendImage{true};
@@ -106,4 +106,4 @@ struct LiveRuntimeTuning {
     std::atomic<float> tbcYawDeg{0.0f};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

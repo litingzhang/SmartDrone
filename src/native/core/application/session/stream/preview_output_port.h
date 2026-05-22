@@ -10,7 +10,7 @@
 
 #include <opencv2/core.hpp>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct CalibStereoFrame;
 struct MainRuntimeAliases;
@@ -59,4 +59,4 @@ class IPreviewOutputRuntime {
 PreviewOutputOpenConfig MakePreviewOutputOpenConfig(
     const MainRuntimeAliases &aliases);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

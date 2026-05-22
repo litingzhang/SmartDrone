@@ -14,26 +14,26 @@ struct v4l2_buffer;
 struct v4l2_capability;
 struct v4l2_format;
 
-namespace SmartDrone::adapters::camera {
+namespace SmartDrone::Adapters::Camera {
 
-class UvcStereoCamera final : public core::ports::ICameraProvider {
+class UvcStereoCamera final : public Core::Ports::ICameraProvider {
   public:
     UvcStereoCamera() = default;
     ~UvcStereoCamera() override;
 
-    bool Open(const core::ports::CameraOpenConfig &config) override;
+    bool Open(const Core::Ports::CameraOpenConfig &config) override;
     void Close() override;
     bool Start() override;
     void Stop() override;
-    bool GrabStereo(core::ports::StereoFrame &out, int timeoutMs, bool preferLatest,
+    bool GrabStereo(Core::Ports::StereoFrame &out, int timeoutMs, bool preferLatest,
                     uint64_t minTimestampNs = 0) override;
-    core::ports::CameraHealth GetHealth() const override;
-    core::ports::CameraDiagnostics GetDiagnostics() const override;
-    core::ports::CameraProviderSemantics Semantics() const override;
+    Core::Ports::CameraHealth GetHealth() const override;
+    Core::Ports::CameraDiagnostics GetDiagnostics() const override;
+    Core::Ports::CameraProviderSemantics Semantics() const override;
 
   private:
     struct StereoFrameItem {
-        core::ports::StereoFrame frame;
+        Core::Ports::StereoFrame frame;
         uint64_t captureTimestampNs{0};
     };
 
@@ -66,11 +66,14 @@ class UvcStereoCamera final : public core::ports::ICameraProvider {
         Fatal,
     };
 
+    bool ApplyOpenConfig(const Core::Ports::CameraOpenConfig &config);
+    void ResetOpenState(const Core::Ports::CameraOpenConfig &config);
+    void MarkOpenHealthy();
     CaptureStatus CaptureOnce(int timeoutMs);
     CaptureStatus PollCaptureReady(int fd, int timeoutMs);
     CaptureStatus DequeueCaptureBuffer(int fd, v4l2_buffer &buffer);
     CaptureStatus DecodeCaptureBuffer(int fd, v4l2_buffer &buffer, CapturedPackedFrame &frame);
-    bool TryPopOrStop(core::ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs);
+    bool TryPopOrStop(Core::Ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs);
     void DrainReadyFrames();
     bool OpenDevice(const DeviceOpenParams &params);
     bool ValidateDeviceCapabilities(int fd, const std::string &devicePath, v4l2_capability &caps);
@@ -86,9 +89,9 @@ class UvcStereoCamera final : public core::ports::ICameraProvider {
     void LogOpenedDevice(const DeviceOpenParams &params, const v4l2_capability &caps, const v4l2_format &format,
                          uint32_t bufferCount);
     void CloseDevice();
-    bool PopCandidateLocked(core::ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs);
-    core::ports::StereoFrame BuildStereoFrame(const cv::Mat &packed, uint64_t captureTimestampNs, uint64_t arriveNs);
-    void PushFrame(core::ports::StereoFrame &&frame, uint64_t captureTimestampNs);
+    bool PopCandidateLocked(Core::Ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs);
+    Core::Ports::StereoFrame BuildStereoFrame(const cv::Mat &packed, uint64_t captureTimestampNs, uint64_t arriveNs);
+    void PushFrame(Core::Ports::StereoFrame &&frame, uint64_t captureTimestampNs);
     void MarkCaptureFault(bool acceptingFrames);
 
     mutable std::mutex m_mutex;
@@ -110,7 +113,7 @@ class UvcStereoCamera final : public core::ports::ICameraProvider {
     uint32_t m_sequence{0};
     uint64_t m_lastFrameTimestampNs{0};
     uint64_t m_lastPairTimestampNs{0};
-    core::ports::CameraDiagnostics m_diag{};
+    Core::Ports::CameraDiagnostics m_diag{};
 };
 
-} // namespace SmartDrone::adapters::camera
+} // namespace SmartDrone::Adapters::Camera

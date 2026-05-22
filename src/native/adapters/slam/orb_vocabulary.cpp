@@ -10,7 +10,7 @@
 
 #include "ORBVocabulary.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -58,7 +58,7 @@ VisualFeatureIndex ToVisualFeatureIndex(const DBoW2::FeatureVector &features)
     VisualFeatureIndex out;
     out.nodes.reserve(features.size());
     for (const auto &entry : features) {
-        core::ports::VisualFeatureNode node;
+        Core::Ports::VisualFeatureNode node;
         node.nodeId = static_cast<uint32_t>(entry.first);
         node.featureIndices.reserve(entry.second.size());
         for (unsigned int index : entry.second) {
@@ -179,4 +179,4 @@ double OrbVisualVocabulary::Score(const VisualBowVector &left, const VisualBowVe
     return m_impl->vocabulary->score(ToDbowBowVector(left), ToDbowBowVector(right));
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

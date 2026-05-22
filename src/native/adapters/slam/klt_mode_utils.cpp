@@ -12,7 +12,7 @@
 #include "adapters/slam/slam_env.h"
 #include "adapters/slam/stereo_geometry.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -384,4 +384,4 @@ void AppendLkSeedsForDegradedCells(const std::vector<LkStereoTrack> &seeds, cons
     }
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

@@ -4,7 +4,7 @@
 
 #include "core/application/session/epg/messages/calib_epg_messages.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 bool CalibShouldRunTask(const std::atomic<bool> &runningFlag,
@@ -56,7 +56,9 @@ void CalibResourceTask::EmitStopRequest(Epg::TaskContext &context,
     context.Push(2, std::move(stop));
 }
 
-EPG_REGISTER_TASK_TYPE(CalibResourceTask, "CalibResourceTask")
+const bool CALIB_RESOURCE_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<CalibResourceTask>(
+        "CalibResourceTask");
 
 CalibClockTask::CalibClockTask(std::atomic<bool> &stop,
                                std::atomic<bool> &runningFlag)
@@ -74,7 +76,9 @@ void CalibClockTask::OnTick(Epg::TaskContext &context)
     context.Push(0, std::move(tick));
 }
 
-EPG_REGISTER_TASK_TYPE(CalibClockTask, "CalibClockTask")
+const bool CALIB_CLOCK_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<CalibClockTask>(
+        "CalibClockTask");
 
 CalibCameraAcquireTask::CalibCameraAcquireTask(
     std::shared_ptr<CalibRuntimeState> state,
@@ -133,7 +137,9 @@ bool CalibCameraAcquireTask::HandleCaptureResult(
     return false;
 }
 
-EPG_REGISTER_TASK_TYPE(CalibCameraAcquireTask, "CalibCameraAcquireTask")
+const bool CALIB_CAMERA_ACQUIRE_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<CalibCameraAcquireTask>(
+        "CalibCameraAcquireTask");
 
 CalibPacingFilterTask::CalibPacingFilterTask(
     std::shared_ptr<CalibRuntimeState> state)
@@ -152,7 +158,9 @@ void CalibPacingFilterTask::OnTick(Epg::TaskContext &context)
     }
 }
 
-EPG_REGISTER_TASK_TYPE(CalibPacingFilterTask, "CalibPacingFilterTask")
+const bool CALIB_PACING_FILTER_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<CalibPacingFilterTask>(
+        "CalibPacingFilterTask");
 
 CalibStorageWriteTask::CalibStorageWriteTask(
     std::shared_ptr<CalibRuntimeState> state)
@@ -169,7 +177,9 @@ void CalibStorageWriteTask::OnTick(Epg::TaskContext &context)
     }
 }
 
-EPG_REGISTER_TASK_TYPE(CalibStorageWriteTask, "CalibStorageWriteTask")
+const bool CALIB_STORAGE_WRITE_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<CalibStorageWriteTask>(
+        "CalibStorageWriteTask");
 
 CalibUdpPreviewTask::CalibUdpPreviewTask(
     std::shared_ptr<CalibRuntimeState> state)
@@ -186,7 +196,9 @@ void CalibUdpPreviewTask::OnTick(Epg::TaskContext &context)
     }
 }
 
-EPG_REGISTER_TASK_TYPE(CalibUdpPreviewTask, "CalibUdpPreviewTask")
+const bool CALIB_UDP_PREVIEW_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<CalibUdpPreviewTask>(
+        "CalibUdpPreviewTask");
 
 CalibImuWriterTask::CalibImuWriterTask(
     std::shared_ptr<CalibRuntimeState> state,
@@ -219,7 +231,9 @@ void CalibImuWriterTask::PushResult(Epg::TaskContext &context,
     context.Push(0, std::move(imuStatus));
 }
 
-EPG_REGISTER_TASK_TYPE(CalibImuWriterTask, "CalibImuWriterTask")
+const bool CALIB_IMU_WRITER_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<CalibImuWriterTask>(
+        "CalibImuWriterTask");
 
 CalibCompletionTask::CalibCompletionTask(
     std::shared_ptr<CalibRuntimeState> state)
@@ -268,7 +282,9 @@ void CalibCompletionTask::EmitFlush(Epg::TaskContext &context)
     context.Push(0, std::move(flush));
 }
 
-EPG_REGISTER_TASK_TYPE(CalibCompletionTask, "CalibCompletionTask")
+const bool CALIB_COMPLETION_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<CalibCompletionTask>(
+        "CalibCompletionTask");
 
 CalibFlushSyncTask::CalibFlushSyncTask(
     std::shared_ptr<CalibRuntimeState> state,
@@ -293,7 +309,9 @@ void CalibFlushSyncTask::OnTick(Epg::TaskContext &context)
     }
 }
 
-EPG_REGISTER_TASK_TYPE(CalibFlushSyncTask, "CalibFlushSyncTask")
+const bool CALIB_FLUSH_SYNC_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<CalibFlushSyncTask>(
+        "CalibFlushSyncTask");
 
 CalibMonitorTask::CalibMonitorTask(std::atomic<bool> &sessionOk,
                                    std::atomic<bool> &completed)
@@ -311,6 +329,8 @@ void CalibMonitorTask::OnTick(Epg::TaskContext &context)
     }
 }
 
-EPG_REGISTER_TASK_TYPE(CalibMonitorTask, "CalibMonitorTask")
+const bool CALIB_MONITOR_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<CalibMonitorTask>(
+        "CalibMonitorTask");
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

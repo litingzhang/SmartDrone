@@ -5,7 +5,7 @@
 #include "core/application/session/epg/messages/slam_epg_messages.h"
 #include "core/application/session/epg/slam_session_task_results.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class SlamSessionRuntime;
 
@@ -31,4 +31,4 @@ class SlamSessionProcessingPort final {
                                     ISlamPublishedFramePayload &frame);
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

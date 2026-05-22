@@ -10,7 +10,7 @@
 #include "core/ports/slam_engine.h"
 #include "core/ports/visual_feature_frontend.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 SlamSessionResourceLifecycle::SlamSessionResourceLifecycle(
     SlamSessionResourceLifecycleConfig config)
@@ -136,4 +136,4 @@ bool SlamSessionResourceLifecycle::OpenCamera()
     return false;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

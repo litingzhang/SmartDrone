@@ -6,7 +6,7 @@
 
 #include "core/ports/visual_feature_data.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 class IVisualDescriptorProvider {
   public:
@@ -22,4 +22,4 @@ class IVisualDescriptorProvider {
                                    const cv::Mat &rightDescriptor) const = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

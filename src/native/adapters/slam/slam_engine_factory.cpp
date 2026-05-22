@@ -5,7 +5,7 @@
 #include <iostream>
 #include <mutex>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -75,7 +75,6 @@ SlamEngineFactoryRegistrar::SlamEngineFactoryRegistrar(
 
 ControlledSlamEngine CreateOrbSlam3Engine(const OrbSlam3EngineConfig &config)
 {
-#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
     SlamEngineFactory factory = LookupSlamEngineFactory(SlamBackend::OrbSlam3);
     if (factory == nullptr) {
         return {};
@@ -89,10 +88,6 @@ ControlledSlamEngine CreateOrbSlam3Engine(const OrbSlam3EngineConfig &config)
     factoryConfig.useImu = config.useImu;
     factoryConfig.inputMode = config.inputMode;
     return factory(factoryConfig);
-#else
-    (void)config;
-    return {};
-#endif
 }
 
 ControlledSlamEngine CreateSlamEngine(const SlamEngineFactoryConfig &config)
@@ -104,12 +99,10 @@ ControlledSlamEngine CreateSlamEngine(const SlamEngineFactoryConfig &config)
         return out;
     }
 
-#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
     if (config.backend == SlamBackend::OrbSlam3) {
         std::cerr << "[slam_factory] ORB-SLAM3 backend returned no engine; "
                      "falling back to KLT\n";
     }
-#endif
 
     SlamEngineFactory fallbackFactory = LookupSlamEngineFactory(SlamBackend::Klt);
     if (fallbackFactory == nullptr || config.backend == SlamBackend::Klt) {
@@ -118,4 +111,4 @@ ControlledSlamEngine CreateSlamEngine(const SlamEngineFactoryConfig &config)
     return fallbackFactory(config);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

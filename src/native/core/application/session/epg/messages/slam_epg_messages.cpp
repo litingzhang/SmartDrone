@@ -2,15 +2,28 @@
 
 #include "common/epg/epg.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
-EPG_REGISTER_MESSAGE(SlamResourceReady, "SlamResourceReady")
-EPG_REGISTER_MESSAGE(SlamTick, "SlamTick")
-EPG_REGISTER_MESSAGE(SlamImuReady, "SlamImuReady")
-EPG_REGISTER_MESSAGE(SlamFrameReady, "SlamFrameReady")
-EPG_REGISTER_MESSAGE(SlamPreparedFrame, "SlamPreparedFrame")
-EPG_REGISTER_MESSAGE(SlamTrackedFrame, "SlamTrackedFrame")
-EPG_REGISTER_MESSAGE(SlamPublishedFrame, "SlamPublishedFrame")
-EPG_REGISTER_MESSAGE(SlamStatus, "SlamStatus")
+const bool SLAM_RESOURCE_READY_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamResourceReady>(
+        "SlamResourceReady");
+const bool SLAM_TICK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamTick>("SlamTick");
+const bool SLAM_IMU_READY_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamImuReady>("SlamImuReady");
+const bool SLAM_FRAME_READY_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamFrameReady>(
+        "SlamFrameReady");
+const bool SLAM_PREPARED_FRAME_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamPreparedFrame>(
+        "SlamPreparedFrame");
+const bool SLAM_TRACKED_FRAME_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamTrackedFrame>(
+        "SlamTrackedFrame");
+const bool SLAM_PUBLISHED_FRAME_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamPublishedFrame>(
+        "SlamPublishedFrame");
+const bool SLAM_STATUS_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamStatus>("SlamStatus");
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

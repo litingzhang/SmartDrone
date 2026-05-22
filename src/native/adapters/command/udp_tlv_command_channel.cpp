@@ -1,6 +1,6 @@
 #include "adapters/command/udp_tlv_command_channel.h"
 
-namespace SmartDrone::adapters::command {
+namespace SmartDrone::Adapters::Command {
 
 UdpTlvCommandChannel::UdpTlvCommandChannel(uint16_t port)
     : m_port(port)
@@ -30,4 +30,4 @@ bool UdpTlvCommandChannel::Healthy() const
     return m_started.load(std::memory_order_relaxed) && m_healthy.load(std::memory_order_relaxed);
 }
 
-} // namespace SmartDrone::adapters::command
+} // namespace SmartDrone::Adapters::Command

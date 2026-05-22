@@ -8,7 +8,7 @@
 #include "core/application/session/slam/slam_frame_stage_state.h"
 #include "core/application/session/slam/slam_frame_step_result.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class SlamFrameOutputPort final {
   public:
@@ -38,8 +38,8 @@ class SlamFrameOutputPort final {
         SlamPreparedFrameData &frame;
         SlamTrackedFrameData &tracked;
         SlamPublishedFrameData &published;
-        SmartDrone::core::ports::SlamInputBatch &slamInput;
-        SmartDrone::core::ports::SlamOutput &slamOutput;
+        SmartDrone::Core::Ports::SlamInputBatch &slamInput;
+        SmartDrone::Core::Ports::SlamOutput &slamOutput;
         const PosePostprocessor::Result &poseResult;
         DfxTiming timing;
         bool visualFeatureStereoWeak{false};
@@ -75,4 +75,4 @@ class SlamFrameOutputPort final {
     SlamFrameOutputState &m_state;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

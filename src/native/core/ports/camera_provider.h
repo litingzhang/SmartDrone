@@ -5,7 +5,7 @@
 
 #include <opencv2/core/mat.hpp>
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 enum class CameraProviderSemantics {
     DualStreamPaired,
@@ -88,4 +88,4 @@ class ICameraProvider {
     virtual CameraProviderSemantics Semantics() const = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

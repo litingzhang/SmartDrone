@@ -6,7 +6,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct FrameTimingRecord {
     uint64_t frameId{0};
@@ -37,4 +37,4 @@ class FrameTimingTracker {
     size_t m_maxRecords{4096};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -4,7 +4,7 @@
 
 #include "slam_engine.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct VelocityEstimate {
     float vx{0.0f};
@@ -27,4 +27,4 @@ class IPosePublisher {
                              uint8_t resetCounter, uint16_t resetMapCount, int trackingState, PoseQuality quality) = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

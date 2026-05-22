@@ -5,7 +5,7 @@
 #include "core/application/config/capability_catalog.h"
 #include "core/application/runtime/runtime_provider_metadata.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 std::vector<uint8_t> TextPayloadFromString(const std::string &text)
 {
@@ -66,7 +66,7 @@ void AppendSlamModeConfig(std::ostringstream &oss, const UnifiedConfig &cfg)
     oss << "slam.perception_mode=" << ToSensorModeText(cfg.app.sensorMode)
         << "\n";
     oss << "slam.operation_mode="
-        << SmartDrone::core::domain::ToString(cfg.app.runtime.slamOperationMode)
+        << SmartDrone::Core::Domain::ToString(cfg.app.runtime.slamOperationMode)
         << "\n";
 }
 
@@ -133,13 +133,13 @@ std::vector<uint8_t> BuildCapabilitiesPayload(
     const auto capabilities = CapabilityCatalog::BuildDefault(cameraProvider);
     std::vector<std::string> runtimeModes;
     for (const auto mode : capabilities.runtimeModes)
-        runtimeModes.emplace_back(SmartDrone::core::domain::ToString(mode));
+        runtimeModes.emplace_back(SmartDrone::Core::Domain::ToString(mode));
     std::vector<std::string> perceptionModes;
     for (const auto mode : capabilities.perceptionModes)
-        perceptionModes.emplace_back(SmartDrone::core::domain::ToString(mode));
+        perceptionModes.emplace_back(SmartDrone::Core::Domain::ToString(mode));
     std::vector<std::string> slamModes;
     for (const auto mode : capabilities.slamModes)
-        slamModes.emplace_back(SmartDrone::core::domain::ToString(mode));
+        slamModes.emplace_back(SmartDrone::Core::Domain::ToString(mode));
     std::vector<std::string> configKeys;
     configKeys.reserve(capabilities.configKeys.size());
     for (const auto &item : capabilities.configKeys)
@@ -164,11 +164,11 @@ std::vector<uint8_t> BuildCapabilitiesPayload(
 
 std::vector<uint8_t>
 BuildConfigPayload(const UnifiedConfig &cfg,
-                   SmartDrone::core::domain::RuntimeMode runtimeMode,
+                   SmartDrone::Core::Domain::RuntimeMode runtimeMode,
                    const CameraRuntimeProviderMetadata &cameraProvider)
 {
     std::ostringstream oss;
-    oss << "runtime.mode=" << SmartDrone::core::domain::ToString(runtimeMode)
+    oss << "runtime.mode=" << SmartDrone::Core::Domain::ToString(runtimeMode)
         << "\n";
     AppendCameraConfig(oss, cfg, cameraProvider);
     AppendSlamModeConfig(oss, cfg);
@@ -179,4 +179,4 @@ BuildConfigPayload(const UnifiedConfig &cfg,
     return TextPayloadFromString(oss.str());
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -32,8 +32,8 @@ void ApplyOctave(std::vector<cv::KeyPoint> &keypoints, int octave)
 }
 
 void LoadStereoKeypointsAndDescriptors(
-    const core::ports::StereoFeatureObservationPacket &features,
-    core::ports::VisualFrameObservationData &outData)
+    const Core::Ports::StereoFeatureObservationPacket &features,
+    Core::Ports::VisualFrameObservationData &outData)
 {
     outData.leftKeypoints = features.leftKeypoints;
     outData.rightKeypoints = features.rightKeypoints;
@@ -46,8 +46,8 @@ void LoadStereoKeypointsAndDescriptors(
 }
 
 void ApplyInjectedOctave(
-    const core::ports::StereoFrameObservationLoadRequest &request,
-    core::ports::VisualFrameObservationData &outData)
+    const Core::Ports::StereoFrameObservationLoadRequest &request,
+    Core::Ports::VisualFrameObservationData &outData)
 {
     const int octave = std::clamp(request.options.injectedKeypointOctave, 0,
                                   std::max(0, request.options.maxScaleLevel));
@@ -56,7 +56,7 @@ void ApplyInjectedOctave(
 }
 
 void InitializeStereoDepthOutputs(
-    core::ports::VisualFrameObservationData &outData)
+    Core::Ports::VisualFrameObservationData &outData)
 {
     outData.featureCount = static_cast<int>(outData.leftKeypoints.size());
     outData.rightU = std::vector<float>(
@@ -65,8 +65,8 @@ void InitializeStereoDepthOutputs(
         static_cast<size_t>(outData.featureCount), -1.0f);
 }
 
-size_t StereoPairCount(const core::ports::StereoFeatureObservationPacket &features,
-                       const core::ports::VisualFrameObservationData &outData)
+size_t StereoPairCount(const Core::Ports::StereoFeatureObservationPacket &features,
+                       const Core::Ports::VisualFrameObservationData &outData)
 {
     if (features.leftToRightMatch.empty()) {
         return std::min(outData.leftKeypoints.size(), outData.rightKeypoints.size());
@@ -75,7 +75,7 @@ size_t StereoPairCount(const core::ports::StereoFeatureObservationPacket &featur
 }
 
 int ResolveRightFeatureIndex(
-    const core::ports::StereoFeatureObservationPacket &features,
+    const Core::Ports::StereoFeatureObservationPacket &features,
     size_t leftIndex)
 {
     if (features.leftToRightMatch.empty()) {
@@ -88,9 +88,9 @@ int ResolveRightFeatureIndex(
 }
 
 void ApplyStereoDepthForPair(
-    const core::ports::StereoFrameObservationLoadRequest &request,
+    const Core::Ports::StereoFrameObservationLoadRequest &request,
     size_t leftIndex, int rightIndex,
-    core::ports::VisualFrameObservationData &outData)
+    Core::Ports::VisualFrameObservationData &outData)
 {
     if (rightIndex < 0 ||
         static_cast<size_t>(rightIndex) >= outData.rightKeypoints.size()) {
@@ -114,9 +114,9 @@ void ApplyStereoDepthForPair(
 }
 
 void FillMatchedStereoDepth(
-    const core::ports::StereoFrameObservationLoadRequest &request,
-    const core::ports::StereoFeatureObservationPacket &features,
-    core::ports::VisualFrameObservationData &outData)
+    const Core::Ports::StereoFrameObservationLoadRequest &request,
+    const Core::Ports::StereoFeatureObservationPacket &features,
+    Core::Ports::VisualFrameObservationData &outData)
 {
     const size_t pairCount = StereoPairCount(features, outData);
     for (size_t i = 0; i < pairCount; ++i) {
@@ -128,8 +128,8 @@ void FillMatchedStereoDepth(
 } // namespace
 
 bool DefaultVisualFrameObservationLoader::LoadMonoObservation(
-    const core::ports::MonoFrameObservationLoadRequest &request,
-    core::ports::VisualFrameObservationData &outData) const
+    const Core::Ports::MonoFrameObservationLoadRequest &request,
+    Core::Ports::VisualFrameObservationData &outData) const
 {
     outData = {};
     if (request.features == nullptr) {
@@ -146,15 +146,15 @@ bool DefaultVisualFrameObservationLoader::LoadMonoObservation(
 }
 
 bool DefaultVisualFrameObservationLoader::LoadStereoObservation(
-    const core::ports::StereoFrameObservationLoadRequest &request,
-    core::ports::VisualFrameObservationData &outData) const
+    const Core::Ports::StereoFrameObservationLoadRequest &request,
+    Core::Ports::VisualFrameObservationData &outData) const
 {
     outData = {};
     if (request.features == nullptr) {
         return false;
     }
 
-    const core::ports::StereoFeatureObservationPacket &features =
+    const Core::Ports::StereoFeatureObservationPacket &features =
         *request.features;
     LoadStereoKeypointsAndDescriptors(features, outData);
     ApplyInjectedOctave(request, outData);
@@ -169,19 +169,19 @@ bool DefaultVisualFrameObservationLoader::LoadStereoObservation(
 }
 
 bool LoadMonoFrameObservation(
-    const core::ports::MonoFrameObservationLoadRequest &request,
-    core::ports::VisualFrameObservationData &outData)
+    const Core::Ports::MonoFrameObservationLoadRequest &request,
+    Core::Ports::VisualFrameObservationData &outData)
 {
     return DefaultVisualFrameObservationLoader().LoadMonoObservation(request,
                                                                      outData);
 }
 
 bool LoadStereoFrameObservation(
-    const core::ports::StereoFrameObservationLoadRequest &request,
-    core::ports::VisualFrameObservationData &outData)
+    const Core::Ports::StereoFrameObservationLoadRequest &request,
+    Core::Ports::VisualFrameObservationData &outData)
 {
     return DefaultVisualFrameObservationLoader().LoadStereoObservation(request,
                                                                        outData);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

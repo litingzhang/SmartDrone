@@ -2,8 +2,8 @@
 
 #include "core/ports/slam_runtime_control.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
-using ISlamRuntimeControl = SmartDrone::core::ports::ISlamRuntimeControl;
+using ISlamRuntimeControl = SmartDrone::Core::Ports::ISlamRuntimeControl;
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

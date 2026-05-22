@@ -6,7 +6,7 @@
 
 #include "core/ports/visual_feature_data.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 constexpr float kStereoMaxEpipolarDeltaPx = 1.5f;
 constexpr float kStereoMinDisparityPx = 0.75f;
@@ -50,8 +50,8 @@ bool FindRightPointByStereoZnccAroundDisparity(const cv::Mat &leftGray32f,
 float ComputeStereoCandidateQuality(float descriptorScore, float zncc,
                                     float epipolarErrorPx, float disparity);
 
-std::vector<core::ports::StereoMatchPair>
+std::vector<Core::Ports::StereoMatchPair>
 FilterStereoPairsByDisparityConsistency(
-    const std::vector<core::ports::StereoMatchPair> &matches);
+    const std::vector<Core::Ports::StereoMatchPair> &matches);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

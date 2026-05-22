@@ -8,7 +8,7 @@
 #include <cmath>
 #include <optional>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 namespace {
 
 struct KltPerFramePnPCandidate {
@@ -309,4 +309,4 @@ KltTrackedStereoPnpObservationSet DefaultVisualPnpObservationBuilder::BuildTrack
     return BuildKltTrackedStereoPnpObservations(options);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

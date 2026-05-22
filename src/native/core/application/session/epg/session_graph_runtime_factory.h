@@ -6,12 +6,12 @@
 #include "core/application/session/epg/session_graph_runtime.h"
 #include "core/domain/runtime_mode.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 class IPosePublisher;
 class ISlamSessionTelemetryPort;
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct ApplicationRuntimeFactories;
 struct LiveRuntimeTuning;
@@ -19,11 +19,11 @@ struct LivePoseState;
 struct UnifiedConfig;
 
 struct SessionGraphRuntimeFactoryConfig {
-    domain::RuntimeMode mode{domain::RuntimeMode::Idle};
+    Domain::RuntimeMode mode{Domain::RuntimeMode::Idle};
     const UnifiedConfig &cfg;
     LiveRuntimeTuning &tuning;
-    SmartDrone::core::ports::ISlamSessionTelemetryPort &telemetry;
-    SmartDrone::core::ports::IPosePublisher &posePublisher;
+    SmartDrone::Core::Ports::ISlamSessionTelemetryPort &telemetry;
+    SmartDrone::Core::Ports::IPosePublisher &posePublisher;
     std::atomic<bool> &stop;
     LivePoseState &livePose;
     std::atomic<bool> &runningFlag;
@@ -32,4 +32,4 @@ struct SessionGraphRuntimeFactoryConfig {
 
 std::unique_ptr<ISessionGraphRuntime> CreateSessionGraphRuntime(const SessionGraphRuntimeFactoryConfig &config);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

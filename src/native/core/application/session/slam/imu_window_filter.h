@@ -5,7 +5,7 @@
 
 #include "core/ports/imu_provider.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct ImuWindowValidation {
     size_t inputCount{0};
@@ -19,9 +19,9 @@ struct ImuWindowValidation {
     const char *failureReason{nullptr};
 };
 
-bool IsFiniteImuReading(const SmartDrone::core::ports::ImuReading &reading);
-bool SanitizeImuWindow(std::vector<SmartDrone::core::ports::ImuReading> &vImu,
+bool IsFiniteImuReading(const SmartDrone::Core::Ports::ImuReading &reading);
+bool SanitizeImuWindow(std::vector<SmartDrone::Core::Ports::ImuReading> &vImu,
                        double prevFrameTime, double frameTime,
                        double expectedImuDtSec, ImuWindowValidation &stats);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

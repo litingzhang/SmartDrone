@@ -9,7 +9,7 @@
 #include "core/application/runtime/epg_dfx_snapshot.h"
 #include "core/application/session/epg/calib_session_tasks.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 using CalibTaskFactoryEntries =
@@ -107,4 +107,4 @@ EpgTaskFactoryResolver MakeCalibGraphTaskFactoryResolver(
     return resolver;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

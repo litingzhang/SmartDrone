@@ -8,8 +8,9 @@
 #include "common/tlv/tlv_pack.h"
 #include "common/tlv/tlv_protocol.h"
 #include "core/application/config/config_registry.h"
+#include "core/application/config/slam_backend_availability.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 SensorMode ParseRuntimeSensorMode(std::uint8_t value)
@@ -79,20 +80,17 @@ SlamBackend ParseRuntimeSlamBackend(std::uint8_t value)
     case RUNTIME_SLAM_BACKEND_DPVO_TENSORRT:
         return SlamBackend::DpvoTensorRt;
     case RUNTIME_SLAM_BACKEND_ORBSLAM3:
-#if defined(SMART_DRONE_ENABLE_ORB_SLAM3)
-        return SlamBackend::OrbSlam3;
-#else
-        return SlamBackend::Klt;
-#endif
+        return OrbSlam3BackendAvailable() ? SlamBackend::OrbSlam3
+                                          : SlamBackend::Klt;
     default:
         return SlamBackend::Klt;
     }
 }
 
-SmartDrone::core::domain::SlamOperationMode
+SmartDrone::Core::Domain::SlamOperationMode
 ParseRuntimeSlamMode(std::uint8_t value)
 {
-    using SmartDrone::core::domain::SlamOperationMode;
+    using SmartDrone::Core::Domain::SlamOperationMode;
     switch (value) {
     case RUNTIME_SLAM_MODE_LOCALIZATION:
         return SlamOperationMode::Localization;
@@ -310,7 +308,7 @@ void AddCameraAndModeConfig(ConfigUpdate &update,
     update.values[std::string(ConfigRegistry::kSlamFeatureFrontend)] =
         std::string(ToFeatureFrontendText(remote.featureFrontend));
     update.values[std::string(ConfigRegistry::kSlamOperationMode)] =
-        std::string(SmartDrone::core::domain::ToString(
+        std::string(SmartDrone::Core::Domain::ToString(
             remote.slamOperationMode));
     update.values[std::string(ConfigRegistry::kSlamPerceptionMode)] =
         std::string(ToSensorModeText(remote.sensorMode));
@@ -446,7 +444,7 @@ std::string BuildRuntimeConfigAckMessage(const std::string &message,
            " backend=" + std::string(ToSlamBackendText(remote.slamBackend)) +
            " frontend=" +
            std::string(ToFeatureFrontendText(remote.featureFrontend)) +
-           " slam_mode=" + std::string(SmartDrone::core::domain::ToString(remote.slamOperationMode)) +
+           " slam_mode=" + std::string(SmartDrone::Core::Domain::ToString(remote.slamOperationMode)) +
            " img=" + (remote.sendImage ? "on" : "off") +
            " feat=" + (remote.sendFeature ? "on" : "off") +
            " map=" + (remote.sendMap ? "on" : "off") +
@@ -457,4 +455,4 @@ std::string BuildRuntimeConfigAckMessage(const std::string &message,
            " orb_accel=" + remote.orbAcceleration;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 struct OrbFeatureExtractorOptions {
     int maxFeatures{1000};
@@ -10,4 +10,4 @@ struct OrbFeatureExtractorOptions {
     int minimumFastThreshold{7};
 };
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

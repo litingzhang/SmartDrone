@@ -490,6 +490,11 @@ bool SplitStatementAndAttributes(const std::string &statement,
     return true;
 }
 
+void ApplyTaskTimingFields(TaskConfig &task,
+                           const std::map<std::string, std::string> &fields);
+void ApplyTaskSchedulingFields(
+    TaskConfig &task, const std::map<std::string, std::string> &fields);
+
 TaskConfig ParseTaskStatement(const std::string &head,
                               const std::map<std::string, std::string> &attrs)
 {
@@ -503,7 +508,14 @@ TaskConfig ParseTaskStatement(const std::string &head,
     task.name = head;
     task.type = RequireField(fields, "type", task.name);
     task.trigger.mode = ParseDotTriggerMode(RequireField(fields, "trigger", task.name));
+    ApplyTaskTimingFields(task, fields);
+    ApplyTaskSchedulingFields(task, fields);
+    return task;
+}
 
+void ApplyTaskTimingFields(TaskConfig &task,
+                           const std::map<std::string, std::string> &fields)
+{
     const auto intervalIt = fields.find("interval_ms");
     if (intervalIt != fields.end()) {
         task.trigger.interval = std::chrono::milliseconds(
@@ -513,6 +525,11 @@ TaskConfig ParseTaskStatement(const std::string &head,
     if (triggerQueuesIt != fields.end()) {
         task.trigger.queues = SplitTriggerQueueRefs(triggerQueuesIt->second);
     }
+}
+
+void ApplyTaskSchedulingFields(TaskConfig &task,
+                               const std::map<std::string, std::string> &fields)
+{
     const auto realtimeIt = fields.find("realtime");
     if (realtimeIt != fields.end()) {
         task.scheduling.realtime = ParseBool(realtimeIt->second, "realtime");
@@ -544,7 +561,6 @@ TaskConfig ParseTaskStatement(const std::string &head,
                 ParsePortId(port, "backpressure_outputs"));
         }
     }
-    return task;
 }
 
 void MergePortSpec(std::map<std::string, std::vector<PortSpec>> &byTask,

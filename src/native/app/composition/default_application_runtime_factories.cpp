@@ -1,4 +1,4 @@
-#include "adapters/runtime/default_application_runtime_factories.h"
+#include "app/composition/default_application_runtime_factories.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -18,32 +18,32 @@
 #include "core/application/session/slam/slam_runtime_control_port.h"
 #include "core/application/session/stream/preview_output_port.h"
 
-namespace SmartDrone::adapters::runtime {
+namespace SmartDrone::App::Composition {
 namespace {
 
 using ApplicationRuntimeFactories =
-    SmartDrone::core::application::ApplicationRuntimeFactories;
-using CalibStereoFrame = SmartDrone::core::application::CalibStereoFrame;
+    SmartDrone::Core::Application::ApplicationRuntimeFactories;
+using CalibStereoFrame = SmartDrone::Core::Application::CalibStereoFrame;
 using IPreviewOutputPort =
-    SmartDrone::core::application::IPreviewOutputPort;
+    SmartDrone::Core::Application::IPreviewOutputPort;
 using IPreviewOutputRuntime =
-    SmartDrone::core::application::IPreviewOutputRuntime;
+    SmartDrone::Core::Application::IPreviewOutputRuntime;
 using MainRuntimeAliases =
-    SmartDrone::core::application::MainRuntimeAliases;
+    SmartDrone::Core::Application::MainRuntimeAliases;
 using PreviewOutputFrame =
-    SmartDrone::core::application::PreviewOutputFrame;
+    SmartDrone::Core::Application::PreviewOutputFrame;
 using PreviewOutputOpenConfig =
-    SmartDrone::core::application::PreviewOutputOpenConfig;
-using SlamInputMode = SmartDrone::core::ports::SlamInputMode;
+    SmartDrone::Core::Application::PreviewOutputOpenConfig;
+using SlamInputMode = SmartDrone::Core::Ports::SlamInputMode;
 using SlamRuntimeControlPort =
-    SmartDrone::core::application::SlamRuntimeControlPort;
+    SmartDrone::Core::Application::SlamRuntimeControlPort;
 using SlamSessionEngineResourceConfig =
-    SmartDrone::core::application::SlamSessionEngineResourceConfig;
+    SmartDrone::Core::Application::SlamSessionEngineResourceConfig;
 using SlamSessionEngineResources =
-    SmartDrone::core::application::SlamSessionEngineResources;
+    SmartDrone::Core::Application::SlamSessionEngineResources;
 using SlamVisualFeatureFrontendStartResult =
-    SmartDrone::core::application::SlamVisualFeatureFrontendStartResult;
-using UnifiedConfig = SmartDrone::core::application::UnifiedConfig;
+    SmartDrone::Core::Application::SlamVisualFeatureFrontendStartResult;
+using UnifiedConfig = SmartDrone::Core::Application::UnifiedConfig;
 
 class UdpPreviewOutputPort final : public IPreviewOutputPort {
   public:
@@ -99,10 +99,10 @@ class UdpPreviewOutputRuntime final : public IPreviewOutputRuntime {
         bool convertedLeft = false;
         bool convertedRight = false;
         const cv::Mat leftGray =
-            SmartDrone::core::application::EnsureCalibGray8(
+            SmartDrone::Core::Application::EnsureCalibGray8(
                 left.gray, convertedLeft);
         const cv::Mat rightGray =
-            SmartDrone::core::application::EnsureCalibGray8(
+            SmartDrone::Core::Application::EnsureCalibGray8(
                 right.gray, convertedRight);
         m_udp.Enqueue(0, static_cast<std::uint64_t>(left.sequence),
                       left.sequence, pairNs * 1e-9, leftGray, {}, true,
@@ -132,7 +132,7 @@ SlamInputMode ResolveSlamInputMode(const MainRuntimeAliases &aliases)
     return monoMode ? SlamInputMode::MonoRight : SlamInputMode::Stereo;
 }
 
-SmartDrone::adapters::imu::Icm42688ImuProviderConfig
+SmartDrone::Adapters::Imu::Icm42688ImuProviderConfig
 MakeImuProviderConfig(const MainRuntimeAliases &aliases)
 {
     const int64_t imuDtNs = 1000000000LL / std::max(1, aliases.imuHz);
@@ -141,10 +141,10 @@ MakeImuProviderConfig(const MainRuntimeAliases &aliases)
     return {slackBeforeNs, slackAfterNs};
 }
 
-SmartDrone::adapters::slam::SlamEngineFactoryConfig
+SmartDrone::Adapters::Slam::SlamEngineFactoryConfig
 BuildEngineConfig(const SlamSessionEngineResourceConfig &config)
 {
-    SmartDrone::adapters::slam::SlamEngineFactoryConfig engineConfig{};
+    SmartDrone::Adapters::Slam::SlamEngineFactoryConfig engineConfig{};
     engineConfig.backend = config.aliases.slamBackend;
     engineConfig.vocabularyPath = config.cfg.app.vocab;
     engineConfig.settingsPath = config.settingsPath;
@@ -156,13 +156,13 @@ BuildEngineConfig(const SlamSessionEngineResourceConfig &config)
     return engineConfig;
 }
 
-SmartDrone::adapters::slam::VisualFeatureFrontendRuntimeConfig
+SmartDrone::Adapters::Slam::VisualFeatureFrontendRuntimeConfig
 BuildVisualFeatureConfig(const MainRuntimeAliases &aliases,
                          const UnifiedConfig &cfg)
 {
-    SmartDrone::adapters::slam::VisualFeatureFrontendRuntimeConfig config{};
+    SmartDrone::Adapters::Slam::VisualFeatureFrontendRuntimeConfig config{};
     config.repoPath =
-        SmartDrone::adapters::slam::ResolveVisualFeatureFrontendRepo(
+        SmartDrone::Adapters::Slam::ResolveVisualFeatureFrontendRepo(
             aliases.featureFrontend, cfg.app.runtime.visualFeatureRepo);
     config.device = cfg.app.runtime.visualFeatureDevice;
     config.topK = cfg.app.runtime.visualFeatureTopK;
@@ -173,11 +173,11 @@ BuildVisualFeatureConfig(const MainRuntimeAliases &aliases,
 }
 
 class SlamVisualFeatureFrontendSession final
-    : public SmartDrone::core::application::ISlamVisualFeatureFrontendSession {
+    : public SmartDrone::Core::Application::ISlamVisualFeatureFrontendSession {
   public:
     explicit SlamVisualFeatureFrontendSession(
         std::unique_ptr<
-            SmartDrone::adapters::slam::IManagedVisualFeatureFrontend>
+            SmartDrone::Adapters::Slam::IManagedVisualFeatureFrontend>
             client)
         : m_client(std::move(client))
     {
@@ -190,21 +190,21 @@ class SlamVisualFeatureFrontendSession final
         }
     }
 
-    SmartDrone::core::ports::IVisualFeatureFrontend *Frontend()
+    SmartDrone::Core::Ports::IVisualFeatureFrontend *Frontend()
     {
         return m_client.get();
     }
 
   private:
-    std::unique_ptr<SmartDrone::adapters::slam::IManagedVisualFeatureFrontend>
+    std::unique_ptr<SmartDrone::Adapters::Slam::IManagedVisualFeatureFrontend>
         m_client;
 };
 
 SlamSessionEngineResources CreateSlamEngineResources(
     const SlamSessionEngineResourceConfig &config)
 {
-    SmartDrone::adapters::slam::ControlledSlamEngine slamEngine =
-        SmartDrone::adapters::slam::CreateSlamEngine(BuildEngineConfig(config));
+    SmartDrone::Adapters::Slam::ControlledSlamEngine slamEngine =
+        SmartDrone::Adapters::Slam::CreateSlamEngine(BuildEngineConfig(config));
 
     SlamSessionEngineResources resources{};
     resources.control =
@@ -223,15 +223,15 @@ SlamVisualFeatureFrontendStartResult StartVisualFeatureFrontendSession(
 
     result.routeAvailable = true;
     auto featureConfig = BuildVisualFeatureConfig(aliases, cfg);
-    SmartDrone::adapters::slam::ConfigureVisualFeatureFrontendDefaults(
+    SmartDrone::Adapters::Slam::ConfigureVisualFeatureFrontendDefaults(
         aliases.featureFrontend, featureConfig);
     result.repoPath = featureConfig.repoPath;
-    if (!SmartDrone::adapters::slam::VisualFeatureFrontendClientEnabled(
+    if (!SmartDrone::Adapters::Slam::VisualFeatureFrontendClientEnabled(
             aliases.featureFrontend)) {
         return result;
     }
 
-    auto client = SmartDrone::adapters::slam::CreateVisualFeatureFrontendClient(
+    auto client = SmartDrone::Adapters::Slam::CreateVisualFeatureFrontendClient(
         aliases.featureFrontend);
     if (client == nullptr) {
         result.clientMissing = true;
@@ -256,20 +256,20 @@ ApplicationRuntimeFactories CreateDefaultApplicationRuntimeFactories()
 {
     ApplicationRuntimeFactories factories{};
     factories.createCameraProvider =
-        []() { return SmartDrone::adapters::camera::CreateCameraProvider(); };
+        []() { return SmartDrone::Adapters::Camera::CreateCameraProvider(); };
     factories.makeCameraOpenConfig =
         [](const MainRuntimeAliases &aliases) {
-            return SmartDrone::adapters::camera::MakeCameraOpenConfig(aliases);
+            return SmartDrone::Adapters::Camera::MakeCameraOpenConfig(aliases);
         };
     factories.createSlamEngineResources =
         [](const SlamSessionEngineResourceConfig &config) {
             return CreateSlamEngineResources(config);
         };
     factories.createImuProvider =
-        [](SmartDrone::core::application::ImuThreadState &state,
+        [](SmartDrone::Core::Application::ImuThreadState &state,
            const MainRuntimeAliases &aliases) {
             return std::make_unique<
-                SmartDrone::adapters::imu::Icm42688ImuProvider>(
+                SmartDrone::Adapters::Imu::Icm42688ImuProvider>(
                 state.imuBuffer, MakeImuProviderConfig(aliases));
         };
     factories.startVisualFeatureFrontendSession =
@@ -279,10 +279,10 @@ ApplicationRuntimeFactories CreateDefaultApplicationRuntimeFactories()
     factories.createPreviewOutputRuntime =
         []() { return std::make_unique<UdpPreviewOutputRuntime>(); };
     factories.cameraProvider = {
-        std::string(SmartDrone::adapters::camera::CompiledCameraProviderName()),
-        SmartDrone::adapters::camera::CompiledCameraProviderUsesPackedStereo(),
+        std::string(SmartDrone::Adapters::Camera::CompiledCameraProviderName()),
+        SmartDrone::Adapters::Camera::CompiledCameraProviderUsesPackedStereo(),
     };
     return factories;
 }
 
-} // namespace SmartDrone::adapters::runtime
+} // namespace SmartDrone::App::Composition

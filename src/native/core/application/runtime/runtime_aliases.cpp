@@ -5,7 +5,7 @@
 
 #include "core/application/runtime/runtime_provider_metadata.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 namespace {
 
@@ -144,7 +144,7 @@ void PrintRuntimeFeatureConfig(const AppConfig &app, const MainRuntimeAliases &a
 {
     std::cerr << "slam_input_fps=" << aliases.slamInputFps << " camera_fps=" << aliases.fps
               << " frame_drop=" << (aliases.slamInputFps < aliases.fps ? "Y" : "N") << "\n";
-    std::cerr << "slam_mode=" << SmartDrone::core::domain::ToString(aliases.slamOperationMode) << "\n";
+    std::cerr << "slam_mode=" << SmartDrone::Core::Domain::ToString(aliases.slamOperationMode) << "\n";
     PrintBackendConfig(app, aliases);
     PrintOrbConfig(app, aliases);
     std::cerr << "lk seed=gftt"
@@ -192,12 +192,12 @@ MainRuntimeAliases BuildRuntimeAliases(const AppConfig &config)
 
 void PrintStartupConfig(const AppConfig &app, const MainRuntimeAliases &aliases,
                         const CameraRuntimeProviderMetadata &cameraProvider,
-                        SmartDrone::core::domain::RuntimeMode mode)
+                        SmartDrone::Core::Domain::RuntimeMode mode)
 {
-    std::cerr << "mode=" << SmartDrone::core::domain::ToString(mode) << "\n";
+    std::cerr << "mode=" << SmartDrone::Core::Domain::ToString(mode) << "\n";
     PrintCameraConfig(aliases, cameraProvider);
     PrintRuntimeFeatureConfig(app, aliases);
     PrintDiagnosticsConfig(app, aliases);
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

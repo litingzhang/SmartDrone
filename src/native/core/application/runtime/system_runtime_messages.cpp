@@ -2,9 +2,11 @@
 
 #include <utility>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
-EPG_REGISTER_MESSAGE(SystemRuntimePulse, "SystemRuntimePulse")
+const bool SYSTEM_RUNTIME_PULSE_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SystemRuntimePulse>(
+        "SystemRuntimePulse");
 
 void DrainSystemRuntimePulse(Epg::TaskContext &context)
 {
@@ -25,4 +27,4 @@ void PushSystemRuntimePulse(Epg::TaskContext &context,
     context.Push(SYSTEM_RUNTIME_PULSE_PORT, std::move(pulse));
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

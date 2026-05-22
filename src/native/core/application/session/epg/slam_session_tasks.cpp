@@ -9,7 +9,7 @@
 #include "core/application/session/slam/slam_session_runtime_service.h"
 #include "core/application/session/epg/slam_session_task_utils.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr Epg::PortId STATUS_OUTPUT_PORT = 1;
@@ -501,19 +501,47 @@ void SlamMonitorTask::OnTick(Epg::TaskContext &context)
     }
 }
 
-EPG_REGISTER_TASK_TYPE(SlamResourceTask, "SlamResourceTask")
-EPG_REGISTER_TASK_TYPE(SlamClockTask, "SlamClockTask")
-EPG_REGISTER_TASK_TYPE(SlamImuPollTask, "SlamImuPollTask")
-EPG_REGISTER_TASK_TYPE(SlamBackendTickTask, "SlamBackendTickTask")
-EPG_REGISTER_TASK_TYPE(SlamImuGateTask, "SlamImuGateTask")
-EPG_REGISTER_TASK_TYPE(SlamAcquireTask, "SlamAcquireTask")
-EPG_REGISTER_TASK_TYPE(SlamTrackingTask, "SlamTrackingTask")
-EPG_REGISTER_TASK_TYPE(SlamPosePostprocessTask, "SlamPosePostprocessTask")
-EPG_REGISTER_TASK_TYPE(SlamPointCloudTask, "SlamPointCloudTask")
-EPG_REGISTER_TASK_TYPE(SlamDfxTask, "SlamDfxTask")
-EPG_REGISTER_TASK_TYPE(SlamUdpTask, "SlamUdpTask")
-EPG_REGISTER_TASK_TYPE(SlamMavlinkTask, "SlamMavlinkTask")
-EPG_REGISTER_TASK_TYPE(SlamLivePoseTask, "SlamLivePoseTask")
-EPG_REGISTER_TASK_TYPE(SlamMonitorTask, "SlamMonitorTask")
+const bool SLAM_RESOURCE_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamResourceTask>(
+        "SlamResourceTask");
+const bool SLAM_CLOCK_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamClockTask>(
+        "SlamClockTask");
+const bool SLAM_IMU_POLL_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamImuPollTask>(
+        "SlamImuPollTask");
+const bool SLAM_BACKEND_TICK_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamBackendTickTask>(
+        "SlamBackendTickTask");
+const bool SLAM_IMU_GATE_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamImuGateTask>(
+        "SlamImuGateTask");
+const bool SLAM_ACQUIRE_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamAcquireTask>(
+        "SlamAcquireTask");
+const bool SLAM_TRACKING_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamTrackingTask>(
+        "SlamTrackingTask");
+const bool SLAM_POSE_POSTPROCESS_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamPosePostprocessTask>(
+        "SlamPosePostprocessTask");
+const bool SLAM_POINT_CLOUD_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamPointCloudTask>(
+        "SlamPointCloudTask");
+const bool SLAM_DFX_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamDfxTask>(
+        "SlamDfxTask");
+const bool SLAM_UDP_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamUdpTask>(
+        "SlamUdpTask");
+const bool SLAM_MAVLINK_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamMavlinkTask>(
+        "SlamMavlinkTask");
+const bool SLAM_LIVE_POSE_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamLivePoseTask>(
+        "SlamLivePoseTask");
+const bool SLAM_MONITOR_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamMonitorTask>(
+        "SlamMonitorTask");
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

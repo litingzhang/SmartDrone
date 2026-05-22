@@ -5,7 +5,7 @@
 #include <Eigen/Core>
 #include <opencv2/core.hpp>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 std::optional<Sophus::SE3f> ReadSe3Node(const cv::FileNode &node)
 {
@@ -100,4 +100,4 @@ OrbExtractorSettings LoadOrbExtractorSettings(const std::string &settingsPath)
     return settings;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -6,13 +6,13 @@
 #include "core/domain/runtime_mode.h"
 #include "core/ports/visual_feature_frontend.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 class ISlamRuntimeControl {
   public:
     virtual ~ISlamRuntimeControl() = default;
 
-    virtual void SetOperationMode(core::domain::SlamOperationMode mode) = 0;
+    virtual void SetOperationMode(Core::Domain::SlamOperationMode mode) = 0;
     virtual void SetFeatureFrontend(FeatureFrontend frontend) = 0;
     virtual void SetVisualFeatureFrontend(IVisualFeatureFrontend *frontend) = 0;
     virtual void SetVisualFeatureInputSizeLimit(int maxWidth,
@@ -30,4 +30,4 @@ class ISlamRuntimeControl {
     }
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

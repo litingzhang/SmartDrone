@@ -8,7 +8,7 @@
 #include "slam_tracking_state.h"
 #include "tracked_visual_data.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct PoseEstimate {
     bool valid{false};
@@ -99,4 +99,4 @@ class ISlamEngine {
                                bool extractPointCloud) = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

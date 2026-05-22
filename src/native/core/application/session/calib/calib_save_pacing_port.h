@@ -7,7 +7,7 @@
 
 #include "core/application/session/epg/messages/calib_epg_messages.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct CalibSavePacingPortConfig {
     int requestedSaveFps{1};
@@ -38,4 +38,4 @@ class CalibSavePacingPort final {
     int m_droppedByPacing{0};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

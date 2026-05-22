@@ -16,7 +16,7 @@
 #include "core/application/runtime/runtime_config_frame_codec.h"
 #include "core/application/runtime/runtime_command_service.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr auto kHeartbeatPeriod = std::chrono::milliseconds(500);
@@ -41,7 +41,7 @@ int EnvIntValueClamped(const char *name, int fallback, int minValue,
 RouteResult HandleRuntimeModeFrame(const TlvFrame &frame,
                                    IRuntimeCommandTarget &commandTarget)
 {
-    using ControllerMode = SmartDrone::core::domain::RuntimeMode;
+    using ControllerMode = SmartDrone::Core::Domain::RuntimeMode;
     if (frame.len != RUNTIME_MODE_PAYLOAD_LEN)
         return {ACK_E_BAD_LEN, "bad runtime mode len"};
     RuntimeAction action{};
@@ -561,4 +561,4 @@ void UdpCommandRuntime::Step()
     OnGraphTick();
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

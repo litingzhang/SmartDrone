@@ -9,9 +9,9 @@
 #include "core/ports/slam_backend.h"
 #include "core/ports/slam_engine.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
-using SlamInputMode = core::ports::SlamInputMode;
+using SlamInputMode = Core::Ports::SlamInputMode;
 
 struct OrbSlam3EngineConfig {
     std::string vocabularyPath;
@@ -34,7 +34,7 @@ struct SlamEngineFactoryConfig {
 };
 
 struct ControlledSlamEngine {
-    std::unique_ptr<core::ports::ISlamEngine> engine;
+    std::unique_ptr<Core::Ports::ISlamEngine> engine;
     ISlamRuntimeControl *control{nullptr};
 };
 
@@ -51,4 +51,4 @@ class SlamEngineFactoryRegistrar {
 ControlledSlamEngine CreateOrbSlam3Engine(const OrbSlam3EngineConfig &config);
 ControlledSlamEngine CreateSlamEngine(const SlamEngineFactoryConfig &config);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

@@ -5,14 +5,14 @@
 
 #include "core/ports/visual_place_recognition.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
-using VisualBowVector = core::ports::VisualBowVector;
-using VisualFeatureIndex = core::ports::VisualFeatureIndex;
-using VisualVocabularyTransform = core::ports::VisualVocabularyTransform;
-using VisualWordWeight = core::ports::VisualWordWeight;
+using VisualBowVector = Core::Ports::VisualBowVector;
+using VisualFeatureIndex = Core::Ports::VisualFeatureIndex;
+using VisualVocabularyTransform = Core::Ports::VisualVocabularyTransform;
+using VisualWordWeight = Core::Ports::VisualWordWeight;
 
-class OrbVisualVocabulary final : public core::ports::IVisualVocabulary {
+class OrbVisualVocabulary final : public Core::Ports::IVisualVocabulary {
   public:
     OrbVisualVocabulary();
     ~OrbVisualVocabulary() override;
@@ -28,4 +28,4 @@ class OrbVisualVocabulary final : public core::ports::IVisualVocabulary {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

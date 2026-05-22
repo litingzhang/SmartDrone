@@ -10,7 +10,7 @@
 #include "core/application/session/slam/slam_session_runtime_service.h"
 #include "core/application/session/epg/slam_session_tasks.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 using EpgTaskFactoryEntries = std::vector<Epg::TypeCatalog::TaskFactoryEntry>;
@@ -132,4 +132,4 @@ EpgTaskFactoryResolver MakeSlamGraphTaskFactoryResolver(
     return resolver;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

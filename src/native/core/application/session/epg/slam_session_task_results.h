@@ -4,7 +4,7 @@
 
 #include "core/application/session/epg/messages/slam_epg_messages.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct SlamTaskStepResult {
     bool sessionAvailable{false};
@@ -25,4 +25,4 @@ struct SlamPublishFrameResult : SlamTaskStepResult {
     std::shared_ptr<ISlamPublishedFramePayload> frame;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -38,7 +38,7 @@ bool IsVisualFeatureLightGlueFrontend(FeatureFrontend frontend);
 SlamBackend ParseSlamBackendText(const std::string &text);
 SlamBackend NormalizeSlamBackendForBuild(SlamBackend backend);
 const char *ToSlamBackendText(SlamBackend backend);
-SmartDrone::core::domain::SlamOperationMode
+SmartDrone::Core::Domain::SlamOperationMode
 ParseSlamOperationModeText(const std::string &text);
 std::string ResolveRuntimePath(const std::string &path, const char *argv0);
 std::string
@@ -98,8 +98,8 @@ struct RuntimeConfig {
     int64_t offRejectNs{10'000'000};
     bool allowEmptyImu{false};
     int slamInputFps{30};
-    SmartDrone::core::domain::SlamOperationMode slamOperationMode{
-        SmartDrone::core::domain::SlamOperationMode::Mapping};
+    SmartDrone::Core::Domain::SlamOperationMode slamOperationMode{
+        SmartDrone::Core::Domain::SlamOperationMode::Mapping};
     SlamBackend slamBackend{SlamBackend::Klt};
     FeatureFrontend featureFrontend{FeatureFrontend::LkGfttPerFrame};
     std::string dpvoRepo;

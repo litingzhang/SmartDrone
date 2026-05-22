@@ -8,13 +8,13 @@
 #include "platform/linux/gpio/drdy_gpio.h"
 #include "platform/linux/spi/spi_dev.h"
 
-namespace SmartDrone::adapters::imu {
+namespace SmartDrone::Adapters::Imu {
 
 namespace {
 
 using MainRuntimeAliases =
-    SmartDrone::core::application::MainRuntimeAliases;
-using ImuSampleReadStatus = SmartDrone::core::ports::ImuSampleReadStatus;
+    SmartDrone::Core::Application::MainRuntimeAliases;
+using ImuSampleReadStatus = SmartDrone::Core::Ports::ImuSampleReadStatus;
 
 } // namespace
 
@@ -174,7 +174,7 @@ class Icm42688SampleSource::Impl final {
 };
 
 Icm42688SampleSource::Icm42688SampleSource(
-    const SmartDrone::core::application::MainRuntimeAliases &aliases)
+    const SmartDrone::Core::Application::MainRuntimeAliases &aliases)
     : m_impl(new Impl(aliases))
 {
 }
@@ -211,4 +211,4 @@ bool Icm42688SampleSource::Failed() const
     return m_impl->Failed();
 }
 
-} // namespace SmartDrone::adapters::imu
+} // namespace SmartDrone::Adapters::Imu

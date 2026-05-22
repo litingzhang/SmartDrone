@@ -8,14 +8,14 @@
 #include "adapters/slam/slam_mode_state.h"
 #include "core/ports/visual_tracking.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
-using KltPerFramePnpObservationBuilderOptions = core::ports::PerFramePnpObservationBuilderOptions;
-using KltPnpObservationSet = core::ports::PnpObservationSet;
-using KltTrackedStereoPnpObservationBuilderOptions = core::ports::TrackedStereoPnpObservationBuilderOptions;
-using KltTrackedStereoPnpObservationSet = core::ports::TrackedStereoPnpObservationSet;
+using KltPerFramePnpObservationBuilderOptions = Core::Ports::PerFramePnpObservationBuilderOptions;
+using KltPnpObservationSet = Core::Ports::PnpObservationSet;
+using KltTrackedStereoPnpObservationBuilderOptions = Core::Ports::TrackedStereoPnpObservationBuilderOptions;
+using KltTrackedStereoPnpObservationSet = Core::Ports::TrackedStereoPnpObservationSet;
 
-class DefaultVisualPnpObservationBuilder final : public core::ports::IVisualPnpObservationBuilder {
+class DefaultVisualPnpObservationBuilder final : public Core::Ports::IVisualPnpObservationBuilder {
   public:
     KltPnpObservationSet BuildPerFrameObservations(
         const KltPerFramePnpObservationBuilderOptions &options) const override;
@@ -29,4 +29,4 @@ KltPnpObservationSet BuildKltPerFramePnpObservations(
 KltTrackedStereoPnpObservationSet BuildKltTrackedStereoPnpObservations(
     const KltTrackedStereoPnpObservationBuilderOptions &options);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

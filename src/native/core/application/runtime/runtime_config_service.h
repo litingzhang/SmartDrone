@@ -7,7 +7,7 @@
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/runtime_command_service.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class RuntimeConfigService {
   public:
@@ -28,4 +28,4 @@ class RuntimeConfigService {
     RestartFn m_requestRestart;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

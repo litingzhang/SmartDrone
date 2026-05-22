@@ -11,7 +11,7 @@
 
 #include <opencv2/calib3d.hpp>
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 namespace {
 
 constexpr double kLkPerFrameAcceleratedPnPReprojThresholdPx = 3.0;
@@ -72,7 +72,7 @@ KltPnpPoseEstimateResult
 EstimateKltPnpPoseDelta(const std::vector<cv::Point3f> &objectPoints,
                         const std::vector<cv::Point2f> &imagePoints,
                         const KltPnpPoseEstimatorOptions &options,
-                        core::ports::IVisualPnpPoseBackend &backend)
+                        Core::Ports::IVisualPnpPoseBackend &backend)
 {
     KltPnpPoseEstimateResult result;
     VisualPnpPoseBackendOptions pnpOptions;
@@ -116,4 +116,4 @@ EstimateKltPnpPoseDelta(const std::vector<cv::Point3f> &objectPoints,
                                    pnpBackend);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

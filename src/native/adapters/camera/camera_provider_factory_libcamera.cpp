@@ -1,17 +1,17 @@
 #include "adapters/camera/camera_provider_factory.h"
 #include "adapters/camera/libcamera_stereo_camera.h"
 
-namespace SmartDrone::adapters::camera {
+namespace SmartDrone::Adapters::Camera {
 
-std::unique_ptr<SmartDrone::core::ports::ICameraProvider> CreateCameraProvider()
+std::unique_ptr<SmartDrone::Core::Ports::ICameraProvider> CreateCameraProvider()
 {
     return std::make_unique<LibcameraStereoCamera>();
 }
 
-SmartDrone::core::ports::CameraOpenConfig MakeCameraOpenConfig(
-    const SmartDrone::core::application::MainRuntimeAliases &aliases)
+SmartDrone::Core::Ports::CameraOpenConfig MakeCameraOpenConfig(
+    const SmartDrone::Core::Application::MainRuntimeAliases &aliases)
 {
-    SmartDrone::core::ports::CameraOpenConfig config{};
+    SmartDrone::Core::Ports::CameraOpenConfig config{};
     config.width = aliases.width;
     config.height = aliases.height;
     config.fps = aliases.fps;
@@ -43,4 +43,4 @@ bool CompiledCameraProviderUsesPackedStereo()
     return false;
 }
 
-} // namespace SmartDrone::adapters::camera
+} // namespace SmartDrone::Adapters::Camera

@@ -7,7 +7,7 @@
 
 #include "common/epg/epg.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct LiveRuntimeTuning;
 class SlamSessionRuntimeService;
@@ -198,4 +198,4 @@ class SlamMonitorTask final : public Epg::ITask {
     std::atomic<bool> &m_sessionOk;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

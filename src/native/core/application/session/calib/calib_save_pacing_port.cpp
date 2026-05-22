@@ -8,7 +8,7 @@
 #include "core/application/runtime/runtime_aliases.h"
 #include "core/application/session/calib/calib_storage_helpers.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr int RECOMMENDED_MAX_CALIB_SAVE_FPS = 30;
@@ -97,4 +97,4 @@ std::int64_t CalibSavePacingPort::FramePairTimestampNs(
                                      2);
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

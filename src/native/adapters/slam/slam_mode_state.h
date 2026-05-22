@@ -17,11 +17,11 @@
 #include "core/ports/visual_pose_backend.h"
 #include "core/ports/visual_tracking.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
-using LkStereoTrack = core::ports::StereoTrack;
-using LkLoopKeyframe = core::ports::LoopKeyframe;
-using LkLoopClosureState = core::ports::LoopClosureState;
+using LkStereoTrack = Core::Ports::StereoTrack;
+using LkLoopKeyframe = Core::Ports::LoopKeyframe;
+using LkLoopClosureState = Core::Ports::LoopClosureState;
 
 struct LkPerFrameVpiState;
 
@@ -36,55 +36,55 @@ struct SlamModeSharedState {
                                    cv::Mat &rightRect);
     void ResetTrackingState();
     void ResetVisualFeatureStats();
-    void CopyVisualFeatureStatsToOutput(core::ports::SlamOutput &out) const;
-    core::ports::IStereoCalibrationLoader &StereoCalibrationLoader();
-    const core::ports::IStereoCalibrationLoader &StereoCalibrationLoader() const;
-    core::ports::IStereoRectifier &StereoRectifier();
-    const core::ports::IStereoRectifier &StereoRectifier() const;
-    core::ports::IStereoFramePreprocessor &StereoFramePreprocessor();
-    const core::ports::IStereoFramePreprocessor &StereoFramePreprocessor() const;
-    core::ports::IStereoPairBuilder &StereoPairBuilder();
-    const core::ports::IStereoPairBuilder &StereoPairBuilder() const;
-    core::ports::IStereoMatchSelector &StereoMatchSelector();
-    const core::ports::IStereoMatchSelector &StereoMatchSelector() const;
-    core::ports::ITemporalStereoProcessor &TemporalStereoProcessor();
-    const core::ports::ITemporalStereoProcessor &TemporalStereoProcessor() const;
-    core::ports::IStereoFeaturePacketBuilder &StereoFeaturePacketBuilder();
-    const core::ports::IStereoFeaturePacketBuilder &
+    void CopyVisualFeatureStatsToOutput(Core::Ports::SlamOutput &out) const;
+    Core::Ports::IStereoCalibrationLoader &StereoCalibrationLoader();
+    const Core::Ports::IStereoCalibrationLoader &StereoCalibrationLoader() const;
+    Core::Ports::IStereoRectifier &StereoRectifier();
+    const Core::Ports::IStereoRectifier &StereoRectifier() const;
+    Core::Ports::IStereoFramePreprocessor &StereoFramePreprocessor();
+    const Core::Ports::IStereoFramePreprocessor &StereoFramePreprocessor() const;
+    Core::Ports::IStereoPairBuilder &StereoPairBuilder();
+    const Core::Ports::IStereoPairBuilder &StereoPairBuilder() const;
+    Core::Ports::IStereoMatchSelector &StereoMatchSelector();
+    const Core::Ports::IStereoMatchSelector &StereoMatchSelector() const;
+    Core::Ports::ITemporalStereoProcessor &TemporalStereoProcessor();
+    const Core::Ports::ITemporalStereoProcessor &TemporalStereoProcessor() const;
+    Core::Ports::IStereoFeaturePacketBuilder &StereoFeaturePacketBuilder();
+    const Core::Ports::IStereoFeaturePacketBuilder &
     StereoFeaturePacketBuilder() const;
     void SetStereoMatchSelector(
-        std::unique_ptr<core::ports::IStereoMatchSelector> selector);
+        std::unique_ptr<Core::Ports::IStereoMatchSelector> selector);
     void SetTemporalStereoProcessor(
-        std::unique_ptr<core::ports::ITemporalStereoProcessor> processor);
+        std::unique_ptr<Core::Ports::ITemporalStereoProcessor> processor);
     void SetStereoFeaturePacketBuilder(
-        std::unique_ptr<core::ports::IStereoFeaturePacketBuilder> builder);
+        std::unique_ptr<Core::Ports::IStereoFeaturePacketBuilder> builder);
     void SetStereoCalibrationLoader(
-        std::unique_ptr<core::ports::IStereoCalibrationLoader> loader);
+        std::unique_ptr<Core::Ports::IStereoCalibrationLoader> loader);
     void
-    SetStereoRectifier(std::unique_ptr<core::ports::IStereoRectifier> rectifier);
+    SetStereoRectifier(std::unique_ptr<Core::Ports::IStereoRectifier> rectifier);
     void SetStereoFramePreprocessor(
-        std::unique_ptr<core::ports::IStereoFramePreprocessor> preprocessor);
+        std::unique_ptr<Core::Ports::IStereoFramePreprocessor> preprocessor);
     void SetStereoPairBuilder(
-        std::unique_ptr<core::ports::IStereoPairBuilder> builder);
-    core::ports::IVisualPnpObservationBuilder &VisualPnpObservationBuilder();
-    const core::ports::IVisualPnpObservationBuilder &
+        std::unique_ptr<Core::Ports::IStereoPairBuilder> builder);
+    Core::Ports::IVisualPnpObservationBuilder &VisualPnpObservationBuilder();
+    const Core::Ports::IVisualPnpObservationBuilder &
     VisualPnpObservationBuilder() const;
-    core::ports::IVisualPnpPoseBackend &VisualPnpPoseBackend();
-    const core::ports::IVisualPnpPoseBackend &VisualPnpPoseBackend() const;
+    Core::Ports::IVisualPnpPoseBackend &VisualPnpPoseBackend();
+    const Core::Ports::IVisualPnpPoseBackend &VisualPnpPoseBackend() const;
     void SetVisualPnpObservationBuilder(
-        std::unique_ptr<core::ports::IVisualPnpObservationBuilder> builder);
+        std::unique_ptr<Core::Ports::IVisualPnpObservationBuilder> builder);
     void SetVisualPnpPoseBackend(
-        std::unique_ptr<core::ports::IVisualPnpPoseBackend> backend);
-    core::ports::IPointTracker2d &PointTracker2d();
-    const core::ports::IPointTracker2d &PointTracker2d() const;
-    core::ports::IVisualLoopClosureBackend &VisualLoopClosureBackend();
-    const core::ports::IVisualLoopClosureBackend &
+        std::unique_ptr<Core::Ports::IVisualPnpPoseBackend> backend);
+    Core::Ports::IPointTracker2d &PointTracker2d();
+    const Core::Ports::IPointTracker2d &PointTracker2d() const;
+    Core::Ports::IVisualLoopClosureBackend &VisualLoopClosureBackend();
+    const Core::Ports::IVisualLoopClosureBackend &
     VisualLoopClosureBackend() const;
-    void SetPointTracker2d(std::unique_ptr<core::ports::IPointTracker2d> tracker);
+    void SetPointTracker2d(std::unique_ptr<Core::Ports::IPointTracker2d> tracker);
     void SetVisualLoopClosureBackend(
-        std::unique_ptr<core::ports::IVisualLoopClosureBackend> backend);
+        std::unique_ptr<Core::Ports::IVisualLoopClosureBackend> backend);
 
-    core::ports::IVisualFeatureFrontend *m_visualFeatureFrontend{nullptr};
+    Core::Ports::IVisualFeatureFrontend *m_visualFeatureFrontend{nullptr};
     int m_visualFeatureInputMaxWidth{640};
     int m_visualFeatureInputMaxHeight{400};
     mutable int m_lastVisualFeatureRawLeftCount{0};
@@ -112,22 +112,22 @@ struct SlamModeSharedState {
     mutable std::vector<cv::Point2f> m_visualFeatureTemporalPrevLeftPoints;
     mutable std::vector<cv::Point2f> m_visualFeatureTemporalPrevRightPoints;
     mutable bool m_visualFeatureTemporalHavePrevStereo{false};
-    std::unique_ptr<core::ports::IStereoMatchSelector> m_stereoMatchSelector;
-    std::unique_ptr<core::ports::ITemporalStereoProcessor>
+    std::unique_ptr<Core::Ports::IStereoMatchSelector> m_stereoMatchSelector;
+    std::unique_ptr<Core::Ports::ITemporalStereoProcessor>
         m_temporalStereoProcessor;
-    std::unique_ptr<core::ports::IStereoFeaturePacketBuilder>
+    std::unique_ptr<Core::Ports::IStereoFeaturePacketBuilder>
         m_stereoFeaturePacketBuilder;
-    std::unique_ptr<core::ports::IStereoCalibrationLoader>
+    std::unique_ptr<Core::Ports::IStereoCalibrationLoader>
         m_stereoCalibrationLoader;
-    std::unique_ptr<core::ports::IStereoRectifier> m_stereoRectifier;
-    std::unique_ptr<core::ports::IStereoFramePreprocessor>
+    std::unique_ptr<Core::Ports::IStereoRectifier> m_stereoRectifier;
+    std::unique_ptr<Core::Ports::IStereoFramePreprocessor>
         m_stereoFramePreprocessor;
-    std::unique_ptr<core::ports::IStereoPairBuilder> m_stereoPairBuilder;
-    std::unique_ptr<core::ports::IVisualPnpObservationBuilder>
+    std::unique_ptr<Core::Ports::IStereoPairBuilder> m_stereoPairBuilder;
+    std::unique_ptr<Core::Ports::IVisualPnpObservationBuilder>
         m_visualPnpObservationBuilder;
-    std::unique_ptr<core::ports::IVisualPnpPoseBackend> m_visualPnpPoseBackend;
-    std::unique_ptr<core::ports::IPointTracker2d> m_pointTracker2d;
-    std::unique_ptr<core::ports::IVisualLoopClosureBackend>
+    std::unique_ptr<Core::Ports::IVisualPnpPoseBackend> m_visualPnpPoseBackend;
+    std::unique_ptr<Core::Ports::IPointTracker2d> m_pointTracker2d;
+    std::unique_ptr<Core::Ports::IVisualLoopClosureBackend>
         m_visualLoopClosureBackend;
 
     bool m_lkCalibrationLoaded{false};
@@ -162,4 +162,4 @@ struct SlamModeSharedState {
     mutable LkLoopClosureState m_lkLoop;
 };
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

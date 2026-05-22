@@ -8,7 +8,7 @@
 #include "core/ports/slam_engine.h"
 #include "core/ports/visual_feature_frontend.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct ImuThreadState;
 struct MainRuntimeAliases;
@@ -30,7 +30,7 @@ struct SlamSessionEngineResourceConfig {
 };
 
 struct SlamSessionEngineResources {
-    std::unique_ptr<SmartDrone::core::ports::ISlamEngine> engine;
+    std::unique_ptr<SmartDrone::Core::Ports::ISlamEngine> engine;
     std::unique_ptr<SlamRuntimeControlPort> control;
 };
 
@@ -41,7 +41,7 @@ struct SlamVisualFeatureFrontendStartResult {
     std::string repoPath;
     std::string error;
     std::unique_ptr<ISlamVisualFeatureFrontendSession> session;
-    SmartDrone::core::ports::IVisualFeatureFrontend *frontend{nullptr};
+    SmartDrone::Core::Ports::IVisualFeatureFrontend *frontend{nullptr};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

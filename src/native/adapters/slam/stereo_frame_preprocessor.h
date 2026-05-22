@@ -5,12 +5,12 @@
 #include "adapters/slam/stereo_calibration.h"
 #include "core/ports/stereo_processing.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
-using PreparedStereoFrame = core::ports::PreparedStereoFrame;
+using PreparedStereoFrame = Core::Ports::PreparedStereoFrame;
 
 class DefaultStereoFramePreprocessor final
-    : public core::ports::IStereoFramePreprocessor {
+    : public Core::Ports::IStereoFramePreprocessor {
   public:
     bool PrepareForFrontend(const cv::Mat &leftImage, const cv::Mat &rightImage,
                             PreparedStereoFrame &frame,
@@ -24,4 +24,4 @@ bool PrepareStereoFrameForFrontend(const cv::Mat &leftImage,
                                    StereoCalibration *calibration,
                                    bool rectify);
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam

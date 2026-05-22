@@ -5,7 +5,7 @@
 
 #include <opencv2/core.hpp>
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct VisualFeatureSet {
     std::vector<cv::Point2f> keypoints;
@@ -35,4 +35,4 @@ struct StereoMatchPair {
     float quality{0.0f};
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

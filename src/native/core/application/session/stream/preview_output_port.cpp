@@ -2,7 +2,7 @@
 
 #include "core/application/config/runtime_app_types.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 PreviewOutputOpenConfig MakePreviewOutputOpenConfig(
     const MainRuntimeAliases &aliases)
@@ -16,4 +16,4 @@ PreviewOutputOpenConfig MakePreviewOutputOpenConfig(
     return config;
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

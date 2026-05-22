@@ -5,7 +5,7 @@
 
 #include "core/application/epg/epg_registry.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct EpgGraphRef;
 struct LiveRuntimeTuning;
@@ -24,4 +24,4 @@ struct SlamTaskFactoryDeps {
 EpgTaskFactoryResolver MakeSlamGraphTaskFactoryResolver(
     SlamTaskFactoryDeps deps);
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

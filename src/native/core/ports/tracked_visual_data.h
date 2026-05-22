@@ -6,7 +6,7 @@
 
 #include <opencv2/core/types.hpp>
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct TrackedFeatureSnapshot {
     std::vector<cv::Point2f> leftFeatures;
@@ -68,4 +68,4 @@ class ITrackedVisualDataProvider {
     ExtractVisualMapSnapshot(const VisualMapSnapshotRequest &request) = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

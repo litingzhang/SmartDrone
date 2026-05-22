@@ -5,12 +5,12 @@
 
 #include "core/application/session/epg/session_graph_runtime.h"
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 class IPosePublisher;
 class ISlamSessionTelemetryPort;
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 struct ApplicationRuntimeFactories;
 struct LivePoseState;
@@ -20,8 +20,8 @@ struct UnifiedConfig;
 struct SlamSessionGraphRuntimeConfig {
     const UnifiedConfig &cfg;
     LiveRuntimeTuning &tuning;
-    SmartDrone::core::ports::ISlamSessionTelemetryPort &telemetry;
-    SmartDrone::core::ports::IPosePublisher &posePublisher;
+    SmartDrone::Core::Ports::ISlamSessionTelemetryPort &telemetry;
+    SmartDrone::Core::Ports::IPosePublisher &posePublisher;
     std::atomic<bool> &stop;
     LivePoseState &livePose;
     std::atomic<bool> &runningFlag;
@@ -46,4 +46,4 @@ class SlamSessionGraphRuntime final : public ISessionGraphRuntime {
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

@@ -6,7 +6,7 @@
 #include <netinet/in.h>
 #include <sys/types.h>
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 
 class DiscoveryBeaconRuntime final {
   public:
@@ -33,4 +33,4 @@ class DiscoveryBeaconRuntime final {
     bool m_firstLog{true};
 };
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

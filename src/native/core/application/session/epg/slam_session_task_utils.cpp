@@ -8,7 +8,7 @@
 #include "core/application/epg/epg_task_manifest.h"
 #include "core/application/runtime/runtime_aliases.h"
 
-namespace SmartDrone::core::application {
+namespace SmartDrone::Core::Application {
 namespace {
 
 const std::vector<EpgTaskRuntimeTuningEntry> SLAM_RUNTIME_TUNING{
@@ -61,4 +61,4 @@ void ApplySlamRuntimePacing(Epg::GraphConfig &config, const UnifiedConfig &cfg)
                            cfg.app.imu.rtPrio);
 }
 
-} // namespace SmartDrone::core::application
+} // namespace SmartDrone::Core::Application

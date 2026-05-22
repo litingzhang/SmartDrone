@@ -6,7 +6,7 @@
 
 #include <opencv2/core.hpp>
 
-namespace SmartDrone::core::ports {
+namespace SmartDrone::Core::Ports {
 
 struct VisualWordWeight {
     uint32_t wordId{0};
@@ -44,4 +44,4 @@ class IVisualVocabulary {
                          const VisualBowVector &right) const = 0;
 };
 
-} // namespace SmartDrone::core::ports
+} // namespace SmartDrone::Core::Ports

@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <condition_variable>
+#include <thread>
 
 namespace Epg {
 

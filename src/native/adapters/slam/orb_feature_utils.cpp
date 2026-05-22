@@ -7,7 +7,7 @@
 #include "ORBmatcher.h"
 #include "adapters/slam/descriptor_geometry.h"
 
-namespace SmartDrone::adapters::slam {
+namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
@@ -38,7 +38,7 @@ bool ComputeOrbDescriptorsAtPoints(ORB_SLAM3::ORBextractor *extractor,
 
 bool DetectAndComputeOrbFeatures(ORB_SLAM3::ORBextractor *extractor,
                                  const cv::Mat &gray,
-                                 core::ports::VisualFeatureSet &features)
+                                 Core::Ports::VisualFeatureSet &features)
 {
     features = {};
     if (extractor == nullptr || gray.empty()) {
@@ -119,7 +119,7 @@ struct DefaultOrbFeatureFrontend::Impl {
     }
 
     std::unique_ptr<ORB_SLAM3::ORBextractor> extractor;
-    core::ports::VisualFeatureFrontendStats lastStats;
+    Core::Ports::VisualFeatureFrontendStats lastStats;
 };
 
 DefaultOrbFeatureFrontend::DefaultOrbFeatureFrontend(
@@ -136,13 +136,13 @@ bool DefaultOrbFeatureFrontend::Running() const
 }
 
 bool DefaultOrbFeatureFrontend::Detect(
-    const core::ports::VisualFeatureDetectRequest &request,
-    core::ports::VisualFeatureDetectResult &result)
+    const Core::Ports::VisualFeatureDetectRequest &request,
+    Core::Ports::VisualFeatureDetectResult &result)
 {
     result = {};
-    core::ports::VisualFeatureComputeRequest computeRequest;
+    Core::Ports::VisualFeatureComputeRequest computeRequest;
     computeRequest.gray = request.gray;
-    core::ports::VisualFeatureComputeResult computeResult;
+    Core::Ports::VisualFeatureComputeResult computeResult;
     if (!DetectAndCompute(computeRequest, computeResult)) {
         result.error = std::move(computeResult.error);
         return false;
@@ -152,8 +152,8 @@ bool DefaultOrbFeatureFrontend::Detect(
 }
 
 bool DefaultOrbFeatureFrontend::DetectAndCompute(
-    const core::ports::VisualFeatureComputeRequest &request,
-    core::ports::VisualFeatureComputeResult &result)
+    const Core::Ports::VisualFeatureComputeRequest &request,
+    Core::Ports::VisualFeatureComputeResult &result)
 {
     result = {};
     if (request.gray == nullptr) {
@@ -182,8 +182,8 @@ bool DefaultOrbFeatureFrontend::DetectAndCompute(
 }
 
 bool DefaultOrbFeatureFrontend::DetectAndComputeStereo(
-    const core::ports::StereoVisualFeatureComputeRequest &request,
-    core::ports::StereoVisualFeatureComputeResult &result)
+    const Core::Ports::StereoVisualFeatureComputeRequest &request,
+    Core::Ports::StereoVisualFeatureComputeResult &result)
 {
     result = {};
     if (request.leftGray == nullptr || request.rightGray == nullptr) {
@@ -224,10 +224,10 @@ void DefaultOrbFeatureFrontend::SetLightGlueEveryNOverride(int)
 {
 }
 
-core::ports::VisualFeatureFrontendStats
+Core::Ports::VisualFeatureFrontendStats
 DefaultOrbFeatureFrontend::LastStats() const
 {
-    return m_impl ? m_impl->lastStats : core::ports::VisualFeatureFrontendStats{};
+    return m_impl ? m_impl->lastStats : Core::Ports::VisualFeatureFrontendStats{};
 }
 
 bool DefaultOrbFeatureFrontend::ComputeDescriptorsAtPoints(
@@ -262,4 +262,4 @@ int DefaultOrbFeatureFrontend::DescriptorDistance(
                                                      rightDescriptor);
 }
 
-} // namespace SmartDrone::adapters::slam
+} // namespace SmartDrone::Adapters::Slam
