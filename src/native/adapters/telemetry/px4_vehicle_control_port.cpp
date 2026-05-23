@@ -56,7 +56,7 @@ Px4VehicleControlPort::Px4VehicleControlPort(Px4MavlinkGateway &mavlink)
 {
 }
 
-void Px4VehicleControlPort::SetFrameTimingTracker(SmartDrone::Core::Application::FrameTimingTracker *tracker)
+void Px4VehicleControlPort::SetFrameTimingTracker(SmartDrone::Core::Ports::IFrameTimingTracker *tracker)
 {
     m_mavlink.SetFrameTimingTracker(tracker);
 }

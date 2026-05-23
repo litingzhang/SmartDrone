@@ -58,7 +58,7 @@ class EventPipelineGraph {
         IQueue *m_queue{nullptr};
     };
 
-    explicit EventPipelineGraph(const Registry &registry);
+    explicit EventPipelineGraph(Registry registry);
     ~EventPipelineGraph();
 
     EventPipelineGraph(const EventPipelineGraph &) = delete;
@@ -147,7 +147,7 @@ class EventPipelineGraph {
     void BindTaskInputNotifiers(TaskRunner &runner,
                                 const TaskConfig &taskConfig);
 
-    const Registry &m_registry;
+    Registry m_registry;
     bool m_configured{false};
     bool m_running{false};
     GraphConfig m_config;

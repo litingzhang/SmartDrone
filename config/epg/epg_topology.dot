@@ -140,8 +140,20 @@ digraph EpgTopology {
     SlamAcquireTask [
       label="{SlamAcquireTask|type=SlamAcquireTask|stage=frame_acquire_and_prepare|trigger=any_queue_ready|trigger_queues=SlamFrameReady}"
     ];
-    SlamTrackingTask [
-      label="{SlamTrackingTask|type=SlamTrackingTask|trigger=any_queue_ready|trigger_queues=SlamPreparedFrame}"
+    SlamTrackingRouteTask [
+      label="{SlamTrackingRouteTask|type=SlamTrackingRouteTask|trigger=any_queue_ready|trigger_queues=SlamPreparedFrame}"
+    ];
+    SlamKltTrackingTask [
+      label="{SlamKltTrackingTask|type=SlamKltTrackingTask|trigger=any_queue_ready|trigger_queues=SlamKltPreparedFrame}"
+    ];
+    SlamDpvoTrackingTask [
+      label="{SlamDpvoTrackingTask|type=SlamDpvoTrackingTask|trigger=any_queue_ready|trigger_queues=SlamDpvoPreparedFrame}"
+    ];
+    SlamOrbTrackingTask [
+      label="{SlamOrbTrackingTask|type=SlamOrbTrackingTask|trigger=any_queue_ready|trigger_queues=SlamOrbPreparedFrame}"
+    ];
+    SlamVisualFeatureTrackingTask [
+      label="{SlamVisualFeatureTrackingTask|type=SlamVisualFeatureTrackingTask|trigger=any_queue_ready|trigger_queues=SlamVisualFeaturePreparedFrame}"
     ];
     SlamPosePostprocessTask [
       label="{SlamPosePostprocessTask|type=SlamPosePostprocessTask|trigger=any_queue_ready|trigger_queues=SlamTrackedFrame}"
@@ -183,11 +195,32 @@ digraph EpgTopology {
     SlamImuGateTask -> SlamAcquireTask [
       taillabel="0", headlabel="0", label="SlamFrameReady\ndepth=1\noverflow=overwrite_oldest"
     ];
-    SlamAcquireTask -> SlamTrackingTask [
+    SlamAcquireTask -> SlamTrackingRouteTask [
       taillabel="0", headlabel="0", label="SlamPreparedFrame\ndepth=1\noverflow=overwrite_oldest"
     ];
-    SlamTrackingTask -> SlamPosePostprocessTask [
+    SlamTrackingRouteTask -> SlamKltTrackingTask [
+      taillabel="0", headlabel="0", label="SlamKltPreparedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamTrackingRouteTask -> SlamDpvoTrackingTask [
+      taillabel="1", headlabel="0", label="SlamDpvoPreparedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamTrackingRouteTask -> SlamOrbTrackingTask [
+      taillabel="2", headlabel="0", label="SlamOrbPreparedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamTrackingRouteTask -> SlamVisualFeatureTrackingTask [
+      taillabel="3", headlabel="0", label="SlamVisualFeaturePreparedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamKltTrackingTask -> SlamPosePostprocessTask [
       taillabel="0", headlabel="0", label="SlamTrackedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamDpvoTrackingTask -> SlamPosePostprocessTask [
+      taillabel="0", headlabel="1", label="SlamTrackedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamOrbTrackingTask -> SlamPosePostprocessTask [
+      taillabel="0", headlabel="2", label="SlamTrackedFrame\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    SlamVisualFeatureTrackingTask -> SlamPosePostprocessTask [
+      taillabel="0", headlabel="3", label="SlamTrackedFrame\ndepth=1\noverflow=overwrite_oldest"
     ];
     SlamPosePostprocessTask -> SlamPointCloudTask [
       taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=1\noverflow=overwrite_oldest"
@@ -225,26 +258,35 @@ digraph EpgTopology {
     SlamAcquireTask -> SlamMonitorTask [
       taillabel="1", headlabel="2", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
     ];
-    SlamTrackingTask -> SlamMonitorTask [
+    SlamKltTrackingTask -> SlamMonitorTask [
       taillabel="1", headlabel="3", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
     ];
-    SlamPosePostprocessTask -> SlamMonitorTask [
-      taillabel="4", headlabel="4", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    SlamDpvoTrackingTask -> SlamMonitorTask [
+      taillabel="1", headlabel="4", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
     ];
-    SlamPointCloudTask -> SlamMonitorTask [
+    SlamOrbTrackingTask -> SlamMonitorTask [
       taillabel="1", headlabel="5", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
     ];
-    SlamLivePoseTask -> SlamMonitorTask [
+    SlamVisualFeatureTrackingTask -> SlamMonitorTask [
       taillabel="1", headlabel="6", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
     ];
-    SlamMavlinkTask -> SlamMonitorTask [
-      taillabel="1", headlabel="7", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    SlamPosePostprocessTask -> SlamMonitorTask [
+      taillabel="4", headlabel="7", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
     ];
-    SlamUdpTask -> SlamMonitorTask [
+    SlamPointCloudTask -> SlamMonitorTask [
       taillabel="1", headlabel="8", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
     ];
-    SlamPreviewTxTask -> SlamMonitorTask [
+    SlamLivePoseTask -> SlamMonitorTask [
       taillabel="1", headlabel="9", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamMavlinkTask -> SlamMonitorTask [
+      taillabel="1", headlabel="10", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamUdpTask -> SlamMonitorTask [
+      taillabel="1", headlabel="11", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
+    ];
+    SlamPreviewTxTask -> SlamMonitorTask [
+      taillabel="1", headlabel="12", label="SlamStatus\ndepth=4\noverflow=overwrite_oldest"
     ];
   }
 

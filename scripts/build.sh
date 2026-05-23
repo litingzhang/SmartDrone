@@ -195,7 +195,7 @@ HOST_TEST_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host/unit-test"
 HOST_REPLAY_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host/offline-replay"
 REPLAY_ARTIFACTS_DIR="$HOST_REPLAY_ARTIFACTS_DIR"
 ANDROID_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/android"
-ORB_VOCAB_DIR="$REPO_ROOT/src/native/adapters/slam/orb_slam3/place_recognition/vocabulary"
+ORB_VOCAB_DIR="$REPO_ROOT/src/native/adapters/slam/orb/orb_slam3/place_recognition/vocabulary"
 ORB_VOCAB_TXT="$ORB_VOCAB_DIR/ORBvoc.txt"
 ORB_VOCAB_ARCHIVE="$ORB_VOCAB_DIR/ORBvoc.txt.tar.gz"
 

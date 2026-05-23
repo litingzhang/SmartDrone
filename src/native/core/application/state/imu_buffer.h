@@ -5,33 +5,17 @@
 #include <mutex>
 #include <vector>
 
+#include "core/domain/imu_sample.h"
 #include "core/ports/imu_provider.h"
 
-struct ImuSample {
-    int64_t tNs{};
-    float ax{}, ay{}, az{};
-    float gx{}, gy{}, gz{};
-};
-
-struct ImuScale {
-    float accelLsbPerG{2048.0f};
-    float gyroLsbPerDps{16.4f};
-};
-
-struct ImuTimeRange {
-    int64_t startNs{};
-    int64_t endNs{};
-    int64_t slackBeforeNs{};
-    int64_t slackAfterNs{};
-};
-
-class ImuBuffer {
+class ImuBuffer final : public SmartDrone::Core::Ports::IImuWindowSource {
   public:
     void Push(const ImuSample &sample);
-    std::vector<SmartDrone::Core::Ports::ImuReading> PopBetweenNs(const ImuTimeRange &range);
+    std::vector<SmartDrone::Core::Ports::ImuReading> PopBetweenNs(
+        const ImuTimeRange &range) override;
     std::vector<SmartDrone::Core::Ports::ImuReading> PopBetweenNs(int64_t t0Ns, int64_t t1Ns,
                                                                   int64_t slackBeforeNs, int64_t slackAfterNs);
-    size_t Size() const;
+    size_t Size() const override;
     bool PeekFirstLast(int64_t &tFirst, int64_t &tLast) const;
 
   private:

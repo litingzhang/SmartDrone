@@ -1,9 +1,7 @@
 #include "core/application/session/slam/slam_runtime_environment.h"
 
-#include <algorithm>
 #include <cctype>
 #include <cstddef>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -176,19 +174,6 @@ void LogRuntimeOrbSettings(const RuntimeConfig &runtime,
               << " file=" << targetPath.string() << "\n";
 }
 
-void ResetOrbAccelerationEnvironment()
-{
-#if defined(_WIN32)
-    _putenv_s("SMART_DRONE_ORB_ACCEL", "");
-    _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "");
-    _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
-#else
-    unsetenv("SMART_DRONE_ORB_ACCEL");
-    unsetenv("SMART_DRONE_ORB_VPI_REMAP");
-    unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
-#endif
-}
-
 } // namespace
 
 std::string BuildEffectiveSlamSettingsPath(const UnifiedConfig &cfg)
@@ -216,44 +201,6 @@ std::string BuildEffectiveSlamSettingsPath(const UnifiedConfig &cfg)
 
     LogRuntimeOrbSettings(cfg.app.runtime, targetPath);
     return targetPath.string();
-}
-
-void ApplyOrbAccelerationEnvironment(const std::string &acceleration)
-{
-    std::string normalized = acceleration;
-    std::transform(
-        normalized.begin(), normalized.end(), normalized.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (normalized == "cuda" || normalized == "gpu" ||
-        normalized == "opencv_cuda" || normalized == "opencv-cuda") {
-#if defined(_WIN32)
-        _putenv_s("SMART_DRONE_ORB_ACCEL", "cuda");
-        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "");
-        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
-#else
-        setenv("SMART_DRONE_ORB_ACCEL", "cuda", 1);
-        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
-        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
-#endif
-        return;
-    }
-
-    if (normalized == "vpi" || normalized == "vpi_remap" ||
-        normalized == "vpi-remap" || normalized == "vpi_cuda_remap" ||
-        normalized == "vpi-cuda-remap") {
-#if defined(_WIN32)
-        _putenv_s("SMART_DRONE_ORB_ACCEL", "");
-        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "1");
-        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
-#else
-        unsetenv("SMART_DRONE_ORB_ACCEL");
-        setenv("SMART_DRONE_ORB_VPI_REMAP", "1", 1);
-        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
-#endif
-        return;
-    }
-
-    ResetOrbAccelerationEnvironment();
 }
 
 } // namespace SmartDrone::Core::Application

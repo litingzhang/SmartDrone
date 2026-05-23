@@ -5,12 +5,12 @@
 #include <utility>
 
 #include "common/epg/epg.h"
+#include "core/application/epg/epg_graph_runtime.h"
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
 #include "core/application/runtime/epg_graph_lifecycle.h"
 #include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/session/calib/calib_runtime_state.h"
-#include "core/application/epg/epg_registry.h"
 #include "core/application/state/live_pose_state.h"
 #include "core/application/session/epg/calib_session_task_factory.h"
 
@@ -48,19 +48,19 @@ class CalibSessionGraphRuntime::Impl final {
         m_sessionOk.store(true, std::memory_order_relaxed);
         m_state = std::make_shared<CalibRuntimeState>(RuntimeStateConfig());
         auto graphRef = std::make_shared<EpgGraphRef>();
-        RegisterEpgTypes(m_registry, EpgDomain::CalibSession,
-                         MakeCalibGraphTaskFactoryResolver({
-                             m_state,
-                             m_stop,
-                             m_runningFlag,
-                             m_sessionOk,
-                             m_completed,
-                             graphRef,
-                         }));
-        auto graph = std::make_unique<Epg::EventPipelineGraph>(m_registry);
-        graphRef->graph = graph.get();
-        graph->Configure(CompileEpgConfig(EpgDomain::CalibSession, m_registry));
-        graph->Start();
+        auto graph = StartEpgGraph({
+            EpgDomain::CalibSession,
+            MakeCalibGraphTaskFactoryResolver({
+                m_state,
+                m_stop,
+                m_runningFlag,
+                m_sessionOk,
+                m_completed,
+                graphRef,
+            }),
+            graphRef,
+            {},
+        });
         m_lifecycle.AttachGraph(std::move(graph));
         return true;
     }
@@ -138,7 +138,6 @@ class CalibSessionGraphRuntime::Impl final {
     LivePoseState &m_livePose;
     std::atomic<bool> &m_runningFlag;
     const ApplicationRuntimeFactories &m_factories;
-    Epg::Registry m_registry;
     std::shared_ptr<CalibRuntimeState> m_state;
     EpgGraphLifecycle m_lifecycle;
     std::atomic<bool> m_sessionOk{true};

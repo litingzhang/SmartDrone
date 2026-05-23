@@ -701,4 +701,4 @@ std::shared_ptr<LibcameraMonoCam::FrameSlot> LibcameraMonoCam::AcquireFrameSlot(
     });
 }
 
-#include "stereo_ov9281_pairing.inc"
+#include "stereo_ov9281_pairing.h"

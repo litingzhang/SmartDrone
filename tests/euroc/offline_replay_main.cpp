@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -11,13 +13,30 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "adapters/slam/slam_engine_factory.h"
-#include "adapters/slam/visual_feature_frontend_client.h"
+#include <unistd.h>
+
+#include "common/environment.h"
+#include "adapters/slam/engine/slam_engine_factory.h"
+#include "adapters/slam/engine/slam_mode_state.h"
+#include "adapters/slam/superpoint/visual_feature_frontend_client.h"
 #include "core/application/config/app_args.h"
+#include "core/application/config/runtime_app_types.h"
 #include "core/application/config/slam_backend_availability.h"
+#include "core/application/epg/epg_runtime_optimizer.h"
+#include "core/application/epg/epg_task_manifest.h"
+#include "core/application/runtime/application_runtime_factories.h"
+#include "core/application/runtime/epg_dfx_snapshot.h"
+#include "core/application/runtime/runtime_aliases.h"
+#include "core/application/session/epg/slam_session_graph_service.h"
+#include "core/application/session/slam/slam_runtime_control_port.h"
+#include "core/application/session/stream/preview_output_port.h"
+#include "core/application/state/live_pose_state.h"
 #include "core/domain/runtime_mode.h"
+#include "core/ports/pose_publisher.h"
+#include "core/ports/slam_session_telemetry.h"
 #include "support/replay_dataset.h"
 #include "support/replay_slam_runner.h"
 #include <Eigen/Core>
@@ -33,6 +52,10 @@ struct OfflineReplayOptions {
     fs::path outputCsv{"build/offline_replay_pose.csv"};
     fs::path summaryJson{};
     fs::path finalEurocTrajectory{};
+    fs::path epgProfileOut{};
+    fs::path epgOptimizedOut{};
+    fs::path epgSolverReportOut{};
+    int epgDrainMs{1500};
     std::string vocab{};
     std::string settings{"config/stereo.yaml"};
     SensorMode sensorMode{SensorMode::StereoImu};
@@ -335,6 +358,14 @@ constexpr const char *OFFLINE_REPLAY_USAGE_TEXT =
     "  --summary-json <file> Optional summary JSON output path\n"
     "  --final-euroc-trajectory <file> Optional final ORB-SLAM3 EuRoC "
     "trajectory after shutdown\n"
+    "  --epg-profile-out <file> Run stereo-only replay through SLAM EPG and "
+    "copy the profile JSON\n"
+    "  --epg-optimized-out <file> Optional optimized SLAM EPG config output "
+    "for --epg-profile-out\n"
+    "  --epg-solver-report-out <file> Optional solver report output for "
+    "--epg-profile-out\n"
+    "  --epg-drain-ms <n> Extra profile drain time after dataset end, "
+    "default 1500\n"
     "  --vocab <file>        ORB vocabulary path, used only with "
     "--slam-backend orbslam3\n"
     "  --settings <file>     Camera/SLAM settings YAML path\n"
@@ -529,6 +560,14 @@ void ParseReplayIoOptions(int argc, char **argv, OfflineReplayOptions &opts)
     opts.summaryJson = fs::path(GetOptionValue(argc, argv, "--summary-json", ""));
     opts.finalEurocTrajectory =
         fs::path(GetOptionValue(argc, argv, "--final-euroc-trajectory", ""));
+    opts.epgProfileOut =
+        fs::path(GetOptionValue(argc, argv, "--epg-profile-out", ""));
+    opts.epgOptimizedOut =
+        fs::path(GetOptionValue(argc, argv, "--epg-optimized-out", ""));
+    opts.epgSolverReportOut =
+        fs::path(GetOptionValue(argc, argv, "--epg-solver-report-out", ""));
+    opts.epgDrainMs =
+        GetOptionInt(argc, argv, "--epg-drain-ms", opts.epgDrainMs);
 }
 
 void ParseReplayModeOptions(int argc, char **argv, OfflineReplayOptions &opts)
@@ -644,15 +683,19 @@ bool UseImu(SensorMode mode)
     return mode == SensorMode::StereoImu || mode == SensorMode::MonoImu;
 }
 
-SmartDrone::Adapters::Slam::SlamInputMode
-ResolveSlamInputMode(SensorMode mode)
+SmartDrone::Adapters::Slam::SlamInputMode ResolveSlamInputMode(SensorMode mode)
 {
     return (mode == SensorMode::Mono || mode == SensorMode::MonoImu)
                ? SmartDrone::Adapters::Slam::SlamInputMode::MonoRight
                : SmartDrone::Adapters::Slam::SlamInputMode::Stereo;
 }
 
-#include "offline_replay_run.inc"
+int RunEpgProfileReplay(const OfflineReplayOptions &opts);
+
+#include "offline_replay_runtime.h"
+#include "offline_replay_summary.h"
+#include "offline_replay_execute.h"
+#include "offline_replay_epg_profile.h"
 
 } // namespace
 

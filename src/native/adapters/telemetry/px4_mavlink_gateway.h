@@ -13,7 +13,7 @@
 
 #include "adapters/telemetry/mavlink_serial_transport.h"
 #include "common/mavlink.h"
-#include "core/application/state/frame_timing_tracker.h"
+#include "core/ports/frame_timing.h"
 
 enum class OdomQualityMode { GOOD,
                              WEAK,
@@ -103,7 +103,7 @@ class Px4MavlinkGateway {
     ~Px4MavlinkGateway();
 
     void SetJsonDiagnostics(bool enabled);
-    void SetFrameTimingTracker(SmartDrone::Core::Application::FrameTimingTracker *tracker);
+    void SetFrameTimingTracker(SmartDrone::Core::Ports::IFrameTimingTracker *tracker);
     int PollRxOnce(int timeoutMs = 0);
     void StepTx();
     uint8_t GetTargetSystem() const;
@@ -164,7 +164,7 @@ class Px4MavlinkGateway {
         OdometryTiming timing{};
     };
 
-    bool LookupFrameTiming(uint64_t frameId, SmartDrone::Core::Application::FrameTimingRecord &out) const;
+    bool LookupFrameTiming(uint64_t frameId, SmartDrone::Core::Ports::FrameTimingRecord &out) const;
     void MarkFrameMavTx(uint64_t frameId, uint64_t tMavTxNs);
     static const char *MavResultToStr(uint8_t r);
     OdometryPacketFields BuildOdometryPacketFields(const OdometryRequest &request) const;
@@ -215,6 +215,6 @@ class Px4MavlinkGateway {
     DownwardDistanceSensor m_downwardDistanceSensor{};
     bool m_haveDownwardDistanceSensor{false};
     uint64_t m_lastSentOdomFrameId{0};
-    SmartDrone::Core::Application::FrameTimingTracker *m_frameTimingTracker{nullptr};
+    SmartDrone::Core::Ports::IFrameTimingTracker *m_frameTimingTracker{nullptr};
     std::atomic<bool> m_jsonDiagnostics{false};
 };

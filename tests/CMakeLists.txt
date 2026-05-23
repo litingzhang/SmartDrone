@@ -11,6 +11,10 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/common/epg/epg_json.cpp
     ../src/native/common/epg/epg_mermaid.cpp
     ../src/native/common/epg/epg_task_runner.cpp
+    ../src/native/common/environment.cpp
+    ../src/native/core/application/config/orb_acceleration_config.cpp
+    ../src/native/core/application/epg/epg_graph_runtime.cpp
+    ../src/native/core/application/epg/epg_registry.cpp
     ../src/native/core/application/epg/epg_runtime_optimizer.cpp
     ../src/native/core/application/epg/epg_solver_primitives.cpp
     ../src/native/core/application/epg/epg_task_manifest.cpp
@@ -70,40 +74,84 @@ if(ENABLE_OFFLINE_REPLAY)
   add_executable(smart_drone_offline_replay
     euroc/offline_replay_main.cpp
     euroc/support/replay_dataset.cpp
+    euroc/support/replay_imu_sample_source.cpp
     euroc/support/replay_slam_runner.cpp
-    ../src/native/adapters/slam/dpvo_runtime_options.cpp
-    ../src/native/adapters/slam/slam_engine_factory.cpp
-    ../src/native/adapters/slam/slam_mode_state.cpp
-    ../src/native/adapters/slam/klt_slam_engine.cpp
-    ../src/native/adapters/slam/klt_continuous_frontend.cpp
-    ../src/native/adapters/slam/klt_loop_closure_backend.cpp
-    ../src/native/adapters/slam/klt_mode_utils.cpp
-    ../src/native/adapters/slam/klt_per_frame_frontend.cpp
-    ../src/native/adapters/slam/klt_pnp_observation_builder.cpp
-    ../src/native/adapters/slam/klt_pose_estimator.cpp
-    ../src/native/adapters/slam/klt_track_manager.cpp
-    ../src/native/adapters/slam/feature_point_tracking.cpp
-    ../src/native/adapters/slam/stereo_feature_frontend_runner.cpp
-    ../src/native/adapters/slam/descriptor_geometry.cpp
-    ../src/native/adapters/slam/stereo_matching.cpp
-    ../src/native/adapters/slam/stereo_pair_builder.cpp
-    ../src/native/adapters/slam/stereo_feature_packet.cpp
-    ../src/native/adapters/slam/temporal_stereo.cpp
-    ../src/native/adapters/slam/slam_image_utils.cpp
-    ../src/native/adapters/slam/slam_output_utils.cpp
-    ../src/native/adapters/slam/slam_output_optional.cpp
-    ../src/native/adapters/slam/slam_pose_utils.cpp
-    ../src/native/adapters/slam/stereo_calibration.cpp
-    ../src/native/adapters/slam/stereo_frame_preprocessor.cpp
-    ../src/native/adapters/slam/stereo_geometry.cpp
-    ../src/native/adapters/slam/visual_pnp_pose_backend.cpp
-    ../src/native/adapters/slam/visual_feature_frontend_client.cpp
-    ../src/native/adapters/slam/superpoint_runtime_options.cpp
-    ../src/native/adapters/slam/superpoint_lightglue_frontend_client.cpp
+    ../src/native/common/epg/epg_context.cpp
+    ../src/native/common/epg/epg.cpp
+    ../src/native/common/epg/epg_dot.cpp
+    ../src/native/common/epg/epg_json.cpp
+    ../src/native/common/epg/epg_task_runner.cpp
+    ../src/native/common/time_utils.cpp
+    ../src/native/adapters/slam/dpvo/dpvo_runtime_options.cpp
+    ../src/native/adapters/slam/engine/slam_engine_factory.cpp
+    ../src/native/adapters/slam/engine/slam_mode_state.cpp
+    ../src/native/adapters/slam/klt/klt_slam_engine.cpp
+    ../src/native/adapters/slam/klt/klt_continuous_frontend.cpp
+    ../src/native/adapters/slam/klt/klt_loop_closure_backend.cpp
+    ../src/native/adapters/slam/klt/klt_mode_utils.cpp
+    ../src/native/adapters/slam/klt/klt_per_frame_frontend.cpp
+    ../src/native/adapters/slam/klt/klt_pnp_observation_builder.cpp
+    ../src/native/adapters/slam/klt/klt_pose_estimator.cpp
+    ../src/native/adapters/slam/klt/klt_track_manager.cpp
+    ../src/native/adapters/slam/stereo/feature_point_tracking.cpp
+    ../src/native/adapters/slam/stereo/stereo_feature_frontend_runner.cpp
+    ../src/native/adapters/slam/stereo/descriptor_geometry.cpp
+    ../src/native/adapters/slam/stereo/stereo_matching.cpp
+    ../src/native/adapters/slam/stereo/stereo_pair_builder.cpp
+    ../src/native/adapters/slam/stereo/stereo_feature_packet.cpp
+    ../src/native/adapters/slam/stereo/temporal_stereo.cpp
+    ../src/native/adapters/slam/engine/slam_image_utils.cpp
+    ../src/native/adapters/slam/engine/slam_output_utils.cpp
+    ../src/native/adapters/slam/engine/slam_output_optional.cpp
+    ../src/native/adapters/slam/engine/slam_pose_utils.cpp
+    ../src/native/adapters/slam/stereo/stereo_calibration.cpp
+    ../src/native/adapters/slam/stereo/stereo_frame_preprocessor.cpp
+    ../src/native/adapters/slam/stereo/stereo_geometry.cpp
+    ../src/native/adapters/slam/stereo/visual_pnp_pose_backend.cpp
+    ../src/native/adapters/slam/superpoint/visual_feature_frontend_client.cpp
+    ../src/native/adapters/slam/superpoint/superpoint_runtime_options.cpp
+    ../src/native/adapters/slam/superpoint/superpoint_lightglue_frontend_client.cpp
+    ../src/native/common/environment.cpp
     ../src/native/core/application/config/app_args.cpp
+    ../src/native/core/application/config/orb_acceleration_config.cpp
     ../src/native/core/application/config/slam_backend_availability.cpp
+    ../src/native/core/application/epg/epg_graph_runtime.cpp
+    ../src/native/core/application/epg/epg_registry.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer.cpp
+    ../src/native/core/application/epg/epg_solver_primitives.cpp
+    ../src/native/core/application/epg/epg_task_manifest.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report.cpp
+    ../src/native/core/application/runtime/epg_dfx_snapshot.cpp
+    ../src/native/core/application/runtime/epg_graph_lifecycle.cpp
+    ../src/native/core/application/runtime/runtime_aliases.cpp
+    ../src/native/core/application/runtime/system_runtime_messages.cpp
+    ../src/native/core/application/sensors/imu_sensor_poller.cpp
+    ../src/native/core/application/session/epg/messages/slam_epg_messages.cpp
+    ../src/native/core/application/session/epg/slam_session_graph_service.cpp
+    ../src/native/core/application/session/epg/slam_session_task_factory.cpp
+    ../src/native/core/application/session/epg/slam_session_task_utils.cpp
+    ../src/native/core/application/session/epg/slam_session_tasks.cpp
+    ../src/native/core/application/session/slam/imu_window_filter.cpp
+    ../src/native/core/application/session/slam/slam_backend_maintenance_port.cpp
+    ../src/native/core/application/session/slam/slam_frame_input_port.cpp
+    ../src/native/core/application/session/slam/slam_frame_output_port.cpp
+    ../src/native/core/application/session/slam/slam_frame_port_set.cpp
+    ../src/native/core/application/session/slam/slam_frame_pose_postprocess_port.cpp
+    ../src/native/core/application/session/slam/slam_frame_tracking_port.cpp
+    ../src/native/core/application/session/slam/slam_processing_support.cpp
+    ../src/native/core/application/session/slam/slam_runtime_control_port.cpp
+    ../src/native/core/application/session/slam/slam_runtime_environment.cpp
+    ../src/native/core/application/session/slam/slam_session_processing_port.cpp
+    ../src/native/core/application/session/slam/slam_session_resource_lifecycle.cpp
+    ../src/native/core/application/session/slam/slam_session_runtime.cpp
+    ../src/native/core/application/session/slam/slam_session_runtime_service.cpp
+    ../src/native/core/application/session/slam/slam_settings_loader.cpp
+    ../src/native/core/application/session/stream/preview_output_port.cpp
     ../src/native/core/application/state/frame_timing_tracker.cpp
+    ../src/native/core/application/state/imu_buffer.cpp
+    ../src/native/core/application/state/live_pose_state.cpp
     ../src/native/core/application/state/perception_pipeline.cpp
+    ../src/native/core/application/state/pose_postprocessor.cpp
     ../src/native/core/domain/runtime_mode.cpp
   )
 
@@ -115,20 +163,20 @@ if(ENABLE_OFFLINE_REPLAY)
 
   if(SMART_DRONE_ENABLE_ORB_SLAM3)
     target_sources(smart_drone_offline_replay PRIVATE
-      ../src/native/adapters/slam/slam_engine_adapter.cpp
-      ../src/native/adapters/slam/slam_mode_strategy.cpp
-      ../src/native/adapters/slam/slam_tracking_backend.cpp
-      ../src/native/adapters/slam/orb_mode_strategy.cpp
-      ../src/native/adapters/slam/visual_feature_lightglue_mode_strategy.cpp
-      ../src/native/adapters/slam/slam_output_optional_orb.cpp
-      ../src/native/adapters/slam/orb_feature_utils.cpp
-      ../src/native/adapters/slam/orb_visual_components.cpp
-      ../src/native/adapters/slam/orb_slam3_runtime.cpp
-      ../src/native/adapters/slam/orb_slam3_backend.cpp
+      ../src/native/adapters/slam/engine/slam_engine_adapter.cpp
+      ../src/native/adapters/slam/engine/slam_mode_strategy.cpp
+      ../src/native/adapters/slam/engine/slam_tracking_backend.cpp
+      ../src/native/adapters/slam/orb/orb_mode_strategy.cpp
+      ../src/native/adapters/slam/superpoint/visual_feature_lightglue_mode_strategy.cpp
+      ../src/native/adapters/slam/engine/slam_output_optional_orb.cpp
+      ../src/native/adapters/slam/orb/orb_feature_utils.cpp
+      ../src/native/adapters/slam/orb/orb_visual_components.cpp
+      ../src/native/adapters/slam/orb/orb_slam3_runtime.cpp
+      ../src/native/adapters/slam/orb/orb_slam3_backend.cpp
       ../src/native/core/application/config/slam_backend_availability_orb.cpp
     )
     set_source_files_properties(
-      ../src/native/adapters/slam/slam_output_optional.cpp
+      ../src/native/adapters/slam/engine/slam_output_optional.cpp
       ../src/native/core/application/config/slam_backend_availability.cpp
       PROPERTIES HEADER_FILE_ONLY ON)
     configure_orb_target(smart_drone_offline_replay)
@@ -137,7 +185,7 @@ if(ENABLE_OFFLINE_REPLAY)
   if(TARGET Eigen3::Eigen)
     target_link_libraries(smart_drone_offline_replay PRIVATE Eigen3::Eigen)
   else()
-    target_include_directories(smart_drone_offline_replay PRIVATE "/usr/include/eigen3")
+    target_include_directories(smart_drone_offline_replay SYSTEM PRIVATE "/usr/include/eigen3")
   endif()
 
   target_compile_definitions(smart_drone_offline_replay PRIVATE
@@ -145,17 +193,17 @@ if(ENABLE_OFFLINE_REPLAY)
   )
 
   set(SMART_DRONE_REPLAY_VPI_SOURCE
-    ../src/native/adapters/slam/klt_vpi_acceleration_stub.cpp)
+    ../src/native/adapters/slam/klt/klt_vpi_acceleration_stub.cpp)
   set(SMART_DRONE_REPLAY_DPVO_SOURCE
-    ../src/native/adapters/slam/dpvo_tensorrt_engine.cpp)
+    ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine.cpp)
   set(SMART_DRONE_REPLAY_SUPERPOINT_SOURCE
-    ../src/native/adapters/slam/superpoint_native_extractor.cpp)
+    ../src/native/adapters/slam/superpoint/superpoint_native_extractor.cpp)
 
   if(SMART_DRONE_ENABLE_VPI)
     resolve_smart_drone_vpi()
     if(SMART_DRONE_VPI_AVAILABLE)
       set(SMART_DRONE_REPLAY_VPI_SOURCE
-        ../src/native/adapters/slam/klt_vpi_acceleration.cpp)
+        ../src/native/adapters/slam/klt/klt_vpi_acceleration.cpp)
       target_include_directories(smart_drone_offline_replay PRIVATE "${SMART_DRONE_RESOLVED_VPI_ROOT}/include")
       target_link_directories(smart_drone_offline_replay PRIVATE "${SMART_DRONE_RESOLVED_VPI_ROOT}/lib/aarch64-linux-gnu")
       target_link_libraries(smart_drone_offline_replay PRIVATE nvvpi)
@@ -172,9 +220,15 @@ if(ENABLE_OFFLINE_REPLAY)
     configure_superpoint_native_target(smart_drone_offline_replay)
     if(SMART_DRONE_TENSORRT_AVAILABLE)
       set(SMART_DRONE_REPLAY_DPVO_SOURCE
-        ../src/native/adapters/slam/dpvo_tensorrt_engine_trt.cpp)
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_trt.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_cuda_runtime.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_graph_state.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_graph_state_internal.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_native_solver_math.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_native_solver_bundle_adjustment.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_native_solver_step.cpp)
       set(SMART_DRONE_REPLAY_SUPERPOINT_SOURCE
-        ../src/native/adapters/slam/superpoint_native_extractor_trt.cpp)
+        ../src/native/adapters/slam/superpoint/superpoint_native_extractor_trt.cpp)
     endif()
   endif()
 

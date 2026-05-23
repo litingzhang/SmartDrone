@@ -1,73 +1,18 @@
 #include "core/application/runtime/runtime_config_service.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
-#include <cstdlib>
 #include <string>
 #include <utility>
 #include <variant>
 
 #include "core/application/config/app_args.h"
 #include "core/application/config/config_registry.h"
+#include "core/application/config/orb_acceleration_config.h"
 #include "core/application/session/slam/slam_settings_loader.h"
 
 namespace SmartDrone::Core::Application {
 namespace {
-
-std::string NormalizeOrbAcceleration(std::string value)
-{
-    std::transform(
-        value.begin(), value.end(), value.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (value == "cuda" || value == "gpu" || value == "opencv_cuda" ||
-        value == "opencv-cuda") {
-        return "cuda";
-    }
-    if (value == "vpi" || value == "vpi_remap" || value == "vpi-remap" ||
-        value == "vpi_cuda_remap" || value == "vpi-cuda-remap") {
-        return "vpi-remap";
-    }
-    if (value == "cpu" || value == "off" || value.empty()) {
-        return "cpu";
-    }
-    return value;
-}
-
-void ApplyOrbAccelerationEnvironment(const std::string &acceleration)
-{
-    if (NormalizeOrbAcceleration(acceleration) == "cuda") {
-#if defined(_WIN32)
-        _putenv_s("SMART_DRONE_ORB_ACCEL", "cuda");
-        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "");
-        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
-#else
-        setenv("SMART_DRONE_ORB_ACCEL", "cuda", 1);
-        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
-        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
-#endif
-    } else if (NormalizeOrbAcceleration(acceleration) == "vpi-remap") {
-#if defined(_WIN32)
-        _putenv_s("SMART_DRONE_ORB_ACCEL", "");
-        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "1");
-        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
-#else
-        unsetenv("SMART_DRONE_ORB_ACCEL");
-        setenv("SMART_DRONE_ORB_VPI_REMAP", "1", 1);
-        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
-#endif
-    } else {
-#if defined(_WIN32)
-        _putenv_s("SMART_DRONE_ORB_ACCEL", "");
-        _putenv_s("SMART_DRONE_ORB_VPI_REMAP", "");
-        _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
-#else
-        unsetenv("SMART_DRONE_ORB_ACCEL");
-        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
-        unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
-#endif
-    }
-}
 
 bool ValidateOrbExtractorConfig(const RemoteRuntimeConfig &remote,
                                 std::string *err)

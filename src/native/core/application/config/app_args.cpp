@@ -5,9 +5,12 @@
 #include <cstdlib>
 #include <vector>
 
+#include "core/application/config/orb_acceleration_config.h"
 #include "core/application/config/slam_backend_availability.h"
 
 namespace {
+
+namespace AppCore = SmartDrone::Core::Application;
 
 std::string
 ResolveFirstExistingRuntimePath(const std::vector<std::string> &candidates,
@@ -28,44 +31,6 @@ ResolveFirstExistingRuntimePath(const std::vector<std::string> &candidates,
         }
     }
     return firstResolved;
-}
-
-std::string NormalizeAccelerationText(std::string value)
-{
-    std::transform(
-        value.begin(), value.end(), value.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (value == "cuda" || value == "gpu" || value == "opencv_cuda" ||
-        value == "opencv-cuda") {
-        return "cuda";
-    }
-    if (value == "vpi" || value == "vpi_remap" || value == "vpi-remap" ||
-        value == "vpi_cuda_remap" || value == "vpi-cuda-remap") {
-        return "vpi-remap";
-    }
-    return "cpu";
-}
-
-void ApplyOrbAccelerationEnvironment(const std::string &acceleration)
-{
-    const std::string normalized = NormalizeAccelerationText(acceleration);
-#if defined(_WIN32)
-    _putenv_s("SMART_DRONE_ORB_ACCEL", normalized == "cuda" ? "cuda" : "");
-    _putenv_s("SMART_DRONE_ORB_VPI_REMAP", normalized == "vpi-remap" ? "1" : "");
-    _putenv_s("SMART_DRONE_ORB_CUDA_PYRAMID", "");
-#else
-    if (normalized == "cuda") {
-        setenv("SMART_DRONE_ORB_ACCEL", "cuda", 1);
-    } else {
-        unsetenv("SMART_DRONE_ORB_ACCEL");
-    }
-    if (normalized == "vpi-remap") {
-        setenv("SMART_DRONE_ORB_VPI_REMAP", "1", 1);
-    } else {
-        unsetenv("SMART_DRONE_ORB_VPI_REMAP");
-    }
-    unsetenv("SMART_DRONE_ORB_CUDA_PYRAMID");
-#endif
 }
 
 int GetIntWithLegacyFallback(const ArgReader &args, const char *name,
@@ -624,9 +589,11 @@ void ParseSlamFeatureTuningConfig(const ArgReader &argReader,
     runtimeConfig.lkPerFrameAcceleration =
         argReader.GetString("--lk-per-frame-accel", "vpi-cuda");
     runtimeConfig.orbAcceleration =
-        NormalizeAccelerationText(argReader.GetString("--orb-accel", "cpu"));
+        AppCore::NormalizeOrbAccelerationOrCpu(
+            argReader.GetString("--orb-accel", "cpu"));
     if (runtimeConfig.slamBackend == SlamBackend::OrbSlam3) {
-        ApplyOrbAccelerationEnvironment(runtimeConfig.orbAcceleration);
+        AppCore::ApplyOrbAccelerationEnvironment(
+            runtimeConfig.orbAcceleration);
     }
 }
 

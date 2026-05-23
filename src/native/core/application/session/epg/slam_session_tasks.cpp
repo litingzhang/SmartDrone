@@ -17,7 +17,8 @@ constexpr Epg::PortId DFX_STATUS_OUTPUT_PORT = 0;
 constexpr Epg::PortId PREVIEW_READY_OUTPUT_PORT = 0;
 constexpr std::array<Epg::PortId, 4> PUBLISHED_FRAME_FAN_OUT_PORTS{
     0, 1, 2, 3};
-constexpr std::array<Epg::PortId, 10> SLAM_MONITOR_STATUS_INPUT_PORTS{
+constexpr std::array<Epg::PortId, 4> TRACKED_FRAME_INPUT_PORTS{0, 1, 2, 3};
+constexpr std::array<Epg::PortId, 13> SLAM_MONITOR_STATUS_INPUT_PORTS{
     0,
     1,
     2,
@@ -28,6 +29,16 @@ constexpr std::array<Epg::PortId, 10> SLAM_MONITOR_STATUS_INPUT_PORTS{
     7,
     8,
     9,
+    10,
+    11,
+    12,
+};
+
+enum class SlamTrackingRoute : std::uint8_t {
+    Klt,
+    Dpvo,
+    Orb,
+    VisualFeature,
 };
 
 bool ShouldRunTask(const std::atomic<bool> &runningFlag,
@@ -39,6 +50,29 @@ bool ShouldRunTask(const std::atomic<bool> &runningFlag,
 using PublishedOutputFn = SlamTaskStepResult (
     SlamSessionRuntimeService::*)(std::uint64_t,
                                   ISlamPublishedFramePayload &);
+
+bool IsVisualFeatureRouteFrontend(FeatureFrontend frontend)
+{
+    return frontend == FeatureFrontend::SuperPointLightGlue ||
+           frontend == FeatureFrontend::XFeatLightGlue;
+}
+
+SlamTrackingRoute ResolveTrackingRoute(const SlamPreparedFrame &prepared)
+{
+    const auto frame = prepared.frame ? prepared.frame->Frame() : nullptr;
+    if (!frame) {
+        return SlamTrackingRoute::Klt;
+    }
+    if (frame->slamBackend == SlamBackend::DpvoTensorRt) {
+        return SlamTrackingRoute::Dpvo;
+    }
+    if (frame->slamBackend != SlamBackend::OrbSlam3) {
+        return SlamTrackingRoute::Klt;
+    }
+    return IsVisualFeatureRouteFrontend(frame->featureFrontend)
+               ? SlamTrackingRoute::VisualFeature
+               : SlamTrackingRoute::Orb;
+}
 
 void PushSlamStatus(Epg::TaskContext &context, bool sessionOk,
                     bool abortRequested,
@@ -90,13 +124,60 @@ bool StepResultAllowsContinue(Epg::TaskContext &context,
 }
 
 template <typename MessageType, typename FramePayload>
-void PushSlamStageFrame(Epg::TaskContext &context, std::uint64_t sessionId,
-                        FramePayload frame)
+void PushSlamStageFrame(Epg::TaskContext &context, Epg::PortId port,
+                        std::uint64_t sessionId, FramePayload frame)
 {
     auto message = context.Make<MessageType>();
     message->sessionId = sessionId;
     message->frame = std::move(frame);
-    context.Push(0, std::move(message));
+    context.Push(port, std::move(message));
+}
+
+template <typename MessageType>
+void PushSlamRouteFrame(Epg::TaskContext &context, Epg::PortId port,
+                        SlamPreparedFrame &prepared)
+{
+    auto message = context.Make<MessageType>();
+    message->sessionId = prepared.sessionId;
+    message->frame = std::move(prepared.frame);
+    context.Push(port, std::move(message));
+}
+
+template <typename MessageType>
+void RunTrackingStageTask(Epg::TaskContext &context,
+                          SlamSessionRuntimeService &service)
+{
+    const auto prepared = context.TryPopLatest<MessageType>(0);
+    if (!prepared || prepared->sessionId == 0 || !prepared->frame) {
+        return;
+    }
+
+    SlamTrackFrameResult result =
+        service.TrackPreparedFrame(prepared->sessionId,
+                                   std::move(prepared->frame));
+    if (!StepResultAllowsContinue(context, result, STATUS_OUTPUT_PORT)) {
+        return;
+    }
+    if (!result.frame) {
+        return;
+    }
+
+    PushSlamStageFrame<SlamTrackedFrame>(
+        context, 0, prepared->sessionId, std::move(result.frame));
+}
+
+std::shared_ptr<SlamTrackedFrame> PopNextTrackedFrame(
+    Epg::TaskContext &context)
+{
+    for (const Epg::PortId port : TRACKED_FRAME_INPUT_PORTS) {
+        if (!context.InputExists(port)) {
+            continue;
+        }
+        if (auto frame = context.TryPopLatest<SlamTrackedFrame>(port)) {
+            return frame;
+        }
+    }
+    return {};
 }
 
 bool ValidPublishedFrame(const std::shared_ptr<SlamPublishedFrame> &frame)
@@ -304,11 +385,47 @@ void SlamAcquireTask::OnTick(Epg::TaskContext &context)
         return;
     }
 
-    PushSlamStageFrame<SlamPreparedFrame>(context, frameReady->sessionId,
-                                          std::move(result.frame));
+    PushSlamStageFrame<SlamPreparedFrame>(
+        context, 0, frameReady->sessionId, std::move(result.frame));
 }
 
-SlamTrackingTask::SlamTrackingTask(
+SlamTrackingRouteTask::SlamTrackingRouteTask(
+    std::atomic<bool> &stop,
+    std::atomic<bool> &runningFlag)
+    : m_stop(stop),
+      m_runningFlag(runningFlag)
+{
+}
+
+void SlamTrackingRouteTask::OnTick(Epg::TaskContext &context)
+{
+    if (!ShouldRunTask(m_runningFlag, m_stop)) {
+        return;
+    }
+    auto prepared = context.TryPopLatest<SlamPreparedFrame>(0);
+    if (!prepared || prepared->sessionId == 0 || !prepared->frame) {
+        return;
+    }
+
+    switch (ResolveTrackingRoute(*prepared)) {
+    case SlamTrackingRoute::Dpvo:
+        PushSlamRouteFrame<SlamDpvoPreparedFrame>(context, 1, *prepared);
+        break;
+    case SlamTrackingRoute::Orb:
+        PushSlamRouteFrame<SlamOrbPreparedFrame>(context, 2, *prepared);
+        break;
+    case SlamTrackingRoute::VisualFeature:
+        PushSlamRouteFrame<SlamVisualFeaturePreparedFrame>(context, 3,
+                                                           *prepared);
+        break;
+    case SlamTrackingRoute::Klt:
+    default:
+        PushSlamRouteFrame<SlamKltPreparedFrame>(context, 0, *prepared);
+        break;
+    }
+}
+
+SlamKltTrackingTask::SlamKltTrackingTask(
     std::shared_ptr<SlamSessionRuntimeService> service,
     std::atomic<bool> &stop,
     std::atomic<bool> &runningFlag)
@@ -318,28 +435,66 @@ SlamTrackingTask::SlamTrackingTask(
 {
 }
 
-void SlamTrackingTask::OnTick(Epg::TaskContext &context)
+void SlamKltTrackingTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
     }
-    const auto prepared = context.TryPopLatest<SlamPreparedFrame>(0);
-    if (!prepared || prepared->sessionId == 0 || !prepared->frame) {
-        return;
-    }
+    RunTrackingStageTask<SlamKltPreparedFrame>(context, *m_service);
+}
 
-    SlamTrackFrameResult result =
-        m_service->TrackPreparedFrame(prepared->sessionId,
-                                      std::move(prepared->frame));
-    if (!StepResultAllowsContinue(context, result, STATUS_OUTPUT_PORT)) {
-        return;
-    }
-    if (!result.frame) {
-        return;
-    }
+SlamDpvoTrackingTask::SlamDpvoTrackingTask(
+    std::shared_ptr<SlamSessionRuntimeService> service,
+    std::atomic<bool> &stop,
+    std::atomic<bool> &runningFlag)
+    : m_service(std::move(service)),
+      m_stop(stop),
+      m_runningFlag(runningFlag)
+{
+}
 
-    PushSlamStageFrame<SlamTrackedFrame>(context, prepared->sessionId,
-                                         std::move(result.frame));
+void SlamDpvoTrackingTask::OnTick(Epg::TaskContext &context)
+{
+    if (!ShouldRunTask(m_runningFlag, m_stop)) {
+        return;
+    }
+    RunTrackingStageTask<SlamDpvoPreparedFrame>(context, *m_service);
+}
+
+SlamOrbTrackingTask::SlamOrbTrackingTask(
+    std::shared_ptr<SlamSessionRuntimeService> service,
+    std::atomic<bool> &stop,
+    std::atomic<bool> &runningFlag)
+    : m_service(std::move(service)),
+      m_stop(stop),
+      m_runningFlag(runningFlag)
+{
+}
+
+void SlamOrbTrackingTask::OnTick(Epg::TaskContext &context)
+{
+    if (!ShouldRunTask(m_runningFlag, m_stop)) {
+        return;
+    }
+    RunTrackingStageTask<SlamOrbPreparedFrame>(context, *m_service);
+}
+
+SlamVisualFeatureTrackingTask::SlamVisualFeatureTrackingTask(
+    std::shared_ptr<SlamSessionRuntimeService> service,
+    std::atomic<bool> &stop,
+    std::atomic<bool> &runningFlag)
+    : m_service(std::move(service)),
+      m_stop(stop),
+      m_runningFlag(runningFlag)
+{
+}
+
+void SlamVisualFeatureTrackingTask::OnTick(Epg::TaskContext &context)
+{
+    if (!ShouldRunTask(m_runningFlag, m_stop)) {
+        return;
+    }
+    RunTrackingStageTask<SlamVisualFeaturePreparedFrame>(context, *m_service);
 }
 
 SlamPosePostprocessTask::SlamPosePostprocessTask(
@@ -357,7 +512,7 @@ void SlamPosePostprocessTask::OnTick(Epg::TaskContext &context)
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
     }
-    const auto tracked = context.TryPopLatest<SlamTrackedFrame>(0);
+    const auto tracked = PopNextTrackedFrame(context);
     if (!tracked || tracked->sessionId == 0 || !tracked->frame) {
         return;
     }
@@ -557,9 +712,21 @@ const bool SLAM_IMU_GATE_TASK_REGISTERED =
 const bool SLAM_ACQUIRE_TASK_REGISTERED =
     Epg::TypeCatalog::Global().RegisterTaskType<SlamAcquireTask>(
         "SlamAcquireTask");
-const bool SLAM_TRACKING_TASK_REGISTERED =
-    Epg::TypeCatalog::Global().RegisterTaskType<SlamTrackingTask>(
-        "SlamTrackingTask");
+const bool SLAM_TRACKING_ROUTE_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamTrackingRouteTask>(
+        "SlamTrackingRouteTask");
+const bool SLAM_KLT_TRACKING_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamKltTrackingTask>(
+        "SlamKltTrackingTask");
+const bool SLAM_DPVO_TRACKING_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamDpvoTrackingTask>(
+        "SlamDpvoTrackingTask");
+const bool SLAM_ORB_TRACKING_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamOrbTrackingTask>(
+        "SlamOrbTrackingTask");
+const bool SLAM_VISUAL_FEATURE_TRACKING_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<
+        SlamVisualFeatureTrackingTask>("SlamVisualFeatureTrackingTask");
 const bool SLAM_POSE_POSTPROCESS_TASK_REGISTERED =
     Epg::TypeCatalog::Global().RegisterTaskType<SlamPosePostprocessTask>(
         "SlamPosePostprocessTask");

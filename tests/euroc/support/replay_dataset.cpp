@@ -205,14 +205,21 @@ ReplayDataset ReplayDataset::Load(const std::filesystem::path &rootDir, size_t m
     return dataset;
 }
 
-ReplayCameraProvider::ReplayCameraProvider(const ReplayDataset &dataset)
-    : m_dataset(dataset)
+ReplayCameraProvider::ReplayCameraProvider(
+    const ReplayDataset &dataset,
+    std::shared_ptr<ReplayCameraProgress> progress)
+    : m_dataset(dataset), m_progress(std::move(progress))
 {
 }
 
 bool ReplayCameraProvider::Open(const SmartDrone::Core::Ports::CameraOpenConfig &)
 {
     m_nextIndex = 0;
+    if (m_progress != nullptr) {
+        m_progress->framesConsumed.store(0);
+        m_progress->finished.store(m_dataset.LeftFrames().empty());
+    }
+    m_started = true;
     return true;
 }
 
@@ -220,12 +227,20 @@ void ReplayCameraProvider::Close()
 {
     m_started = false;
     m_nextIndex = 0;
+    if (m_progress != nullptr) {
+        m_progress->framesConsumed.store(0);
+        m_progress->finished.store(false);
+    }
 }
 
 bool ReplayCameraProvider::Start()
 {
     m_started = true;
     m_nextIndex = 0;
+    if (m_progress != nullptr) {
+        m_progress->framesConsumed.store(0);
+        m_progress->finished.store(m_dataset.LeftFrames().empty());
+    }
     return true;
 }
 
@@ -233,6 +248,10 @@ void ReplayCameraProvider::Stop()
 {
     m_started = false;
     m_nextIndex = 0;
+    if (m_progress != nullptr) {
+        m_progress->framesConsumed.store(0);
+        m_progress->finished.store(false);
+    }
 }
 
 bool ReplayCameraProvider::GrabStereo(SmartDrone::Core::Ports::StereoFrame &out, int, bool, uint64_t minTimestampNs)
@@ -241,13 +260,18 @@ bool ReplayCameraProvider::GrabStereo(SmartDrone::Core::Ports::StereoFrame &out,
         return false;
     }
 
-    while (m_nextIndex < m_dataset.LeftFrames().size()) {
-        const ReplayImageSample &left = m_dataset.LeftFrames()[m_nextIndex];
-        const ReplayImageSample &right = m_dataset.RightFrames()[m_nextIndex];
+    size_t nextIndex = m_nextIndex.load();
+    while (nextIndex < m_dataset.LeftFrames().size()) {
+        const ReplayImageSample &left = m_dataset.LeftFrames()[nextIndex];
+        const ReplayImageSample &right = m_dataset.RightFrames()[nextIndex];
         const uint64_t earlierTimestampNs = std::min(left.timestampNs, right.timestampNs);
         const uint64_t laterTimestampNs = std::max(left.timestampNs, right.timestampNs);
         const uint64_t pairTimestampNs = earlierTimestampNs + ((laterTimestampNs - earlierTimestampNs) / 2ULL);
-        ++m_nextIndex;
+        ++nextIndex;
+        m_nextIndex.store(nextIndex);
+        if (m_progress != nullptr) {
+            m_progress->framesConsumed.store(nextIndex);
+        }
         if (pairTimestampNs < minTimestampNs) {
             continue;
         }
@@ -256,13 +280,20 @@ bool ReplayCameraProvider::GrabStereo(SmartDrone::Core::Ports::StereoFrame &out,
         out.right.timestampNs = right.timestampNs;
         out.left.arriveNs = static_cast<int64_t>(left.timestampNs);
         out.right.arriveNs = static_cast<int64_t>(right.timestampNs);
-        out.left.sequence = static_cast<uint32_t>(m_nextIndex);
-        out.right.sequence = static_cast<uint32_t>(m_nextIndex);
+        out.left.sequence = static_cast<uint32_t>(nextIndex);
+        out.right.sequence = static_cast<uint32_t>(nextIndex);
         out.left.gray = LoadGrayImage(left.path);
         out.right.gray = LoadGrayImage(right.path);
-        return !out.left.gray.empty() && !out.right.gray.empty();
+        const bool loaded = !out.left.gray.empty() && !out.right.gray.empty();
+        if (!loaded && m_progress != nullptr) {
+            m_progress->finished.store(Finished());
+        }
+        return loaded;
     }
 
+    if (m_progress != nullptr) {
+        m_progress->finished.store(true);
+    }
     return false;
 }
 
@@ -282,6 +313,16 @@ SmartDrone::Core::Ports::CameraDiagnostics ReplayCameraProvider::GetDiagnostics(
 SmartDrone::Core::Ports::CameraProviderSemantics ReplayCameraProvider::Semantics() const
 {
     return SmartDrone::Core::Ports::CameraProviderSemantics::DualStreamPaired;
+}
+
+bool ReplayCameraProvider::Finished() const
+{
+    return m_nextIndex.load() >= m_dataset.LeftFrames().size();
+}
+
+size_t ReplayCameraProvider::FramesConsumed() const
+{
+    return m_nextIndex.load();
 }
 
 ReplayImuProvider::ReplayImuProvider(const ReplayDataset &dataset)

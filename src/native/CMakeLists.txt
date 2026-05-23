@@ -44,43 +44,43 @@ endif()
 set(SMART_DRONE_ADAPTER_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/adapters/command/udp_tlv_command_channel.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/app/composition/default_application_runtime_factories.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/app/composition/imu_sample_source_provider.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688/icm42688_imu.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688_imu_provider.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688_sample_source.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/imu_sample_source_provider.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_engine_factory.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo_tensorrt_engine.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo_runtime_options.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo_feature_frontend_runner.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/descriptor_geometry.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo_pair_builder.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo_matching.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo_feature_packet.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/temporal_stereo.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/visual_frame_observation_loader.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/feature_point_tracking.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo_calibration.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo_frame_preprocessor.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo_geometry.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_slam_engine.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_continuous_frontend.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_loop_closure_backend.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_mode_utils.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_per_frame_frontend.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_pnp_observation_builder.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_pose_estimator.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_track_manager.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_vpi_acceleration_stub.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_image_utils.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/visual_pnp_pose_backend.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/visual_feature_frontend_client.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_mode_state.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_output_utils.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_output_optional.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_pose_utils.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint_native_extractor.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint_runtime_options.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint_lightglue_frontend_client.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_engine_factory.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_runtime_options.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/stereo_feature_frontend_runner.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/descriptor_geometry.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/stereo_pair_builder.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/stereo_matching.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/stereo_feature_packet.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/temporal_stereo.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/visual_frame_observation_loader.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/feature_point_tracking.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/stereo_calibration.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/stereo_frame_preprocessor.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/stereo_geometry.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_slam_engine.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_continuous_frontend.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_loop_closure_backend.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_mode_utils.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_per_frame_frontend.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_pnp_observation_builder.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_pose_estimator.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_track_manager.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_vpi_acceleration_stub.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_image_utils.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/visual_pnp_pose_backend.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint/visual_feature_frontend_client.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_mode_state.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_output_utils.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_output_optional.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_pose_utils.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint/superpoint_native_extractor.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint/superpoint_runtime_options.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint/superpoint_lightglue_frontend_client.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/stream/udp_image_sender.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/mavlink_pose_publisher.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/mavlink_serial_transport.cpp"
@@ -91,43 +91,49 @@ set(SMART_DRONE_ADAPTER_SOURCES
 
 if(SMART_DRONE_TENSORRT_AVAILABLE)
   list(REMOVE_ITEM SMART_DRONE_ADAPTER_SOURCES
-    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo_tensorrt_engine.cpp"
-    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint_native_extractor.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint/superpoint_native_extractor.cpp"
   )
   list(APPEND SMART_DRONE_ADAPTER_SOURCES
-    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo_tensorrt_engine_trt.cpp"
-    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint_native_extractor_trt.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine_trt.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine_cuda_runtime.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine_graph_state.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine_graph_state_internal.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine_native_solver_math.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine_native_solver_bundle_adjustment.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine_native_solver_step.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint/superpoint_native_extractor_trt.cpp"
   )
 endif()
 
 if(SMART_DRONE_VPI_AVAILABLE)
   list(REMOVE_ITEM SMART_DRONE_ADAPTER_SOURCES
-    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_vpi_acceleration_stub.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_vpi_acceleration_stub.cpp"
   )
   list(APPEND SMART_DRONE_ADAPTER_SOURCES
-    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt_vpi_acceleration.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/klt/klt_vpi_acceleration.cpp"
   )
 endif()
 
 set(SMART_DRONE_ORB_SOURCES
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_engine_adapter.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_mode_strategy.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb_feature_utils.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb_visual_components.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb_vocabulary.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb_slam3_runtime.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb_slam3_backend.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_tracking_backend.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb_mode_strategy.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/visual_feature_lightglue_mode_strategy.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_engine_adapter.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_mode_strategy.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb/orb_feature_utils.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb/orb_visual_components.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb/orb_vocabulary.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb/orb_slam3_runtime.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb/orb_slam3_backend.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_tracking_backend.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/orb/orb_mode_strategy.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/superpoint/visual_feature_lightglue_mode_strategy.cpp"
 )
 
 if(SMART_DRONE_ENABLE_ORB_SLAM3)
   list(REMOVE_ITEM SMART_DRONE_ADAPTER_SOURCES
-    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_output_optional.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_output_optional.cpp"
   )
   list(APPEND SMART_DRONE_ADAPTER_SOURCES
-    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/slam_output_optional_orb.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_output_optional_orb.cpp"
   )
   list(APPEND SMART_DRONE_ADAPTER_SOURCES ${SMART_DRONE_ORB_SOURCES})
 endif()
@@ -142,6 +148,7 @@ if(SMART_DRONE_ENABLE_ORB_SLAM3)
 endif()
 
 set(SMART_DRONE_COMMON_SOURCES
+  "${SMART_DRONE_NATIVE_ROOT}/common/environment.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/common/runtime_state.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/common/time_utils.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/common/tlv/crc16_ccitt_false.cpp"
@@ -159,6 +166,7 @@ set(SMART_DRONE_CORE_APPLICATION_SOURCES
   "${SMART_DRONE_SLAM_BACKEND_AVAILABILITY_SOURCE}"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/config/capability_catalog.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/config/config_registry.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/config/orb_acceleration_config.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/discovery_beacon_runtime.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/mode_manager.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/epg_dfx_snapshot.cpp"
@@ -195,6 +203,7 @@ set(SMART_DRONE_CORE_APPLICATION_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/epg/messages/calib_epg_messages.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/session/epg/messages/slam_epg_messages.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_registry.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_graph_runtime.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_runtime_optimizer.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_solver_primitives.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_task_manifest.cpp"

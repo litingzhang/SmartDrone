@@ -1,8 +1,8 @@
 #include "core/application/session/slam/slam_frame_output_port.h"
 
 #include <chrono>
-#include <cstdio>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 
 #include "common/logger.h"
@@ -123,11 +123,15 @@ SlamFrameStepResult SlamFrameOutputPort::EmitMavlink(
     auto &slamOutput = tracked.slamOutput;
     const auto &poseResult = published.poseResult;
     const auto publishStartTp = std::chrono::steady_clock::now();
-    m_ctx.posePublisher.PublishPose(
-        slamOutput.frameId, poseResult.poseEstimate,
-        poseResult.velocityEstimate, published.effectiveResetCounter,
-        published.effectiveResetMapCount, published.trackingState,
-        poseResult.quality);
+    Ports::PosePublishRequest request{};
+    request.frameId = slamOutput.frameId;
+    request.pose = poseResult.poseEstimate;
+    request.velocity = poseResult.velocityEstimate;
+    request.resetCounter = published.effectiveResetCounter;
+    request.resetMapCount = published.effectiveResetMapCount;
+    request.trackingState = published.trackingState;
+    request.quality = poseResult.quality;
+    m_ctx.posePublisher.PublishPose(request);
     published.publishStartTp = publishStartTp;
     published.publishEndTp = std::chrono::steady_clock::now();
     return SlamFrameStepResult::Continue;
@@ -255,7 +259,7 @@ void SlamFrameOutputPort::LogDfxLine(const DfxSample &sample) const
                                  ? BuildJsonDfxLine(sample)
                                  : BuildTextDfxLine(sample);
     Logger::Logf(Logger::INFO, "%s", line.c_str());
-    std::fprintf(stderr, "%s\n", line.c_str());
+    std::cerr << line << "\n";
 }
 
 void SlamFrameOutputPort::UpdateDfxAverages(const DfxSample &sample)

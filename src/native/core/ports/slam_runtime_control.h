@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "core/application/config/app_args.h"
+#include "core/domain/feature_frontend.h"
 #include "core/domain/runtime_mode.h"
 #include "core/ports/visual_feature_frontend.h"
 

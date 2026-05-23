@@ -58,9 +58,24 @@ void AddSlamProcessingTaskFactories(EpgTaskFactoryEntries &entries,
         return new SlamAcquireTask(deps.service, deps.stop,
                                    deps.runningFlag);
     });
-    AddFactory<SlamTrackingTask>(entries, catalog, [deps]() {
-        return new SlamTrackingTask(deps.service, deps.stop,
-                                    deps.runningFlag);
+    AddFactory<SlamTrackingRouteTask>(entries, catalog, [deps]() {
+        return new SlamTrackingRouteTask(deps.stop, deps.runningFlag);
+    });
+    AddFactory<SlamKltTrackingTask>(entries, catalog, [deps]() {
+        return new SlamKltTrackingTask(deps.service, deps.stop,
+                                       deps.runningFlag);
+    });
+    AddFactory<SlamDpvoTrackingTask>(entries, catalog, [deps]() {
+        return new SlamDpvoTrackingTask(deps.service, deps.stop,
+                                        deps.runningFlag);
+    });
+    AddFactory<SlamOrbTrackingTask>(entries, catalog, [deps]() {
+        return new SlamOrbTrackingTask(deps.service, deps.stop,
+                                       deps.runningFlag);
+    });
+    AddFactory<SlamVisualFeatureTrackingTask>(entries, catalog, [deps]() {
+        return new SlamVisualFeatureTrackingTask(deps.service, deps.stop,
+                                                 deps.runningFlag);
     });
 }
 

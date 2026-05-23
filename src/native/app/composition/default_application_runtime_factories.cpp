@@ -7,8 +7,8 @@
 
 #include "adapters/camera/camera_provider_factory.h"
 #include "adapters/imu/icm42688_imu_provider.h"
-#include "adapters/slam/slam_engine_factory.h"
-#include "adapters/slam/visual_feature_frontend_client.h"
+#include "adapters/slam/engine/slam_engine_factory.h"
+#include "adapters/slam/superpoint/visual_feature_frontend_client.h"
 #include "adapters/stream/udp_image_sender.h"
 #include "core/application/config/app_args.h"
 #include "core/application/config/runtime_app_types.h"
@@ -34,6 +34,7 @@ using PreviewOutputFrame =
     SmartDrone::Core::Application::PreviewOutputFrame;
 using PreviewOutputOpenConfig =
     SmartDrone::Core::Application::PreviewOutputOpenConfig;
+using CameraOpenConfig = SmartDrone::Core::Ports::CameraOpenConfig;
 using SlamInputMode = SmartDrone::Core::Ports::SlamInputMode;
 using SlamRuntimeControlPort =
     SmartDrone::Core::Application::SlamRuntimeControlPort;
@@ -146,6 +147,30 @@ MakeImuProviderConfig(const MainRuntimeAliases &aliases)
     return {slackBeforeNs, slackAfterNs};
 }
 
+CameraOpenConfig BuildCameraOpenConfig(const MainRuntimeAliases &aliases)
+{
+    CameraOpenConfig config{};
+    config.width = aliases.width;
+    config.height = aliases.height;
+    config.fps = aliases.fps;
+    config.leftCameraIndex = aliases.leftCamIndex;
+    config.rightCameraIndex = aliases.rightCamIndex;
+    config.exposureUs = aliases.exposureUs;
+    config.pairWindowMs = aliases.pairMs;
+    config.keepWindowMs = aliases.keepMs;
+    config.pairQueue = aliases.pairQueue;
+    config.uvcDeviceIndex = aliases.uvcDeviceIndex;
+    config.uvcEyeWidth = aliases.uvcEyeWidth;
+    config.uvcEyeHeight = aliases.uvcEyeHeight;
+    config.autoExposureDisabled = aliases.aeDisable;
+    config.requestY8 = aliases.requestY8;
+    config.r16Normalize = aliases.r16Norm;
+    config.uvcPackedStereo = aliases.uvcPackedStereo;
+    config.uvcSwapEyes = aliases.uvcSwapEyes;
+    config.gain = aliases.gain;
+    return config;
+}
+
 SmartDrone::Adapters::Slam::SlamEngineFactoryConfig
 BuildEngineConfig(const SlamSessionEngineResourceConfig &config)
 {
@@ -157,7 +182,19 @@ BuildEngineConfig(const SlamSessionEngineResourceConfig &config)
     engineConfig.useViewer = false;
     engineConfig.useImu = config.useImu;
     engineConfig.inputMode = ResolveSlamInputMode(config.aliases);
-    engineConfig.runtime = config.cfg.app.runtime;
+    engineConfig.dpvoRuntime.repoPath = config.cfg.app.runtime.dpvoRepo;
+    engineConfig.dpvoRuntime.patchEnginePath =
+        config.cfg.app.runtime.dpvoPatchEngine;
+    engineConfig.dpvoRuntime.updateEnginePath =
+        config.cfg.app.runtime.dpvoUpdateEngine;
+    engineConfig.dpvoRuntime.inputWidth =
+        config.cfg.app.runtime.dpvoInputWidth;
+    engineConfig.dpvoRuntime.inputHeight =
+        config.cfg.app.runtime.dpvoInputHeight;
+    engineConfig.dpvoRuntime.patchesPerFrame =
+        config.cfg.app.runtime.dpvoPatchesPerFrame;
+    engineConfig.dpvoRuntime.optimizationWindow =
+        config.cfg.app.runtime.dpvoOptimizationWindow;
     return engineConfig;
 }
 
@@ -264,7 +301,7 @@ ApplicationRuntimeFactories CreateDefaultApplicationRuntimeFactories()
         []() { return SmartDrone::Adapters::Camera::CreateCameraProvider(); };
     factories.makeCameraOpenConfig =
         [](const MainRuntimeAliases &aliases) {
-            return SmartDrone::Adapters::Camera::MakeCameraOpenConfig(aliases);
+            return BuildCameraOpenConfig(aliases);
         };
     factories.createSlamEngineResources =
         [](const SlamSessionEngineResourceConfig &config) {

@@ -2,9 +2,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <utility>
 
 #include "adapters/imu/icm42688/icm42688_imu.h"
-#include "core/application/config/runtime_app_types.h"
 #include "platform/linux/gpio/drdy_gpio.h"
 #include "platform/linux/spi/spi_dev.h"
 
@@ -12,16 +12,14 @@ namespace SmartDrone::Adapters::Imu {
 
 namespace {
 
-using MainRuntimeAliases =
-    SmartDrone::Core::Application::MainRuntimeAliases;
 using ImuSampleReadStatus = SmartDrone::Core::Ports::ImuSampleReadStatus;
 
 } // namespace
 
 class Icm42688SampleSource::Impl final {
   public:
-    explicit Impl(const MainRuntimeAliases &aliases)
-        : m_aliases(aliases)
+    explicit Impl(Icm42688SampleSourceConfig config)
+        : m_config(std::move(config))
     {
     }
 
@@ -91,9 +89,9 @@ class Icm42688SampleSource::Impl final {
   private:
     bool OpenSpi()
     {
-        m_spi.reset(new SpiDev(m_aliases.spiDev));
-        if (m_spi->Open(m_aliases.spiSpeed, m_aliases.spiMode,
-                        m_aliases.spiBits)) {
+        m_spi.reset(new SpiDev(m_config.spiDev));
+        if (m_spi->Open(m_config.spiSpeed, m_config.spiMode,
+                        m_config.spiBits)) {
             return true;
         }
         return Fail();
@@ -101,8 +99,8 @@ class Icm42688SampleSource::Impl final {
 
     void BeginConfigure()
     {
-        m_configSequencer.Reset(m_aliases.imuHz, m_aliases.accelFsG,
-                                m_aliases.gyroFsDps);
+        m_configSequencer.Reset(m_config.imuHz, m_config.accelFsG,
+                                m_config.gyroFsDps);
         m_configuring = true;
     }
 
@@ -132,7 +130,7 @@ class Icm42688SampleSource::Impl final {
     bool OpenDrdy()
     {
         m_drdy.reset(new DrdyGpio());
-        if (!m_drdy->Open(m_aliases.gpiochip, m_aliases.drdyLine)) {
+        if (!m_drdy->Open(m_config.gpiochip, m_config.drdyLine)) {
             return Fail();
         }
         std::uint8_t status = 0;
@@ -146,7 +144,7 @@ class Icm42688SampleSource::Impl final {
         sample.tNs = timestampNs;
         std::uint8_t status = 0;
         m_spi->ReadReg(REG_INT_STATUS, status);
-        if (!m_spi->ReadRegs(m_aliases.imuStartReg, m_raw12,
+        if (!m_spi->ReadRegs(m_config.imuStartReg, m_raw12,
                              sizeof(m_raw12))) {
             return ImuSampleReadStatus::Failed;
         }
@@ -161,7 +159,7 @@ class Icm42688SampleSource::Impl final {
         return false;
     }
 
-    const MainRuntimeAliases &m_aliases;
+    Icm42688SampleSourceConfig m_config;
     std::unique_ptr<SpiDev> m_spi;
     std::unique_ptr<DrdyGpio> m_drdy;
     Icm42688ConfigSequencer m_configSequencer;
@@ -174,8 +172,8 @@ class Icm42688SampleSource::Impl final {
 };
 
 Icm42688SampleSource::Icm42688SampleSource(
-    const SmartDrone::Core::Application::MainRuntimeAliases &aliases)
-    : m_impl(new Impl(aliases))
+    Icm42688SampleSourceConfig config)
+    : m_impl(new Impl(std::move(config)))
 {
 }
 

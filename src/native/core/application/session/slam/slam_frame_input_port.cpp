@@ -445,6 +445,8 @@ void SlamFrameInputPort::FillPreparedFrame(
     frame.imuEndTp = input.imuEndTp;
     frame.stereoBatch = std::move(acquire.stereoBatch);
     frame.slamInput = std::move(input.slamInput);
+    frame.slamBackend = m_ctx.aliases.slamBackend;
+    frame.featureFrontend = config.effectiveFrontend;
     frame.configuredSlamInputFps = config.configuredSlamInputFps;
     frame.effectiveSlamInputFps = config.effectiveSlamInputFps;
     frame.sendImage = metadata.sendImage;

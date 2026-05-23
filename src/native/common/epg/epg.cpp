@@ -3,6 +3,7 @@
 #include <functional>
 #include <set>
 #include <sstream>
+#include <utility>
 
 namespace Epg {
 namespace {
@@ -325,8 +326,8 @@ std::string GraphConfigToJson(
     return out.str();
 }
 
-EventPipelineGraph::EventPipelineGraph(const Registry &registry)
-    : m_registry(registry)
+EventPipelineGraph::EventPipelineGraph(Registry registry)
+    : m_registry(std::move(registry))
 {
 }
 

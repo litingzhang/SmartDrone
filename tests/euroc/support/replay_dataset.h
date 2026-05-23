@@ -1,9 +1,11 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -56,9 +58,16 @@ class ReplayDataset {
     std::vector<ReplayImuSample> m_imuSamples;
 };
 
+struct ReplayCameraProgress {
+    std::atomic<size_t> framesConsumed{0};
+    std::atomic<bool> finished{false};
+};
+
 class ReplayCameraProvider final : public SmartDrone::Core::Ports::ICameraProvider {
   public:
-    explicit ReplayCameraProvider(const ReplayDataset &dataset);
+    explicit ReplayCameraProvider(
+        const ReplayDataset &dataset,
+        std::shared_ptr<ReplayCameraProgress> progress = {});
 
     bool Open(const SmartDrone::Core::Ports::CameraOpenConfig &config) override;
     void Close() override;
@@ -69,10 +78,13 @@ class ReplayCameraProvider final : public SmartDrone::Core::Ports::ICameraProvid
     SmartDrone::Core::Ports::CameraHealth GetHealth() const override;
     SmartDrone::Core::Ports::CameraDiagnostics GetDiagnostics() const override;
     SmartDrone::Core::Ports::CameraProviderSemantics Semantics() const override;
+    bool Finished() const;
+    size_t FramesConsumed() const;
 
   private:
     const ReplayDataset &m_dataset;
-    size_t m_nextIndex{0};
+    std::shared_ptr<ReplayCameraProgress> m_progress;
+    std::atomic<size_t> m_nextIndex{0};
     bool m_started{false};
 };
 

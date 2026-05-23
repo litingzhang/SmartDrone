@@ -67,6 +67,19 @@ class JsonParser {
         }
 
         const char c = m_text[m_pos];
+        return ParseValueStartingWith(c);
+    }
+
+    JsonValue ParseStringValue()
+    {
+        JsonValue value;
+        value.kind = JsonValue::Kind::String;
+        value.string = ParseString();
+        return value;
+    }
+
+    JsonValue ParseValueStartingWith(char c)
+    {
         if (c == '{') {
             return ParseObject();
         }
@@ -74,10 +87,7 @@ class JsonParser {
             return ParseArray();
         }
         if (c == '"') {
-            JsonValue value;
-            value.kind = JsonValue::Kind::String;
-            value.string = ParseString();
-            return value;
+            return ParseStringValue();
         }
         if (c == 't' || c == 'f') {
             return ParseBool();

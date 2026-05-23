@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "core/domain/imu_sample.h"
+
 namespace SmartDrone::Core::Ports {
 
 enum class ImuSampleReadStatus : std::uint8_t {
@@ -11,9 +13,6 @@ enum class ImuSampleReadStatus : std::uint8_t {
 };
 
 } // namespace SmartDrone::Core::Ports
-
-struct ImuSample;
-struct ImuScale;
 
 namespace SmartDrone::Core::Ports {
 

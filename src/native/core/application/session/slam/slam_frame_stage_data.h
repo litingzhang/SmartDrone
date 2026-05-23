@@ -8,6 +8,8 @@
 #include "core/application/session/slam/slam_frame_step_result.h"
 #include "core/application/state/perception_pipeline.h"
 #include "core/application/state/pose_postprocessor.h"
+#include "core/domain/feature_frontend.h"
+#include "core/domain/runtime_mode.h"
 #include "core/ports/slam_engine.h"
 
 namespace SmartDrone::Core::Application {
@@ -20,6 +22,8 @@ struct SlamPreparedFrameData {
     std::chrono::steady_clock::time_point imuEndTp;
     StereoBatch stereoBatch;
     SmartDrone::Core::Ports::SlamInputBatch slamInput;
+    SlamBackend slamBackend{SlamBackend::Klt};
+    FeatureFrontend featureFrontend{FeatureFrontend::LkGfttPerFrame};
     int configuredSlamInputFps{0};
     int effectiveSlamInputFps{0};
     bool sendImage{false};

@@ -38,8 +38,8 @@ flowchart TD
 | CLI/offline replay | `tests/euroc/offline_replay_main.cpp` | Parses `klt_tracking`, applies `--lk-per-frame-accel`, runs replay. |
 | Replay loop | `tests/euroc/support/replay_slam_runner.cpp` | Builds input batches and records process-level profiling. |
 | Live loop | `src/native/core/application/session/slam_frame_input_port.cpp` | Applies frontend mode and adaptive input FPS in runtime sessions. |
-| KLT engine | `src/native/adapters/slam/klt_slam_engine.cpp` | Owns KLT frontend selection and pose output. |
-| KLT implementation | `src/native/adapters/slam/klt_per_frame_frontend.cpp`, `src/native/adapters/slam/klt_pnp_observation_builder.cpp`, `src/native/adapters/slam/klt_pose_estimator.cpp` | Implements rectification, disparity, GFTT, LK flow, depth, PnP, pose update. |
+| KLT engine | `src/native/adapters/slam/klt/klt_slam_engine.cpp` | Owns KLT frontend selection and pose output. |
+| KLT implementation | `src/native/adapters/slam/klt/klt_per_frame_frontend.cpp`, `src/native/adapters/slam/klt/klt_pnp_observation_builder.cpp`, `src/native/adapters/slam/klt/klt_pose_estimator.cpp` | Implements rectification, disparity, GFTT, LK flow, depth, PnP, pose update. |
 | Output contract | `src/native/core/ports/slam_engine.h` | Carries KLT timing and pose fields in `SlamOutput`. |
 
 ## Mode Selection
@@ -52,7 +52,7 @@ if (frontend != FeatureFrontend::LK && frontend != FeatureFrontend::LkGfttPerFra
 }
 ```
 
-The engine ignores `extractPointCloud` because this VO path produces pose and tracking diagnostics only. The per-frame KLT implementation lives in `src/native/adapters/slam/klt_per_frame_frontend.cpp` and related KLT helper modules.
+The engine ignores `extractPointCloud` because this VO path produces pose and tracking diagnostics only. The per-frame KLT implementation lives in `src/native/adapters/slam/klt/klt_per_frame_frontend.cpp` and related KLT helper modules.
 
 The EuRoC profiling script uses:
 

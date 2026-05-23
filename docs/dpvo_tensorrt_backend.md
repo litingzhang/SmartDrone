@@ -807,7 +807,7 @@ Attempt log:
 | Attempt | Key settings | Phone-equivalent TLV result | Jetson timing result | Notes |
 | --- | --- | --- | --- | --- |
 | Frame cadence only | heavy every 3 frames, warmup 8, bootstrap 4, max edges 512 | 18 s: `50` state packets, `45` non-zero poses | Fast frames about `4-7 ms`; heavy frames still about `280-300 ms` | Proved fast publish path works, but heavy updates still happened too frequently. |
-| Wall-clock heavy cadence | heavy every 3 frames and at least 700 ms apart, max edges 384 | 18 s: `117` state packets, `101` non-zero poses, state gap mean `155.9 ms` | EPG `SlamTrackingTask` settled near `7 ms` on fast frames | Much better realtime output; startup still had a multi-second gap while engines/camera/warmup initialized. |
+| Wall-clock heavy cadence | heavy every 3 frames and at least 700 ms apart, max edges 384 | 18 s: `117` state packets, `101` non-zero poses, state gap mean `155.9 ms` | EPG DPVO tracking task settled near `7 ms` on fast frames | Much better realtime output; startup still had a multi-second gap while engines/camera/warmup initialized. |
 | Light warmup live profile | heavy interval 500 ms, warmup 4, bootstrap 2, max edges 256 | 18 s: `110` state packets, `85` non-zero poses, state gap mean `165.4 ms` | `226` DFX frames: median SLAM `6.338 ms`, p90 `7.309 ms`, max `270.714 ms` | Stable fast path. Startup state gap still peaked around `2.24 s`; DFX frame gap after running peaked at `620 ms`. |
 
 Final live timing summary from Jetson logs:
@@ -829,7 +829,7 @@ Interpretation:
 - The DPVO hot path is now EPG-friendly in live mode: most frames pass through tracking in about `6 ms` and publish a
   pose through the normal postprocess/live-pose/MAVLink/UDP tasks.
 - The remaining runtime spikes are the intentional low-rate full DPVO updates. In this attempt they still block
-  `SlamTrackingTask` because correlation/update/BA are synchronous inside the backend.
+  the DPVO tracking task because correlation/update/BA are synchronous inside the backend.
 - This live profile favors realtime pose continuity over offline accuracy. MH04/MH05 ATE/RPE runs should use a separate
   full-accuracy profile with higher edge/update cadence.
 - The next efficiency step is to move full DPVO update/BA into an async EPG worker or finish native CUDA `fastba` so the

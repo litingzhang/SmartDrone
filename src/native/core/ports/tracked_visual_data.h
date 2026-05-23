@@ -59,11 +59,8 @@ class ITrackedVisualDataProvider {
                            int rightImageWidth, int rightImageHeight) = 0;
     virtual TrackedPointCloudSnapshot
     ExtractTrackedPointCloud(size_t maxPointCloudPoints) = 0;
-    virtual TrackedVisualData
-    ExtractTrackedVisualData(int leftImageWidth, int leftImageHeight,
-                             int rightImageWidth, int rightImageHeight,
-                             bool includePointCloud,
-                             size_t maxPointCloudPoints) = 0;
+    virtual TrackedVisualData ExtractTrackedVisualData(
+        const VisualMapSnapshotRequest &request) = 0;
     virtual VisualMapSnapshot
     ExtractVisualMapSnapshot(const VisualMapSnapshotRequest &request) = 0;
 };

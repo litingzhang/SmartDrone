@@ -17,6 +17,19 @@ const bool SLAM_FRAME_READY_REGISTERED =
 const bool SLAM_PREPARED_FRAME_REGISTERED =
     Epg::TypeCatalog::Global().RegisterMessage<SlamPreparedFrame>(
         "SlamPreparedFrame");
+const bool SLAM_KLT_PREPARED_FRAME_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamKltPreparedFrame>(
+        "SlamKltPreparedFrame");
+const bool SLAM_DPVO_PREPARED_FRAME_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamDpvoPreparedFrame>(
+        "SlamDpvoPreparedFrame");
+const bool SLAM_ORB_PREPARED_FRAME_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamOrbPreparedFrame>(
+        "SlamOrbPreparedFrame");
+const bool SLAM_VISUAL_FEATURE_PREPARED_FRAME_REGISTERED =
+    Epg::TypeCatalog::Global()
+        .RegisterMessage<SlamVisualFeaturePreparedFrame>(
+            "SlamVisualFeaturePreparedFrame");
 const bool SLAM_TRACKED_FRAME_REGISTERED =
     Epg::TypeCatalog::Global().RegisterMessage<SlamTrackedFrame>(
         "SlamTrackedFrame");

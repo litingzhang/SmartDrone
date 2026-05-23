@@ -65,7 +65,7 @@ endif()
 project(SmartDrone CXX)
 
 set(SMART_DRONE_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
-set(SMART_DRONE_ORB_MODULE_ROOT "${SMART_DRONE_REPO_ROOT}/src/native/adapters/slam/orb_slam3")
+set(SMART_DRONE_ORB_MODULE_ROOT "${SMART_DRONE_REPO_ROOT}/src/native/adapters/slam/orb/orb_slam3")
 set(SMART_DRONE_SOPHUS_ROOT "${SMART_DRONE_REPO_ROOT}/third_party/Sophus")
 set(SMART_DRONE_DBOW2_ROOT "${SMART_DRONE_REPO_ROOT}/third_party/DBoW2")
 set(SMART_DRONE_G2O_ROOT "${SMART_DRONE_REPO_ROOT}/third_party/g2o")
@@ -163,10 +163,10 @@ function(configure_sophus_target target_name)
   if(TARGET Eigen3::Eigen)
     target_link_libraries(${target_name} PRIVATE Eigen3::Eigen)
   else()
-    target_include_directories(${target_name} PRIVATE "${SYSROOT}/usr/include/eigen3")
+    target_include_directories(${target_name} SYSTEM PRIVATE "${SYSROOT}/usr/include/eigen3")
   endif()
 
-  target_include_directories(${target_name} PRIVATE
+  target_include_directories(${target_name} SYSTEM PRIVATE
     "${SMART_DRONE_SOPHUS_ROOT}"
   )
 endfunction()
@@ -190,6 +190,8 @@ function(configure_orb_target target_name)
     "${SMART_DRONE_ORB_MODULE_ROOT}/place_recognition"
     "${SMART_DRONE_ORB_MODULE_ROOT}/system"
     "${SMART_DRONE_ORB_MODULE_ROOT}/tracking"
+  )
+  target_include_directories(${target_name} SYSTEM PRIVATE
     "${SMART_DRONE_DBOW2_ROOT}"
     "${SMART_DRONE_G2O_ROOT}"
   )

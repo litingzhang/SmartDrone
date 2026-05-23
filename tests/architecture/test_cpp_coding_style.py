@@ -8,10 +8,14 @@ import sys
 from pathlib import Path
 
 
-SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".inc"}
+SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp"}
 HEADER_SUFFIXES = {".h", ".hpp"}
 SOURCE_LINE_LIMIT = 1000
 HEADER_LINE_LIMIT = 500
+DISALLOWED_FILE_PATTERNS = (
+    re.compile(r"\.inc$"),
+    re.compile(r"_(members|private|public_methods|private_methods)\.(h|hpp|cpp|cc|cxx)$"),
+)
 
 LOWERCASE_NAMESPACE_PATTERN = re.compile(
     r"(?:namespace\s+SmartDrone::[a-z]|SmartDrone::[a-z])")
@@ -22,6 +26,21 @@ RELATIVE_NAMESPACE_PATTERN = re.compile(
 SHORT_RELATIVE_NAMESPACE_PATTERN = re.compile(
     r"\b(ports|domain|application|camera|command|imu|slam|telemetry|stream|"
     r"bootstrap|composition)::")
+PREPROCESSOR_DIRECTIVE_PATTERN = re.compile(
+    r"^\s*#\s*(define|ifdef|ifndef|if\s+defined|if\s+!defined|elif|endif)\b",
+    re.MULTILINE)
+BARE_PRINTF_PATTERN = re.compile(r"(?<![A-Za-z0-9_:])printf\s*\(")
+STD_COUT_PATTERN = re.compile(r"\bstd::cout\b")
+STDERR_WRITE_PATTERN = re.compile(
+    r"\b(?:std::)?(?:fprintf|fputs|fwrite)\s*\(\s*stderr\b")
+
+ALLOWED_PREPROCESSOR_PREFIXES = (
+    "src/native/adapters/slam/orb/orb_slam3/",
+)
+
+ALLOWED_PREPROCESSOR_DIRECTIVE_PATHS = {
+    "src/native/common/environment.cpp",
+}
 
 
 def RelativePath(path: Path, root: Path) -> str:
@@ -35,7 +54,7 @@ def IsExcluded(path: Path) -> bool:
         for marker in (
             "/third_party/",
             "/src/android/app/.cxx/",
-            "/src/native/adapters/slam/orb_slam3/",
+            "/src/native/adapters/slam/orb/orb_slam3/",
             "/output/",
         )
     )
@@ -53,6 +72,16 @@ def SourceFiles(root: Path) -> list[Path]:
     return sorted(paths)
 
 
+def RepoFiles(root: Path) -> list[Path]:
+    paths: list[Path] = []
+    for directory in ("src/native", "src/android/app/src/main/cpp", "tests"):
+        base = root / directory
+        if not base.exists():
+            continue
+        paths.extend(path for path in base.rglob("*") if path.is_file() and not IsExcluded(path))
+    return sorted(paths)
+
+
 def LineLimit(path: Path) -> int:
     return HEADER_LINE_LIMIT if path.suffix in HEADER_SUFFIXES else SOURCE_LINE_LIMIT
 
@@ -66,6 +95,16 @@ def FileLengthViolations(root: Path, paths: list[Path]) -> list[str]:
         if line_count > limit:
             violations.append(
                 f"{RelativePath(path, root)} has {line_count} lines, limit is {limit}")
+    return violations
+
+
+def DisallowedFileNameViolations(root: Path, paths: list[Path]) -> list[str]:
+    violations: list[str] = []
+    for path in paths:
+        rel = RelativePath(path, root)
+        name = path.name
+        if any(pattern.search(name) for pattern in DISALLOWED_FILE_PATTERNS):
+            violations.append(f"{rel} uses a disallowed implementation-fragment filename")
     return violations
 
 
@@ -88,11 +127,69 @@ def NamespaceViolations(root: Path, paths: list[Path]) -> list[str]:
     return violations
 
 
+def PreprocessorDirectiveViolations(root: Path, paths: list[Path]) -> list[str]:
+    violations: list[str] = []
+    for path in paths:
+        rel = RelativePath(path, root)
+        if rel in ALLOWED_PREPROCESSOR_DIRECTIVE_PATHS:
+            continue
+        if any(rel.startswith(prefix) for prefix in ALLOWED_PREPROCESSOR_PREFIXES):
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for match in PREPROCESSOR_DIRECTIVE_PATTERN.finditer(text):
+            line = text.count("\n", 0, match.start()) + 1
+            violations.append(
+                f"{rel}:{line} uses preprocessor directive outside allowed platform boundary")
+    return violations
+
+
+def BarePrintfViolations(root: Path, paths: list[Path]) -> list[str]:
+    violations: list[str] = []
+    for path in paths:
+        rel = RelativePath(path, root)
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for match in BARE_PRINTF_PATTERN.finditer(text):
+            line = text.count("\n", 0, match.start()) + 1
+            violations.append(f"{rel}:{line} uses bare printf; use C++ streams or a logging adapter")
+    return violations
+
+
+def NativeStdoutViolations(root: Path, paths: list[Path]) -> list[str]:
+    violations: list[str] = []
+    for path in paths:
+        rel = RelativePath(path, root)
+        if not rel.startswith("src/native/"):
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for match in STD_COUT_PATTERN.finditer(text):
+            line = text.count("\n", 0, match.start()) + 1
+            violations.append(f"{rel}:{line} writes native runtime diagnostics to stdout")
+    return violations
+
+
+def NativeStderrWriteViolations(root: Path, paths: list[Path]) -> list[str]:
+    violations: list[str] = []
+    for path in paths:
+        rel = RelativePath(path, root)
+        if not rel.startswith("src/native/"):
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for match in STDERR_WRITE_PATTERN.finditer(text):
+            line = text.count("\n", 0, match.start()) + 1
+            violations.append(f"{rel}:{line} writes stderr through C stdio; use C++ streams or a logging adapter")
+    return violations
+
+
 def main() -> int:
     root = Path(sys.argv[1]).resolve()
     paths = SourceFiles(root)
-    violations = FileLengthViolations(root, paths)
+    violations = DisallowedFileNameViolations(root, RepoFiles(root))
+    violations.extend(FileLengthViolations(root, paths))
     violations.extend(NamespaceViolations(root, paths))
+    violations.extend(PreprocessorDirectiveViolations(root, paths))
+    violations.extend(BarePrintfViolations(root, paths))
+    violations.extend(NativeStdoutViolations(root, paths))
+    violations.extend(NativeStderrWriteViolations(root, paths))
     if violations:
         sys.stderr.write("\n".join(violations) + "\n")
         return 1

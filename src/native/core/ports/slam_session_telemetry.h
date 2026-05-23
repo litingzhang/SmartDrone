@@ -3,9 +3,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace SmartDrone::Core::Application {
-class FrameTimingTracker;
-}
+#include "core/ports/frame_timing.h"
 
 namespace SmartDrone::Core::Ports {
 
@@ -18,7 +16,7 @@ class ISlamSessionTelemetryPort {
   public:
     virtual ~ISlamSessionTelemetryPort() = default;
 
-    virtual void SetFrameTimingTracker(SmartDrone::Core::Application::FrameTimingTracker *tracker) = 0;
+    virtual void SetFrameTimingTracker(IFrameTimingTracker *tracker) = 0;
     virtual bool GetDownwardRange(SlamRangeSensor &out, uint64_t maxAgeUs) const = 0;
     virtual void StopSetpointStream() = 0;
 };

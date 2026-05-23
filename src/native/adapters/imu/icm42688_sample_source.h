@@ -1,20 +1,30 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <string>
 
 #include "core/ports/imu_sample_source.h"
 
-namespace SmartDrone::Core::Application {
-struct MainRuntimeAliases;
-} // namespace SmartDrone::Core::Application
-
 namespace SmartDrone::Adapters::Imu {
+
+struct Icm42688SampleSourceConfig {
+    std::string spiDev;
+    std::uint32_t spiSpeed{0};
+    std::uint8_t spiMode{0};
+    std::uint8_t spiBits{0};
+    std::string gpiochip;
+    unsigned drdyLine{0};
+    int imuHz{0};
+    int accelFsG{0};
+    int gyroFsDps{0};
+    std::uint8_t imuStartReg{0};
+};
 
 class Icm42688SampleSource final
     : public SmartDrone::Core::Ports::IImuSampleSource {
   public:
-    explicit Icm42688SampleSource(
-        const SmartDrone::Core::Application::MainRuntimeAliases &aliases);
+    explicit Icm42688SampleSource(Icm42688SampleSourceConfig config);
     ~Icm42688SampleSource() override;
 
     bool Start() override;

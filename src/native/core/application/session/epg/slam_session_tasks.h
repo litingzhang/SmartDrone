@@ -89,11 +89,62 @@ class SlamAcquireTask final : public Epg::ITask {
     std::atomic<bool> &m_runningFlag;
 };
 
-class SlamTrackingTask final : public Epg::ITask {
+class SlamTrackingRouteTask final : public Epg::ITask {
   public:
-    SlamTrackingTask(std::shared_ptr<SlamSessionRuntimeService> service,
-                     std::atomic<bool> &stop,
-                     std::atomic<bool> &runningFlag);
+    SlamTrackingRouteTask(std::atomic<bool> &stop,
+                          std::atomic<bool> &runningFlag);
+    void OnTick(Epg::TaskContext &context) override;
+
+  private:
+    std::atomic<bool> &m_stop;
+    std::atomic<bool> &m_runningFlag;
+};
+
+class SlamKltTrackingTask final : public Epg::ITask {
+  public:
+    SlamKltTrackingTask(std::shared_ptr<SlamSessionRuntimeService> service,
+                        std::atomic<bool> &stop,
+                        std::atomic<bool> &runningFlag);
+    void OnTick(Epg::TaskContext &context) override;
+
+  private:
+    std::shared_ptr<SlamSessionRuntimeService> m_service;
+    std::atomic<bool> &m_stop;
+    std::atomic<bool> &m_runningFlag;
+};
+
+class SlamDpvoTrackingTask final : public Epg::ITask {
+  public:
+    SlamDpvoTrackingTask(std::shared_ptr<SlamSessionRuntimeService> service,
+                         std::atomic<bool> &stop,
+                         std::atomic<bool> &runningFlag);
+    void OnTick(Epg::TaskContext &context) override;
+
+  private:
+    std::shared_ptr<SlamSessionRuntimeService> m_service;
+    std::atomic<bool> &m_stop;
+    std::atomic<bool> &m_runningFlag;
+};
+
+class SlamOrbTrackingTask final : public Epg::ITask {
+  public:
+    SlamOrbTrackingTask(std::shared_ptr<SlamSessionRuntimeService> service,
+                        std::atomic<bool> &stop,
+                        std::atomic<bool> &runningFlag);
+    void OnTick(Epg::TaskContext &context) override;
+
+  private:
+    std::shared_ptr<SlamSessionRuntimeService> m_service;
+    std::atomic<bool> &m_stop;
+    std::atomic<bool> &m_runningFlag;
+};
+
+class SlamVisualFeatureTrackingTask final : public Epg::ITask {
+  public:
+    SlamVisualFeatureTrackingTask(
+        std::shared_ptr<SlamSessionRuntimeService> service,
+        std::atomic<bool> &stop,
+        std::atomic<bool> &runningFlag);
     void OnTick(Epg::TaskContext &context) override;
 
   private:

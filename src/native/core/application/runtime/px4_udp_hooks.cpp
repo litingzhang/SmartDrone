@@ -170,11 +170,11 @@ bool Px4UdpHooks::EnterPositionControl(std::string *err)
     VehicleFlightMode beforeMode{};
     const bool haveBeforeMode = m_vehicleControl.GetFlightModeInfo(beforeMode);
     if (haveBeforeMode) {
-        std::cout << "[px4] POSITION requested from mode main=" << static_cast<int>(beforeMode.mainMode)
+        std::cerr << "[px4] POSITION requested from mode main=" << static_cast<int>(beforeMode.mainMode)
                   << " sub=" << static_cast<int>(beforeMode.subMode) << " armed=" << (beforeMode.armed ? 1 : 0)
                   << "\n";
     } else {
-        std::cout << "[px4] POSITION requested (no heartbeat mode snapshot)\n";
+        std::cerr << "[px4] POSITION requested (no heartbeat mode snapshot)\n";
     }
 
     m_remoteModeRequested.store(true, std::memory_order_relaxed);
@@ -189,7 +189,7 @@ bool Px4UdpHooks::EnterPositionControl(std::string *err)
 
     VehicleFlightMode afterMode{};
     if (m_vehicleControl.GetFlightModeInfo(afterMode)) {
-        std::cout << "[px4] POSITION result mode main=" << static_cast<int>(afterMode.mainMode)
+        std::cerr << "[px4] POSITION result mode main=" << static_cast<int>(afterMode.mainMode)
                   << " sub=" << static_cast<int>(afterMode.subMode) << " armed=" << (afterMode.armed ? 1 : 0)
                   << "\n";
     }
@@ -211,7 +211,7 @@ bool Px4UdpHooks::LandVehicle(std::string *err)
         return false;
     }
     TrackCommandAck(VehicleCommandAckKind::Land, "land");
-    std::cout << "[land] land command sent to vehicle\n";
+    std::cerr << "[land] land command sent to vehicle\n";
     return true;
 }
 
@@ -399,7 +399,7 @@ bool Px4UdpHooks::EnsureFlightMode(uint8_t mainMode, bool force, std::string *er
     }
 
     TrackCommandAck(VehicleCommandAckKind::SetMode, modeName ? modeName : "mode");
-    std::cout << "[px4] remote mode -> " << (modeName ? modeName : "unknown") << "\n";
+    std::cerr << "[px4] remote mode -> " << (modeName ? modeName : "unknown") << "\n";
     return true;
 }
 
@@ -481,7 +481,7 @@ void Px4UdpHooks::UpdateAutoLanding()
     SetManualControlNeutral();
     SendManualControlSnapshot();
     DisableRemoteControl(true);
-    std::cout << "[land] touchdown detected by range stability, disarmed\n";
+    std::cerr << "[land] touchdown detected by range stability, disarmed\n";
 }
 
 void Px4UdpHooks::BeginAutoLandingDisarm()
@@ -513,14 +513,14 @@ void Px4UdpHooks::StepCommandAck()
 
     uint8_t result = 255;
     if (m_vehicleControl.TryConsumeCommandAck(pending.command, result)) {
-        std::cout << "[px4] " << pending.label << " ack=" << static_cast<int>(result) << "\n";
+        std::cerr << "[px4] " << pending.label << " ack=" << static_cast<int>(result) << "\n";
         ClearCommandAckIfCurrent(pending.command, pending.label);
         return;
     }
     if (std::chrono::steady_clock::now() < pending.deadline) {
         return;
     }
-    std::cout << "[px4] " << pending.label << " ack timeout\n";
+    std::cerr << "[px4] " << pending.label << " ack timeout\n";
     ClearCommandAckIfCurrent(pending.command, pending.label);
 }
 

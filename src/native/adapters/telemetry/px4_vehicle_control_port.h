@@ -11,7 +11,7 @@ class Px4VehicleControlPort final : public SmartDrone::Core::Ports::IVehicleCont
   public:
     explicit Px4VehicleControlPort(Px4MavlinkGateway &mavlink);
 
-    void SetFrameTimingTracker(SmartDrone::Core::Application::FrameTimingTracker *tracker) override;
+    void SetFrameTimingTracker(SmartDrone::Core::Ports::IFrameTimingTracker *tracker) override;
     bool BeginArm(bool arm) override;
     bool BeginEmergencyStop() override;
     bool BeginLand() override;

@@ -9,9 +9,7 @@ class MavlinkPosePublisher final : public Core::Ports::IPosePublisher {
   public:
     explicit MavlinkPosePublisher(Px4MavlinkGateway &serial);
 
-    void PublishPose(uint64_t frameId, const Core::Ports::PoseEstimate &pose,
-                     const Core::Ports::VelocityEstimate &velocity, uint8_t resetCounter, uint16_t resetMapCount,
-                     int trackingState, Core::Ports::PoseQuality quality) override;
+    void PublishPose(const Core::Ports::PosePublishRequest &request) override;
 
   private:
     Px4MavlinkGateway &m_serial;

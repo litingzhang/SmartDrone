@@ -6,9 +6,9 @@
 
 #include "common/epg/epg.h"
 #include "core/application/config/runtime_app_types.h"
-#include "core/application/runtime/epg_graph_lifecycle.h"
+#include "core/application/epg/epg_graph_runtime.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
-#include "core/application/epg/epg_registry.h"
+#include "core/application/runtime/epg_graph_lifecycle.h"
 #include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/state/live_pose_state.h"
 #include "core/application/session/epg/slam_session_task_factory.h"
@@ -53,22 +53,22 @@ class SlamSessionGraphRuntime::Impl final {
         m_sessionOk.store(true, std::memory_order_relaxed);
         m_runtimeService = std::make_shared<SlamSessionRuntimeService>(RuntimeConfig());
         auto graphRef = std::make_shared<EpgGraphRef>();
-        RegisterEpgTypes(m_registry, EpgDomain::SlamSession,
-                         MakeSlamGraphTaskFactoryResolver({
-                             m_runtimeService,
-                             m_stop,
-                             m_runningFlag,
-                             m_sessionOk,
-                             m_tuning,
-                             m_cfg.app.camera.fps,
-                             graphRef,
-                         }));
-        auto graph = std::make_unique<Epg::EventPipelineGraph>(m_registry);
-        graphRef->graph = graph.get();
-        auto graphConfig = CompileEpgConfig(EpgDomain::SlamSession, m_registry);
-        ApplySlamRuntimePacing(graphConfig, m_cfg);
-        graph->Configure(graphConfig);
-        graph->Start();
+        auto graph = StartEpgGraph({
+            EpgDomain::SlamSession,
+            MakeSlamGraphTaskFactoryResolver({
+                m_runtimeService,
+                m_stop,
+                m_runningFlag,
+                m_sessionOk,
+                m_tuning,
+                m_cfg.app.camera.fps,
+                graphRef,
+            }),
+            graphRef,
+            [this](Epg::GraphConfig &graphConfig) {
+                ApplySlamRuntimePacing(graphConfig, m_cfg);
+            },
+        });
         m_lifecycle.AttachGraph(std::move(graph));
         return true;
     }
@@ -155,7 +155,6 @@ class SlamSessionGraphRuntime::Impl final {
     LivePoseState &m_livePose;
     std::atomic<bool> &m_runningFlag;
     const ApplicationRuntimeFactories &m_factories;
-    Epg::Registry m_registry;
     std::shared_ptr<SlamSessionRuntimeService> m_runtimeService;
     EpgGraphLifecycle m_lifecycle;
     std::atomic<bool> m_sessionOk{true};

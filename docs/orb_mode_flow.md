@@ -33,8 +33,8 @@ flowchart TD
 | Replay loop | `tests/euroc/support/replay_slam_runner.cpp` | Pull stereo frames and IMU windows, call `ISlamEngine::Process`, collect per-frame timing. |
 | Live loop | `src/native/core/application/session/slam_frame_input_port.cpp`, `src/native/core/application/session/slam_frame_tracking_port.cpp` | Read runtime tuning, apply frontend mode, acquire camera frames, call SLAM engine. |
 | Rate limiter | `src/native/core/application/state/perception_pipeline.cpp` | Enforce SLAM input FPS and derive stable capture/logical timestamps. |
-| Mode strategy | `src/native/adapters/slam/slam_mode_strategy.cpp`, `src/native/adapters/slam/orb_mode_strategy.cpp` | Select `FeatureFrontend::Orb`, call ORB-SLAM3, and convert pose/telemetry to `SlamOutput`. |
-| Engine state | `src/native/adapters/slam/slam_engine_adapter.cpp`, `src/native/adapters/slam/orb_slam3_backend.cpp` | Own ORB-SLAM3 system lifetime, calibration, shared state, and runtime setters. |
+| Mode strategy | `src/native/adapters/slam/engine/slam_mode_strategy.cpp`, `src/native/adapters/slam/orb/orb_mode_strategy.cpp` | Select `FeatureFrontend::Orb`, call ORB-SLAM3, and convert pose/telemetry to `SlamOutput`. |
+| Engine state | `src/native/adapters/slam/engine/slam_engine_adapter.cpp`, `src/native/adapters/slam/orb/orb_slam3_backend.cpp` | Own ORB-SLAM3 system lifetime, calibration, shared state, and runtime setters. |
 | Output contract | `src/native/core/ports/slam_engine.h` | Defines `SlamInputBatch` and `SlamOutput`. |
 
 ## Configuration and Mode Selection

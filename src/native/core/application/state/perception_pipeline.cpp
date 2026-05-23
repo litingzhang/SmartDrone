@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <iostream>
 #include <utility>
 
 namespace SmartDrone::Core::Application {
@@ -133,7 +134,7 @@ void PerceptionPipeline::LogGrabFailure(const StereoGrabFailureLog &failure) con
         static_cast<long long>(diag.lastPairDtMs), static_cast<double>(diag.lastRejectDtUs) * 1e-3,
         static_cast<long long>(diag.lastFrameAgeMsL), static_cast<long long>(diag.lastFrameAgeMsR),
         static_cast<long long>(diag.lastPairAgeMs));
-    std::fprintf(stderr, "%s\n", line);
+    std::cerr << line << "\n";
 }
 
 StereoFrameTiming PerceptionPipeline::BuildStereoFrameTiming(

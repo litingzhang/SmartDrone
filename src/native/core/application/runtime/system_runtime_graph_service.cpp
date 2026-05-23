@@ -6,11 +6,11 @@
 #include <utility>
 
 #include "common/epg/epg.h"
+#include "core/application/epg/epg_graph_runtime.h"
 #include "core/application/runtime/discovery_beacon_runtime.h"
 #include "core/application/runtime/epg_graph_lifecycle.h"
 #include "core/application/runtime/epg_redeploy_coordinator.h"
 #include "core/application/runtime/system_runtime_task_factory.h"
-#include "core/application/epg/epg_registry.h"
 
 namespace SmartDrone::Core::Application {
 namespace {
@@ -78,19 +78,18 @@ class SystemRuntimeGraph::Impl final {
                 m_config.stepEpgRedeploy,
             });
         auto graphRef = std::make_shared<EpgGraphRef>();
-        Epg::Registry registry;
-        RegisterEpgTypes(registry, EpgDomain::SystemRuntime,
-                         MakeSystemRuntimeTaskFactoryResolver({
-                             stepServices,
-                             commandRuntime,
-                             discoveryRuntime,
-                             graphRef,
-                             m_config.redeployCoordinator,
-                         }));
-        auto graph = std::make_unique<Epg::EventPipelineGraph>(registry);
-        graphRef->graph = graph.get();
-        graph->Configure(CompileEpgConfig(EpgDomain::SystemRuntime, registry));
-        graph->Start();
+        auto graph = StartEpgGraph({
+            EpgDomain::SystemRuntime,
+            MakeSystemRuntimeTaskFactoryResolver({
+                stepServices,
+                commandRuntime,
+                discoveryRuntime,
+                graphRef,
+                m_config.redeployCoordinator,
+            }),
+            graphRef,
+            {},
+        });
         m_lifecycle.AttachGraph(std::move(graph));
         return true;
     }

@@ -6,26 +6,21 @@
 #include <mutex>
 #include <unordered_map>
 
+#include "core/ports/frame_timing.h"
+
 namespace SmartDrone::Core::Application {
 
-struct FrameTimingRecord {
-    uint64_t frameId{0};
-    uint64_t tCamNs{0};
-    uint64_t tCbNs{0};
-    uint64_t tSlamInNs{0};
-    uint64_t tSlamOutNs{0};
-    uint64_t tMavTxNs{0};
-};
+using FrameTimingRecord = SmartDrone::Core::Ports::FrameTimingRecord;
 
-class FrameTimingTracker {
+class FrameTimingTracker final : public SmartDrone::Core::Ports::IFrameTimingTracker {
   public:
     explicit FrameTimingTracker(size_t maxRecords = 4096);
 
     void UpsertCapture(uint64_t frameId, uint64_t tCamNs, uint64_t tCbNs);
     void MarkSlamIn(uint64_t frameId, uint64_t tSlamInNs);
     void MarkSlamOut(uint64_t frameId, uint64_t tSlamOutNs);
-    void MarkMavTx(uint64_t frameId, uint64_t tMavTxNs);
-    bool Lookup(uint64_t frameId, FrameTimingRecord &out) const;
+    void MarkMavTx(uint64_t frameId, uint64_t tMavTxNs) override;
+    bool Lookup(uint64_t frameId, FrameTimingRecord &out) const override;
 
   private:
     FrameTimingRecord &EnsureRecordLocked(uint64_t frameId);

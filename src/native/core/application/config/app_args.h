@@ -4,30 +4,10 @@
 #include <filesystem>
 #include <string>
 
+#include "core/domain/feature_frontend.h"
 #include "core/domain/runtime_mode.h"
 
 namespace fs = std::filesystem;
-
-enum class SensorMode {
-    Stereo,
-    StereoImu,
-    Mono,
-    MonoImu,
-};
-
-enum class FeatureFrontend {
-    Orb = 0,
-    LK = 3,
-    LkGfttPerFrame = 4,
-    SuperPointLightGlue = 5,
-    XFeatLightGlue = 6,
-};
-
-enum class SlamBackend {
-    Klt,
-    OrbSlam3,
-    DpvoTensorRt,
-};
 
 const char *DefaultSettingsForSensorMode(SensorMode mode);
 SensorMode ParseSensorModeText(const std::string &text);

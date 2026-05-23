@@ -15,6 +15,7 @@
 
 #include "core/application/epg/epg_runtime_optimizer.h"
 #include "core/application/epg/epg_task_manifest.h"
+#include "core/application/config/orb_acceleration_config.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
 #include "core/application/runtime/epg_graph_lifecycle.h"
 #include "core/application/runtime/epg_redeploy_coordinator.h"
@@ -32,6 +33,8 @@ using SmartDrone::Core::Application::BuildEpgTaskTopologyVersion;
 using SmartDrone::Core::Application::EpgDomain;
 using SmartDrone::Core::Application::EpgManifestForDomain;
 using SmartDrone::Core::Application::EpgTaskCatalogTypes;
+using SmartDrone::Core::Application::NormalizeOrbAcceleration;
+using SmartDrone::Core::Application::NormalizeOrbAccelerationOrCpu;
 
 struct TestPacket {
     int sequence{};
@@ -53,6 +56,10 @@ struct SlamTick {};
 struct SlamImuReady {};
 struct SlamFrameReady {};
 struct SlamPreparedFrame {};
+struct SlamKltPreparedFrame {};
+struct SlamDpvoPreparedFrame {};
+struct SlamOrbPreparedFrame {};
+struct SlamVisualFeaturePreparedFrame {};
 struct SlamTrackedFrame {};
 struct SlamPublishedFrame {};
 struct SlamPreviewReady {};
@@ -300,6 +307,21 @@ Registry MakeRegistry()
     return registry;
 }
 
+TEST(OrbAccelerationConfigTest, PreservesUnknownRemoteValuesForValidation)
+{
+    EXPECT_EQ("cuda", NormalizeOrbAcceleration("gpu"));
+    EXPECT_EQ("vpi-remap", NormalizeOrbAcceleration("VPI_CUDA_REMAP"));
+    EXPECT_EQ("cpu", NormalizeOrbAcceleration("off"));
+    EXPECT_EQ("bad-mode", NormalizeOrbAcceleration("BAD-MODE"));
+}
+
+TEST(OrbAccelerationConfigTest, KeepsLegacyCliFallbackForUnknownValues)
+{
+    EXPECT_EQ("cpu", NormalizeOrbAccelerationOrCpu("BAD-MODE"));
+    EXPECT_EQ("cuda", NormalizeOrbAccelerationOrCpu("opencv-cuda"));
+    EXPECT_EQ("vpi-remap", NormalizeOrbAccelerationOrCpu("vpi"));
+}
+
 Registry MakeSlamShapeRegistry()
 {
     Registry registry;
@@ -308,6 +330,14 @@ Registry MakeSlamShapeRegistry()
     registry.RegisterMessageType<SlamImuReady>("SlamImuReady");
     registry.RegisterMessageType<SlamFrameReady>("SlamFrameReady");
     registry.RegisterMessageType<SlamPreparedFrame>("SlamPreparedFrame");
+    registry.RegisterMessageType<SlamKltPreparedFrame>(
+        "SlamKltPreparedFrame");
+    registry.RegisterMessageType<SlamDpvoPreparedFrame>(
+        "SlamDpvoPreparedFrame");
+    registry.RegisterMessageType<SlamOrbPreparedFrame>(
+        "SlamOrbPreparedFrame");
+    registry.RegisterMessageType<SlamVisualFeaturePreparedFrame>(
+        "SlamVisualFeaturePreparedFrame");
     registry.RegisterMessageType<SlamTrackedFrame>("SlamTrackedFrame");
     registry.RegisterMessageType<SlamPublishedFrame>("SlamPublishedFrame");
     registry.RegisterMessageType<SlamPreviewReady>("SlamPreviewReady");
@@ -322,7 +352,12 @@ Registry MakeSlamShapeRegistry()
     registry.RegisterTaskFactory("SlamBackendTickTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamImuGateTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamAcquireTask", {}, {}, factory);
-    registry.RegisterTaskFactory("SlamTrackingTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamTrackingRouteTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamKltTrackingTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamDpvoTrackingTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamOrbTrackingTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamVisualFeatureTrackingTask", {}, {},
+                                 factory);
     registry.RegisterTaskFactory("SlamPosePostprocessTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamPointCloudTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamLivePoseTask", {}, {}, factory);
@@ -450,6 +485,22 @@ void RunTopology(const Epg::GraphConfig &config,
         EXPECT_GT(taskIt->second.loopCount, 0u) << taskName;
         EXPECT_EQ(taskIt->second.errorCount, 0u) << taskName;
     }
+}
+
+TEST(EventPipelineGraph, OwnsRegistryAfterConstruction)
+{
+    Epg::GraphConfig config = Epg::ParseGraphConfigJson(MinimalValidJson());
+    EventPipelineGraph graph(MakeRegistry());
+
+    graph.Configure(config);
+    graph.Start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    graph.Stop();
+
+    const auto taskDiagnostics = graph.TaskDiagnostics();
+    const auto source = taskDiagnostics.find("source");
+    ASSERT_NE(source, taskDiagnostics.end());
+    EXPECT_GT(source->second.loopCount, 0u);
 }
 
 void RunTopologyFromJsonFile(const std::string &jsonFile,
@@ -679,8 +730,12 @@ std::string NonReplaceableTaskProfileJson()
 
 } // namespace
 
-#include "epg_test_runtime_basic_cases.inc"
-#include "epg_test_runtime_validation_cases.inc"
-#include "epg_test_manifest_cases.inc"
-#include "epg_test_optimizer_cases.inc"
-#include "epg_test_config_cases.inc"
+#include "epg_test_runtime_queue_cases.h"
+#include "epg_test_runtime_topology_cases.h"
+#include "epg_test_runtime_lifecycle_cases.h"
+#include "epg_test_runtime_validation_cases.h"
+#include "epg_test_manifest_catalog_cases.h"
+#include "epg_test_manifest_profile_cases.h"
+#include "epg_test_optimizer_apply_cases.h"
+#include "epg_test_optimizer_failure_cases.h"
+#include "epg_test_config_cases.h"

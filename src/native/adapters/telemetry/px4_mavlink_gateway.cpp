@@ -3,9 +3,10 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
-#include <cstdio>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 
 #include <time.h>
 
@@ -79,7 +80,7 @@ void Px4MavlinkGateway::SetJsonDiagnostics(bool enabled)
     m_jsonDiagnostics.store(enabled, std::memory_order_relaxed);
 }
 
-void Px4MavlinkGateway::SetFrameTimingTracker(SmartDrone::Core::Application::FrameTimingTracker *tracker)
+void Px4MavlinkGateway::SetFrameTimingTracker(SmartDrone::Core::Ports::IFrameTimingTracker *tracker)
 {
     std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
     m_frameTimingTracker = tracker;
@@ -128,7 +129,7 @@ void Px4MavlinkGateway::StepTx()
         if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
             return;
         }
-        printf("[mav] write failed len=%zu errno=%d\n", front.size(), errno);
+        std::cerr << "[mav] write failed len=" << front.size() << " errno=" << errno << "\n";
         m_txQueue.pop_front();
         m_txOffset = 0;
         return;
@@ -435,11 +436,10 @@ Px4MavlinkGateway::BuildOdometryPacketFields(const OdometryRequest &request) con
 
 bool Px4MavlinkGateway::PrepareOdometryTiming(uint64_t frameId, OdometryTiming &out)
 {
-    SmartDrone::Core::Application::FrameTimingRecord timing{};
+    SmartDrone::Core::Ports::FrameTimingRecord timing{};
     const bool haveTiming = LookupFrameTiming(frameId, timing);
     if (!haveTiming || timing.tCamNs == 0) {
-        printf("[odom_warn] frame=%llu missing capture timestamp; skipping odometry publish\n",
-               static_cast<unsigned long long>(frameId));
+        std::cerr << "[odom_warn] frame=" << frameId << " missing capture timestamp; skipping odometry publish\n";
         return false;
     }
     out.tCamNs = timing.tCamNs;
@@ -475,20 +475,23 @@ void Px4MavlinkGateway::LogOdometryTiming(const OdometryTimingLog &log) const
         return;
     }
     if (m_jsonDiagnostics.load(std::memory_order_relaxed)) {
-        printf("{\"tag\":\"odom_ts\",\"frame\":%llu,\"timing\":%d,\"reset\":%u,\"quality\":%d,\"cam_ns\":%llu,"
-               "\"queue_ms\":%.3f,\"slam_ms\":%.3f,\"send_ms\":%.3f,\"total_ms\":%.3f}\n",
-               static_cast<unsigned long long>(log.frameId), log.haveTiming ? 1 : 0,
-               static_cast<unsigned>(log.resetCounter), static_cast<int>(log.quality),
-               static_cast<unsigned long long>(log.timing.tCamNs), queueLatencyMs, slamLatencyMs, sendLatencyMs,
-               totalLatencyMs);
+        std::ostringstream line;
+        line << std::fixed << std::setprecision(3) << "{\"tag\":\"odom_ts\",\"frame\":" << log.frameId
+             << ",\"timing\":" << (log.haveTiming ? 1 : 0)
+             << ",\"reset\":" << static_cast<unsigned>(log.resetCounter)
+             << ",\"quality\":" << static_cast<int>(log.quality) << ",\"cam_ns\":" << log.timing.tCamNs
+             << ",\"queue_ms\":" << queueLatencyMs << ",\"slam_ms\":" << slamLatencyMs
+             << ",\"send_ms\":" << sendLatencyMs << ",\"total_ms\":" << totalLatencyMs << "}";
+        std::cerr << line.str() << "\n";
         return;
     }
-    printf("[odom_ts] frame=%llu timing=%d reset=%u quality=%d cam_ns=%llu "
-           "queue_ms=%.3f slam_ms=%.3f send_ms=%.3f total_ms=%.3f\n",
-           static_cast<unsigned long long>(log.frameId), log.haveTiming ? 1 : 0,
-           static_cast<unsigned>(log.resetCounter), static_cast<int>(log.quality),
-           static_cast<unsigned long long>(log.timing.tCamNs), queueLatencyMs, slamLatencyMs, sendLatencyMs,
-           totalLatencyMs);
+    std::ostringstream line;
+    line << std::fixed << std::setprecision(3) << "[odom_ts] frame=" << log.frameId
+         << " timing=" << (log.haveTiming ? 1 : 0)
+         << " reset=" << static_cast<unsigned>(log.resetCounter) << " quality=" << static_cast<int>(log.quality)
+         << " cam_ns=" << log.timing.tCamNs << " queue_ms=" << queueLatencyMs << " slam_ms=" << slamLatencyMs
+         << " send_ms=" << sendLatencyMs << " total_ms=" << totalLatencyMs;
+    std::cerr << line.str() << "\n";
 }
 
 Px4MavlinkGateway::Pose Px4MavlinkGateway::EnuToNed(const Pose &pEnu)
@@ -539,7 +542,7 @@ void Px4MavlinkGateway::NormalizeQuat(float &w, float &x, float &y, float &z)
     }
 }
 
-bool Px4MavlinkGateway::LookupFrameTiming(uint64_t frameId, SmartDrone::Core::Application::FrameTimingRecord &out) const
+bool Px4MavlinkGateway::LookupFrameTiming(uint64_t frameId, SmartDrone::Core::Ports::FrameTimingRecord &out) const
 {
     std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
     return m_frameTimingTracker && m_frameTimingTracker->Lookup(frameId, out);
@@ -600,7 +603,7 @@ bool Px4MavlinkGateway::QueueMessage(const mavlink_message_t &msg)
 {
     std::lock_guard<std::mutex> txLock(m_txMtx);
     if (m_txQueue.size() >= kMaxQueuedTxMessages) {
-        printf("[mav] tx queue full, dropping msgid=%u\n", unsigned(msg.msgid));
+        std::cerr << "[mav] tx queue full, dropping msgid=" << unsigned(msg.msgid) << "\n";
         return false;
     }
     std::vector<uint8_t> buffer(MAVLINK_MAX_PACKET_LEN);
@@ -709,8 +712,9 @@ void Px4MavlinkGateway::HandleCommandAck(const mavlink_message_t &msg)
         std::lock_guard<std::mutex> lock(m_ackMtx);
         m_ackMap[ack.command] = info;
     }
-    printf("[ACK] sys=%d, comp=%d cmd=%u result= %d(%s) progress=%d param2=%d\n", int(msg.sysid), int(msg.compid),
-           ack.command, int(ack.result), MavResultToStr(ack.result), int(ack.progress), ack.result_param2);
+    std::cerr << "[ACK] sys=" << int(msg.sysid) << ", comp=" << int(msg.compid) << " cmd=" << ack.command
+              << " result= " << int(ack.result) << "(" << MavResultToStr(ack.result)
+              << ") progress=" << int(ack.progress) << " param2=" << ack.result_param2 << "\n";
 }
 
 void Px4MavlinkGateway::HandleStatusText(const mavlink_message_t &msg)
@@ -720,7 +724,7 @@ void Px4MavlinkGateway::HandleStatusText(const mavlink_message_t &msg)
     char text[sizeof(statusText.text) + 1];
     std::memcpy(text, statusText.text, sizeof(statusText.text));
     text[sizeof(statusText.text)] = '\0';
-    printf("[STATUSTEXT] sev=%d %s\n", int(statusText.severity), text);
+    std::cerr << "[STATUSTEXT] sev=" << int(statusText.severity) << " " << text << "\n";
 }
 
 void Px4MavlinkGateway::MaybeRequestLocalPositionNedStream(uint8_t targetSystem, uint8_t targetComponent)
@@ -731,7 +735,8 @@ void Px4MavlinkGateway::MaybeRequestLocalPositionNedStream(uint8_t targetSystem,
     }
     constexpr float kIntervalUs = 50000.0f;
     SendMessageIntervalRequest(MAVLINK_MSG_ID_LOCAL_POSITION_NED, kIntervalUs, targetSystem, targetComponent);
-    printf("[mav] requested LOCAL_POSITION_NED @20Hz from sys=%d comp=%d\n", int(targetSystem), int(targetComponent));
+    std::cerr << "[mav] requested LOCAL_POSITION_NED @20Hz from sys=" << int(targetSystem)
+              << " comp=" << int(targetComponent) << "\n";
 }
 
 void Px4MavlinkGateway::MaybeRequestDistanceSensorStream(uint8_t targetSystem, uint8_t targetComponent)
@@ -742,5 +747,6 @@ void Px4MavlinkGateway::MaybeRequestDistanceSensorStream(uint8_t targetSystem, u
     }
     constexpr float kIntervalUs = 50000.0f;
     SendMessageIntervalRequest(MAVLINK_MSG_ID_DISTANCE_SENSOR, kIntervalUs, targetSystem, targetComponent);
-    printf("[mav] requested DISTANCE_SENSOR @20Hz from sys=%d comp=%d\n", int(targetSystem), int(targetComponent));
+    std::cerr << "[mav] requested DISTANCE_SENSOR @20Hz from sys=" << int(targetSystem)
+              << " comp=" << int(targetComponent) << "\n";
 }

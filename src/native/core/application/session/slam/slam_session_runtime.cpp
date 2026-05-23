@@ -8,6 +8,7 @@
 
 #include "common/logger.h"
 #include "common/tlv/tlv_protocol.h"
+#include "core/application/config/orb_acceleration_config.h"
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/runtime/runtime_aliases.h"

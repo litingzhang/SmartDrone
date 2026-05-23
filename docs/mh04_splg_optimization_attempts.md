@@ -102,7 +102,7 @@ These are present in the working tree on 2026-05-14 and still need Jetson valida
 
 | Attempt | Files | Status |
 | --- | --- | --- |
-| Keep mature bootstrap trust from resetting too easily | `src/native/adapters/slam/visual_feature_lightglue_mode_strategy.cpp` | Existing working-tree change. `UpdateLightGlueCadenceState()` now allows the OK streak to continue after trust maturity when tracked map points stay above `SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_HOLD_TRACKED_MPS`. Needs MH04 strict replay validation. |
+| Keep mature bootstrap trust from resetting too easily | `src/native/adapters/slam/superpoint/visual_feature_lightglue_mode_strategy.cpp` | Existing working-tree change. `UpdateLightGlueCadenceState()` now allows the OK streak to continue after trust maturity when tracked map points stay above `SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_HOLD_TRACKED_MPS`. Needs MH04 strict replay validation. |
 | Realtime quality gate passthrough in feature-compare script | `scripts/run_jetson_euroc_mh_feature_compare.sh` | Added env capture and export for `SMART_DRONE_SP_LG_REALTIME_QUALITY_GATE`, gate mode, inlier/tracked-map thresholds, max step, max innovation, and rotation limit. Defaults keep the gate disabled, so baseline behavior is unchanged unless enabled. |
 | MH04 strict realtime sweep script | `scripts/run_jetson_mh04_splg_realtime_accuracy_sweep.sh` | Added executable sweep entry point. Runs only `MH_04_difficult` + `superpoint_lightglue`, uses `--require-realtime-pose` through the existing evaluator, writes `sweep_summary.md`, and saves `best_profile.env` when a strict profile passes. |
 

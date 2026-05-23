@@ -7,18 +7,37 @@ import sys
 from pathlib import Path
 
 
-ALLOWED_ADAPTER_APPLICATION_INCLUDES = {
-    "src/native/adapters/camera/camera_provider_factory.h",
-    "src/native/adapters/imu/icm42688/icm42688_imu.h",
-    "src/native/adapters/imu/icm42688_imu_provider.h",
-    "src/native/adapters/imu/icm42688_sample_source.cpp",
-    "src/native/adapters/imu/imu_sample_source_provider.cpp",
-    "src/native/adapters/slam/dpvo_tensorrt_engine.h",
-    "src/native/adapters/slam/orb_slam3_runtime.h",
-    "src/native/adapters/slam/slam_engine_factory.h",
-    "src/native/adapters/slam/slam_mode_strategy.h",
-    "src/native/adapters/slam/visual_feature_frontend_client.h",
-    "src/native/adapters/telemetry/px4_mavlink_gateway.h",
+ALLOWED_ADAPTER_APPLICATION_INCLUDES = set()
+
+EPG_GRAPH_RUNTIME_ENTRYPOINT = (
+    "src/native/core/application/epg/epg_graph_runtime.cpp"
+)
+EPG_RUNTIME_BOUNDARY_ALLOWED_FILES = {
+    EPG_GRAPH_RUNTIME_ENTRYPOINT,
+    "src/native/core/application/epg/epg_registry.cpp",
+    "src/native/core/application/epg/epg_registry.h",
+}
+
+EPG_RUNTIME_BOUNDARY_PATTERNS = {
+    "RegisterEpgTypes(": "EPG type registration must stay behind StartEpgGraph",
+    "CompileEpgConfig(": "EPG config compilation must stay behind StartEpgGraph",
+    "std::make_unique<Epg::EventPipelineGraph>":
+        "runtime EPG graph construction must stay behind StartEpgGraph",
+    "Epg::EventPipelineGraph graph":
+        "runtime EPG graph construction must stay behind StartEpgGraph",
+}
+
+NON_EPG_THREAD_ALLOWED_FILES = {
+    "src/native/common/epg/epg_internal.h",
+    "src/native/common/epg/epg_task_runner.cpp",
+}
+
+NON_EPG_THREAD_PATTERNS = {
+    "std::thread": "native runtime threads must be owned by EPG",
+    "std::jthread": "native runtime threads must be owned by EPG",
+    "std::async": "native runtime async work must be owned by EPG",
+    "pthread_create": "native runtime threads must be owned by EPG",
+    ".detach(": "native runtime detached threads are not allowed",
 }
 
 
@@ -32,7 +51,7 @@ def source_files(root: Path, directory: str) -> list[Path]:
         path
         for path in base.rglob("*")
         if path.suffix in {".h", ".hpp", ".c", ".cc", ".cpp"}
-        and "adapters/slam/orb_slam3" not in path.as_posix()
+        and "adapters/slam/orb/orb_slam3" not in path.as_posix()
     ]
 
 
@@ -42,6 +61,16 @@ def adapter_application_include_violations(root: Path) -> list[str]:
         rel = relative_path(path, root)
         if rel in ALLOWED_ADAPTER_APPLICATION_INCLUDES:
             continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if '#include "core/application/' in text:
+            violations.append(rel)
+    return violations
+
+
+def core_ports_application_include_violations(root: Path) -> list[str]:
+    violations: list[str] = []
+    for path in source_files(root, "src/native/core/ports"):
+        rel = relative_path(path, root)
         text = path.read_text(encoding="utf-8", errors="ignore")
         if '#include "core/application/' in text:
             violations.append(rel)
@@ -58,13 +87,43 @@ def misplaced_application_composition(root: Path) -> list[str]:
     return misplaced
 
 
+def runtime_epg_boundary_violations(root: Path) -> list[str]:
+    violations: list[str] = []
+    for path in source_files(root, "src/native/core/application"):
+        rel = relative_path(path, root)
+        if rel in EPG_RUNTIME_BOUNDARY_ALLOWED_FILES:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for pattern, message in EPG_RUNTIME_BOUNDARY_PATTERNS.items():
+            if pattern in text:
+                violations.append(f"{message}: {rel}")
+    return violations
+
+
+def non_epg_thread_violations(root: Path) -> list[str]:
+    violations: list[str] = []
+    for path in source_files(root, "src/native"):
+        rel = relative_path(path, root)
+        if rel in NON_EPG_THREAD_ALLOWED_FILES:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for pattern, message in NON_EPG_THREAD_PATTERNS.items():
+            if pattern in text:
+                violations.append(f"{message}: {rel}")
+    return violations
+
+
 def main() -> int:
     root = Path(sys.argv[1]).resolve()
     violations = []
     for rel in adapter_application_include_violations(root):
         violations.append(f"adapter must not include core/application directly: {rel}")
+    for rel in core_ports_application_include_violations(root):
+        violations.append(f"core port must not include core/application directly: {rel}")
     for rel in misplaced_application_composition(root):
         violations.append(f"application composition must live under src/native/app: {rel}")
+    violations.extend(runtime_epg_boundary_violations(root))
+    violations.extend(non_epg_thread_violations(root))
     if violations:
         sys.stderr.write("\n".join(violations) + "\n")
         return 1

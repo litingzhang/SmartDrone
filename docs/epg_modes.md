@@ -33,8 +33,9 @@ Current responsibility split:
 - `SlamClockTask`: emits the frame tick queue. The static DOT default is 50 ms, and the SLAM session applies the manifest-declared runtime tuning for the configured SLAM input FPS at startup.
 - `SlamImuGateTask`: consumes runtime readiness and ticks, waits for IMU readiness, rate-limits frame readiness from the live SLAM input FPS, and emits `SlamFrameReady`.
 - `SlamAcquireTask`: runs `SlamFrameInputPort::AcquireAndPrepareFrame` and emits `SlamPreparedFrame`.
-- `SlamTrackingTask`: runs `SlamFrameTrackingPort::TrackPreparedFrame` and emits `SlamTrackedFrame`.
-- `SlamPosePostprocessTask`: runs `SlamFramePosePostprocessPort::PostprocessTrackedFrame` and fans out the same `SlamPublishedFrame` snapshot to output tasks.
+- `SlamTrackingRouteTask`: routes prepared frames to the selected tracking strategy queue.
+- `SlamKltTrackingTask`, `SlamDpvoTrackingTask`, `SlamOrbTrackingTask`, and `SlamVisualFeatureTrackingTask`: run `SlamFrameTrackingPort::TrackPreparedFrame` for the selected strategy and emit `SlamTrackedFrame`.
+- `SlamPosePostprocessTask`: consumes tracked frames from the strategy branches, runs `SlamFramePosePostprocessPort::PostprocessTrackedFrame`, and fans out the same `SlamPublishedFrame` snapshot to output tasks.
 - `SlamPointCloudTask`: emits the point-cloud side effect and reports `SlamStatus`.
 - `SlamLivePoseTask`: emits the live-pose side effect and reports `SlamStatus`.
 - `SlamMavlinkTask`: emits the MAVLink pose side effect and reports `SlamStatus`.

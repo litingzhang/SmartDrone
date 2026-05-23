@@ -7,42 +7,41 @@ MavlinkPosePublisher::MavlinkPosePublisher(Px4MavlinkGateway &serial)
 {
 }
 
-void MavlinkPosePublisher::PublishPose(uint64_t frameId, const Core::Ports::PoseEstimate &pose,
-                                       const Core::Ports::VelocityEstimate &velocity, uint8_t resetCounter, uint16_t,
-                                       int, Core::Ports::PoseQuality quality)
+void MavlinkPosePublisher::PublishPose(
+    const Core::Ports::PosePublishRequest &request)
 {
     Px4MavlinkGateway::Pose mavPose{};
-    mavPose.x = pose.x;
-    mavPose.y = pose.y;
-    mavPose.z = pose.z;
-    mavPose.qw = pose.qw;
-    mavPose.qx = pose.qx;
-    mavPose.qy = pose.qy;
-    mavPose.qz = pose.qz;
+    mavPose.x = request.pose.x;
+    mavPose.y = request.pose.y;
+    mavPose.z = request.pose.z;
+    mavPose.qw = request.pose.qw;
+    mavPose.qx = request.pose.qx;
+    mavPose.qy = request.pose.qy;
+    mavPose.qz = request.pose.qz;
 
     Px4MavlinkGateway::LinearVelocityNed mavVelocity{};
-    if (velocity.valid) {
-        mavVelocity.x = velocity.vx;
-        mavVelocity.y = velocity.vy;
-        mavVelocity.z = velocity.vz;
+    if (request.velocity.valid) {
+        mavVelocity.x = request.velocity.vx;
+        mavVelocity.y = request.velocity.vy;
+        mavVelocity.z = request.velocity.vz;
     }
 
     OdomQualityMode odomQuality = OdomQualityMode::GOOD;
-    if (quality == Core::Ports::PoseQuality::Weak) {
+    if (request.quality == Core::Ports::PoseQuality::Weak) {
         odomQuality = OdomQualityMode::WEAK;
-    } else if (quality == Core::Ports::PoseQuality::Lost) {
+    } else if (request.quality == Core::Ports::PoseQuality::Lost) {
         odomQuality = OdomQualityMode::LOST;
     }
 
-    Px4MavlinkGateway::OdometryRequest request{};
-    request.frameId = frameId;
-    request.poseNed = mavPose;
-    request.velocityNed = mavVelocity;
-    request.mavFrameId = MAV_FRAME_LOCAL_FRD;
-    request.childFrameId = MAV_FRAME_BODY_FRD;
-    request.resetCounter = resetCounter;
-    request.qualityMode = odomQuality;
-    m_serial.SendOdometry(request);
+    Px4MavlinkGateway::OdometryRequest odometry{};
+    odometry.frameId = request.frameId;
+    odometry.poseNed = mavPose;
+    odometry.velocityNed = mavVelocity;
+    odometry.mavFrameId = MAV_FRAME_LOCAL_FRD;
+    odometry.childFrameId = MAV_FRAME_BODY_FRD;
+    odometry.resetCounter = request.resetCounter;
+    odometry.qualityMode = odomQuality;
+    m_serial.SendOdometry(odometry);
 }
 
 } // namespace SmartDrone::Adapters::Telemetry

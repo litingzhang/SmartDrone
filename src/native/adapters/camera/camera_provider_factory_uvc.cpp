@@ -8,31 +8,6 @@ std::unique_ptr<SmartDrone::Core::Ports::ICameraProvider> CreateCameraProvider()
     return std::make_unique<UvcStereoCamera>();
 }
 
-SmartDrone::Core::Ports::CameraOpenConfig MakeCameraOpenConfig(
-    const SmartDrone::Core::Application::MainRuntimeAliases &aliases)
-{
-    SmartDrone::Core::Ports::CameraOpenConfig config{};
-    config.width = aliases.width;
-    config.height = aliases.height;
-    config.fps = aliases.fps;
-    config.leftCameraIndex = aliases.leftCamIndex;
-    config.rightCameraIndex = aliases.rightCamIndex;
-    config.exposureUs = aliases.exposureUs;
-    config.pairWindowMs = aliases.pairMs;
-    config.keepWindowMs = aliases.keepMs;
-    config.pairQueue = aliases.pairQueue;
-    config.uvcDeviceIndex = aliases.uvcDeviceIndex;
-    config.uvcEyeWidth = aliases.uvcEyeWidth;
-    config.uvcEyeHeight = aliases.uvcEyeHeight;
-    config.autoExposureDisabled = aliases.aeDisable;
-    config.requestY8 = aliases.requestY8;
-    config.r16Normalize = aliases.r16Norm;
-    config.uvcPackedStereo = aliases.uvcPackedStereo;
-    config.uvcSwapEyes = aliases.uvcSwapEyes;
-    config.gain = aliases.gain;
-    return config;
-}
-
 std::string_view CompiledCameraProviderName()
 {
     return "uvc_stereo_opencv";

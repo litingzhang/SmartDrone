@@ -19,12 +19,21 @@ enum class PoseQuality : uint8_t {
     Lost = 2,
 };
 
+struct PosePublishRequest {
+    uint64_t frameId{0};
+    PoseEstimate pose{};
+    VelocityEstimate velocity{};
+    uint8_t resetCounter{0};
+    uint16_t resetMapCount{0};
+    int trackingState{0};
+    PoseQuality quality{PoseQuality::Lost};
+};
+
 class IPosePublisher {
   public:
     virtual ~IPosePublisher() = default;
 
-    virtual void PublishPose(uint64_t frameId, const PoseEstimate &pose, const VelocityEstimate &velocity,
-                             uint8_t resetCounter, uint16_t resetMapCount, int trackingState, PoseQuality quality) = 0;
+    virtual void PublishPose(const PosePublishRequest &request) = 0;
 };
 
 } // namespace SmartDrone::Core::Ports
