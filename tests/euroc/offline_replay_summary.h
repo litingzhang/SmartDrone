@@ -43,6 +43,7 @@ void UpdateReplayTimingSummary(
     summary.replayAcquireMs.Add(sample.replayAcquireMs);
     summary.replayImuMs.Add(sample.replayImuMs);
     summary.slamTotalMs.Add(sample.slamTotalMs);
+    summary.slamBackendStepMs.Add(sample.slamBackendStepMs);
     summary.inputPrepareMs.Add(sample.inputPrepareMs);
     summary.frontendMs.Add(sample.frontendMs);
     summary.stereoPairMs.Add(sample.stereoPairMs);
@@ -160,6 +161,8 @@ void PrintReplayCoreTiming(const ReplaySummary &summary)
     PrintReplayMetric("replay_acquire_ms", summary.replayAcquireMs, frames);
     PrintReplayMetric("replay_imu_ms", summary.replayImuMs, frames);
     PrintReplayMetric("slam_total_ms", summary.slamTotalMs, frames);
+    PrintReplayMetric("slam_backend_step_ms", summary.slamBackendStepMs,
+                      frames);
     PrintReplayMetric("input_prepare_ms", summary.inputPrepareMs, frames);
     PrintReplayMetric("frontend_ms", summary.frontendMs, frames);
     PrintReplayMetric("stereo_pair_ms", summary.stereoPairMs, frames);
@@ -277,6 +280,8 @@ void WriteReplaySummaryJsonTiming(std::ostream &json,
                           frames);
     WriteReplayMetricJson(json, "replay_imu_ms", summary.replayImuMs, frames);
     WriteReplayMetricJson(json, "slam_total_ms", summary.slamTotalMs, frames);
+    WriteReplayMetricJson(json, "slam_backend_step_ms",
+                          summary.slamBackendStepMs, frames);
     WriteReplayMetricJson(json, "input_prepare_ms", summary.inputPrepareMs,
                           frames);
     WriteReplayMetricJson(json, "frontend_ms", summary.frontendMs, frames);

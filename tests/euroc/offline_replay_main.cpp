@@ -71,6 +71,7 @@ struct OfflineReplayOptions {
     int visualFeatureInputMaxHeight{409};
     int cameraFps{60};
     int slamInputFps{20};
+    int backendStepEveryN{1};
     int timeoutMs{1000};
     size_t maxFrames{0};
     bool lkLoopClosure{false};
@@ -245,6 +246,7 @@ void WriteReplayCsvHeader(std::ostream &csv)
            "external_hash,"
            "superpoint_lg_every_n,superpoint_frontend_ms,superpoint_match_ms,"
            "superpoint_total_ms,replay_acquire_ms,replay_imu_ms,slam_total_ms,"
+           "slam_backend_step_ms,"
            "input_prepare_ms,frontend_ms,stereo_pair_ms,external_pack_ms,mono_"
            "augment_ms,"
            "lk_rectify_ms,lk_disparity_ms,lk_gftt_ms,lk_flow_ms,lk_candidate_ms,"
@@ -301,14 +303,15 @@ void WriteReplayCsvTimingFields(
     std::ostream &csv, const SmartDrone::Tests::ReplayPoseSample &sample)
 {
     csv << sample.replayAcquireMs << ',' << sample.replayImuMs << ','
-        << sample.slamTotalMs << ',' << sample.inputPrepareMs << ','
-        << sample.frontendMs << ',' << sample.stereoPairMs << ','
-        << sample.featurePackMs << ',' << sample.monoAugmentMs << ','
-        << sample.lkRectifyMs << ',' << sample.lkDisparityMs << ','
-        << sample.lkGfttMs << ',' << sample.lkFlowMs << ','
-        << sample.lkCandidateMs << ',' << sample.lkPnpMs << ','
-        << sample.lkUpdateMs << ',' << sample.orbTrackMs << ','
-        << sample.orbExtractMs << ',' << sample.orbStereoMatchMs << ',';
+        << sample.slamTotalMs << ',' << sample.slamBackendStepMs << ','
+        << sample.inputPrepareMs << ',' << sample.frontendMs << ','
+        << sample.stereoPairMs << ',' << sample.featurePackMs << ','
+        << sample.monoAugmentMs << ',' << sample.lkRectifyMs << ','
+        << sample.lkDisparityMs << ',' << sample.lkGfttMs << ','
+        << sample.lkFlowMs << ',' << sample.lkCandidateMs << ','
+        << sample.lkPnpMs << ',' << sample.lkUpdateMs << ','
+        << sample.orbTrackMs << ',' << sample.orbExtractMs << ','
+        << sample.orbStereoMatchMs << ',';
 }
 
 void WriteReplayCsvMappingFields(
@@ -403,6 +406,7 @@ constexpr const char *OFFLINE_REPLAY_USAGE_TEXT =
     "mapping|localization|relocalization|tracking-only|auto\n"
     "  --fps <n>             Camera FPS for replay pacing, default 60\n"
     "  --slam-fps <n>        SLAM input FPS, default 20\n"
+    "  --backend-step-every-n <n> Backend maintenance cadence, default 1\n"
     "  --timeout-ms <n>      Batch acquire timeout, default 1000\n"
     "  --max-frames <n>      Maximum output frames, default 0(all)\n"
     "  --lk-loop-closure     Compatibility flag; disabled for realtime "
@@ -585,6 +589,8 @@ void ParseReplayModeOptions(int argc, char **argv, OfflineReplayOptions &opts)
         GetOptionValue(argc, argv, "--slam-mode", "mapping"));
     opts.cameraFps = GetOptionInt(argc, argv, "--fps", opts.cameraFps);
     opts.slamInputFps = GetOptionInt(argc, argv, "--slam-fps", opts.slamInputFps);
+    opts.backendStepEveryN = GetOptionInt(
+        argc, argv, "--backend-step-every-n", opts.backendStepEveryN);
     opts.timeoutMs = GetOptionInt(argc, argv, "--timeout-ms", opts.timeoutMs);
     opts.maxFrames = GetOptionSize(argc, argv, "--max-frames", opts.maxFrames);
 }

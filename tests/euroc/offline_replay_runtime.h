@@ -38,6 +38,7 @@ struct ReplaySummary {
     MetricAccumulator replayAcquireMs;
     MetricAccumulator replayImuMs;
     MetricAccumulator slamTotalMs;
+    MetricAccumulator slamBackendStepMs;
     MetricAccumulator inputPrepareMs;
     MetricAccumulator frontendMs;
     MetricAccumulator stereoPairMs;
@@ -259,6 +260,7 @@ BuildReplayRunnerConfig(const OfflineReplayOptions &opts)
 {
     return {.cameraFps = opts.cameraFps,
             .slamInputFps = opts.slamInputFps,
+            .backendStepEveryN = std::max(1, opts.backendStepEveryN),
             .useImu = UseImu(opts.sensorMode),
             .preferLatestFrame = true,
             .timeoutMs = opts.timeoutMs,

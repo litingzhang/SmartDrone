@@ -1,5 +1,6 @@
 #include "support/replay_slam_runner.h"
 
+#include <algorithm>
 #include <chrono>
 
 namespace SmartDrone::Tests {
@@ -23,6 +24,10 @@ ReplaySlamRunner::ReplaySlamRunner(
       m_pipeline(SmartDrone::Core::Application::PerceptionPipelineConfig{
           cfg.cameraFps, cfg.preferLatestFrame})
 {
+    m_slamControl =
+        dynamic_cast<SmartDrone::Core::Ports::ISlamRuntimeControl *>(
+            &m_slamEngine);
+    m_backendStepEveryN = std::max(1, m_cfg.backendStepEveryN);
 }
 
 std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
@@ -83,6 +88,14 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
         const auto output = m_slamEngine.Process(input, m_cfg.extractFeatures,
                                                  m_cfg.extractPointCloud);
         const auto slamEnd = std::chrono::steady_clock::now();
+        const bool runBackendStep =
+            m_slamControl != nullptr &&
+            output.frameId % static_cast<uint64_t>(m_backendStepEveryN) == 0U;
+        const auto backendStepStart = std::chrono::steady_clock::now();
+        if (runBackendStep) {
+            m_slamControl->StepBackend();
+        }
+        const auto backendStepEnd = std::chrono::steady_clock::now();
         ReplayPoseSample sample{};
         sample.frameId = output.frameId;
         sample.captureTimestampNs = output.captureTimestampNs;
@@ -108,6 +121,8 @@ std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
         sample.replayAcquireMs = DurationMs(acquireStart, acquireEnd);
         sample.replayImuMs = DurationMs(imuStart, imuEnd);
         sample.slamTotalMs = DurationMs(slamStart, slamEnd);
+        sample.slamBackendStepMs =
+            runBackendStep ? DurationMs(backendStepStart, backendStepEnd) : 0.0;
         sample.inputPrepareMs = output.inputPrepareMs;
         sample.frontendMs = output.frontendMs;
         sample.stereoPairMs = output.stereoPairMs;

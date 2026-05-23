@@ -9,12 +9,14 @@
 #include "core/application/state/perception_pipeline.h"
 #include "core/ports/imu_provider.h"
 #include "core/ports/slam_engine.h"
+#include "core/ports/slam_runtime_control.h"
 
 namespace SmartDrone::Tests {
 
 struct ReplaySlamRunnerConfig {
     int cameraFps{60};
     int slamInputFps{20};
+    int backendStepEveryN{1};
     bool useImu{true};
     bool preferLatestFrame{true};
     int timeoutMs{1000};
@@ -45,6 +47,7 @@ struct ReplayPoseSample {
     double replayAcquireMs{0.0};
     double replayImuMs{0.0};
     double slamTotalMs{0.0};
+    double slamBackendStepMs{0.0};
     double inputPrepareMs{0.0};
     double frontendMs{0.0};
     double stereoPairMs{0.0};
@@ -108,9 +111,11 @@ class ReplaySlamRunner {
     SmartDrone::Core::Ports::ICameraProvider &m_camera;
     SmartDrone::Core::Ports::IImuProvider &m_imu;
     SmartDrone::Core::Ports::ISlamEngine &m_slamEngine;
+    SmartDrone::Core::Ports::ISlamRuntimeControl *m_slamControl{nullptr};
     ReplaySlamRunnerConfig m_cfg;
     SmartDrone::Core::Application::PerceptionPipeline m_pipeline;
     int64_t m_lastFrameNs{0};
+    int m_backendStepEveryN{1};
 };
 
 } // namespace SmartDrone::Tests

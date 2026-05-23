@@ -64,6 +64,30 @@ find_first_toolchain_prefix() {
     return 1
 }
 
+cache_value_matches() {
+    local cache_file="$1"
+    local key="$2"
+    local expected="$3"
+    if [ ! -f "$cache_file" ]; then
+        return 1
+    fi
+    grep -Eq "^${key}:[^=]*=${expected}$" "$cache_file"
+}
+
+cmake_cache_needs_reconfigure() {
+    local cache_file="$1"
+    if [ ! -f "$cache_file" ]; then
+        return 0
+    fi
+    if ! cache_value_matches "$cache_file" "SMART_DRONE_ENABLE_ORB_SLAM3" "$ENABLE_ORB_SLAM3"; then
+        return 0
+    fi
+    if ! cache_value_matches "$cache_file" "SMART_DRONE_ENABLE_OPENCV_CUDA_ORB" "$ENABLE_OPENCV_CUDA_ORB"; then
+        return 0
+    fi
+    return 1
+}
+
 MODE="${1:-smart_drone}"
 shift $(( $# > 0 ? 1 : 0 ))
 BUILD_SMART_DRONE=OFF
@@ -451,7 +475,7 @@ if [ "$BUILD_SMART_DRONE" = "ON" ]; then
         rm -rf "$BUILD_DIR"
     fi
     mkdir -p "$BUILD_DIR"
-    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ "$NATIVE_RECONFIGURE_REQUIRED" -eq 1 ] || [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ "$NATIVE_RECONFIGURE_REQUIRED" -eq 1 ] || cmake_cache_needs_reconfigure "$BUILD_DIR/CMakeCache.txt"; then
         smart_drone_configure_args=(
             "${configure_native_args[@]}"
             -DPKG_CONFIG_EXECUTABLE=/usr/bin/pkg-config
@@ -492,7 +516,7 @@ if [ "$BUILD_REPLAY" -eq 1 ]; then
         rm -rf "$REPLAY_BUILD_DIR"
     fi
     mkdir -p "$REPLAY_BUILD_DIR"
-    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -f "$REPLAY_BUILD_DIR/CMakeCache.txt" ]; then
+    if [ "$FORCE_RECONFIGURE" -eq 1 ] || cmake_cache_needs_reconfigure "$REPLAY_BUILD_DIR/CMakeCache.txt"; then
         replay_configure_args=(
             -DBUILD_SMART_DRONE=OFF
             -DENABLE_OFFLINE_REPLAY=ON
