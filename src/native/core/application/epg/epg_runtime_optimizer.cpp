@@ -2,9 +2,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstdio>
-#include <filesystem>
-#include <fstream>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -13,6 +10,7 @@
 #include <vector>
 
 #include "core/application/epg/epg_solver_primitives.h"
+#include "core/application/epg/epg_runtime_optimizer_io.h"
 #include "core/application/epg/epg_task_manifest.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
 namespace SmartDrone::Core::Application {
@@ -43,9 +41,12 @@ struct SolverDecision {
     std::uint64_t effectiveLoopUs{0}, resourceWaitCount{0};
     std::uint64_t maxResourceWaitUs{0}, averageResourceWaitUs{0};
     std::uint64_t totalResourceWaitUs{0}, utilizationPpm{0};
+    std::uint64_t predictedResourceWaitUs{0};
     std::uint64_t budgetUs{0}, deadlineUs{0};
     std::uint64_t budgetOverrunCount{0}, deadlineMissCount{0};
     std::uint64_t schedulingErrorCount{0}, topologyPenalty{0};
+    std::string resourceBefore;
+    std::string resourceAfter;
     std::vector<Epg::PortId> backpressureBefore;
     std::vector<Epg::PortId> backpressureAfter;
 };
@@ -60,7 +61,9 @@ struct QueueCandidate {
 };
 struct TaskCandidate {
     std::uint64_t intervalMs{0};
+    std::string resource;
     std::vector<Epg::PortId> backpressureOutputs;
+    std::uint64_t predictedResourceWaitUs{0};
     std::uint64_t topologyPenalty{0};
     std::uint64_t penalty{0};
 };
@@ -84,87 +87,6 @@ struct TopologySolution {
     std::vector<std::size_t> queueCandidateIndexes;
     std::vector<std::size_t> taskCandidateIndexes;
 };
-
-std::string ReadFile(const std::string &path)
-{
-    std::ifstream input(path);
-    if (!input) {
-        return {};
-    }
-    return std::string(std::istreambuf_iterator<char>(input),
-                       std::istreambuf_iterator<char>());
-}
-
-std::string StripGeneratedMetadata(std::string text)
-{
-    const std::vector<std::string> fields = {
-        "generatedAtMs",
-        "sourceTimestampMs",
-    };
-    for (const auto &field : fields) {
-        const auto key = "\"" + field + "\":";
-        auto pos = text.find(key);
-        if (pos == std::string::npos) {
-            continue;
-        }
-        auto end = text.find('\n', pos);
-        if (end == std::string::npos) {
-            text.erase(pos);
-            continue;
-        }
-        text.erase(pos, end - pos + 1);
-    }
-    return text;
-}
-
-bool OptimizedConfigChanged(const std::string &oldJson,
-                            const std::string &newJson)
-{
-    return StripGeneratedMetadata(oldJson) != StripGeneratedMetadata(newJson);
-}
-
-void EnsureArtifactDirectory(const std::string &path)
-{
-    const std::filesystem::path artifactPath(path);
-    const auto parent = artifactPath.parent_path();
-    if (parent.empty()) {
-        return;
-    }
-    std::error_code error;
-    if (std::filesystem::exists(parent, error) &&
-        !std::filesystem::is_directory(parent, error)) {
-        throw std::runtime_error("EPG artifact directory is not a directory: " +
-                                 parent.string());
-    }
-    std::filesystem::create_directories(parent, error);
-    if (error) {
-        throw std::runtime_error("failed to create EPG artifact directory: " +
-                                 parent.string());
-    }
-}
-
-void WriteRequiredArtifactFile(const std::string &path,
-                               const std::string &text)
-{
-    EnsureArtifactDirectory(path);
-    const std::string tempPath = path + ".tmp";
-    {
-        std::ofstream output(tempPath, std::ios::out | std::ios::trunc);
-        if (!output) {
-            throw std::runtime_error("failed to open EPG artifact: " +
-                                     tempPath);
-        }
-        output << text;
-        if (!output) {
-            throw std::runtime_error("failed to write EPG artifact: " +
-                                     tempPath);
-        }
-    }
-    if (std::rename(tempPath.c_str(), path.c_str()) != 0) {
-        (void)std::remove(tempPath.c_str());
-        throw std::runtime_error("failed to publish EPG artifact: " + path);
-    }
-}
 
 std::uint64_t ProfileAgeMs(std::uint64_t nowMs,
                            std::uint64_t profileTimestampMs)
@@ -205,7 +127,8 @@ void ValidateProfileCatalogEntry(const EpgTaskCatalogEntry &manifestEntry,
         entry.resource != manifestEntry.resource ||
         entry.budgetUs != manifestEntry.budgetUs ||
         entry.deadlineUs != manifestEntry.deadlineUs ||
-        entry.replaceable != manifestEntry.replaceable) {
+        entry.replaceable != manifestEntry.replaceable ||
+        entry.resourceAlternates != manifestEntry.resourceAlternates) {
         throw std::runtime_error("profile task catalog mismatch: " +
                                  manifestEntry.taskType);
     }
@@ -262,20 +185,23 @@ void ValidateProfileDiagnosticsCoverage(
     ValidateProfileTaskDiagnostics(topology, diagnostics);
 }
 
-std::uint64_t TaskCandidatePenalty(std::uint64_t intervalBeforeMs,
-                                   std::uint64_t intervalAfterMs,
-                                   const Epg::TaskProfileMetrics &stats,
-                                   std::uint64_t effectiveLoopUs,
-                                   std::uint64_t topologyPenalty)
+std::vector<std::string> TaskResourceCandidates(
+    const Epg::TaskConfig &task,
+    const Epg::TaskProfileMetrics &stats,
+    const EpgTaskCatalogEntry *catalog)
 {
-    return Solver::TaskPeriodicOverloadUs(intervalAfterMs, effectiveLoopUs) +
-           stats.totalResourceWaitUs + stats.schedulingErrorCount * 10000 +
-           stats.budgetOverrunCount * 2000 +
-           stats.deadlineMissCount * 5000 +
-           Solver::TaskUtilizationOverPpm(intervalBeforeMs, intervalAfterMs,
-                                          stats.utilizationPpm,
-                                          TARGET_UTILIZATION_PPM) +
-           intervalAfterMs + topologyPenalty;
+    std::vector<std::string> candidates{task.scheduling.resource};
+    if (!catalog || !catalog->replaceable ||
+        !Solver::HasResourceSplitPressure(
+            stats, RESOURCE_WAIT_PRESSURE_US, TARGET_UTILIZATION_PPM)) {
+        return candidates;
+    }
+    for (const auto &resource : catalog->resourceAlternates) {
+        if (resource != task.scheduling.resource) {
+            candidates.push_back(resource);
+        }
+    }
+    return candidates;
 }
 
 std::vector<QueueCandidate> BuildQueueCandidates(
@@ -306,33 +232,54 @@ std::vector<TaskCandidate> BuildTaskCandidates(
 {
     const auto intervalBeforeMs =
         static_cast<std::uint64_t>(task.trigger.interval.count());
+    const bool replaceable = catalog && catalog->replaceable;
     const auto backpressureBefore =
         Solver::SortedUniquePorts(task.scheduling.backpressureOutputs);
     const auto backpressureOptimized =
         Solver::CandidateBackpressurePorts(config, &diagnostics, task,
                                            backpressureBefore,
-                                           catalog && catalog->replaceable);
+                                           replaceable);
+    const auto resourceCandidates =
+        TaskResourceCandidates(task, stats, catalog);
     const auto appendCandidate =
         [&](std::vector<TaskCandidate> &candidates,
             std::uint64_t intervalMs,
+            const std::string &resource,
             const std::vector<Epg::PortId> &backpressureOutputs) {
-            const auto topologyPenalty =
-                Solver::BackpressureTopologyPenalty(
-                    &config, &diagnostics, task, backpressureBefore,
-                    backpressureOutputs, stats.totalResourceWaitUs,
-                    catalog && catalog->replaceable);
-            candidates.push_back({
-                intervalMs,
-                backpressureOutputs,
-                topologyPenalty,
-                TaskCandidatePenalty(intervalBeforeMs, intervalMs, stats,
-                                     effectiveLoopUs, topologyPenalty),
-            });
-        };
+        const auto topologyPenalty =
+            Solver::BackpressureTopologyPenalty(
+                &config, &diagnostics, task, backpressureBefore,
+                backpressureOutputs, stats.totalResourceWaitUs,
+                replaceable) +
+            Solver::ResourceTopologyPenalty(task.scheduling.resource,
+                                            resource);
+        const auto predictedResourceWaitUs =
+            Solver::PredictedResourceWaitUs(stats.totalResourceWaitUs,
+                                            task.scheduling.resource,
+                                            resource);
+        candidates.push_back({
+            intervalMs,
+            resource,
+            backpressureOutputs,
+            predictedResourceWaitUs,
+            topologyPenalty,
+            Solver::TaskCandidatePenalty(
+                intervalBeforeMs, intervalMs, stats, effectiveLoopUs,
+                predictedResourceWaitUs, topologyPenalty,
+                TARGET_UTILIZATION_PPM),
+        });
+    };
 
     std::vector<TaskCandidate> candidates;
-    if (!catalog || !catalog->replaceable || intervalBeforeMs == 0) {
-        appendCandidate(candidates, intervalBeforeMs, backpressureBefore);
+    if (!replaceable || intervalBeforeMs == 0) {
+        for (const auto &resource : resourceCandidates) {
+            appendCandidate(candidates, intervalBeforeMs, resource,
+                            backpressureBefore);
+            if (backpressureOptimized != backpressureBefore) {
+                appendCandidate(candidates, intervalBeforeMs, resource,
+                                backpressureOptimized);
+            }
+        }
         return candidates;
     }
     const auto maxInterval =
@@ -340,12 +287,17 @@ std::vector<TaskCandidate> BuildTaskCandidates(
             intervalBeforeMs, stats, effectiveLoopUs, TARGET_UTILIZATION_PPM,
             MAX_PERIODIC_INTERVAL_MS);
     candidates.reserve(static_cast<std::size_t>(
-                           (maxInterval - intervalBeforeMs + 1) * 2));
+                           (maxInterval - intervalBeforeMs + 1) *
+                           resourceCandidates.size() * 2));
     for (std::uint64_t interval = intervalBeforeMs; interval <= maxInterval;
          ++interval) {
-        appendCandidate(candidates, interval, backpressureBefore);
-        if (backpressureOptimized != backpressureBefore) {
-            appendCandidate(candidates, interval, backpressureOptimized);
+        for (const auto &resource : resourceCandidates) {
+            appendCandidate(candidates, interval, resource,
+                            backpressureBefore);
+            if (backpressureOptimized != backpressureBefore) {
+                appendCandidate(candidates, interval, resource,
+                                backpressureOptimized);
+            }
         }
     }
     return candidates;
@@ -371,6 +323,9 @@ std::size_t BestTaskCandidateIndex(const TaskSolverNode &node)
         const auto &best = node.candidates[bestIndex];
         if (candidate.penalty < best.penalty ||
             (candidate.penalty == best.penalty &&
+             candidate.predictedResourceWaitUs < best.predictedResourceWaitUs) ||
+            (candidate.penalty == best.penalty &&
+             candidate.predictedResourceWaitUs == best.predictedResourceWaitUs &&
              candidate.backpressureOutputs.size() >
                  best.backpressureOutputs.size())) {
             bestIndex = index;
@@ -414,7 +369,11 @@ std::vector<Solver::DiscreteCandidateSet> BuildGlobalCandidateSets(
         Solver::DiscreteCandidateSet set;
         for (const auto &candidate : tasks[nodeIndex].candidates) {
             set.penalties.push_back(candidate.penalty);
-            set.tieWeights.push_back(candidate.backpressureOutputs.size());
+            std::uint64_t tieWeight = candidate.backpressureOutputs.size();
+            if (candidate.predictedResourceWaitUs == 0) {
+                ++tieWeight;
+            }
+            set.tieWeights.push_back(tieWeight);
         }
         sets.push_back(std::move(set));
     }
@@ -517,6 +476,8 @@ std::string OptimizedTaskReason(const Epg::TaskConfig &task,
                                 std::uint64_t effectiveLoopUs,
                                 std::uint64_t intervalBeforeMs,
                                 std::uint64_t intervalAfterMs,
+                                const std::string &resourceBefore,
+                                const std::string &resourceAfter,
                                 const std::vector<Epg::PortId> &backpressureBefore,
                                 const std::vector<Epg::PortId> &backpressureAfter,
                                 const EpgTaskCatalogEntry *catalog)
@@ -527,6 +488,9 @@ std::string OptimizedTaskReason(const Epg::TaskConfig &task,
     }
     if (backpressureAfter != backpressureBefore) {
         reasons.push_back("global_optimum_backpressure");
+    }
+    if (resourceAfter != resourceBefore) {
+        reasons.push_back("global_optimum_resource");
     }
     if (!reasons.empty()) {
         return JoinReasons(reasons);
@@ -641,22 +605,25 @@ void ApplyTaskSolution(Epg::TaskConfig &task,
 {
     const auto backpressureBefore =
         Solver::SortedUniquePorts(task.scheduling.backpressureOutputs);
+    const auto resourceBefore = task.scheduling.resource;
     if (candidate.intervalMs != node.intervalBeforeMs) {
         task.trigger.interval =
             std::chrono::milliseconds(static_cast<int>(candidate.intervalMs));
     }
+    task.scheduling.resource = candidate.resource;
     task.scheduling.backpressureOutputs =
         Solver::SortedUniquePorts(candidate.backpressureOutputs);
     ApplyResourceIsolation(task, node.stats, node.catalog);
     const auto backpressureAfter = task.scheduling.backpressureOutputs;
+    const auto resourceAfter = task.scheduling.resource;
 
     SolverDecision decision;
     decision.kind = "task";
     decision.name = task.name;
     decision.reason = OptimizedTaskReason(
         task, node.stats, node.effectiveLoopUs, node.intervalBeforeMs,
-        candidate.intervalMs, backpressureBefore, backpressureAfter,
-        node.catalog);
+        candidate.intervalMs, resourceBefore, resourceAfter,
+        backpressureBefore, backpressureAfter, node.catalog);
     decision.catalogRole = node.catalog ? node.catalog->role : "";
     decision.replaceable = node.catalog ? node.catalog->replaceable : false;
     decision.intervalBeforeMs = node.intervalBeforeMs;
@@ -670,12 +637,15 @@ void ApplyTaskSolution(Epg::TaskConfig &task,
     decision.maxResourceWaitUs = node.stats.maxResourceWaitUs;
     decision.averageResourceWaitUs = node.stats.averageResourceWaitUs;
     decision.totalResourceWaitUs = node.stats.totalResourceWaitUs;
+    decision.predictedResourceWaitUs = candidate.predictedResourceWaitUs;
     decision.utilizationPpm = node.stats.utilizationPpm;
     decision.budgetUs = task.scheduling.budgetUs;
     decision.deadlineUs = task.scheduling.deadlineUs;
     decision.budgetOverrunCount = node.stats.budgetOverrunCount;
     decision.deadlineMissCount = node.stats.deadlineMissCount;
     decision.schedulingErrorCount = node.stats.schedulingErrorCount;
+    decision.resourceBefore = resourceBefore;
+    decision.resourceAfter = resourceAfter;
     decision.backpressureBefore = backpressureBefore;
     decision.backpressureAfter = backpressureAfter;
     decision.topologyPenalty = candidate.topologyPenalty;
@@ -755,7 +725,7 @@ SolverScore ScoreDecisions(const std::vector<SolverDecision> &decisions)
         }
         score.periodicOverloadUs += Solver::TaskPeriodicOverloadUs(
             decision.intervalAfterMs, decision.effectiveLoopUs);
-        score.resourceWaitUs += decision.totalResourceWaitUs;
+        score.resourceWaitUs += decision.predictedResourceWaitUs;
         score.schedulingErrors += decision.schedulingErrorCount;
         score.budgetOverruns += decision.budgetOverrunCount;
         score.deadlineMisses += decision.deadlineMissCount;
@@ -818,6 +788,8 @@ void WriteTaskDecisionJson(std::ostringstream &out,
     out << "\"averageResourceWaitUs\": "
         << decision.averageResourceWaitUs << ", ";
     out << "\"totalResourceWaitUs\": " << decision.totalResourceWaitUs << ", ";
+    out << "\"predictedResourceWaitUs\": "
+        << decision.predictedResourceWaitUs << ", ";
     out << "\"utilizationPpm\": " << decision.utilizationPpm << ", ";
     out << "\"targetUtilizationPpm\": " << TARGET_UTILIZATION_PPM << ", ";
     out << "\"budgetUs\": " << decision.budgetUs << ", ";
@@ -826,6 +798,10 @@ void WriteTaskDecisionJson(std::ostringstream &out,
         << "\", ";
     out << "\"replaceable\": " << (decision.replaceable ? "true" : "false")
         << ", ";
+    out << "\"resourceBefore\": \""
+        << Solver::JsonEscape(decision.resourceBefore) << "\", ";
+    out << "\"resourceAfter\": \""
+        << Solver::JsonEscape(decision.resourceAfter) << "\", ";
     out << "\"budgetOverrunCount\": " << decision.budgetOverrunCount << ", ";
     out << "\"deadlineMissCount\": " << decision.deadlineMissCount << ", ";
     out << "\"schedulingErrorCount\": " << decision.schedulingErrorCount
@@ -930,9 +906,10 @@ EpgRuntimeOptimizerResult WriteOptimizedConfig(const EpgTaskManifest &manifest,
         BuildSolverReport(manifest, profile.metadata, nowMs, decisions);
     (void)ValidateGeneratedArtifacts(manifest, profile, json, report);
     const bool changed =
-        OptimizedConfigChanged(ReadFile(paths.optimizedConfigPath), json);
-    WriteRequiredArtifactFile(paths.solverReportPath, report);
-    WriteRequiredArtifactFile(paths.optimizedConfigPath, json);
+        EpgOptimizedConfigChanged(
+            ReadEpgOptimizerFile(paths.optimizedConfigPath), json);
+    WriteRequiredEpgOptimizerArtifactFile(paths.solverReportPath, report);
+    WriteRequiredEpgOptimizerArtifactFile(paths.optimizedConfigPath, json);
     EpgRuntimeOptimizerResult result;
     result.optimized = true;
     result.configChanged = changed;
@@ -962,7 +939,7 @@ OptimizeEpgProfileForManifest(const EpgTaskManifest &manifest,
         return {false, false, error.what()};
     }
     const std::string profileText =
-        ReadFile(manifest.artifactPaths.profilePath);
+        ReadEpgOptimizerFile(manifest.artifactPaths.profilePath);
     if (profileText.empty()) {
         return {false, false, "profile missing"};
     }

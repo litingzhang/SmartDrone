@@ -150,6 +150,7 @@ struct GraphProfileTaskCatalogEntry {
     std::uint64_t budgetUs{};
     std::uint64_t deadlineUs{};
     bool replaceable{false};
+    std::vector<std::string> resourceAlternates;
 };
 
 struct OptimizedGraphMetadata {
@@ -222,6 +223,7 @@ struct SolverReportDecision {
     std::uint64_t maxResourceWaitUs{};
     std::uint64_t averageResourceWaitUs{};
     std::uint64_t totalResourceWaitUs{};
+    std::uint64_t predictedResourceWaitUs{};
     std::uint64_t utilizationPpm{};
     std::uint64_t targetUtilizationPpm{};
     std::uint64_t budgetUs{};
@@ -230,6 +232,8 @@ struct SolverReportDecision {
     std::uint64_t deadlineMissCount{};
     std::uint64_t schedulingErrorCount{};
     std::uint64_t topologyPenalty{};
+    std::string resourceBefore;
+    std::string resourceAfter;
     std::vector<PortId> backpressureBefore;
     std::vector<PortId> backpressureAfter;
 };

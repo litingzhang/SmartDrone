@@ -17,6 +17,7 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile)
               "taskType": "TestSourceTask",
               "role": "source",
               "resource": "cpu",
+              "resourceAlternates": ["cpu_isolated"],
               "budgetUs": 1500,
               "deadlineUs": 3000,
               "replaceable": true
@@ -140,7 +141,7 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile)
     manifest.artifactPaths.optimizedConfigPath = outputPath;
     manifest.artifactPaths.solverReportPath = reportPath;
     manifest.catalog[0] =
-        {"TestSourceTask", "source", "cpu", 1500, 3000, true};
+        {"TestSourceTask", "source", "cpu", 1500, 3000, true, {"cpu_isolated"}};
     manifest.catalog.push_back(
         {"TestSinkTask", "sink", "cpu", 1000, 3000, false});
 
@@ -180,6 +181,7 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile)
     ASSERT_EQ(config.tasks.size(), 2u);
     EXPECT_EQ(config.queues.front().depth, 5u);
     EXPECT_EQ(config.tasks.front().trigger.interval.count(), 3);
+    EXPECT_EQ(config.tasks.front().scheduling.resource, "cpu_isolated");
     EXPECT_EQ(config.tasks.front().scheduling.backpressureOutputs,
               std::vector<Epg::PortId>{0});
     EXPECT_EQ(config.tasks.front().scheduling.cpuAffinity, 2);
@@ -203,15 +205,19 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile)
     EXPECT_NE(report.find("\"reason\": \"global_optimum_depth\""),
               std::string::npos);
     EXPECT_NE(report.find(
-                  "\"reason\": \"global_optimum_interval+global_optimum_backpressure\""),
+                  "\"reason\": \"global_optimum_interval+global_optimum_backpressure+global_optimum_resource\""),
               std::string::npos);
-    EXPECT_NE(report.find("\"topologyPenalty\": 11"), std::string::npos);
+    EXPECT_NE(report.find("\"topologyPenalty\": 31"), std::string::npos);
     EXPECT_NE(report.find("\"backpressureBefore\": []"), std::string::npos);
     EXPECT_NE(report.find("\"backpressureAfter\": [0]"), std::string::npos);
     EXPECT_NE(report.find("\"pressureAfter\": 0"), std::string::npos);
-    EXPECT_NE(report.find("\"resourceWaitUs\": 2500"),
+    EXPECT_NE(report.find("\"resourceWaitUs\": 0"),
               std::string::npos);
     EXPECT_NE(report.find("\"totalResourceWaitUs\": 2500"),
+              std::string::npos);
+    EXPECT_NE(report.find("\"predictedResourceWaitUs\": 0"),
+              std::string::npos);
+    EXPECT_NE(report.find("\"resourceAfter\": \"cpu_isolated\""),
               std::string::npos);
     EXPECT_NE(report.find("\"catalogRole\": \"source\""),
               std::string::npos);
@@ -235,6 +241,7 @@ TEST(EventPipelineGraphOptimizer, WritesOptimizedConfigFromFreshProfile)
                   config.tasks.front().trigger.interval.count()));
     EXPECT_EQ(parsedReport.decisions[1].backpressureAfter,
               std::vector<Epg::PortId>{0});
+    EXPECT_EQ(parsedReport.decisions[1].resourceAfter, "cpu_isolated");
 
     (void)std::remove(profilePath.c_str());
     (void)std::remove(outputPath.c_str());

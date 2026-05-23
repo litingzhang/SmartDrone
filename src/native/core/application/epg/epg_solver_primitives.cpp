@@ -155,13 +155,24 @@ bool HasResourceWaitPressure(const Epg::TaskProfileMetrics &stats,
            stats.totalResourceWaitUs > pressureThresholdUs;
 }
 
+bool HasResourceSplitPressure(const Epg::TaskProfileMetrics &stats,
+                              std::uint64_t resourceWaitThresholdUs,
+                              std::uint64_t targetUtilizationPpm)
+{
+    return HasResourceWaitPressure(stats, resourceWaitThresholdUs) ||
+           stats.deadlineMissCount > 0 || stats.budgetOverrunCount > 0 ||
+           stats.schedulingErrorCount > 0 ||
+           stats.utilizationPpm > targetUtilizationPpm;
+}
+
 std::uint64_t QueuePressureAtDepth(
     std::uint64_t depth,
     const Epg::QueueProfileMetrics &stats)
 {
-    const auto depthPressure =
-        stats.maxDepthObserved > depth ? stats.maxDepthObserved - depth : 0;
-    return depthPressure + stats.droppedNewest + stats.overwrittenOldest;
+    const auto requiredDepth =
+        stats.maxDepthObserved + stats.droppedNewest +
+        stats.overwrittenOldest;
+    return requiredDepth > depth ? requiredDepth - depth : 0;
 }
 
 std::uint64_t QueuePressure(const Epg::QueueConfig &queue,
@@ -223,6 +234,40 @@ std::uint64_t TaskFeasibleIntervalLimit(
     }
     return std::min(std::max(limit, intervalBeforeMs),
                     maxPeriodicIntervalMs);
+}
+
+std::uint64_t PredictedResourceWaitUs(
+    std::uint64_t totalResourceWaitUs,
+    const std::string &resourceBefore,
+    const std::string &resourceAfter)
+{
+    return resourceAfter == resourceBefore ? totalResourceWaitUs : 0;
+}
+
+std::uint64_t ResourceTopologyPenalty(
+    const std::string &resourceBefore,
+    const std::string &resourceAfter)
+{
+    return resourceAfter == resourceBefore ? 0 : 20;
+}
+
+std::uint64_t TaskCandidatePenalty(
+    std::uint64_t intervalBeforeMs,
+    std::uint64_t intervalAfterMs,
+    const Epg::TaskProfileMetrics &stats,
+    std::uint64_t effectiveLoopUs,
+    std::uint64_t predictedResourceWaitUs,
+    std::uint64_t topologyPenalty,
+    std::uint64_t targetUtilizationPpm)
+{
+    return TaskPeriodicOverloadUs(intervalAfterMs, effectiveLoopUs) +
+           predictedResourceWaitUs + stats.schedulingErrorCount * 10000 +
+           stats.budgetOverrunCount * 2000 +
+           stats.deadlineMissCount * 5000 +
+           TaskUtilizationOverPpm(intervalBeforeMs, intervalAfterMs,
+                                  stats.utilizationPpm,
+                                  targetUtilizationPpm) +
+           intervalAfterMs + topologyPenalty;
 }
 
 std::vector<Epg::PortId> SortedUniquePorts(std::vector<Epg::PortId> ports)

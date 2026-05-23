@@ -2,6 +2,8 @@
 #include "core/application/epg/epg_task_manifest_internal.h"
 #include "core/application/epg/epg_solver_primitives.h"
 
+#include <algorithm>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -44,6 +46,12 @@ std::uint64_t SolverTaskUtilizationOverPpm(
                                           decision.targetUtilizationPpm);
 }
 
+bool StringVectorContains(const std::vector<std::string> &values,
+                          const std::string &value)
+{
+    return std::find(values.begin(), values.end(), value) != values.end();
+}
+
 Epg::QueueProfileMetrics QueueMetricsFromDecision(
     const Epg::SolverReportDecision &decision)
 {
@@ -61,9 +69,10 @@ Epg::QueueProfileMetrics QueueMetricsFromDecision(
     return stats;
 }
 
-std::uint64_t TaskCandidatePenalty(
+std::uint64_t SolverTaskCandidatePenalty(
     const Epg::SolverReportDecision &decision,
     std::uint64_t intervalMs,
+    const std::string &resource,
     const std::vector<Epg::PortId> &backpressureOutputs,
     const Epg::TaskProfileMetrics &stats,
     std::uint64_t effectiveLoopUs,
@@ -71,19 +80,20 @@ std::uint64_t TaskCandidatePenalty(
     const Epg::GraphProfileDiagnostics *diagnostics,
     const Epg::TaskConfig &task)
 {
-    return Solver::TaskPeriodicOverloadUs(intervalMs, effectiveLoopUs) +
-           stats.totalResourceWaitUs +
-           stats.schedulingErrorCount * 10000 +
-           stats.budgetOverrunCount * 2000 +
-           stats.deadlineMissCount * 5000 +
-           Solver::TaskUtilizationOverPpm(decision.intervalBeforeMs,
-                                          intervalMs, stats.utilizationPpm,
-                                          decision.targetUtilizationPpm) +
-           intervalMs +
+    const auto predictedResourceWaitUs =
+        Solver::PredictedResourceWaitUs(
+            stats.totalResourceWaitUs, decision.resourceBefore, resource);
+    const auto topologyPenalty =
            Solver::BackpressureTopologyPenalty(
                sourceGraphConfig, diagnostics, task,
                decision.backpressureBefore, backpressureOutputs,
-               stats.totalResourceWaitUs, decision.replaceable);
+               stats.totalResourceWaitUs, decision.replaceable) +
+           Solver::ResourceTopologyPenalty(decision.resourceBefore,
+                                           resource);
+    return Solver::TaskCandidatePenalty(
+        decision.intervalBeforeMs, intervalMs, stats, effectiveLoopUs,
+        predictedResourceWaitUs, topologyPenalty,
+        decision.targetUtilizationPpm);
 }
 
 std::uint64_t TaskFeasibleIntervalLimit(
@@ -95,6 +105,31 @@ std::uint64_t TaskFeasibleIntervalLimit(
     return Solver::TaskFeasibleIntervalLimit(
         decision.intervalBeforeMs, stats, effectiveLoopUs,
         decision.targetUtilizationPpm, constraints.maxPeriodicIntervalMs);
+}
+
+bool TaskHasResourceSplitPressure(const Epg::TaskProfileMetrics &stats,
+                                  std::uint64_t targetUtilizationPpm)
+{
+    return Solver::HasResourceSplitPressure(stats, 1000,
+                                            targetUtilizationPpm);
+}
+
+std::vector<std::string> TaskResourceCandidates(
+    const EpgTaskCatalogEntry &catalog,
+    const Epg::TaskProfileMetrics &stats,
+    const Epg::SolverReportDecision &decision)
+{
+    std::vector<std::string> resources{decision.resourceBefore};
+    if (!decision.replaceable ||
+        !TaskHasResourceSplitPressure(stats, decision.targetUtilizationPpm)) {
+        return resources;
+    }
+    for (const auto &resource : catalog.resourceAlternates) {
+        if (resource != decision.resourceBefore) {
+            resources.push_back(resource);
+        }
+    }
+    return resources;
 }
 
 std::uint64_t BestQueuePenalty(
@@ -119,43 +154,36 @@ std::uint64_t BestTaskPenalty(
     const Epg::GraphProfileDiagnostics *diagnostics,
     const Epg::TaskConfig &task,
     const Epg::TaskProfileMetrics &stats,
-    const Epg::SolverReportDecision &decision)
+    const Epg::SolverReportDecision &decision,
+    const EpgTaskCatalogEntry &catalog)
 {
-    if (!decision.replaceable || decision.intervalBeforeMs == 0) {
-        return TaskCandidatePenalty(
-            decision, decision.intervalBeforeMs, decision.backpressureBefore,
-            stats, decision.effectiveLoopUs, sourceGraphConfig, diagnostics,
-            task);
-    }
-    const auto maxInterval =
-        TaskFeasibleIntervalLimit(constraints, stats,
-                                  decision.effectiveLoopUs, decision);
+    const auto maxInterval = !decision.replaceable || decision.intervalBeforeMs == 0
+        ? decision.intervalBeforeMs
+        : TaskFeasibleIntervalLimit(constraints, stats,
+                                    decision.effectiveLoopUs, decision);
     const auto optimizedBackpressure =
         sourceGraphConfig
             ? Solver::CandidateBackpressurePorts(
                   *sourceGraphConfig, diagnostics, task,
                   decision.backpressureBefore, decision.replaceable)
             : decision.backpressureAfter;
-    auto bestPenalty =
-        TaskCandidatePenalty(
-            decision, decision.intervalBeforeMs, decision.backpressureBefore,
-            stats, decision.effectiveLoopUs, sourceGraphConfig, diagnostics,
-            task);
-    for (std::uint64_t interval = decision.intervalBeforeMs + 1;
-         interval <= maxInterval; ++interval) {
-        const auto penalty = TaskCandidatePenalty(
-            decision, interval, decision.backpressureBefore, stats,
-            decision.effectiveLoopUs, sourceGraphConfig, diagnostics, task);
-        bestPenalty = std::min(bestPenalty, penalty);
-    }
-    if (optimizedBackpressure != decision.backpressureBefore) {
+    const auto resources = TaskResourceCandidates(catalog, stats, decision);
+    auto bestPenalty = std::numeric_limits<std::uint64_t>::max();
+    for (const auto &resource : resources) {
         for (std::uint64_t interval = decision.intervalBeforeMs;
              interval <= maxInterval; ++interval) {
-            const auto penalty = TaskCandidatePenalty(
-                decision, interval, optimizedBackpressure, stats,
+            const auto penalty = SolverTaskCandidatePenalty(
+                decision, interval, resource, decision.backpressureBefore, stats,
                 decision.effectiveLoopUs, sourceGraphConfig, diagnostics,
                 task);
             bestPenalty = std::min(bestPenalty, penalty);
+            if (optimizedBackpressure != decision.backpressureBefore) {
+                const auto backpressurePenalty = SolverTaskCandidatePenalty(
+                    decision, interval, resource, optimizedBackpressure, stats,
+                    decision.effectiveLoopUs, sourceGraphConfig, diagnostics,
+                    task);
+                bestPenalty = std::min(bestPenalty, backpressurePenalty);
+            }
         }
     }
     return bestPenalty;
@@ -171,7 +199,7 @@ void AddTaskDecisionScore(const Epg::SolverReportDecision &decision,
                           Epg::SolverReportScore &score)
 {
     score.periodicOverloadUs += SolverTaskPeriodicOverloadUs(decision);
-    score.resourceWaitUs += decision.totalResourceWaitUs;
+    score.resourceWaitUs += decision.predictedResourceWaitUs;
     score.schedulingErrors += decision.schedulingErrorCount;
     score.budgetOverruns += decision.budgetOverrunCount;
     score.deadlineMisses += decision.deadlineMissCount;
@@ -282,6 +310,7 @@ void ValidateQueueGlobalOptimum(
 }
 
 void ValidateTaskGlobalOptimum(
+    const EpgTaskManifest &manifest,
     const Epg::SolverReport &report,
     const Epg::GraphConfig *sourceGraphConfig,
     const Epg::GraphProfileDiagnostics *diagnostics,
@@ -289,6 +318,7 @@ void ValidateTaskGlobalOptimum(
     const Epg::TaskProfileMetrics *profileStats)
 {
     const auto &decision = RequireDecision(report, "task", optimizedTask.name);
+    const auto &catalog = RequireCatalogEntry(manifest, optimizedTask.type);
     const auto *sourceTask =
         sourceGraphConfig ? Solver::FindTaskConfig(*sourceGraphConfig,
                                                    optimizedTask.name)
@@ -306,12 +336,21 @@ void ValidateTaskGlobalOptimum(
         throw std::runtime_error("solver report task metrics mismatch: " +
                                  optimizedTask.name);
     }
-    const auto actualPenalty = TaskCandidatePenalty(
-        decision, decision.intervalAfterMs, decision.backpressureAfter,
+    const auto expectedPredictedResourceWaitUs =
+        Solver::PredictedResourceWaitUs(stats.totalResourceWaitUs,
+                                        decision.resourceBefore,
+                                        decision.resourceAfter);
+    if (decision.predictedResourceWaitUs != expectedPredictedResourceWaitUs) {
+        throw std::runtime_error("solver report task resource mismatch: " +
+                                 optimizedTask.name);
+    }
+    const auto actualPenalty = SolverTaskCandidatePenalty(
+        decision, decision.intervalAfterMs, decision.resourceAfter,
+        decision.backpressureAfter,
         stats, effectiveLoopUs, sourceGraphConfig, diagnostics, candidateTask);
     const auto bestPenalty =
         BestTaskPenalty(report.constraints, sourceGraphConfig, diagnostics,
-                        candidateTask, stats, decision);
+                        candidateTask, stats, decision, catalog);
     if (actualPenalty != bestPenalty) {
         throw std::runtime_error("solver report task is not optimal: " +
                                  optimizedTask.name);
@@ -319,7 +358,9 @@ void ValidateTaskGlobalOptimum(
     const auto expectedTopologyPenalty = Solver::BackpressureTopologyPenalty(
         sourceGraphConfig, diagnostics, candidateTask,
         decision.backpressureBefore, decision.backpressureAfter,
-        stats.totalResourceWaitUs, decision.replaceable);
+        stats.totalResourceWaitUs, decision.replaceable) +
+        Solver::ResourceTopologyPenalty(decision.resourceBefore,
+                                        decision.resourceAfter);
     if (decision.topologyPenalty != expectedTopologyPenalty) {
         throw std::runtime_error("solver report task topology mismatch: " +
                                  optimizedTask.name);
@@ -327,6 +368,7 @@ void ValidateTaskGlobalOptimum(
 }
 
 void ValidateSolverReportGlobalOptimum(
+    const EpgTaskManifest &manifest,
     const Epg::OptimizedGraph &optimizedGraph,
     const Epg::SolverReport &report,
     const Epg::GraphProfile *sourceProfile)
@@ -350,8 +392,8 @@ void ValidateSolverReportGlobalOptimum(
         if (sourceProfile) {
             stats = &sourceProfile->diagnostics.tasks.at(task.name);
         }
-        ValidateTaskGlobalOptimum(report, sourceGraphConfig, diagnostics,
-                                  task, stats);
+        ValidateTaskGlobalOptimum(manifest, report, sourceGraphConfig,
+                                  diagnostics, task, stats);
     }
 }
 
@@ -506,6 +548,9 @@ std::string ExpectedTaskDecisionReason(
     if (decision.backpressureAfter != decision.backpressureBefore) {
         topologyReasons.push_back("global_optimum_backpressure");
     }
+    if (decision.resourceAfter != decision.resourceBefore) {
+        topologyReasons.push_back("global_optimum_resource");
+    }
     if (!topologyReasons.empty()) {
         return JoinTaskDecisionReasons(topologyReasons);
     }
@@ -538,6 +583,7 @@ void ValidateTaskSolverDecision(
             static_cast<std::uint64_t>(task->trigger.interval.count()) ||
         decision.budgetUs != task->scheduling.budgetUs ||
         decision.deadlineUs != task->scheduling.deadlineUs ||
+        decision.resourceAfter != task->scheduling.resource ||
         decision.targetUtilizationPpm != constraints.targetUtilizationPpm ||
         decision.backpressureAfter !=
             Solver::SortedUniquePorts(
@@ -552,6 +598,7 @@ void ValidateTaskSolverDecision(
             decision.intervalBeforeMs !=
                 static_cast<std::uint64_t>(
                     sourceTask->trigger.interval.count()) ||
+            decision.resourceBefore != sourceTask->scheduling.resource ||
             decision.backpressureBefore !=
                 Solver::SortedUniquePorts(
                     sourceTask->scheduling.backpressureOutputs)) {
@@ -562,6 +609,12 @@ void ValidateTaskSolverDecision(
     if (decision.catalogRole != catalog.role ||
         decision.replaceable != catalog.replaceable) {
         throw std::runtime_error("solver report task catalog mismatch: " +
+                                 decision.name);
+    }
+    if (decision.resourceAfter != catalog.resource &&
+        !StringVectorContains(catalog.resourceAlternates,
+                              decision.resourceAfter)) {
+        throw std::runtime_error("solver report task resource mismatch: " +
                                  decision.name);
     }
     if (decision.reason != ExpectedTaskDecisionReason(decision)) {
@@ -683,7 +736,8 @@ void ValidateEpgSolverReport(
     ValidateSolverReportDecisionDetails(
         manifest, nullptr, optimizedGraph.config, report);
     if (SolverReportUsesGlobalObjective(report)) {
-        ValidateSolverReportGlobalOptimum(optimizedGraph, report, nullptr);
+        ValidateSolverReportGlobalOptimum(
+            manifest, optimizedGraph, report, nullptr);
     }
 }
 
@@ -706,7 +760,7 @@ void ValidateEpgSolverReport(
     ValidateSolverReportDecisionDetails(
         manifest, &sourceProfile.topology, optimizedGraph.config, report);
     if (SolverReportUsesGlobalObjective(report)) {
-        ValidateSolverReportGlobalOptimum(optimizedGraph, report,
+        ValidateSolverReportGlobalOptimum(manifest, optimizedGraph, report,
                                           &sourceProfile);
     }
 }

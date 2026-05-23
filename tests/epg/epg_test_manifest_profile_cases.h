@@ -11,7 +11,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
       "sourceTimestampMs": 123,
       "generatedAtMs": 456,
       "queues": [
-        {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "drop_newest"}
+        {"name": "packets", "type": "TestPacket", "depth": 6, "overflow": "drop_newest"}
       ],
       "tasks": [
         {
@@ -41,14 +41,14 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
       "objective": {
         "name": "global_minimize_predicted_epg_penalty_discrete_topology",
         "score": {
-          "queuePressure": 2,
+          "queuePressure": 0,
           "periodicOverloadUs": 500,
           "resourceWaitUs": 0,
           "schedulingErrors": 1,
           "budgetOverruns": 2,
           "deadlineMisses": 3,
           "utilizationOverPpm": 100000,
-          "totalPenalty": 131500
+          "totalPenalty": 129500
         }
       },
       "constraints": {
@@ -61,16 +61,16 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
           "kind": "queue",
           "name": "packets",
           "depthBefore": 4,
-          "depthAfter": 4,
+          "depthAfter": 6,
           "pressureBefore": 2,
-          "pressureAfter": 2,
+          "pressureAfter": 0,
           "maxDepthObserved": 4,
           "droppedNewest": 2,
           "overwrittenOldest": 0,
           "pushedPerSecond": 0,
           "poppedPerSecond": 0,
           "droppedPerSecond": 0,
-          "reason": "keep"
+          "reason": "global_optimum_depth"
         },
         {
           "kind": "task",
@@ -86,12 +86,15 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
           "maxResourceWaitUs": 0,
           "averageResourceWaitUs": 0,
           "totalResourceWaitUs": 0,
+          "predictedResourceWaitUs": 0,
           "utilizationPpm": 900000,
           "targetUtilizationPpm": 800000,
           "budgetUs": 1000,
           "deadlineUs": 2000,
           "catalogRole": "source",
           "replaceable": false,
+          "resourceBefore": "cpu",
+          "resourceAfter": "cpu",
           "budgetOverrunCount": 2,
           "deadlineMissCount": 3,
           "schedulingErrorCount": 1,
@@ -108,6 +111,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
     sourceProfile.metadata.topologyVersion = "test-topology";
     sourceProfile.metadata.timestampMs = 123;
     sourceProfile.topology = optimized.config;
+    sourceProfile.topology.queues[0].depth = 4;
     sourceProfile.diagnostics.queues["packets"].maxDepthObserved = 4;
     sourceProfile.diagnostics.queues["packets"].droppedNewest = 2;
     sourceProfile.diagnostics.tasks["source"].maxLoopUs = 1500;
@@ -123,7 +127,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
             manifest, sourceProfile, optimized, report));
 
     auto nonOptimalReport = report;
-    nonOptimalReport.decisions[0].depthAfter = 5;
+    nonOptimalReport.decisions[0].depthAfter = 4;
     nonOptimalReport.decisions[0].pressureAfter = 2;
     nonOptimalReport.decisions[0].reason = "global_optimum_depth";
     nonOptimalReport.score.totalPenalty = 131500;

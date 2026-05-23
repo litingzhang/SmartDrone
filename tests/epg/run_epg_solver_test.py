@@ -31,6 +31,7 @@ def write_profile(path: Path) -> None:
                 "taskType": "TestSourceTask",
                 "role": "source",
                 "resource": "cpu",
+                "resourceAlternates": ["cpu_isolated"],
                 "budgetUs": 1500,
                 "deadlineUs": 2200,
                 "replaceable": True,
@@ -272,8 +273,9 @@ def main() -> int:
     assert optimized["sourceProfile"] == "test_graph"
     assert optimized["sourceTimestampMs"] == 123
     assert optimized["generatedAtMs"] == 456
-    assert optimized["queues"][0]["depth"] == 1
+    assert optimized["queues"][0]["depth"] == 3
     assert optimized["tasks"][0]["trigger"]["interval_ms"] == 3
+    assert optimized["tasks"][0]["scheduling"]["resource"] == "cpu_isolated"
     assert optimized["tasks"][0]["scheduling"]["backpressure_outputs"] == [0]
     assert optimized["tasks"][0]["scheduling"]["cpu_affinity"] == 2
     assert optimized["tasks"][0]["scheduling"]["realtime"] is True
@@ -298,24 +300,27 @@ def main() -> int:
     assert report["objective"]["score"]["totalPenalty"] > 0
     assert report["objective"]["score"]["budgetOverruns"] == 2
     assert report["objective"]["score"]["deadlineMisses"] == 1
-    assert report["objective"]["score"]["resourceWaitUs"] == 2500
-    assert report["objective"]["score"]["topologyPenalty"] == 11
+    assert report["objective"]["score"]["resourceWaitUs"] == 0
+    assert report["objective"]["score"]["topologyPenalty"] == 31
     assert report["constraints"]["maxQueueDepth"] == 8
     assert report["decisions"][0]["depthAfter"] == optimized["queues"][0]["depth"]
-    assert report["decisions"][0]["pressureAfter"] == 2
+    assert report["decisions"][0]["pressureAfter"] == 0
     assert report["decisions"][1]["intervalAfterMs"] == (
         optimized["tasks"][0]["trigger"]["interval_ms"])
     assert report["decisions"][0]["droppedPerSecond"] == 100
     assert report["decisions"][1]["budgetUs"] == 1500
     assert report["decisions"][1]["totalResourceWaitUs"] == 2500
+    assert report["decisions"][1]["predictedResourceWaitUs"] == 0
+    assert report["decisions"][1]["resourceBefore"] == "cpu"
+    assert report["decisions"][1]["resourceAfter"] == "cpu_isolated"
     assert report["decisions"][1]["catalogRole"] == "source"
     assert report["decisions"][1]["replaceable"] is True
     assert report["decisions"][1]["backpressureBefore"] == []
     assert report["decisions"][1]["backpressureAfter"] == [0]
-    assert report["decisions"][1]["topologyPenalty"] == 11
-    assert report["decisions"][0]["reason"] == "keep"
+    assert report["decisions"][1]["topologyPenalty"] == 31
+    assert report["decisions"][0]["reason"] == "global_optimum_depth"
     assert report["decisions"][1]["reason"] == (
-        "global_optimum_interval+global_optimum_backpressure")
+        "global_optimum_interval+global_optimum_backpressure+global_optimum_resource")
     fixed_profile = work_dir / "non_replaceable_profile.json"
     fixed_output = work_dir / "non_replaceable_optimized.json"
     fixed_report_path = work_dir / "non_replaceable_report.json"

@@ -639,6 +639,7 @@ GraphProfileTaskCatalogEntry ParseTaskCatalogEntry(const JsonValue &item)
     entry.budgetUs = RequiredUInt64(item, "budgetUs");
     entry.deadlineUs = RequiredUInt64(item, "deadlineUs");
     entry.replaceable = OptionalBool(item, "replaceable", entry.replaceable);
+    entry.resourceAlternates = OptionalStringArray(item, "resourceAlternates");
     return entry;
 }
 
@@ -833,6 +834,8 @@ void ParseTaskSolverReportDecision(const JsonValue &item,
         item, "averageResourceWaitUs", decision.averageResourceWaitUs);
     decision.totalResourceWaitUs = OptionalUInt64(
         item, "totalResourceWaitUs", decision.totalResourceWaitUs);
+    decision.predictedResourceWaitUs = OptionalUInt64(
+        item, "predictedResourceWaitUs", decision.totalResourceWaitUs);
     decision.utilizationPpm = RequiredUInt64(item, "utilizationPpm");
     decision.targetUtilizationPpm =
         RequiredUInt64(item, "targetUtilizationPpm");
@@ -846,6 +849,10 @@ void ParseTaskSolverReportDecision(const JsonValue &item,
         RequiredUInt64(item, "schedulingErrorCount");
     decision.topologyPenalty =
         OptionalUInt64(item, "topologyPenalty", decision.topologyPenalty);
+    decision.resourceBefore =
+        OptionalString(item, "resourceBefore", decision.resourceBefore);
+    decision.resourceAfter =
+        OptionalString(item, "resourceAfter", decision.resourceAfter);
     decision.backpressureBefore =
         OptionalPortIdArray(item, "backpressureBefore");
     decision.backpressureAfter =

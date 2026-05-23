@@ -205,6 +205,7 @@ set(SMART_DRONE_CORE_APPLICATION_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_registry.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_graph_runtime.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_runtime_optimizer.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_runtime_optimizer_io.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_solver_primitives.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_task_manifest.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/epg/epg_task_manifest_solver_report.cpp"

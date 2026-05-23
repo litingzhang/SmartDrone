@@ -74,13 +74,13 @@ const EpgTaskManifest SLAM_SESSION_MANIFEST{
         {"SlamResourceTask", "resource_open", "session_resource", 5000, 50000, false},
         {"SlamClockTask", "frame_clock", "cpu", 500, 2000, false},
         {"SlamImuPollTask", "imu_poll", "imu", 1000, 2000, false},
-        {"SlamBackendTickTask", "backend_maintenance", "slam_backend", 2000, 5000, false},
+        {"SlamBackendTickTask", "backend_maintenance", "slam_backend", 2000, 5000, true, {"slam_backend_maintenance"}},
         {"SlamImuGateTask", "sensor_gate", "cpu", 1000, 2000, false},
         {"SlamAcquireTask", "frame_acquire", "camera", 12000, 16000, true},
         {"SlamTrackingRouteTask", "tracking_route", "cpu", 500, 2000, false},
         {"SlamKltTrackingTask", "klt_tracking", "slam_backend", 24000, 33000, true},
         {"SlamDpvoTrackingTask", "dpvo_tracking", "slam_backend", 24000, 33000, true},
-        {"SlamOrbTrackingTask", "orb_tracking", "slam_backend", 24000, 33000, true},
+        {"SlamOrbTrackingTask", "orb_tracking", "slam_backend", 24000, 33000, true, {"slam_orb_tracking"}},
         {"SlamVisualFeatureTrackingTask", "visual_feature_tracking", "slam_backend", 24000, 33000, true},
         {"SlamPosePostprocessTask", "pose_postprocess", "cpu", 3000, 5000, true},
         {"SlamPointCloudTask", "point_cloud", "slam_backend", 5000, 10000, true},
@@ -148,6 +148,12 @@ bool ArtifactPathsComplete(const EpgTaskArtifactPaths &paths)
            !paths.solverReportPath.empty();
 }
 
+bool StringVectorContains(const std::vector<std::string> &values,
+                          const std::string &value)
+{
+    return std::find(values.begin(), values.end(), value) != values.end();
+}
+
 void ValidateManifestMetadata(const EpgTaskManifest &manifest)
 {
     if (manifest.subgraphName.empty()) {
@@ -200,8 +206,10 @@ void ValidateTaskSchedulingCatalogMatch(const EpgTaskManifest &manifest,
 {
     const auto &entry = RequireCatalogEntry(manifest, task.type);
     const auto &scheduling = task.scheduling;
-    if (scheduling.resource != entry.resource ||
-        scheduling.budgetUs != entry.budgetUs ||
+    const bool resourceAllowed =
+        scheduling.resource == entry.resource ||
+        StringVectorContains(entry.resourceAlternates, scheduling.resource);
+    if (!resourceAllowed || scheduling.budgetUs != entry.budgetUs ||
         scheduling.deadlineUs != entry.deadlineUs) {
         throw std::runtime_error(TaskGraphLabel(manifest) +
                                  " task scheduling catalog mismatch: " +
@@ -249,6 +257,14 @@ void ValidateCatalogEntrySemantics(const EpgTaskManifest &manifest,
         entry.deadlineUs < entry.budgetUs) {
         throw std::runtime_error(TaskGraphLabel(manifest) +
                                  " catalog timing is invalid: " +
+                                 entry.taskType);
+    }
+    for (const auto &resource : entry.resourceAlternates) {
+        if (!resource.empty()) {
+            continue;
+        }
+        throw std::runtime_error(TaskGraphLabel(manifest) +
+                                 " catalog alternate resource is empty: " +
                                  entry.taskType);
     }
 }
@@ -434,6 +450,19 @@ const EpgTaskManifest &EpgManifestForDomain(EpgDomain domain)
     throw std::runtime_error("unsupported EPG domain");
 }
 
+void WriteJsonStringArray(std::ostringstream &out,
+                          const std::vector<std::string> &values)
+{
+    out << "[";
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index != 0) {
+            out << ",";
+        }
+        out << "\"" << JsonEscape(values[index]) << "\"";
+    }
+    out << "]";
+}
+
 std::vector<std::string> EpgTaskCatalogTypes(
     const EpgTaskManifest &manifest)
 {
@@ -457,6 +486,11 @@ std::string EpgTaskCatalogJson(const EpgTaskManifest &manifest)
         out << "{\"taskType\":\"" << JsonEscape(entry.taskType) << "\",";
         out << "\"role\":\"" << JsonEscape(entry.role) << "\",";
         out << "\"resource\":\"" << JsonEscape(entry.resource) << "\",";
+        if (!entry.resourceAlternates.empty()) {
+            out << "\"resourceAlternates\":";
+            WriteJsonStringArray(out, entry.resourceAlternates);
+            out << ",";
+        }
         out << "\"budgetUs\":" << entry.budgetUs << ",";
         out << "\"deadlineUs\":" << entry.deadlineUs << ",";
         out << "\"replaceable\":" << (entry.replaceable ? "true" : "false");

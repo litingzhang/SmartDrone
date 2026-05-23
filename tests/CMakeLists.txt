@@ -16,6 +16,7 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/core/application/epg/epg_graph_runtime.cpp
     ../src/native/core/application/epg/epg_registry.cpp
     ../src/native/core/application/epg/epg_runtime_optimizer.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_io.cpp
     ../src/native/core/application/epg/epg_solver_primitives.cpp
     ../src/native/core/application/epg/epg_task_manifest.cpp
     ../src/native/core/application/epg/epg_task_manifest_solver_report.cpp
@@ -118,6 +119,7 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/core/application/epg/epg_graph_runtime.cpp
     ../src/native/core/application/epg/epg_registry.cpp
     ../src/native/core/application/epg/epg_runtime_optimizer.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_io.cpp
     ../src/native/core/application/epg/epg_solver_primitives.cpp
     ../src/native/core/application/epg/epg_task_manifest.cpp
     ../src/native/core/application/epg/epg_task_manifest_solver_report.cpp

@@ -32,6 +32,10 @@ std::uint64_t EffectiveLoopUs(const Epg::TaskProfileMetrics &stats);
 bool HasResourceWaitPressure(const Epg::TaskProfileMetrics &stats,
                              std::uint64_t pressureThresholdUs);
 
+bool HasResourceSplitPressure(const Epg::TaskProfileMetrics &stats,
+                              std::uint64_t resourceWaitThresholdUs,
+                              std::uint64_t targetUtilizationPpm);
+
 std::uint64_t QueuePressureAtDepth(
     std::uint64_t depth,
     const Epg::QueueProfileMetrics &stats);
@@ -57,6 +61,24 @@ std::uint64_t TaskFeasibleIntervalLimit(
     std::uint64_t effectiveLoopUs,
     std::uint64_t targetUtilizationPpm,
     std::uint64_t maxPeriodicIntervalMs);
+
+std::uint64_t PredictedResourceWaitUs(
+    std::uint64_t totalResourceWaitUs,
+    const std::string &resourceBefore,
+    const std::string &resourceAfter);
+
+std::uint64_t ResourceTopologyPenalty(
+    const std::string &resourceBefore,
+    const std::string &resourceAfter);
+
+std::uint64_t TaskCandidatePenalty(
+    std::uint64_t intervalBeforeMs,
+    std::uint64_t intervalAfterMs,
+    const Epg::TaskProfileMetrics &stats,
+    std::uint64_t effectiveLoopUs,
+    std::uint64_t predictedResourceWaitUs,
+    std::uint64_t topologyPenalty,
+    std::uint64_t targetUtilizationPpm);
 
 std::vector<Epg::PortId> SortedUniquePorts(
     std::vector<Epg::PortId> ports);
