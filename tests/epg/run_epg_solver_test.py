@@ -105,6 +105,16 @@ def write_non_replaceable_profile(path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def write_accuracy_preserving_profile(path: Path) -> None:
+    write_profile(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["taskCatalog"][0]["preserveAccuracy"] = True
+    payload["diagnostics"]["queues"]["packets"]["maxDepthObserved"] = 5
+    payload["diagnostics"]["queues"]["packets"]["droppedNewest"] = 0
+    payload["diagnostics"]["queues"]["packets"]["droppedPerSecond"] = 0
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def write_depth_optimization_profile(path: Path) -> None:
     write_profile(path)
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -113,6 +123,118 @@ def write_depth_optimization_profile(path: Path) -> None:
     payload["diagnostics"]["queues"]["packets"]["droppedNewest"] = 0
     payload["diagnostics"]["queues"]["packets"]["overwrittenOldest"] = 0
     payload["diagnostics"]["queues"]["packets"]["droppedPerSecond"] = 0
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def task_catalog_entry(task_type: str) -> dict:
+    budget_us = 5000 if task_type == "TestSinkTask" else 1000
+    return {
+        "taskType": task_type,
+        "role": task_type,
+        "resource": "cpu",
+        "budgetUs": budget_us,
+        "deadlineUs": 5000,
+        "replaceable": False,
+    }
+
+
+def task_diagnostics(loop_us: int) -> dict:
+    return {
+        "maxLoopUs": loop_us,
+        "p90LoopUs": loop_us,
+        "p99LoopUs": loop_us,
+        "averageLoopUs": loop_us,
+        "resourceWaitCount": 0,
+        "maxResourceWaitUs": 0,
+        "averageResourceWaitUs": 0,
+        "totalResourceWaitUs": 0,
+        "utilizationPpm": 0,
+        "loopCount": 1,
+        "errorCount": 0,
+        "budgetOverrunCount": 0,
+        "deadlineMissCount": 0,
+        "schedulingErrorCount": 0,
+    }
+
+
+def write_topology_schedule_profile(path: Path) -> None:
+    payload = {
+        "schema": "smartdrone.epg.profile.v1",
+        "graph": "test_graph",
+        "topologyVersion": "test-topology-v1",
+        "timestampMs": 123,
+        "taskCatalog": [
+            task_catalog_entry("TestSourceTask"),
+            task_catalog_entry("TestForwardTask"),
+            task_catalog_entry("TestSinkTask"),
+        ],
+        "topology": {
+            "queues": [
+                {"name": "source_to_left", "type": "TestPacket",
+                 "depth": 1, "overflow": "drop_newest"},
+                {"name": "source_to_right", "type": "TestPacket",
+                 "depth": 1, "overflow": "drop_newest"},
+                {"name": "left_to_sink", "type": "TestPacket",
+                 "depth": 1, "overflow": "drop_newest"},
+                {"name": "right_to_sink", "type": "TestPacket",
+                 "depth": 1, "overflow": "drop_newest"},
+            ],
+            "tasks": [
+                {
+                    "name": "sink",
+                    "type": "TestSinkTask",
+                    "trigger": {
+                        "mode": "any_queue_ready",
+                        "queues": ["left_to_sink", "right_to_sink"],
+                    },
+                    "inputs": {"0": "left_to_sink", "1": "right_to_sink"},
+                    "outputs": {},
+                },
+                {
+                    "name": "left",
+                    "type": "TestForwardTask",
+                    "trigger": {
+                        "mode": "any_queue_ready",
+                        "queues": ["source_to_left"],
+                    },
+                    "inputs": {"0": "source_to_left"},
+                    "outputs": {"0": "left_to_sink"},
+                },
+                {
+                    "name": "right",
+                    "type": "TestForwardTask",
+                    "trigger": {
+                        "mode": "any_queue_ready",
+                        "queues": ["source_to_right"],
+                    },
+                    "inputs": {"0": "source_to_right"},
+                    "outputs": {"0": "right_to_sink"},
+                },
+                {
+                    "name": "source",
+                    "type": "TestSourceTask",
+                    "trigger": {"mode": "periodic", "interval_ms": 1},
+                    "inputs": {},
+                    "outputs": {"0": "source_to_left",
+                                "1": "source_to_right"},
+                },
+            ],
+        },
+        "diagnostics": {
+            "queues": {
+                "source_to_left": minimal_queue_diagnostics(),
+                "source_to_right": minimal_queue_diagnostics(),
+                "left_to_sink": minimal_queue_diagnostics(),
+                "right_to_sink": minimal_queue_diagnostics(),
+            },
+            "tasks": {
+                "source": task_diagnostics(1200),
+                "left": task_diagnostics(2000),
+                "right": task_diagnostics(3000),
+                "sink": task_diagnostics(400),
+            },
+        },
+    }
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -273,7 +395,7 @@ def main() -> int:
     assert optimized["sourceProfile"] == "test_graph"
     assert optimized["sourceTimestampMs"] == 123
     assert optimized["generatedAtMs"] == 456
-    assert optimized["queues"][0]["depth"] == 3
+    assert optimized["queues"][0]["depth"] == 1
     assert optimized["tasks"][0]["trigger"]["interval_ms"] == 3
     assert optimized["tasks"][0]["scheduling"]["resource"] == "cpu_isolated"
     assert optimized["tasks"][0]["scheduling"]["backpressure_outputs"] == [0]
@@ -304,7 +426,7 @@ def main() -> int:
     assert report["objective"]["score"]["topologyPenalty"] == 31
     assert report["constraints"]["maxQueueDepth"] == 8
     assert report["decisions"][0]["depthAfter"] == optimized["queues"][0]["depth"]
-    assert report["decisions"][0]["pressureAfter"] == 0
+    assert report["decisions"][0]["pressureAfter"] == 2
     assert report["decisions"][1]["intervalAfterMs"] == (
         optimized["tasks"][0]["trigger"]["interval_ms"])
     assert report["decisions"][0]["droppedPerSecond"] == 100
@@ -313,14 +435,16 @@ def main() -> int:
     assert report["decisions"][1]["predictedResourceWaitUs"] == 0
     assert report["decisions"][1]["resourceBefore"] == "cpu"
     assert report["decisions"][1]["resourceAfter"] == "cpu_isolated"
+    assert report["decisions"][1]["cpuAffinityBefore"] == -1
+    assert report["decisions"][1]["cpuAffinityAfter"] == 2
     assert report["decisions"][1]["catalogRole"] == "source"
     assert report["decisions"][1]["replaceable"] is True
     assert report["decisions"][1]["backpressureBefore"] == []
     assert report["decisions"][1]["backpressureAfter"] == [0]
     assert report["decisions"][1]["topologyPenalty"] == 31
-    assert report["decisions"][0]["reason"] == "global_optimum_depth"
+    assert report["decisions"][0]["reason"] == "keep"
     assert report["decisions"][1]["reason"] == (
-        "global_optimum_interval+global_optimum_backpressure+global_optimum_resource")
+        "global_optimum_interval+global_optimum_backpressure+global_optimum_resource+global_optimum_cpu_binding")
     fixed_profile = work_dir / "non_replaceable_profile.json"
     fixed_output = work_dir / "non_replaceable_optimized.json"
     fixed_report_path = work_dir / "non_replaceable_report.json"
@@ -346,6 +470,47 @@ def main() -> int:
     fixed_report = json.loads(fixed_report_path.read_text(encoding="utf-8"))
     assert fixed_optimized["tasks"][0]["trigger"]["interval_ms"] == 1
     assert fixed_report["decisions"][1]["reason"].startswith("not_replaceable+")
+    accuracy_profile = work_dir / "accuracy_profile.json"
+    accuracy_output = work_dir / "accuracy_optimized.json"
+    accuracy_report_path = work_dir / "accuracy_report.json"
+    write_accuracy_preserving_profile(accuracy_profile)
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "tools" / "epg_solver.py"),
+            "--profile",
+            str(accuracy_profile),
+            "--output",
+            str(accuracy_output),
+            "--report",
+            str(accuracy_report_path),
+            "--max-queue-depth",
+            "8",
+            "--generated-at-ms",
+            "456",
+        ],
+        check=True,
+    )
+    accuracy_optimized = json.loads(
+        accuracy_output.read_text(encoding="utf-8"))
+    accuracy_report = json.loads(
+        accuracy_report_path.read_text(encoding="utf-8"))
+    accuracy_task = accuracy_optimized["tasks"][0]
+    assert accuracy_optimized["queues"][0]["depth"] == 1
+    assert accuracy_report["decisions"][0]["reason"] == "keep"
+    assert accuracy_report["decisions"][0]["pressureAfter"] == 4
+    accuracy_decision = accuracy_report["decisions"][1]
+    assert accuracy_task["trigger"]["interval_ms"] == 1
+    assert accuracy_task["scheduling"]["resource"] == "cpu"
+    assert accuracy_task["scheduling"]["backpressure_outputs"] == []
+    assert accuracy_task["scheduling"]["cpu_affinity"] == -1
+    assert accuracy_decision["cpuAffinityBefore"] == -1
+    assert accuracy_decision["cpuAffinityAfter"] == -1
+    assert accuracy_task["scheduling"]["realtime"] is False
+    assert accuracy_task["scheduling"]["priority"] == 0
+    assert accuracy_decision["reason"] == (
+        "utilization_over_target+budget_overrun+deadline_miss+scheduling_error+resource_wait")
+    assert accuracy_report["objective"]["score"]["resourceWaitUs"] == 2500
     depth_profile = work_dir / "depth_profile.json"
     depth_output = work_dir / "depth_optimized.json"
     depth_report_path = work_dir / "depth_report.json"
@@ -369,9 +534,56 @@ def main() -> int:
     )
     depth_optimized = json.loads(depth_output.read_text(encoding="utf-8"))
     depth_report = json.loads(depth_report_path.read_text(encoding="utf-8"))
-    assert depth_optimized["queues"][0]["depth"] == 5
-    assert depth_report["decisions"][0]["pressureAfter"] == 0
-    assert depth_report["decisions"][0]["reason"] == "global_optimum_depth"
+    assert depth_optimized["queues"][0]["depth"] == 1
+    assert depth_report["decisions"][0]["pressureAfter"] == 4
+    assert depth_report["decisions"][0]["reason"] == "keep"
+    topology_profile = work_dir / "topology_profile.json"
+    topology_output = work_dir / "topology_optimized.json"
+    topology_report_path = work_dir / "topology_report.json"
+    write_topology_schedule_profile(topology_profile)
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "tools" / "epg_solver.py"),
+            "--profile",
+            str(topology_profile),
+            "--output",
+            str(topology_output),
+            "--report",
+            str(topology_report_path),
+            "--max-queue-depth",
+            "8",
+            "--generated-at-ms",
+            "456",
+        ],
+        check=True,
+    )
+    topology_optimized = json.loads(
+        topology_output.read_text(encoding="utf-8"))
+    topology_report = json.loads(
+        topology_report_path.read_text(encoding="utf-8"))
+    assert [task["name"] for task in topology_optimized["tasks"]] == [
+        "source", "left", "right", "sink"]
+    topology_schedule = {
+        task["name"]: task["scheduling"]
+        for task in topology_optimized["tasks"]
+    }
+    assert topology_schedule["source"]["topology_level"] == 0
+    assert topology_schedule["left"]["topology_level"] == 1
+    assert topology_schedule["right"]["topology_level"] == 1
+    assert topology_schedule["sink"]["topology_level"] == 2
+    assert topology_schedule["source"]["phase_offset_ms"] == 0
+    assert topology_schedule["left"]["phase_offset_ms"] == 2
+    assert topology_schedule["right"]["phase_offset_ms"] == 2
+    assert topology_schedule["sink"]["phase_offset_ms"] == 5
+    task_decisions = {
+        item["name"]: item
+        for item in topology_report["decisions"]
+        if item["kind"] == "task"
+    }
+    assert task_decisions["left"]["phaseOffsetMs"] == 2
+    assert task_decisions["right"]["phaseOffsetMs"] == 2
+    assert task_decisions["sink"]["durationMs"] == 1
     stale_report_profile = work_dir / "stale_report_profile.json"
     stale_output = work_dir / "stale_report_optimized.json"
     stale_report_path = work_dir / "stale_report_report.json"

@@ -28,4 +28,16 @@ inline const EpgTaskCatalogEntry &RequireCatalogEntry(
                              " missing catalog task type: " + taskType);
 }
 
+inline const EpgTaskCatalogEntry *FindCatalogEntry(
+    const EpgTaskManifest &manifest,
+    const std::string &taskType)
+{
+    for (const auto &entry : manifest.catalog) {
+        if (entry.taskType == taskType) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace SmartDrone::Core::Application::EpgTaskManifestInternal

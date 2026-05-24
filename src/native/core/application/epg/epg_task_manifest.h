@@ -20,6 +20,7 @@ struct EpgTaskCatalogEntry {
     std::uint64_t deadlineUs{0};
     bool replaceable{false};
     std::vector<std::string> resourceAlternates;
+    bool preserveAccuracy{false};
 };
 
 struct EpgTaskArtifactSpec {

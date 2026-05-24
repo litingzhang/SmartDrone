@@ -14,6 +14,8 @@ TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile)
             "cpu_affinity": -1,
             "budget_us": 500,
             "deadline_us": 900,
+            "topology_level": 1,
+            "phase_offset_ms": 2,
             "backpressure_outputs": [0],
             "realtime": true,
             "priority": 42
@@ -29,6 +31,9 @@ TEST(GraphConfig, ParsesEscapesAndRejectsMissingFile)
     EXPECT_EQ(config.tasks.front().scheduling.cpuAffinity, -1);
     EXPECT_EQ(config.tasks.front().scheduling.budgetUs, 500u);
     EXPECT_EQ(config.tasks.front().scheduling.deadlineUs, 900u);
+    EXPECT_EQ(config.tasks.front().scheduling.topologyLevel, 1u);
+    EXPECT_TRUE(config.tasks.front().scheduling.phaseOffsetConfigured);
+    EXPECT_EQ(config.tasks.front().scheduling.phaseOffsetMs, 2u);
     EXPECT_EQ(config.tasks.front().scheduling.backpressureOutputs,
               std::vector<Epg::PortId>{0});
     EXPECT_TRUE(config.tasks.front().scheduling.realtime);
@@ -175,6 +180,9 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson)
           "targetUtilizationPpm": 800000,
           "budgetUs": 0,
           "deadlineUs": 0,
+          "topologyLevel": 0,
+          "phaseOffsetMs": 0,
+          "durationMs": 0,
           "catalogRole": "source",
           "replaceable": false,
           "budgetOverrunCount": 0,
@@ -199,6 +207,8 @@ TEST(GraphConfig, ParsesOptimizedRuntimeConfigJson)
     EXPECT_EQ(report.decisions.front().name, "packets");
     EXPECT_EQ(report.decisions.front().depthAfter, 6u);
     EXPECT_EQ(report.decisions.back().intervalAfterMs, 3u);
+    EXPECT_EQ(report.decisions.back().cpuAffinityBefore, -1);
+    EXPECT_EQ(report.decisions.back().cpuAffinityAfter, -1);
     EXPECT_THROW(
         Epg::ParseSolverReportJson(R"({
           "schema": "smartdrone.epg.solver_report.v1",

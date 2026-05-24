@@ -2,86 +2,9 @@
 
 #include <algorithm>
 #include <sstream>
+#include <string>
 
 namespace SmartDrone::Core::Application::EpgSolverPrimitives {
-namespace {
-
-struct DiscreteSearchState {
-    std::vector<std::size_t> indexes;
-    std::vector<std::size_t> bestIndexes;
-    std::uint64_t bestPenalty{0};
-    std::uint64_t bestTieWeight{0};
-    bool hasBest{false};
-};
-
-bool CandidateSpaceWithinLimit(
-    const std::vector<DiscreteCandidateSet> &candidateSets,
-    std::uint64_t maxExactCandidates)
-{
-    std::uint64_t total = 1;
-    for (const auto &set : candidateSets) {
-        if (set.penalties.empty()) {
-            return false;
-        }
-        if (total > maxExactCandidates / set.penalties.size()) {
-            return false;
-        }
-        total *= set.penalties.size();
-    }
-    return total <= maxExactCandidates;
-}
-
-std::uint64_t TieWeight(
-    const std::vector<DiscreteCandidateSet> &candidateSets,
-    const std::vector<std::size_t> &indexes)
-{
-    std::uint64_t weight = 0;
-    for (std::size_t index = 0; index < candidateSets.size(); ++index) {
-        const auto &weights = candidateSets[index].tieWeights;
-        if (indexes[index] < weights.size()) {
-            weight += weights[indexes[index]];
-        }
-    }
-    return weight;
-}
-
-void UpdateBestCandidate(
-    const std::vector<DiscreteCandidateSet> &candidateSets,
-    std::uint64_t penalty,
-    DiscreteSearchState &state)
-{
-    const auto tieWeight = TieWeight(candidateSets, state.indexes);
-    if (!state.hasBest || penalty < state.bestPenalty ||
-        (penalty == state.bestPenalty && tieWeight > state.bestTieWeight)) {
-        state.bestPenalty = penalty;
-        state.bestTieWeight = tieWeight;
-        state.bestIndexes = state.indexes;
-        state.hasBest = true;
-    }
-}
-
-void SearchDiscreteCandidates(
-    const std::vector<DiscreteCandidateSet> &candidateSets,
-    std::size_t setIndex,
-    std::uint64_t penalty,
-    DiscreteSearchState &state)
-{
-    if (state.hasBest && penalty > state.bestPenalty) {
-        return;
-    }
-    if (setIndex == candidateSets.size()) {
-        UpdateBestCandidate(candidateSets, penalty, state);
-        return;
-    }
-    const auto &set = candidateSets[setIndex];
-    for (std::size_t index = 0; index < set.penalties.size(); ++index) {
-        state.indexes[setIndex] = index;
-        SearchDiscreteCandidates(candidateSets, setIndex + 1,
-                                 penalty + set.penalties[index], state);
-    }
-}
-
-} // namespace
 
 std::uint64_t CeilDiv(std::uint64_t numerator, std::uint64_t denominator)
 {
@@ -119,26 +42,33 @@ std::string JsonEscape(const std::string &value)
     return out.str();
 }
 
-DiscreteGlobalSolution SolveDiscreteGlobalTopology(
-    const std::vector<DiscreteCandidateSet> &candidateSets,
-    std::uint64_t maxExactCandidates)
+std::string JoinReasonTags(const std::vector<std::string> &reasons)
 {
-    DiscreteGlobalSolution solution;
-    solution.candidateIndexes.assign(candidateSets.size(), 0);
-    if (!CandidateSpaceWithinLimit(candidateSets, maxExactCandidates)) {
-        return solution;
+    if (reasons.empty()) {
+        return {};
     }
+    std::string reason = reasons.front();
+    for (std::size_t index = 1; index < reasons.size(); ++index) {
+        reason += "+" + reasons[index];
+    }
+    return reason;
+}
 
-    DiscreteSearchState state;
-    state.indexes.assign(candidateSets.size(), 0);
-    SearchDiscreteCandidates(candidateSets, 0, 0, state);
-    if (!state.hasBest) {
-        return solution;
+SolverLimits DefaultSolverLimits()
+{
+    return {};
+}
+
+Epg::SolverReportDecision *FindSolverReportTaskDecision(
+    std::vector<Epg::SolverReportDecision> &decisions,
+    const std::string &taskName)
+{
+    for (auto &decision : decisions) {
+        if (decision.kind == "task" && decision.name == taskName) {
+            return &decision;
+        }
     }
-    solution.candidateIndexes = std::move(state.bestIndexes);
-    solution.totalPenalty = state.bestPenalty;
-    solution.exact = true;
-    return solution;
+    return nullptr;
 }
 
 std::uint64_t EffectiveLoopUs(const Epg::TaskProfileMetrics &stats)
@@ -249,157 +179,6 @@ std::uint64_t ResourceTopologyPenalty(
     const std::string &resourceAfter)
 {
     return resourceAfter == resourceBefore ? 0 : 20;
-}
-
-std::uint64_t TaskCandidatePenalty(
-    std::uint64_t intervalBeforeMs,
-    std::uint64_t intervalAfterMs,
-    const Epg::TaskProfileMetrics &stats,
-    std::uint64_t effectiveLoopUs,
-    std::uint64_t predictedResourceWaitUs,
-    std::uint64_t topologyPenalty,
-    std::uint64_t targetUtilizationPpm)
-{
-    return TaskPeriodicOverloadUs(intervalAfterMs, effectiveLoopUs) +
-           predictedResourceWaitUs + stats.schedulingErrorCount * 10000 +
-           stats.budgetOverrunCount * 2000 +
-           stats.deadlineMissCount * 5000 +
-           TaskUtilizationOverPpm(intervalBeforeMs, intervalAfterMs,
-                                  stats.utilizationPpm,
-                                  targetUtilizationPpm) +
-           intervalAfterMs + topologyPenalty;
-}
-
-std::vector<Epg::PortId> SortedUniquePorts(std::vector<Epg::PortId> ports)
-{
-    std::sort(ports.begin(), ports.end());
-    ports.erase(std::unique(ports.begin(), ports.end()), ports.end());
-    return ports;
-}
-
-bool ContainsPort(const std::vector<Epg::PortId> &ports, Epg::PortId port)
-{
-    return std::find(ports.begin(), ports.end(), port) != ports.end();
-}
-
-const Epg::QueueConfig *FindQueueConfig(const Epg::GraphConfig &graphConfig,
-                                        const std::string &name)
-{
-    for (const auto &queue : graphConfig.queues) {
-        if (queue.name == name) {
-            return &queue;
-        }
-    }
-    return nullptr;
-}
-
-const Epg::TaskConfig *FindTaskConfig(const Epg::GraphConfig &graphConfig,
-                                      const std::string &name)
-{
-    for (const auto &task : graphConfig.tasks) {
-        if (task.name == name) {
-            return &task;
-        }
-    }
-    return nullptr;
-}
-
-const Epg::QueueProfileMetrics *FindQueueStats(
-    const Epg::GraphProfileDiagnostics *diagnostics,
-    const std::string &name)
-{
-    if (!diagnostics) {
-        return nullptr;
-    }
-    const auto it = diagnostics->queues.find(name);
-    if (it == diagnostics->queues.end()) {
-        return nullptr;
-    }
-    return &it->second;
-}
-
-const Epg::QueueProfileMetrics *FindQueueStats(
-    const Epg::GraphProfileDiagnostics *diagnostics,
-    const Epg::QueueConfig &queue)
-{
-    return FindQueueStats(diagnostics, queue.name);
-}
-
-bool QueueHasPressure(const Epg::QueueConfig &queue,
-                      const Epg::GraphProfileDiagnostics *diagnostics)
-{
-    const auto *stats = FindQueueStats(diagnostics, queue);
-    return stats && QueuePressure(queue, *stats) > 0;
-}
-
-std::vector<Epg::PortId> CandidateBackpressurePorts(
-    const Epg::GraphConfig &config,
-    const Epg::GraphProfileDiagnostics *diagnostics,
-    const Epg::TaskConfig &task,
-    const std::vector<Epg::PortId> &before,
-    bool replaceable)
-{
-    if (!replaceable) {
-        return SortedUniquePorts(before);
-    }
-    auto ports = before;
-    for (const auto &output : task.outputs) {
-        const auto *queue = FindQueueConfig(config, output.second);
-        if (!queue || !QueueHasPressure(*queue, diagnostics)) {
-            continue;
-        }
-        ports.push_back(output.first);
-    }
-    return SortedUniquePorts(std::move(ports));
-}
-
-std::uint64_t BackpressureChangeCost(
-    const std::vector<Epg::PortId> &before,
-    const std::vector<Epg::PortId> &after,
-    std::uint64_t totalResourceWaitUs)
-{
-    std::uint64_t penalty = after.size();
-    for (const auto port : after) {
-        if (!ContainsPort(before, port)) {
-            penalty += 10;
-        }
-    }
-    if (totalResourceWaitUs == 0 && after.size() > before.size()) {
-        penalty += 100;
-    }
-    return penalty;
-}
-
-std::uint64_t BackpressureTopologyPenalty(
-    const Epg::GraphConfig *sourceGraphConfig,
-    const Epg::GraphProfileDiagnostics *diagnostics,
-    const Epg::TaskConfig &task,
-    const std::vector<Epg::PortId> &before,
-    const std::vector<Epg::PortId> &after,
-    std::uint64_t totalResourceWaitUs,
-    bool replaceable)
-{
-    std::uint64_t penalty =
-        BackpressureChangeCost(before, after, totalResourceWaitUs);
-    if (!replaceable || !sourceGraphConfig) {
-        return penalty;
-    }
-    for (const auto &output : task.outputs) {
-        if (ContainsPort(after, output.first)) {
-            continue;
-        }
-        const auto *queue = FindQueueConfig(*sourceGraphConfig,
-                                            output.second);
-        if (!queue) {
-            continue;
-        }
-        const auto *queueStats = FindQueueStats(diagnostics, *queue);
-        if (!queueStats) {
-            continue;
-        }
-        penalty += QueuePressure(*queue, *queueStats) * 1000;
-    }
-    return penalty;
 }
 
 } // namespace SmartDrone::Core::Application::EpgSolverPrimitives

@@ -162,6 +162,11 @@ void WriteTaskConfigJson(std::ostringstream &out,
     out << "\"cpu_affinity\": " << taskConfig.scheduling.cpuAffinity << ", ";
     out << "\"budget_us\": " << taskConfig.scheduling.budgetUs << ", ";
     out << "\"deadline_us\": " << taskConfig.scheduling.deadlineUs << ", ";
+    out << "\"topology_level\": " << taskConfig.scheduling.topologyLevel << ", ";
+    if (taskConfig.scheduling.phaseOffsetConfigured) {
+        out << "\"phase_offset_ms\": "
+            << taskConfig.scheduling.phaseOffsetMs << ", ";
+    }
     out << "\"backpressure_outputs\": ";
     WritePortIdArray(out, taskConfig.scheduling.backpressureOutputs);
     out << ", ";

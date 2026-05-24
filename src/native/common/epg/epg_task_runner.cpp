@@ -66,6 +66,32 @@ std::uint64_t PercentileValue(std::vector<std::uint64_t> values,
     return values[index];
 }
 
+bool WaitUntilRunningOrStopped(std::condition_variable &cv,
+                               std::mutex &mutex,
+                               const std::chrono::steady_clock::time_point &time,
+                               const std::atomic<bool> &running)
+{
+    std::unique_lock<std::mutex> lock(mutex);
+    cv.wait_until(lock, time, [&running]() {
+        return !running.load(std::memory_order_acquire);
+    });
+    return running.load(std::memory_order_acquire);
+}
+
+bool WaitForConfiguredPhase(std::condition_variable &cv,
+                            std::mutex &mutex,
+                            const TaskSchedulingConfig &scheduling,
+                            const std::atomic<bool> &running)
+{
+    if (!scheduling.phaseOffsetConfigured ||
+        scheduling.phaseOffsetMs == 0) {
+        return running.load(std::memory_order_acquire);
+    }
+    const auto wakeAt = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(scheduling.phaseOffsetMs);
+    return WaitUntilRunningOrStopped(cv, mutex, wakeAt, running);
+}
+
 } // namespace
 
 EventPipelineGraph::TaskRunner::TaskRunner(TaskConfig config,
@@ -253,6 +279,11 @@ bool EventPipelineGraph::TaskRunner::WaitForTrigger()
 {
     switch (m_config.trigger.mode) {
     case TriggerMode::Periodic:
+        if (m_config.scheduling.phaseOffsetConfigured &&
+            m_diag.loopCount.load(std::memory_order_relaxed) == 0) {
+            return WaitForConfiguredPhase(
+                m_cv, m_mutex, m_config.scheduling, m_running);
+        }
         if (m_config.trigger.interval.count() > 0) {
             std::unique_lock<std::mutex> lock(m_mutex);
             m_cv.wait_for(lock, m_config.trigger.interval,

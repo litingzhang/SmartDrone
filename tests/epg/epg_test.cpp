@@ -598,6 +598,28 @@ std::string MinimalTaskDiagnosticsJson()
           })";
 }
 
+std::string TaskDiagnosticsJson(std::uint64_t maxLoopUs,
+                                std::uint64_t averageLoopUs,
+                                std::uint64_t resourceWaitUs,
+                                std::uint64_t utilizationPpm)
+{
+    return std::string(R"({
+            "maxLoopUs": )") +
+           std::to_string(maxLoopUs) +
+           R"(, "p90LoopUs": )" + std::to_string(averageLoopUs) +
+           R"(, "p99LoopUs": )" + std::to_string(maxLoopUs) +
+           R"(, "averageLoopUs": )" + std::to_string(averageLoopUs) +
+           R"(, "resourceWaitCount": 2,
+            "maxResourceWaitUs": )" + std::to_string(resourceWaitUs) +
+           R"(, "averageResourceWaitUs": )" + std::to_string(resourceWaitUs) +
+           R"(, "totalResourceWaitUs": )" + std::to_string(resourceWaitUs * 2) +
+           R"(, "utilizationPpm": )" + std::to_string(utilizationPpm) +
+           R"(, "budgetOverrunCount": 2,
+            "deadlineMissCount": 0,
+            "schedulingErrorCount": 0
+          })";
+}
+
 std::string MinimalProfileDiagnosticsJson(std::uint64_t timestampMs)
 {
     return std::string(R"({
@@ -707,25 +729,9 @@ std::string NonReplaceableTaskProfileJson()
       "diagnostics": {
         "queues": {"packets": )") +
            MinimalQueueDiagnosticsJson() +
-           R"(},
-        "tasks": {
-          "source": {
-            "maxLoopUs": 2600,
-            "p90LoopUs": 2400,
-            "p99LoopUs": 2600,
-            "averageLoopUs": 2200,
-            "resourceWaitCount": 0,
-            "maxResourceWaitUs": 0,
-            "averageResourceWaitUs": 0,
-            "totalResourceWaitUs": 0,
-            "utilizationPpm": 900000,
-            "budgetOverrunCount": 2,
-            "deadlineMissCount": 1,
-            "schedulingErrorCount": 0
-          }
-        }
-      }
-    })";
+           std::string("},\n        \"tasks\": {\"source\": ") +
+           TaskDiagnosticsJson(2600, 2200, 0, 900000) +
+           std::string("}\n      }\n    }");
 }
 
 } // namespace
@@ -737,5 +743,6 @@ std::string NonReplaceableTaskProfileJson()
 #include "epg_test_manifest_catalog_cases.h"
 #include "epg_test_manifest_profile_cases.h"
 #include "epg_test_optimizer_apply_cases.h"
+#include "epg_test_optimizer_topology_cases.h"
 #include "epg_test_optimizer_failure_cases.h"
 #include "epg_test_config_cases.h"

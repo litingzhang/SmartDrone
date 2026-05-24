@@ -20,6 +20,7 @@ EXACT_SOLVER_OBJECTIVE = "global_minimize_predicted_epg_penalty_discrete_topolog
 RESOURCE_WAIT_PRESSURE_US = 1000
 RESOURCE_ISOLATION_CPU_AFFINITY = 2
 RESOURCE_ISOLATION_PRIORITY = 20
+CPU_BINDING_CANDIDATE_COUNT = 8
 MAX_EXACT_TOPOLOGY_CANDIDATES = 200000
 
 
@@ -113,6 +114,10 @@ def validate_task_catalog_entry(item: Any) -> str:
     if "replaceable" in item and not isinstance(item["replaceable"], bool):
         raise ValueError(
             f"EPG profile taskCatalog replaceable invalid: {task_type}")
+    if ("preserveAccuracy" in item and
+            not isinstance(item["preserveAccuracy"], bool)):
+        raise ValueError(
+            f"EPG profile taskCatalog preserveAccuracy invalid: {task_type}")
     alternates = item.get("resourceAlternates", [])
     if not isinstance(alternates, list):
         raise ValueError(
@@ -214,6 +219,9 @@ TASK_DECISION_FIELDS = [
     "deadlineMissCount",
     "schedulingErrorCount",
     "topologyPenalty",
+    "topologyLevel",
+    "phaseOffsetMs",
+    "durationMs",
 ]
 
 TASK_REASON_ORDER = [
@@ -298,7 +306,7 @@ def validate_queue_decision(item: Dict[str, Any],
         raise ValueError(f"EPG solver report queue depth mismatch: {name}")
     if integer(item.get("depthBefore")) != integer(source_queue.get("depth")):
         raise ValueError(f"EPG solver report queue source mismatch: {name}")
-    if depth_after <= 0 or depth_after > integer(constraints.get("maxQueueDepth")):
+    if depth_after <= 0:
         raise ValueError(
             f"EPG solver report queue constraint mismatch: {name}")
     if item.get("reason") != expected_reason:
@@ -345,6 +353,9 @@ def expected_task_decision_reason(item: Dict[str, Any]) -> str:
         topology_reasons.append("global_optimum_backpressure")
     if str(item.get("resourceAfter", "")) != str(item.get("resourceBefore", "")):
         topology_reasons.append("global_optimum_resource")
+    if integer(item.get("cpuAffinityAfter"), -1) != integer(
+            item.get("cpuAffinityBefore"), -1):
+        topology_reasons.append("global_optimum_cpu_binding")
     if topology_reasons:
         return "+".join(topology_reasons)
     reason = ordered_reason_text(decision_reason_set(item))
@@ -374,6 +385,30 @@ def validate_task_decision(item: Dict[str, Any],
         raise ValueError(f"EPG solver report task role mismatch: {name}")
     if item.get("replaceable") != bool(catalog_item.get("replaceable", False)):
         raise ValueError(f"EPG solver report task replaceable mismatch: {name}")
+    preserve_accuracy = bool(catalog_item.get("preserveAccuracy", False))
+    alternates = catalog_item.get("resourceAlternates", [])
+    alternate_resources = (
+        [str(resource) for resource in alternates]
+        if isinstance(alternates, list)
+        else []
+    )
+    if preserve_accuracy:
+        if integer(item.get("intervalAfterMs")) != integer(
+                item.get("intervalBeforeMs")):
+            raise ValueError(
+                f"EPG solver report task accuracy constraint mismatch: {name}")
+        if str(item.get("resourceAfter", "")) != str(
+                item.get("resourceBefore", "")):
+            raise ValueError(
+                f"EPG solver report task accuracy constraint mismatch: {name}")
+        if integer(item.get("cpuAffinityAfter"), -1) != integer(
+                item.get("cpuAffinityBefore"), -1):
+            raise ValueError(
+                f"EPG solver report task accuracy constraint mismatch: {name}")
+        if sorted_ports(item.get("backpressureAfter")) != sorted_ports(
+                item.get("backpressureBefore")):
+            raise ValueError(
+                f"EPG solver report task accuracy constraint mismatch: {name}")
     if integer(item.get("intervalAfterMs")) != integer(trigger.get("interval_ms")):
         raise ValueError(f"EPG solver report task interval mismatch: {name}")
     source_trigger = source_task.get("trigger", {})
@@ -388,6 +423,11 @@ def validate_task_decision(item: Dict[str, Any],
     if sorted_ports(item.get("backpressureBefore")) != sorted_ports(
             source_scheduling.get("backpressure_outputs")):
         raise ValueError(f"EPG solver report task source mismatch: {name}")
+    if preserve_accuracy:
+        for field in ["realtime", "priority"]:
+            if scheduling.get(field) != source_scheduling.get(field):
+                raise ValueError(
+                    f"EPG solver report task accuracy constraint mismatch: {name}")
     if integer(item.get("budgetUs")) != integer(scheduling.get("budget_us")):
         raise ValueError(f"EPG solver report task budget mismatch: {name}")
     if integer(item.get("deadlineUs")) != integer(scheduling.get("deadline_us")):
@@ -395,17 +435,31 @@ def validate_task_decision(item: Dict[str, Any],
     if str(item.get("resourceAfter", "")) != str(
             scheduling.get("resource", "")):
         raise ValueError(f"EPG solver report task resource mismatch: {name}")
+    if integer(item.get("cpuAffinityAfter"), -1) != integer(
+            scheduling.get("cpu_affinity"), -1):
+        raise ValueError(
+            f"EPG solver report task CPU binding mismatch: {name}")
     if sorted_ports(item.get("backpressureAfter")) != sorted_ports(
             scheduling.get("backpressure_outputs")):
         raise ValueError(f"EPG solver report task backpressure mismatch: {name}")
+    if integer(item.get("topologyLevel")) != integer(
+            scheduling.get("topology_level")):
+        raise ValueError(f"EPG solver report task schedule mismatch: {name}")
+    if integer(item.get("phaseOffsetMs")) != integer(
+            scheduling.get("phase_offset_ms")):
+        raise ValueError(f"EPG solver report task schedule mismatch: {name}")
+    if integer(item.get("durationMs")) != ceil_div(
+            integer(item.get("effectiveLoopUs")), 1000):
+        raise ValueError(f"EPG solver report task schedule mismatch: {name}")
     source_resource = str(
         source_scheduling.get("resource") or catalog_item.get("resource", ""))
     if str(item.get("resourceBefore", "")) != source_resource:
         raise ValueError(f"EPG solver report task source mismatch: {name}")
+    if integer(item.get("cpuAffinityBefore"), -1) != integer(
+            source_scheduling.get("cpu_affinity"), -1):
+        raise ValueError(f"EPG solver report task source mismatch: {name}")
     allowed_resources = [str(catalog_item.get("resource", ""))]
-    alternates = catalog_item.get("resourceAlternates", [])
-    if isinstance(alternates, list):
-        allowed_resources.extend(str(resource) for resource in alternates)
+    allowed_resources.extend(alternate_resources)
     if str(item.get("resourceAfter", "")) not in allowed_resources:
         raise ValueError(f"EPG solver report task resource mismatch: {name}")
     if integer(item.get("targetUtilizationPpm")) != integer(
@@ -504,16 +558,13 @@ def backpressure_topology_penalty(before: List[int],
 def queue_candidates(queue: Dict[str, Any],
                      limits: SolverLimits,
                      diag: Dict[str, Any]) -> List[Dict[str, int]]:
+    del limits
     depth = max(1, integer(queue.get("depth"), 1))
-    max_depth = max(depth, limits.max_queue_depth)
-    return [
-        {
-            "depth": candidate,
-            "pressureAfter": queue_pressure(candidate, diag),
-            "penalty": queue_candidate_penalty(candidate, diag),
-        }
-        for candidate in range(depth, max_depth + 1)
-    ]
+    return [{
+        "depth": depth,
+        "pressureAfter": queue_pressure(depth, diag),
+        "penalty": queue_candidate_penalty(depth, diag),
+    }]
 
 
 def best_candidate_index(candidates: List[Dict[str, int]]) -> int:
@@ -678,6 +729,7 @@ def resource_candidates(scheduling: Dict[str, Any],
     resource = str(scheduling.get("resource") or catalog_item.get("resource", ""))
     candidates = [resource]
     if (not bool(catalog_item.get("replaceable", False)) or
+            bool(catalog_item.get("preserveAccuracy", False)) or
             not task_has_resource_split_pressure(diag, limits)):
         return candidates
     alternates = catalog_item.get("resourceAlternates", [])
@@ -703,6 +755,39 @@ def resource_topology_penalty(resource_before: str,
     return 0 if resource_after == resource_before else 20
 
 
+def cpu_binding_candidates(cpu_before: int, enabled: bool) -> List[int]:
+    candidates = [cpu_before]
+    if enabled:
+        candidates.extend(
+            cpu for cpu in range(CPU_BINDING_CANDIDATE_COUNT)
+            if cpu not in candidates)
+    return candidates
+
+
+def cpu_binding_penalty(cpu_before: int,
+                        cpu_after: int,
+                        resource_before: str,
+                        resource_after: str) -> int:
+    if cpu_after == cpu_before:
+        return 0 if resource_after == resource_before else 1000
+    if resource_after == resource_before or cpu_after < 0:
+        return 1000
+    return abs(cpu_after - RESOURCE_ISOLATION_CPU_AFFINITY)
+
+
+def task_cpu_affinity_candidates(scheduling: Dict[str, Any],
+                                 diag: Dict[str, Any],
+                                 resource_before: str,
+                                 resource_after: str,
+                                 limits: SolverLimits) -> List[int]:
+    enabled = (
+        resource_after != resource_before and
+        task_has_resource_split_pressure(diag, limits)
+    )
+    return cpu_binding_candidates(
+        integer(scheduling.get("cpu_affinity"), -1), enabled)
+
+
 def task_candidates(task: Dict[str, Any],
                     queues: Optional[Dict[str, Dict[str, Any]]],
                     queue_diag: Optional[Dict[str, Dict[str, Any]]],
@@ -715,10 +800,11 @@ def task_candidates(task: Dict[str, Any],
     if not isinstance(scheduling, dict):
         scheduling = {}
     replaceable = bool(catalog_item.get("replaceable", False))
+    preserve_accuracy = bool(catalog_item.get("preserveAccuracy", False))
     backpressure_before = sorted_ports(scheduling.get("backpressure_outputs"))
     backpressure_optimized = (
         candidate_backpressure_outputs(task, queues or {}, queue_diag or {},
-                                       replaceable)
+                                       replaceable and not preserve_accuracy)
         if queues is not None and queue_diag is not None
         else backpressure_before
     )
@@ -728,16 +814,20 @@ def task_candidates(task: Dict[str, Any],
 
     def build_candidate(candidate_interval: int,
                         resource_after: str,
+                        cpu_affinity: int,
                         backpressure_outputs: List[int]) -> Dict[str, int]:
         topology_penalty = backpressure_topology_penalty(
             backpressure_before, backpressure_outputs, task, queues,
             queue_diag, diag, replaceable) + resource_topology_penalty(
-                resource_before, resource_after)
+                resource_before, resource_after) + cpu_binding_penalty(
+                    integer(scheduling.get("cpu_affinity"), -1),
+                    cpu_affinity, resource_before, resource_after)
         predicted_wait_us = predicted_resource_wait_us(
             resource_before, resource_after, diag)
         return {
             "intervalMs": candidate_interval,
             "resource": resource_after,
+            "cpuAffinity": cpu_affinity,
             "backpressureOutputs": backpressure_outputs,
             "predictedResourceWaitUs": predicted_wait_us,
             "topologyPenalty": topology_penalty,
@@ -746,24 +836,32 @@ def task_candidates(task: Dict[str, Any],
                 predicted_wait_us, topology_penalty),
         }
 
-    if not replaceable or interval_ms <= 0:
+    if not replaceable or preserve_accuracy or interval_ms <= 0:
         candidates = []
         for resource in resources:
-            candidates.append(build_candidate(
-                interval_ms, resource, backpressure_before))
-            if backpressure_optimized != backpressure_before:
+            for cpu_affinity in task_cpu_affinity_candidates(
+                    scheduling, diag, resource_before, resource, limits):
                 candidates.append(build_candidate(
-                    interval_ms, resource, backpressure_optimized))
+                    interval_ms, resource, cpu_affinity,
+                    backpressure_before))
+                if backpressure_optimized != backpressure_before:
+                    candidates.append(build_candidate(
+                        interval_ms, resource, cpu_affinity,
+                        backpressure_optimized))
         return candidates
     max_interval = task_feasible_interval_limit(interval_ms, diag, loop_us, limits)
     candidates = []
     for candidate_interval in range(interval_ms, max_interval + 1):
         for resource in resources:
-            candidates.append(build_candidate(
-                candidate_interval, resource, backpressure_before))
-            if backpressure_optimized != backpressure_before:
+            for cpu_affinity in task_cpu_affinity_candidates(
+                    scheduling, diag, resource_before, resource, limits):
                 candidates.append(build_candidate(
-                    candidate_interval, resource, backpressure_optimized))
+                    candidate_interval, resource, cpu_affinity,
+                    backpressure_before))
+                if backpressure_optimized != backpressure_before:
+                    candidates.append(build_candidate(
+                        candidate_interval, resource, cpu_affinity,
+                        backpressure_optimized))
     return candidates
 
 
@@ -771,6 +869,7 @@ def report_reason(reasons: Set[str],
                   interval_changed: bool,
                   resource_changed: bool,
                   backpressure_changed: bool,
+                  cpu_binding_changed: bool,
                   replaceable: bool) -> str:
     topology_reasons = []
     if interval_changed:
@@ -779,6 +878,8 @@ def report_reason(reasons: Set[str],
         topology_reasons.append("global_optimum_backpressure")
     if resource_changed:
         topology_reasons.append("global_optimum_resource")
+    if cpu_binding_changed:
+        topology_reasons.append("global_optimum_cpu_binding")
     if topology_reasons:
         return "+".join(topology_reasons)
     reason = ordered_reason_text(reasons)
@@ -790,11 +891,14 @@ def report_reason(reasons: Set[str],
 def apply_resource_isolation(scheduling: Dict[str, Any],
                              trigger: Dict[str, Any],
                              diag: Dict[str, Any],
-                             replaceable: bool) -> None:
-    if not replaceable or not has_resource_wait_pressure(diag):
+                             replaceable: bool,
+                             preserve_accuracy: bool,
+                             resource_before: str) -> None:
+    resource_changed = str(scheduling.get("resource", "")) != resource_before
+    if (not replaceable or
+            preserve_accuracy or not resource_changed or
+            not has_resource_wait_pressure(diag)):
         return
-    if integer(scheduling.get("cpu_affinity"), -1) < 0:
-        scheduling["cpu_affinity"] = RESOURCE_ISOLATION_CPU_AFFINITY
     if (not bool(scheduling.get("realtime", False)) and
             integer(trigger.get("interval_ms")) > 0):
         scheduling["realtime"] = True
@@ -821,16 +925,23 @@ def task_decision(task: Dict[str, Any],
     interval_ms = integer(trigger.get("interval_ms"))
     reasons = reason_set(diag, loop_us, utilization_ppm, scheduling, limits)
     replaceable = bool(catalog_item.get("replaceable", False))
+    preserve_accuracy = bool(catalog_item.get("preserveAccuracy", False))
     target_interval = candidate["intervalMs"]
     resource_before = str(scheduling.get("resource", ""))
     resource_after = str(candidate.get("resource", resource_before))
+    cpu_affinity_before = integer(scheduling.get("cpu_affinity"), -1)
+    cpu_affinity_after = integer(
+        candidate.get("cpuAffinity"), cpu_affinity_before)
     backpressure_before = sorted_ports(scheduling.get("backpressure_outputs"))
     backpressure_after = sorted_ports(candidate.get("backpressureOutputs"))
     if target_interval != interval_ms:
         trigger["interval_ms"] = target_interval
     scheduling["resource"] = resource_after
+    scheduling["cpu_affinity"] = cpu_affinity_after
     scheduling["backpressure_outputs"] = backpressure_after
-    apply_resource_isolation(scheduling, trigger, diag, replaceable)
+    apply_resource_isolation(
+        scheduling, trigger, diag, replaceable, preserve_accuracy,
+        resource_before)
     result["trigger"] = trigger
     result["scheduling"] = scheduling
     decision = {
@@ -858,6 +969,8 @@ def task_decision(task: Dict[str, Any],
         "replaceable": replaceable,
         "resourceBefore": resource_before,
         "resourceAfter": resource_after,
+        "cpuAffinityBefore": cpu_affinity_before,
+        "cpuAffinityAfter": integer(scheduling.get("cpu_affinity"), -1),
         "budgetOverrunCount": integer(diag.get("budgetOverrunCount")),
         "deadlineMissCount": integer(diag.get("deadlineMissCount")),
         "schedulingErrorCount": integer(diag.get("schedulingErrorCount")),
@@ -867,9 +980,107 @@ def task_decision(task: Dict[str, Any],
         "reason": report_reason(
             reasons, target_interval != interval_ms,
             resource_after != resource_before,
-            backpressure_after != backpressure_before, replaceable),
+            backpressure_after != backpressure_before,
+            integer(scheduling.get("cpu_affinity"), -1) !=
+            cpu_affinity_before,
+            replaceable),
     }
     return result, decision
+
+
+def task_duration_ms(decision: Dict[str, Any]) -> int:
+    return ceil_div(integer(decision.get("effectiveLoopUs")), 1000)
+
+
+def queue_producers(tasks: List[Dict[str, Any]]) -> Dict[str, int]:
+    producers: Dict[str, int] = {}
+    for index, task in enumerate(tasks):
+        outputs = task.get("outputs", {})
+        if not isinstance(outputs, dict):
+            continue
+        for queue_name in outputs.values():
+            name = str(queue_name)
+            if name in producers:
+                raise ValueError(f"EPG topology queue has multiple producers: {name}")
+            producers[name] = index
+    return producers
+
+
+def build_topology_successors(tasks: List[Dict[str, Any]]) -> Tuple[List[List[int]], List[int]]:
+    producers = queue_producers(tasks)
+    successors: List[List[int]] = [[] for _ in tasks]
+    incoming = [0 for _ in tasks]
+    for consumer_index, task in enumerate(tasks):
+        inputs = task.get("inputs", {})
+        if not isinstance(inputs, dict):
+            continue
+        for queue_name in inputs.values():
+            producer_index = producers.get(str(queue_name))
+            if producer_index is None:
+                continue
+            if consumer_index not in successors[producer_index]:
+                successors[producer_index].append(consumer_index)
+                incoming[consumer_index] += 1
+    return successors, incoming
+
+
+def build_topology_schedule(tasks: List[Dict[str, Any]],
+                            durations_ms: Dict[str, int]) -> List[Dict[str, int]]:
+    successors, incoming = build_topology_successors(tasks)
+    levels = [0 for _ in tasks]
+    phases = [0 for _ in tasks]
+    ready = [index for index, count in enumerate(incoming) if count == 0]
+    order = []
+    cursor = 0
+    while cursor < len(ready):
+        index = ready[cursor]
+        cursor += 1
+        task_name = str(tasks[index].get("name", ""))
+        order.append({
+            "index": index,
+            "level": levels[index],
+            "phaseOffsetMs": phases[index],
+            "durationMs": durations_ms.get(task_name, 0),
+        })
+        for successor in successors[index]:
+            levels[successor] = max(levels[successor], levels[index] + 1)
+            phases[successor] = max(
+                phases[successor],
+                phases[index] + durations_ms.get(task_name, 0),
+            )
+            incoming[successor] -= 1
+            if incoming[successor] == 0:
+                ready.append(successor)
+    if len(order) != len(tasks):
+        raise ValueError("EPG topology contains a cycle")
+    return order
+
+
+def apply_topology_schedule(tasks: List[Dict[str, Any]],
+                            decisions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    decisions_by_name = {
+        str(decision.get("name", "")): decision
+        for decision in decisions
+        if decision.get("kind") == "task"
+    }
+    durations = {
+        name: task_duration_ms(decision)
+        for name, decision in decisions_by_name.items()
+    }
+    scheduled_tasks = []
+    for entry in build_topology_schedule(tasks, durations):
+        task = dict(tasks[entry["index"]])
+        scheduling = dict(task.get("scheduling", {}))
+        scheduling["topology_level"] = entry["level"]
+        scheduling["phase_offset_ms"] = entry["phaseOffsetMs"]
+        task["scheduling"] = scheduling
+        scheduled_tasks.append(task)
+        decision = decisions_by_name.get(str(task.get("name", "")))
+        if decision is not None:
+            decision["topologyLevel"] = entry["level"]
+            decision["phaseOffsetMs"] = entry["phaseOffsetMs"]
+            decision["durationMs"] = entry["durationMs"]
+    return scheduled_tasks
 
 
 def score_decisions(decisions: List[Dict[str, Any]]) -> Dict[str, int]:
@@ -1026,11 +1237,13 @@ def solve_global_topology(queue_nodes: List[Dict[str, Any]],
             kind, _, candidates = dimensions[dimension_index]
             candidate = candidates[candidate_index]
             penalty += integer(candidate.get("penalty"))
-            if kind == "task":
-                topology_weight += len(
-                    sorted_ports(candidate.get("backpressureOutputs")))
-                if integer(candidate.get("predictedResourceWaitUs")) == 0:
-                    topology_weight += 1
+        if kind == "task":
+            topology_weight += len(
+                sorted_ports(candidate.get("backpressureOutputs")))
+            if integer(candidate.get("predictedResourceWaitUs")) == 0:
+                topology_weight += 1
+            topology_weight += 1000 - min(
+                1000, integer(candidate.get("topologyPenalty")))
         if (best_penalty is None or penalty < best_penalty or
                 (penalty == best_penalty and
                  topology_weight > best_backpressure_ports)):
@@ -1155,7 +1368,42 @@ def validate_generated_pair(config: Dict[str, Any],
     for field in SOLVER_SCORE_FIELDS:
         if integer(score.get(field)) != expected_score[field]:
             raise ValueError(f"EPG solver report score mismatch: {field}")
+    validate_topology_schedule(config, decisions)
     validate_global_optimum(profile, report)
+
+
+def validate_topology_schedule(config: Dict[str, Any],
+                               decisions: List[Dict[str, Any]]) -> None:
+    tasks = [
+        task
+        for task in config.get("tasks", [])
+        if isinstance(task, dict)
+    ]
+    durations = {
+        str(decision.get("name", "")): integer(decision.get("durationMs"))
+        for decision in decisions
+        if isinstance(decision, dict) and decision.get("kind") == "task"
+    }
+    decision_map = {
+        str(decision.get("name", "")): decision
+        for decision in decisions
+        if isinstance(decision, dict) and decision.get("kind") == "task"
+    }
+    for entry in build_topology_schedule(tasks, durations):
+        task = tasks[entry["index"]]
+        name = str(task.get("name", ""))
+        scheduling = task.get("scheduling", {})
+        decision = decision_map.get(name)
+        if decision is None or not isinstance(scheduling, dict):
+            raise ValueError(f"EPG solver report task schedule missing: {name}")
+        if (integer(scheduling.get("topology_level")) != entry["level"] or
+                integer(scheduling.get("phase_offset_ms")) !=
+                entry["phaseOffsetMs"] or
+                integer(decision.get("topologyLevel")) != entry["level"] or
+                integer(decision.get("phaseOffsetMs")) !=
+                entry["phaseOffsetMs"]):
+            raise ValueError(
+                f"EPG solver report topology schedule mismatch: {name}")
 
 
 def decision_by_key(report: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -1197,13 +1445,8 @@ def validate_global_optimum(profile: Dict[str, Any],
                 integer(diag.get("droppedPerSecond"))):
             raise ValueError(f"EPG solver report queue metrics mismatch: {name}")
         actual = queue_candidate_penalty(integer(decision.get("depthAfter")), diag)
-        best = min(
-            queue_candidate_penalty(candidate, diag)
-            for candidate in range(
-                max(1, integer(decision.get("depthBefore"))),
-                max(max(1, integer(decision.get("depthBefore"))),
-                    integer(constraints.get("maxQueueDepth"))) + 1)
-        )
+        best = queue_candidate_penalty(
+            max(1, integer(decision.get("depthBefore"))), diag)
         if actual != best:
             raise ValueError(f"EPG solver report queue is not optimal: {name}")
     for task in topology.get("tasks", []):
@@ -1249,10 +1492,6 @@ def validate_global_optimum(profile: Dict[str, Any],
             target_utilization_ppm=integer(
                 constraints.get("targetUtilizationPpm")),
         )
-        actual = task_candidate_penalty(
-            interval, integer(decision.get("intervalAfterMs")),
-            diag, loop_us, limits, expected_wait,
-            integer(decision.get("topologyPenalty")))
         topology_penalty = backpressure_topology_penalty(
             sorted_ports(decision.get("backpressureBefore")),
             sorted_ports(decision.get("backpressureAfter")),
@@ -1261,10 +1500,17 @@ def validate_global_optimum(profile: Dict[str, Any],
             queue_diag,
             diag,
             replaceable,
-        ) + resource_topology_penalty(resource_before, resource_after)
+        ) + resource_topology_penalty(
+            resource_before, resource_after) + cpu_binding_penalty(
+                integer(decision.get("cpuAffinityBefore"), -1),
+                integer(decision.get("cpuAffinityAfter"), -1),
+                resource_before, resource_after)
         if integer(decision.get("topologyPenalty")) != topology_penalty:
             raise ValueError(
                 f"EPG solver report task topology mismatch: {name}")
+        actual = task_candidate_penalty(
+            interval, integer(decision.get("intervalAfterMs")),
+            diag, loop_us, limits, expected_wait, topology_penalty)
         best = min(
             item["penalty"]
             for item in task_candidates(
@@ -1318,6 +1564,7 @@ def optimize_profile(profile: Dict[str, Any],
             node["task"], limits, node["diag"], node["catalog"], candidate)
         optimized_tasks[node_index] = optimized
         decisions.append(decision)
+    optimized_tasks = apply_topology_schedule(optimized_tasks, decisions)
 
     config = {
         "schema": OPTIMIZED_SCHEMA,

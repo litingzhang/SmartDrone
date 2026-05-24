@@ -43,6 +43,7 @@ class SlamSessionRuntimeService final {
     bool StepImuPoll();
     bool ImuReady() const;
     SlamTaskStepResult StepBackend();
+    SlamTaskStepResult StepBackendIfIdle();
     SlamPrepareFrameResult AcquireAndPrepareFrame(std::uint64_t sessionId);
     SlamTrackFrameResult TrackPreparedFrame(
         std::uint64_t sessionId,

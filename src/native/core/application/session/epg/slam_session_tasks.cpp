@@ -313,7 +313,7 @@ void SlamBackendTickTask::OnTick(Epg::TaskContext &context)
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
     }
-    const SlamTaskStepResult result = m_service->StepBackend();
+    const SlamTaskStepResult result = m_service->StepBackendIfIdle();
     if (result.abortRequested) {
         m_stop.store(true);
     }
@@ -334,7 +334,6 @@ void SlamImuGateTask::OnTick(Epg::TaskContext &context)
     if (auto ready = context.TryPopLatest<SlamImuReady>(0)) {
         m_imuReady = ready->ready;
     }
-    const auto tick = context.TryPopLatest<SlamTick>(1);
     if (m_service->StartFailed()) {
         PushSlamStatus(context, false, true, STATUS_OUTPUT_PORT);
         return;
@@ -342,7 +341,12 @@ void SlamImuGateTask::OnTick(Epg::TaskContext &context)
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
     }
-    if (!m_imuReady || !tick || context.OutputSize(0) > 0) {
+    if (!m_imuReady || context.OutputSize(0) > 0) {
+        return;
+    }
+
+    const auto tick = context.TryPopLatest<SlamTick>(1);
+    if (!tick) {
         return;
     }
 
@@ -370,9 +374,11 @@ void SlamAcquireTask::OnTick(Epg::TaskContext &context)
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
     }
+    if (context.OutputSize(0) > 0) {
+        return;
+    }
     const auto frameReady = context.TryPopLatest<SlamFrameReady>(0);
-    if (!frameReady || frameReady->sessionId == 0 ||
-        context.OutputSize(0) > 0) {
+    if (!frameReady || frameReady->sessionId == 0) {
         return;
     }
 

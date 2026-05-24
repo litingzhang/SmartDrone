@@ -11,7 +11,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
       "sourceTimestampMs": 123,
       "generatedAtMs": 456,
       "queues": [
-        {"name": "packets", "type": "TestPacket", "depth": 6, "overflow": "drop_newest"}
+        {"name": "packets", "type": "TestPacket", "depth": 4, "overflow": "drop_newest"}
       ],
       "tasks": [
         {
@@ -20,8 +20,11 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
           "trigger": {"mode": "periodic", "interval_ms": 1},
           "scheduling": {
             "resource": "cpu",
+            "cpu_affinity": -1,
             "budget_us": 1000,
-            "deadline_us": 2000
+            "deadline_us": 2000,
+            "topology_level": 0,
+            "phase_offset_ms": 0
           },
           "outputs": {"0": "packets"}
         }
@@ -41,14 +44,14 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
       "objective": {
         "name": "global_minimize_predicted_epg_penalty_discrete_topology",
         "score": {
-          "queuePressure": 0,
+          "queuePressure": 2,
           "periodicOverloadUs": 500,
           "resourceWaitUs": 0,
           "schedulingErrors": 1,
           "budgetOverruns": 2,
           "deadlineMisses": 3,
           "utilizationOverPpm": 100000,
-          "totalPenalty": 129500
+          "totalPenalty": 131500
         }
       },
       "constraints": {
@@ -61,16 +64,16 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
           "kind": "queue",
           "name": "packets",
           "depthBefore": 4,
-          "depthAfter": 6,
+          "depthAfter": 4,
           "pressureBefore": 2,
-          "pressureAfter": 0,
+          "pressureAfter": 2,
           "maxDepthObserved": 4,
           "droppedNewest": 2,
           "overwrittenOldest": 0,
           "pushedPerSecond": 0,
           "poppedPerSecond": 0,
           "droppedPerSecond": 0,
-          "reason": "global_optimum_depth"
+          "reason": "keep"
         },
         {
           "kind": "task",
@@ -91,6 +94,15 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
           "targetUtilizationPpm": 800000,
           "budgetUs": 1000,
           "deadlineUs": 2000,
+          "topologyLevel": 0,
+          "phaseOffsetMs": 0,
+          "durationMs": 2,
+          "cpuBindingAffinity": 0,
+          "cpuBindingStartMs": 0,
+          "cpuBindingFinishMs": 2,
+          "cpuBindingMakespanMs": 2,
+          "cpuAffinityBefore": -1,
+          "cpuAffinityAfter": -1,
           "catalogRole": "source",
           "replaceable": false,
           "resourceBefore": "cpu",
@@ -98,7 +110,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
           "budgetOverrunCount": 2,
           "deadlineMissCount": 3,
           "schedulingErrorCount": 1,
-          "reason": "not_replaceable+utilization_over_target+budget_overrun+deadline_miss+scheduling_error"
+          "reason": "global_optimum_cpu_binding"
         }
       ]
     })");
@@ -112,6 +124,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
     sourceProfile.metadata.timestampMs = 123;
     sourceProfile.topology = optimized.config;
     sourceProfile.topology.queues[0].depth = 4;
+    sourceProfile.topology.tasks[0].scheduling.cpuAffinity = -1;
     sourceProfile.diagnostics.queues["packets"].maxDepthObserved = 4;
     sourceProfile.diagnostics.queues["packets"].droppedNewest = 2;
     sourceProfile.diagnostics.tasks["source"].maxLoopUs = 1500;
@@ -127,10 +140,11 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
             manifest, sourceProfile, optimized, report));
 
     auto nonOptimalReport = report;
-    nonOptimalReport.decisions[0].depthAfter = 4;
-    nonOptimalReport.decisions[0].pressureAfter = 2;
+    nonOptimalReport.decisions[0].depthAfter = 6;
+    nonOptimalReport.decisions[0].pressureAfter = 0;
     nonOptimalReport.decisions[0].reason = "global_optimum_depth";
-    nonOptimalReport.score.totalPenalty = 131500;
+    nonOptimalReport.score.queuePressure = 0;
+    nonOptimalReport.score.totalPenalty = 129500;
     EXPECT_THROW(
         SmartDrone::Core::Application::ValidateEpgSolverReport(
             manifest, sourceProfile, optimized, nonOptimalReport),
@@ -236,7 +250,7 @@ TEST(EventPipelineGraphManifest, RejectsOptimizedGraphMismatch)
         std::runtime_error);
 
     auto wrongConstraint = report;
-    wrongConstraint.constraints.maxQueueDepth = 1;
+    wrongConstraint.constraints.maxPeriodicIntervalMs = 0;
     EXPECT_THROW(
         SmartDrone::Core::Application::ValidateEpgSolverReport(
             manifest, sourceProfile, optimized, wrongConstraint),

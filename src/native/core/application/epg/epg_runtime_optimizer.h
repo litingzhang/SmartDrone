@@ -27,6 +27,15 @@ struct EpgRuntimeOptimizerResult {
     std::string solverReportPath;
 };
 
+EpgRuntimeOptimizerResult WriteOptimizedConfigForProfile(
+    const EpgTaskManifest &manifest,
+    const Epg::GraphProfile &profile,
+    std::uint64_t nowMs);
+
+void ValidateEpgOptimizerProfileForManifest(
+    const EpgTaskManifest &manifest,
+    Epg::GraphProfile &profile);
+
 EpgRuntimeOptimizerResult OptimizeEpgProfileForManifest(
     const EpgTaskManifest &manifest,
     std::uint64_t nowMs);

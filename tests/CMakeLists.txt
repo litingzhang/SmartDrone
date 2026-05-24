@@ -13,13 +13,48 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/common/epg/epg_task_runner.cpp
     ../src/native/common/environment.cpp
     ../src/native/core/application/config/orb_acceleration_config.cpp
+    ../src/native/core/application/epg/epg_discrete_global_solver.cpp
     ../src/native/core/application/epg/epg_graph_runtime.cpp
+    ../src/native/core/application/epg/epg_cpu_binding_solver_exact.cpp
+    ../src/native/core/application/epg/epg_cpu_binding_solver_heuristic.cpp
+    ../src/native/core/application/epg/epg_cpu_binding_solver_support.cpp
+    ../src/native/core/application/epg/epg_cpu_binding_solver.cpp
     ../src/native/core/application/epg/epg_registry.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_apply.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_candidates.cpp
     ../src/native/core/application/epg/epg_runtime_optimizer.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_cpu_binding.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_entry.cpp
     ../src/native/core/application/epg/epg_runtime_optimizer_io.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_plan.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_queue_candidates.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_report.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_report_decisions.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_task_apply.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_topology.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_topology_solver.cpp
     ../src/native/core/application/epg/epg_solver_primitives.cpp
+    ../src/native/core/application/epg/epg_solver_report_score.cpp
+    ../src/native/core/application/epg/epg_solver_topology_primitives.cpp
+    ../src/native/core/application/epg/epg_task_decision_primitives.cpp
+    ../src/native/core/application/epg/epg_task_evaluation_primitives.cpp
+    ../src/native/core/application/epg/epg_task_dependency_graph.cpp
     ../src/native/core/application/epg/epg_task_manifest.cpp
+    ../src/native/core/application/epg/epg_task_manifest_catalog.cpp
+    ../src/native/core/application/epg/epg_task_manifest_optimized_graph_validation.cpp
+    ../src/native/core/application/epg/epg_task_manifest_registry.cpp
+    ../src/native/core/application/epg/epg_task_manifest_runtime_tuning.cpp
+    ../src/native/core/application/epg/epg_task_manifest_validation.cpp
     ../src/native/core/application/epg/epg_task_manifest_solver_report.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_decisions.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_global_optimum.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_global_optimum_support.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_metadata.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_queue_optimum.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_schedule.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_task_decisions.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_task_optimum.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_task_penalty.cpp
     ../src/native/core/application/runtime/epg_dfx_snapshot.cpp
     ../src/native/core/application/runtime/epg_graph_lifecycle.cpp
     ../src/native/core/application/runtime/epg_redeploy_coordinator.cpp
@@ -116,13 +151,48 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/core/application/config/app_args.cpp
     ../src/native/core/application/config/orb_acceleration_config.cpp
     ../src/native/core/application/config/slam_backend_availability.cpp
+    ../src/native/core/application/epg/epg_discrete_global_solver.cpp
     ../src/native/core/application/epg/epg_graph_runtime.cpp
+    ../src/native/core/application/epg/epg_cpu_binding_solver_exact.cpp
+    ../src/native/core/application/epg/epg_cpu_binding_solver_heuristic.cpp
+    ../src/native/core/application/epg/epg_cpu_binding_solver_support.cpp
+    ../src/native/core/application/epg/epg_cpu_binding_solver.cpp
     ../src/native/core/application/epg/epg_registry.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_apply.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_candidates.cpp
     ../src/native/core/application/epg/epg_runtime_optimizer.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_cpu_binding.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_entry.cpp
     ../src/native/core/application/epg/epg_runtime_optimizer_io.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_plan.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_queue_candidates.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_report.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_report_decisions.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_task_apply.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_topology.cpp
+    ../src/native/core/application/epg/epg_runtime_optimizer_topology_solver.cpp
     ../src/native/core/application/epg/epg_solver_primitives.cpp
+    ../src/native/core/application/epg/epg_solver_report_score.cpp
+    ../src/native/core/application/epg/epg_solver_topology_primitives.cpp
+    ../src/native/core/application/epg/epg_task_decision_primitives.cpp
+    ../src/native/core/application/epg/epg_task_evaluation_primitives.cpp
+    ../src/native/core/application/epg/epg_task_dependency_graph.cpp
     ../src/native/core/application/epg/epg_task_manifest.cpp
+    ../src/native/core/application/epg/epg_task_manifest_catalog.cpp
+    ../src/native/core/application/epg/epg_task_manifest_optimized_graph_validation.cpp
+    ../src/native/core/application/epg/epg_task_manifest_registry.cpp
+    ../src/native/core/application/epg/epg_task_manifest_runtime_tuning.cpp
+    ../src/native/core/application/epg/epg_task_manifest_validation.cpp
     ../src/native/core/application/epg/epg_task_manifest_solver_report.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_decisions.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_global_optimum.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_global_optimum_support.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_metadata.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_queue_optimum.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_schedule.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_task_decisions.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_task_optimum.cpp
+    ../src/native/core/application/epg/epg_task_manifest_solver_report_task_penalty.cpp
     ../src/native/core/application/runtime/epg_dfx_snapshot.cpp
     ../src/native/core/application/runtime/epg_graph_lifecycle.cpp
     ../src/native/core/application/runtime/runtime_aliases.cpp

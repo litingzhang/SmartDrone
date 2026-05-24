@@ -554,6 +554,17 @@ void ApplyTaskSchedulingFields(TaskConfig &task,
     if (deadlineIt != fields.end()) {
         task.scheduling.deadlineUs = ParseSize(deadlineIt->second, "deadline_us");
     }
+    const auto topologyLevelIt = fields.find("topology_level");
+    if (topologyLevelIt != fields.end()) {
+        task.scheduling.topologyLevel =
+            ParseSize(topologyLevelIt->second, "topology_level");
+    }
+    const auto phaseOffsetIt = fields.find("phase_offset_ms");
+    if (phaseOffsetIt != fields.end()) {
+        task.scheduling.phaseOffsetMs =
+            ParseSize(phaseOffsetIt->second, "phase_offset_ms");
+        task.scheduling.phaseOffsetConfigured = true;
+    }
     const auto backpressureIt = fields.find("backpressure_outputs");
     if (backpressureIt != fields.end()) {
         for (const auto &port : Split(backpressureIt->second, '+')) {

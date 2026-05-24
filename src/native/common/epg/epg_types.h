@@ -117,6 +117,9 @@ struct TaskSchedulingConfig {
     int cpuAffinity{-1};
     std::uint64_t budgetUs{0};
     std::uint64_t deadlineUs{0};
+    std::uint64_t topologyLevel{0};
+    std::uint64_t phaseOffsetMs{0};
+    bool phaseOffsetConfigured{false};
     std::vector<PortId> backpressureOutputs;
     bool realtime{false};
     int priority{0};
@@ -151,6 +154,7 @@ struct GraphProfileTaskCatalogEntry {
     std::uint64_t deadlineUs{};
     bool replaceable{false};
     std::vector<std::string> resourceAlternates;
+    bool preserveAccuracy{false};
 };
 
 struct OptimizedGraphMetadata {
@@ -232,6 +236,15 @@ struct SolverReportDecision {
     std::uint64_t deadlineMissCount{};
     std::uint64_t schedulingErrorCount{};
     std::uint64_t topologyPenalty{};
+    std::uint64_t topologyLevel{};
+    std::uint64_t phaseOffsetMs{};
+    std::uint64_t durationMs{};
+    std::uint64_t cpuBindingStartMs{};
+    std::uint64_t cpuBindingFinishMs{};
+    std::uint64_t cpuBindingMakespanMs{};
+    int cpuBindingAffinity{-1};
+    int cpuAffinityBefore{-1};
+    int cpuAffinityAfter{-1};
     std::string resourceBefore;
     std::string resourceAfter;
     std::vector<PortId> backpressureBefore;
