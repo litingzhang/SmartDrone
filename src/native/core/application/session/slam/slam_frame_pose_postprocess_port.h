@@ -28,9 +28,9 @@ class SlamFramePosePostprocessPort final {
 
   private:
     struct TrackingContext {
-        int state{SmartDrone::Core::Ports::kSlamTrackingNoImagesYet};
+        int state{SmartDrone::Core::Ports::SLAM_TRACKING_NO_IMAGES_YET};
         bool usable{false};
-        unsigned long mapId{PosePostprocessor::ContinuityMapper::kInvalidMapId};
+        unsigned long mapId{PosePostprocessor::ContinuityMapper::INVALID_MAP_ID};
     };
 
     struct StereoExtrinsicsContext {
@@ -42,7 +42,7 @@ class SlamFramePosePostprocessPort final {
         PosePostprocessor::Result poseResult{};
         std::chrono::steady_clock::time_point postStartTp;
         std::chrono::steady_clock::time_point postEndTp;
-        int trackingState{SmartDrone::Core::Ports::kSlamTrackingNoImagesYet};
+        int trackingState{SmartDrone::Core::Ports::SLAM_TRACKING_NO_IMAGES_YET};
         bool trackingUsable{false};
         uint8_t effectiveResetCounter{0};
         uint16_t effectiveResetMapCount{0};

@@ -1,7 +1,5 @@
 #include "core/application/session/calib/calib_imu_sample_port.h"
 
-#include <mutex>
-
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/sensors/imu_sample_source_provider.h"
 
@@ -27,7 +25,6 @@ class CalibImuSamplePort::Impl final {
 
     CalibImuSamplePortResult ReadSample()
     {
-        std::lock_guard<std::mutex> lock(m_mu);
         if (!EnsureOpened()) {
             return {CalibImuSamplePortStatus::Pending, {}};
         }
@@ -38,7 +35,6 @@ class CalibImuSamplePort::Impl final {
 
     void Stop()
     {
-        std::lock_guard<std::mutex> lock(m_mu);
         if (m_sampleSource) {
             m_sampleSource->Stop();
         }
@@ -72,7 +68,6 @@ class CalibImuSamplePort::Impl final {
         return {CalibImuSamplePortStatus::Pending, {}};
     }
 
-    std::mutex m_mu;
     std::unique_ptr<SmartDrone::Core::Ports::IImuSampleSource> m_sampleSource;
     bool m_opened{false};
     bool m_openFailed{false};

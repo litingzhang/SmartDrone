@@ -8,16 +8,16 @@
 
 namespace SmartDrone::Adapters::Slam {
 
-constexpr float kStereoMaxEpipolarDeltaPx = 1.5f;
-constexpr float kStereoMinDisparityPx = 0.75f;
-constexpr float kStereoMaxDisparityPx = 240.0f;
-constexpr float kStereoSimilarityRatioTest = 0.98f;
-constexpr float kStereoMinDescriptorSimilarity = 0.20f;
-constexpr float kStereoMinZnccScore = 0.10f;
-constexpr int kStereoPatchRadiusPx = 3;
-constexpr float kTemporalStereoMinZnccScore = 0.05f;
-constexpr float kStereoDisparityMadScale = 2.5f;
-constexpr float kStereoDisparityMinTolerancePx = 6.0f;
+constexpr float STEREO_MAX_EPIPOLAR_DELTA_PX = 1.5f;
+constexpr float STEREO_MIN_DISPARITY_PX = 0.75f;
+constexpr float STEREO_MAX_DISPARITY_PX = 240.0f;
+constexpr float STEREO_SIMILARITY_RATIO_TEST = 0.98f;
+constexpr float STEREO_MIN_DESCRIPTOR_SIMILARITY = 0.20f;
+constexpr float STEREO_MIN_ZNCC_SCORE = 0.10f;
+constexpr int STEREO_PATCH_RADIUS_PX = 3;
+constexpr float TEMPORAL_STEREO_MIN_ZNCC_SCORE = 0.05f;
+constexpr float STEREO_DISPARITY_MAD_SCALE = 2.5f;
+constexpr float STEREO_DISPARITY_MIN_TOLERANCE_PX = 6.0f;
 
 float StereoMinDisparityPx();
 
@@ -28,24 +28,34 @@ bool ComputePatchZncc(const cv::Mat &leftGray32f, const cv::Point2f &leftPt,
 bool IsStereoPairGeometricallyValid(const cv::Point2f &leftPt,
                                     const cv::Point2f &rightPt);
 
-bool RefineRightPointByStereoZncc(const cv::Mat &leftGray32f,
-                                  const cv::Point2f &leftPt,
-                                  const cv::Mat &rightGray32f,
-                                  const cv::Point2f &predictedRightPt,
-                                  cv::Point2f &refinedRightPt,
-                                  float &bestScore);
+struct RefineRightPointByStereoZnccRequest {
+    const cv::Mat &leftGray32f;
+    const cv::Point2f &leftPt;
+    const cv::Mat &rightGray32f;
+    const cv::Point2f &predictedRightPt;
+    cv::Point2f &refinedRightPt;
+    float &bestScore;
+};
+
+bool RefineRightPointByStereoZncc(
+    const RefineRightPointByStereoZnccRequest &request);
 
 bool FindRightPointByStereoZncc(const cv::Mat &leftGray32f,
                                 const cv::Point2f &leftPt,
                                 const cv::Mat &rightGray32f,
                                 cv::Point2f &rightPt, float &bestScore);
 
-bool FindRightPointByStereoZnccAroundDisparity(const cv::Mat &leftGray32f,
-                                               const cv::Point2f &leftPt,
-                                               const cv::Mat &rightGray32f,
-                                               float expectedDisparity,
-                                               cv::Point2f &rightPt,
-                                               float &bestScore);
+struct FindRightPointByStereoZnccAroundDisparityRequest {
+    const cv::Mat &leftGray32f;
+    const cv::Point2f &leftPt;
+    const cv::Mat &rightGray32f;
+    float expectedDisparity;
+    cv::Point2f &rightPt;
+    float &bestScore;
+};
+
+bool FindRightPointByStereoZnccAroundDisparity(
+    const FindRightPointByStereoZnccAroundDisparityRequest &request);
 
 float ComputeStereoCandidateQuality(float descriptorScore, float zncc,
                                     float epipolarErrorPx, float disparity);

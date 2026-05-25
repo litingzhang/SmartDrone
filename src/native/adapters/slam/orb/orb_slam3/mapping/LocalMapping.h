@@ -52,8 +52,6 @@ public:
     void SetTracker(Tracking* pTracker);
     void SetTrackingBackend(IOrbTrackingBackend* trackingBackend);
 
-    // Main function
-    void Run();
     bool Step();
 
     void InsertKeyFrame(KeyFrame* pKF);

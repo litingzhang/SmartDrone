@@ -1,35 +1,25 @@
 #include "adapters/slam/engine/slam_mode_strategy.h"
 
-#include <array>
 #include <cstddef>
-#include <mutex>
 #include <utility>
 
 #include "adapters/slam/engine/slam_engine_adapter.h"
+#include "adapters/slam/fixed_factory_registry.h"
 
 namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
-constexpr size_t kMaxFeatureFrontendSlots = 16;
+constexpr std::size_t MAX_FEATURE_FRONTEND_SLOTS = 16;
 
-struct SlamModeStrategyRegistryEntry {
-    FeatureFrontend frontend{FeatureFrontend::Orb};
-    SlamModeStrategyFactory factory{nullptr};
-};
-
-std::array<SlamModeStrategyRegistryEntry, kMaxFeatureFrontendSlots> &
+FixedFactoryRegistry<FeatureFrontend, SlamModeStrategyFactory,
+                     MAX_FEATURE_FRONTEND_SLOTS> &
 SlamModeStrategyRegistry()
 {
-    static std::array<SlamModeStrategyRegistryEntry, kMaxFeatureFrontendSlots>
-        registry{};
+    static FixedFactoryRegistry<FeatureFrontend, SlamModeStrategyFactory,
+                                MAX_FEATURE_FRONTEND_SLOTS>
+        registry;
     return registry;
-}
-
-std::mutex &SlamModeStrategyRegistryMutex()
-{
-    static std::mutex mutex;
-    return mutex;
 }
 
 } // namespace
@@ -37,25 +27,7 @@ std::mutex &SlamModeStrategyRegistryMutex()
 void RegisterSlamModeStrategy(FeatureFrontend frontend,
                               SlamModeStrategyFactory factory)
 {
-    if (factory == nullptr) {
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(SlamModeStrategyRegistryMutex());
-    auto &registry = SlamModeStrategyRegistry();
-    for (SlamModeStrategyRegistryEntry &entry : registry) {
-        if (entry.factory != nullptr && entry.frontend == frontend) {
-            entry.factory = factory;
-            return;
-        }
-    }
-    for (SlamModeStrategyRegistryEntry &entry : registry) {
-        if (entry.factory == nullptr) {
-            entry.frontend = frontend;
-            entry.factory = factory;
-            return;
-        }
-    }
+    SlamModeStrategyRegistry().Register(frontend, factory);
 }
 
 SlamModeStrategyRegistrar::SlamModeStrategyRegistrar(
@@ -67,14 +39,9 @@ SlamModeStrategyRegistrar::SlamModeStrategyRegistrar(
 std::unique_ptr<SlamModeStrategy>
 CreateSlamModeStrategy(FeatureFrontend frontend)
 {
-    {
-        std::lock_guard<std::mutex> lock(SlamModeStrategyRegistryMutex());
-        for (const SlamModeStrategyRegistryEntry &entry :
-             SlamModeStrategyRegistry()) {
-            if (entry.factory != nullptr && entry.frontend == frontend) {
-                return entry.factory();
-            }
-        }
+    SlamModeStrategyFactory factory = SlamModeStrategyRegistry().Find(frontend);
+    if (factory != nullptr) {
+        return factory();
     }
     return CreateOrbModeStrategy();
 }

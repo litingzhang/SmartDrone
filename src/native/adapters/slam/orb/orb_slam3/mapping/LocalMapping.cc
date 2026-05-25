@@ -183,11 +183,6 @@ void LocalMapping::SetTrackingBackend(IOrbTrackingBackend* trackingBackend)
     mpTrackingBackend = trackingBackend;
 }
 
-void LocalMapping::Run()
-{
-    Step();
-}
-
 bool LocalMapping::Step()
 {
     {

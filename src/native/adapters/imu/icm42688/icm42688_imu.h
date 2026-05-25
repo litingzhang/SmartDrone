@@ -34,18 +34,18 @@ class Icm42688ConfigSequencer {
   private:
     enum class Stage {
         Start,
-        WaitAfterReset,
+        DelayAfterReset,
         PowerOn,
-        WaitAfterPower,
+        DelayAfterPower,
         ConfigureRate,
-        WaitAfterRate,
+        DelayAfterRate,
         Done,
         Failed,
     };
 
     bool DelayElapsed(std::chrono::steady_clock::time_point now) const;
     void AdvanceWaitStage();
-    void WaitFor(std::chrono::steady_clock::time_point now, std::chrono::milliseconds delay, Stage nextStage);
+    void ScheduleDelay(std::chrono::steady_clock::time_point now, std::chrono::milliseconds delay, Stage nextStage);
     Status StepStart(SpiDev &spi, std::chrono::steady_clock::time_point now);
     Status StepPowerOn(SpiDev &spi, std::chrono::steady_clock::time_point now);
     Status StepConfigureRate(SpiDev &spi, std::chrono::steady_clock::time_point now);

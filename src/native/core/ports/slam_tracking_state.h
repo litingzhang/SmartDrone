@@ -3,18 +3,15 @@
 namespace SmartDrone::Core::Ports {
 
 enum SlamTrackingState : int {
-    kSlamTrackingSystemNotReady = -1,
-    kSlamTrackingNoImagesYet = 0,
-    kSlamTrackingNotInitialized = 1,
-    kSlamTrackingOk = 2,
-    kSlamTrackingRecentlyLost = 3,
-    kSlamTrackingLost = 4,
-    kSlamTrackingOkKlt = 5,
+    SLAM_TRACKING_SYSTEM_NOT_READY = -1,
+    SLAM_TRACKING_NO_IMAGES_YET = 0,
+    SLAM_TRACKING_NOT_INITIALIZED = 1,
+    SLAM_TRACKING_OK = 2,
+    SLAM_TRACKING_RECENTLY_LOST = 3,
+    SLAM_TRACKING_LOST = 4,
+    SLAM_TRACKING_OK_KLT = 5,
 };
 
-inline bool IsSlamTrackingPoseUsable(int trackingState)
-{
-    return trackingState == kSlamTrackingOk || trackingState == kSlamTrackingOkKlt;
-}
+bool IsSlamTrackingPoseUsable(int trackingState);
 
 } // namespace SmartDrone::Core::Ports

@@ -1,40 +1,28 @@
 #include "adapters/slam/superpoint/visual_feature_frontend_client.h"
 
-#include <array>
 #include <cstddef>
-#include <cstdlib>
 #include <filesystem>
-#include <mutex>
 #include <system_error>
 #include <vector>
 
+#include "adapters/slam/fixed_factory_registry.h"
 #include "common/environment.h"
 
 namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
-constexpr size_t kMaxVisualFeatureFrontendClientSlots = 16;
+constexpr std::size_t MAX_VISUAL_FEATURE_FRONTEND_CLIENT_SLOTS = 16;
 
-struct VisualFeatureFrontendClientRegistryEntry {
-    FeatureFrontend frontend{FeatureFrontend::Orb};
-    VisualFeatureFrontendClientFactory factory{nullptr};
-};
-
-std::array<VisualFeatureFrontendClientRegistryEntry,
-           kMaxVisualFeatureFrontendClientSlots> &
+FixedFactoryRegistry<FeatureFrontend, VisualFeatureFrontendClientFactory,
+                     MAX_VISUAL_FEATURE_FRONTEND_CLIENT_SLOTS> &
 VisualFeatureFrontendClientRegistry()
 {
-    static std::array<VisualFeatureFrontendClientRegistryEntry,
-                      kMaxVisualFeatureFrontendClientSlots>
-        registry{};
+    static FixedFactoryRegistry<
+        FeatureFrontend, VisualFeatureFrontendClientFactory,
+        MAX_VISUAL_FEATURE_FRONTEND_CLIENT_SLOTS>
+        registry;
     return registry;
-}
-
-std::mutex &VisualFeatureFrontendClientRegistryMutex()
-{
-    static std::mutex mutex;
-    return mutex;
 }
 
 void SetStereoFeatureEnvDefault(const char *name, const char *legacyName,
@@ -65,9 +53,9 @@ std::string FirstExistingPathOrFallback(
 
 std::string ResolveLightGlueRepo(const std::string &configuredRepo)
 {
-    const char *home = std::getenv("HOME");
+    const std::string home = SmartDrone::Common::EnvStringValue("HOME", "");
     std::vector<std::filesystem::path> candidates;
-    if (home != nullptr && home[0] != '\0') {
+    if (!home.empty()) {
         candidates.emplace_back(std::filesystem::path(home) / "LightGlue");
         candidates.emplace_back(std::filesystem::path(home) / "lightglue");
         candidates.emplace_back(std::filesystem::path(home) / "third_party" /
@@ -173,25 +161,7 @@ void ConfigureLightGlueFrontendDefaults(
 void RegisterVisualFeatureFrontendClient(
     FeatureFrontend frontend, VisualFeatureFrontendClientFactory factory)
 {
-    if (factory == nullptr) {
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(VisualFeatureFrontendClientRegistryMutex());
-    auto &registry = VisualFeatureFrontendClientRegistry();
-    for (VisualFeatureFrontendClientRegistryEntry &entry : registry) {
-        if (entry.factory != nullptr && entry.frontend == frontend) {
-            entry.factory = factory;
-            return;
-        }
-    }
-    for (VisualFeatureFrontendClientRegistryEntry &entry : registry) {
-        if (entry.factory == nullptr) {
-            entry.frontend = frontend;
-            entry.factory = factory;
-            return;
-        }
-    }
+    VisualFeatureFrontendClientRegistry().Register(frontend, factory);
 }
 
 VisualFeatureFrontendClientRegistrar::VisualFeatureFrontendClientRegistrar(
@@ -203,14 +173,12 @@ VisualFeatureFrontendClientRegistrar::VisualFeatureFrontendClientRegistrar(
 std::unique_ptr<IManagedVisualFeatureFrontend>
 CreateVisualFeatureFrontendClient(FeatureFrontend frontend)
 {
-    std::lock_guard<std::mutex> lock(VisualFeatureFrontendClientRegistryMutex());
-    for (const VisualFeatureFrontendClientRegistryEntry &entry :
-         VisualFeatureFrontendClientRegistry()) {
-        if (entry.factory != nullptr && entry.frontend == frontend) {
-            return entry.factory();
-        }
+    VisualFeatureFrontendClientFactory factory =
+        VisualFeatureFrontendClientRegistry().Find(frontend);
+    if (factory == nullptr) {
+        return nullptr;
     }
-    return nullptr;
+    return factory();
 }
 
 bool VisualFeatureFrontendClientEnabled(FeatureFrontend frontend)
@@ -219,13 +187,8 @@ bool VisualFeatureFrontendClientEnabled(FeatureFrontend frontend)
         frontend != FeatureFrontend::XFeatLightGlue) {
         return false;
     }
-    const char *value = std::getenv("SMART_DRONE_SUPERPOINT_LIGHTGLUE_INJECT");
-    if (value == nullptr || value[0] == '\0') {
-        return true;
-    }
-    const std::string text(value);
-    return !(text == "0" || text == "false" || text == "FALSE" || text == "off" ||
-             text == "OFF");
+    return SmartDrone::Common::EnvFlagEnabled(
+        "SMART_DRONE_SUPERPOINT_LIGHTGLUE_INJECT", true);
 }
 
 std::string

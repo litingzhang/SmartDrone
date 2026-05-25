@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
-#include <mutex>
 
 #include "core/application/session/epg/messages/calib_epg_messages.h"
 
@@ -30,7 +29,6 @@ class CalibSavePacingPort final {
     static std::int64_t FramePairTimestampNs(const CalibStereoFrame &frame);
 
     CalibSavePacingPortConfig m_config;
-    std::mutex m_mu;
     int m_saveFps{1};
     std::int64_t m_saveStepNs{1000000000LL};
     std::int64_t m_lastPairNs{0};

@@ -1,7 +1,8 @@
 #include "core/application/epg/epg_runtime_optimizer_cpu_binding.h"
 
-#include <cstdlib>
 #include <string>
+
+#include "common/environment.h"
 
 namespace SmartDrone::Core::Application {
 namespace {
@@ -22,8 +23,8 @@ const Solver::CpuBindingScheduleEntry *FindCpuBindingEntry(
 
 bool CpuBindingApplyEnabled()
 {
-    const auto *value = std::getenv("SMART_DRONE_EPG_APPLY_CPU_BINDING");
-    return value && std::string(value) == "1";
+    return SmartDrone::Common::EnvStringValue(
+               "SMART_DRONE_EPG_APPLY_CPU_BINDING", "") == "1";
 }
 
 bool ShouldApplyCpuBindingAffinity(const Epg::TaskConfig &task)

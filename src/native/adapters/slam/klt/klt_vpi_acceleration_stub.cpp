@@ -11,10 +11,7 @@ bool StoreVpiPreviousRectified(std::shared_ptr<LkPerFrameVpiState> &)
     return false;
 }
 
-bool VpiRemapCurrentStereo(const cv::Mat &, const cv::Mat &, cv::Mat &,
-                           cv::Mat &, std::shared_ptr<LkPerFrameVpiState> &,
-                           const cv::Mat &, const cv::Mat &, const cv::Mat &,
-                           const cv::Mat &, bool &)
+bool VpiRemapCurrentStereo(const VpiRemapCurrentStereoRequest &)
 {
     return false;
 }

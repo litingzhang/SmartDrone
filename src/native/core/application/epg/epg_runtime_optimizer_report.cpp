@@ -13,6 +13,7 @@ namespace {
 namespace Solver = EpgSolverPrimitives;
 
 const auto SOLVER_LIMITS = Solver::DefaultSolverLimits();
+constexpr const char *REPORT_OBJECT_BEGIN = "{\n";
 
 void WriteScoreJson(std::ostringstream &out,
                     const Epg::SolverReportScore &score)
@@ -33,7 +34,7 @@ void WriteSolverReportHeader(std::ostringstream &out,
                              const Epg::GraphProfileMetadata &metadata,
                              std::uint64_t nowMs)
 {
-    out << "{\n";
+    out << REPORT_OBJECT_BEGIN;
     out << "  \"schema\": \"" << Epg::SOLVER_REPORT_SCHEMA << "\",\n";
     out << "  \"targetGraph\": \"" << Solver::JsonEscape(manifest.subgraphName)
         << "\",\n";

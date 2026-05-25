@@ -8,15 +8,18 @@
 
 #include <array>
 #include <atomic>
-#include <mutex>
+#include <chrono>
 
 namespace SmartDrone::Common {
 
 namespace {
 
-std::once_flag g_stopPipeInitOnce;
-int g_stopPipeReadFd{-1};
-std::atomic<int> g_stopPipeWriteFd{-1};
+struct RuntimeStopPipe {
+    RuntimeStopPipe();
+
+    int readFd{-1};
+    std::atomic<int> writeFd{-1};
+};
 
 void SetNonBlocking(int fd)
 {
@@ -26,7 +29,7 @@ void SetNonBlocking(int fd)
     }
 }
 
-void InitRuntimeStopPipe()
+RuntimeStopPipe::RuntimeStopPipe()
 {
     std::array<int, 2> fds{-1, -1};
     if (::pipe(fds.data()) != 0) {
@@ -34,18 +37,15 @@ void InitRuntimeStopPipe()
     }
     SetNonBlocking(fds[0]);
     SetNonBlocking(fds[1]);
-    g_stopPipeReadFd = fds[0];
-    g_stopPipeWriteFd.store(fds[1], std::memory_order_release);
+    readFd = fds[0];
+    writeFd.store(fds[1], std::memory_order_release);
 }
 
-void EnsureRuntimeStopPipe()
-{
-    std::call_once(g_stopPipeInitOnce, InitRuntimeStopPipe);
-}
+RuntimeStopPipe g_stopPipe;
 
 void NotifyRuntimeStopWaiter()
 {
-    const int fd = g_stopPipeWriteFd.load(std::memory_order_acquire);
+    const int fd = g_stopPipe.writeFd.load(std::memory_order_acquire);
     if (fd < 0) {
         return;
     }
@@ -56,7 +56,7 @@ void NotifyRuntimeStopWaiter()
 void DrainRuntimeStopPipe()
 {
     char buffer[32];
-    while (::read(g_stopPipeReadFd, buffer, sizeof(buffer)) > 0) {
+    while (::read(g_stopPipe.readFd, buffer, sizeof(buffer)) > 0) {
     }
 }
 
@@ -81,16 +81,38 @@ bool RuntimeStopRequested()
     return !g_runningFlag.load(std::memory_order_acquire);
 }
 
+bool WaitForRuntimeStop(std::chrono::milliseconds timeout)
+{
+    if (!g_runningFlag.load(std::memory_order_acquire)) {
+        return true;
+    }
+    if (g_stopPipe.readFd < 0) {
+        return RuntimeStopRequested();
+    }
+    pollfd fd{};
+    fd.fd = g_stopPipe.readFd;
+    fd.events = POLLIN;
+    const int timeoutMs = static_cast<int>(timeout.count());
+    const int result = ::poll(&fd, 1, timeoutMs);
+    if (result > 0) {
+        DrainRuntimeStopPipe();
+        return RuntimeStopRequested();
+    }
+    if (result < 0 && errno != EINTR) {
+        return RuntimeStopRequested();
+    }
+    return RuntimeStopRequested();
+}
+
 void WaitUntilRuntimeStopRequested()
 {
-    EnsureRuntimeStopPipe();
     while (g_runningFlag.load()) {
-        if (g_stopPipeReadFd < 0) {
+        if (g_stopPipe.readFd < 0) {
             (void)::pause();
             continue;
         }
         pollfd fd{};
-        fd.fd = g_stopPipeReadFd;
+        fd.fd = g_stopPipe.readFd;
         fd.events = POLLIN;
         const int result = ::poll(&fd, 1, -1);
         if (result < 0 && errno == EINTR) {

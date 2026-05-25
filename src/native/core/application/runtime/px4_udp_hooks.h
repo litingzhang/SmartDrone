@@ -5,7 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
-#include <mutex>
+#include <memory>
 #include <string>
 
 #include "common/tlv/runtime_command_hooks.h"
@@ -51,35 +51,21 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     void StepManualControl();
 
   private:
-    struct AutoLandingState {
-        bool active{false};
-        bool haveRangeWindow{false};
-        float rangeWindowMin{NAN};
-        float rangeWindowMax{NAN};
-        std::chrono::steady_clock::time_point rangeWindowStart{};
-        std::chrono::steady_clock::time_point lastDisarmAttempt{};
-    };
-
     struct PendingCommandAck {
-        bool active{false};
         Ports::VehicleCommandAckKind command{Ports::VehicleCommandAckKind::ArmDisarm};
         std::string label;
         std::chrono::steady_clock::time_point deadline{};
     };
 
-    static constexpr float kAutoLandThrottleNorm = -0.6f;
-    static constexpr float kAutoLandStableRangeDeltaM = 0.03f;
-    static constexpr float kAutoLandNearGroundM = 0.35f;
-    static constexpr uint64_t kAutoLandRangeMaxAgeUs = 300000ULL;
-    static constexpr auto kAutoLandStableDuration = std::chrono::seconds(2);
-    static constexpr auto kAutoLandDisarmRetry = std::chrono::milliseconds(500);
+    struct RemoteModeRequestState {
+        uint8_t mainMode{0};
+        std::chrono::steady_clock::time_point requestTime{};
+    };
 
     static float ClampSignedUnit(float value);
     static bool IsTrackingPoseUsable(int trackingState);
     static bool IsPoseQualityUsable(LivePoseQuality quality);
 
-    void CancelAutoLanding();
-    bool IsAutoLandingActive() const;
     bool EnsureSetpointStream();
     void EnsureManualControlStream();
     void DisableRemoteControl(bool stopManualStream);
@@ -91,17 +77,14 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     bool ApplyOffboardMoveGoal(const MoveGoal &goal, std::string *err);
     bool EnsureOffboardMoveReady(std::string *err);
     SmartDrone::Core::Ports::VehicleSetpointLocalNed BuildMoveSetpoint(const MoveGoal &goal) const;
+    void ClearRemoteModeRequest();
+    bool TryMarkFlightModeRequest(uint8_t mainMode, bool force, std::chrono::steady_clock::time_point now);
     bool EnsureOffboardMode(bool force, std::string *err);
     bool EnsureFlightMode(uint8_t mainMode, bool force, std::string *err, const char *modeName);
     bool EnsurePositionMode(bool force, std::string *err);
-    bool PrepareAutoLandingRangeWindow(const SmartDrone::Core::Ports::VehicleDownwardRange &range,
-                                       std::chrono::steady_clock::time_point now,
-                                       bool &shouldDisarm);
-    void UpdateAutoLanding();
-    void BeginAutoLandingDisarm();
     void TrackCommandAck(Ports::VehicleCommandAckKind command, const std::string &label);
     void StepCommandAck();
-    void ClearCommandAckIfCurrent(Ports::VehicleCommandAckKind command, const std::string &label);
+    void ClearCommandAckIfCurrent(const std::shared_ptr<const PendingCommandAck> &pending);
 
     SmartDrone::Core::Ports::IVehicleControlPort &m_vehicleControl;
     ReadRuntimeGateFn m_readRuntimeGate;
@@ -110,16 +93,9 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     std::atomic<bool> m_manualControlStreaming{false};
     std::atomic<bool> m_remoteModeRequested{false};
     std::atomic<bool> m_offboardModeRequested{false};
-    mutable std::mutex m_manualControlMtx;
-    SmartDrone::Core::Ports::VehicleManualControl m_manualControlInput{};
-    mutable std::mutex m_remoteModeMtx;
-    mutable std::mutex m_autoLandingMtx;
-    AutoLandingState m_autoLanding{};
-    mutable std::mutex m_commandAckMtx;
-    PendingCommandAck m_pendingCommandAck{};
-    bool m_modeChangeRequested{false};
-    uint8_t m_requestedMainMode{0};
-    std::chrono::steady_clock::time_point m_lastPositionModeRequest{};
+    std::shared_ptr<const SmartDrone::Core::Ports::VehicleManualControl> m_manualControlInput;
+    std::shared_ptr<const RemoteModeRequestState> m_remoteModeRequestState;
+    std::shared_ptr<const PendingCommandAck> m_pendingCommandAck;
 };
 
 } // namespace SmartDrone::Core::Application

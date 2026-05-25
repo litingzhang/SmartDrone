@@ -53,7 +53,7 @@ class PosePostprocessor {
         uint8_t GetResetCounter() const;
         uint16_t GetResetMapCount() const;
 
-        static constexpr unsigned long kInvalidMapId = std::numeric_limits<unsigned long>::max();
+        static constexpr unsigned long INVALID_MAP_ID = std::numeric_limits<unsigned long>::max();
 
         Sophus::SE3f bridgeRawToContinuous{Sophus::SE3f()};
         Sophus::SE3f lastContinuousPose{Sophus::SE3f()};
@@ -61,7 +61,7 @@ class PosePostprocessor {
         bool haveLastContinuousPose{false};
         bool haveMapId{false};
         bool pendingReset{false};
-        unsigned long lastMapId{kInvalidMapId};
+        unsigned long lastMapId{INVALID_MAP_ID};
         uint32_t resetCounter{0};
         uint32_t resetMapCount{0};
     };
@@ -78,8 +78,8 @@ class PosePostprocessor {
         SmartDrone::Core::Ports::PoseEstimate ComputeLostPose(uint64_t nowUs);
         void ApplyRangeProtection(SmartDrone::Core::Ports::PoseEstimate &pose, uint64_t nowUs);
 
-        static constexpr uint64_t kWeakHoldUs = 1500000ULL;
-        static constexpr float kRangeHardFloorM = 0.35f;
+        static constexpr uint64_t WEAK_HOLD_US = 1500000ULL;
+        static constexpr float RANGE_HARD_FLOOR_M = 0.35f;
 
         float zOffset{0.0f};
         uint64_t weakUntilUs{0};
@@ -149,10 +149,10 @@ class PosePostprocessor {
         void ResetState(const SmartDrone::Core::Ports::PoseEstimate &pose, int64_t frameNs, PoseQuality quality,
                         uint16_t resetMapCount);
 
-        static constexpr float kHorizontalTauSec = 0.18f;
-        static constexpr float kVerticalTauSec = 0.30f;
-        static constexpr float kMaxHorizontalSpeedMps = 8.0f;
-        static constexpr float kMaxVerticalSpeedMps = 4.0f;
+        static constexpr float HORIZONTAL_TAU_SEC = 0.18f;
+        static constexpr float VERTICAL_TAU_SEC = 0.30f;
+        static constexpr float MAX_HORIZONTAL_SPEED_MPS = 8.0f;
+        static constexpr float MAX_VERTICAL_SPEED_MPS = 4.0f;
 
         SmartDrone::Core::Ports::PoseEstimate lastPose{};
         SmartDrone::Core::Ports::VelocityEstimate filteredVelocity{};
@@ -167,7 +167,7 @@ class PosePostprocessor {
         Sophus::SE3f twcRaw{Sophus::SE3f()};
         bool useImu{false};
         bool trackingUsable{false};
-        unsigned long mapId{ContinuityMapper::kInvalidMapId};
+        unsigned long mapId{ContinuityMapper::INVALID_MAP_ID};
         bool stereoExtrinsicsLoaded{false};
         Sophus::SE3f stereoBodyExtrinsics{Sophus::SE3f()};
         bool *stereoReferencePoseSet{nullptr};

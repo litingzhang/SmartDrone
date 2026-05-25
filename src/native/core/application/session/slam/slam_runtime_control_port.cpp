@@ -10,14 +10,12 @@ SlamRuntimeControlPort::SlamRuntimeControlPort(
 
 bool SlamRuntimeControlPort::Available() const
 {
-    std::lock_guard<std::mutex> lock(m_mu);
     return m_control != nullptr;
 }
 
 void SlamRuntimeControlPort::SetOperationMode(
     SmartDrone::Core::Domain::SlamOperationMode mode)
 {
-    std::lock_guard<std::mutex> lock(m_mu);
     if (m_control == nullptr) {
         return;
     }
@@ -26,7 +24,6 @@ void SlamRuntimeControlPort::SetOperationMode(
 
 void SlamRuntimeControlPort::SetFeatureFrontend(FeatureFrontend frontend)
 {
-    std::lock_guard<std::mutex> lock(m_mu);
     if (m_control == nullptr) {
         return;
     }
@@ -36,7 +33,6 @@ void SlamRuntimeControlPort::SetFeatureFrontend(FeatureFrontend frontend)
 void SlamRuntimeControlPort::SetVisualFeatureFrontend(
     SmartDrone::Core::Ports::IVisualFeatureFrontend *frontend)
 {
-    std::lock_guard<std::mutex> lock(m_mu);
     if (m_control == nullptr) {
         return;
     }
@@ -46,7 +42,6 @@ void SlamRuntimeControlPort::SetVisualFeatureFrontend(
 void SlamRuntimeControlPort::SetVisualFeatureInputSizeLimit(int maxWidth,
                                                             int maxHeight)
 {
-    std::lock_guard<std::mutex> lock(m_mu);
     if (m_control == nullptr) {
         return;
     }
@@ -57,7 +52,6 @@ void SlamRuntimeControlPort::SetStereoVoLoopClosure(bool enabled,
                                                     float scale,
                                                     float relaxation)
 {
-    std::lock_guard<std::mutex> lock(m_mu);
     if (m_control == nullptr) {
         return;
     }
@@ -67,7 +61,6 @@ void SlamRuntimeControlPort::SetStereoVoLoopClosure(bool enabled,
 void SlamRuntimeControlPort::SetStereoVoPerFrameAcceleration(
     const std::string &acceleration)
 {
-    std::lock_guard<std::mutex> lock(m_mu);
     if (m_control == nullptr) {
         return;
     }
@@ -76,7 +69,6 @@ void SlamRuntimeControlPort::SetStereoVoPerFrameAcceleration(
 
 void SlamRuntimeControlPort::StepBackend()
 {
-    std::lock_guard<std::mutex> lock(m_mu);
     if (m_control == nullptr) {
         return;
     }

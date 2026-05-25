@@ -3,6 +3,7 @@
 #include <chrono>
 #include <csignal>
 #include <iostream>
+#include <memory>
 #include <utility>
 
 #include "core/application/session/slam/slam_settings_loader.h"
@@ -11,7 +12,13 @@ namespace SmartDrone::Core::Application {
 
 namespace {
 
-constexpr auto kCalibCleanupIdleTimeout = std::chrono::seconds(5);
+constexpr auto CALIB_CLEANUP_IDLE_TIMEOUT = std::chrono::seconds(5);
+
+std::int64_t SteadyNowMs()
+{
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+}
 
 void SyncDefaultTbcFromSettings(UnifiedConfig &config)
 {
@@ -66,10 +73,11 @@ void SyncDefaultOrbFromSettings(UnifiedConfig &config)
 } // namespace
 
 UnifiedRuntimeController::UnifiedRuntimeController(UnifiedRuntimeControllerConfig config)
-    : m_config(std::move(config.initialConfig)), m_tuning(config.tuning),
+    : m_config(std::make_shared<const UnifiedConfig>(std::move(config.initialConfig))),
+      m_tuning(config.tuning),
       m_publishRuntimeMode(std::move(config.publishRuntimeMode)),
       m_cleanupCalibData(std::move(config.cleanupCalibData)),
-      m_configService(m_config, m_tuning, m_mu,
+      m_configService(m_config, m_tuning,
                       [this]() {
                           if (m_sessionSupervisor.DesiredMode() != ControllerMode::Idle) {
                               m_sessionSupervisor.RequestRestart();
@@ -80,24 +88,29 @@ UnifiedRuntimeController::UnifiedRuntimeController(UnifiedRuntimeControllerConfi
           [this]() { return CurrentConfig(); },
           std::move(config.createSession)})
 {
-    SyncDefaultTbcFromSettings(m_config);
-    SyncDefaultOrbFromSettings(m_config);
+    UnifiedConfig initialConfig = CurrentConfig();
+    SyncDefaultTbcFromSettings(initialConfig);
+    SyncDefaultOrbFromSettings(initialConfig);
+    std::atomic_store_explicit(&m_config,
+                               std::make_shared<const UnifiedConfig>(std::move(initialConfig)),
+                               std::memory_order_release);
+    const UnifiedConfig runtimeConfig = CurrentConfig();
 
-    m_tuning.slamInputFps.store(m_config.app.runtime.slamInputFps, std::memory_order_relaxed);
-    m_tuning.slamOperationMode.store(static_cast<uint8_t>(m_config.app.runtime.slamOperationMode),
+    m_tuning.slamInputFps.store(runtimeConfig.app.runtime.slamInputFps, std::memory_order_relaxed);
+    m_tuning.slamOperationMode.store(static_cast<uint8_t>(runtimeConfig.app.runtime.slamOperationMode),
                                      std::memory_order_relaxed);
-    m_tuning.featureFrontend.store(static_cast<uint8_t>(m_config.app.runtime.featureFrontend),
+    m_tuning.featureFrontend.store(static_cast<uint8_t>(runtimeConfig.app.runtime.featureFrontend),
                                    std::memory_order_relaxed);
-    m_tuning.sendImage.store(m_config.app.udp.sendImage, std::memory_order_relaxed);
-    m_tuning.sendFeature.store(m_config.app.udp.sendFeature, std::memory_order_relaxed);
-    m_tuning.sendMap.store(m_config.app.udp.sendMap, std::memory_order_relaxed);
-    m_tuning.useCustomTbc.store(m_config.app.runtime.useCustomTbc, std::memory_order_relaxed);
-    m_tuning.tbcTx.store(m_config.app.runtime.tbcTx, std::memory_order_relaxed);
-    m_tuning.tbcTy.store(m_config.app.runtime.tbcTy, std::memory_order_relaxed);
-    m_tuning.tbcTz.store(m_config.app.runtime.tbcTz, std::memory_order_relaxed);
-    m_tuning.tbcRollDeg.store(m_config.app.runtime.tbcRollDeg, std::memory_order_relaxed);
-    m_tuning.tbcPitchDeg.store(m_config.app.runtime.tbcPitchDeg, std::memory_order_relaxed);
-    m_tuning.tbcYawDeg.store(m_config.app.runtime.tbcYawDeg, std::memory_order_relaxed);
+    m_tuning.sendImage.store(runtimeConfig.app.udp.sendImage, std::memory_order_relaxed);
+    m_tuning.sendFeature.store(runtimeConfig.app.udp.sendFeature, std::memory_order_relaxed);
+    m_tuning.sendMap.store(runtimeConfig.app.udp.sendMap, std::memory_order_relaxed);
+    m_tuning.useCustomTbc.store(runtimeConfig.app.runtime.useCustomTbc, std::memory_order_relaxed);
+    m_tuning.tbcTx.store(runtimeConfig.app.runtime.tbcTx, std::memory_order_relaxed);
+    m_tuning.tbcTy.store(runtimeConfig.app.runtime.tbcTy, std::memory_order_relaxed);
+    m_tuning.tbcTz.store(runtimeConfig.app.runtime.tbcTz, std::memory_order_relaxed);
+    m_tuning.tbcRollDeg.store(runtimeConfig.app.runtime.tbcRollDeg, std::memory_order_relaxed);
+    m_tuning.tbcPitchDeg.store(runtimeConfig.app.runtime.tbcPitchDeg, std::memory_order_relaxed);
+    m_tuning.tbcYawDeg.store(runtimeConfig.app.runtime.tbcYawDeg, std::memory_order_relaxed);
 }
 
 void UnifiedRuntimeController::Stop()
@@ -108,8 +121,7 @@ void UnifiedRuntimeController::Stop()
 bool UnifiedRuntimeController::SetMode(ControllerMode mode, std::string *err)
 {
     if (mode != ControllerMode::Idle) {
-        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
-        if (m_calibCleanupPending) {
+        if (CalibCleanupPending()) {
             if (err) {
                 *err = "calib clean pending";
             }
@@ -132,32 +144,27 @@ bool UnifiedRuntimeController::UpdateRemoteConfig(const RemoteRuntimeConfig &r, 
 
 CommandResult UnifiedRuntimeController::RequestCalibCleanup()
 {
-    {
-        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
-        if (m_calibCleanupPending) {
-            return {true, "calib clean pending"};
-        }
-        m_calibCleanupPending = true;
-        m_calibCleanupDeadline = std::chrono::steady_clock::now() + kCalibCleanupIdleTimeout;
+    if (!TryScheduleCalibCleanup()) {
+        return {true, "calib clean pending"};
     }
 
     const auto status = m_sessionSupervisor.GetIdleStatus();
     if (status.stopping) {
-        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
-        m_calibCleanupPending = false;
+        m_calibCleanupDeadlineMs.store(0, std::memory_order_release);
         return {false, "runtime stopping"};
     }
     if (status.idle) {
-        const auto result = RunCalibCleanup();
-        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
-        m_calibCleanupPending = false;
+        const std::int64_t deadlineMs =
+            m_calibCleanupDeadlineMs.load(std::memory_order_acquire);
+        const bool taken = TakePendingCalibCleanup(deadlineMs);
+        const auto result =
+            taken ? RunCalibCleanup() : CommandResult{true, "calib clean pending"};
         return result;
     }
 
     std::string err;
     if (!m_sessionSupervisor.RequestMode(ControllerMode::Idle, &err)) {
-        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
-        m_calibCleanupPending = false;
+        m_calibCleanupDeadlineMs.store(0, std::memory_order_release);
         return {false, err.empty() ? "runtime stopping" : err};
     }
     return {true, "calib clean pending"};
@@ -165,19 +172,16 @@ CommandResult UnifiedRuntimeController::RequestCalibCleanup()
 
 CommandResult UnifiedRuntimeController::RunCalibCleanup()
 {
-    std::string root;
-    {
-        std::lock_guard<std::mutex> lock(m_mu);
-        root = m_config.calib.root;
-    }
+    const std::string root = CurrentConfig().calib.root;
     const int removed = m_cleanupCalibData ? m_cleanupCalibData(root) : 0;
     return {true, "calib clean removed=" + std::to_string(removed)};
 }
 
 UnifiedConfig UnifiedRuntimeController::CurrentConfig()
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    return CurrentConfigUnlocked();
+    std::shared_ptr<const UnifiedConfig> config =
+        std::atomic_load_explicit(&m_config, std::memory_order_acquire);
+    return config ? *config : UnifiedConfig{};
 }
 
 UnifiedRuntimeController::ControllerMode UnifiedRuntimeController::CurrentDesiredMode()
@@ -199,33 +203,26 @@ void UnifiedRuntimeController::StepSessionSupervisor()
 void UnifiedRuntimeController::StepPendingCalibCleanup()
 {
     const auto status = m_sessionSupervisor.GetIdleStatus();
-    const auto now = std::chrono::steady_clock::now();
-    bool shouldRun = false;
+    const std::int64_t deadlineMs =
+        m_calibCleanupDeadlineMs.load(std::memory_order_acquire);
+    if (deadlineMs == 0) {
+        return;
+    }
     bool expired = false;
     bool stopping = false;
-    {
-        std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
-        if (!m_calibCleanupPending) {
+    if (status.stopping) {
+        stopping = TakePendingCalibCleanup(deadlineMs);
+    } else if (status.idle) {
+        if (!TakePendingCalibCleanup(deadlineMs)) {
             return;
         }
-        if (status.stopping) {
-            m_calibCleanupPending = false;
-            stopping = true;
-        } else if (status.idle) {
-            shouldRun = true;
-        } else if (now >= m_calibCleanupDeadline) {
-            m_calibCleanupPending = false;
-            expired = true;
-        }
-    }
-    if (shouldRun) {
         const auto result = RunCalibCleanup();
-        {
-            std::lock_guard<std::mutex> lock(m_calibCleanupMtx);
-            m_calibCleanupPending = false;
-        }
         std::cerr << "[runtime] " << result.message << "\n";
-    } else if (expired) {
+        return;
+    } else if (SteadyNowMs() >= deadlineMs) {
+        expired = TakePendingCalibCleanup(deadlineMs);
+    }
+    if (expired) {
         std::cerr << "[runtime] calib clean skipped: runtime busy\n";
     } else if (stopping) {
         std::cerr << "[runtime] calib clean skipped: runtime stopping\n";
@@ -234,13 +231,13 @@ void UnifiedRuntimeController::StepPendingCalibCleanup()
 
 void UnifiedRuntimeController::StepForceRestart()
 {
-    const auto now = std::chrono::steady_clock::now();
-    {
-        std::lock_guard<std::mutex> lock(m_forceRestartMtx);
-        if (m_forceRestartAt.time_since_epoch().count() == 0 || now < m_forceRestartAt) {
-            return;
-        }
-        m_forceRestartAt = std::chrono::steady_clock::time_point{};
+    const std::int64_t restartAt =
+        m_forceRestartAtMs.load(std::memory_order_acquire);
+    if (restartAt == 0 || SteadyNowMs() < restartAt) {
+        return;
+    }
+    if (m_forceRestartAtMs.exchange(0, std::memory_order_acq_rel) == 0) {
+        return;
     }
     std::raise(SIGKILL);
 }
@@ -286,8 +283,8 @@ CommandResult UnifiedRuntimeController::ExecuteAction(const RuntimeAction &actio
         return RequestCalibCleanup();
     }
     case RuntimeAction::Type::ForceRestart: {
-        std::lock_guard<std::mutex> lock(m_forceRestartMtx);
-        m_forceRestartAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(150);
+        m_forceRestartAtMs.store(SteadyNowMs() + 150,
+                                 std::memory_order_release);
     }
         return {true, "service restart scheduled"};
     case RuntimeAction::Type::ResetMap:
@@ -304,9 +301,36 @@ CommandResult UnifiedRuntimeController::ApplyConfig(const ConfigUpdate &update)
     return m_configService.ApplyConfig(update, CurrentConfig());
 }
 
-UnifiedConfig UnifiedRuntimeController::CurrentConfigUnlocked() const
+bool UnifiedRuntimeController::CalibCleanupPending() const
 {
-    return m_config;
+    return m_calibCleanupDeadlineMs.load(std::memory_order_acquire) != 0;
+}
+
+bool UnifiedRuntimeController::TryScheduleCalibCleanup()
+{
+    std::int64_t expected = 0;
+    const auto timeoutMs =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            CALIB_CLEANUP_IDLE_TIMEOUT)
+            .count();
+    return m_calibCleanupDeadlineMs.compare_exchange_strong(
+        expected,
+        SteadyNowMs() + timeoutMs,
+        std::memory_order_acq_rel,
+        std::memory_order_acquire);
+}
+
+bool UnifiedRuntimeController::TakePendingCalibCleanup(
+    std::int64_t deadlineMs)
+{
+    if (deadlineMs == 0) {
+        return false;
+    }
+    return m_calibCleanupDeadlineMs.compare_exchange_strong(
+        deadlineMs,
+        0,
+        std::memory_order_acq_rel,
+        std::memory_order_acquire);
 }
 
 } // namespace SmartDrone::Core::Application

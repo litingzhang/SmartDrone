@@ -16,9 +16,9 @@ struct CalibOutputFlushRequest {
     const std::filesystem::path &cam1Dir;
 };
 
-void FlushAndSyncFile(FILE *file, const char *label);
-void SyncPathFile(const std::filesystem::path &path);
-void SyncDirPath(const std::filesystem::path &path);
-void FlushCalibOutputs(const CalibOutputFlushRequest &request);
+bool FlushAndSyncFile(FILE *file, const char *label);
+bool SyncPathFile(const std::filesystem::path &path);
+bool SyncDirPath(const std::filesystem::path &path);
+bool FlushCalibOutputs(const CalibOutputFlushRequest &request);
 
 } // namespace SmartDrone::Core::Application

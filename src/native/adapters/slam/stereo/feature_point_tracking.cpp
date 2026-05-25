@@ -6,58 +6,58 @@
 
 namespace SmartDrone::Adapters::Slam {
 
-bool TrackPointsForwardBackward(const cv::Mat &prevGray, const cv::Mat &currGray,
-                                const std::vector<cv::Point2f> &prevPoints,
-                                std::vector<cv::Point2f> &currPoints,
-                                std::vector<uchar> &status,
-                                const ForwardBackwardTrackingOptions &options)
+bool TrackPointsForwardBackward(const ForwardBackwardTrackingRequest &request)
 {
-    currPoints.clear();
-    status.clear();
-    if (prevGray.empty() || currGray.empty() || prevPoints.empty()) {
+    request.currPoints.clear();
+    request.status.clear();
+    if (request.prevGray.empty() || request.currGray.empty() ||
+        request.prevPoints.empty()) {
         return false;
     }
 
-    const int windowSizePx = std::max(3, options.windowSizePx);
-    const int maxLevel = std::max(0, options.maxLevel);
-    const float maxErrorPx = std::max(0.0f, options.maxForwardBackwardErrorPx);
+    const int windowSizePx = std::max(3, request.options.windowSizePx);
+    const int maxLevel = std::max(0, request.options.maxLevel);
+    const float maxErrorPx =
+        std::max(0.0f, request.options.maxForwardBackwardErrorPx);
 
     std::vector<float> errors;
-    cv::calcOpticalFlowPyrLK(prevGray, currGray, prevPoints, currPoints, status, errors,
+    cv::calcOpticalFlowPyrLK(request.prevGray, request.currGray,
+                             request.prevPoints, request.currPoints,
+                             request.status, errors,
                              cv::Size(windowSizePx, windowSizePx), maxLevel);
-    if (currPoints.empty() || status.empty()) {
+    if (request.currPoints.empty() || request.status.empty()) {
         return false;
     }
 
     std::vector<cv::Point2f> backwardPoints;
     std::vector<uchar> backwardStatus;
     std::vector<float> backwardErrors;
-    cv::calcOpticalFlowPyrLK(currGray, prevGray, currPoints, backwardPoints, backwardStatus,
-                             backwardErrors, cv::Size(windowSizePx, windowSizePx), maxLevel);
+    cv::calcOpticalFlowPyrLK(request.currGray, request.prevGray,
+                             request.currPoints, backwardPoints,
+                             backwardStatus, backwardErrors,
+                             cv::Size(windowSizePx, windowSizePx), maxLevel);
 
     const float maxErrorSq = maxErrorPx * maxErrorPx;
-    for (size_t i = 0; i < status.size(); ++i) {
-        if (!status[i] || i >= backwardStatus.size() || !backwardStatus[i] || i >= backwardPoints.size()) {
-            status[i] = 0;
+    for (size_t i = 0; i < request.status.size(); ++i) {
+        if (!request.status[i] || i >= backwardStatus.size() ||
+            !backwardStatus[i] || i >= backwardPoints.size()) {
+            request.status[i] = 0;
             continue;
         }
 
-        const cv::Point2f delta = backwardPoints[i] - prevPoints[i];
+        const cv::Point2f delta = backwardPoints[i] - request.prevPoints[i];
         if ((delta.x * delta.x + delta.y * delta.y) > maxErrorSq) {
-            status[i] = 0;
+            request.status[i] = 0;
         }
     }
 
     return true;
 }
 
-bool DefaultPointTracker2d::TrackForwardBackward(const cv::Mat &prevGray, const cv::Mat &currGray,
-                                                 const std::vector<cv::Point2f> &prevPoints,
-                                                 std::vector<cv::Point2f> &currPoints,
-                                                 std::vector<uchar> &status,
-                                                 const ForwardBackwardTrackingOptions &options) const
+bool DefaultPointTracker2d::TrackForwardBackward(
+    const ForwardBackwardTrackingRequest &request) const
 {
-    return TrackPointsForwardBackward(prevGray, currGray, prevPoints, currPoints, status, options);
+    return TrackPointsForwardBackward(request);
 }
 
 } // namespace SmartDrone::Adapters::Slam

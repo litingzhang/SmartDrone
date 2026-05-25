@@ -2,10 +2,8 @@
 
 #include <algorithm>
 #include <iostream>
-#include <mutex>
 #include <utility>
 
-#include "core/application/runtime/runtime_aliases.h"
 #include "core/application/session/calib/calib_storage_helpers.h"
 
 namespace SmartDrone::Core::Application {
@@ -16,7 +14,14 @@ constexpr std::int64_t NANOSECONDS_PER_SECOND = 1000000000LL;
 
 int ClampCalibSaveFps(int requestedFps, int cameraFps)
 {
-    const int baseFps = ClampSlamInputFps(requestedFps, cameraFps);
+    int baseFps = requestedFps;
+    if (cameraFps <= 0) {
+        baseFps = std::max(1, requestedFps);
+    } else if (requestedFps <= 0) {
+        baseFps = cameraFps;
+    } else {
+        baseFps = std::clamp(requestedFps, 1, cameraFps);
+    }
     const int maxFps =
         std::max(1, std::min(cameraFps, RECOMMENDED_MAX_CALIB_SAVE_FPS));
     return std::clamp(baseFps, 1, maxFps);
@@ -62,7 +67,6 @@ void CalibSavePacingPort::ConfigureSavePacing()
 
 bool CalibSavePacingPort::NextEligibleSave(std::int64_t &pairNs)
 {
-    std::lock_guard<std::mutex> lock(m_mu);
     if (m_nextEligibleSaveNs != 0 && pairNs < m_nextEligibleSaveNs) {
         ++m_droppedByPacing;
         LogPacingDrop(pairNs);

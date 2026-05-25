@@ -30,11 +30,17 @@ size_t AppendTemporalStereoCarry(const TemporalStereoCarryInput &input,
                                  std::vector<cv::Point2f> &matchedLeftPoints,
                                  std::vector<cv::Point2f> &matchedRightPoints);
 
+struct TemporalStereoSourceExtractionRequest {
+    const cv::Mat &leftPrepared;
+    const cv::Mat &rightPrepared;
+    const Core::Ports::StereoFeatureObservationPacket &stereoData;
+    cv::Mat &prevLeft;
+    cv::Mat &prevRight;
+    std::vector<cv::Point2f> &prevLeftPoints;
+    std::vector<cv::Point2f> &prevRightPoints;
+};
+
 bool ExtractTemporalStereoSource(
-    const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
-    const Core::Ports::StereoFeatureObservationPacket &stereoData,
-    cv::Mat &prevLeft, cv::Mat &prevRight,
-    std::vector<cv::Point2f> &prevLeftPoints,
-    std::vector<cv::Point2f> &prevRightPoints);
+    const TemporalStereoSourceExtractionRequest &request);
 
 } // namespace SmartDrone::Adapters::Slam

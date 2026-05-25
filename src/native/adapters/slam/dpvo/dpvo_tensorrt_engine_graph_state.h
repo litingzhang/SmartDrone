@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -54,6 +55,24 @@ struct DpvoIntrinsics {
     float cy{0.0f};
 };
 
+struct DpvoFeatureMapView {
+    const float *data{nullptr};
+    int channels{0};
+    int height{0};
+    int width{0};
+    size_t valueCount{0};
+};
+
+struct DpvoPatchProjectionRequest {
+    const DpvoFrameState &source;
+    const DpvoFrameState &target;
+    const DpvoPatchState &patch;
+    const Eigen::Matrix3f &overrideR;
+    bool useOverrideR;
+    const DpvoIntrinsics &intrinsics;
+    bool *valid;
+};
+
 class DpvoGraphState {
   public:
     void Reset(int patchesPerFrame, int optimizationWindow);
@@ -79,15 +98,31 @@ class DpvoGraphState {
     bool MaybeRemoveKeyframe(const DpvoIntrinsics &intrinsics);
 
   private:
-    static float FeatureAt(const float *data, int channels, int height, int width,
-                           int c, int y, int x);
-    static float SampleFeatureBilinear(const float *data, int channels,
-                                       int height, int width, int c, float x,
-                                       float y);
-    static void SampleFeatureVector(const float *data, int channels, int height,
-                                    int width, float x, float y, float *out);
-    static void SampleFeaturePatch3(const float *data, int channels, int height,
-                                    int width, float x, float y, float *out);
+    struct StereoDepthSearchResult {
+        std::vector<float> scores;
+        float bestScore{-std::numeric_limits<float>::infinity()};
+        float secondScore{-std::numeric_limits<float>::infinity()};
+        int bestDisp{0};
+        int maxPatchDisp{0};
+    };
+    struct StereoDepthRequest {
+        DpvoFrameState &frame;
+        const DpvoFeatureMapView &rightMap;
+        float fx;
+        float baseline;
+        int maxDisp;
+        float minScore;
+        float minMargin;
+    };
+
+    static float FeatureAt(const DpvoFeatureMapView &featureMap, int c, int y,
+                           int x);
+    static float SampleFeatureBilinear(
+        const DpvoFeatureMapView &featureMap, int c, float x, float y);
+    static void SampleFeatureVector(const DpvoFeatureMapView &featureMap,
+                                    float x, float y, float *out);
+    static void SampleFeaturePatch3(const DpvoFeatureMapView &featureMap,
+                                    float x, float y, float *out);
     static std::vector<float> BuildPooledFmap(const std::vector<float> &src,
                                               int channels, int height,
                                               int width, int level);
@@ -95,10 +130,7 @@ class DpvoGraphState {
                                               const cv::Mat &gray) const;
     float MedianRecentDepth() const;
     static std::array<float, 2>
-    ProjectPatchCenter(const DpvoFrameState &source, const DpvoFrameState &target,
-                       const DpvoPatchState &patch,
-                       const Eigen::Matrix3f &overrideR, bool useOverrideR,
-                       const DpvoIntrinsics &intrinsics, bool *valid);
+    ProjectPatchCenter(const DpvoPatchProjectionRequest &request);
     float MotionMagnitude(int sourceFrame, int targetFrame,
                           const DpvoIntrinsics &intrinsics) const;
     void AppendEdgesForNewest();
@@ -106,15 +138,42 @@ class DpvoGraphState {
     void CapActiveEdges();
     void RemoveFrameAt(int frameIndex);
     void PruneFrames();
+    static bool BuildRightFmapView(const DpvoPatchifierRun &rightRun,
+                                   const DpvoFrameState &frame,
+                                   DpvoFeatureMapView *rightMap);
+    static StereoDepthSearchResult SearchStereoDisparity(
+        const StereoDepthRequest &request, int patchIndex);
+    static float ComputeStereoPatchScore(const StereoDepthRequest &request,
+                                         int patchIndex, int disparity);
+    static float RefineStereoDisparity(
+        const StereoDepthSearchResult &searchResult);
+    static bool StereoSearchAccepted(
+        const StereoDepthSearchResult &searchResult, float minScore,
+        float minMargin);
+    static bool UpdateStereoPatchDepth(const StereoDepthRequest &request,
+                                       int patchIndex);
+    DpvoFrameState CreateFrameState(uint64_t frameId, int64_t timestampNs,
+                                    const cv::Mat &gray,
+                                    const Sophus::SE3f &initialPose,
+                                    const DpvoPatchifierRun &patchRun) const;
+    static void LoadFrameFmap(DpvoFrameState *frame,
+                              const DpvoPatchifierRun &patchRun);
+    static void LoadFrameImapMetadata(DpvoFrameState *frame,
+                                      const DpvoPatchifierRun &patchRun);
+    void SelectFramePatches(DpvoFrameState *frame, const cv::Mat &gray) const;
+    void SampleFrameImap(DpvoFrameState *frame,
+                         const DpvoPatchifierRun &patchRun) const;
+    void SampleFrameGmap(DpvoFrameState *frame) const;
+    void CommitFrame(DpvoFrameState frame);
 
-    static constexpr int kInitializationFrames = 8;
-    static constexpr int kDim = 384;
-    static constexpr int kFmapChannels = 128;
-    static constexpr int kPatchSize = 3;
-    static constexpr int kPatchRadius = 1;
-    static constexpr int kPatchArea = kPatchSize * kPatchSize;
-    static constexpr int kKeyframeIndex = 4;
-    static constexpr float kKeyframeThreshold = 15.0f;
+    static constexpr int INITIALIZATION_FRAMES = 8;
+    static constexpr int DIM = 384;
+    static constexpr int FMAP_CHANNELS = 128;
+    static constexpr int PATCH_SIZE = 3;
+    static constexpr int PATCH_RADIUS = 1;
+    static constexpr int PATCH_AREA = PATCH_SIZE * PATCH_SIZE;
+    static constexpr int KEYFRAME_INDEX = 4;
+    static constexpr float KEYFRAME_THRESHOLD = 15.0f;
     int m_patchesPerFrame{48};
     int m_optimizationWindow{7};
     int m_patchLifetime{11};

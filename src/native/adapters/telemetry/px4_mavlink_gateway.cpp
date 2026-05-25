@@ -14,8 +14,7 @@
 
 namespace {
 
-constexpr uint64_t kOdomTsLogEveryNFrames = 30;
-constexpr std::size_t kMaxQueuedTxMessages = 64;
+constexpr uint64_t ODOM_TS_LOG_EVERY_N_FRAMES = 30;
 
 struct CovarianceDiagonal {
     float x;
@@ -68,6 +67,12 @@ uint64_t ClockMonotonicNs()
 Px4MavlinkGateway::Px4MavlinkGateway(const std::string &dev, int baud, uint8_t sysid, uint8_t compid)
     : m_transport(dev, baud), m_sysid(sysid), m_compid(compid)
 {
+    auto setpoint = std::make_shared<const SetpointLocalNED>(SetpointLocalNED{});
+    auto ackSnapshot = std::make_shared<const AckSnapshot>(AckSnapshot{});
+    std::atomic_store_explicit(&m_spCurrent, std::move(setpoint),
+                               std::memory_order_release);
+    std::atomic_store_explicit(&m_ackSnapshot, std::move(ackSnapshot),
+                               std::memory_order_release);
 }
 
 Px4MavlinkGateway::~Px4MavlinkGateway()
@@ -82,14 +87,13 @@ void Px4MavlinkGateway::SetJsonDiagnostics(bool enabled)
 
 void Px4MavlinkGateway::SetFrameTimingTracker(SmartDrone::Core::Ports::IFrameTimingTracker *tracker)
 {
-    std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
-    m_frameTimingTracker = tracker;
+    m_frameTimingTracker.store(tracker, std::memory_order_release);
 }
 
-int Px4MavlinkGateway::PollRxOnce(int timeoutMs)
+int Px4MavlinkGateway::PollRxOnce()
 {
     StepTx();
-    const int pollResult = m_transport.PollReadable(timeoutMs);
+    const int pollResult = m_transport.PollReadable();
     if (pollResult <= 0) {
         return 0;
     }
@@ -111,15 +115,14 @@ int Px4MavlinkGateway::PollRxOnce(int timeoutMs)
 
 void Px4MavlinkGateway::StepTx()
 {
-    std::lock_guard<std::mutex> txLock(m_txMtx);
-    while (!m_txQueue.empty()) {
-        auto &front = m_txQueue.front();
-        const ssize_t written = m_transport.WriteSome(front.data() + m_txOffset, front.size() - m_txOffset);
+    while (m_txActive || LoadNextTxMessage()) {
+        const auto &front = *m_txActive;
+        const ssize_t written = m_transport.WriteSome(
+            front.bytes.data() + m_txOffset, front.length - m_txOffset);
         if (written > 0) {
             m_txOffset += static_cast<std::size_t>(written);
-            if (m_txOffset >= front.size()) {
-                m_txQueue.pop_front();
-                m_txOffset = 0;
+            if (m_txOffset >= front.length) {
+                ReleaseActiveTxMessage();
             }
             continue;
         }
@@ -129,9 +132,9 @@ void Px4MavlinkGateway::StepTx()
         if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
             return;
         }
-        std::cerr << "[mav] write failed len=" << front.size() << " errno=" << errno << "\n";
-        m_txQueue.pop_front();
-        m_txOffset = 0;
+        std::cerr << "[mav] write failed len=" << front.length
+                  << " errno=" << errno << "\n";
+        ReleaseActiveTxMessage();
         return;
     }
 }
@@ -148,52 +151,68 @@ uint8_t Px4MavlinkGateway::GetTargetComponent() const
 
 bool Px4MavlinkGateway::GetLocalPositionNed(LocalPositionNed &out, uint64_t maxAgeUs) const
 {
-    std::lock_guard<std::mutex> lk(m_localPosMtx);
-    if (!m_haveLocalPosNed) {
+    auto snapshot = std::atomic_load_explicit(&m_localPosNed,
+                                              std::memory_order_acquire);
+    if (!snapshot) {
         return false;
     }
-    if (maxAgeUs > 0 && (MonoTimeUs() - m_localPosNed.receivedUs) > maxAgeUs) {
+    if (maxAgeUs > 0 && (MonoTimeUs() - snapshot->receivedUs) > maxAgeUs) {
         return false;
     }
-    out = m_localPosNed;
+    out = *snapshot;
     return true;
 }
 
 bool Px4MavlinkGateway::GetDownwardDistanceSensor(DownwardDistanceSensor &out, uint64_t maxAgeUs) const
 {
-    std::lock_guard<std::mutex> lk(m_distanceSensorMtx);
-    if (!m_haveDownwardDistanceSensor) {
+    auto snapshot = std::atomic_load_explicit(&m_downwardDistanceSensor,
+                                              std::memory_order_acquire);
+    if (!snapshot) {
         return false;
     }
-    if (maxAgeUs > 0 && (MonoTimeUs() - m_downwardDistanceSensor.receivedUs) > maxAgeUs) {
+    if (maxAgeUs > 0 && (MonoTimeUs() - snapshot->receivedUs) > maxAgeUs) {
         return false;
     }
-    out = m_downwardDistanceSensor;
+    out = *snapshot;
     return true;
 }
 
 bool Px4MavlinkGateway::TryConsumeCommandAck(uint16_t command, uint8_t &outResult)
 {
-    std::lock_guard<std::mutex> lk(m_ackMtx);
-    const auto it = m_ackMap.find(command);
-    if (it == m_ackMap.end()) {
-        return false;
+    auto current = std::atomic_load_explicit(&m_ackSnapshot,
+                                             std::memory_order_acquire);
+    while (current) {
+        AckSnapshot next = *current;
+        auto it = std::find_if(next.records.begin(), next.records.end(),
+                               [command](const AckInfo &info) {
+                                   return info.command == command;
+                               });
+        if (it == next.records.end()) {
+            return false;
+        }
+        outResult = it->result;
+        next.records.erase(it);
+        auto updated = std::make_shared<const AckSnapshot>(std::move(next));
+        if (std::atomic_compare_exchange_weak_explicit(
+                &m_ackSnapshot, &current, updated,
+                std::memory_order_acq_rel, std::memory_order_acquire)) {
+            return true;
+        }
     }
-    outResult = it->second.result;
-    m_ackMap.erase(it);
-    return true;
+    return false;
 }
 
 bool Px4MavlinkGateway::GetFlightModeInfo(FlightModeInfo &out, uint64_t maxAgeUs) const
 {
-    std::lock_guard<std::mutex> lk(m_flightModeMtx);
-    if (!m_haveFlightModeInfo) {
+    auto snapshot = std::atomic_load_explicit(&m_flightModeInfo,
+                                              std::memory_order_acquire);
+    if (!snapshot) {
         return false;
     }
-    if (maxAgeUs > 0 && (MonoTimeUs() - m_flightModeInfo.receivedUs) > maxAgeUs) {
+    if (maxAgeUs > 0 && (MonoTimeUs() - snapshot->receivedUs) > maxAgeUs) {
         return false;
     }
-    out = m_flightModeInfo;
+    out = *snapshot;
     return true;
 }
 
@@ -210,10 +229,7 @@ bool Px4MavlinkGateway::SendCommandLong(const CommandLongRequest &request)
 bool Px4MavlinkGateway::BeginCommandLong(const CommandLongRequest &request)
 {
     const auto resolved = ResolveCommandTargets(request);
-    {
-        std::lock_guard<std::mutex> lk(m_ackMtx);
-        m_ackMap.erase(resolved.command);
-    }
+    ClearCommandAck(resolved.command);
     return SendCommandLong(resolved);
 }
 
@@ -325,20 +341,21 @@ void Px4MavlinkGateway::StepSetpointStream()
     if (lastTxUs != 0 && nowUs - lastTxUs < m_streamPeriodUs.load(std::memory_order_relaxed)) {
         return;
     }
-    SetpointLocalNED setpoint;
-    {
-        std::lock_guard<std::mutex> lock(m_spMtx);
-        setpoint = m_spCurrent;
+    auto setpoint = std::atomic_load_explicit(&m_spCurrent,
+                                              std::memory_order_acquire);
+    if (!setpoint) {
+        return;
     }
     m_lastStreamTxUs.store(nowUs, std::memory_order_relaxed);
-    SendSetPositionTargetLocalNed(MonoTimeMs32(), setpoint, MAV_FRAME_LOCAL_NED);
-    StepTx();
+    SendSetPositionTargetLocalNed(MonoTimeMs32(), *setpoint,
+                                  MAV_FRAME_LOCAL_NED);
 }
 
 void Px4MavlinkGateway::UpdateStreamSetpoint(const SetpointLocalNED &spNed)
 {
-    std::lock_guard<std::mutex> lk(m_spMtx);
-    m_spCurrent = spNed;
+    auto snapshot = std::make_shared<const SetpointLocalNED>(spNed);
+    std::atomic_store_explicit(&m_spCurrent, std::move(snapshot),
+                               std::memory_order_release);
 }
 
 void Px4MavlinkGateway::UpdateStreamPosition(float xN, float yE, float zD, float yawRad)
@@ -448,7 +465,6 @@ bool Px4MavlinkGateway::PrepareOdometryTiming(uint64_t frameId, OdometryTiming &
     out.tSlamOutNs = timing.tSlamOutNs;
     out.tMavTxNs = ClockMonotonicNs();
     MarkFrameMavTx(frameId, out.tMavTxNs);
-    m_lastSentOdomFrameId = frameId;
     return true;
 }
 
@@ -468,7 +484,7 @@ void Px4MavlinkGateway::LogOdometryTiming(const OdometryTimingLog &log) const
     const double slamLatencyMs = NsDeltaToMs(log.timing.tSlamOutNs, log.timing.tCamNs);
     const double sendLatencyMs = NsDeltaToMs(log.timing.tMavTxNs, log.timing.tSlamOutNs);
     const double totalLatencyMs = NsDeltaToMs(log.timing.tMavTxNs, log.timing.tCamNs);
-    const bool periodic = (kOdomTsLogEveryNFrames > 0) && ((log.frameId % kOdomTsLogEveryNFrames) == 0);
+    const bool periodic = (ODOM_TS_LOG_EVERY_N_FRAMES > 0) && ((log.frameId % ODOM_TS_LOG_EVERY_N_FRAMES) == 0);
     const bool abnormal =
         totalLatencyMs > 120.0 || queueLatencyMs > 50.0 || slamLatencyMs > 80.0 || sendLatencyMs > 30.0;
     if (!periodic && !abnormal) {
@@ -502,28 +518,32 @@ Px4MavlinkGateway::Pose Px4MavlinkGateway::EnuToNed(const Pose &pEnu)
     out.z = -pEnu.z;
 
     const float s = 0.7071067811865476f;
-    const float qrW = 0.0f, qrX = s, qrY = s, qrZ = 0.0f;
-
-    auto qmul = [](float aw, float ax, float ay, float az, float bw, float bx, float by, float bz, float &ow, float &ox,
-                   float &oy, float &oz) {
-        ow = aw * bw - ax * bx - ay * by - az * bz;
-        ox = aw * bx + ax * bw + ay * bz - az * by;
-        oy = aw * by - ax * bz + ay * bw + az * bx;
-        oz = aw * bz + ax * by - ay * bx + az * bw;
+    struct Quaternion {
+        float w{1.0f};
+        float x{0.0f};
+        float y{0.0f};
+        float z{0.0f};
     };
 
-    auto qconj = [](float w, float x, float y, float z, float &ow, float &ox, float &oy, float &oz) {
-        ow = w;
-        ox = -x;
-        oy = -y;
-        oz = -z;
+    const Quaternion rotation{0.0f, s, s, 0.0f};
+    const Quaternion input{pEnu.qw, pEnu.qx, pEnu.qy, pEnu.qz};
+    auto multiply = [](const Quaternion &lhs, const Quaternion &rhs) {
+        return Quaternion{
+            lhs.w * rhs.w - lhs.x * rhs.x - lhs.y * rhs.y - lhs.z * rhs.z,
+            lhs.w * rhs.x + lhs.x * rhs.w + lhs.y * rhs.z - lhs.z * rhs.y,
+            lhs.w * rhs.y - lhs.x * rhs.z + lhs.y * rhs.w + lhs.z * rhs.x,
+            lhs.w * rhs.z + lhs.x * rhs.y - lhs.y * rhs.x + lhs.z * rhs.w};
+    };
+    auto conjugate = [](const Quaternion &value) {
+        return Quaternion{value.w, -value.x, -value.y, -value.z};
     };
 
-    float tW, tX, tY, tZ;
-    qmul(qrW, qrX, qrY, qrZ, pEnu.qw, pEnu.qx, pEnu.qy, pEnu.qz, tW, tX, tY, tZ);
-    float qrcW, qrcX, qrcY, qrcZ;
-    qconj(qrW, qrX, qrY, qrZ, qrcW, qrcX, qrcY, qrcZ);
-    qmul(tW, tX, tY, tZ, qrcW, qrcX, qrcY, qrcZ, out.qw, out.qx, out.qy, out.qz);
+    const Quaternion converted =
+        multiply(multiply(rotation, input), conjugate(rotation));
+    out.qw = converted.w;
+    out.qx = converted.x;
+    out.qy = converted.y;
+    out.qz = converted.z;
     NormalizeQuat(out.qw, out.qx, out.qy, out.qz);
     return out;
 }
@@ -544,15 +564,15 @@ void Px4MavlinkGateway::NormalizeQuat(float &w, float &x, float &y, float &z)
 
 bool Px4MavlinkGateway::LookupFrameTiming(uint64_t frameId, SmartDrone::Core::Ports::FrameTimingRecord &out) const
 {
-    std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
-    return m_frameTimingTracker && m_frameTimingTracker->Lookup(frameId, out);
+    auto *tracker = m_frameTimingTracker.load(std::memory_order_acquire);
+    return tracker != nullptr && tracker->Lookup(frameId, out);
 }
 
 void Px4MavlinkGateway::MarkFrameMavTx(uint64_t frameId, uint64_t tMavTxNs)
 {
-    std::lock_guard<std::mutex> lk(m_frameTimingTrackerMtx);
-    if (m_frameTimingTracker) {
-        m_frameTimingTracker->MarkMavTx(frameId, tMavTxNs);
+    auto *tracker = m_frameTimingTracker.load(std::memory_order_acquire);
+    if (tracker != nullptr) {
+        tracker->MarkMavTx(frameId, tMavTxNs);
     }
 }
 
@@ -587,6 +607,36 @@ Px4MavlinkGateway::CommandLongRequest Px4MavlinkGateway::ResolveCommandTargets(C
     return request;
 }
 
+void Px4MavlinkGateway::ClearCommandAck(uint16_t command)
+{
+    uint8_t ignored = 0;
+    (void)TryConsumeCommandAck(command, ignored);
+}
+
+void Px4MavlinkGateway::StoreCommandAck(const AckInfo &info)
+{
+    auto current = std::atomic_load_explicit(&m_ackSnapshot,
+                                             std::memory_order_acquire);
+    while (current) {
+        AckSnapshot next = *current;
+        auto it = std::find_if(next.records.begin(), next.records.end(),
+                               [&info](const AckInfo &record) {
+                                   return record.command == info.command;
+                               });
+        if (it == next.records.end()) {
+            next.records.push_back(info);
+        } else {
+            *it = info;
+        }
+        auto updated = std::make_shared<const AckSnapshot>(std::move(next));
+        if (std::atomic_compare_exchange_weak_explicit(
+                &m_ackSnapshot, &current, updated,
+                std::memory_order_acq_rel, std::memory_order_acquire)) {
+            return;
+        }
+    }
+}
+
 bool Px4MavlinkGateway::SendMessageIntervalRequest(uint32_t messageId, float intervalUs, uint8_t targetSystem,
                                                    uint8_t targetComponent)
 {
@@ -599,17 +649,60 @@ bool Px4MavlinkGateway::SendMessageIntervalRequest(uint32_t messageId, float int
     return SendCommandLong(request);
 }
 
-bool Px4MavlinkGateway::QueueMessage(const mavlink_message_t &msg)
+bool Px4MavlinkGateway::LoadNextTxMessage()
 {
-    std::lock_guard<std::mutex> txLock(m_txMtx);
-    if (m_txQueue.size() >= kMaxQueuedTxMessages) {
-        std::cerr << "[mav] tx queue full, dropping msgid=" << unsigned(msg.msgid) << "\n";
+    auto tail = m_txTail.load(std::memory_order_relaxed);
+    if (tail == m_txHead.load(std::memory_order_acquire)) {
         return false;
     }
-    std::vector<uint8_t> buffer(MAVLINK_MAX_PACKET_LEN);
-    const uint16_t len = mavlink_msg_to_send_buffer(buffer.data(), &msg);
-    buffer.resize(len);
-    m_txQueue.push_back(std::move(buffer));
+    const auto index = static_cast<std::size_t>(tail % TX_QUEUE_CAPACITY);
+    if (!m_txReady[index].load(std::memory_order_acquire)) {
+        return false;
+    }
+    m_txActive = std::move(m_txSlots[index]);
+    m_txSlots[index].reset();
+    m_txReady[index].store(false, std::memory_order_release);
+    m_txTail.store(tail + 1, std::memory_order_release);
+    m_txOffset = 0;
+    return m_txActive != nullptr;
+}
+
+void Px4MavlinkGateway::ReleaseActiveTxMessage()
+{
+    m_txActive.reset();
+    m_txOffset = 0;
+}
+
+bool Px4MavlinkGateway::PushTxMessage(std::shared_ptr<const TxMessage> message)
+{
+    auto head = m_txHead.load(std::memory_order_relaxed);
+    while (true) {
+        const auto tail = m_txTail.load(std::memory_order_acquire);
+        if (head - tail >= TX_QUEUE_CAPACITY) {
+            return false;
+        }
+        if (m_txHead.compare_exchange_weak(head, head + 1,
+                                           std::memory_order_acq_rel,
+                                           std::memory_order_relaxed)) {
+            break;
+        }
+    }
+    const auto index = static_cast<std::size_t>(head % TX_QUEUE_CAPACITY);
+    m_txSlots[index] = std::move(message);
+    m_txReady[index].store(true, std::memory_order_release);
+    return true;
+}
+
+bool Px4MavlinkGateway::QueueMessage(const mavlink_message_t &msg)
+{
+    auto message = std::make_shared<TxMessage>();
+    const uint16_t len = mavlink_msg_to_send_buffer(message->bytes.data(), &msg);
+    message->length = len;
+    if (!PushTxMessage(std::move(message))) {
+        std::cerr << "[mav] tx queue full, dropping msgid="
+                  << unsigned(msg.msgid) << "\n";
+        return false;
+    }
     return true;
 }
 
@@ -651,11 +744,9 @@ void Px4MavlinkGateway::HandleHeartbeat(const mavlink_message_t &msg)
     modeInfo.subMode = static_cast<uint8_t>((heartbeat.custom_mode >> 24) & 0xFFu);
     modeInfo.armed = (heartbeat.base_mode & MAV_MODE_FLAG_SAFETY_ARMED) != 0;
     modeInfo.receivedUs = MonoTimeUs();
-    {
-        std::lock_guard<std::mutex> lock(m_flightModeMtx);
-        m_flightModeInfo = modeInfo;
-        m_haveFlightModeInfo = true;
-    }
+    auto snapshot = std::make_shared<const FlightModeInfo>(modeInfo);
+    std::atomic_store_explicit(&m_flightModeInfo, std::move(snapshot),
+                               std::memory_order_release);
     m_havePx4Heartbeat.store(true);
     m_px4Sysid.store(msg.sysid);
     m_px4Compid.store(msg.compid);
@@ -676,9 +767,9 @@ void Px4MavlinkGateway::HandleLocalPositionNed(const mavlink_message_t &msg)
     sample.vz = localPosition.vz;
     sample.timeBootMs = localPosition.time_boot_ms;
     sample.receivedUs = MonoTimeUs();
-    std::lock_guard<std::mutex> lock(m_localPosMtx);
-    m_localPosNed = sample;
-    m_haveLocalPosNed = true;
+    auto snapshot = std::make_shared<const LocalPositionNed>(sample);
+    std::atomic_store_explicit(&m_localPosNed, std::move(snapshot),
+                               std::memory_order_release);
 }
 
 void Px4MavlinkGateway::HandleDistanceSensor(const mavlink_message_t &msg)
@@ -694,9 +785,9 @@ void Px4MavlinkGateway::HandleDistanceSensor(const mavlink_message_t &msg)
     sample.maxDistance = 0.01f * static_cast<float>(distance.max_distance);
     sample.signalQuality = distance.signal_quality;
     sample.receivedUs = MonoTimeUs();
-    std::lock_guard<std::mutex> lock(m_distanceSensorMtx);
-    m_downwardDistanceSensor = sample;
-    m_haveDownwardDistanceSensor = true;
+    auto snapshot = std::make_shared<const DownwardDistanceSensor>(sample);
+    std::atomic_store_explicit(&m_downwardDistanceSensor, std::move(snapshot),
+                               std::memory_order_release);
 }
 
 void Px4MavlinkGateway::HandleCommandAck(const mavlink_message_t &msg)
@@ -704,14 +795,12 @@ void Px4MavlinkGateway::HandleCommandAck(const mavlink_message_t &msg)
     mavlink_command_ack_t ack{};
     mavlink_msg_command_ack_decode(&msg, &ack);
     AckInfo info;
+    info.command = ack.command;
     info.result = ack.result;
     info.progress = ack.progress;
     info.resultParam2 = ack.result_param2;
     info.t = std::chrono::steady_clock::now();
-    {
-        std::lock_guard<std::mutex> lock(m_ackMtx);
-        m_ackMap[ack.command] = info;
-    }
+    StoreCommandAck(info);
     std::cerr << "[ACK] sys=" << int(msg.sysid) << ", comp=" << int(msg.compid) << " cmd=" << ack.command
               << " result= " << int(ack.result) << "(" << MavResultToStr(ack.result)
               << ") progress=" << int(ack.progress) << " param2=" << ack.result_param2 << "\n";
@@ -733,8 +822,8 @@ void Px4MavlinkGateway::MaybeRequestLocalPositionNedStream(uint8_t targetSystem,
     if (!m_localPosStreamRequested.compare_exchange_strong(expected, true)) {
         return;
     }
-    constexpr float kIntervalUs = 50000.0f;
-    SendMessageIntervalRequest(MAVLINK_MSG_ID_LOCAL_POSITION_NED, kIntervalUs, targetSystem, targetComponent);
+    constexpr float intervalUs = 50000.0f;
+    SendMessageIntervalRequest(MAVLINK_MSG_ID_LOCAL_POSITION_NED, intervalUs, targetSystem, targetComponent);
     std::cerr << "[mav] requested LOCAL_POSITION_NED @20Hz from sys=" << int(targetSystem)
               << " comp=" << int(targetComponent) << "\n";
 }
@@ -745,8 +834,8 @@ void Px4MavlinkGateway::MaybeRequestDistanceSensorStream(uint8_t targetSystem, u
     if (!m_distanceSensorStreamRequested.compare_exchange_strong(expected, true)) {
         return;
     }
-    constexpr float kIntervalUs = 50000.0f;
-    SendMessageIntervalRequest(MAVLINK_MSG_ID_DISTANCE_SENSOR, kIntervalUs, targetSystem, targetComponent);
+    constexpr float intervalUs = 50000.0f;
+    SendMessageIntervalRequest(MAVLINK_MSG_ID_DISTANCE_SENSOR, intervalUs, targetSystem, targetComponent);
     std::cerr << "[mav] requested DISTANCE_SENSOR @20Hz from sys=" << int(targetSystem)
               << " comp=" << int(targetComponent) << "\n";
 }

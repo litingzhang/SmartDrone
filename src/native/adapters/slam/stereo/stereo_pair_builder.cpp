@@ -11,11 +11,11 @@ namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
-constexpr int kStereoGridCols = 8;
-constexpr int kStereoGridRows = 6;
-constexpr int kStereoMaxPairsPerCell = 10;
-constexpr int kStereoMaxPairsPerCellLimit = 32;
-constexpr float kStereoMinCandidateQuality = 0.18f;
+constexpr int STEREO_GRID_COLS = 8;
+constexpr int STEREO_GRID_ROWS = 6;
+constexpr int STEREO_MAX_PAIRS_PER_CELL = 10;
+constexpr int STEREO_MAX_PAIRS_PER_CELL_LIMIT = 32;
+constexpr float STEREO_MIN_CANDIDATE_QUALITY = 0.18f;
 
 struct DescriptorStereoCandidate {
     int rightIndex{-1};
@@ -78,19 +78,19 @@ bool IsStereoCandidateGeometryValid(const cv::Point2f &leftPt,
 {
     yDelta = std::fabs(leftPt.y - rightPt.y);
     disparity = leftPt.x - rightPt.x;
-    return yDelta <= kStereoMaxEpipolarDeltaPx &&
+    return yDelta <= STEREO_MAX_EPIPOLAR_DELTA_PX &&
            disparity >= StereoMinDisparityPx() &&
-           disparity <= kStereoMaxDisparityPx;
+           disparity <= STEREO_MAX_DISPARITY_PX;
 }
 
 bool IsDescriptorRatioAccepted(float bestScore, float secondScore)
 {
     if (!std::isfinite(bestScore) ||
-        bestScore < kStereoMinDescriptorSimilarity) {
+        bestScore < STEREO_MIN_DESCRIPTOR_SIMILARITY) {
         return false;
     }
     return !std::isfinite(secondScore) ||
-           bestScore >= secondScore / kStereoSimilarityRatioTest;
+           bestScore >= secondScore / STEREO_SIMILARITY_RATIO_TEST;
 }
 
 bool IsDescriptorMatchOrderBetter(float score,
@@ -156,7 +156,7 @@ bool BuildDescriptorMatchForLeft(const DescriptorMatchBuildRequest &request,
     float zncc = -1.0f;
     if (!ComputePatchZncc(*request.leftGray32f, leftPt, *request.rightGray32f,
                           rightPt, zncc) ||
-        zncc < kStereoMinZnccScore) {
+        zncc < STEREO_MIN_ZNCC_SCORE) {
         return false;
     }
 
@@ -164,7 +164,7 @@ bool BuildDescriptorMatchForLeft(const DescriptorMatchBuildRequest &request,
     const float quality =
         ComputeStereoCandidateQuality(best.bestScore, zncc, epipolarError,
                                       best.disparity);
-    if (quality < kStereoMinCandidateQuality) {
+    if (quality < STEREO_MIN_CANDIDATE_QUALITY) {
         return false;
     }
     match = Core::Ports::StereoMatchPair{request.leftIndex, best.rightIndex,
@@ -248,13 +248,13 @@ bool BuildAlignedStereoMatch(const AlignedStereoMatchBuildRequest &request,
     float zncc = -1.0f;
     if (!ComputePatchZncc(*request.leftGray32f, request.leftPt,
                           *request.rightGray32f, request.rightPt, zncc) ||
-        zncc < kStereoMinZnccScore) {
+        zncc < STEREO_MIN_ZNCC_SCORE) {
         return false;
     }
 
     const float quality =
         ComputeStereoCandidateQuality(1.0f, zncc, yDelta, disparity);
-    if (quality < kStereoMinCandidateQuality) {
+    if (quality < STEREO_MIN_CANDIDATE_QUALITY) {
         return false;
     }
     match = Core::Ports::StereoMatchPair{
@@ -288,24 +288,24 @@ std::vector<Core::Ports::StereoMatchPair> SelectGridBalancedPairs(
     }
 
     const int cellWidth =
-        std::max(1, (imageWidth + kStereoGridCols - 1) / kStereoGridCols);
+        std::max(1, (imageWidth + STEREO_GRID_COLS - 1) / STEREO_GRID_COLS);
     const int cellHeight =
-        std::max(1, (imageHeight + kStereoGridRows - 1) / kStereoGridRows);
+        std::max(1, (imageHeight + STEREO_GRID_ROWS - 1) / STEREO_GRID_ROWS);
     const int maxPairsPerCell = EnvIntValueClamped(
-        "SMART_DRONE_STEREO_FEATURE_MAX_PAIRS_PER_CELL", kStereoMaxPairsPerCell,
-        1, kStereoMaxPairsPerCellLimit);
+        "SMART_DRONE_STEREO_FEATURE_MAX_PAIRS_PER_CELL", STEREO_MAX_PAIRS_PER_CELL,
+        1, STEREO_MAX_PAIRS_PER_CELL_LIMIT);
     std::vector<int> cellCounts(
-        static_cast<size_t>(kStereoGridCols * kStereoGridRows), 0);
+        static_cast<size_t>(STEREO_GRID_COLS * STEREO_GRID_ROWS), 0);
     std::vector<Core::Ports::StereoMatchPair> selected;
     selected.reserve(matches.size());
 
     for (const Core::Ports::StereoMatchPair &match : matches) {
         const cv::Point2f &pt = leftKeypoints[static_cast<size_t>(match.leftIndex)];
         const int col =
-            std::clamp(static_cast<int>(pt.x) / cellWidth, 0, kStereoGridCols - 1);
+            std::clamp(static_cast<int>(pt.x) / cellWidth, 0, STEREO_GRID_COLS - 1);
         const int row =
-            std::clamp(static_cast<int>(pt.y) / cellHeight, 0, kStereoGridRows - 1);
-        const size_t cellIndex = static_cast<size_t>(row * kStereoGridCols + col);
+            std::clamp(static_cast<int>(pt.y) / cellHeight, 0, STEREO_GRID_ROWS - 1);
+        const size_t cellIndex = static_cast<size_t>(row * STEREO_GRID_COLS + col);
         if (cellCounts[cellIndex] >= maxPairsPerCell) {
             continue;
         }

@@ -23,7 +23,7 @@ struct SlamFrameSharedState {
 
     std::atomic<bool> lastTrackingUsable{false};
     std::atomic<int> lastTrackingState{
-        SmartDrone::Core::Ports::kSlamTrackingNoImagesYet};
+        SmartDrone::Core::Ports::SLAM_TRACKING_NO_IMAGES_YET};
     std::atomic<SmartDrone::Core::Domain::SlamOperationMode>
         requestedSlamMode{
             SmartDrone::Core::Domain::SlamOperationMode::Mapping};
@@ -49,7 +49,7 @@ struct SlamFramePosePostprocessState {
     Sophus::SE3f stereoReferencePose{Sophus::SE3f()};
     bool stereoReferencePoseSet{false};
     unsigned long lastRawMapId{
-        PosePostprocessor::ContinuityMapper::kInvalidMapId};
+        PosePostprocessor::ContinuityMapper::INVALID_MAP_ID};
     Sophus::SE3f lastValidTwcRaw{Sophus::SE3f()};
     bool haveLastValidTwcRaw{false};
     std::uint8_t sessionResetCounterBase{0};

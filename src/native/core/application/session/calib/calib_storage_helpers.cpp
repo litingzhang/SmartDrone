@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <system_error>
 
+#include "common/numeric_parse.h"
+
 namespace SmartDrone::Core::Application {
 
 void EnsureDir(const fs::path &p)
@@ -38,12 +40,10 @@ bool TryParseCalibIndex(const std::string &name, int &indexOut)
             return false;
         }
     }
-    try {
-        indexOut = std::stoi(suffix);
-        return indexOut >= 0;
-    } catch (...) {
+    if (!SmartDrone::Common::TryParseIntFull(suffix.c_str(), 10, indexOut)) {
         return false;
     }
+    return indexOut >= 0;
 }
 
 std::string MakeCalibSessionDir(const std::string &root)

@@ -1,59 +1,14 @@
 #pragma once
 
 #include "common/epg/epg.h"
+#include "common/epg/epg_trigger_modes.h"
 
-#include <algorithm>
 #include <array>
-#include <condition_variable>
+#include <atomic>
+#include <cstdint>
 #include <thread>
 
 namespace Epg {
-
-inline bool IsQueueTriggeredMode(TriggerMode mode)
-{
-    return mode == TriggerMode::AnyQueueReady ||
-           mode == TriggerMode::AllQueueReady ||
-           mode == TriggerMode::PeriodicOrAnyQueueReady;
-}
-
-inline TaskDiagnosticsSnapshot SnapshotTaskDiagnostics(const TaskDiagnostics &diag)
-{
-    TaskDiagnosticsSnapshot result;
-    result.loopCount = diag.loopCount.load(std::memory_order_relaxed);
-    result.errorCount = diag.errorCount.load(std::memory_order_relaxed);
-    result.idleWakeups = diag.idleWakeups.load(std::memory_order_relaxed);
-    result.lastLoopUs = diag.lastLoopUs.load(std::memory_order_relaxed);
-    result.maxLoopUs = diag.maxLoopUs.load(std::memory_order_relaxed);
-    result.totalLoopUs = diag.totalLoopUs.load(std::memory_order_relaxed);
-    result.resourceWaitCount =
-        diag.resourceWaitCount.load(std::memory_order_relaxed);
-    result.lastResourceWaitUs =
-        diag.lastResourceWaitUs.load(std::memory_order_relaxed);
-    result.maxResourceWaitUs =
-        diag.maxResourceWaitUs.load(std::memory_order_relaxed);
-    result.totalResourceWaitUs =
-        diag.totalResourceWaitUs.load(std::memory_order_relaxed);
-    result.firstLoopMs = diag.firstLoopMs.load(std::memory_order_relaxed);
-    result.lastLoopMs = diag.lastLoopMs.load(std::memory_order_relaxed);
-    result.budgetOverrunCount =
-        diag.budgetOverrunCount.load(std::memory_order_relaxed);
-    result.deadlineMissCount =
-        diag.deadlineMissCount.load(std::memory_order_relaxed);
-    result.schedulingErrorCount =
-        diag.schedulingErrorCount.load(std::memory_order_relaxed);
-    result.lastSchedulingError =
-        diag.lastSchedulingError.load(std::memory_order_relaxed);
-    return result;
-}
-
-inline std::map<PortId, PortSpec> MakePortMap(const std::vector<PortSpec> &specs)
-{
-    std::map<PortId, PortSpec> result;
-    for (const auto &spec : specs) {
-        result.emplace(spec.id, spec);
-    }
-    return result;
-}
 
 class EventPipelineGraph::TaskRunner {
   public:
@@ -78,6 +33,12 @@ class EventPipelineGraph::TaskRunner {
     void Run();
     void ApplyScheduling();
     bool WaitForTrigger();
+    bool WaitForConfiguredPhase();
+    bool WaitForDuration(std::chrono::milliseconds duration);
+    bool WaitForQueueTrigger();
+    bool WaitForPeriodicOrQueueTrigger();
+    void PollWakeEvent(int timeoutMs);
+    void DrainWakeEvents();
     bool QueuesReady() const;
     bool BackpressureBlocked() const;
     void StoreLoopSample(std::uint64_t elapsedUs);
@@ -91,12 +52,10 @@ class EventPipelineGraph::TaskRunner {
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_exited{true};
     std::thread m_thread;
-    std::mutex m_mutex;
-    std::condition_variable m_cv;
-    mutable std::mutex m_sampleMutex;
-    std::array<std::uint64_t, LOOP_SAMPLE_CAPACITY> m_loopSamples{};
+    int m_wakeEventFd{-1};
+    std::array<std::atomic<std::uint64_t>, LOOP_SAMPLE_CAPACITY> m_loopSamples{};
     std::size_t m_loopSampleCursor{};
-    std::size_t m_loopSampleCount{};
+    std::atomic<std::size_t> m_loopSampleCount{0};
 };
 
 } // namespace Epg

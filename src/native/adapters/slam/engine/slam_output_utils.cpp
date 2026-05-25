@@ -12,7 +12,7 @@ MakeOkSlamOutput(const Core::Ports::SlamInputBatch &input,
     out.frameId = input.frameId;
     out.captureTimestampNs = input.captureTimestampNs;
     out.mapId = mapId;
-    out.trackingState = Core::Ports::kSlamTrackingOk;
+    out.trackingState = Core::Ports::SLAM_TRACKING_OK;
     out.poseValid = true;
     out.pose.valid = true;
     out.usedVisualFeatureFrontend = false;

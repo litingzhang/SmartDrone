@@ -41,8 +41,8 @@ copying ORB-SLAM3 constructor-style argument lists into the rest of the stack.
 - The legacy `external_*` adapter headers have been removed. New code should include the generic `visual_feature_*`,
   `stereo_feature_*`, `stereo_*`, or `temporal_stereo` headers.
 
-ORB-SLAM3 code is absorbed under `src/native/adapters/slam/orb/orb_slam3` and built as internal modules. Sophus, DBoW2, and
-g2o remain third-party dependencies under `third_party`.
+ORB-SLAM3 code lives under `src/native/adapters/slam/orb/orb_slam3` and is built as an optional backend library. Sophus, DBoW2, and
+g2o remain third-party dependencies under `third_party`; `src/native` keeps only adapter code behind the SLAM ports.
 
 ORB tracked feature and point-cloud extraction is kept behind the generic `ITrackedVisualDataProvider` port. The ORB
 tracking module delegates this data shaping to `tracking/TrackedVisualDataExtractor`, so point-cloud/feature export is

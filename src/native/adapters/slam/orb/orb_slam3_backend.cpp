@@ -26,8 +26,8 @@ CreateOrbSlam3SlamEngine(const SlamEngineFactoryConfig &config)
 }
 
 const SlamEngineFactoryRegistrar
-    kOrbSlam3SlamEngineRegistrar(SlamBackend::OrbSlam3,
-                                 CreateOrbSlam3SlamEngine);
+    ORB_SLAM3_SLAM_ENGINE_REGISTRAR(SlamBackend::OrbSlam3,
+                                    CreateOrbSlam3SlamEngine);
 
 } // namespace
 

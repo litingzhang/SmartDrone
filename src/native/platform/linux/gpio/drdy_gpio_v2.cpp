@@ -80,11 +80,9 @@ bool DrdyGpio::OpenLine(unsigned lineOffset)
     return m_eventBuffer != nullptr;
 }
 
-bool DrdyGpio::WaitForGpiodEvent(int timeoutMs)
+bool DrdyGpio::EdgeEventReady()
 {
-    const int64_t timeoutNs =
-        (timeoutMs < 0) ? -1 : static_cast<int64_t>(timeoutMs) * 1000000LL;
-    return gpiod_line_request_wait_edge_events(AsRequest(m_request), timeoutNs) >
+    return gpiod_line_request_wait_edge_events(AsRequest(m_request), 0) >
            0;
 }
 

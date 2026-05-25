@@ -1,13 +1,12 @@
 #pragma once
 
 #include <atomic>
-#include <condition_variable>
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <vector>
 
 #include <sys/types.h>
@@ -84,18 +83,16 @@ class LibcameraMonoCam {
         bool Active() const;
     };
 
-    struct FrameSlot {
-        cv::Mat gray;
-    };
-
-    struct FramePoolState {
-        std::atomic<bool> active{false};
-        std::vector<std::unique_ptr<FrameSlot>> slots;
-        std::deque<FrameSlot *> freeSlots;
-        std::mutex mu;
+    struct SinkState {
+        std::function<void(FrameItem &&)> sink;
     };
 
     void WaitForCallbacks();
+    bool PrepareCallbackEvent();
+    void CloseCallbackEvent();
+    void NotifyCallbackCompleted();
+    void ReleaseCallback();
+    void DrainCallbackEvent();
     std::function<void(FrameItem &&)> CopySink() const;
     bool RequeueRequest(libcamera::Request *req);
     void OnRequestComplete(libcamera::Request *req);
@@ -105,15 +102,13 @@ class LibcameraMonoCam {
     bool ConfigureCamera();
     bool MapBuffers(const std::vector<std::unique_ptr<libcamera::FrameBuffer>> &buffers);
     bool CreateRequests(const std::vector<std::unique_ptr<libcamera::FrameBuffer>> &buffers);
-    void CreateFramePool(size_t slotCount);
     void LogIspMetadata(const libcamera::FrameMetadata &metadata, const libcamera::ControlList &meta) const;
     libcamera::FrameBuffer *RequestBuffer(libcamera::Request *req);
     uint8_t *MappedBufferData(libcamera::FrameBuffer *buffer);
     void ConvertFrameToGray(const libcamera::StreamConfiguration &config, uint8_t *data, uint32_t sequence,
                             cv::Mat &gray);
-    void PublishFrame(FrameItem &&item, std::shared_ptr<FrameSlot> frameSlot);
+    void PublishFrame(FrameItem &&item);
     void RequeueIfActive(libcamera::Request *req);
-    std::shared_ptr<FrameSlot> AcquireFrameSlot();
     void ResetOpenState();
 
     std::shared_ptr<libcamera::Camera> m_cam;
@@ -124,18 +119,14 @@ class LibcameraMonoCam {
     std::unique_ptr<libcamera::FrameBufferAllocator> m_allocator;
     std::vector<std::unique_ptr<libcamera::Request>> m_requests;
     std::map<libcamera::FrameBuffer *, std::vector<PlaneMap>> m_bufferMaps;
-    std::function<void(FrameItem &&)> m_sink;
-    mutable std::mutex m_sinkMu;
+    std::shared_ptr<const SinkState> m_sinkState;
     bool m_r16Normalize{false};
     bool m_aeConfiguredAuto{false};
     std::atomic<bool> m_active{false};
     std::atomic<bool> m_streamFault{false};
-    std::mutex m_framePoolMu;
-    std::shared_ptr<FramePoolState> m_framePool;
-    std::mutex m_callbackMu;
-    std::condition_variable m_callbackCv;
-    size_t m_callbacksInFlight{0};
-    bool m_closing{false};
+    std::atomic<size_t> m_callbacksInFlight{0};
+    std::atomic<bool> m_closing{false};
+    int m_callbackEventFd{-1};
 };
 
 class LibcameraStereoOV9281_TsPair {
@@ -161,11 +152,12 @@ class LibcameraStereoOV9281_TsPair {
         int64_t lastPairAgeMs{-1};
     };
 
-    static constexpr size_t kPairLookahead = 3;
+    static constexpr size_t PAIR_LOOKAHEAD = 3;
+    static constexpr size_t MAX_PENDING_FRAMES = 64;
 
     bool Open(const StereoCameraOpenParams &params);
     void Close();
-    bool GrabPair(FrameItem &L, FrameItem &R, int timeoutMs = 1000, bool preferLatest = false,
+    bool GrabPair(FrameItem &L, FrameItem &R, bool preferLatest = false,
                   uint64_t minTimestampNs = 0);
 
     int64_t LastDtMs() const;
@@ -193,20 +185,31 @@ class LibcameraStereoOV9281_TsPair {
         int64_t bestDtNs{0};
     };
 
+    struct PendingFrame {
+        size_t queueSeq{0};
+        std::shared_ptr<const FrameItem> frame;
+    };
+
     uint64_t PairTimestampNs(const std::pair<FrameItem, FrameItem> &pair) const;
-    bool HasEligiblePairLocked(uint64_t minTimestampNs) const;
-    size_t SelectPairIndexLocked(bool preferLatest, uint64_t minTimestampNs) const;
-    void DropPairsBeforeLocked(size_t selectedIndex);
-    bool TryGrabPairLocked(FrameItem &L, FrameItem &R, bool preferLatest, uint64_t minTimestampNs);
+    bool HasEligiblePair(uint64_t minTimestampNs) const;
+    size_t SelectPairIndex(bool preferLatest, uint64_t minTimestampNs) const;
+    void DropPairsBefore(size_t selectedIndex);
+    bool TryGrabPair(FrameItem &L, FrameItem &R, bool preferLatest, uint64_t minTimestampNs);
     void PushFrame(FrameItem &&fi);
-    bool TryPairLocked();
-    PairMatchSelection SelectPairMatchLocked() const;
-    bool DropOldestUnpairedLocked(int64_t rejectDtNs);
-    void CommitPairLocked(const PairMatchSelection &selection);
+    void StorePendingFrame(FrameItem &&fi);
+    void DropPendingFramesBefore(int camIndex, size_t minReadSeq);
+    bool PopPendingFrame(int camIndex, FrameItem &frame);
+    void DrainPendingFrames();
+    bool TryPair();
+    PairMatchSelection SelectPairMatch() const;
+    bool DropOldestUnpaired(int64_t rejectDtNs);
+    void CommitPair(const PairMatchSelection &selection);
     size_t FindBestMatchIndex(const std::deque<FrameItem> &q, uint64_t targetTs) const;
-    void PurgeOldLocked();
-    void OnFrameLocked(FrameItem &&fi);
+    void PurgeOld();
+    void OnFrame(FrameItem &&fi);
     void ResetPairingState();
+    void ClearPendingFrames();
+    void PublishQueueSizes();
     void ApplyOpenParams(const StereoCameraOpenParams &params);
     bool StartCameraManager();
     bool SelectCameras(int leftCamIndex, int rightCamIndex);
@@ -227,8 +230,6 @@ class LibcameraStereoOV9281_TsPair {
     LibcameraMonoCam m_left;
     LibcameraMonoCam m_right;
 
-    mutable std::mutex m_muPair;
-    std::condition_variable m_cvPair;
     std::deque<FrameItem> m_qL;
     std::deque<FrameItem> m_qR;
     std::deque<std::pair<FrameItem, FrameItem>> m_paired;
@@ -243,4 +244,12 @@ class LibcameraStereoOV9281_TsPair {
     std::atomic<uint64_t> m_droppedUnpaired[2]{{0}, {0}};
     std::atomic<int64_t> m_lastArriveNs[2]{{0}, {0}};
     std::atomic<int64_t> m_lastPairMonoNs{0};
+    std::atomic<size_t> m_pendingQueueSize[2]{{0}, {0}};
+    std::atomic<size_t> m_pairedQueueSize{0};
+    std::array<std::array<std::shared_ptr<const PendingFrame>,
+                          MAX_PENDING_FRAMES>,
+               2>
+        m_pendingFrames{};
+    std::atomic<size_t> m_frameWriteSeq[2]{{0}, {0}};
+    std::atomic<size_t> m_frameReadSeq[2]{{0}, {0}};
 };

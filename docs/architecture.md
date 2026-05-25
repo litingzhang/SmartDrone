@@ -130,8 +130,8 @@ The SLAM stack is split around reusable ports:
 - KLT/PnP back-end stages: `IVisualPnpObservationBuilder`, `IVisualPnpPoseBackend`
 - place recognition vocabulary: `IVisualVocabulary`
 
-ORB-SLAM3 source is built from `src/native/adapters/slam/orb/orb_slam3` as internal modules. Third-party dependencies such
-as Sophus, DBoW2, and g2o remain under `third_party`.
+ORB-SLAM3 source is built from `src/native/adapters/slam/orb/orb_slam3` as an optional backend library. Sophus, DBoW2, and g2o remain
+under `third_party`, while `src/native` keeps only the ORB adapter boundary.
 
 The implementation contains the following visual-feature adaptations:
 

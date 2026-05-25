@@ -1,7 +1,9 @@
 #include "core/application/runtime/runtime_config_service.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <memory>
 #include <string>
 #include <utility>
 #include <variant>
@@ -411,29 +413,29 @@ CommandResult ApplyCameraConfigValue(const std::string &key,
                                      bool &handled)
 {
     handled = true;
-    if (key == ConfigRegistry::kCameraExposureUs) {
+    if (key == ConfigRegistry::CAMERA_EXPOSURE_US) {
         return AssignStrictInt(value, remote.exposureUs, "camera.exposure_us");
     }
-    if (key == ConfigRegistry::kCameraGain) {
+    if (key == ConfigRegistry::CAMERA_GAIN) {
         return AssignFloat(value, remote.gain, "camera.gain");
     }
-    if (key == ConfigRegistry::kCameraAutoExposure) {
+    if (key == ConfigRegistry::CAMERA_AUTO_EXPOSURE) {
         return AssignBool(value, remote.autoExposureEnabled, "camera.auto_exposure");
     }
-    if (key == ConfigRegistry::kCameraPairWindowMs) {
+    if (key == ConfigRegistry::CAMERA_PAIR_WINDOW_MS) {
         return AssignStrictInt(value, remote.pairMs, "camera.pair_window_ms");
     }
-    if (key == ConfigRegistry::kCameraUvcDeviceIndex) {
+    if (key == ConfigRegistry::CAMERA_UVC_DEVICE_INDEX) {
         return AssignStrictInt(value, remote.uvcDeviceIndex,
                                "camera.uvc_device_index");
     }
-    if (key == ConfigRegistry::kCameraUvcEyeWidth) {
+    if (key == ConfigRegistry::CAMERA_UVC_EYE_WIDTH) {
         return AssignStrictInt(value, remote.uvcEyeWidth, "camera.uvc_eye_width");
     }
-    if (key == ConfigRegistry::kCameraUvcEyeHeight) {
+    if (key == ConfigRegistry::CAMERA_UVC_EYE_HEIGHT) {
         return AssignStrictInt(value, remote.uvcEyeHeight, "camera.uvc_eye_height");
     }
-    if (key == ConfigRegistry::kCameraUvcPackedStereo) {
+    if (key == ConfigRegistry::CAMERA_UVC_PACKED_STEREO) {
         return AssignBool(value, remote.uvcPackedStereo, "camera.uvc_packed_stereo");
     }
     handled = false;
@@ -446,10 +448,10 @@ CommandResult ApplySlamModeConfigValue(const std::string &key,
                                        bool &handled)
 {
     handled = true;
-    if (key == ConfigRegistry::kSlamInputFps) {
+    if (key == ConfigRegistry::SLAM_INPUT_FPS) {
         return AssignStrictInt(value, remote.slamInputFps, "slam.input_fps");
     }
-    if (key == ConfigRegistry::kSlamBackend) {
+    if (key == ConfigRegistry::SLAM_BACKEND) {
         if (const auto *text = std::get_if<std::string>(&value)) {
             remote.slamBackend =
                 NormalizeSlamBackendForBuild(ParseSlamBackendText(*text));
@@ -457,21 +459,21 @@ CommandResult ApplySlamModeConfigValue(const std::string &key,
         }
         return TypeMismatchResult("slam.backend");
     }
-    if (key == ConfigRegistry::kSlamFeatureFrontend) {
+    if (key == ConfigRegistry::SLAM_FEATURE_FRONTEND) {
         if (const auto *text = std::get_if<std::string>(&value)) {
             remote.featureFrontend = ParseFeatureFrontendText(*text);
             return OkResult();
         }
         return TypeMismatchResult("slam.feature_frontend");
     }
-    if (key == ConfigRegistry::kSlamOperationMode) {
+    if (key == ConfigRegistry::SLAM_OPERATION_MODE) {
         if (const auto *text = std::get_if<std::string>(&value)) {
             remote.slamOperationMode = ParseSlamOperationModeText(*text);
             return OkResult();
         }
         return TypeMismatchResult("slam.operation_mode");
     }
-    if (key == ConfigRegistry::kSlamPerceptionMode) {
+    if (key == ConfigRegistry::SLAM_PERCEPTION_MODE) {
         if (const auto *text = std::get_if<std::string>(&value)) {
             remote.sensorMode = ParseSensorModeText(*text);
             return OkResult();
@@ -488,19 +490,19 @@ CommandResult ApplyStreamConfigValue(const std::string &key,
                                      bool &handled)
 {
     handled = true;
-    if (key == ConfigRegistry::kStreamUdpEnabled) {
+    if (key == ConfigRegistry::STREAM_UDP_ENABLED) {
         return AssignBool(value, remote.udpEnabled, "stream.udp_enabled");
     }
-    if (key == ConfigRegistry::kStreamUdpIp) {
+    if (key == ConfigRegistry::STREAM_UDP_IP) {
         return AssignString(value, remote.udpIp, "stream.udp_ip");
     }
-    if (key == ConfigRegistry::kStreamSendImage) {
+    if (key == ConfigRegistry::STREAM_SEND_IMAGE) {
         return AssignBool(value, remote.sendImage, "stream.send_image");
     }
-    if (key == ConfigRegistry::kStreamSendFeature) {
+    if (key == ConfigRegistry::STREAM_SEND_FEATURE) {
         return AssignBool(value, remote.sendFeature, "stream.send_feature");
     }
-    if (key == ConfigRegistry::kStreamSendMap) {
+    if (key == ConfigRegistry::STREAM_SEND_MAP) {
         return AssignBool(value, remote.sendMap, "stream.send_map");
     }
     handled = false;
@@ -513,25 +515,25 @@ CommandResult ApplyTbcConfigValue(const std::string &key,
                                   bool &handled)
 {
     handled = true;
-    if (key == ConfigRegistry::kSlamUseCustomTbc) {
+    if (key == ConfigRegistry::SLAM_USE_CUSTOM_TBC) {
         return AssignBool(value, remote.useCustomTbc, "slam.tbc_override_enabled");
     }
-    if (key == ConfigRegistry::kSlamTbcTx) {
+    if (key == ConfigRegistry::SLAM_TBC_TX) {
         return AssignFloat(value, remote.tbcTx, "slam.tbc_tx_m");
     }
-    if (key == ConfigRegistry::kSlamTbcTy) {
+    if (key == ConfigRegistry::SLAM_TBC_TY) {
         return AssignFloat(value, remote.tbcTy, "slam.tbc_ty_m");
     }
-    if (key == ConfigRegistry::kSlamTbcTz) {
+    if (key == ConfigRegistry::SLAM_TBC_TZ) {
         return AssignFloat(value, remote.tbcTz, "slam.tbc_tz_m");
     }
-    if (key == ConfigRegistry::kSlamTbcRollDeg) {
+    if (key == ConfigRegistry::SLAM_TBC_ROLL_DEG) {
         return AssignFloat(value, remote.tbcRollDeg, "slam.tbc_roll_deg");
     }
-    if (key == ConfigRegistry::kSlamTbcPitchDeg) {
+    if (key == ConfigRegistry::SLAM_TBC_PITCH_DEG) {
         return AssignFloat(value, remote.tbcPitchDeg, "slam.tbc_pitch_deg");
     }
-    if (key == ConfigRegistry::kSlamTbcYawDeg) {
+    if (key == ConfigRegistry::SLAM_TBC_YAW_DEG) {
         return AssignFloat(value, remote.tbcYawDeg, "slam.tbc_yaw_deg");
     }
     handled = false;
@@ -544,19 +546,19 @@ CommandResult ApplyOrbConfigValue(const std::string &key,
                                   bool &handled)
 {
     handled = true;
-    if (key == ConfigRegistry::kSlamOrbNFeatures) {
+    if (key == ConfigRegistry::SLAM_ORB_N_FEATURES) {
         return AssignNumericInt(value, remote.orbNFeatures, "slam.orb_nfeatures");
     }
-    if (key == ConfigRegistry::kSlamOrbScaleFactor) {
+    if (key == ConfigRegistry::SLAM_ORB_SCALE_FACTOR) {
         return AssignFloat(value, remote.orbScaleFactor, "slam.orb_scale_factor");
     }
-    if (key == ConfigRegistry::kSlamOrbNLevels) {
+    if (key == ConfigRegistry::SLAM_ORB_N_LEVELS) {
         return AssignNumericInt(value, remote.orbNLevels, "slam.orb_nlevels");
     }
-    if (key == ConfigRegistry::kSlamOrbIniThFast) {
+    if (key == ConfigRegistry::SLAM_ORB_INI_TH_FAST) {
         return AssignNumericInt(value, remote.orbIniThFAST, "slam.orb_ini_th_fast");
     }
-    if (key == ConfigRegistry::kSlamOrbMinThFast) {
+    if (key == ConfigRegistry::SLAM_ORB_MIN_TH_FAST) {
         return AssignNumericInt(value, remote.orbMinThFAST, "slam.orb_min_th_fast");
     }
     handled = false;
@@ -569,23 +571,23 @@ CommandResult ApplyVisualFeatureConfigValue(const std::string &key,
                                             bool &handled)
 {
     handled = true;
-    if (key == ConfigRegistry::kSlamVisualFeatureTopK ||
-        key == ConfigRegistry::kSlamSuperPointTopK) {
+    if (key == ConfigRegistry::SLAM_VISUAL_FEATURE_TOP_K ||
+        key == ConfigRegistry::SLAM_SUPER_POINT_TOP_K) {
         return AssignNumericInt(value, remote.visualFeatureTopK,
                                 "slam.visual_feature_top_k");
     }
-    if (key == ConfigRegistry::kSlamVisualFeatureMaxPoints ||
-        key == ConfigRegistry::kSlamSuperPointMaxPoints) {
+    if (key == ConfigRegistry::SLAM_VISUAL_FEATURE_MAX_POINTS ||
+        key == ConfigRegistry::SLAM_SUPER_POINT_MAX_POINTS) {
         return AssignNumericInt(value, remote.visualFeatureMaxPoints,
                                 "slam.visual_feature_max_points");
     }
-    if (key == ConfigRegistry::kSlamVisualFeatureInputMaxWidth ||
-        key == ConfigRegistry::kSlamSuperPointInputMaxWidth) {
+    if (key == ConfigRegistry::SLAM_VISUAL_FEATURE_INPUT_MAX_WIDTH ||
+        key == ConfigRegistry::SLAM_SUPER_POINT_INPUT_MAX_WIDTH) {
         return AssignNumericInt(value, remote.visualFeatureInputMaxWidth,
                                 "slam.visual_feature_input_max_width");
     }
-    if (key == ConfigRegistry::kSlamVisualFeatureInputMaxHeight ||
-        key == ConfigRegistry::kSlamSuperPointInputMaxHeight) {
+    if (key == ConfigRegistry::SLAM_VISUAL_FEATURE_INPUT_MAX_HEIGHT ||
+        key == ConfigRegistry::SLAM_SUPER_POINT_INPUT_MAX_HEIGHT) {
         return AssignNumericInt(value, remote.visualFeatureInputMaxHeight,
                                 "slam.visual_feature_input_max_height");
     }
@@ -599,17 +601,17 @@ CommandResult ApplyAccelerationConfigValue(const std::string &key,
                                            bool &handled)
 {
     handled = true;
-    if (key == ConfigRegistry::kSlamLkSuperPointSeeding) {
+    if (key == ConfigRegistry::SLAM_LK_SUPER_POINT_SEEDING) {
         if (std::holds_alternative<bool>(value)) {
             return OkResult();
         }
         return TypeMismatchResult("slam.lk_superpoint_seeding");
     }
-    if (key == ConfigRegistry::kSlamLkPerFrameAcceleration) {
+    if (key == ConfigRegistry::SLAM_LK_PER_FRAME_ACCELERATION) {
         return AssignString(value, remote.lkPerFrameAcceleration,
                             "slam.lk_per_frame_accel");
     }
-    if (key == ConfigRegistry::kSlamOrbAcceleration) {
+    if (key == ConfigRegistry::SLAM_ORB_ACCELERATION) {
         return AssignString(value, remote.orbAcceleration, "slam.orb_accel");
     }
     handled = false;
@@ -682,11 +684,10 @@ std::string BuildRuntimeConfigMessage(const RemoteRuntimeConfig &remote,
 
 } // namespace
 
-RuntimeConfigService::RuntimeConfigService(UnifiedConfig &config,
+RuntimeConfigService::RuntimeConfigService(std::shared_ptr<const UnifiedConfig> &config,
                                            LiveRuntimeTuning &tuning,
-                                           std::mutex &configMutex,
                                            RestartFn requestRestart)
-    : m_config(config), m_tuning(tuning), m_configMutex(configMutex),
+    : m_config(config), m_tuning(tuning),
       m_requestRestart(std::move(requestRestart))
 {
 }
@@ -700,9 +701,14 @@ bool RuntimeConfigService::UpdateRemoteConfig(RemoteRuntimeConfig remote,
     }
 
     AppliedRuntimeConfig applied{};
-    {
-        std::lock_guard<std::mutex> lock(m_configMutex);
-        applied = ApplyRemoteRuntimeConfig(m_config, remote);
+    while (true) {
+        std::shared_ptr<const UnifiedConfig> current = LoadConfig();
+        UnifiedConfig nextConfig = current ? *current : UnifiedConfig{};
+        applied = ApplyRemoteRuntimeConfig(nextConfig, remote);
+        auto next = std::make_shared<const UnifiedConfig>(std::move(nextConfig));
+        if (ReplaceConfig(current, std::move(next))) {
+            break;
+        }
     }
 
     if (remote.slamBackend == SlamBackend::OrbSlam3) {
@@ -784,6 +790,20 @@ RuntimeConfigService::BuildRemoteConfig(const UnifiedConfig &currentConfig)
         currentConfig.app.runtime.lkPerFrameAcceleration;
     remote.orbAcceleration = currentConfig.app.runtime.orbAcceleration;
     return remote;
+}
+
+std::shared_ptr<const UnifiedConfig> RuntimeConfigService::LoadConfig() const
+{
+    return std::atomic_load_explicit(&m_config, std::memory_order_acquire);
+}
+
+bool RuntimeConfigService::ReplaceConfig(
+    std::shared_ptr<const UnifiedConfig> &expected,
+    std::shared_ptr<const UnifiedConfig> next)
+{
+    return std::atomic_compare_exchange_weak_explicit(&m_config, &expected, std::move(next),
+                                                      std::memory_order_acq_rel,
+                                                      std::memory_order_acquire);
 }
 
 } // namespace SmartDrone::Core::Application

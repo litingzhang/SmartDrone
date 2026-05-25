@@ -70,7 +70,7 @@ class Icm42688SampleSource::Impl final {
             return ImuSampleReadStatus::Pending;
         }
         int64_t timestampNs = 0;
-        if (!m_drdy->WaitTs(0, timestampNs)) {
+        if (!m_drdy->ReadReadyTimestamp(timestampNs)) {
             return ImuSampleReadStatus::Pending;
         }
         return ReadReadySample(timestampNs, sample);

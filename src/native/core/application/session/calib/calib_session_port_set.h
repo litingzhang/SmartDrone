@@ -42,9 +42,11 @@ class CalibSessionPortSet final {
     bool TryBuildSavePair(std::shared_ptr<CalibStereoFrame> frame,
                           CalibSavePair &savePair);
     bool WriteSavePair(const CalibSavePair &pair);
+    bool WriteImuSample(const ImuSample &sample);
     bool EnqueuePreview(const CalibStereoFrame &frame);
     CalibImuSampleResult StepImuSample();
-    void StopAndFlush();
+    bool FlushAndCloseStorage();
+    void StopPorts();
     void LogFinalStatus() const;
 
   private:

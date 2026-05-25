@@ -42,7 +42,7 @@ class ImuSensorPoller::Impl final {
 
     void Step()
     {
-        for (int i = 0; i < kMaxSamplesPerStep; ++i) {
+        for (int i = 0; i < MAX_SAMPLES_PER_STEP; ++i) {
             ImuSample sample{};
             const ImuSampleReadStatus status =
                 m_sampleSource->ReadSample(sample);
@@ -65,7 +65,7 @@ class ImuSensorPoller::Impl final {
     }
 
   private:
-    static constexpr int kMaxSamplesPerStep = 8;
+    static constexpr int MAX_SAMPLES_PER_STEP = 8;
 
     void SetScale(const ImuScale &scale)
     {

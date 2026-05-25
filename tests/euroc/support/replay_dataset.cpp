@@ -8,6 +8,8 @@
 
 #include <opencv2/imgcodecs.hpp>
 
+#include "common/numeric_parse.h"
+
 namespace SmartDrone::Tests {
 namespace {
 
@@ -29,6 +31,36 @@ std::string TrimAsciiWhitespace(std::string text)
         text.pop_back();
     }
     return text;
+}
+
+uint64_t ParseReplayTimestamp(const std::string &field)
+{
+    std::uint64_t value = 0;
+    if (!SmartDrone::Common::TryParseUInt64Full(
+            TrimAsciiWhitespace(field).c_str(), value)) {
+        throw std::runtime_error("invalid replay timestamp: " + field);
+    }
+    return value;
+}
+
+int64_t ParseReplaySignedTimestamp(const std::string &field)
+{
+    std::int64_t value = 0;
+    if (!SmartDrone::Common::TryParseInt64Prefix(
+            TrimAsciiWhitespace(field).c_str(), 10, value)) {
+        throw std::runtime_error("invalid replay imu timestamp: " + field);
+    }
+    return value;
+}
+
+float ParseReplayFloat(const std::string &field)
+{
+    float value = 0.0f;
+    if (!SmartDrone::Common::TryParseFloatPrefix(
+            TrimAsciiWhitespace(field).c_str(), value)) {
+        throw std::runtime_error("invalid replay float: " + field);
+    }
+    return value;
 }
 
 std::vector<ReplayImageSample> LoadImageIndex(const std::filesystem::path &csvPath,
@@ -55,7 +87,7 @@ std::vector<ReplayImageSample> LoadImageIndex(const std::filesystem::path &csvPa
             continue;
         }
         ReplayImageSample sample{};
-        sample.timestampNs = static_cast<uint64_t>(std::stoull(TrimAsciiWhitespace(timestampField)));
+        sample.timestampNs = ParseReplayTimestamp(timestampField);
         sample.path = imageDir / TrimAsciiWhitespace(fileField);
         samples.push_back(std::move(sample));
         if (maxFrames > 0 && samples.size() >= maxFrames) {
@@ -84,31 +116,31 @@ std::vector<ReplayImuSample> LoadImuCsv(const std::filesystem::path &csvPath)
         if (!std::getline(lineStream, field, ',')) {
             continue;
         }
-        sample.timestampNs = std::stoll(TrimAsciiWhitespace(field));
+        sample.timestampNs = ParseReplaySignedTimestamp(field);
         if (!std::getline(lineStream, field, ',')) {
             continue;
         }
-        sample.gx = std::stof(TrimAsciiWhitespace(field));
+        sample.gx = ParseReplayFloat(field);
         if (!std::getline(lineStream, field, ',')) {
             continue;
         }
-        sample.gy = std::stof(TrimAsciiWhitespace(field));
+        sample.gy = ParseReplayFloat(field);
         if (!std::getline(lineStream, field, ',')) {
             continue;
         }
-        sample.gz = std::stof(TrimAsciiWhitespace(field));
+        sample.gz = ParseReplayFloat(field);
         if (!std::getline(lineStream, field, ',')) {
             continue;
         }
-        sample.ax = std::stof(TrimAsciiWhitespace(field));
+        sample.ax = ParseReplayFloat(field);
         if (!std::getline(lineStream, field, ',')) {
             continue;
         }
-        sample.ay = std::stof(TrimAsciiWhitespace(field));
+        sample.ay = ParseReplayFloat(field);
         if (!std::getline(lineStream, field, ',')) {
             continue;
         }
-        sample.az = std::stof(TrimAsciiWhitespace(field));
+        sample.az = ParseReplayFloat(field);
         samples.push_back(sample);
     }
     return samples;
@@ -254,7 +286,7 @@ void ReplayCameraProvider::Stop()
     }
 }
 
-bool ReplayCameraProvider::GrabStereo(SmartDrone::Core::Ports::StereoFrame &out, int, bool, uint64_t minTimestampNs)
+bool ReplayCameraProvider::GrabStereo(SmartDrone::Core::Ports::StereoFrame &out, bool, uint64_t minTimestampNs)
 {
     if (!m_started) {
         return false;

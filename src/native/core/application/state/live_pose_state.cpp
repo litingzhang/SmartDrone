@@ -1,8 +1,107 @@
 #include "core/application/state/live_pose_state.h"
 
+#include <atomic>
+#include <memory>
 #include <utility>
 
 namespace SmartDrone::Core::Application {
+namespace {
+
+constexpr auto LIVE_POSE_WRITE_ORDER = std::memory_order_release;
+constexpr auto LIVE_POSE_READ_ORDER = std::memory_order_acquire;
+
+struct LivePoseData {
+    UdpPeer latestPeer{};
+    bool hasPeer{false};
+    bool poseValid{false};
+    uint8_t runtimeMode{RUNTIME_MODE_IDLE};
+    uint8_t slamMode{RUNTIME_SLAM_MODE_MAPPING};
+    uint8_t trackingState{0xFF};
+    bool armed{false};
+    uint8_t px4MainMode{0};
+    uint8_t px4SubMode{0};
+    LivePoseQuality poseQuality{LivePoseQuality::Lost};
+    uint16_t resetCounter{0};
+    uint16_t resetMapCount{0};
+    float x{0.0f};
+    float y{0.0f};
+    float z{0.0f};
+    float qw{1.0f};
+    float qx{0.0f};
+    float qy{0.0f};
+    float qz{0.0f};
+    std::shared_ptr<const std::vector<float>> pointCloudXyz;
+    uint32_t pointCloudSeq{0};
+    uint32_t txSeq{1};
+    bool dirty{false};
+};
+
+void CopyStateToSnapshot(const LivePoseData &state,
+                         LivePoseState::Snapshot &out)
+{
+    out.hasPeer = state.hasPeer;
+    out.peer = state.latestPeer;
+    out.poseValid = state.poseValid;
+    out.runtimeMode = state.runtimeMode;
+    out.slamMode = state.slamMode;
+    out.trackingState = state.trackingState;
+    out.armed = state.armed;
+    out.px4MainMode = state.px4MainMode;
+    out.px4SubMode = state.px4SubMode;
+    out.poseQuality = state.poseQuality;
+    out.resetCounter = state.resetCounter;
+    out.resetMapCount = state.resetMapCount;
+    out.x = state.x;
+    out.y = state.y;
+    out.z = state.z;
+    out.qw = state.qw;
+    out.qx = state.qx;
+    out.qy = state.qy;
+    out.qz = state.qz;
+    out.seq = state.txSeq;
+    out.pointCloudXyz = state.pointCloudXyz;
+    out.pointCloudSeq = state.pointCloudSeq;
+}
+
+} // namespace
+
+struct LivePoseState::Impl {
+    Impl()
+        : state(std::make_shared<LivePoseData>())
+    {
+    }
+
+    std::shared_ptr<const LivePoseData> Load() const
+    {
+        return std::atomic_load_explicit(&state, LIVE_POSE_READ_ORDER);
+    }
+
+    template <typename ApplyFn>
+    void PublishUpdate(ApplyFn apply)
+    {
+        auto current = Load();
+        while (current) {
+            LivePoseData next = *current;
+            apply(next);
+            std::shared_ptr<const LivePoseData> published =
+                std::make_shared<LivePoseData>(std::move(next));
+            if (std::atomic_compare_exchange_weak_explicit(
+                    &state, &current, published, LIVE_POSE_WRITE_ORDER,
+                    LIVE_POSE_READ_ORDER)) {
+                return;
+            }
+        }
+    }
+
+    std::shared_ptr<const LivePoseData> state;
+};
+
+LivePoseState::LivePoseState()
+    : m_impl(std::make_unique<Impl>())
+{
+}
+
+LivePoseState::~LivePoseState() = default;
 
 void LivePoseState::UpdatePeer(const UdpPeer &peer)
 {
@@ -10,129 +109,105 @@ void LivePoseState::UpdatePeer(const UdpPeer &peer)
         return;
     }
 
-    std::lock_guard<std::mutex> lock(mu);
-    latestPeer = peer;
-    hasPeer = true;
+    m_impl->PublishUpdate([&peer](LivePoseData &state) {
+        state.latestPeer = peer;
+        state.hasPeer = true;
+    });
 }
 
 void LivePoseState::SetRuntimeMode(uint8_t mode)
 {
-    std::lock_guard<std::mutex> lock(mu);
-    runtimeMode = mode;
-    if (mode != RUNTIME_MODE_SLAM) {
-        poseValid = false;
-        slamMode = RUNTIME_SLAM_MODE_MAPPING;
-        trackingState = 0xFF;
-        poseQuality = LivePoseQuality::Lost;
-    }
-    dirty = true;
+    m_impl->PublishUpdate([mode](LivePoseData &state) {
+        state.runtimeMode = mode;
+        if (mode != RUNTIME_MODE_SLAM) {
+            state.poseValid = false;
+            state.slamMode = RUNTIME_SLAM_MODE_MAPPING;
+            state.trackingState = 0xFF;
+            state.poseQuality = LivePoseQuality::Lost;
+        }
+        state.dirty = true;
+    });
 }
 
 void LivePoseState::SetSlamMode(uint8_t mode)
 {
-    std::lock_guard<std::mutex> lock(mu);
-    slamMode = mode;
-    dirty = true;
+    m_impl->PublishUpdate([mode](LivePoseData &state) {
+        state.slamMode = mode;
+        state.dirty = true;
+    });
 }
 
 void LivePoseState::SetVehicleFlightState(bool armedIn, uint8_t px4MainModeIn, uint8_t px4SubModeIn)
 {
-    std::lock_guard<std::mutex> lock(mu);
-    armed = armedIn;
-    px4MainMode = px4MainModeIn;
-    px4SubMode = px4SubModeIn;
-    dirty = true;
+    m_impl->PublishUpdate([armedIn, px4MainModeIn,
+                           px4SubModeIn](LivePoseData &state) {
+        state.armed = armedIn;
+        state.px4MainMode = px4MainModeIn;
+        state.px4SubMode = px4SubModeIn;
+        state.dirty = true;
+    });
 }
 
 void LivePoseState::UpdatePose(const LivePoseUpdate &update)
 {
-    std::lock_guard<std::mutex> lock(mu);
-    runtimeMode = update.runtimeMode;
-    trackingState = update.trackingState;
-    poseQuality = update.quality;
-    resetCounter = update.resetCounter;
-    resetMapCount = update.resetMapCount;
-    x = update.pose.x;
-    y = update.pose.y;
-    z = update.pose.z;
-    qw = update.pose.qw;
-    qx = update.pose.qx;
-    qy = update.pose.qy;
-    qz = update.pose.qz;
-    poseValid = update.poseValid;
-    dirty = true;
+    m_impl->PublishUpdate([&update](LivePoseData &state) {
+        state.runtimeMode = update.runtimeMode;
+        state.trackingState = update.trackingState;
+        state.poseQuality = update.quality;
+        state.resetCounter = update.resetCounter;
+        state.resetMapCount = update.resetMapCount;
+        state.x = update.pose.x;
+        state.y = update.pose.y;
+        state.z = update.pose.z;
+        state.qw = update.pose.qw;
+        state.qx = update.pose.qx;
+        state.qy = update.pose.qy;
+        state.qz = update.pose.qz;
+        state.poseValid = update.poseValid;
+        state.dirty = true;
+    });
 }
 
 void LivePoseState::UpdatePointCloud(std::vector<float> xyz)
 {
-    std::lock_guard<std::mutex> lock(mu);
-    pointCloudXyz = std::make_shared<const std::vector<float>>(std::move(xyz));
-    ++pointCloudSeq;
-    dirty = true;
+    auto pointCloud = std::make_shared<const std::vector<float>>(std::move(xyz));
+    m_impl->PublishUpdate([pointCloud](LivePoseData &state) {
+        state.pointCloudXyz = pointCloud;
+        ++state.pointCloudSeq;
+        state.dirty = true;
+    });
 }
 
 bool LivePoseState::ConsumeSnapshot(Snapshot &out)
 {
-    std::lock_guard<std::mutex> lock(mu);
-    if (!hasPeer || !dirty) {
-        return false;
-    }
+    while (true) {
+        auto current = m_impl->Load();
+        if (!current || !current->hasPeer || !current->dirty) {
+            return false;
+        }
 
-    out.hasPeer = hasPeer;
-    out.peer = latestPeer;
-    out.poseValid = poseValid;
-    out.runtimeMode = runtimeMode;
-    out.slamMode = slamMode;
-    out.trackingState = trackingState;
-    out.armed = armed;
-    out.px4MainMode = px4MainMode;
-    out.px4SubMode = px4SubMode;
-    out.poseQuality = poseQuality;
-    out.resetCounter = resetCounter;
-    out.resetMapCount = resetMapCount;
-    out.x = x;
-    out.y = y;
-    out.z = z;
-    out.qw = qw;
-    out.qx = qx;
-    out.qy = qy;
-    out.qz = qz;
-    out.seq = ++txSeq;
-    out.pointCloudXyz = pointCloudXyz;
-    out.pointCloudSeq = pointCloudSeq;
-    dirty = false;
-    return true;
+        LivePoseData next = *current;
+        ++next.txSeq;
+        next.dirty = false;
+        std::shared_ptr<const LivePoseData> published =
+            std::make_shared<LivePoseData>(std::move(next));
+        if (std::atomic_compare_exchange_weak_explicit(
+                &m_impl->state, &current, published, LIVE_POSE_WRITE_ORDER,
+                LIVE_POSE_READ_ORDER)) {
+            CopyStateToSnapshot(*published, out);
+            return true;
+        }
+    }
 }
 
 bool LivePoseState::ReadSnapshot(Snapshot &out) const
 {
-    std::lock_guard<std::mutex> lock(mu);
-    if (!hasPeer) {
+    const auto current = m_impl->Load();
+    if (!current || !current->hasPeer) {
         return false;
     }
 
-    out.hasPeer = hasPeer;
-    out.peer = latestPeer;
-    out.poseValid = poseValid;
-    out.runtimeMode = runtimeMode;
-    out.slamMode = slamMode;
-    out.trackingState = trackingState;
-    out.armed = armed;
-    out.px4MainMode = px4MainMode;
-    out.px4SubMode = px4SubMode;
-    out.poseQuality = poseQuality;
-    out.resetCounter = resetCounter;
-    out.resetMapCount = resetMapCount;
-    out.x = x;
-    out.y = y;
-    out.z = z;
-    out.qw = qw;
-    out.qx = qx;
-    out.qy = qy;
-    out.qz = qz;
-    out.seq = txSeq;
-    out.pointCloudXyz = pointCloudXyz;
-    out.pointCloudSeq = pointCloudSeq;
+    CopyStateToSnapshot(*current, out);
     return true;
 }
 

@@ -2,7 +2,6 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
-#include <cerrno>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -19,6 +18,7 @@
 #include <unistd.h>
 
 #include "common/environment.h"
+#include "common/numeric_parse.h"
 #include "adapters/slam/engine/slam_engine_factory.h"
 #include "adapters/slam/engine/slam_mode_state.h"
 #include "adapters/slam/superpoint/visual_feature_frontend_client.h"
@@ -48,7 +48,7 @@ namespace fs = std::filesystem;
 namespace {
 
 struct OfflineReplayOptions {
-    fs::path datasetRoot{fs::path(TESTS_SOURCE_DIR) / "data"};
+    fs::path datasetRoot{"tests/euroc/data"};
     fs::path outputCsv{"build/offline_replay_pose.csv"};
     fs::path summaryJson{};
     fs::path finalEurocTrajectory{};
@@ -72,7 +72,7 @@ struct OfflineReplayOptions {
     int cameraFps{60};
     int slamInputFps{20};
     int backendStepEveryN{1};
-    int timeoutMs{1000};
+    int staleFrameThresholdMs{1000};
     size_t maxFrames{0};
     bool lkLoopClosure{false};
     bool lkRuntimeLoopClosure{false};
@@ -89,42 +89,18 @@ struct OfflineReplayOptions {
     int dpvoOptimizationWindow{7};
 };
 
-double EnvDoubleValue(const char *name, double fallback)
-{
-    const char *value = std::getenv(name);
-    if (value == nullptr || value[0] == '\0') {
-        return fallback;
-    }
-    char *end = nullptr;
-    errno = 0;
-    const double parsed = std::strtod(value, &end);
-    if (errno != 0 || end == value || !std::isfinite(parsed)) {
-        return fallback;
-    }
-    return parsed;
-}
-
 int64_t EnvTimestampOffsetNs()
 {
     const double offsetMs =
-        EnvDoubleValue("SMART_DRONE_EUROC_OUTPUT_TIMESTAMP_OFFSET_MS", 0.0);
+        SmartDrone::Common::EnvDoubleValue(
+            "SMART_DRONE_EUROC_OUTPUT_TIMESTAMP_OFFSET_MS", 0.0);
     return static_cast<int64_t>(std::llround(offsetMs * 1000000.0));
 }
 
 double EnvOutputPositionScale()
 {
-    return EnvDoubleValue("SMART_DRONE_EUROC_OUTPUT_POSITION_SCALE", 1.0);
-}
-
-bool EnvFlagEnabled(const char *name, bool fallback)
-{
-    const char *value = std::getenv(name);
-    if (value == nullptr || value[0] == '\0') {
-        return fallback;
-    }
-    const std::string text(value);
-    return text == "1" || text == "true" || text == "TRUE" || text == "on" ||
-           text == "ON" || text == "yes" || text == "YES";
+    return SmartDrone::Common::EnvDoubleValue(
+        "SMART_DRONE_EUROC_OUTPUT_POSITION_SCALE", 1.0);
 }
 
 std::optional<Sophus::SE3f> ReadSe3Node(const cv::FileNode &node)
@@ -407,7 +383,8 @@ constexpr const char *OFFLINE_REPLAY_USAGE_TEXT =
     "  --fps <n>             Camera FPS for replay pacing, default 60\n"
     "  --slam-fps <n>        SLAM input FPS, default 20\n"
     "  --backend-step-every-n <n> Backend maintenance cadence, default 1\n"
-    "  --timeout-ms <n>      Batch acquire timeout, default 1000\n"
+    "  --stale-frame-threshold-ms <n> Stereo stale diagnostic threshold, default 1000\n"
+    "  --timeout-ms <n>      Deprecated alias for --stale-frame-threshold-ms\n"
     "  --max-frames <n>      Maximum output frames, default 0(all)\n"
     "  --lk-loop-closure     Compatibility flag; disabled for realtime "
     "CSV output\n"
@@ -488,7 +465,12 @@ int GetOptionInt(int argc, char **argv, const char *name, int defaultValue)
 {
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == name) {
-            return std::stoi(argv[i + 1]);
+            int parsed = defaultValue;
+            if (!SmartDrone::Common::TryParseIntPrefix(argv[i + 1], 10,
+                                                       parsed)) {
+                throw std::invalid_argument(argv[i + 1]);
+            }
+            return parsed;
         }
     }
     return defaultValue;
@@ -499,7 +481,12 @@ int GetOptionIntWithLegacyFallback(int argc, char **argv, const char *name,
 {
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == name) {
-            return std::stoi(argv[i + 1]);
+            int parsed = defaultValue;
+            if (!SmartDrone::Common::TryParseIntPrefix(argv[i + 1], 10,
+                                                       parsed)) {
+                throw std::invalid_argument(argv[i + 1]);
+            }
+            return parsed;
         }
     }
     return GetOptionInt(argc, argv, legacyName, defaultValue);
@@ -523,7 +510,12 @@ float GetOptionFloat(int argc, char **argv, const char *name,
 {
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == name) {
-            return std::stof(argv[i + 1]);
+            float parsed = defaultValue;
+            if (!SmartDrone::Common::TryParseFloatPrefix(argv[i + 1],
+                                                         parsed)) {
+                throw std::invalid_argument(argv[i + 1]);
+            }
+            return parsed;
         }
     }
     return defaultValue;
@@ -534,7 +526,12 @@ size_t GetOptionSize(int argc, char **argv, const char *name,
 {
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::string(argv[i]) == name) {
-            return static_cast<size_t>(std::stoull(argv[i + 1]));
+            size_t parsed = defaultValue;
+            if (!SmartDrone::Common::TryParseSizePrefix(argv[i + 1],
+                                                        parsed)) {
+                throw std::invalid_argument(argv[i + 1]);
+            }
+            return parsed;
         }
     }
     return defaultValue;
@@ -557,8 +554,9 @@ const char *ProgramPath(int argc, char **argv)
 
 void ParseReplayIoOptions(int argc, char **argv, OfflineReplayOptions &opts)
 {
-    opts.datasetRoot = fs::path(
-        GetOptionValue(argc, argv, "--dataset", opts.datasetRoot.string()));
+    opts.datasetRoot = fs::path(ResolveRuntimePath(
+        GetOptionValue(argc, argv, "--dataset", opts.datasetRoot.string()),
+        ProgramPath(argc, argv)));
     opts.outputCsv =
         fs::path(GetOptionValue(argc, argv, "--out", opts.outputCsv.string()));
     opts.summaryJson = fs::path(GetOptionValue(argc, argv, "--summary-json", ""));
@@ -591,7 +589,9 @@ void ParseReplayModeOptions(int argc, char **argv, OfflineReplayOptions &opts)
     opts.slamInputFps = GetOptionInt(argc, argv, "--slam-fps", opts.slamInputFps);
     opts.backendStepEveryN = GetOptionInt(
         argc, argv, "--backend-step-every-n", opts.backendStepEveryN);
-    opts.timeoutMs = GetOptionInt(argc, argv, "--timeout-ms", opts.timeoutMs);
+    opts.staleFrameThresholdMs = GetOptionIntWithLegacyFallback(
+        argc, argv, "--stale-frame-threshold-ms", "--timeout-ms",
+        opts.staleFrameThresholdMs);
     opts.maxFrames = GetOptionSize(argc, argv, "--max-frames", opts.maxFrames);
 }
 

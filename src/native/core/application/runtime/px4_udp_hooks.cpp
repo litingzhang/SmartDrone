@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <utility>
 
 #include "core/ports/slam_tracking_state.h"
@@ -10,7 +11,6 @@
 namespace SmartDrone::Core::Application {
 
 using SmartDrone::Core::Ports::VehicleCommandAckKind;
-using SmartDrone::Core::Ports::VehicleDownwardRange;
 using SmartDrone::Core::Ports::VehicleFlightMode;
 using SmartDrone::Core::Ports::VehicleLocalPosition;
 using SmartDrone::Core::Ports::VehicleManualControl;
@@ -55,7 +55,6 @@ RuntimeCommandGate Px4UdpHooks::ReadCommandGate() const
 
 bool Px4UdpHooks::ArmVehicle(std::string *err)
 {
-    CancelAutoLanding();
     EnsureManualControlStream();
     SetManualControlNeutral();
     SendManualControlSnapshot();
@@ -70,7 +69,6 @@ bool Px4UdpHooks::ArmVehicle(std::string *err)
 
 bool Px4UdpHooks::DisarmVehicle(std::string *err)
 {
-    CancelAutoLanding();
     m_vehicleControl.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
     SetManualControlNeutral();
@@ -87,7 +85,6 @@ bool Px4UdpHooks::DisarmVehicle(std::string *err)
 
 bool Px4UdpHooks::StopVehicleImmediately(std::string *err)
 {
-    CancelAutoLanding();
     m_vehicleControl.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
     DisableRemoteControl(true);
@@ -102,8 +99,6 @@ bool Px4UdpHooks::StopVehicleImmediately(std::string *err)
 
 bool Px4UdpHooks::EnterGuidedControl(std::string *err)
 {
-    CancelAutoLanding();
-
     // OFFBOARD relies on setpoint stream; disable manual joystick streaming.
     m_manualControlStreaming.store(false, std::memory_order_relaxed);
     SetManualControlNeutral();
@@ -145,7 +140,6 @@ bool Px4UdpHooks::EnterGuidedControl(std::string *err)
 bool Px4UdpHooks::HoldVehicle(std::string *err)
 {
     (void)err;
-    CancelAutoLanding();
     m_vehicleControl.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
     m_offboardModeRequested.store(false, std::memory_order_relaxed);
@@ -157,8 +151,6 @@ bool Px4UdpHooks::HoldVehicle(std::string *err)
 
 bool Px4UdpHooks::EnterPositionControl(std::string *err)
 {
-    CancelAutoLanding();
-
     // POSITION mode should not keep OFFBOARD setpoint stream alive.
     m_vehicleControl.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
@@ -198,7 +190,6 @@ bool Px4UdpHooks::EnterPositionControl(std::string *err)
 
 bool Px4UdpHooks::LandVehicle(std::string *err)
 {
-    CancelAutoLanding();
     m_vehicleControl.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
     SetManualControlNeutral();
@@ -217,7 +208,6 @@ bool Px4UdpHooks::LandVehicle(std::string *err)
 
 bool Px4UdpHooks::ApplyMoveGoal(const MoveGoal &goal, std::string *err)
 {
-    CancelAutoLanding();
     if (goal.isRcJoystick) {
         return ApplyRcMoveGoal(goal);
     }
@@ -232,10 +222,7 @@ bool Px4UdpHooks::ApplyRcMoveGoal(const MoveGoal &goal)
     input.pitchNorm = ClampSignedUnit(goal.pitchNorm);
     input.rollNorm = ClampSignedUnit(goal.rollNorm);
     EnsureManualControlStream();
-    {
-        std::lock_guard<std::mutex> lock(m_manualControlMtx);
-        m_manualControlInput = input;
-    }
+    SetManualControlInput(input);
     SendManualControlSnapshot();
     return true;
 }
@@ -300,25 +287,6 @@ bool Px4UdpHooks::ApplyOffboardMoveGoal(const MoveGoal &goal, std::string *err)
     return true;
 }
 
-void Px4UdpHooks::CancelAutoLanding()
-{
-    bool wasActive = false;
-    {
-        std::lock_guard<std::mutex> lock(m_autoLandingMtx);
-        wasActive = m_autoLanding.active;
-        m_autoLanding = AutoLandingState{};
-    }
-    if (wasActive) {
-        SetManualControlNeutral();
-    }
-}
-
-bool Px4UdpHooks::IsAutoLandingActive() const
-{
-    std::lock_guard<std::mutex> lock(m_autoLandingMtx);
-    return m_autoLanding.active;
-}
-
 bool Px4UdpHooks::EnsureSetpointStream()
 {
     bool expected = false;
@@ -340,33 +308,62 @@ void Px4UdpHooks::DisableRemoteControl(bool stopManualStream)
     if (stopManualStream) {
         m_manualControlStreaming.store(false, std::memory_order_relaxed);
     }
-    std::lock_guard<std::mutex> lock(m_remoteModeMtx);
-    m_modeChangeRequested = false;
-    m_requestedMainMode = 0;
-    m_lastPositionModeRequest = std::chrono::steady_clock::time_point{};
+    ClearRemoteModeRequest();
 }
 
 void Px4UdpHooks::SetManualControlNeutral()
 {
-    std::lock_guard<std::mutex> lock(m_manualControlMtx);
-    m_manualControlInput = VehicleManualControl{};
+    SetManualControlInput(VehicleManualControl{});
 }
 
 void Px4UdpHooks::SetManualControlInput(const VehicleManualControl &input)
 {
-    std::lock_guard<std::mutex> lock(m_manualControlMtx);
-    m_manualControlInput = input;
+    auto snapshot = std::make_shared<const VehicleManualControl>(input);
+    std::atomic_store_explicit(&m_manualControlInput, std::move(snapshot), std::memory_order_release);
 }
 
 VehicleManualControl Px4UdpHooks::GetManualControlSnapshot() const
 {
-    std::lock_guard<std::mutex> lock(m_manualControlMtx);
-    return m_manualControlInput;
+    std::shared_ptr<const VehicleManualControl> snapshot =
+        std::atomic_load_explicit(&m_manualControlInput, std::memory_order_acquire);
+    if (!snapshot) {
+        return VehicleManualControl{};
+    }
+    return *snapshot;
 }
 
 void Px4UdpHooks::SendManualControlSnapshot()
 {
     m_vehicleControl.SendManualControl(GetManualControlSnapshot());
+}
+
+void Px4UdpHooks::ClearRemoteModeRequest()
+{
+    std::atomic_store_explicit(&m_remoteModeRequestState, std::shared_ptr<const RemoteModeRequestState>{},
+                               std::memory_order_release);
+}
+
+bool Px4UdpHooks::TryMarkFlightModeRequest(uint8_t mainMode,
+                                           bool force,
+                                           std::chrono::steady_clock::time_point now)
+{
+    auto next = std::make_shared<const RemoteModeRequestState>(RemoteModeRequestState{mainMode, now});
+    std::shared_ptr<const RemoteModeRequestState> current =
+        std::atomic_load_explicit(&m_remoteModeRequestState, std::memory_order_acquire);
+    while (true) {
+        if (current) {
+            const bool duplicateRecent =
+                current->mainMode == mainMode && (now - current->requestTime) < std::chrono::milliseconds(600);
+            if (!force && duplicateRecent) {
+                return false;
+            }
+        }
+        if (std::atomic_compare_exchange_weak_explicit(&m_remoteModeRequestState, &current, next,
+                                                       std::memory_order_acq_rel,
+                                                       std::memory_order_acquire)) {
+            return true;
+        }
+    }
 }
 
 bool Px4UdpHooks::EnsureFlightMode(uint8_t mainMode, bool force, std::string *err, const char *modeName)
@@ -378,15 +375,8 @@ bool Px4UdpHooks::EnsureFlightMode(uint8_t mainMode, bool force, std::string *er
     }
 
     const auto now = std::chrono::steady_clock::now();
-    {
-        std::lock_guard<std::mutex> lock(m_remoteModeMtx);
-        if (!force && m_modeChangeRequested && m_requestedMainMode == mainMode &&
-            (now - m_lastPositionModeRequest) < std::chrono::milliseconds(600)) {
-            return true;
-        }
-        m_modeChangeRequested = true;
-        m_requestedMainMode = mainMode;
-        m_lastPositionModeRequest = now;
+    if (!TryMarkFlightModeRequest(mainMode, force, now)) {
+        return true;
     }
 
     const bool ok = (mainMode == m_vehicleControl.PositionModeId()) ? m_vehicleControl.BeginSetModePosition()
@@ -413,124 +403,44 @@ bool Px4UdpHooks::EnsureOffboardMode(bool force, std::string *err)
     return EnsureFlightMode(m_vehicleControl.OffboardModeId(), force, err, "OFFBOARD");
 }
 
-bool Px4UdpHooks::PrepareAutoLandingRangeWindow(const VehicleDownwardRange &range,
-                                                std::chrono::steady_clock::time_point now,
-                                                bool &shouldDisarm)
-{
-    if (!m_autoLanding.active) {
-        return false;
-    }
-    if (!m_autoLanding.haveRangeWindow) {
-        m_autoLanding.haveRangeWindow = true;
-        m_autoLanding.rangeWindowMin = range.currentDistance;
-        m_autoLanding.rangeWindowMax = range.currentDistance;
-        m_autoLanding.rangeWindowStart = now;
-        return false;
-    }
-    m_autoLanding.rangeWindowMin = std::min(m_autoLanding.rangeWindowMin, range.currentDistance);
-    m_autoLanding.rangeWindowMax = std::max(m_autoLanding.rangeWindowMax, range.currentDistance);
-    if ((now - m_autoLanding.rangeWindowStart) < kAutoLandStableDuration) {
-        return false;
-    }
-    const bool rangeStable =
-        (m_autoLanding.rangeWindowMax - m_autoLanding.rangeWindowMin) <= kAutoLandStableRangeDeltaM;
-    const bool nearGround = range.currentDistance <= kAutoLandNearGroundM;
-    shouldDisarm = rangeStable && nearGround &&
-                   (m_autoLanding.lastDisarmAttempt.time_since_epoch().count() == 0 ||
-                    (now - m_autoLanding.lastDisarmAttempt) >= kAutoLandDisarmRetry);
-    return true;
-}
-
-void Px4UdpHooks::UpdateAutoLanding()
-{
-    if (!IsAutoLandingActive()) {
-        return;
-    }
-
-    VehicleManualControl input{};
-    input.throttleNorm = kAutoLandThrottleNorm;
-    SetManualControlInput(input);
-
-    VehicleDownwardRange range{};
-    if (!m_vehicleControl.GetDownwardRange(range, kAutoLandRangeMaxAgeUs) || !std::isfinite(range.currentDistance)) {
-        return;
-    }
-
-    const auto now = std::chrono::steady_clock::now();
-    bool shouldDisarm = false;
-    {
-        std::lock_guard<std::mutex> lock(m_autoLandingMtx);
-        if (!PrepareAutoLandingRangeWindow(range, now, shouldDisarm)) {
-            return;
-        }
-        if (shouldDisarm) {
-            m_autoLanding.lastDisarmAttempt = now;
-        } else {
-            m_autoLanding.rangeWindowMin = range.currentDistance;
-            m_autoLanding.rangeWindowMax = range.currentDistance;
-            m_autoLanding.rangeWindowStart = now;
-        }
-    }
-
-    if (!shouldDisarm) {
-        return;
-    }
-
-    BeginAutoLandingDisarm();
-    CancelAutoLanding();
-    SetManualControlNeutral();
-    SendManualControlSnapshot();
-    DisableRemoteControl(true);
-    std::cerr << "[land] touchdown detected by range stability, disarmed\n";
-}
-
-void Px4UdpHooks::BeginAutoLandingDisarm()
-{
-    if (m_vehicleControl.BeginArm(false)) {
-        TrackCommandAck(VehicleCommandAckKind::ArmDisarm, "auto land disarm");
-    }
-}
-
 void Px4UdpHooks::TrackCommandAck(VehicleCommandAckKind command, const std::string &label)
 {
-    std::lock_guard<std::mutex> lock(m_commandAckMtx);
-    m_pendingCommandAck.active = true;
-    m_pendingCommandAck.command = command;
-    m_pendingCommandAck.label = label;
-    m_pendingCommandAck.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(900);
+    PendingCommandAck pending{};
+    pending.command = command;
+    pending.label = label;
+    pending.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(900);
+    auto snapshot = std::make_shared<const PendingCommandAck>(std::move(pending));
+    std::atomic_store_explicit(&m_pendingCommandAck, std::move(snapshot), std::memory_order_release);
 }
 
 void Px4UdpHooks::StepCommandAck()
 {
-    PendingCommandAck pending{};
-    {
-        std::lock_guard<std::mutex> lock(m_commandAckMtx);
-        pending = m_pendingCommandAck;
-    }
-    if (!pending.active) {
+    std::shared_ptr<const PendingCommandAck> pending =
+        std::atomic_load_explicit(&m_pendingCommandAck, std::memory_order_acquire);
+    if (!pending) {
         return;
     }
 
     uint8_t result = 255;
-    if (m_vehicleControl.TryConsumeCommandAck(pending.command, result)) {
-        std::cerr << "[px4] " << pending.label << " ack=" << static_cast<int>(result) << "\n";
-        ClearCommandAckIfCurrent(pending.command, pending.label);
+    if (m_vehicleControl.TryConsumeCommandAck(pending->command, result)) {
+        std::cerr << "[px4] " << pending->label << " ack=" << static_cast<int>(result) << "\n";
+        ClearCommandAckIfCurrent(pending);
         return;
     }
-    if (std::chrono::steady_clock::now() < pending.deadline) {
+    if (std::chrono::steady_clock::now() < pending->deadline) {
         return;
     }
-    std::cerr << "[px4] " << pending.label << " ack timeout\n";
-    ClearCommandAckIfCurrent(pending.command, pending.label);
+    std::cerr << "[px4] " << pending->label << " ack timeout\n";
+    ClearCommandAckIfCurrent(pending);
 }
 
-void Px4UdpHooks::ClearCommandAckIfCurrent(VehicleCommandAckKind command, const std::string &label)
+void Px4UdpHooks::ClearCommandAckIfCurrent(const std::shared_ptr<const PendingCommandAck> &pending)
 {
-    std::lock_guard<std::mutex> lock(m_commandAckMtx);
-    if (!m_pendingCommandAck.active || m_pendingCommandAck.command != command || m_pendingCommandAck.label != label) {
-        return;
-    }
-    m_pendingCommandAck = PendingCommandAck{};
+    std::shared_ptr<const PendingCommandAck> expected = pending;
+    std::atomic_compare_exchange_strong_explicit(&m_pendingCommandAck, &expected,
+                                                 std::shared_ptr<const PendingCommandAck>{},
+                                                 std::memory_order_acq_rel,
+                                                 std::memory_order_acquire);
 }
 
 void Px4UdpHooks::StepManualControl()
@@ -540,7 +450,6 @@ void Px4UdpHooks::StepManualControl()
     if (m_vehicleControl.GetFlightModeInfo(flightMode) && m_publishVehicleFlightState) {
         m_publishVehicleFlightState(flightMode.armed, flightMode.mainMode, flightMode.subMode);
     }
-    UpdateAutoLanding();
     if (m_manualControlStreaming.load(std::memory_order_relaxed)) {
         SendManualControlSnapshot();
     }

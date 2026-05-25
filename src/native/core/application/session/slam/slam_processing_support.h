@@ -43,13 +43,13 @@ class AutoSlamModeController {
                               size_t rightFeatureCount);
 
   private:
-    static constexpr int kFramesToLocalization = 12;
-    static constexpr int kFramesToMapping = 4;
-    static constexpr double kStableFrameGapMs = 75.0;
-    static constexpr size_t kStableLeftFeatures = 180;
-    static constexpr size_t kStableRightFeatures = 40;
-    static constexpr size_t kWeakLeftFeatures = 80;
-    static constexpr size_t kWeakRightFeatures = 20;
+    static constexpr int FRAMES_TO_LOCALIZATION = 12;
+    static constexpr int FRAMES_TO_MAPPING = 4;
+    static constexpr double STABLE_FRAME_GAP_MS = 75.0;
+    static constexpr size_t STABLE_LEFT_FEATURES = 180;
+    static constexpr size_t STABLE_RIGHT_FEATURES = 40;
+    static constexpr size_t WEAK_LEFT_FEATURES = 80;
+    static constexpr size_t WEAK_RIGHT_FEATURES = 20;
 
     SlamOperationMode m_effectiveMode{SlamOperationMode::Mapping};
     int m_stableFrames{0};

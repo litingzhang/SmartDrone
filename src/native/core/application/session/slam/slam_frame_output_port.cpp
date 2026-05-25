@@ -14,9 +14,9 @@
 namespace SmartDrone::Core::Application {
 namespace {
 
-constexpr uint64_t kSlamDfxLogEveryNFrames = 30;
-constexpr int kVisualFeatureStereoWeakMatchThreshold = 24;
-constexpr double kDfxTimingEmaAlpha = 0.18;
+constexpr uint64_t SLAM_DFX_LOG_EVERY_N_FRAMES = 30;
+constexpr int VISUAL_FEATURE_STEREO_WEAK_MATCH_THRESHOLD = 24;
+constexpr double DFX_TIMING_EMA_ALPHA = 0.18;
 
 double UpdateEma(double current, double sample)
 {
@@ -26,8 +26,8 @@ double UpdateEma(double current, double sample)
     if (!(current > 0.0)) {
         return sample;
     }
-    return (1.0 - kDfxTimingEmaAlpha) * current +
-           kDfxTimingEmaAlpha * sample;
+    return (1.0 - DFX_TIMING_EMA_ALPHA) * current +
+           DFX_TIMING_EMA_ALPHA * sample;
 }
 
 LivePoseQuality ToLivePoseQuality(
@@ -214,7 +214,7 @@ SlamFrameOutputPort::DfxSample SlamFrameOutputPort::MakeDfxSample(
     const bool stereoWeak = slamOutput.usedVisualFeatureFrontend &&
                             !m_ctx.monoMode &&
                             slamOutput.visualFeatureMatchedStereoCount <
-                                kVisualFeatureStereoWeakMatchThreshold;
+                                VISUAL_FEATURE_STEREO_WEAK_MATCH_THRESHOLD;
     return {frame, tracked, published, frame.slamInput, slamOutput,
             published.poseResult, MakeDfxTiming(frame, tracked, published),
             stereoWeak};
@@ -242,8 +242,8 @@ bool SlamFrameOutputPort::ShouldLogDfx(const DfxSample &sample) const
 {
     const auto &output = sample.slamOutput;
     const uint64_t frameIndex = m_state.frameIndex.load();
-    const bool periodic = kSlamDfxLogEveryNFrames > 0 &&
-                          (frameIndex % kSlamDfxLogEveryNFrames) == 0;
+    const bool periodic = SLAM_DFX_LOG_EVERY_N_FRAMES > 0 &&
+                          (frameIndex % SLAM_DFX_LOG_EVERY_N_FRAMES) == 0;
     const bool abnormal = !sample.poseResult.poseEstimate.valid ||
                           sample.published.trackingState <= 0 ||
                           sample.timing.totalMs > 80.0 ||

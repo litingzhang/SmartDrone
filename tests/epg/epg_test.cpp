@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <stdexcept>
@@ -21,6 +22,8 @@
 #include "core/application/runtime/epg_redeploy_coordinator.h"
 
 namespace {
+
+namespace fs = std::filesystem;
 
 using Epg::EventPipelineGraph;
 using Epg::ITask;
@@ -68,12 +71,12 @@ struct CalibResourceReady {};
 struct CalibTick {};
 struct CalibStereoFrame {};
 struct CalibSavePair {};
+struct CalibImuSample {};
 struct CalibCaptureDone {};
 struct CalibStopRequest {};
-struct CalibStorageStatus {};
-struct CalibImuStatus {};
 struct CalibPreviewStatus {};
 struct CalibFlushRequest {};
+struct CalibStorageFlushed {};
 struct CalibStatus {};
 struct SystemRuntimePulse {};
 
@@ -401,12 +404,12 @@ Registry MakeCalibShapeRegistry()
     registry.RegisterMessageType<CalibTick>("CalibTick");
     registry.RegisterMessageType<CalibStereoFrame>("CalibStereoFrame");
     registry.RegisterMessageType<CalibSavePair>("CalibSavePair");
+    registry.RegisterMessageType<CalibImuSample>("CalibImuSample");
     registry.RegisterMessageType<CalibCaptureDone>("CalibCaptureDone");
     registry.RegisterMessageType<CalibStopRequest>("CalibStopRequest");
-    registry.RegisterMessageType<CalibStorageStatus>("CalibStorageStatus");
-    registry.RegisterMessageType<CalibImuStatus>("CalibImuStatus");
     registry.RegisterMessageType<CalibPreviewStatus>("CalibPreviewStatus");
     registry.RegisterMessageType<CalibFlushRequest>("CalibFlushRequest");
+    registry.RegisterMessageType<CalibStorageFlushed>("CalibStorageFlushed");
     registry.RegisterMessageType<CalibStatus>("CalibStatus");
 
     const auto factory = []() {
@@ -503,13 +506,39 @@ TEST(EventPipelineGraph, OwnsRegistryAfterConstruction)
     EXPECT_GT(source->second.loopCount, 0u);
 }
 
+fs::path FindRepoRoot()
+{
+    fs::path current = fs::current_path();
+    while (!current.empty()) {
+        if (fs::exists(current / "config" / "epg") &&
+            fs::exists(current / "tests" / "epg")) {
+            return current;
+        }
+        const fs::path parent = current.parent_path();
+        if (parent == current) {
+            break;
+        }
+        current = parent;
+    }
+    throw std::runtime_error("failed to locate SmartDrone repository root");
+}
+
+fs::path TestEpgPath(const std::string &relativePath)
+{
+    return FindRepoRoot() / "tests" / "epg" / relativePath;
+}
+
+fs::path RepoPath(const std::string &relativePath)
+{
+    return FindRepoRoot() / relativePath;
+}
+
 void RunTopologyFromJsonFile(const std::string &jsonFile,
                              const std::vector<std::string> &queues,
                              const std::vector<std::string> &tasks)
 {
     RunTopology(
-        Epg::ParseGraphConfigJsonFile(
-            std::string(TEST_EPG_DIR) + "/" + jsonFile),
+        Epg::ParseGraphConfigJsonFile(TestEpgPath(jsonFile).string()),
         queues,
         tasks);
 }
@@ -521,7 +550,7 @@ void RunTopologyFromDotFile(const std::string &dotFile,
     auto registry = MakeRegistry();
     RunTopology(
         Epg::ParseGraphConfigDotFile(
-            std::string(TEST_EPG_DIR) + "/" + dotFile,
+            TestEpgPath(dotFile).string(),
             "cluster_test_graph",
             registry),
         queues,
@@ -530,8 +559,8 @@ void RunTopologyFromDotFile(const std::string &dotFile,
 
 std::string RuntimeTopologyPath()
 {
-    return std::string(TEST_EPG_DIR) + "/../../" +
-           EpgManifestForDomain(EpgDomain::SystemRuntime).topologyPath;
+    return RepoPath(EpgManifestForDomain(EpgDomain::SystemRuntime).topologyPath)
+        .string();
 }
 
 SmartDrone::Core::Application::EpgTaskManifest MakeValidTestManifest()
@@ -737,12 +766,20 @@ std::string NonReplaceableTaskProfileJson()
 } // namespace
 
 #include "epg_test_runtime_queue_cases.h"
+#include "epg_test_runtime_topology_helpers.h"
 #include "epg_test_runtime_topology_cases.h"
+#include "epg_test_runtime_lifecycle_helpers.h"
 #include "epg_test_runtime_lifecycle_cases.h"
 #include "epg_test_runtime_validation_cases.h"
+#include "epg_test_manifest_catalog_helpers.h"
 #include "epg_test_manifest_catalog_cases.h"
+#include "epg_test_manifest_profile_helpers.h"
 #include "epg_test_manifest_profile_cases.h"
+#include "epg_test_optimizer_apply_helpers.h"
 #include "epg_test_optimizer_apply_cases.h"
+#include "epg_test_optimizer_topology_helpers.h"
 #include "epg_test_optimizer_topology_cases.h"
+#include "epg_test_optimizer_failure_helpers.h"
 #include "epg_test_optimizer_failure_cases.h"
+#include "epg_test_config_helpers.h"
 #include "epg_test_config_cases.h"

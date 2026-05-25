@@ -15,7 +15,7 @@
 namespace SmartDrone::Core::Application {
 namespace {
 
-constexpr int64_t kPointCloudUpdateIntervalNs = 200000000LL;
+constexpr int64_t POINT_CLOUD_UPDATE_INTERVAL_NS = 200000000LL;
 
 std::pair<int, int> ComputeVisualFeatureInputBudget(int baseWidth,
                                                     int baseHeight,
@@ -369,7 +369,7 @@ void SlamFrameInputPort::PopulateFrameProcessingFlags(FrameMetadata &metadata)
         !metadata.debugRightOnlyFeatures && metadata.sendMap &&
         (metadata.captureTimestampNs -
          m_outputState.lastPointCloudUpdateNs.load()) >=
-            kPointCloudUpdateIntervalNs;
+            POINT_CLOUD_UPDATE_INTERVAL_NS;
 }
 
 void SlamFrameInputPort::MaybeLogFrameGap(
@@ -384,10 +384,10 @@ void SlamFrameInputPort::MaybeLogFrameGap(
     if (metadata.frameGapMs <= expectedFrameGapMs) {
         return;
     }
-    constexpr int64_t kGapWarnMinIntervalNs = 1000000000LL;
+    constexpr int64_t GAP_WARN_MIN_INTERVAL_NS = 1000000000LL;
     if (m_state.lastFrameGapWarnLogNs != 0 &&
         (metadata.logicalFrameTimestampNs - m_state.lastFrameGapWarnLogNs) <
-            kGapWarnMinIntervalNs) {
+            GAP_WARN_MIN_INTERVAL_NS) {
         return;
     }
     std::cerr << "[slam_gap_warn] frame_gap_ms=" << metadata.frameGapMs

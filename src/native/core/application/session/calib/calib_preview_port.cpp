@@ -1,7 +1,6 @@
 #include "core/application/session/calib/calib_preview_port.h"
 
 #include <iostream>
-#include <mutex>
 
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/application_runtime_factories.h"
@@ -20,7 +19,6 @@ class CalibPreviewPort::Impl final {
 
     bool Open()
     {
-        std::lock_guard<std::mutex> lock(m_mu);
         if (!m_aliases.udpEnable || !m_aliases.sendImage) {
             return true;
         }
@@ -34,7 +32,6 @@ class CalibPreviewPort::Impl final {
 
     bool Enqueue(const CalibStereoFrame &frame)
     {
-        std::lock_guard<std::mutex> lock(m_mu);
         if (!m_aliases.udpEnable || !m_aliases.sendImage) {
             return true;
         }
@@ -47,7 +44,6 @@ class CalibPreviewPort::Impl final {
 
     void Close()
     {
-        std::lock_guard<std::mutex> lock(m_mu);
         if (!m_opened) {
             return;
         }
@@ -58,12 +54,10 @@ class CalibPreviewPort::Impl final {
 
     bool Opened() const
     {
-        std::lock_guard<std::mutex> lock(m_mu);
         return m_opened;
     }
 
   private:
-    mutable std::mutex m_mu;
     const MainRuntimeAliases &m_aliases;
     std::unique_ptr<IPreviewOutputRuntime> m_previewOutput;
     bool m_opened{false};

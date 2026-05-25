@@ -11,8 +11,8 @@
 namespace SmartDrone::Core::Application {
 namespace {
 
-constexpr const char *kDiscoveryMagic = "smartdrone_discovery";
-constexpr auto kDiscoveryOpenRetryPeriod = std::chrono::seconds(1);
+constexpr const char *DISCOVERY_MAGIC = "smartdrone_discovery";
+constexpr auto DISCOVERY_OPEN_RETRY_PERIOD = std::chrono::seconds(1);
 
 bool SetSocketNonBlocking(int fd)
 {
@@ -51,13 +51,13 @@ bool DiscoveryBeaconRuntime::Start()
 
     m_fd = ::socket(AF_INET, SOCK_DGRAM, 0);
     if (m_fd < 0) {
-        m_nextOpenAttempt = now + kDiscoveryOpenRetryPeriod;
+        m_nextOpenAttempt = now + DISCOVERY_OPEN_RETRY_PERIOD;
         std::cerr << "[discovery] socket open failed\n";
         return false;
     }
     if (!SetSocketNonBlocking(m_fd)) {
         Stop();
-        m_nextOpenAttempt = now + kDiscoveryOpenRetryPeriod;
+        m_nextOpenAttempt = now + DISCOVERY_OPEN_RETRY_PERIOD;
         std::cerr << "[discovery] socket nonblock failed\n";
         return false;
     }
@@ -68,7 +68,7 @@ bool DiscoveryBeaconRuntime::Start()
     m_dst.sin_family = AF_INET;
     m_dst.sin_port = htons(static_cast<uint16_t>(m_discoveryPort));
     m_dst.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-    m_payload = std::string(kDiscoveryMagic) + ";device=cm5;cmd=" +
+    m_payload = std::string(DISCOVERY_MAGIC) + ";device=cm5;cmd=" +
                 std::to_string(m_cmdPort) + ";video=" +
                 std::to_string(m_videoPort);
     m_nextOpenAttempt = {};

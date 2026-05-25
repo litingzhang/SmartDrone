@@ -16,22 +16,22 @@ namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
-constexpr float kLkForwardAxisGain = 1.0f;
-constexpr float kLkMaxForwardStepMeters = 0.35f;
-constexpr float kLkMaxLateralStepMeters = 0.35f;
-constexpr float kLkMaxVerticalStepMeters = 0.35f;
-constexpr int kLkRecoveryMinTracks = 24;
-constexpr int kLkGridCols = 8;
-constexpr int kLkGridRows = 6;
-constexpr int kLkGridCellCount = kLkGridCols * kLkGridRows;
-constexpr int kLkTargetTracksPerCell = 12;
-constexpr int kLkMinTracksPerCell = 6;
-constexpr size_t kLkMaxTracks = 576;
-constexpr int kLkGfttMaxCorners = 900;
-constexpr float kLkMinConsistentDisparityPx = 1.0f;
-constexpr float kLkDisparityNeighborhoodTolerancePx = 1.5f;
-constexpr int kLkDisparityNeighborhoodRadius = 1;
-constexpr float kLkMinSeedDistancePx = 3.5f;
+constexpr float LK_FORWARD_AXIS_GAIN = 1.0f;
+constexpr float LK_MAX_FORWARD_STEP_METERS = 0.35f;
+constexpr float LK_MAX_LATERAL_STEP_METERS = 0.35f;
+constexpr float LK_MAX_VERTICAL_STEP_METERS = 0.35f;
+constexpr int LK_RECOVERY_MIN_TRACKS = 24;
+constexpr int LK_GRID_COLS = 8;
+constexpr int LK_GRID_ROWS = 6;
+constexpr int LK_GRID_CELL_COUNT = LK_GRID_COLS * LK_GRID_ROWS;
+constexpr int LK_TARGET_TRACKS_PER_CELL = 12;
+constexpr int LK_MIN_TRACKS_PER_CELL = 6;
+constexpr size_t LK_MAX_TRACKS = 576;
+constexpr int LK_GFTT_MAX_CORNERS = 900;
+constexpr float LK_MIN_CONSISTENT_DISPARITY_PX = 1.0f;
+constexpr float LK_DISPARITY_NEIGHBORHOOD_TOLERANCE_PX = 1.5f;
+constexpr int LK_DISPARITY_NEIGHBORHOOD_RADIUS = 1;
+constexpr float LK_MIN_SEED_DISTANCE_PX = 3.5f;
 
 int LkGridCellForPoint(const cv::Point2f &pt, const cv::Size &size)
 {
@@ -39,16 +39,16 @@ int LkGridCellForPoint(const cv::Point2f &pt, const cv::Size &size)
         pt.x >= static_cast<float>(size.width) || pt.y >= static_cast<float>(size.height)) {
         return -1;
     }
-    const int cellWidth = std::max(1, (size.width + kLkGridCols - 1) / kLkGridCols);
-    const int cellHeight = std::max(1, (size.height + kLkGridRows - 1) / kLkGridRows);
-    const int col = std::clamp(static_cast<int>(pt.x) / cellWidth, 0, kLkGridCols - 1);
-    const int row = std::clamp(static_cast<int>(pt.y) / cellHeight, 0, kLkGridRows - 1);
-    return row * kLkGridCols + col;
+    const int cellWidth = std::max(1, (size.width + LK_GRID_COLS - 1) / LK_GRID_COLS);
+    const int cellHeight = std::max(1, (size.height + LK_GRID_ROWS - 1) / LK_GRID_ROWS);
+    const int col = std::clamp(static_cast<int>(pt.x) / cellWidth, 0, LK_GRID_COLS - 1);
+    const int row = std::clamp(static_cast<int>(pt.y) / cellHeight, 0, LK_GRID_ROWS - 1);
+    return row * LK_GRID_COLS + col;
 }
 
-std::array<int, kLkGridCellCount> CountLkTracksByCell(const std::vector<LkStereoTrack> &tracks, const cv::Size &size)
+std::array<int, LK_GRID_CELL_COUNT> CountLkTracksByCell(const std::vector<LkStereoTrack> &tracks, const cv::Size &size)
 {
-    std::array<int, kLkGridCellCount> counts{};
+    std::array<int, LK_GRID_CELL_COUNT> counts{};
     for (const LkStereoTrack &track : tracks) {
         const int cell = LkGridCellForPoint(track.left, size);
         if (cell >= 0) {
@@ -60,7 +60,7 @@ std::array<int, kLkGridCellCount> CountLkTracksByCell(const std::vector<LkStereo
 
 bool LkTrackNearExisting(const cv::Point2f &left, const cv::Point2f &right, const std::vector<LkStereoTrack> &tracks)
 {
-    const float minDistSq = kLkMinSeedDistancePx * kLkMinSeedDistancePx;
+    const float minDistSq = LK_MIN_SEED_DISTANCE_PX * LK_MIN_SEED_DISTANCE_PX;
     for (const LkStereoTrack &track : tracks) {
         const cv::Point2f leftDelta = track.left - left;
         const cv::Point2f rightDelta = track.right - right;
@@ -106,7 +106,7 @@ std::vector<cv::Point2f> SelectGfttPointsGridBalanced(const std::vector<cv::Poin
         return {};
     }
 
-    std::array<int, kLkGridCellCount> counts{};
+    std::array<int, LK_GRID_CELL_COUNT> counts{};
     std::vector<cv::Point2f> selected;
     selected.reserve(std::min(static_cast<size_t>(maxTotal), points.size()));
     for (const cv::Point2f &point : points) {
@@ -141,11 +141,11 @@ std::vector<LkStereoTrack> SelectLkTracksGridBalanced(const std::vector<LkStereo
         return lhs.age < rhs.age;
     });
 
-    std::array<int, kLkGridCellCount> counts{};
+    std::array<int, LK_GRID_CELL_COUNT> counts{};
     std::vector<LkStereoTrack> selected;
-    selected.reserve(std::min(kLkMaxTracks, ranked.size()));
+    selected.reserve(std::min(LK_MAX_TRACKS, ranked.size()));
     for (const LkStereoTrack &track : ranked) {
-        if (selected.size() >= kLkMaxTracks) {
+        if (selected.size() >= LK_MAX_TRACKS) {
             break;
         }
         const int cell = LkGridCellForPoint(track.left, size);
@@ -153,7 +153,7 @@ std::vector<LkStereoTrack> SelectLkTracksGridBalanced(const std::vector<LkStereo
             continue;
         }
         int &cellCount = counts[static_cast<size_t>(cell)];
-        if (cellCount >= kLkTargetTracksPerCell) {
+        if (cellCount >= LK_TARGET_TRACKS_PER_CELL) {
             continue;
         }
         selected.push_back(track);
@@ -164,11 +164,11 @@ std::vector<LkStereoTrack> SelectLkTracksGridBalanced(const std::vector<LkStereo
 
 bool LkHasDegradedGridCell(const std::vector<LkStereoTrack> &tracks, const cv::Size &size)
 {
-    if (tracks.size() < static_cast<size_t>(kLkRecoveryMinTracks)) {
+    if (tracks.size() < static_cast<size_t>(LK_RECOVERY_MIN_TRACKS)) {
         return true;
     }
     const auto counts = CountLkTracksByCell(tracks, size);
-    return std::any_of(counts.begin(), counts.end(), [](int count) { return count < kLkMinTracksPerCell; });
+    return std::any_of(counts.begin(), counts.end(), [](int count) { return count < LK_MIN_TRACKS_PER_CELL; });
 }
 
 bool IsHorizontalLateralFlow(const std::vector<cv::Point2f> &prevPts, const std::vector<cv::Point2f> &currPts,
@@ -195,7 +195,7 @@ bool IsHorizontalLateralFlow(const std::vector<cv::Point2f> &prevPts, const std:
             continue;
         }
         const cv::Point2f flow = p1 - p0;
-        if (cv::norm(flow) > kLkMaxFlowPx) {
+        if (cv::norm(flow) > LK_MAX_FLOW_PX) {
             continue;
         }
         const cv::Point2f radial = p0 - center;
@@ -227,13 +227,13 @@ Sophus::SE3f StabilizeLkCameraDelta(const Sophus::SE3f &delta, bool horizontalLa
         return Sophus::SE3f(delta.so3(), Eigen::Vector3f::Zero());
     }
 
-    t.x() = std::clamp(t.x(), -kLkMaxLateralStepMeters, kLkMaxLateralStepMeters);
-    t.y() = std::clamp(t.y(), -kLkMaxVerticalStepMeters, kLkMaxVerticalStepMeters);
+    t.x() = std::clamp(t.x(), -LK_MAX_LATERAL_STEP_METERS, LK_MAX_LATERAL_STEP_METERS);
+    t.y() = std::clamp(t.y(), -LK_MAX_VERTICAL_STEP_METERS, LK_MAX_VERTICAL_STEP_METERS);
     if (horizontalLateralFlow) {
         const float maxForwardFromLateral = std::max(0.015f, 0.25f * std::abs(t.x()));
         t.z() = std::clamp(t.z(), -maxForwardFromLateral, maxForwardFromLateral);
     }
-    t.z() = std::clamp(t.z() * kLkForwardAxisGain, -kLkMaxForwardStepMeters, kLkMaxForwardStepMeters);
+    t.z() = std::clamp(t.z() * LK_FORWARD_AXIS_GAIN, -LK_MAX_FORWARD_STEP_METERS, LK_MAX_FORWARD_STEP_METERS);
     return Sophus::SE3f(delta.so3(), t);
 }
 
@@ -246,22 +246,22 @@ bool ReadConsistentDisparity(const cv::Mat &disp, const cv::Point2f &pt, float &
 
     const int cx = static_cast<int>(std::lround(pt.x));
     const int cy = static_cast<int>(std::lround(pt.y));
-    if (cx < kLkDisparityNeighborhoodRadius || cy < kLkDisparityNeighborhoodRadius ||
-        cx >= disp.cols - kLkDisparityNeighborhoodRadius || cy >= disp.rows - kLkDisparityNeighborhoodRadius) {
+    if (cx < LK_DISPARITY_NEIGHBORHOOD_RADIUS || cy < LK_DISPARITY_NEIGHBORHOOD_RADIUS ||
+        cx >= disp.cols - LK_DISPARITY_NEIGHBORHOOD_RADIUS || cy >= disp.rows - LK_DISPARITY_NEIGHBORHOOD_RADIUS) {
         return false;
     }
 
     const float center = disp.at<float>(cy, cx);
-    if (!(center >= kLkMinConsistentDisparityPx) || center > kStereoMaxDisparityPx || !std::isfinite(center)) {
+    if (!(center >= LK_MIN_CONSISTENT_DISPARITY_PX) || center > STEREO_MAX_DISPARITY_PX || !std::isfinite(center)) {
         return false;
     }
 
     std::vector<float> neighborhood;
     neighborhood.reserve(9);
-    for (int dy = -kLkDisparityNeighborhoodRadius; dy <= kLkDisparityNeighborhoodRadius; ++dy) {
-        for (int dx = -kLkDisparityNeighborhoodRadius; dx <= kLkDisparityNeighborhoodRadius; ++dx) {
+    for (int dy = -LK_DISPARITY_NEIGHBORHOOD_RADIUS; dy <= LK_DISPARITY_NEIGHBORHOOD_RADIUS; ++dy) {
+        for (int dx = -LK_DISPARITY_NEIGHBORHOOD_RADIUS; dx <= LK_DISPARITY_NEIGHBORHOOD_RADIUS; ++dx) {
             const float value = disp.at<float>(cy + dy, cx + dx);
-            if (value >= kLkMinConsistentDisparityPx && value <= kStereoMaxDisparityPx && std::isfinite(value)) {
+            if (value >= LK_MIN_CONSISTENT_DISPARITY_PX && value <= STEREO_MAX_DISPARITY_PX && std::isfinite(value)) {
                 neighborhood.push_back(value);
             }
         }
@@ -274,7 +274,7 @@ bool ReadConsistentDisparity(const cv::Mat &disp, const cv::Point2f &pt, float &
     std::nth_element(neighborhood.begin(), neighborhood.begin() + static_cast<std::ptrdiff_t>(mid),
                      neighborhood.end());
     const float median = neighborhood[mid];
-    if (std::fabs(center - median) > kLkDisparityNeighborhoodTolerancePx) {
+    if (std::fabs(center - median) > LK_DISPARITY_NEIGHBORHOOD_TOLERANCE_PX) {
         return false;
     }
     disparity = median;
@@ -307,6 +307,56 @@ int LkPerFramePnPMethod()
     return cv::SOLVEPNP_EPNP;
 }
 
+cv::Mat BuildLkGfttDisparity(const cv::Mat &leftGray, const cv::Mat &rightGray)
+{
+    cv::Mat disp32f;
+    const int numDisparities =
+        std::max(16, ((leftGray.cols / 8 + 15) / 16) * 16);
+    cv::Ptr<cv::StereoSGBM> sgbm = cv::StereoSGBM::create(
+        0, numDisparities, 5, 8 * 5 * 5, 32 * 5 * 5, 1, 31, 8, 60, 2,
+        cv::StereoSGBM::MODE_SGBM_3WAY);
+    cv::Mat disp16;
+    sgbm->compute(leftGray, rightGray, disp16);
+    disp16.convertTo(disp32f, CV_32F, 1.0 / 16.0);
+    return disp32f;
+}
+
+std::vector<cv::Point2f> DetectLkGfttSeedPoints(const cv::Mat &leftGray)
+{
+    std::vector<cv::Point2f> leftPoints;
+    cv::goodFeaturesToTrack(
+        leftGray, leftPoints, LK_GFTT_MAX_CORNERS, LK_GFTT_QUALITY_LEVEL,
+        LK_GFTT_MIN_DISTANCE_PX, cv::Mat(), LK_GFTT_BLOCK_SIZE, false,
+        LK_GFTT_HARRIS_K);
+    return leftPoints;
+}
+
+bool TryBuildLkGfttSeed(const cv::Mat &disp32f, const cv::Mat &left32f,
+                        const cv::Mat &right32f, const cv::Point2f &leftPt,
+                        LkStereoTrack &seed)
+{
+    const int ix = static_cast<int>(std::lround(leftPt.x));
+    const int iy = static_cast<int>(std::lround(leftPt.y));
+    if (ix < 0 || iy < 0 || ix >= disp32f.cols || iy >= disp32f.rows) {
+        return false;
+    }
+    const float expectedDisparity = disp32f.at<float>(iy, ix);
+    if (!(expectedDisparity >= StereoMinDisparityPx()) ||
+        expectedDisparity > STEREO_MAX_DISPARITY_PX ||
+        !std::isfinite(expectedDisparity)) {
+        return false;
+    }
+    cv::Point2f rightPt;
+    float zncc = -1.0f;
+    if (!FindRightPointByStereoZnccAroundDisparity(
+            {left32f, leftPt, right32f, expectedDisparity, rightPt, zncc})) {
+        return false;
+    }
+    seed = LkStereoTrack{
+        leftPt, rightPt, std::clamp((zncc + 1.0f) * 0.5f, 0.0f, 1.0f), 0};
+    return true;
+}
+
 std::vector<LkStereoTrack> BuildLkGfttStereoSeeds(const cv::Mat &leftGray, const cv::Mat &rightGray)
 {
     std::vector<LkStereoTrack> seeds;
@@ -314,45 +364,18 @@ std::vector<LkStereoTrack> BuildLkGfttStereoSeeds(const cv::Mat &leftGray, const
         return seeds;
     }
 
-    cv::Mat disp32f;
-    {
-        const int numDisparities = std::max(16, ((leftGray.cols / 8 + 15) / 16) * 16);
-        cv::Ptr<cv::StereoSGBM> sgbm = cv::StereoSGBM::create(
-            0, numDisparities, 5, 8 * 5 * 5, 32 * 5 * 5, 1, 31, 8, 60, 2, cv::StereoSGBM::MODE_SGBM_3WAY);
-        cv::Mat disp16;
-        sgbm->compute(leftGray, rightGray, disp16);
-        disp16.convertTo(disp32f, CV_32F, 1.0 / 16.0);
-    }
-
-    std::vector<cv::Point2f> leftPoints;
-    cv::goodFeaturesToTrack(leftGray, leftPoints, kLkGfttMaxCorners, kLkGfttQualityLevel, kLkGfttMinDistancePx,
-                            cv::Mat(), kLkGfttBlockSize, false, kLkGfttHarrisK);
-    if (leftPoints.empty()) {
-        return seeds;
-    }
-
+    const cv::Mat disp32f = BuildLkGfttDisparity(leftGray, rightGray);
+    const std::vector<cv::Point2f> leftPoints = DetectLkGfttSeedPoints(leftGray);
     cv::Mat left32f;
     cv::Mat right32f;
     leftGray.convertTo(left32f, CV_32F);
     rightGray.convertTo(right32f, CV_32F);
     seeds.reserve(leftPoints.size());
     for (const cv::Point2f &leftPt : leftPoints) {
-        const int ix = static_cast<int>(std::lround(leftPt.x));
-        const int iy = static_cast<int>(std::lround(leftPt.y));
-        if (ix < 0 || iy < 0 || ix >= disp32f.cols || iy >= disp32f.rows) {
-            continue;
+        LkStereoTrack seed;
+        if (TryBuildLkGfttSeed(disp32f, left32f, right32f, leftPt, seed)) {
+            seeds.push_back(seed);
         }
-        const float expectedDisparity = disp32f.at<float>(iy, ix);
-        if (!(expectedDisparity >= StereoMinDisparityPx()) || expectedDisparity > kStereoMaxDisparityPx ||
-            !std::isfinite(expectedDisparity)) {
-            continue;
-        }
-        cv::Point2f rightPt;
-        float zncc = -1.0f;
-        if (!FindRightPointByStereoZnccAroundDisparity(left32f, leftPt, right32f, expectedDisparity, rightPt, zncc)) {
-            continue;
-        }
-        seeds.push_back(LkStereoTrack{leftPt, rightPt, std::clamp((zncc + 1.0f) * 0.5f, 0.0f, 1.0f), 0});
     }
     return seeds;
 }
@@ -365,7 +388,7 @@ void AppendLkSeedsForDegradedCells(const std::vector<LkStereoTrack> &seeds, cons
     }
     auto counts = CountLkTracksByCell(tracks, size);
     for (const LkStereoTrack &seed : seeds) {
-        if (tracks.size() >= kLkMaxTracks) {
+        if (tracks.size() >= LK_MAX_TRACKS) {
             return;
         }
         const int cell = LkGridCellForPoint(seed.left, size);
@@ -373,7 +396,7 @@ void AppendLkSeedsForDegradedCells(const std::vector<LkStereoTrack> &seeds, cons
             continue;
         }
         int &cellCount = counts[static_cast<size_t>(cell)];
-        if (cellCount >= kLkTargetTracksPerCell) {
+        if (cellCount >= LK_TARGET_TRACKS_PER_CELL) {
             continue;
         }
         if (LkTrackNearExisting(seed.left, seed.right, tracks)) {

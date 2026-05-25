@@ -42,6 +42,24 @@ class SlamEngineAdapter final : public Core::Ports::ISlamEngine, public ISlamRun
   private:
     friend class SlamEngineAccess;
 
+    struct RealtimePosePredictionRequest {
+        Core::Ports::PoseEstimate &pose;
+        bool &poseValid;
+        double timestampSec;
+        double dt;
+        int trackingState;
+        bool rawIdentity;
+    };
+
+    struct AlphaBetaVelocityUpdateRequest {
+        float innovationX;
+        float innovationY;
+        float innovationZ;
+        double dt;
+        float beta;
+        float maxSpeed;
+    };
+
     void StabilizeOutputPose(Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec, int trackingState);
     void MaintainRealtimePoseContinuity(Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
                                         int trackingState);
@@ -52,8 +70,7 @@ class SlamEngineAdapter final : public Core::Ports::ISlamEngine, public ISlamRun
                                   double dt, int trackingState);
     bool AcceptRealtimeBootstrapPose(Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec,
                                      int trackingState, bool rawIdentity);
-    bool PredictRealtimePose(Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec, double dt,
-                             int trackingState, bool rawIdentity);
+    bool PredictRealtimePose(const RealtimePosePredictionRequest &request);
     bool HandleRealtimeMapBridge(Core::Ports::SlamOutput &out);
     bool ApplyRealtimeMapContinuity(Core::Ports::SlamOutput &out);
     bool ApplyRealtimeResetGuard(Core::Ports::SlamOutput &out);
@@ -67,8 +84,8 @@ class SlamEngineAdapter final : public Core::Ports::ISlamEngine, public ISlamRun
     Core::Ports::PoseEstimate PredictSmoothedPose(double dt) const;
     void ClampInnovationVector(float &innovationX, float &innovationY, float &innovationZ, float maxInnovation) const;
     void LimitSmoothedStep(Core::Ports::PoseEstimate &pose, float maxStep) const;
-    void UpdateAlphaBetaVelocity(float innovationX, float innovationY, float innovationZ, double dt, float beta,
-                                 float maxSpeed);
+    void UpdateAlphaBetaVelocity(
+        const AlphaBetaVelocityUpdateRequest &request);
     void ApplyAlphaBetaSmoother(Core::Ports::PoseEstimate &pose, bool &poseValid, double timestampSec, double dt);
     Core::Ports::PoseEstimate PredictGuardedSmoothedPose(double dt, float maxGuardStep, float maxSpeed);
     void UpdateGuardMeasuredVelocity(const Core::Ports::PoseEstimate &pose, double dt, float maxSpeed);

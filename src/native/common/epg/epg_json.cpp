@@ -2,6 +2,9 @@
 #include <cctype>
 #include <fstream>
 #include <sstream>
+
+#include "common/numeric_parse.h"
+
 namespace Epg {
 namespace {
 class JsonValue {
@@ -227,7 +230,11 @@ class JsonParser {
         }
         JsonValue value;
         value.kind = JsonValue::Kind::Number;
-        value.number = std::stod(m_text.substr(start, m_pos - start));
+        const std::string text = m_text.substr(start, m_pos - start);
+        if (!SmartDrone::Common::TryParseDoublePrefix(text.c_str(),
+                                                      value.number)) {
+            throw std::runtime_error("invalid json number");
+        }
         return value;
     }
     void SkipWhitespace()
@@ -431,9 +438,8 @@ TaskSchedulingConfig OptionalScheduling(const JsonValue &value)
 }
 PortId ParsePortId(const std::string &value, const std::string &field)
 {
-    std::size_t parsedChars = 0;
-    const auto parsed = std::stoul(value, &parsedChars, 10);
-    if (parsedChars != value.size()) {
+    std::size_t parsed = 0;
+    if (!SmartDrone::Common::TryParseSizeFull(value.c_str(), parsed)) {
         throw std::runtime_error("json port id must be a non-negative integer: " + field);
     }
     return static_cast<PortId>(parsed);
@@ -751,8 +757,8 @@ void ParseQueueSolverReportDecision(const JsonValue &item,
     decision.poppedPerSecond = RequiredUInt64(item, "poppedPerSecond");
     decision.droppedPerSecond = RequiredUInt64(item, "droppedPerSecond");
 }
-void ParseTaskSolverReportDecision(const JsonValue &item,
-                                   SolverReportDecision &decision)
+void ParseTaskSolverRequiredMetrics(const JsonValue &item,
+                                    SolverReportDecision &decision)
 {
     decision.intervalBeforeMs = RequiredUInt64(item, "intervalBeforeMs");
     decision.intervalAfterMs = RequiredUInt64(item, "intervalAfterMs");
@@ -782,9 +788,16 @@ void ParseTaskSolverReportDecision(const JsonValue &item,
     decision.deadlineMissCount = RequiredUInt64(item, "deadlineMissCount");
     decision.schedulingErrorCount =
         RequiredUInt64(item, "schedulingErrorCount");
-    decision.topologyPenalty = OptionalUInt64(item, "topologyPenalty", decision.topologyPenalty);
-    decision.topologyLevel = OptionalUInt64(item, "topologyLevel", decision.topologyLevel);
-    decision.phaseOffsetMs = OptionalUInt64(item, "phaseOffsetMs", decision.phaseOffsetMs);
+}
+void ParseTaskSolverTimingOptions(const JsonValue &item,
+                                  SolverReportDecision &decision)
+{
+    decision.topologyPenalty =
+        OptionalUInt64(item, "topologyPenalty", decision.topologyPenalty);
+    decision.topologyLevel =
+        OptionalUInt64(item, "topologyLevel", decision.topologyLevel);
+    decision.phaseOffsetMs =
+        OptionalUInt64(item, "phaseOffsetMs", decision.phaseOffsetMs);
     decision.durationMs = OptionalUInt64(item, "durationMs", decision.durationMs);
     decision.cpuBindingStartMs = OptionalUInt64(
         item, "cpuBindingStartMs", decision.cpuBindingStartMs);
@@ -792,6 +805,10 @@ void ParseTaskSolverReportDecision(const JsonValue &item,
         item, "cpuBindingFinishMs", decision.cpuBindingFinishMs);
     decision.cpuBindingMakespanMs = OptionalUInt64(
         item, "cpuBindingMakespanMs", decision.cpuBindingMakespanMs);
+}
+void ParseTaskSolverPlacementOptions(const JsonValue &item,
+                                     SolverReportDecision &decision)
+{
     decision.cpuBindingAffinity =
         OptionalInt(item, "cpuBindingAffinity", decision.cpuBindingAffinity);
     decision.cpuAffinityBefore =
@@ -806,6 +823,13 @@ void ParseTaskSolverReportDecision(const JsonValue &item,
         OptionalPortIdArray(item, "backpressureBefore");
     decision.backpressureAfter =
         OptionalPortIdArray(item, "backpressureAfter");
+}
+void ParseTaskSolverReportDecision(const JsonValue &item,
+                                   SolverReportDecision &decision)
+{
+    ParseTaskSolverRequiredMetrics(item, decision);
+    ParseTaskSolverTimingOptions(item, decision);
+    ParseTaskSolverPlacementOptions(item, decision);
 }
 SolverReportDecision ParseSolverReportDecision(const JsonValue &item)
 {

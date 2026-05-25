@@ -1,6 +1,5 @@
 #pragma once
 
-#include <mutex>
 #include <string>
 
 #include "core/application/config/app_args.h"
@@ -29,7 +28,6 @@ class SlamRuntimeControlPort final {
 
   private:
     SmartDrone::Core::Ports::ISlamRuntimeControl *m_control{nullptr};
-    mutable std::mutex m_mu;
 };
 
 } // namespace SmartDrone::Core::Application

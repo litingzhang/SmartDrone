@@ -15,18 +15,17 @@ namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
-constexpr int kTemporalStereoFlowWindowPx = 21;
-constexpr int kTemporalStereoFlowMaxLevel = 3;
-constexpr float kTemporalStereoForwardBackwardMaxErrorPx = 1.5f;
-constexpr float kTemporalStereoMergeMinDistancePx = 4.0f;
-constexpr float kTemporalStereoMinZnccScore = 0.05f;
-constexpr size_t kTemporalStereoMaxCarryPairs = 192;
-constexpr size_t kTemporalStereoMaxInjectedPairs = 320;
-constexpr size_t kTemporalStereoRansacMinPairs = 10;
-constexpr double kTemporalStereoRansacReprojThresholdPx = 3.5;
-constexpr size_t kTemporalStereoCarryMinBudget = 24;
-constexpr size_t kTemporalStereoCarryMaxBudget = 64;
-constexpr size_t kWeakTrackingTemporalStereoCarryBudget = 8;
+constexpr int TEMPORAL_STEREO_FLOW_WINDOW_PX = 21;
+constexpr int TEMPORAL_STEREO_FLOW_MAX_LEVEL = 3;
+constexpr float TEMPORAL_STEREO_FORWARD_BACKWARD_MAX_ERROR_PX = 1.5f;
+constexpr float TEMPORAL_STEREO_MERGE_MIN_DISTANCE_PX = 4.0f;
+constexpr size_t TEMPORAL_STEREO_MAX_CARRY_PAIRS = 192;
+constexpr size_t TEMPORAL_STEREO_MAX_INJECTED_PAIRS = 320;
+constexpr size_t TEMPORAL_STEREO_RANSAC_MIN_PAIRS = 10;
+constexpr double TEMPORAL_STEREO_RANSAC_REPROJ_THRESHOLD_PX = 3.5;
+constexpr size_t TEMPORAL_STEREO_CARRY_MIN_BUDGET = 24;
+constexpr size_t TEMPORAL_STEREO_CARRY_MAX_BUDGET = 64;
+constexpr size_t WEAK_TRACKING_TEMPORAL_STEREO_CARRY_BUDGET = 8;
 
 struct TemporalStereoPair {
     cv::Point2f leftPt;
@@ -66,6 +65,11 @@ struct TemporalStereoPairBuildRequest {
     const cv::Mat *currRightGray32f{nullptr};
     size_t index{0};
 };
+struct TemporalStereoRansacInput {
+    std::vector<cv::Point2f> prevPts;
+    std::vector<cv::Point2f> currPts;
+    std::vector<int> pairIndices;
+};
 
 bool HasTemporalCarryInput(const TemporalStereoCarryInput &input)
 {
@@ -85,36 +89,36 @@ bool HasTemporalCarryInput(const TemporalStereoCarryInput &input)
 size_t TemporalStereoCarryBudget(bool previousFrameWeak)
 {
     const size_t stableBudget = EnvSizeValueClamped(
-        "SMART_DRONE_SP_LG_TEMPORAL_CARRY_BUDGET", kTemporalStereoCarryMinBudget,
-        0, kTemporalStereoCarryMaxBudget);
+        "SMART_DRONE_SP_LG_TEMPORAL_CARRY_BUDGET", TEMPORAL_STEREO_CARRY_MIN_BUDGET,
+        0, TEMPORAL_STEREO_CARRY_MAX_BUDGET);
     if (!previousFrameWeak) {
         return stableBudget;
     }
     return EnvSizeValueClamped("SMART_DRONE_SP_LG_WEAK_TEMPORAL_CARRY_BUDGET",
-                               kWeakTrackingTemporalStereoCarryBudget, 0,
-                               kTemporalStereoCarryMaxBudget);
+                               WEAK_TRACKING_TEMPORAL_STEREO_CARRY_BUDGET, 0,
+                               TEMPORAL_STEREO_CARRY_MAX_BUDGET);
 }
 
 bool TrackTemporalStereoPoints(const TemporalStereoTrackRequest &request,
                                TemporalStereoTrackingResult &result)
 {
     const ForwardBackwardTrackingOptions trackingOptions{
-        kTemporalStereoFlowWindowPx, kTemporalStereoFlowMaxLevel,
-        kTemporalStereoForwardBackwardMaxErrorPx};
+        TEMPORAL_STEREO_FLOW_WINDOW_PX, TEMPORAL_STEREO_FLOW_MAX_LEVEL,
+        TEMPORAL_STEREO_FORWARD_BACKWARD_MAX_ERROR_PX};
     DefaultPointTracker2d defaultPointTracker;
     const Core::Ports::IPointTracker2d &tracker =
         request.pointTracker != nullptr ? *request.pointTracker
                                         : defaultPointTracker;
-    return tracker.TrackForwardBackward(*request.prevLeftGray,
-                                        *request.currLeftGray,
-                                        *request.prevLeftPoints,
-                                        result.trackedLeft,
-                                        result.leftStatus, trackingOptions) &&
-           tracker.TrackForwardBackward(*request.prevRightGray,
-                                        *request.currRightGray,
-                                        *request.prevRightPoints,
-                                        result.trackedRight,
-                                        result.rightStatus, trackingOptions);
+    return tracker.TrackForwardBackward(
+               ForwardBackwardTrackingRequest{
+                   *request.prevLeftGray, *request.currLeftGray,
+                   *request.prevLeftPoints, result.trackedLeft,
+                   result.leftStatus, trackingOptions}) &&
+           tracker.TrackForwardBackward(
+               ForwardBackwardTrackingRequest{
+                   *request.prevRightGray, *request.currRightGray,
+                   *request.prevRightPoints, result.trackedRight,
+                   result.rightStatus, trackingOptions});
 }
 
 bool IsTrackedTemporalStereoPointValid(
@@ -146,7 +150,7 @@ bool BuildTemporalStereoPair(const TemporalStereoPairBuildRequest &request,
     float zncc = -1.0f;
     if (!ComputePatchZncc(*request.currLeftGray32f, leftPt,
                           *request.currRightGray32f, rightPt, zncc) ||
-        zncc < kTemporalStereoMinZnccScore) {
+        zncc < TEMPORAL_STEREO_MIN_ZNCC_SCORE) {
         return false;
     }
     pair = TemporalStereoPair{leftPt, rightPt, zncc,
@@ -160,19 +164,21 @@ void SortAndLimitTemporalPairs(std::vector<TemporalStereoPair> &trackedPairs)
               [](const TemporalStereoPair &lhs, const TemporalStereoPair &rhs) {
                   return lhs.zncc > rhs.zncc;
               });
-    if (trackedPairs.size() > kTemporalStereoMaxCarryPairs) {
-        trackedPairs.resize(kTemporalStereoMaxCarryPairs);
+    if (trackedPairs.size() > TEMPORAL_STEREO_MAX_CARRY_PAIRS) {
+        trackedPairs.resize(TEMPORAL_STEREO_MAX_CARRY_PAIRS);
     }
 }
 
 std::vector<TemporalStereoPair> TrackStereoPairsTemporally(
-    const cv::Mat &prevLeftGray, const cv::Mat &prevRightGray,
-    const std::vector<cv::Point2f> &prevLeftPoints,
-    const std::vector<cv::Point2f> &prevRightPoints,
-    const cv::Mat &currLeftGray, const cv::Mat &currRightGray,
-    const Core::Ports::IPointTracker2d *pointTracker)
+    const TemporalStereoTrackRequest &request)
 {
     std::vector<TemporalStereoPair> trackedPairs;
+    const cv::Mat &prevLeftGray = *request.prevLeftGray;
+    const cv::Mat &prevRightGray = *request.prevRightGray;
+    const cv::Mat &currLeftGray = *request.currLeftGray;
+    const cv::Mat &currRightGray = *request.currRightGray;
+    const auto &prevLeftPoints = *request.prevLeftPoints;
+    const auto &prevRightPoints = *request.prevRightPoints;
     if (prevLeftGray.empty() || prevRightGray.empty() || currLeftGray.empty() ||
         currRightGray.empty() || prevLeftPoints.empty() ||
         prevLeftPoints.size() != prevRightPoints.size()) {
@@ -180,10 +186,7 @@ std::vector<TemporalStereoPair> TrackStereoPairsTemporally(
     }
 
     TemporalStereoTrackingResult tracking;
-    const TemporalStereoTrackRequest trackRequest{
-        &prevLeftGray, &prevRightGray, &prevLeftPoints, &prevRightPoints,
-        &currLeftGray, &currRightGray, pointTracker};
-    if (!TrackTemporalStereoPoints(trackRequest, tracking)) {
+    if (!TrackTemporalStereoPoints(request, tracking)) {
         return trackedPairs;
     }
 
@@ -207,54 +210,79 @@ std::vector<TemporalStereoPair> TrackStereoPairsTemporally(
     return trackedPairs;
 }
 
-std::vector<TemporalStereoPair> FilterTemporalPairsWithMotionRansac(
+TemporalStereoRansacInput BuildTemporalStereoRansacInput(
     const std::vector<TemporalStereoPair> &trackedPairs,
     const std::vector<cv::Point2f> &previousLeftPoints)
 {
-    if (trackedPairs.size() < kTemporalStereoRansacMinPairs ||
-        previousLeftPoints.empty()) {
-        return trackedPairs;
-    }
-
-    std::vector<cv::Point2f> prevPts;
-    std::vector<cv::Point2f> currPts;
-    std::vector<int> pairIndices;
-    prevPts.reserve(trackedPairs.size());
-    currPts.reserve(trackedPairs.size());
-    pairIndices.reserve(trackedPairs.size());
+    TemporalStereoRansacInput input;
+    input.prevPts.reserve(trackedPairs.size());
+    input.currPts.reserve(trackedPairs.size());
+    input.pairIndices.reserve(trackedPairs.size());
     for (size_t i = 0; i < trackedPairs.size(); ++i) {
         const int sourceIndex = trackedPairs[i].sourceIndex;
         if (sourceIndex < 0 ||
             static_cast<size_t>(sourceIndex) >= previousLeftPoints.size()) {
             continue;
         }
-        prevPts.push_back(previousLeftPoints[static_cast<size_t>(sourceIndex)]);
-        currPts.push_back(trackedPairs[i].leftPt);
-        pairIndices.push_back(static_cast<int>(i));
+        input.prevPts.push_back(
+            previousLeftPoints[static_cast<size_t>(sourceIndex)]);
+        input.currPts.push_back(trackedPairs[i].leftPt);
+        input.pairIndices.push_back(static_cast<int>(i));
     }
+    return input;
+}
 
-    if (prevPts.size() < kTemporalStereoRansacMinPairs) {
-        return trackedPairs;
-    }
-
+cv::Mat EstimateTemporalStereoInlierMask(
+    const TemporalStereoRansacInput &input)
+{
     cv::Mat inlierMask;
     const cv::Mat affine =
-        cv::estimateAffinePartial2D(prevPts, currPts, inlierMask, cv::RANSAC,
-                                    kTemporalStereoRansacReprojThresholdPx);
+        cv::estimateAffinePartial2D(input.prevPts, input.currPts, inlierMask,
+                                    cv::RANSAC,
+                                    TEMPORAL_STEREO_RANSAC_REPROJ_THRESHOLD_PX);
     if (affine.empty() || inlierMask.empty()) {
-        return trackedPairs;
+        return {};
     }
+    return inlierMask;
+}
 
+std::vector<TemporalStereoPair> CollectTemporalStereoInliers(
+    const std::vector<TemporalStereoPair> &trackedPairs,
+    const TemporalStereoRansacInput &input,
+    const cv::Mat &inlierMask)
+{
     std::vector<TemporalStereoPair> filtered;
     filtered.reserve(trackedPairs.size());
     for (int row = 0; row < inlierMask.rows; ++row) {
         if (inlierMask.at<uchar>(row, 0) == 0) {
             continue;
         }
-        const int pairIndex = pairIndices[static_cast<size_t>(row)];
+        const int pairIndex = input.pairIndices[static_cast<size_t>(row)];
         filtered.push_back(trackedPairs[static_cast<size_t>(pairIndex)]);
     }
+    return filtered;
+}
 
+std::vector<TemporalStereoPair> FilterTemporalPairsWithMotionRansac(
+    const std::vector<TemporalStereoPair> &trackedPairs,
+    const std::vector<cv::Point2f> &previousLeftPoints)
+{
+    if (trackedPairs.size() < TEMPORAL_STEREO_RANSAC_MIN_PAIRS ||
+        previousLeftPoints.empty()) {
+        return trackedPairs;
+    }
+
+    const TemporalStereoRansacInput input =
+        BuildTemporalStereoRansacInput(trackedPairs, previousLeftPoints);
+    if (input.prevPts.size() < TEMPORAL_STEREO_RANSAC_MIN_PAIRS) {
+        return trackedPairs;
+    }
+    const cv::Mat inlierMask = EstimateTemporalStereoInlierMask(input);
+    if (inlierMask.empty()) {
+        return trackedPairs;
+    }
+    const std::vector<TemporalStereoPair> filtered =
+        CollectTemporalStereoInliers(trackedPairs, input, inlierMask);
     if (filtered.size() < (trackedPairs.size() / 3)) {
         return trackedPairs;
     }
@@ -279,7 +307,7 @@ bool IsStereoPairNearExisting(const cv::Point2f &leftPt,
                               const std::vector<cv::Point2f> &existingRight)
 {
     const float minDistSq =
-        kTemporalStereoMergeMinDistancePx * kTemporalStereoMergeMinDistancePx;
+        TEMPORAL_STEREO_MERGE_MIN_DISTANCE_PX * TEMPORAL_STEREO_MERGE_MIN_DISTANCE_PX;
     for (size_t i = 0; i < existingLeft.size() && i < existingRight.size(); ++i) {
         const cv::Point2f leftDelta = existingLeft[i] - leftPt;
         const cv::Point2f rightDelta = existingRight[i] - rightPt;
@@ -349,9 +377,9 @@ size_t AppendTemporalStereoCarry(const TemporalStereoCarryInput &input,
     }
 
     std::vector<TemporalStereoPair> trackedPairs = TrackStereoPairsTemporally(
-        *state.prevLeft, *state.prevRight, *state.prevLeftPoints,
-        *state.prevRightPoints, *input.leftPrepared, *input.rightPrepared,
-        input.pointTracker);
+        {state.prevLeft, state.prevRight, state.prevLeftPoints,
+         state.prevRightPoints, input.leftPrepared, input.rightPrepared,
+         input.pointTracker});
     trackedPairs =
         FilterTemporalPairsWithMotionRansac(trackedPairs, *state.prevLeftPoints);
     trackedPairs = LimitTemporalPairs(trackedPairs, budget);
@@ -368,8 +396,8 @@ size_t AppendTemporalStereoCarry(const TemporalStereoCarryInput &input,
     TemporalStereoMergeBuffers merged;
     const size_t maxMergedPairs =
         EnvSizeValueClamped("SMART_DRONE_SP_LG_TEMPORAL_CARRY_MAX_PAIRS",
-                            std::max(before, kTemporalStereoMaxInjectedPairs),
-                            kTemporalStereoMaxInjectedPairs, 1200);
+                            std::max(before, TEMPORAL_STEREO_MAX_INJECTED_PAIRS),
+                            TEMPORAL_STEREO_MAX_INJECTED_PAIRS, 1200);
     merged.leftPoints.reserve(
         std::min(maxMergedPairs, before + carryLeftPoints.size()));
     merged.rightPoints.reserve(
@@ -395,40 +423,37 @@ bool DefaultTemporalStereoProcessor::AppendCarry(
 }
 
 bool ExtractTemporalStereoSource(
-    const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
-    const Core::Ports::StereoFeatureObservationPacket &stereoData,
-    cv::Mat &prevLeft, cv::Mat &prevRight,
-    std::vector<cv::Point2f> &prevLeftPoints,
-    std::vector<cv::Point2f> &prevRightPoints)
+    const TemporalStereoSourceExtractionRequest &request)
 {
-    prevLeftPoints.clear();
-    prevRightPoints.clear();
+    request.prevLeftPoints.clear();
+    request.prevRightPoints.clear();
     if (!EnvFlagEnabled("SMART_DRONE_SP_LG_TEMPORAL_CARRY", false)) {
         return false;
     }
 
+    const auto &stereoData = request.stereoData;
     const size_t pairCount = std::min(stereoData.leftKeypoints.size(),
                                       stereoData.leftToRightMatch.size());
-    prevLeftPoints.reserve(pairCount);
-    prevRightPoints.reserve(pairCount);
+    request.prevLeftPoints.reserve(pairCount);
+    request.prevRightPoints.reserve(pairCount);
     for (size_t leftIndex = 0; leftIndex < pairCount; ++leftIndex) {
         const int rightIndex = stereoData.leftToRightMatch[leftIndex];
         if (rightIndex < 0 ||
             static_cast<size_t>(rightIndex) >= stereoData.rightKeypoints.size()) {
             continue;
         }
-        prevLeftPoints.push_back(stereoData.leftKeypoints[leftIndex].pt);
-        prevRightPoints.push_back(
+        request.prevLeftPoints.push_back(stereoData.leftKeypoints[leftIndex].pt);
+        request.prevRightPoints.push_back(
             stereoData.rightKeypoints[static_cast<size_t>(rightIndex)].pt);
     }
 
-    if (prevLeftPoints.empty() ||
-        prevLeftPoints.size() != prevRightPoints.size()) {
+    if (request.prevLeftPoints.empty() ||
+        request.prevLeftPoints.size() != request.prevRightPoints.size()) {
         return false;
     }
 
-    prevLeft = leftPrepared.clone();
-    prevRight = rightPrepared.clone();
+    request.prevLeft = request.leftPrepared.clone();
+    request.prevRight = request.rightPrepared.clone();
     return true;
 }
 
@@ -441,10 +466,10 @@ bool DefaultTemporalStereoProcessor::ExtractSource(
         input.observations == nullptr) {
         return false;
     }
-    return ExtractTemporalStereoSource(*input.leftPrepared, *input.rightPrepared,
-                                       *input.observations, source.prevLeft,
-                                       source.prevRight, source.prevLeftPoints,
-                                       source.prevRightPoints);
+    return ExtractTemporalStereoSource(
+        {*input.leftPrepared, *input.rightPrepared, *input.observations,
+         source.prevLeft, source.prevRight, source.prevLeftPoints,
+         source.prevRightPoints});
 }
 
 } // namespace SmartDrone::Adapters::Slam

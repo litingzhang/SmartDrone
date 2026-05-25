@@ -6,7 +6,8 @@ namespace SmartDrone::Adapters::Slam {
 namespace {
 
 const SlamModeStrategyRegistrar
-    kOrbModeStrategyRegistration(FeatureFrontend::Orb, &CreateOrbModeStrategy);
+    ORB_MODE_STRATEGY_REGISTRATION(FeatureFrontend::Orb,
+                                   &CreateOrbModeStrategy);
 
 } // namespace
 

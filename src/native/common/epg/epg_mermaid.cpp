@@ -7,6 +7,9 @@
 #include <set>
 #include <sstream>
 
+#include "common/numeric_parse.h"
+#include "common/epg/epg_trigger_modes.h"
+
 namespace Epg {
 namespace {
 
@@ -152,14 +155,8 @@ TriggerMode ParseMermaidTriggerMode(const std::string &value)
 
 std::size_t ParseSize(const std::string &value, const std::string &field)
 {
-    std::size_t parsedChars = 0;
     std::size_t parsed = 0;
-    try {
-        parsed = std::stoul(value, &parsedChars, 10);
-    } catch (const std::exception &) {
-        throw std::runtime_error("Mermaid numeric field is invalid: " + field + "=" + value);
-    }
-    if (parsedChars != value.size()) {
+    if (!SmartDrone::Common::TryParseSizeFull(value.c_str(), parsed)) {
         throw std::runtime_error("Mermaid numeric field is invalid: " + field + "=" + value);
     }
     return parsed;
@@ -178,26 +175,12 @@ bool ParseBool(const std::string &value, const std::string &field)
 
 int ParseInt(const std::string &value, const std::string &field)
 {
-    std::size_t parsedChars = 0;
     int parsed = 0;
-    try {
-        parsed = std::stoi(value, &parsedChars, 10);
-    } catch (const std::exception &) {
-        throw std::runtime_error("Mermaid integer field is invalid: " +
-                                 field + "=" + value);
-    }
-    if (parsedChars != value.size()) {
+    if (!SmartDrone::Common::TryParseIntFull(value.c_str(), 10, parsed)) {
         throw std::runtime_error("Mermaid integer field is invalid: " +
                                  field + "=" + value);
     }
     return parsed;
-}
-
-bool IsQueueTriggeredMode(TriggerMode mode)
-{
-    return mode == TriggerMode::AnyQueueReady ||
-           mode == TriggerMode::AllQueueReady ||
-           mode == TriggerMode::PeriodicOrAnyQueueReady;
 }
 
 std::string RequireField(const std::map<std::string, std::string> &fields,

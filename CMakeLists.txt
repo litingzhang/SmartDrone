@@ -29,7 +29,7 @@ set(SMART_DRONE_GPIOD_LIBRARIES gpiod)
 set(SMART_DRONE_GPIOD_CFLAGS_OTHER "")
 option(SMART_DRONE_ENABLE_VPI "Enable NVIDIA VPI acceleration when headers and libraries are available" OFF)
 option(SMART_DRONE_ENABLE_OPENCV_CUDA_ORB "Enable experimental OpenCV CUDA ORB extraction when supported" OFF)
-option(SMART_DRONE_ENABLE_ORB_SLAM3 "Build the internal ORB-SLAM3 backend absorbed under src/native" OFF)
+option(SMART_DRONE_ENABLE_ORB_SLAM3 "Build the optional ORB-SLAM3 backend from src/native/adapters/slam/orb/orb_slam3" OFF)
 set(SMART_DRONE_VPI_ROOT "" CACHE PATH "NVIDIA VPI root, e.g. /opt/nvidia/vpi2")
 
 if(NOT BUILD_SMART_DRONE AND NOT ENABLE_UNIT_TESTS AND NOT ENABLE_OFFLINE_REPLAY)
@@ -203,10 +203,10 @@ function(configure_orb_target target_name)
   )
 endfunction()
 
-function(add_internal_orb_slam3)
+function(add_native_orb_slam3)
   if(NOT EXISTS "${SMART_DRONE_ORB_MODULE_ROOT}/CMakeLists.txt")
     message(FATAL_ERROR
-      "SMART_DRONE_ENABLE_ORB_SLAM3=ON requires the absorbed ORB-SLAM3 sources at "
+      "SMART_DRONE_ENABLE_ORB_SLAM3=ON requires ORB-SLAM3 sources at "
       "${SMART_DRONE_ORB_MODULE_ROOT}.")
   endif()
   if(TARGET ORB_SLAM3)
@@ -316,7 +316,7 @@ function(configure_superpoint_native_target target_name)
 endfunction()
 
 if((BUILD_SMART_DRONE OR ENABLE_OFFLINE_REPLAY) AND SMART_DRONE_ENABLE_ORB_SLAM3)
-  add_internal_orb_slam3()
+  add_native_orb_slam3()
 endif()
 
 if(BUILD_SMART_DRONE)

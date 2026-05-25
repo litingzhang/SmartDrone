@@ -14,7 +14,7 @@ class LibcameraStereoCamera final : public Core::Ports::ICameraProvider {
     void Close() override;
     bool Start() override;
     void Stop() override;
-    bool GrabStereo(Core::Ports::StereoFrame &out, int timeoutMs, bool preferLatest,
+    bool GrabStereo(Core::Ports::StereoFrame &out, bool preferLatest,
                     uint64_t minTimestampNs = 0) override;
     Core::Ports::CameraHealth GetHealth() const override;
     Core::Ports::CameraDiagnostics GetDiagnostics() const override;

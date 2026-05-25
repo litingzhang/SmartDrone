@@ -16,7 +16,7 @@ class MavlinkSerialTransport {
     void Open(const std::string &dev, int baud);
     void Close();
     ssize_t WriteSome(const uint8_t *data, size_t len) const;
-    int PollReadable(int timeoutMs) const;
+    int PollReadable() const;
     ssize_t Read(uint8_t *buffer, size_t len) const;
 
   private:

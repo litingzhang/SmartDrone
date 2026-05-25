@@ -7,25 +7,29 @@
 
 namespace SmartDrone::Adapters::Slam::DpvoTensorRtInternal {
 
-float DpvoGraphState::FeatureAt(const float *data, int channels, int height, int width,
-                       int c, int y, int x)
+float DpvoGraphState::FeatureAt(const DpvoFeatureMapView &featureMap, int c,
+                                int y, int x)
 {
-    if (data == nullptr || c < 0 || c >= channels || y < 0 || y >= height ||
-        x < 0 || x >= width) {
+    if (featureMap.data == nullptr || c < 0 || c >= featureMap.channels ||
+        y < 0 || y >= featureMap.height || x < 0 || x >= featureMap.width) {
         return 0.0f;
     }
-    const size_t idx = (static_cast<size_t>(c) * static_cast<size_t>(height) +
+    const size_t idx = (static_cast<size_t>(c) *
+                            static_cast<size_t>(featureMap.height) +
                         static_cast<size_t>(y)) *
-                           static_cast<size_t>(width) +
+                           static_cast<size_t>(featureMap.width) +
                        static_cast<size_t>(x);
-    return data[idx];
+    if (idx >= featureMap.valueCount) {
+        return 0.0f;
+    }
+    return featureMap.data[idx];
 }
 
-float DpvoGraphState::SampleFeatureBilinear(const float *data, int channels,
-                                   int height, int width, int c, float x,
-                                   float y)
+float DpvoGraphState::SampleFeatureBilinear(
+    const DpvoFeatureMapView &featureMap, int c, float x, float y)
 {
-    if (data == nullptr || channels <= 0 || height <= 0 || width <= 0) {
+    if (featureMap.data == nullptr || featureMap.channels <= 0 ||
+        featureMap.height <= 0 || featureMap.width <= 0) {
         return 0.0f;
     }
     const int x0 = static_cast<int>(std::floor(x));
@@ -34,40 +38,40 @@ float DpvoGraphState::SampleFeatureBilinear(const float *data, int channels,
     const int y1 = y0 + 1;
     const float dx = x - static_cast<float>(x0);
     const float dy = y - static_cast<float>(y0);
-    const float v00 = FeatureAt(data, channels, height, width, c, y0, x0);
-    const float v01 = FeatureAt(data, channels, height, width, c, y0, x1);
-    const float v10 = FeatureAt(data, channels, height, width, c, y1, x0);
-    const float v11 = FeatureAt(data, channels, height, width, c, y1, x1);
+    const float v00 = FeatureAt(featureMap, c, y0, x0);
+    const float v01 = FeatureAt(featureMap, c, y0, x1);
+    const float v10 = FeatureAt(featureMap, c, y1, x0);
+    const float v11 = FeatureAt(featureMap, c, y1, x1);
     return (1.0f - dy) * ((1.0f - dx) * v00 + dx * v01) +
            dy * ((1.0f - dx) * v10 + dx * v11);
 }
 
-void DpvoGraphState::SampleFeatureVector(const float *data, int channels, int height,
-                                int width, float x, float y, float *out)
+void DpvoGraphState::SampleFeatureVector(
+    const DpvoFeatureMapView &featureMap, float x, float y, float *out)
 {
     if (out == nullptr) {
         return;
     }
-    for (int c = 0; c < channels; ++c) {
-        out[c] = SampleFeatureBilinear(data, channels, height, width, c, x, y);
+    for (int c = 0; c < featureMap.channels; ++c) {
+        out[c] = SampleFeatureBilinear(featureMap, c, x, y);
     }
 }
 
-void DpvoGraphState::SampleFeaturePatch3(const float *data, int channels, int height,
-                                int width, float x, float y, float *out)
+void DpvoGraphState::SampleFeaturePatch3(
+    const DpvoFeatureMapView &featureMap, float x, float y, float *out)
 {
     if (out == nullptr) {
         return;
     }
-    for (int c = 0; c < channels; ++c) {
-        for (int py = 0; py < kPatchSize; ++py) {
-            for (int px = 0; px < kPatchSize; ++px) {
-                const float sx = x + static_cast<float>(px - kPatchRadius);
-                const float sy = y + static_cast<float>(py - kPatchRadius);
-                const size_t idx = (static_cast<size_t>(c) * kPatchArea) +
-                                   static_cast<size_t>(py * kPatchSize + px);
+    for (int c = 0; c < featureMap.channels; ++c) {
+        for (int py = 0; py < PATCH_SIZE; ++py) {
+            for (int px = 0; px < PATCH_SIZE; ++px) {
+                const float sx = x + static_cast<float>(px - PATCH_RADIUS);
+                const float sy = y + static_cast<float>(py - PATCH_RADIUS);
+                const size_t idx = (static_cast<size_t>(c) * PATCH_AREA) +
+                                   static_cast<size_t>(py * PATCH_SIZE + px);
                 out[idx] =
-                    SampleFeatureBilinear(data, channels, height, width, c, sx, sy);
+                    SampleFeatureBilinear(featureMap, c, sx, sy);
             }
         }
     }
@@ -162,20 +166,21 @@ float DpvoGraphState::MedianRecentDepth() const
     return std::clamp(depths[mid], 1e-3f, 10.0f);
 }
 
-std::array<float, 2>
-DpvoGraphState::ProjectPatchCenter(const DpvoFrameState &source, const DpvoFrameState &target,
-                   const DpvoPatchState &patch,
-                   const Eigen::Matrix3f &overrideR, bool useOverrideR,
-                   const DpvoIntrinsics &intrinsics, bool *valid)
+std::array<float, 2> DpvoGraphState::ProjectPatchCenter(
+    const DpvoPatchProjectionRequest &request)
 {
-    if (valid != nullptr) {
-        *valid = false;
+    const DpvoPatchState &patch = request.patch;
+    const DpvoIntrinsics &intrinsics = request.intrinsics;
+    if (request.valid != nullptr) {
+        *request.valid = false;
     }
     if (!(intrinsics.fx > 0.0f) || !(intrinsics.fy > 0.0f)) {
         return {patch.x, patch.y};
     }
-    const Sophus::SE3f Tji = target.Tcw * source.Tcw.inverse();
-    const Eigen::Matrix3f R = useOverrideR ? overrideR : Tji.so3().matrix();
+    const Sophus::SE3f Tji =
+        request.target.Tcw * request.source.Tcw.inverse();
+    const Eigen::Matrix3f R =
+        request.useOverrideR ? request.overrideR : Tji.so3().matrix();
     const Eigen::Vector3f t = Tji.translation();
     const Eigen::Vector3f Xi((patch.x - intrinsics.cx) / intrinsics.fx,
                              (patch.y - intrinsics.cy) / intrinsics.fy, 1.0f);
@@ -183,8 +188,8 @@ DpvoGraphState::ProjectPatchCenter(const DpvoFrameState &source, const DpvoFrame
     if (!(Xj.z() > 0.2f) || !Xj.allFinite()) {
         return {patch.x, patch.y};
     }
-    if (valid != nullptr) {
-        *valid = true;
+    if (request.valid != nullptr) {
+        *request.valid = true;
     }
     return {intrinsics.fx * (Xj.x() / Xj.z()) + intrinsics.cx,
             intrinsics.fy * (Xj.y() / Xj.z()) + intrinsics.cy};
@@ -209,9 +214,9 @@ float DpvoGraphState::MotionMagnitude(int sourceFrame, int targetFrame,
         bool validFull = false;
         bool validTonly = false;
         const std::array<float, 2> full = ProjectPatchCenter(
-            source, target, patch, identityR, false, intrinsics, &validFull);
+            {source, target, patch, identityR, false, intrinsics, &validFull});
         const std::array<float, 2> tonly = ProjectPatchCenter(
-            source, target, patch, identityR, true, intrinsics, &validTonly);
+            {source, target, patch, identityR, true, intrinsics, &validTonly});
         if (!validFull || !validTonly) {
             continue;
         }

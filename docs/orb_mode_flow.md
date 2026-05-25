@@ -2,7 +2,7 @@
 
 ## Purpose
 
-ORB mode (`--slam-backend orbslam3 --feature-frontend orb`) uses the absorbed ORB-SLAM3 backend and remains a historical EuRoC accuracy reference. It is available only when SmartDrone is built with `SMART_DRONE_ENABLE_ORB_SLAM3=ON`. The default production path is now the native KLT/PnP backend, with DPVO TensorRT as a backend-level alternative.
+ORB mode (`--slam-backend orbslam3 --feature-frontend orb`) uses the optional ORB-SLAM3 backend from `src/native/adapters/slam/orb/orb_slam3` and remains a historical EuRoC accuracy reference. It is available only when SmartDrone is built with `SMART_DRONE_ENABLE_ORB_SLAM3=ON`. The default production path is now the native KLT/PnP backend, with DPVO TensorRT as a backend-level alternative.
 
 ## Main Flow
 

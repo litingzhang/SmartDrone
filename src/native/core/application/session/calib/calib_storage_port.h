@@ -21,7 +21,7 @@ class CalibStoragePort final {
     bool Open();
     bool WriteSavePair(const CalibSavePair &pair);
     bool WriteImuSample(const ImuSample &sample);
-    void FlushAndClose();
+    bool FlushAndClose();
     int SavedCount() const;
     std::string OutputRoot() const;
     std::filesystem::path Cam0Dir() const;

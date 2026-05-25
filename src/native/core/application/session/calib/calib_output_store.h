@@ -21,7 +21,7 @@ class CalibOutputStore final {
     bool Open();
     bool WriteSavePair(const CalibSavePair &pair);
     bool WriteImuSample(const ImuSample &sample);
-    void FlushAndClose();
+    bool FlushAndClose();
     void Close();
     bool Opened() const;
     int SavedCount() const;

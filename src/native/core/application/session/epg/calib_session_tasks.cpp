@@ -170,11 +170,51 @@ CalibStorageWriteTask::CalibStorageWriteTask(
 
 void CalibStorageWriteTask::OnTick(Epg::TaskContext &context)
 {
+    DrainSavePairs(context);
+    DrainImuSamples(context);
+    DrainFlushRequests(context);
+}
+
+void CalibStorageWriteTask::DrainSavePairs(Epg::TaskContext &context)
+{
     while (auto save = context.TryPop<CalibSavePair>(0)) {
-        auto status = context.Make<CalibStorageStatus>();
-        status->ok = m_state->WriteSavePair(*save);
-        context.Push(0, std::move(status));
+        if (!m_state->WriteSavePair(*save)) {
+            m_sessionOk = false;
+        }
     }
+}
+
+void CalibStorageWriteTask::DrainImuSamples(Epg::TaskContext &context)
+{
+    while (auto imuSample = context.TryPop<CalibImuSample>(1)) {
+        if (!imuSample->ok ||
+            !m_state->WriteImuSample(imuSample->sample)) {
+            m_sessionOk = false;
+        }
+    }
+}
+
+void CalibStorageWriteTask::DrainFlushRequests(Epg::TaskContext &context)
+{
+    while (auto flush = context.TryPop<CalibFlushRequest>(2)) {
+        Flush(context, flush->sessionOk);
+    }
+}
+
+void CalibStorageWriteTask::Flush(Epg::TaskContext &context, bool sessionOk)
+{
+    if (m_flushed) {
+        return;
+    }
+    m_flushed = true;
+    m_state->RequestStop();
+    DrainSavePairs(context);
+    DrainImuSamples(context);
+
+    const bool storageOk = m_state->FlushStorage();
+    auto flushed = context.Make<CalibStorageFlushed>();
+    flushed->sessionOk = sessionOk && m_sessionOk && storageOk;
+    context.Push(0, std::move(flushed));
 }
 
 const bool CALIB_STORAGE_WRITE_TASK_REGISTERED =
@@ -191,7 +231,7 @@ void CalibUdpPreviewTask::OnTick(Epg::TaskContext &context)
 {
     while (auto frame = context.TryPopLatest<CalibStereoFrame>(0)) {
         auto status = context.Make<CalibPreviewStatus>();
-        status->ok = m_state->EnqueuePreview(*frame);
+        status->sessionOk = m_state->EnqueuePreview(*frame);
         context.Push(0, std::move(status));
     }
 }
@@ -217,18 +257,25 @@ void CalibImuWriterTask::OnTick(Epg::TaskContext &context)
         return;
     }
     const CalibImuSampleResult result = m_state->StepImuSample();
-    PushResult(context, result.status);
+    PushResult(context, result);
 }
 
 void CalibImuWriterTask::PushResult(Epg::TaskContext &context,
-                                    CalibImuSampleStatus status)
+                                    const CalibImuSampleResult &result)
 {
-    if (status == CalibImuSampleStatus::Pending) {
+    if (result.status == CalibImuSampleStatus::Pending) {
         return;
     }
-    auto imuStatus = context.Make<CalibImuStatus>();
-    imuStatus->ok = status == CalibImuSampleStatus::Written;
-    context.Push(0, std::move(imuStatus));
+    if (result.status == CalibImuSampleStatus::Failed) {
+        auto imuSample = context.Make<CalibImuSample>();
+        imuSample->ok = false;
+        context.Push(0, std::move(imuSample));
+        return;
+    }
+    auto imuSample = context.Make<CalibImuSample>();
+    imuSample->ok = true;
+    imuSample->sample = result.sample;
+    context.Push(0, std::move(imuSample));
 }
 
 const bool CALIB_IMU_WRITER_TASK_REGISTERED =
@@ -243,18 +290,8 @@ CalibCompletionTask::CalibCompletionTask(
 
 void CalibCompletionTask::OnTick(Epg::TaskContext &context)
 {
-    while (auto status = context.TryPop<CalibStorageStatus>(1)) {
-        if (!status->ok) {
-            m_sessionOk = false;
-        }
-    }
-    while (auto status = context.TryPop<CalibImuStatus>(2)) {
-        if (!status->ok) {
-            m_sessionOk = false;
-        }
-    }
-    while (auto status = context.TryPop<CalibPreviewStatus>(3)) {
-        if (!status->ok) {
+    while (auto status = context.TryPop<CalibPreviewStatus>(1)) {
+        if (!status->sessionOk) {
             m_sessionOk = false;
         }
     }
@@ -262,7 +299,7 @@ void CalibCompletionTask::OnTick(Epg::TaskContext &context)
         m_sessionOk = m_sessionOk && done->sessionOk;
         EmitFlush(context);
     }
-    while (auto stop = context.TryPop<CalibStopRequest>(4)) {
+    while (auto stop = context.TryPop<CalibStopRequest>(2)) {
         m_sessionOk = m_sessionOk && stop->sessionOk;
         EmitFlush(context);
     }
@@ -299,13 +336,14 @@ void CalibFlushSyncTask::OnTick(Epg::TaskContext &context)
     if (m_completed.load(std::memory_order_relaxed)) {
         return;
     }
-    if (auto flush = context.TryPopLatest<CalibFlushRequest>(0)) {
-        m_state->Finalize(flush->sessionOk);
-        m_sessionOk.store(flush->sessionOk, std::memory_order_relaxed);
+    if (auto flushed = context.TryPopLatest<CalibStorageFlushed>(0)) {
+        const bool sessionOk = flushed->sessionOk;
+        m_sessionOk.store(sessionOk, std::memory_order_relaxed);
         auto status = context.Make<CalibStatus>();
-        status->sessionOk = flush->sessionOk;
+        status->sessionOk = sessionOk;
         status->completed = true;
         context.Push(0, std::move(status));
+        m_state->MarkStorageFlushed();
     }
 }
 

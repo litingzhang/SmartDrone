@@ -43,11 +43,12 @@ const char *VisualFeatureFrontendName(FeatureFrontend frontend)
     return "superpoint_lightglue";
 }
 
-const SlamModeStrategyRegistrar kSuperPointLightGlueModeStrategyRegistration(
-    FeatureFrontend::SuperPointLightGlue,
-    &CreateRegisteredSuperPointLightGlueModeStrategy);
+const SlamModeStrategyRegistrar
+    SUPER_POINT_LIGHT_GLUE_MODE_STRATEGY_REGISTRATION(
+        FeatureFrontend::SuperPointLightGlue,
+        &CreateRegisteredSuperPointLightGlueModeStrategy);
 
-const SlamModeStrategyRegistrar kXFeatLightGlueModeStrategyRegistration(
+const SlamModeStrategyRegistrar XFEAT_LIGHT_GLUE_MODE_STRATEGY_REGISTRATION(
     FeatureFrontend::XFeatLightGlue,
     &CreateRegisteredXFeatLightGlueModeStrategy);
 
@@ -57,7 +58,7 @@ MakeVisualFeatureFailureOutput(SlamEngineAdapter &engine,
                                const Core::Ports::SlamInputBatch &input)
 {
     Core::Ports::SlamOutput out = MakePoseLostSlamOutput(
-        &engine, input, Core::Ports::kSlamTrackingRecentlyLost, true, true);
+        &engine, input, Core::Ports::SLAM_TRACKING_RECENTLY_LOST, true, true);
     state.CopyVisualFeatureStatsToOutput(out);
     return out;
 }
@@ -85,7 +86,7 @@ int ChooseLightGlueCadence(
         EnvIntValueClamped("SMART_DRONE_SP_LG_STABLE_OK_STREAK", 120, 1, 100000);
     const int trackedMapPointMin =
         EnvIntValueClamped("SMART_DRONE_SP_LG_STABLE_TRACKED_MPS", 96, 1, 100000);
-    if (trackingState == Core::Ports::kSlamTrackingOk &&
+    if (trackingState == Core::Ports::SLAM_TRACKING_OK &&
         state.m_visualFeatureLightGlueOkStreak >= okStreakMin &&
         trackedMapPoints >= trackedMapPointMin) {
         return stableEveryN;
@@ -110,7 +111,7 @@ void UpdateLightGlueCadenceState(SlamModeSharedState &state,
     const bool holdMatureBootstrapTrust =
         bootstrapTrustAlreadyMature &&
         trackedMapPoints >= bootstrapTrustHoldTrackedMapMin;
-    if (out.trackingState == Core::Ports::kSlamTrackingOk &&
+    if (out.trackingState == Core::Ports::SLAM_TRACKING_OK &&
         (trackedMapPoints >= trackedMapPointMin || holdMatureBootstrapTrust)) {
         ++state.m_visualFeatureLightGlueOkStreak;
     } else {
@@ -172,8 +173,9 @@ size_t RefineSelectedRightPointsByZncc(const cv::Mat &leftPrepared,
     for (size_t i = 0; i < leftPoints.size(); ++i) {
         cv::Point2f refinedRight = rightPoints[i];
         float zncc = -1.0f;
-        if (!RefineRightPointByStereoZncc(left32f, leftPoints[i], right32f,
-                                          rightPoints[i], refinedRight, zncc)) {
+        if (!RefineRightPointByStereoZncc(
+                {left32f, leftPoints[i], right32f, rightPoints[i],
+                 refinedRight, zncc})) {
             continue;
         }
         if (std::fabs(refinedRight.x - rightPoints[i].x) > maxShiftPx ||

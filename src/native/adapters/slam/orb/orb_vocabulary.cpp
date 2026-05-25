@@ -1,5 +1,5 @@
 #include "adapters/slam/orb/orb_vocabulary.h"
-#include "adapters/slam/orb/orb_slam3/features/orb_vocabulary_bridge.h"
+#include "orb_vocabulary_bridge.h"
 
 #include <algorithm>
 #include <iostream>

@@ -1,6 +1,5 @@
 #include "core/application/session/calib/calib_storage_port.h"
 
-#include <mutex>
 #include <utility>
 
 #include "core/application/session/calib/calib_output_store.h"
@@ -16,7 +15,6 @@ class CalibStoragePort::Impl final {
 
     bool Open()
     {
-        std::lock_guard<std::mutex> lock(m_mu);
         m_closed = false;
         const bool opened = m_store->Open();
         m_closed = !opened;
@@ -25,7 +23,6 @@ class CalibStoragePort::Impl final {
 
     bool WriteSavePair(const CalibSavePair &pair)
     {
-        std::lock_guard<std::mutex> lock(m_mu);
         if (m_closed) {
             return false;
         }
@@ -34,21 +31,20 @@ class CalibStoragePort::Impl final {
 
     bool WriteImuSample(const ImuSample &sample)
     {
-        std::lock_guard<std::mutex> lock(m_mu);
         if (m_closed) {
             return false;
         }
         return m_store->WriteImuSample(sample);
     }
 
-    void FlushAndClose()
+    bool FlushAndClose()
     {
-        std::lock_guard<std::mutex> lock(m_mu);
         if (m_closed) {
-            return;
+            return true;
         }
-        m_store->FlushAndClose();
+        const bool synced = m_store->FlushAndClose();
         m_closed = true;
+        return synced;
     }
 
     int SavedCount() const
@@ -72,7 +68,6 @@ class CalibStoragePort::Impl final {
     }
 
   private:
-    mutable std::mutex m_mu;
     std::unique_ptr<CalibOutputStore> m_store;
     bool m_closed{true};
 };
@@ -99,9 +94,9 @@ bool CalibStoragePort::WriteImuSample(const ImuSample &sample)
     return m_impl->WriteImuSample(sample);
 }
 
-void CalibStoragePort::FlushAndClose()
+bool CalibStoragePort::FlushAndClose()
 {
-    m_impl->FlushAndClose();
+    return m_impl->FlushAndClose();
 }
 
 int CalibStoragePort::SavedCount() const

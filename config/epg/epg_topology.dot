@@ -225,29 +225,20 @@ digraph EpgTopology {
     SlamPosePostprocessTask -> SlamPointCloudTask [
       taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
-    SlamPosePostprocessTask -> SlamLivePoseTask [
-      taillabel="1", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
-    ];
-    SlamPosePostprocessTask -> SlamMavlinkTask [
-      taillabel="2", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
-    ];
-    SlamPosePostprocessTask -> SlamUdpTask [
-      taillabel="3", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
-    ];
-    SlamPointCloudTask -> SlamDfxTask [
+    SlamPointCloudTask -> SlamLivePoseTask [
       taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
-    SlamLivePoseTask -> SlamDfxTask [
-      taillabel="0", headlabel="1", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
+    SlamLivePoseTask -> SlamMavlinkTask [
+      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
-    SlamMavlinkTask -> SlamDfxTask [
-      taillabel="0", headlabel="2", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
+    SlamMavlinkTask -> SlamUdpTask [
+      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamUdpTask -> SlamPreviewTxTask [
       taillabel="0", headlabel="0", label="SlamPreviewReady\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamPreviewTxTask -> SlamDfxTask [
-      taillabel="0", headlabel="3", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
+      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamDfxTask -> SlamMonitorTask [
       taillabel="0", headlabel="0", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
@@ -308,7 +299,7 @@ digraph EpgTopology {
       label="{CalibPacingFilterTask|type=CalibPacingFilterTask|trigger=any_queue_ready|trigger_queues=CalibStereoFrame}"
     ];
     CalibStorageWriteTask [
-      label="{CalibStorageWriteTask|type=CalibStorageWriteTask|trigger=any_queue_ready|trigger_queues=CalibSavePair}"
+      label="{CalibStorageWriteTask|type=CalibStorageWriteTask|trigger=any_queue_ready|trigger_queues=CalibSavePair+CalibImuSample+CalibFlushRequest}"
     ];
     CalibImuWriterTask [
       label="{CalibImuWriterTask|type=CalibImuWriterTask|trigger=periodic_or_any_queue_ready|interval_ms=1|trigger_queues=CalibResourceReady}"
@@ -317,10 +308,10 @@ digraph EpgTopology {
       label="{CalibUdpPreviewTask|type=CalibUdpPreviewTask|trigger=any_queue_ready|trigger_queues=CalibStereoFrame}"
     ];
     CalibCompletionTask [
-      label="{CalibCompletionTask|type=CalibCompletionTask|trigger=any_queue_ready|trigger_queues=CalibCaptureDone+CalibStorageStatus+CalibImuStatus+CalibPreviewStatus+CalibStopRequest}"
+      label="{CalibCompletionTask|type=CalibCompletionTask|trigger=any_queue_ready|trigger_queues=CalibCaptureDone+CalibPreviewStatus+CalibStopRequest}"
     ];
     CalibFlushSyncTask [
-      label="{CalibFlushSyncTask|type=CalibFlushSyncTask|trigger=any_queue_ready|trigger_queues=CalibFlushRequest}"
+      label="{CalibFlushSyncTask|type=CalibFlushSyncTask|trigger=any_queue_ready|trigger_queues=CalibStorageFlushed}"
     ];
     CalibMonitorTask [
       label="{CalibMonitorTask|type=CalibMonitorTask|trigger=any_queue_ready|trigger_queues=CalibStatus}"
@@ -336,7 +327,7 @@ digraph EpgTopology {
       taillabel="1", headlabel="0", label="CalibResourceReady\ndepth=1\noverflow=overwrite_oldest"
     ];
     CalibResourceTask -> CalibCompletionTask [
-      taillabel="2", headlabel="4", label="CalibStopRequest\ndepth=1\noverflow=overwrite_oldest"
+      taillabel="2", headlabel="2", label="CalibStopRequest\ndepth=1\noverflow=overwrite_oldest"
     ];
     CalibClockTask -> CalibCameraAcquireTask [
       taillabel="0", headlabel="1", label="CalibTick\ndepth=1\noverflow=overwrite_oldest"
@@ -353,17 +344,17 @@ digraph EpgTopology {
     CalibPacingFilterTask -> CalibStorageWriteTask [
       taillabel="0", headlabel="0", label="CalibSavePair\ndepth=2\noverflow=drop_newest"
     ];
-    CalibStorageWriteTask -> CalibCompletionTask [
-      taillabel="0", headlabel="1", label="CalibStorageStatus\ndepth=8\noverflow=overwrite_oldest"
-    ];
-    CalibImuWriterTask -> CalibCompletionTask [
-      taillabel="0", headlabel="2", label="CalibImuStatus\ndepth=8\noverflow=overwrite_oldest"
+    CalibImuWriterTask -> CalibStorageWriteTask [
+      taillabel="0", headlabel="1", label="CalibImuSample\ndepth=64\noverflow=drop_newest"
     ];
     CalibUdpPreviewTask -> CalibCompletionTask [
-      taillabel="0", headlabel="3", label="CalibPreviewStatus\ndepth=8\noverflow=overwrite_oldest"
+      taillabel="0", headlabel="1", label="CalibPreviewStatus\ndepth=8\noverflow=overwrite_oldest"
     ];
-    CalibCompletionTask -> CalibFlushSyncTask [
-      taillabel="0", headlabel="0", label="CalibFlushRequest\ndepth=1\noverflow=overwrite_oldest"
+    CalibCompletionTask -> CalibStorageWriteTask [
+      taillabel="0", headlabel="2", label="CalibFlushRequest\ndepth=1\noverflow=overwrite_oldest"
+    ];
+    CalibStorageWriteTask -> CalibFlushSyncTask [
+      taillabel="0", headlabel="0", label="CalibStorageFlushed\ndepth=1\noverflow=overwrite_oldest"
     ];
     CalibFlushSyncTask -> CalibMonitorTask [
       taillabel="0", headlabel="0", label="CalibStatus\ndepth=4\noverflow=overwrite_oldest"

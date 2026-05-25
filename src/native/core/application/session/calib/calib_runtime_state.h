@@ -32,9 +32,15 @@ class CalibRuntimeState final {
     bool TryBuildSavePair(std::shared_ptr<CalibStereoFrame> frame,
                           CalibSavePair &savePair);
     bool WriteSavePair(const CalibSavePair &pair);
+    bool WriteImuSample(const ImuSample &sample);
     bool EnqueuePreview(const CalibStereoFrame &frame);
     CalibImuSampleResult StepImuSample();
+    void RequestStop();
+    bool FlushStorage();
+    void MarkStorageFlushed();
+    bool StorageFlushed() const;
     bool Finalized() const;
+    void FinalizeAfterStorageFlushed(bool sessionOk);
     void Finalize(bool sessionOk);
 
   private:

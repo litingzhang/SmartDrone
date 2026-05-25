@@ -6,10 +6,31 @@
 
 namespace SmartDrone::Core::Application {
 
+namespace {
+
+class AtomicFlagResetGuard {
+  public:
+    explicit AtomicFlagResetGuard(std::atomic<bool> &flag)
+        : m_flag(flag)
+    {
+    }
+
+    ~AtomicFlagResetGuard()
+    {
+        m_flag.store(false, std::memory_order_release);
+    }
+
+  private:
+    std::atomic<bool> &m_flag;
+};
+
+} // namespace
+
 RuntimeSessionSupervisor::RuntimeSessionSupervisor(Config config)
     : m_runningFlag(config.runningFlag), m_currentConfig(std::move(config.currentConfig)),
       m_createSession(std::move(config.createSession))
 {
+    StoreState(std::make_shared<const SupervisorState>());
 }
 
 RuntimeSessionSupervisor::~RuntimeSessionSupervisor()
@@ -19,14 +40,22 @@ RuntimeSessionSupervisor::~RuntimeSessionSupervisor()
 
 void RuntimeSessionSupervisor::Stop()
 {
-    {
-        std::lock_guard<std::mutex> lock(m_mu);
-        m_stopping = true;
-        m_modeManager.RequestMode(ControllerMode::Idle);
-        m_sessionStop.store(true);
-    }
-    std::lock_guard<std::mutex> stepLock(m_stepMu);
+    RequestSupervisorStop();
     StopActiveSessionSynchronously();
+}
+
+void RuntimeSessionSupervisor::RequestSupervisorStop()
+{
+    std::shared_ptr<const SupervisorState> current = LoadState();
+    while (current) {
+        auto next = std::make_shared<SupervisorState>(*current);
+        next->stopping = true;
+        next->modeManager.RequestMode(ControllerMode::Idle);
+        if (ReplaceState(current, std::move(next))) {
+            m_sessionStop.store(true);
+            break;
+        }
+    }
 }
 
 void RuntimeSessionSupervisor::OnGraphTick()
@@ -41,45 +70,59 @@ void RuntimeSessionSupervisor::Step()
 
 bool RuntimeSessionSupervisor::RequestMode(ControllerMode mode, std::string *err)
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    if (m_stopping) {
-        if (err) {
-            *err = "runtime stopping";
+    std::shared_ptr<const SupervisorState> current = LoadState();
+    while (current) {
+        if (current->stopping) {
+            if (err) {
+                *err = "runtime stopping";
+            }
+            return false;
         }
-        return false;
+        auto next = std::make_shared<SupervisorState>(*current);
+        next->modeManager.RequestMode(mode);
+        if (ReplaceState(current, std::move(next))) {
+            return true;
+        }
     }
-    m_modeManager.RequestMode(mode);
-    return true;
+    return false;
 }
 
 void RuntimeSessionSupervisor::RequestRestart()
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    m_modeManager.RequestRestart();
-    m_sessionStop.store(true);
+    std::shared_ptr<const SupervisorState> current = LoadState();
+    while (current) {
+        auto next = std::make_shared<SupervisorState>(*current);
+        next->modeManager.RequestRestart();
+        if (ReplaceState(current, std::move(next))) {
+            m_sessionStop.store(true);
+            return;
+        }
+    }
 }
 
 RuntimeSessionSupervisor::ControllerMode RuntimeSessionSupervisor::DesiredMode() const
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    return m_modeManager.DesiredMode();
+    return LoadState()->modeManager.DesiredMode();
 }
 
 RuntimeSessionSupervisor::ControllerMode RuntimeSessionSupervisor::ActiveMode() const
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    return m_modeManager.ActiveMode();
+    return LoadState()->modeManager.ActiveMode();
 }
 
 RuntimeSessionSupervisor::IdleStatus RuntimeSessionSupervisor::GetIdleStatus() const
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    return {SessionIdleUnlocked(), m_stopping};
+    std::shared_ptr<const SupervisorState> state = LoadState();
+    return {SessionIdle(*state), state->stopping};
 }
 
 void RuntimeSessionSupervisor::StepSupervisor()
 {
-    std::lock_guard<std::mutex> stepLock(m_stepMu);
+    bool expected = false;
+    if (!m_stepRunning.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        return;
+    }
+    AtomicFlagResetGuard stepGuard(m_stepRunning);
     ApplyGlobalStop();
     StopRequestedSession();
     StepActiveSession();
@@ -92,22 +135,17 @@ void RuntimeSessionSupervisor::ApplyGlobalStop()
     if (m_runningFlag.load()) {
         return;
     }
-    std::lock_guard<std::mutex> lock(m_mu);
-    m_sessionStop.store(true);
-    m_stopping = true;
-    m_modeManager.RequestMode(ControllerMode::Idle);
+    RequestSupervisorStop();
 }
 
 void RuntimeSessionSupervisor::StopRequestedSession()
 {
-    std::shared_ptr<ISessionGraphRuntime> session;
-    {
-        std::lock_guard<std::mutex> lock(m_mu);
-        if (m_stopping || m_modeManager.ShouldStopActiveSession()) {
-            m_sessionStop.store(true);
-            session = m_session;
-        }
+    std::shared_ptr<const SupervisorState> state = LoadState();
+    if (!state->stopping && !state->modeManager.ShouldStopActiveSession()) {
+        return;
     }
+    m_sessionStop.store(true);
+    std::shared_ptr<ISessionGraphRuntime> session = state->session;
     if (session) {
         session->RequestStop();
     }
@@ -115,11 +153,7 @@ void RuntimeSessionSupervisor::StopRequestedSession()
 
 void RuntimeSessionSupervisor::StepActiveSession()
 {
-    std::shared_ptr<ISessionGraphRuntime> session;
-    {
-        std::lock_guard<std::mutex> lock(m_mu);
-        session = m_session;
-    }
+    std::shared_ptr<ISessionGraphRuntime> session = LoadState()->session;
     if (session) {
         session->Step();
     }
@@ -127,11 +161,7 @@ void RuntimeSessionSupervisor::StepActiveSession()
 
 void RuntimeSessionSupervisor::FinishCompletedSession()
 {
-    std::shared_ptr<ISessionGraphRuntime> session;
-    {
-        std::lock_guard<std::mutex> lock(m_mu);
-        session = m_session;
-    }
+    std::shared_ptr<ISessionGraphRuntime> session = LoadState()->session;
     if (!session || !session->Done()) {
         return;
     }
@@ -150,25 +180,47 @@ void RuntimeSessionSupervisor::LaunchRequestedSession()
         MarkSessionJoined();
         return;
     }
-    std::lock_guard<std::mutex> lock(m_mu);
-    m_session = std::move(session);
+    std::shared_ptr<const SupervisorState> current = LoadState();
+    while (current) {
+        auto next = std::make_shared<SupervisorState>(*current);
+        next->session = session;
+        if (ReplaceState(current, std::move(next))) {
+            return;
+        }
+    }
 }
 
 bool RuntimeSessionSupervisor::PrepareLaunch(ControllerMode &mode, UnifiedConfig &cfg)
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    if (m_stopping || m_session || m_modeManager.ActiveMode() != ControllerMode::Idle) {
-        return false;
+    std::shared_ptr<const SupervisorState> current = LoadState();
+    while (current) {
+        if (current->stopping || current->session ||
+            current->modeManager.ActiveMode() != ControllerMode::Idle) {
+            return false;
+        }
+        auto next = std::make_shared<SupervisorState>(*current);
+        if (current->modeManager.DesiredMode() == ControllerMode::Idle) {
+            next->modeManager.MarkSessionJoined();
+            if (ReplaceState(current, std::move(next))) {
+                return false;
+            }
+            continue;
+        }
+        mode = current->modeManager.DesiredMode();
+        next->modeManager.MarkSessionLaunching(mode);
+        std::shared_ptr<const SupervisorState> nextState = next;
+        if (ReplaceState(current, nextState)) {
+            m_sessionStop.store(false);
+            std::shared_ptr<const SupervisorState> latest = LoadState();
+            if (latest != nextState &&
+                (latest->stopping || latest->modeManager.ShouldStopActiveSession())) {
+                m_sessionStop.store(true);
+            }
+            cfg = m_currentConfig();
+            return true;
+        }
     }
-    if (m_modeManager.DesiredMode() == ControllerMode::Idle) {
-        m_modeManager.MarkSessionJoined();
-        return false;
-    }
-    cfg = m_currentConfig();
-    mode = m_modeManager.DesiredMode();
-    m_modeManager.MarkSessionLaunching(mode);
-    m_sessionStop.store(false);
-    return true;
+    return false;
 }
 
 std::shared_ptr<ISessionGraphRuntime> RuntimeSessionSupervisor::MakeSessionRuntime(
@@ -186,11 +238,7 @@ std::shared_ptr<ISessionGraphRuntime> RuntimeSessionSupervisor::MakeSessionRunti
 
 void RuntimeSessionSupervisor::StopActiveSessionSynchronously()
 {
-    std::shared_ptr<ISessionGraphRuntime> session;
-    {
-        std::lock_guard<std::mutex> lock(m_mu);
-        session = std::move(m_session);
-    }
+    std::shared_ptr<ISessionGraphRuntime> session = LoadState()->session;
     if (session) {
         session->Stop();
     }
@@ -199,15 +247,41 @@ void RuntimeSessionSupervisor::StopActiveSessionSynchronously()
 
 void RuntimeSessionSupervisor::MarkSessionJoined()
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    m_session.reset();
-    m_modeManager.MarkSessionJoined();
+    std::shared_ptr<const SupervisorState> current = LoadState();
+    while (current) {
+        auto next = std::make_shared<SupervisorState>(*current);
+        next->session.reset();
+        next->modeManager.MarkSessionJoined();
+        if (ReplaceState(current, std::move(next))) {
+            return;
+        }
+    }
 }
 
-bool RuntimeSessionSupervisor::SessionIdleUnlocked() const
+bool RuntimeSessionSupervisor::SessionIdle(const SupervisorState &state) const
 {
-    return m_modeManager.ActiveMode() == ControllerMode::Idle &&
-           m_modeManager.DesiredMode() == ControllerMode::Idle && !m_session;
+    return state.modeManager.ActiveMode() == ControllerMode::Idle &&
+           state.modeManager.DesiredMode() == ControllerMode::Idle && !state.session;
+}
+
+std::shared_ptr<const RuntimeSessionSupervisor::SupervisorState>
+RuntimeSessionSupervisor::LoadState() const
+{
+    return std::atomic_load_explicit(&m_state, std::memory_order_acquire);
+}
+
+void RuntimeSessionSupervisor::StoreState(std::shared_ptr<const SupervisorState> state)
+{
+    std::atomic_store_explicit(&m_state, std::move(state), std::memory_order_release);
+}
+
+bool RuntimeSessionSupervisor::ReplaceState(
+    std::shared_ptr<const SupervisorState> &expected,
+    std::shared_ptr<const SupervisorState> next)
+{
+    return std::atomic_compare_exchange_weak_explicit(&m_state, &expected, std::move(next),
+                                                      std::memory_order_acq_rel,
+                                                      std::memory_order_acquire);
 }
 
 } // namespace SmartDrone::Core::Application

@@ -10,57 +10,65 @@
 
 namespace SmartDrone::Core::Application {
 
-void FlushAndSyncFile(FILE *file, const char *label)
+bool FlushAndSyncFile(FILE *file, const char *label)
 {
     if (!file) {
-        return;
+        return true;
     }
     std::fflush(file);
     const int fd = ::fileno(file);
     if (fd >= 0 && ::fsync(fd) != 0) {
         std::cerr << "[calib-sync] fsync failed label=" << label << " errno=" << errno << "\n";
+        return false;
     }
+    return true;
 }
 
-void SyncPathFile(const std::filesystem::path &path)
+bool SyncPathFile(const std::filesystem::path &path)
 {
     const int fd = ::open(path.c_str(), O_RDONLY);
     if (fd < 0) {
         std::cerr << "[calib-sync] open failed path=" << path.string() << " errno=" << errno << "\n";
-        return;
+        return false;
     }
-    if (::fsync(fd) != 0) {
+    const bool synced = ::fsync(fd) == 0;
+    if (!synced) {
         std::cerr << "[calib-sync] fsync failed path=" << path.string() << " errno=" << errno << "\n";
     }
     ::close(fd);
+    return synced;
 }
 
-void SyncDirPath(const std::filesystem::path &path)
+bool SyncDirPath(const std::filesystem::path &path)
 {
     const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY);
     if (fd < 0) {
         std::cerr << "[calib-sync] open dir failed path=" << path.string() << " errno=" << errno << "\n";
-        return;
+        return false;
     }
-    if (::fsync(fd) != 0) {
+    const bool synced = ::fsync(fd) == 0;
+    if (!synced) {
         std::cerr << "[calib-sync] fsync dir failed path=" << path.string() << " errno=" << errno << "\n";
     }
     ::close(fd);
+    return synced;
 }
 
-void FlushCalibOutputs(const CalibOutputFlushRequest &request)
+bool FlushCalibOutputs(const CalibOutputFlushRequest &request)
 {
-    FlushAndSyncFile(request.cam0File, "cam0.csv");
-    FlushAndSyncFile(request.cam1File, "cam1.csv");
-    FlushAndSyncFile(request.imuFile, "imu.csv");
+    bool ok = true;
+    ok = FlushAndSyncFile(request.cam0File, "cam0.csv") && ok;
+    ok = FlushAndSyncFile(request.cam1File, "cam1.csv") && ok;
+    ok = FlushAndSyncFile(request.imuFile, "imu.csv") && ok;
 
     for (const auto &imagePath : request.imagePaths) {
-        SyncPathFile(imagePath);
+        ok = SyncPathFile(imagePath) && ok;
     }
 
-    SyncDirPath(request.cam0Dir);
-    SyncDirPath(request.cam1Dir);
-    SyncDirPath(request.root);
+    ok = SyncDirPath(request.cam0Dir) && ok;
+    ok = SyncDirPath(request.cam1Dir) && ok;
+    ok = SyncDirPath(request.root) && ok;
+    return ok;
 }
 
 } // namespace SmartDrone::Core::Application

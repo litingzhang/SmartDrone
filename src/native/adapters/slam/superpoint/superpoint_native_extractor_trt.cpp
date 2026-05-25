@@ -20,6 +20,14 @@
 #include <opencv2/imgproc.hpp>
 
 #include "adapters/slam/engine/slam_env.h"
+#include "adapters/slam/superpoint/superpoint_native_extractor_impl.h"
+#include "adapters/slam/superpoint/superpoint_native_extractor_postprocess_descriptors.h"
+#include "adapters/slam/superpoint/superpoint_native_extractor_postprocess_heatmap.h"
+#include "adapters/slam/superpoint/superpoint_native_extractor_tensorrt_common.h"
+#include "adapters/slam/superpoint/superpoint_native_extractor_tensorrt_lightglue.h"
+#include "adapters/slam/superpoint/superpoint_native_extractor_tensorrt_output.h"
+#include "adapters/slam/superpoint/superpoint_native_extractor_tensorrt_superpoint.h"
+#include "adapters/slam/superpoint/superpoint_native_extractor_tensorrt_utils.h"
 
 #include <NvInfer.h>
 #include <NvInferPlugin.h>
@@ -29,27 +37,11 @@ namespace SmartDrone::Adapters::Slam {
 
 SuperPointNativeExtractor::SuperPointNativeExtractor() = default;
 
-namespace SuperPointTensorRtInternal {
-#include "superpoint_native_extractor_common.h"
-#include "superpoint_native_extractor_postprocess_heatmap.h"
-#include "superpoint_native_extractor_postprocess_descriptors.h"
-#include "superpoint_native_extractor_tensorrt_output.h"
-#include "superpoint_native_extractor_stereo_append.h"
-#include "superpoint_native_extractor_tensorrt_utils.h"
-#include "superpoint_native_extractor_tensorrt_superpoint.h"
-#include "superpoint_native_extractor_tensorrt_lightglue.h"
-
-} // namespace SuperPointTensorRtInternal
-
-#include "superpoint_native_extractor_impl.h"
-#include "superpoint_native_extractor_impl_runtime.h"
-#include "superpoint_native_extractor_impl_batch.h"
-
 using SuperPointTensorRtInternal::AppendStereoFeaturePairs;
 using SuperPointTensorRtInternal::DurationMs;
 using SuperPointTensorRtInternal::EnvIntClamped;
-using SuperPointTensorRtInternal::kLightGlueMinStereoPairsForSupplement;
-using SuperPointTensorRtInternal::kSuperPointStereoExtractionSlack;
+using SuperPointTensorRtInternal::LIGHT_GLUE_MIN_STEREO_PAIRS_FOR_SUPPLEMENT;
+using SuperPointTensorRtInternal::SUPER_POINT_STEREO_EXTRACTION_SLACK;
 using SuperPointTensorRtInternal::MatchStereoPairs;
 using SuperPointTensorRtInternal::SuperPointPostStats;
 using SuperPointTensorRtInternal::TensorRtForwardStats;
@@ -196,9 +188,10 @@ bool SuperPointNativeExtractor::DetectAndCompute(
     double forwardMs = 0.0;
     double postMs = 0.0;
     const int detectMaxPoints = std::max(m_topK, m_maxPoints);
-    if (!m_impl->DetectAndComputeBatch({gray8}, detectMaxPoints, detectMaxPoints,
-                                       outputs, &inputMs, &forwardMs, &postMs,
-                                       err) ||
+    const std::vector<cv::Mat> grayBatch{gray8};
+    if (!m_impl->DetectAndComputeBatch(
+            {grayBatch, detectMaxPoints, detectMaxPoints, outputs, &inputMs,
+             &forwardMs, &postMs, err}) ||
         outputs.empty()) {
         return false;
     }
@@ -233,14 +226,14 @@ void SuperPointNativeExtractor::ConfigureStereoExtractionBudgets(
     StereoComputeContext &context) const
 {
     context.requestedMaxPoints = std::max(1, m_maxPoints);
-    context.lightGluePoints = m_impl->maxPointsForLightGlue();
+    context.lightGluePoints = m_impl->MaxPointsForLightGlue();
     context.descriptorCandidates =
         EnvIntClamped("SMART_DRONE_DESCRIPTOR_SUPPLEMENT_CANDIDATES",
                       context.requestedMaxPoints, 1, 4096);
     const int requiredFeatureBudget =
         std::max({context.requestedMaxPoints, context.lightGluePoints,
                   context.descriptorCandidates}) +
-        kSuperPointStereoExtractionSlack;
+        SUPER_POINT_STEREO_EXTRACTION_SLACK;
     context.extractionBudget = EnvIntClamped(
         "SMART_DRONE_SUPERPOINT_STEREO_EXTRACTION_BUDGET",
         std::min(std::max(m_topK, context.requestedMaxPoints),
@@ -259,31 +252,16 @@ bool SuperPointNativeExtractor::RunStereoSuperPointBatch(
 {
     ConfigureStereoExtractionBudgets(context);
     context.inferStartTp = context.prepareEndTp;
+    const std::vector<cv::Mat> grayBatch{context.leftGray8,
+                                         context.rightGray8};
     if (!m_impl->DetectAndComputeBatch(
-            {context.leftGray8, context.rightGray8}, context.extractionBudget,
-            context.descriptorLimit, context.rawOutputs, &context.inputMs,
-            &context.forwardMs, &context.postMs, err) ||
+            {grayBatch, context.extractionBudget, context.descriptorLimit,
+             context.rawOutputs, &context.inputMs, &context.forwardMs,
+             &context.postMs, err}) ||
         context.rawOutputs.size() != 2) {
         return false;
     }
     return true;
-}
-
-void SuperPointNativeExtractor::ResetLightGlueStats()
-{
-    m_impl->lastLightGlueMutualCount = 0;
-    m_impl->lastLightGlueScorePassCount = 0;
-    m_impl->lastLightGlueGeometryPassCount = 0;
-    m_impl->lastLightGlueAcceptedCount = 0;
-    m_impl->lastLightGlueMinScore = 0.0f;
-    m_impl->lastLightGlueMaxScore = 0.0f;
-    m_impl->lastLightGlueDecodeMs = 0.0;
-    m_impl->lastLightGlueOrientation = "none";
-    m_impl->lastLightGlueScoresLookLog = false;
-    m_impl->lastLightGlueForwardStats = TensorRtForwardStats{};
-    m_impl->lastLightGlueRequestedPointCount = 0;
-    m_impl->lastLightGlueInputPointCount = 0;
-    m_impl->lastLightGlueStaticShapeFallback = false;
 }
 
 void SuperPointNativeExtractor::ConfigureStereoMatchState(
@@ -293,18 +271,17 @@ void SuperPointNativeExtractor::ConfigureStereoMatchState(
         m_lightGlueEveryNOverride > 0
             ? std::clamp(m_lightGlueEveryNOverride, 1, 120)
             : EnvIntClamped("SMART_DRONE_LIGHTGLUE_EVERY_N", 4, 1, 120);
-    match.lightGlueFrameIndex = m_impl->lightGlueFrameCounter++;
+    match.lightGlueFrameIndex = m_impl->NextLightGlueFrameIndex();
     match.skippedLightGlue = match.lightGlueEveryN > 1 &&
                              (match.lightGlueFrameIndex %
                               match.lightGlueEveryN) != 0;
     match.lightGlueSkipReason = match.skippedLightGlue ? "cadence" : "none";
     match.lightGlueSupplementMinPairs =
         EnvIntClamped("SMART_DRONE_LIGHTGLUE_SUPPLEMENT_MIN_PAIRS",
-                      kLightGlueMinStereoPairsForSupplement, 0,
+                      LIGHT_GLUE_MIN_STEREO_PAIRS_FOR_SUPPLEMENT, 0,
                       context.maxStereoPairs);
-    ResetLightGlueStats();
-    if (!match.skippedLightGlue && m_impl->lightGlueSkipRemaining > 0) {
-        --m_impl->lightGlueSkipRemaining;
+    m_impl->ResetLightGlueStats();
+    if (!match.skippedLightGlue && m_impl->ConsumeLightGlueCooldown()) {
         match.skippedLightGlue = true;
         match.lightGlueSkipReason = "cooldown";
     }
@@ -373,10 +350,10 @@ bool SuperPointNativeExtractor::TryUseLightGlue(
     SuperPointFeatureSet lightGlueLeftFeatures;
     SuperPointFeatureSet lightGlueRightFeatures;
     if (!m_impl->MatchWithLightGlue(
-            context.rawOutputs[0], context.rawOutputs[1],
-            context.maxStereoPairs, context.leftGray8.cols,
-            context.leftGray8.rows, lightGlueLeftFeatures,
-            lightGlueRightFeatures, &match.lightGlueMatchMs, err)) {
+            {context.rawOutputs[0], context.rawOutputs[1],
+             context.maxStereoPairs, context.leftGray8.cols,
+             context.leftGray8.rows, lightGlueLeftFeatures,
+             lightGlueRightFeatures, &match.lightGlueMatchMs, err})) {
         return false;
     }
 
@@ -392,7 +369,7 @@ bool SuperPointNativeExtractor::TryUseLightGlue(
         static_cast<int>(lightGlueRightFeatures.keypoints.size());
     leftFeatures = std::move(lightGlueLeftFeatures);
     rightFeatures = std::move(lightGlueRightFeatures);
-    m_impl->lightGlueEmptyCount = 0;
+    m_impl->ResetLightGlueEmptyCount();
     m_impl->RecordLightGlueLowYield(match.lightGlueLeftCount);
     AppendDescriptorSupplementIfNeeded(context, match, leftFeatures,
                                        rightFeatures);
@@ -431,8 +408,10 @@ void SuperPointNativeExtractor::UpdateStereoStats(
 void SuperPointNativeExtractor::LogSuperPointPerformanceFields(
     std::ostream &out) const
 {
-    const TensorRtForwardStats &spStats = m_impl->lastSuperPointForwardStats;
-    const SuperPointPostStats &spPostStats = m_impl->lastSuperPointPostStats;
+    const SuperPointDiagnostics diagnostics =
+        m_impl->CurrentSuperPointDiagnostics();
+    const TensorRtForwardStats &spStats = diagnostics.forwardStats;
+    const SuperPointPostStats &spPostStats = diagnostics.postStats;
     out << " sp_heatmap_ms=" << spPostStats.heatmapMs
               << " sp_nms_ms=" << spPostStats.nmsMs
               << " sp_scan_ms=" << spPostStats.scanMs
@@ -452,13 +431,15 @@ void SuperPointNativeExtractor::LogSuperPointPerformanceFields(
               << " sp_pinned_host=" << (spStats.pinnedHostOutput ? "Y" : "N")
               << " sp_h2d_bytes=" << spStats.h2dBytes
               << " sp_d2h_bytes=" << spStats.d2hBytes << " sp_batched="
-              << (m_impl->lastSuperPointBatchedForward ? "Y" : "N");
+              << (diagnostics.batchedForward ? "Y" : "N");
 }
 
 void SuperPointNativeExtractor::LogLightGluePerformanceFields(
     std::ostream &out, const StereoMatchState &match) const
 {
-    const TensorRtForwardStats &lgStats = m_impl->lastLightGlueForwardStats;
+    const LightGlueDiagnostics diagnostics =
+        m_impl->CurrentLightGlueDiagnostics();
+    const TensorRtForwardStats &lgStats = diagnostics.forwardStats;
     out << " lightglue=" << (match.usedLightGlue ? "Y" : "N")
               << " skipped_lightglue="
               << (match.skippedLightGlue ? "Y" : "N")
@@ -476,16 +457,18 @@ void SuperPointNativeExtractor::LogLightGluePerformanceFields(
               << " lg_pinned_host=" << (lgStats.pinnedHostOutput ? "Y" : "N")
               << " lg_h2d_bytes=" << lgStats.h2dBytes
               << " lg_d2h_bytes=" << lgStats.d2hBytes
-              << " lg_requested_pts=" << m_impl->lastLightGlueRequestedPointCount
-              << " lg_input_pts=" << m_impl->lastLightGlueInputPointCount
+              << " lg_requested_pts=" << diagnostics.requestedPointCount
+              << " lg_input_pts=" << diagnostics.inputPointCount
               << " lg_static_shape_fallback="
-              << (m_impl->lastLightGlueStaticShapeFallback ? "Y" : "N");
+              << (diagnostics.staticShapeFallback ? "Y" : "N");
 }
 
 void SuperPointNativeExtractor::LogDescriptorPerformanceFields(
     std::ostream &out, const StereoComputeContext &context,
     const StereoMatchState &match) const
 {
+    const LightGlueDiagnostics diagnostics =
+        m_impl->CurrentLightGlueDiagnostics();
     out << " sp_descriptor="
               << (match.usedDescriptorPrimary
                       ? "primary"
@@ -495,15 +478,15 @@ void SuperPointNativeExtractor::LogDescriptorPerformanceFields(
               << " descriptor_candidates=" << context.descriptorCandidates
               << " extraction_budget=" << context.extractionBudget
               << " descriptor_limit=" << context.descriptorLimit
-              << " lg_score_range=" << m_impl->lastLightGlueMinScore << "/"
-              << m_impl->lastLightGlueMaxScore << " lg_score_space="
-              << (m_impl->lastLightGlueScoresLookLog ? "log" : "prob")
-              << " lg_decode_ms=" << m_impl->lastLightGlueDecodeMs
-              << " lg_orientation=" << m_impl->lastLightGlueOrientation
-              << " lg_filter=" << m_impl->lastLightGlueMutualCount << "/"
-              << m_impl->lastLightGlueScorePassCount << "/"
-              << m_impl->lastLightGlueGeometryPassCount << "/"
-              << m_impl->lastLightGlueAcceptedCount;
+              << " lg_score_range=" << diagnostics.minScore << "/"
+              << diagnostics.maxScore << " lg_score_space="
+              << (diagnostics.scoresLookLog ? "log" : "prob")
+              << " lg_decode_ms=" << diagnostics.decodeMs
+              << " lg_orientation=" << diagnostics.orientation
+              << " lg_filter=" << diagnostics.mutualCount << "/"
+              << diagnostics.scorePassCount << "/"
+              << diagnostics.geometryPassCount << "/"
+              << diagnostics.acceptedCount;
 }
 
 void SuperPointNativeExtractor::LogStereoPointSummaryFields(

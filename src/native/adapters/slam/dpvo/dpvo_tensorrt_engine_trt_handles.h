@@ -32,54 +32,7 @@ struct DeleteContext {
 class TensorRtEngineHandle {
   public:
     bool Load(const std::filesystem::path &enginePath, const char *name,
-              std::string *err)
-    {
-        std::ifstream in(enginePath, std::ios::binary);
-        if (!in) {
-            if (err != nullptr) {
-                *err = std::string(name) +
-                       " TensorRT engine not found: " + enginePath.string();
-            }
-            return false;
-        }
-        std::vector<char> bytes((std::istreambuf_iterator<char>(in)),
-                                std::istreambuf_iterator<char>());
-        if (bytes.empty()) {
-            if (err != nullptr) {
-                *err = std::string(name) +
-                       " TensorRT engine is empty: " + enginePath.string();
-            }
-            return false;
-        }
-
-        initLibNvInferPlugins(&m_logger, "");
-        m_runtime.reset(nvinfer1::createInferRuntime(m_logger));
-        if (!m_runtime) {
-            if (err != nullptr) {
-                *err = std::string("failed to create ") + name + " TensorRT runtime";
-            }
-            return false;
-        }
-        m_engine.reset(
-            m_runtime->deserializeCudaEngine(bytes.data(), bytes.size()));
-        if (!m_engine) {
-            if (err != nullptr) {
-                *err = std::string("failed to deserialize ") + name +
-                       " TensorRT engine: " + enginePath.string();
-            }
-            return false;
-        }
-        m_context.reset(m_engine->createExecutionContext());
-        if (!m_context) {
-            if (err != nullptr) {
-                *err = std::string("failed to create ") + name +
-                       " TensorRT execution context";
-            }
-            return false;
-        }
-        m_path = enginePath.string();
-        return true;
-    }
+              std::string *err);
 
     bool Loaded() const
     {
@@ -99,6 +52,17 @@ class TensorRtEngineHandle {
     }
 
   private:
+    bool ReadEngineBytes(const std::filesystem::path &enginePath,
+                         const char *name, std::string *err,
+                         std::vector<char> &bytes);
+    bool CreateRuntime(const char *name, std::string *err);
+    bool DeserializeEngine(const std::filesystem::path &enginePath,
+                           const char *name,
+                           const std::vector<char> &bytes,
+                           std::string *err);
+    bool CreateContext(const char *name, std::string *err);
+    static void SetError(std::string *err, std::string message);
+
     TensorRtLogger m_logger{};
     std::unique_ptr<nvinfer1::IRuntime, DeleteRuntime> m_runtime;
     std::unique_ptr<nvinfer1::ICudaEngine, DeleteEngine> m_engine;
@@ -109,33 +73,7 @@ class TensorRtEngineHandle {
 struct CudaStreamHandle {
     cudaStream_t stream{nullptr};
 
-    bool Create(std::string *err)
-    {
-        if (stream != nullptr) {
-            return true;
-        }
-        const cudaError_t rc = cudaStreamCreate(&stream);
-        if (rc != cudaSuccess) {
-            if (err != nullptr) {
-                *err =
-                    std::string("cudaStreamCreate failed: ") + cudaGetErrorString(rc);
-            }
-            stream = nullptr;
-            return false;
-        }
-        return true;
-    }
-
-    void Reset()
-    {
-        if (stream != nullptr) {
-            cudaStreamDestroy(stream);
-            stream = nullptr;
-        }
-    }
-
-    ~CudaStreamHandle()
-    {
-        Reset();
-    }
+    bool Create(std::string *err);
+    void Reset();
+    ~CudaStreamHandle();
 };

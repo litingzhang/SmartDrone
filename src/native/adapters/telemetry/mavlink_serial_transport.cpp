@@ -75,7 +75,7 @@ ssize_t MavlinkSerialTransport::WriteSome(const uint8_t *data, size_t len) const
     return ::write(m_fd, data, len);
 }
 
-int MavlinkSerialTransport::PollReadable(int timeoutMs) const
+int MavlinkSerialTransport::PollReadable() const
 {
     if (m_fd < 0) {
         return -1;
@@ -84,7 +84,7 @@ int MavlinkSerialTransport::PollReadable(int timeoutMs) const
     pollfd pfd{};
     pfd.fd = m_fd;
     pfd.events = POLLIN;
-    return ::poll(&pfd, 1, timeoutMs);
+    return ::poll(&pfd, 1, 0);
 }
 
 ssize_t MavlinkSerialTransport::Read(uint8_t *buffer, size_t len) const

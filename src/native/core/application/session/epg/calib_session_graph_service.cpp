@@ -26,7 +26,7 @@ class CalibSessionGraphRuntime::Impl final {
           m_factories(config.factories),
           m_lifecycle(EpgGraphLifecycleConfig{
               m_stop,
-              [this]() { return ResourcesStopped(); },
+              [this]() { return GraphCanStop(); },
               {},
               [this]() { ResetResources(); },
           })
@@ -123,13 +123,23 @@ class CalibSessionGraphRuntime::Impl final {
         return !m_runningFlag.load() || m_stop.load() || m_completed.load(std::memory_order_relaxed);
     }
 
-    bool ResourcesStopped() const
+    bool GraphCanStop() const
     {
-        return m_state && m_state->Finalized();
+        return m_state && m_state->StorageFlushed();
     }
 
     void ResetResources()
     {
+        if (m_state) {
+            const bool sessionOk =
+                m_sessionOk.load(std::memory_order_relaxed);
+            if (m_state->StorageFlushed()) {
+                m_state->FinalizeAfterStorageFlushed(sessionOk);
+            } else {
+                m_state->Finalize(false);
+                m_sessionOk.store(false, std::memory_order_relaxed);
+            }
+        }
         m_state.reset();
     }
 

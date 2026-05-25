@@ -17,15 +17,21 @@ struct ForwardBackwardTrackingOptions {
     float maxForwardBackwardErrorPx{1.5f};
 };
 
+struct ForwardBackwardTrackingRequest {
+    const cv::Mat &prevGray;
+    const cv::Mat &currGray;
+    const std::vector<cv::Point2f> &prevPoints;
+    std::vector<cv::Point2f> &currPoints;
+    std::vector<uchar> &status;
+    ForwardBackwardTrackingOptions options{};
+};
+
 class IPointTracker2d {
   public:
     virtual ~IPointTracker2d() = default;
 
     virtual bool TrackForwardBackward(
-        const cv::Mat &prevGray, const cv::Mat &currGray,
-        const std::vector<cv::Point2f> &prevPoints,
-        std::vector<cv::Point2f> &currPoints, std::vector<uchar> &status,
-        const ForwardBackwardTrackingOptions &options = {}) const = 0;
+        const ForwardBackwardTrackingRequest &request) const = 0;
 };
 
 struct StereoTrack {
@@ -116,15 +122,7 @@ class IVisualPnpObservationBuilder {
         const TrackedStereoPnpObservationBuilderOptions &options) const = 0;
 };
 
-inline void CopyStereoTracksToOutput(const std::vector<StereoTrack> &tracks,
-                                     SlamOutput &out)
-{
-    out.leftFeatures.reserve(out.leftFeatures.size() + tracks.size());
-    out.rightFeatures.reserve(out.rightFeatures.size() + tracks.size());
-    for (const StereoTrack &track : tracks) {
-        out.leftFeatures.push_back(track.left);
-        out.rightFeatures.push_back(track.right);
-    }
-}
+void CopyStereoTracksToOutput(const std::vector<StereoTrack> &tracks,
+                              SlamOutput &out);
 
 } // namespace SmartDrone::Core::Ports

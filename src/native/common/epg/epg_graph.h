@@ -28,8 +28,8 @@ class EventPipelineGraph {
         }
         const std::string &QueueName() const
         {
-            static const std::string kEmpty;
-            return m_queue ? m_queue->Name() : kEmpty;
+            static const std::string EMPTY_QUEUE_NAME;
+            return m_queue ? m_queue->Name() : EMPTY_QUEUE_NAME;
         }
 
         bool TryPush(std::shared_ptr<T> item) const

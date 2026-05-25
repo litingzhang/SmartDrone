@@ -1,7 +1,6 @@
 #include "core/application/session/calib/calib_session_port_set.h"
 
 #include <iostream>
-#include <mutex>
 #include <utility>
 
 #include "core/application/config/runtime_app_types.h"
@@ -48,7 +47,6 @@ class CalibSessionPortSet::Impl final {
 
     CalibFrameCaptureResult TryCaptureFrame(CalibStereoFrame &frame)
     {
-        std::lock_guard<std::mutex> lock(m_cameraPortMu);
         if (!m_cameraInput || !m_cameraInput->Opened()) {
             return {CalibFrameCaptureStatus::SessionAbort};
         }
@@ -72,9 +70,17 @@ class CalibSessionPortSet::Impl final {
         return m_storagePort->WriteSavePair(pair);
     }
 
+    bool WriteImuSample(const ImuSample &sample)
+    {
+        if (!m_storagePort || !m_storagePort->WriteImuSample(sample)) {
+            return false;
+        }
+        m_imuOk.store(true, std::memory_order_relaxed);
+        return true;
+    }
+
     bool EnqueuePreview(const CalibStereoFrame &frame)
     {
-        std::lock_guard<std::mutex> lock(m_previewPortMu);
         if (m_previewPort) {
             return m_previewPort->Enqueue(frame);
         }
@@ -83,21 +89,27 @@ class CalibSessionPortSet::Impl final {
 
     CalibImuSampleResult StepImuSample()
     {
-        std::lock_guard<std::mutex> lock(m_imuPortMu);
         if (!m_imuSamplePort) {
             return {CalibImuSampleStatus::Pending};
         }
         const CalibImuSamplePortResult result =
             m_imuSamplePort->ReadSample();
-        return WriteReadyImuSample(result);
+        return BuildImuSampleResult(result);
     }
 
-    void StopAndFlush()
+    bool FlushAndCloseStorage()
+    {
+        if (!m_storagePort) {
+            return true;
+        }
+        return m_storagePort->FlushAndClose();
+    }
+
+    void StopPorts()
     {
         StopCamera();
         StopImu();
         StopPreview();
-        FlushAndCloseStorage();
     }
 
     void LogFinalStatus() const
@@ -133,31 +145,20 @@ class CalibSessionPortSet::Impl final {
         m_imuSamplePort.reset(new CalibImuSamplePort(m_aliases));
     }
 
-    CalibImuSampleResult WriteReadyImuSample(
+    static CalibImuSampleResult BuildImuSampleResult(
         const CalibImuSamplePortResult &result)
     {
         if (result.status == CalibImuSamplePortStatus::Pending) {
             return {CalibImuSampleStatus::Pending};
         }
-        if (result.status == CalibImuSamplePortStatus::Failed ||
-            !WriteImuSample(result.sample)) {
+        if (result.status == CalibImuSamplePortStatus::Failed) {
             return {CalibImuSampleStatus::Failed};
         }
-        return {CalibImuSampleStatus::Written};
-    }
-
-    bool WriteImuSample(const ImuSample &sample)
-    {
-        if (!m_storagePort || !m_storagePort->WriteImuSample(sample)) {
-            return false;
-        }
-        m_imuOk.store(true, std::memory_order_relaxed);
-        return true;
+        return {CalibImuSampleStatus::Ready, result.sample};
     }
 
     void StopCamera()
     {
-        std::lock_guard<std::mutex> lock(m_cameraPortMu);
         if (!m_cameraInput) {
             return;
         }
@@ -167,7 +168,6 @@ class CalibSessionPortSet::Impl final {
 
     void StopImu()
     {
-        std::lock_guard<std::mutex> lock(m_imuPortMu);
         if (m_imuSamplePort) {
             m_imuSamplePort->Stop();
         }
@@ -176,7 +176,6 @@ class CalibSessionPortSet::Impl final {
 
     void StopPreview()
     {
-        std::lock_guard<std::mutex> lock(m_previewPortMu);
         if (!m_previewPort) {
             return;
         }
@@ -184,19 +183,9 @@ class CalibSessionPortSet::Impl final {
         m_previewPort.reset();
     }
 
-    void FlushAndCloseStorage()
-    {
-        if (m_storagePort) {
-            m_storagePort->FlushAndClose();
-        }
-    }
-
     MainRuntimeAliases m_aliases;
     std::string m_root;
     const ApplicationRuntimeFactories &m_factories;
-    std::mutex m_cameraPortMu;
-    std::mutex m_imuPortMu;
-    std::mutex m_previewPortMu;
     std::unique_ptr<CalibCameraInputPort> m_cameraInput;
     std::unique_ptr<CalibImuSamplePort> m_imuSamplePort;
     std::unique_ptr<CalibPreviewPort> m_previewPort;
@@ -240,6 +229,11 @@ bool CalibSessionPortSet::WriteSavePair(const CalibSavePair &pair)
     return m_impl->WriteSavePair(pair);
 }
 
+bool CalibSessionPortSet::WriteImuSample(const ImuSample &sample)
+{
+    return m_impl->WriteImuSample(sample);
+}
+
 bool CalibSessionPortSet::EnqueuePreview(const CalibStereoFrame &frame)
 {
     return m_impl->EnqueuePreview(frame);
@@ -250,9 +244,14 @@ CalibImuSampleResult CalibSessionPortSet::StepImuSample()
     return m_impl->StepImuSample();
 }
 
-void CalibSessionPortSet::StopAndFlush()
+bool CalibSessionPortSet::FlushAndCloseStorage()
 {
-    m_impl->StopAndFlush();
+    return m_impl->FlushAndCloseStorage();
+}
+
+void CalibSessionPortSet::StopPorts()
+{
+    m_impl->StopPorts();
 }
 
 void CalibSessionPortSet::LogFinalStatus() const

@@ -11,7 +11,9 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/common/epg/epg_json.cpp
     ../src/native/common/epg/epg_mermaid.cpp
     ../src/native/common/epg/epg_task_runner.cpp
+    ../src/native/common/epg/epg_trigger_modes.cpp
     ../src/native/common/environment.cpp
+    ../src/native/common/numeric_parse.cpp
     ../src/native/core/application/config/orb_acceleration_config.cpp
     ../src/native/core/application/epg/epg_discrete_global_solver.cpp
     ../src/native/core/application/epg/epg_graph_runtime.cpp
@@ -41,6 +43,7 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/core/application/epg/epg_task_dependency_graph.cpp
     ../src/native/core/application/epg/epg_task_manifest.cpp
     ../src/native/core/application/epg/epg_task_manifest_catalog.cpp
+    ../src/native/core/application/epg/epg_task_manifest_internal.cpp
     ../src/native/core/application/epg/epg_task_manifest_optimized_graph_validation.cpp
     ../src/native/core/application/epg/epg_task_manifest_registry.cpp
     ../src/native/core/application/epg/epg_task_manifest_runtime_tuning.cpp
@@ -65,16 +68,41 @@ if(ENABLE_UNIT_TESTS)
     "${CMAKE_CURRENT_SOURCE_DIR}/../src/native"
   )
 
-  target_compile_definitions(epg_tests PRIVATE
-    TEST_EPG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/epg"
-  )
-
   target_link_libraries(epg_tests PRIVATE
     GTest::gtest_main
     Threads::Threads
   )
 
   add_test(NAME EventPipelineGraphTests COMMAND epg_tests)
+
+  add_executable(application_state_tests
+    application/calib_save_pacing_port_test.cpp
+    application/frame_timing_tracker_test.cpp
+    application/goal_cache_test.cpp
+    application/imu_buffer_test.cpp
+    application/live_pose_state_test.cpp
+    application/runtime_session_supervisor_test.cpp
+    ../src/native/common/numeric_parse.cpp
+    ../src/native/common/tlv/goal_cache.cpp
+    ../src/native/core/application/session/calib/calib_save_pacing_port.cpp
+    ../src/native/core/application/session/calib/calib_storage_helpers.cpp
+    ../src/native/core/application/runtime/mode_manager.cpp
+    ../src/native/core/application/runtime/runtime_session_supervisor.cpp
+    ../src/native/core/application/state/frame_timing_tracker.cpp
+    ../src/native/core/application/state/imu_buffer.cpp
+    ../src/native/core/application/state/live_pose_state.cpp
+  )
+
+  target_include_directories(application_state_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src/native"
+  )
+
+  target_link_libraries(application_state_tests PRIVATE
+    GTest::gtest_main
+    ${OpenCV_LIBS}
+  )
+
+  add_test(NAME ApplicationStateTests COMMAND application_state_tests)
 
   find_package(Python3 COMPONENTS Interpreter QUIET)
   if(Python3_EXECUTABLE)
@@ -117,9 +145,12 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/common/epg/epg_dot.cpp
     ../src/native/common/epg/epg_json.cpp
     ../src/native/common/epg/epg_task_runner.cpp
+    ../src/native/common/epg/epg_trigger_modes.cpp
     ../src/native/common/time_utils.cpp
+    ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_config.cpp
     ../src/native/adapters/slam/dpvo/dpvo_runtime_options.cpp
     ../src/native/adapters/slam/engine/slam_engine_factory.cpp
+    ../src/native/adapters/slam/engine/slam_env.cpp
     ../src/native/adapters/slam/engine/slam_mode_state.cpp
     ../src/native/adapters/slam/klt/klt_slam_engine.cpp
     ../src/native/adapters/slam/klt/klt_continuous_frontend.cpp
@@ -135,6 +166,7 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/adapters/slam/stereo/stereo_matching.cpp
     ../src/native/adapters/slam/stereo/stereo_pair_builder.cpp
     ../src/native/adapters/slam/stereo/stereo_feature_packet.cpp
+    ../src/native/adapters/slam/stereo/stereo_feature_packet_hash.cpp
     ../src/native/adapters/slam/stereo/temporal_stereo.cpp
     ../src/native/adapters/slam/engine/slam_image_utils.cpp
     ../src/native/adapters/slam/engine/slam_output_utils.cpp
@@ -148,6 +180,10 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/adapters/slam/superpoint/superpoint_runtime_options.cpp
     ../src/native/adapters/slam/superpoint/superpoint_lightglue_frontend_client.cpp
     ../src/native/common/environment.cpp
+    ../src/native/common/logger.cpp
+    ../src/native/common/numeric_parse.cpp
+    ../src/native/core/ports/slam_tracking_state.cpp
+    ../src/native/core/ports/visual_tracking.cpp
     ../src/native/core/application/config/app_args.cpp
     ../src/native/core/application/config/orb_acceleration_config.cpp
     ../src/native/core/application/config/slam_backend_availability.cpp
@@ -179,6 +215,7 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/core/application/epg/epg_task_dependency_graph.cpp
     ../src/native/core/application/epg/epg_task_manifest.cpp
     ../src/native/core/application/epg/epg_task_manifest_catalog.cpp
+    ../src/native/core/application/epg/epg_task_manifest_internal.cpp
     ../src/native/core/application/epg/epg_task_manifest_optimized_graph_validation.cpp
     ../src/native/core/application/epg/epg_task_manifest_registry.cpp
     ../src/native/core/application/epg/epg_task_manifest_runtime_tuning.cpp
@@ -260,10 +297,6 @@ if(ENABLE_OFFLINE_REPLAY)
     target_include_directories(smart_drone_offline_replay SYSTEM PRIVATE "/usr/include/eigen3")
   endif()
 
-  target_compile_definitions(smart_drone_offline_replay PRIVATE
-    TESTS_SOURCE_DIR="${EUROC_TEST_ROOT}"
-  )
-
   set(SMART_DRONE_REPLAY_VPI_SOURCE
     ../src/native/adapters/slam/klt/klt_vpi_acceleration_stub.cpp)
   set(SMART_DRONE_REPLAY_DPVO_SOURCE
@@ -294,6 +327,7 @@ if(ENABLE_OFFLINE_REPLAY)
       set(SMART_DRONE_REPLAY_DPVO_SOURCE
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_trt.cpp
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_cuda_runtime.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_cuda_compute.cpp
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_graph_state.cpp
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_graph_state_internal.cpp
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_native_solver_math.cpp

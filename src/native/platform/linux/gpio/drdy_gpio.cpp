@@ -20,9 +20,9 @@ bool DrdyGpio::Open(const std::string &chipPath, unsigned lineOffset)
     return OpenLine(lineOffset);
 }
 
-bool DrdyGpio::WaitTs(int timeoutMs, int64_t &tsNsOut)
+bool DrdyGpio::ReadReadyTimestamp(int64_t &tsNsOut)
 {
-    if (!WaitForGpiodEvent(timeoutMs)) {
+    if (!EdgeEventReady()) {
         return false;
     }
 

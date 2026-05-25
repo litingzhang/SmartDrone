@@ -1,6 +1,6 @@
 # SmartDrone
 
-SmartDrone is a stereo / stereo-inertial drone runtime built around a pluggable SLAM backend boundary, IMU input, UDP preview streaming, MAVLink pose publishing, and a small Android control app. The default backend is native KLT/PnP visual odometry; DPVO TensorRT and the absorbed ORB-SLAM3 backend are optional backend paths.
+SmartDrone is a stereo / stereo-inertial drone runtime built around a pluggable SLAM backend boundary, IMU input, UDP preview streaming, MAVLink pose publishing, and a small Android control app. The default backend is native KLT/PnP visual odometry; DPVO TensorRT and the ORB-SLAM3 backend from `src/native/adapters/slam/orb/orb_slam3` are optional backend paths.
 
 ## Project Layout
 
@@ -30,7 +30,7 @@ flowchart LR
     C --> D{SLAM backend}
     D --> E[KLT/PnP VO]
     D --> F[DPVO TensorRT]
-    D --> G[Optional absorbed ORB-SLAM3 backend]
+    D --> G[Optional ORB-SLAM3 backend]
     G --> I[ORB/SP+LG/XFeat frontend modes]
     E --> H[SlamOutput]
     F --> H
@@ -52,7 +52,7 @@ Build targets:
 
 - `smart_drone`: build the main runtime executable only
 - `android`: build the Android app, defaulting to `:app:assembleDebug`
-- `all`: build the native runtime and Android app; add `--enable-orb-slam3` when enabling the absorbed ORB-SLAM3 backend
+- `all`: build the native runtime and Android app; add `--enable-orb-slam3` when enabling the optional ORB-SLAM3 backend
 - `test`: build and run host-side unit tests
 - `replay`: build the host-side offline replay tool
 
@@ -268,7 +268,7 @@ Artifacts are written to:
 
 The current `scripts/build.sh` also provides the following Jetson-specific workflow normalizations:
 
-- `orb` mode is available when the internal ORB-SLAM3 backend is built with `--enable-orb-slam3`.
+- `orb` mode is available when the optional ORB-SLAM3 backend is built with `--enable-orb-slam3`.
 - `--jetson-orin-nx` auto-detects common sysroot locations, cross-toolchain prefixes, and host libdirs instead of requiring all environment variables every time.
 - `SMART_DRONE_CAMERA_PROVIDER=uvc_stereo_opencv` can be passed directly through to CMake from the unified build entry point.
 - Artifact packaging includes `ORBvoc.txt` only when the optional ORB backend is enabled.
@@ -407,7 +407,7 @@ Configuration defaults:
 - `JETSON_SYSROOT` defaults to `../sysroots/jetson-orin-nx`
 - `JETSON_TOOLCHAIN_PREFIX` defaults to `aarch64-linux-gnu`
 - native build directory is `output/build/jetson-orin-nx/smart_drone`
-- internal ORB-SLAM3 build output is under `output/build/jetson-orin-nx/smart_drone/orb_slam3`
+- ORB-SLAM3 build output is under `output/build/jetson-orin-nx/smart_drone/orb_slam3`
 - packaged artifacts go to `output/artifacts/jetson-orin-nx`
 
 Execution example:

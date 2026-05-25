@@ -55,9 +55,10 @@ class UdpPreviewOutputPort final : public IPreviewOutputPort {
 
     void Enqueue(const PreviewOutputFrame &frame) override
     {
-        m_udpSender.Enqueue(frame.camIndex, frame.frameId, frame.sequence,
-                            frame.frameTime, frame.gray, frame.trackedPoints,
-                            frame.sendImage, frame.sendFeature);
+        m_udpSender.Enqueue(UdpImageSender::EnqueueRequest{
+            frame.camIndex, frame.frameId, frame.sequence, frame.frameTime,
+            frame.gray, frame.trackedPoints, frame.sendImage,
+            frame.sendFeature});
     }
 
     void StepAll() override
@@ -79,15 +80,16 @@ class UdpPreviewOutputRuntime final : public IPreviewOutputRuntime {
     bool Open(const PreviewOutputOpenConfig &config,
               DestinationResolver destinationResolver) override
     {
-        return m_udp.Open(config.ip, config.port, config.jpegQuality,
-                          config.maxPayload, config.maxQueue,
-                          std::move(destinationResolver));
+        return m_udp.Open(UdpImageSender::OpenConfig{
+            config.ip, config.port, config.jpegQuality, config.maxPayload,
+            config.maxQueue, std::move(destinationResolver)});
     }
 
     bool OpenStaticPeer(const PreviewOutputOpenConfig &config) override
     {
-        return m_udp.Open(config.ip, config.port, config.jpegQuality,
-                          config.maxPayload, config.maxQueue);
+        return m_udp.Open(UdpImageSender::OpenConfig{
+            config.ip, config.port, config.jpegQuality, config.maxPayload,
+            config.maxQueue});
     }
 
     void Close() override
@@ -110,12 +112,13 @@ class UdpPreviewOutputRuntime final : public IPreviewOutputRuntime {
         const cv::Mat rightGray =
             SmartDrone::Core::Application::EnsureCalibGray8(
                 right.gray, convertedRight);
-        m_udp.Enqueue(0, static_cast<std::uint64_t>(left.sequence),
-                      left.sequence, pairNs * 1e-9, leftGray, {}, true,
-                      false);
-        m_udp.Enqueue(1, static_cast<std::uint64_t>(right.sequence),
-                      right.sequence, pairNs * 1e-9, rightGray, {}, true,
-                      false);
+        const std::vector<cv::Point2f> trackedPoints{};
+        m_udp.Enqueue(UdpImageSender::EnqueueRequest{
+            0, static_cast<std::uint64_t>(left.sequence), left.sequence,
+            pairNs * 1e-9, leftGray, trackedPoints, true, false});
+        m_udp.Enqueue(UdpImageSender::EnqueueRequest{
+            1, static_cast<std::uint64_t>(right.sequence), right.sequence,
+            pairNs * 1e-9, rightGray, trackedPoints, true, false});
         m_udp.StepAll();
     }
 

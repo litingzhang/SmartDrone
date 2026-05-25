@@ -4,7 +4,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -14,6 +13,7 @@
 #include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "adapters/telemetry/mavlink_pose_publisher.h"
 #include "adapters/telemetry/px4_vehicle_control_port.h"
+#include "common/environment.h"
 #include "common/runtime_state.h"
 #include "core/application/runtime/application_runtime_factories.h"
 #include "common/tlv/udp_server.h"
@@ -96,24 +96,12 @@ struct RuntimeHostServices {
 
 std::string GetEnvOrDefault(const char *name, const char *fallback)
 {
-    const char *value = std::getenv(name);
-    if (!value || value[0] == '\0') {
-        return fallback;
-    }
-    return value;
+    return SmartDrone::Common::EnvStringValue(name, fallback);
 }
 
 int GetEnvIntOrDefault(const char *name, int fallback)
 {
-    const char *value = std::getenv(name);
-    if (!value || value[0] == '\0') {
-        return fallback;
-    }
-    try {
-        return std::stoi(value);
-    } catch (...) {
-        return fallback;
-    }
+    return SmartDrone::Common::EnvIntValue(name, fallback);
 }
 
 ControllerMode ParseAutoMode(std::string autoModeText)
@@ -236,7 +224,7 @@ SystemRuntimeGraphConfig BuildSystemRuntimeGraphConfig(BuildSystemRuntimeGraphCo
     return SystemRuntimeGraphConfig{
         input.aliases,
         DISCOVERY_PORT,
-        [&mav = input.mav]() { (void)mav.PollRxOnce(0); },
+        [&mav = input.mav]() { (void)mav.PollRxOnce(); },
         [&mav = input.mav]() { mav.StepSetpointStream(); },
         [&hooks = input.hooks]() { hooks.StepManualControl(); },
         [&controller = input.controller]() { controller.StepForceRestart(); },
@@ -289,7 +277,8 @@ bool RunSystemGraphUntilStopped(SystemRuntimeGraph &systemGraph,
             !RestartSystemGraph(systemGraph, request)) {
             return false;
         }
-        (void)redeploy.WaitForSystemRedeploy(SYSTEM_REDEPLOY_POLL_INTERVAL);
+        (void)SmartDrone::Common::WaitForRuntimeStop(
+            SYSTEM_REDEPLOY_POLL_INTERVAL);
     }
     return true;
 }

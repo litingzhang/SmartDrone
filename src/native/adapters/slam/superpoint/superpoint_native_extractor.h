@@ -57,7 +57,6 @@ class SuperPointNativeExtractor {
     void ConfigureStereoExtractionBudgets(StereoComputeContext &context) const;
     bool RunStereoSuperPointBatch(StereoComputeContext &context,
                                   std::string *err);
-    void ResetLightGlueStats();
     void ConfigureStereoMatchState(const StereoComputeContext &context,
                                    StereoMatchState &match);
     void BuildDescriptorMatches(const StereoComputeContext &context,

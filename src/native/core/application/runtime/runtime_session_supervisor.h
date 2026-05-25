@@ -3,7 +3,6 @@
 #include <atomic>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <string>
 
 #include "core/application/config/runtime_app_types.h"
@@ -51,7 +50,14 @@ class RuntimeSessionSupervisor {
     IdleStatus GetIdleStatus() const;
 
   private:
+    struct SupervisorState {
+        ModeManager modeManager{};
+        bool stopping{false};
+        std::shared_ptr<ISessionGraphRuntime> session;
+    };
+
     void ApplyGlobalStop();
+    void RequestSupervisorStop();
     void StopRequestedSession();
     void StepActiveSession();
     void FinishCompletedSession();
@@ -60,19 +66,20 @@ class RuntimeSessionSupervisor {
     void MarkSessionJoined();
     void StepSupervisor();
     bool PrepareLaunch(ControllerMode &mode, UnifiedConfig &cfg);
-    bool SessionIdleUnlocked() const;
+    bool SessionIdle(const SupervisorState &state) const;
+    std::shared_ptr<const SupervisorState> LoadState() const;
+    void StoreState(std::shared_ptr<const SupervisorState> state);
+    bool ReplaceState(std::shared_ptr<const SupervisorState> &expected,
+                      std::shared_ptr<const SupervisorState> next);
     std::shared_ptr<ISessionGraphRuntime> MakeSessionRuntime(ControllerMode mode, const UnifiedConfig &cfg);
 
     std::atomic<bool> &m_runningFlag;
     CurrentConfigFn m_currentConfig;
     CreateSessionFn m_createSession;
 
-    std::mutex m_stepMu;
-    mutable std::mutex m_mu;
-    ModeManager m_modeManager{};
-    bool m_stopping{false};
+    std::atomic<bool> m_stepRunning{false};
     std::atomic<bool> m_sessionStop{false};
-    std::shared_ptr<ISessionGraphRuntime> m_session;
+    std::shared_ptr<const SupervisorState> m_state;
 };
 
 } // namespace SmartDrone::Core::Application

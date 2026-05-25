@@ -13,6 +13,15 @@ constexpr int MAX_REALTIME_PRIORITY = 99;
 constexpr std::uint64_t MICROS_PER_MILLI = 1000;
 constexpr std::uint64_t MILLIS_PER_SECOND = 1000;
 
+std::map<PortId, PortSpec> MakePortMap(const std::vector<PortSpec> &specs)
+{
+    std::map<PortId, PortSpec> result;
+    for (const auto &spec : specs) {
+        result.emplace(spec.id, spec);
+    }
+    return result;
+}
+
 std::string JsonEscape(const std::string &value)
 {
     std::ostringstream out;

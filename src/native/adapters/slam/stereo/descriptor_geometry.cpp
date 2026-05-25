@@ -15,10 +15,10 @@ cv::KeyPoint MakeDescriptorKeyPoint(const cv::Point2f &pt)
 
 bool IsPointSafeForDescriptor(const cv::Point2f &pt, const cv::Mat &gray)
 {
-    return pt.x >= static_cast<float>(kDescriptorPatchBorder) &&
-           pt.x < static_cast<float>(gray.cols - kDescriptorPatchBorder) &&
-           pt.y >= static_cast<float>(kDescriptorPatchBorder) &&
-           pt.y < static_cast<float>(gray.rows - kDescriptorPatchBorder);
+    return pt.x >= static_cast<float>(DESCRIPTOR_PATCH_BORDER) &&
+           pt.x < static_cast<float>(gray.cols - DESCRIPTOR_PATCH_BORDER) &&
+           pt.y >= static_cast<float>(DESCRIPTOR_PATCH_BORDER) &&
+           pt.y < static_cast<float>(gray.rows - DESCRIPTOR_PATCH_BORDER);
 }
 
 bool IsPointNearExistingKeypoint(const cv::Point2f &pt,

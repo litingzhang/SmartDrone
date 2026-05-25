@@ -9,18 +9,18 @@ namespace SmartDrone::Adapters::Slam {
 
 bool TrackingStateCanPublishPose(int trackingState)
 {
-    return trackingState == Core::Ports::kSlamTrackingOk ||
-           trackingState == Core::Ports::kSlamTrackingRecentlyLost ||
-           trackingState == Core::Ports::kSlamTrackingOkKlt;
+    return trackingState == Core::Ports::SLAM_TRACKING_OK ||
+           trackingState == Core::Ports::SLAM_TRACKING_RECENTLY_LOST ||
+           trackingState == Core::Ports::SLAM_TRACKING_OK_KLT;
 }
 
 bool IsSuperPointTrackingStateSafe(int trackingState)
 {
     switch (trackingState) {
-    case Core::Ports::kSlamTrackingOk:
-    case Core::Ports::kSlamTrackingRecentlyLost:
-    case Core::Ports::kSlamTrackingLost:
-    case Core::Ports::kSlamTrackingOkKlt:
+    case Core::Ports::SLAM_TRACKING_OK:
+    case Core::Ports::SLAM_TRACKING_RECENTLY_LOST:
+    case Core::Ports::SLAM_TRACKING_LOST:
+    case Core::Ports::SLAM_TRACKING_OK_KLT:
         return true;
     default:
         return false;
@@ -29,26 +29,26 @@ bool IsSuperPointTrackingStateSafe(int trackingState)
 
 bool IsOrbBootstrapState(int trackingState)
 {
-    return trackingState == Core::Ports::kSlamTrackingNoImagesYet ||
-           trackingState == Core::Ports::kSlamTrackingNotInitialized;
+    return trackingState == Core::Ports::SLAM_TRACKING_NO_IMAGES_YET ||
+           trackingState == Core::Ports::SLAM_TRACKING_NOT_INITIALIZED;
 }
 
 std::string DescribeTrackingState(int trackingState)
 {
     switch (trackingState) {
-    case Core::Ports::kSlamTrackingSystemNotReady:
+    case Core::Ports::SLAM_TRACKING_SYSTEM_NOT_READY:
         return "system_not_ready";
-    case Core::Ports::kSlamTrackingNoImagesYet:
+    case Core::Ports::SLAM_TRACKING_NO_IMAGES_YET:
         return "no_images_yet";
-    case Core::Ports::kSlamTrackingNotInitialized:
+    case Core::Ports::SLAM_TRACKING_NOT_INITIALIZED:
         return "not_initialized";
-    case Core::Ports::kSlamTrackingOk:
+    case Core::Ports::SLAM_TRACKING_OK:
         return "ok";
-    case Core::Ports::kSlamTrackingRecentlyLost:
+    case Core::Ports::SLAM_TRACKING_RECENTLY_LOST:
         return "recently_lost";
-    case Core::Ports::kSlamTrackingLost:
+    case Core::Ports::SLAM_TRACKING_LOST:
         return "lost";
-    case Core::Ports::kSlamTrackingOkKlt:
+    case Core::Ports::SLAM_TRACKING_OK_KLT:
         return "ok_klt";
     default:
         return "unknown";

@@ -24,7 +24,7 @@ Options:
   --opencv-cuda-orb-root PATH
                   OpenCV install prefix that provides cudafeatures2d for --opencv-cuda-orb
   --enable-orb-slam3
-                  Build and link the internal ORB-SLAM3 backend under src/native
+                  Build and link the optional ORB-SLAM3 backend from src/native/adapters/slam/orb/orb_slam3
   --jobs N        Build parallelism; defaults to BUILD_JOBS or nproc
   --camera-provider NAME
                   Native camera provider, e.g. libcamera_stereo_ov9281 or uvc_stereo_opencv

@@ -34,7 +34,7 @@ struct SlamOutput : public TrackedVisualData {
     int64_t captureTimestampNs{0};
     PoseEstimate pose;
     bool poseValid{false};
-    int trackingState{kSlamTrackingNoImagesYet};
+    int trackingState{SLAM_TRACKING_NO_IMAGES_YET};
     unsigned long mapId{0};
     bool usedVisualFeatureFrontend{false};
     int visualFeatureRawLeftCount{0};

@@ -35,9 +35,9 @@ void NormalizeRealtimePublishState(Core::Ports::SlamOutput &out)
                         true)) {
         return;
     }
-    if (out.trackingState != Core::Ports::kSlamTrackingOk &&
-        out.trackingState != Core::Ports::kSlamTrackingRecentlyLost) {
-        out.trackingState = Core::Ports::kSlamTrackingRecentlyLost;
+    if (out.trackingState != Core::Ports::SLAM_TRACKING_OK &&
+        out.trackingState != Core::Ports::SLAM_TRACKING_RECENTLY_LOST) {
+        out.trackingState = Core::Ports::SLAM_TRACKING_RECENTLY_LOST;
     }
 }
 
@@ -193,7 +193,7 @@ void ApplyRealtimePoseContinuity(const TrackingBackendContext &context,
         !IsIdentityPose(out.pose) &&
         EnvFlagEnabled(
             "SMART_DRONE_REALTIME_POSE_CONTINUITY_MARK_RECENTLY_LOST", true)) {
-        out.trackingState = Core::Ports::kSlamTrackingRecentlyLost;
+        out.trackingState = Core::Ports::SLAM_TRACKING_RECENTLY_LOST;
     }
     out.pose.valid = out.poseValid;
 }

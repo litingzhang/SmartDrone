@@ -19,9 +19,16 @@ std::vector<LkStereoTrack> KeepLkTracksByIndices(const std::vector<LkStereoTrack
 bool RefreshLkStereoSeedsIfNeeded(SlamModeSharedState &state, const cv::Mat &leftRect,
                                   const cv::Mat &rightRect, uint64_t frameId, bool force);
 
-void UpdateLkTracksAfterPoseEstimate(SlamModeSharedState &state, const cv::Mat &leftRect,
-                                     const cv::Mat &rightRect, uint64_t frameId,
-                                     std::vector<LkStereoTrack> trackedTracks, int inlierCount);
+struct UpdateLkTracksAfterPoseEstimateRequest {
+    SlamModeSharedState &state;
+    const cv::Mat &leftRect;
+    const cv::Mat &rightRect;
+    uint64_t frameId;
+    std::vector<LkStereoTrack> trackedTracks;
+    int inlierCount;
+};
+
+void UpdateLkTracksAfterPoseEstimate(UpdateLkTracksAfterPoseEstimateRequest request);
 
 void CopyLkTrackFeaturesToOutput(const std::vector<LkStereoTrack> &tracks,
                                  Core::Ports::SlamOutput &out);

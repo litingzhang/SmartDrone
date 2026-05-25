@@ -43,32 +43,32 @@ std::vector<cv::Point2f> SelectGridSampledFeatures(const std::vector<cv::Point2f
         return {};
     }
 
-    constexpr int kGridCols = 8;
-    constexpr int kGridRows = 6;
-    constexpr size_t kPerCellCap = 4;
-    constexpr size_t kCellCount = static_cast<size_t>(kGridCols * kGridRows);
+    constexpr int gridCols = 8;
+    constexpr int gridRows = 6;
+    constexpr size_t perCellCap = 4;
+    constexpr size_t cellCount = static_cast<size_t>(gridCols * gridRows);
 
-    std::array<std::vector<size_t>, kCellCount> cells{};
+    std::array<std::vector<size_t>, cellCount> cells{};
     for (size_t i = 0; i < points.size(); ++i) {
         const int xi = std::clamp<int>(static_cast<int>(std::lround(points[i].x)), 0, width - 1);
         const int yi = std::clamp<int>(static_cast<int>(std::lround(points[i].y)), 0, height - 1);
-        const int gx = std::min(kGridCols - 1, (xi * kGridCols) / width);
-        const int gy = std::min(kGridRows - 1, (yi * kGridRows) / height);
-        const size_t cellIdx = static_cast<size_t>(gy * kGridCols + gx);
+        const int gx = std::min(gridCols - 1, (xi * gridCols) / width);
+        const int gy = std::min(gridRows - 1, (yi * gridRows) / height);
+        const size_t cellIdx = static_cast<size_t>(gy * gridCols + gx);
         cells[cellIdx].push_back(i);
     }
 
-    std::array<size_t, kCellCount> cursor{};
-    std::array<size_t, kCellCount> used{};
+    std::array<size_t, cellCount> cursor{};
+    std::array<size_t, cellCount> used{};
     std::vector<cv::Point2f> selected;
     selected.reserve(std::min(maxCount, points.size()));
 
     bool madeProgress = true;
     while (selected.size() < maxCount && madeProgress) {
         madeProgress = false;
-        for (size_t cellIdx = 0; cellIdx < kCellCount && selected.size() < maxCount; ++cellIdx) {
+        for (size_t cellIdx = 0; cellIdx < cellCount && selected.size() < maxCount; ++cellIdx) {
             auto &bucket = cells[cellIdx];
-            if (bucket.empty() || used[cellIdx] >= kPerCellCap || cursor[cellIdx] >= bucket.size()) {
+            if (bucket.empty() || used[cellIdx] >= perCellCap || cursor[cellIdx] >= bucket.size()) {
                 continue;
             }
             selected.push_back(points[bucket[cursor[cellIdx]++]]);
@@ -184,86 +184,75 @@ void Compress16To8Adaptive(const cv::Mat &src16, cv::Mat &dst8, int camIndex, ui
 
 } // namespace
 
-bool UdpImageSender::Open(const std::string &ip, int port, int jpegQuality, int maxPayload, int maxQueue,
-                          DestinationResolver destinationResolver)
-{
-    return Open(OpenConfig{ip, port, jpegQuality, maxPayload, maxQueue, std::move(destinationResolver)});
-}
-
 bool UdpImageSender::Open(OpenConfig config)
 {
-    m_jpegQuality = std::max(10, std::min(95, config.jpegQuality));
-    m_maxPayload = std::max(400, config.maxPayload);
-    m_maxQueue = std::max(1, config.maxQueue);
-    m_port = config.port;
+    m_jpegQuality.store(std::max(10, std::min(95, config.jpegQuality)),
+                        std::memory_order_relaxed);
+    m_maxPayload.store(std::max(400, config.maxPayload),
+                       std::memory_order_relaxed);
+    const int queueDepth =
+        std::clamp(config.maxQueue, 1, static_cast<int>(MAX_PENDING_SLOTS));
+    m_queueDepth.store(queueDepth, std::memory_order_relaxed);
 
-    m_sock = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (m_sock < 0) {
+    const int sock = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
         std::cerr << "[udp] socket() failed: " << strerror(errno) << "\n";
         return false;
     }
 
-    memset(&m_dst, 0, sizeof(m_dst));
-    m_dst.sin_family = AF_INET;
-    m_dst.sin_port = htons(static_cast<uint16_t>(config.port));
-    if (::inet_pton(AF_INET, config.ip.c_str(), &m_dst.sin_addr) != 1) {
+    DestinationState destination{};
+    destination.dst.sin_family = AF_INET;
+    destination.dst.sin_port = htons(static_cast<uint16_t>(config.port));
+    destination.port = config.port;
+    destination.destinationResolver = std::move(config.destinationResolver);
+    if (::inet_pton(AF_INET, config.ip.c_str(), &destination.dst.sin_addr) !=
+        1) {
         std::cerr << "[udp] inet_pton failed for " << config.ip << "\n";
-        ::close(m_sock);
-        m_sock = -1;
+        ::close(sock);
         return false;
     }
-    {
-        std::lock_guard<std::mutex> lk(m_dstMu);
-        m_destinationResolver = std::move(config.destinationResolver);
-        m_lastResolvedIp = 0;
-    }
+    auto destinationState =
+        std::make_shared<const DestinationState>(std::move(destination));
+    std::atomic_store_explicit(&m_destinationState,
+                               std::move(destinationState),
+                               std::memory_order_release);
+    m_lastResolvedIp.store(0, std::memory_order_relaxed);
     for (int cam = 0; cam < 2; ++cam) {
-        std::lock_guard<std::mutex> lk(m_mu[cam]);
-        m_slots[cam].assign(static_cast<size_t>(m_maxQueue + 2), Slot{});
-        m_ready[cam].clear();
-        m_free[cam].clear();
-        for (size_t i = 0; i < m_slots[cam].size(); ++i) {
-            m_slots[cam][i].camIndex = cam;
-            m_free[cam].push_back(i);
-        }
-        m_lastAcceptedFrameTime[cam] = -1.0;
+        ResetCameraQueue(cam);
     }
 
+    const int previousSock = m_sock.exchange(sock, std::memory_order_acq_rel);
+    if (previousSock >= 0) {
+        ::close(previousSock);
+    }
     return true;
 }
 
-sockaddr_in UdpImageSender::ResolveDestination() const
+sockaddr_in UdpImageSender::ResolveDestination()
 {
-    sockaddr_in dst{};
-    {
-        std::lock_guard<std::mutex> lk(m_dstMu);
-        dst = m_dst;
+    const std::shared_ptr<const DestinationState> state =
+        LoadDestinationState();
+    if (!state) {
+        return {};
     }
 
     sockaddr_in dynamicDst{};
-    DestinationResolver resolver;
-    {
-        std::lock_guard<std::mutex> lk(m_dstMu);
-        resolver = m_destinationResolver;
-    }
-    if (!resolver || !resolver(dynamicDst)) {
-        return dst;
+    if (!state->destinationResolver ||
+        !state->destinationResolver(dynamicDst)) {
+        return state->dst;
     }
 
     dynamicDst.sin_family = AF_INET;
-    dynamicDst.sin_port = htons(static_cast<uint16_t>(m_port));
+    dynamicDst.sin_port = htons(static_cast<uint16_t>(state->port));
     const uint32_t resolvedIp = dynamicDst.sin_addr.s_addr;
-    uint32_t previousIp = 0;
-    {
-        std::lock_guard<std::mutex> lk(m_dstMu);
-        previousIp = m_lastResolvedIp;
-        m_lastResolvedIp = resolvedIp;
-    }
+    const uint32_t previousIp =
+        m_lastResolvedIp.exchange(resolvedIp, std::memory_order_acq_rel);
     if (resolvedIp != 0 && resolvedIp != previousIp) {
         char ipBuf[INET_ADDRSTRLEN]{};
         const char *resolvedText = ::inet_ntop(AF_INET, &dynamicDst.sin_addr, ipBuf, sizeof(ipBuf));
         if (resolvedText != nullptr) {
-            std::cerr << "[udp] destination peer -> " << resolvedText << ":" << m_port << "\n";
+            std::cerr << "[udp] destination peer -> " << resolvedText << ":"
+                      << state->port << "\n";
         }
     }
     return dynamicDst;
@@ -271,79 +260,104 @@ sockaddr_in UdpImageSender::ResolveDestination() const
 
 void UdpImageSender::Close()
 {
-    if (m_sock >= 0) {
-        ::close(m_sock);
-        m_sock = -1;
+    const int sock = m_sock.exchange(-1, std::memory_order_acq_rel);
+    if (sock >= 0) {
+        ::close(sock);
     }
     for (int cam = 0; cam < 2; ++cam) {
-        std::lock_guard<std::mutex> lk(m_mu[cam]);
-        m_ready[cam].clear();
-        m_free[cam].clear();
-        m_slots[cam].clear();
-        m_lastAcceptedFrameTime[cam] = -1.0;
+        ResetCameraQueue(cam);
     }
-}
-
-void UdpImageSender::Enqueue(int camIndex, uint64_t frameId, uint32_t seq, double frameTime, const cv::Mat &gray,
-                             const std::vector<cv::Point2f> &trackedPoints, bool sendImage, bool sendFeature)
-{
-    Enqueue(EnqueueRequest{camIndex, frameId, seq, frameTime, gray, trackedPoints, sendImage, sendFeature});
 }
 
 void UdpImageSender::Enqueue(const EnqueueRequest &request)
 {
-    if (m_sock < 0 || request.camIndex < 0 || request.camIndex > 1) {
+    if (SocketFd() < 0 || request.camIndex < 0 || request.camIndex > 1) {
         return;
     }
     if (!request.sendImage && !request.sendFeature) {
         return;
     }
 
-    std::lock_guard<std::mutex> lk(m_mu[request.camIndex]);
-    if (!AcceptFrameTime(request.camIndex, request.frameTime) || !PrepareFreeSlot(request.camIndex)) {
+    if (!AcceptFrameTime(request.camIndex, request.frameTime)) {
         return;
     }
+    StorePendingSlot(request.camIndex, BuildSlot(request));
+}
 
-    const size_t slotIndex = m_free[request.camIndex].front();
-    m_free[request.camIndex].pop_front();
-    Slot &slot = m_slots[request.camIndex][slotIndex];
-    PopulateSlot(slot, request);
-    if (request.sendImage && !FillPreview(request.camIndex, request.seq, request.gray, slot.preview)) {
-        m_free[request.camIndex].push_back(slotIndex);
-        return;
+std::shared_ptr<const UdpImageSender::Slot> UdpImageSender::BuildSlot(
+    const EnqueueRequest &request)
+{
+    auto slot = std::make_shared<Slot>();
+    PopulateSlot(*slot, request);
+    if (request.sendImage &&
+        !FillPreview(request.camIndex, request.seq, request.gray,
+                     slot->preview)) {
+        return nullptr;
     }
-    if (!request.sendImage) {
-        slot.preview.release();
-    }
-    m_ready[request.camIndex].push_back(slotIndex);
-    TrimReadyQueue(request.camIndex);
+    return slot;
 }
 
 bool UdpImageSender::AcceptFrameTime(int camIndex, double frameTime)
 {
-    const double lastFrameTime = m_lastAcceptedFrameTime[camIndex];
-    if (lastFrameTime >= 0.0) {
+    double lastFrameTime =
+        m_lastAcceptedFrameTime[camIndex].load(std::memory_order_acquire);
+    while (true) {
         const double dt = frameTime - lastFrameTime;
-        if (dt >= 0.0 && dt < MIN_FRAME_INTERVAL_SEC) {
+        if (lastFrameTime >= 0.0 && dt >= 0.0 &&
+            dt < MIN_FRAME_INTERVAL_SEC) {
             return false;
         }
+        if (m_lastAcceptedFrameTime[camIndex].compare_exchange_weak(
+                lastFrameTime, frameTime, std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            return true;
+        }
     }
-    m_lastAcceptedFrameTime[camIndex] = frameTime;
-    return true;
 }
 
-bool UdpImageSender::PrepareFreeSlot(int camIndex)
+void UdpImageSender::StorePendingSlot(
+    int camIndex, std::shared_ptr<const Slot> slot)
 {
-    if (!m_free[camIndex].empty()) {
-        return true;
+    if (!slot) {
+        return;
     }
-    if (m_ready[camIndex].empty()) {
-        return false;
+    const std::size_t queueSeq =
+        m_writeSeq[camIndex].fetch_add(1, std::memory_order_acq_rel);
+    const std::size_t depth = PendingQueueDepth();
+    const std::size_t minReadSeq = queueSeq >= depth
+                                       ? queueSeq + 1 - depth
+                                       : 0;
+    std::size_t readSeq = m_readSeq[camIndex].load(std::memory_order_acquire);
+    while (readSeq < minReadSeq &&
+           !m_readSeq[camIndex].compare_exchange_weak(
+               readSeq, minReadSeq, std::memory_order_acq_rel,
+               std::memory_order_acquire)) {
     }
-    const size_t staleSlot = m_ready[camIndex].front();
-    m_ready[camIndex].pop_front();
-    m_free[camIndex].push_back(staleSlot);
-    return true;
+    auto pending = std::make_shared<const PendingSlot>(PendingSlot{queueSeq,
+                                                                   slot});
+    const std::size_t slotIndex = queueSeq % MAX_PENDING_SLOTS;
+    std::atomic_store_explicit(&m_pendingSlots[camIndex][slotIndex],
+                               std::move(pending), std::memory_order_release);
+}
+
+void UdpImageSender::ResetCameraQueue(int camIndex)
+{
+    const std::size_t writeSeq =
+        m_writeSeq[camIndex].load(std::memory_order_acquire);
+    m_readSeq[camIndex].store(writeSeq, std::memory_order_release);
+    m_lastAcceptedFrameTime[camIndex].store(-1.0, std::memory_order_release);
+    for (std::shared_ptr<const PendingSlot> &slot : m_pendingSlots[camIndex]) {
+        std::atomic_store_explicit(&slot,
+                                   std::shared_ptr<const PendingSlot>{},
+                                   std::memory_order_release);
+    }
+}
+
+std::size_t UdpImageSender::PendingQueueDepth() const
+{
+    const int queueDepth = m_queueDepth.load(std::memory_order_relaxed);
+    return static_cast<std::size_t>(
+        std::clamp(queueDepth, 1, static_cast<int>(MAX_PENDING_SLOTS)));
 }
 
 void UdpImageSender::PopulateSlot(Slot &slot, const EnqueueRequest &request)
@@ -355,16 +369,9 @@ void UdpImageSender::PopulateSlot(Slot &slot, const EnqueueRequest &request)
     slot.height = request.gray.rows;
     slot.sendImage = request.sendImage;
     slot.sendFeature = request.sendFeature;
+    slot.preview.release();
     slot.trackedPoints = request.sendFeature ? request.trackedPoints : std::vector<cv::Point2f>{};
-}
-
-void UdpImageSender::TrimReadyQueue(int camIndex)
-{
-    while (static_cast<int>(m_ready[camIndex].size()) > m_maxQueue) {
-        const size_t staleSlot = m_ready[camIndex].front();
-        m_ready[camIndex].pop_front();
-        m_free[camIndex].push_back(staleSlot);
-    }
+    slot.featureBuf.clear();
 }
 
 void UdpImageSender::StepAll()
@@ -381,7 +388,7 @@ void UdpImageSender::StepOnce()
 
 void UdpImageSender::StepCamera(int camIndex)
 {
-    if (m_sock < 0 || camIndex < 0 || camIndex > 1) {
+    if (SocketFd() < 0 || camIndex < 0 || camIndex > 1) {
         return;
     }
     while (StepCameraOnce(camIndex)) {
@@ -390,7 +397,7 @@ void UdpImageSender::StepCamera(int camIndex)
 
 bool UdpImageSender::StepCameraOnce(int camIndex)
 {
-    if (m_sock < 0 || camIndex < 0 || camIndex > 1) {
+    if (SocketFd() < 0 || camIndex < 0 || camIndex > 1) {
         return false;
     }
     Slot slot{};
@@ -403,19 +410,41 @@ bool UdpImageSender::StepCameraOnce(int camIndex)
 
 bool UdpImageSender::PopReadySlot(int camIndex, Slot &slot)
 {
-    std::lock_guard<std::mutex> lk(m_mu[camIndex]);
-    if (m_ready[camIndex].empty()) {
-        return false;
+    std::size_t readSeq =
+        m_readSeq[camIndex].load(std::memory_order_acquire);
+    while (true) {
+        if (readSeq >=
+            m_writeSeq[camIndex].load(std::memory_order_acquire)) {
+            return false;
+        }
+        const std::size_t slotIndex = readSeq % MAX_PENDING_SLOTS;
+        std::shared_ptr<const PendingSlot> pending =
+            std::atomic_load_explicit(&m_pendingSlots[camIndex][slotIndex],
+                                      std::memory_order_acquire);
+        if (!pending) {
+            return false;
+        }
+        if (pending->queueSeq > readSeq) {
+            m_readSeq[camIndex].compare_exchange_weak(
+                readSeq, pending->queueSeq, std::memory_order_acq_rel,
+                std::memory_order_acquire);
+            continue;
+        }
+        if (pending->queueSeq < readSeq) {
+            return false;
+        }
+        const std::size_t nextReadSeq = readSeq + 1;
+        if (!m_readSeq[camIndex].compare_exchange_weak(
+                readSeq, nextReadSeq, std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            continue;
+        }
+        if (!pending->slot) {
+            return false;
+        }
+        slot = *pending->slot;
+        return true;
     }
-
-    const size_t slotIndex = m_ready[camIndex].front();
-    m_ready[camIndex].pop_front();
-    slot = m_slots[camIndex][slotIndex];
-    m_slots[camIndex][slotIndex].preview.release();
-    m_slots[camIndex][slotIndex].trackedPoints.clear();
-    m_slots[camIndex][slotIndex].featureBuf.clear();
-    m_free[camIndex].push_back(slotIndex);
-    return true;
 }
 
 void UdpImageSender::SendSlot(Slot &slot)
@@ -441,7 +470,9 @@ bool UdpImageSender::EncodePreviewJpeg(const Slot &slot, std::vector<uchar> &jpe
     }
 
     try {
-        const std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, m_jpegQuality};
+        const int jpegQuality = m_jpegQuality.load(std::memory_order_relaxed);
+        const std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY,
+                                         jpegQuality};
         cv::imencode(".jpg", slot.preview, jpeg, params);
     } catch (const std::exception &e) {
         std::cerr << "[udp] imencode exception: " << e.what() << "\n";
@@ -459,12 +490,17 @@ bool UdpImageSender::EncodePreviewJpeg(const Slot &slot, std::vector<uchar> &jpe
 void UdpImageSender::SendImagePackets(const Slot &slot, const std::vector<uchar> &jpeg)
 {
     const uint32_t total = static_cast<uint32_t>(jpeg.size());
-    const uint16_t chunks = static_cast<uint16_t>((total + m_maxPayload - 1) / m_maxPayload);
+    const int maxPayload = m_maxPayload.load(std::memory_order_relaxed);
+    const uint16_t chunks =
+        static_cast<uint16_t>((total + maxPayload - 1) / maxPayload);
     for (uint16_t ci = 0; ci < chunks; ++ci) {
-        const uint32_t off = static_cast<uint32_t>(ci) * static_cast<uint32_t>(m_maxPayload);
+        const uint32_t off =
+            static_cast<uint32_t>(ci) * static_cast<uint32_t>(maxPayload);
         const uint32_t left = total - off;
         const uint32_t pay =
-            (left > static_cast<uint32_t>(m_maxPayload)) ? static_cast<uint32_t>(m_maxPayload) : left;
+            (left > static_cast<uint32_t>(maxPayload))
+                ? static_cast<uint32_t>(maxPayload)
+                : left;
 
         PacketHeader h{};
         h.magic = 0x5643494D;
@@ -485,6 +521,11 @@ void UdpImageSender::SendImagePackets(const Slot &slot, const std::vector<uchar>
 
 void UdpImageSender::SendPacket(const PacketHeader &header, const uint8_t *payload, size_t payloadSize)
 {
+    const int sock = SocketFd();
+    if (sock < 0) {
+        return;
+    }
+
     PacketHeader packetHeader = header;
     iovec iov[2]{};
     iov[0].iov_base = &packetHeader;
@@ -498,14 +539,14 @@ void UdpImageSender::SendPacket(const PacketHeader &header, const uint8_t *paylo
     msg.msg_namelen = sizeof(dst);
     msg.msg_iov = iov;
     msg.msg_iovlen = 2;
-    const ssize_t sent = ::sendmsg(m_sock, &msg, 0);
+    const ssize_t sent = ::sendmsg(sock, &msg, 0);
     (void)sent;
 }
 
 void UdpImageSender::SendFeaturePacket(Slot &slot, uint32_t frameId, int width, int height,
                                        const std::vector<cv::Point2f> &trackedPoints)
 {
-    if (m_sock < 0 || width <= 0 || height <= 0 || trackedPoints.empty()) {
+    if (SocketFd() < 0 || width <= 0 || height <= 0 || trackedPoints.empty()) {
         return;
     }
     if (!BuildFeaturePayload(slot.featureBuf, width, height, trackedPoints)) {
@@ -552,6 +593,18 @@ bool UdpImageSender::BuildFeaturePayload(std::vector<uint8_t> &payloadBuf, int w
         WriteU16Le(payload, pointOffset + 2, static_cast<uint16_t>(yi));
     }
     return true;
+}
+
+int UdpImageSender::SocketFd() const
+{
+    return m_sock.load(std::memory_order_acquire);
+}
+
+std::shared_ptr<const UdpImageSender::DestinationState>
+UdpImageSender::LoadDestinationState() const
+{
+    return std::atomic_load_explicit(&m_destinationState,
+                                     std::memory_order_acquire);
 }
 
 bool UdpImageSender::FillPreview(int camIndex, uint32_t seq, const cv::Mat &gray, cv::Mat &preview)

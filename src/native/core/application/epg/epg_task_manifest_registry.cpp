@@ -14,7 +14,7 @@ constexpr const char *VEHICLE_TELEMETRY_RX_TASK_TYPE =
     "VehicleTelemetryRxTask";
 constexpr const char *LEGACY_MAVLINK_RX_TASK_TYPE = "MavlinkRxTask";
 constexpr const char *EPG_TOPOLOGY_PATH = "config/epg/epg_topology.dot";
-constexpr const char *EPG_TOPOLOGY_REVISION = "v4";
+constexpr const char *EPG_TOPOLOGY_REVISION = "v6";
 constexpr const char *EPG_SNAPSHOT_DIR = "/tmp";
 constexpr const char *EPG_OPTIMIZED_DIR = "output/epg";
 const EpgTaskTopologySpec EPG_TOPOLOGY_SPEC{
@@ -112,7 +112,7 @@ const EpgTaskManifest CALIB_SESSION_MANIFEST{
         {"CalibImuWriterTask", "imu_write", "imu", 2000, 5000, false},
         {"CalibUdpPreviewTask", "preview_stream", "udp_stream", 10000, 16000, true},
         {"CalibCompletionTask", "completion", "cpu", 1000, 5000, false},
-        {"CalibFlushSyncTask", "flush_sync", "storage", 50000, 200000, false},
+        {"CalibFlushSyncTask", "flush_sync", "session_resource", 50000, 200000, false},
         {"CalibMonitorTask", "session_monitor", "cpu", 1000, 5000, false},
         {"EpgDfxSnapshotTask", "dfx_snapshot", "storage", 2000, 10000, false},
     },

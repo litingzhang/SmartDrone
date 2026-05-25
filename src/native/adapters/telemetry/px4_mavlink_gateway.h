@@ -5,11 +5,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <deque>
-#include <mutex>
+#include <memory>
 #include <string>
 #include <vector>
-#include <unordered_map>
 
 #include "adapters/telemetry/mavlink_serial_transport.h"
 #include "common/mavlink.h"
@@ -104,7 +102,7 @@ class Px4MavlinkGateway {
 
     void SetJsonDiagnostics(bool enabled);
     void SetFrameTimingTracker(SmartDrone::Core::Ports::IFrameTimingTracker *tracker);
-    int PollRxOnce(int timeoutMs = 0);
+    int PollRxOnce();
     void StepTx();
     uint8_t GetTargetSystem() const;
     uint8_t GetTargetComponent() const;
@@ -135,10 +133,20 @@ class Px4MavlinkGateway {
 
   private:
     struct AckInfo {
+        uint16_t command = 0;
         uint8_t result = 255;
         uint8_t progress = 0;
         int32_t resultParam2 = 0;
         std::chrono::steady_clock::time_point t;
+    };
+
+    struct AckSnapshot {
+        std::vector<AckInfo> records;
+    };
+
+    struct TxMessage {
+        std::array<uint8_t, MAVLINK_MAX_PACKET_LEN> bytes{};
+        std::size_t length{0};
     };
 
     struct OdometryPacketFields {
@@ -173,7 +181,12 @@ class Px4MavlinkGateway {
                              uint64_t captureTimeUs, mavlink_message_t &msg) const;
     void LogOdometryTiming(const OdometryTimingLog &log) const;
     CommandLongRequest ResolveCommandTargets(CommandLongRequest request) const;
+    void ClearCommandAck(uint16_t command);
+    void StoreCommandAck(const AckInfo &info);
     bool SendMessageIntervalRequest(uint32_t messageId, float intervalUs, uint8_t targetSystem, uint8_t targetComponent);
+    bool LoadNextTxMessage();
+    void ReleaseActiveTxMessage();
+    bool PushTxMessage(std::shared_ptr<const TxMessage> message);
     bool QueueMessage(const mavlink_message_t &msg);
     void HandleMavlinkMessage(const mavlink_message_t &msg);
     void HandleHeartbeat(const mavlink_message_t &msg);
@@ -188,33 +201,27 @@ class Px4MavlinkGateway {
     uint8_t m_sysid;
     uint8_t m_compid;
     std::atomic<bool> m_streaming{false};
-    std::mutex m_spMtx;
-    SetpointLocalNED m_spCurrent{};
+    std::shared_ptr<const SetpointLocalNED> m_spCurrent;
     std::atomic<uint64_t> m_streamPeriodUs{50000};
     std::atomic<uint64_t> m_lastStreamTxUs{0};
     mavlink_message_t m_rxMessage{};
     mavlink_status_t m_rxStatus{};
-    std::mutex m_ackMtx;
-    std::unordered_map<uint16_t, AckInfo> m_ackMap;
-    std::mutex m_txMtx;
-    std::deque<std::vector<uint8_t>> m_txQueue;
+    std::shared_ptr<const AckSnapshot> m_ackSnapshot;
+    static constexpr std::size_t TX_QUEUE_CAPACITY = 64;
+    std::array<std::shared_ptr<const TxMessage>, TX_QUEUE_CAPACITY> m_txSlots{};
+    std::array<std::atomic<bool>, TX_QUEUE_CAPACITY> m_txReady{};
+    std::atomic<uint64_t> m_txHead{0};
+    std::atomic<uint64_t> m_txTail{0};
+    std::shared_ptr<const TxMessage> m_txActive;
     std::size_t m_txOffset{0};
-    mutable std::mutex m_frameTimingTrackerMtx;
-    mutable std::mutex m_flightModeMtx;
-    mutable std::mutex m_localPosMtx;
-    mutable std::mutex m_distanceSensorMtx;
     std::atomic<uint8_t> m_px4Sysid{1};
     std::atomic<uint8_t> m_px4Compid{1};
     std::atomic<bool> m_havePx4Heartbeat{false};
     std::atomic<bool> m_localPosStreamRequested{false};
     std::atomic<bool> m_distanceSensorStreamRequested{false};
-    FlightModeInfo m_flightModeInfo{};
-    bool m_haveFlightModeInfo{false};
-    LocalPositionNed m_localPosNed{};
-    bool m_haveLocalPosNed{false};
-    DownwardDistanceSensor m_downwardDistanceSensor{};
-    bool m_haveDownwardDistanceSensor{false};
-    uint64_t m_lastSentOdomFrameId{0};
-    SmartDrone::Core::Ports::IFrameTimingTracker *m_frameTimingTracker{nullptr};
+    std::shared_ptr<const FlightModeInfo> m_flightModeInfo;
+    std::shared_ptr<const LocalPositionNed> m_localPosNed;
+    std::shared_ptr<const DownwardDistanceSensor> m_downwardDistanceSensor;
+    std::atomic<SmartDrone::Core::Ports::IFrameTimingTracker *> m_frameTimingTracker{nullptr};
     std::atomic<bool> m_jsonDiagnostics{false};
 };

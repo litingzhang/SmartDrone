@@ -18,6 +18,24 @@ struct KltPerFramePnPCandidate {
     float depth{0.0f};
 };
 
+struct AppendTrackedStereoObservationRequest {
+    const KltTrackedStereoPnpObservationBuilderOptions &options;
+    const LkStereoTrack &previousTrack;
+    const cv::Point2f &currentLeft;
+    const cv::Point2f &currentRight;
+    float zncc;
+    KltTrackedStereoPnpObservationSet &result;
+};
+
+struct TryAppendTrackedStereoObservationRequest {
+    const KltTrackedStereoPnpObservationBuilderOptions &options;
+    const cv::Size &previousImageSize;
+    const cv::Mat &left32f;
+    const cv::Mat &right32f;
+    size_t index;
+    KltTrackedStereoPnpObservationSet &result;
+};
+
 bool IsInsideSampleWindow(const cv::Point2f &pt, int cols, int rows)
 {
     return pt.x >= 1.0f && pt.y >= 1.0f && pt.x < static_cast<float>(cols - 1) &&
@@ -60,7 +78,7 @@ bool PassesPerFrameForwardBackwardCheck(const KltPerFramePnpObservationBuilderOp
     return options.backwardPoints != nullptr && options.backwardStatus != nullptr &&
            index < options.backwardPoints->size() && index < options.backwardStatus->size() &&
            (*options.backwardStatus)[index] &&
-           cv::norm((*options.backwardPoints)[index] - previousPoint) <= kLkPerFrameForwardBackwardMaxErrPx;
+           cv::norm((*options.backwardPoints)[index] - previousPoint) <= LK_PER_FRAME_FORWARD_BACKWARD_MAX_ERR_PX;
 }
 
 cv::Point3f MakePnpObjectPoint(const cv::Point2f &point, float depth,
@@ -73,7 +91,7 @@ cv::Point3f MakePnpObjectPoint(const cv::Point2f &point, float depth,
 
 bool IsDepthUsable(float depth)
 {
-    return depth >= kLkMinDepthMeters && depth <= kLkMaxDepthMeters && std::isfinite(depth);
+    return depth >= LK_MIN_DEPTH_METERS && depth <= LK_MAX_DEPTH_METERS && std::isfinite(depth);
 }
 
 std::optional<KltPerFramePnPCandidate> BuildPerFrameCandidate(
@@ -89,7 +107,7 @@ std::optional<KltPerFramePnPCandidate> BuildPerFrameCandidate(
         !IsInsideSampleWindow(currentPoint, currentImageSize.width, currentImageSize.height)) {
         return std::nullopt;
     }
-    if (cv::norm(currentPoint - previousPoint) > kLkMaxFlowPx ||
+    if (cv::norm(currentPoint - previousPoint) > LK_MAX_FLOW_PX ||
         !PassesPerFrameForwardBackwardCheck(options, index, previousPoint)) {
         return std::nullopt;
     }
@@ -125,13 +143,13 @@ std::vector<KltPerFramePnPCandidate> CollectPerFrameCandidates(
 
 int PerFrameCandidateBucket(const KltPerFramePnPCandidate &candidate, const cv::Size &previousImageSize)
 {
-    const int gridX = std::clamp(static_cast<int>(candidate.previousPoint.x * kLkPerFramePnPSelectGridCols /
+    const int gridX = std::clamp(static_cast<int>(candidate.previousPoint.x * LK_PER_FRAME_PNP_SELECT_GRID_COLS /
                                                   std::max(1, previousImageSize.width)),
-                                 0, kLkPerFramePnPSelectGridCols - 1);
-    const int gridY = std::clamp(static_cast<int>(candidate.previousPoint.y * kLkPerFramePnPSelectGridRows /
+                                 0, LK_PER_FRAME_PNP_SELECT_GRID_COLS - 1);
+    const int gridY = std::clamp(static_cast<int>(candidate.previousPoint.y * LK_PER_FRAME_PNP_SELECT_GRID_ROWS /
                                                   std::max(1, previousImageSize.height)),
-                                 0, kLkPerFramePnPSelectGridRows - 1);
-    return ((gridY * kLkPerFramePnPSelectGridCols) + gridX) * kLkPerFramePnPDepthBins +
+                                 0, LK_PER_FRAME_PNP_SELECT_GRID_ROWS - 1);
+    return ((gridY * LK_PER_FRAME_PNP_SELECT_GRID_COLS) + gridX) * LK_PER_FRAME_PNP_DEPTH_BINS +
            LkPerFrameDepthBin(candidate.depth);
 }
 
@@ -144,11 +162,11 @@ void AppendCandidateObservation(const KltPerFramePnPCandidate &candidate, KltPnp
 void AppendDepthBalancedCandidates(const std::vector<KltPerFramePnPCandidate> &candidates,
                                    const cv::Size &previousImageSize, KltPnpObservationSet &observations)
 {
-    std::array<int, kLkPerFramePnPSelectGridCols * kLkPerFramePnPSelectGridRows * kLkPerFramePnPDepthBins>
+    std::array<int, LK_PER_FRAME_PNP_SELECT_GRID_COLS * LK_PER_FRAME_PNP_SELECT_GRID_ROWS * LK_PER_FRAME_PNP_DEPTH_BINS>
         bucketCounts{};
     for (const KltPerFramePnPCandidate &candidate : candidates) {
         const int bucket = PerFrameCandidateBucket(candidate, previousImageSize);
-        if (bucketCounts[static_cast<size_t>(bucket)] >= kLkPerFramePnPMaxPerGridDepthBin) {
+        if (bucketCounts[static_cast<size_t>(bucket)] >= LK_PER_FRAME_PNP_MAX_PER_GRID_DEPTH_BIN) {
             continue;
         }
         ++bucketCounts[static_cast<size_t>(bucket)];
@@ -192,43 +210,52 @@ bool HasTrackedStereoSampleWindow(const KltTrackedStereoPnpObservationBuilderOpt
            IsInsideSampleWindow(currentRight, options.currentRightImage->cols, options.currentRightImage->rows);
 }
 
-void AppendTrackedStereoObservation(const KltTrackedStereoPnpObservationBuilderOptions &options,
-                                    const LkStereoTrack &previousTrack, const cv::Point2f &currentLeft,
-                                    const cv::Point2f &currentRight, float zncc,
-                                    KltTrackedStereoPnpObservationSet &result)
+void AppendTrackedStereoObservation(
+    const AppendTrackedStereoObservationRequest &request)
 {
+    const auto &options = request.options;
+    const LkStereoTrack &previousTrack = request.previousTrack;
     const float disparity = previousTrack.left.x - previousTrack.right.x;
     const float depth = options.fx * options.baseline / disparity;
     if (!IsDepthUsable(depth)) {
         return;
     }
-    result.pnp.objectPoints.push_back(MakeTrackedObjectPoint(previousTrack, depth, options));
-    result.pnp.imagePoints.push_back(currentLeft);
-    result.trackedTracks.push_back(
-        LkStereoTrack{currentLeft, currentRight, BlendTrackedQuality(previousTrack, zncc), previousTrack.age + 1});
+    request.result.pnp.objectPoints.push_back(
+        MakeTrackedObjectPoint(previousTrack, depth, options));
+    request.result.pnp.imagePoints.push_back(request.currentLeft);
+    request.result.trackedTracks.push_back(
+        LkStereoTrack{request.currentLeft, request.currentRight,
+                      BlendTrackedQuality(previousTrack, request.zncc),
+                      previousTrack.age + 1});
 }
 
-void TryAppendTrackedStereoObservation(const KltTrackedStereoPnpObservationBuilderOptions &options,
-                                       const cv::Size &previousImageSize, const cv::Mat &left32f,
-                                       const cv::Mat &right32f, size_t index,
-                                       KltTrackedStereoPnpObservationSet &result)
+void TryAppendTrackedStereoObservation(
+    const TryAppendTrackedStereoObservationRequest &request)
 {
-    if (!HasTrackedStereoStatus(options, index)) {
+    const auto &options = request.options;
+    if (!HasTrackedStereoStatus(options, request.index)) {
         return;
     }
-    const LkStereoTrack &previousTrack = (*options.previousTracks)[index];
-    const cv::Point2f &currentLeft = (*options.currentLeftPoints)[index];
-    cv::Point2f currentRight = (*options.currentRightPoints)[index];
-    if (!HasTrackedStereoSampleWindow(options, previousImageSize, previousTrack, currentLeft, currentRight) ||
-        cv::norm(currentLeft - previousTrack.left) > kLkMaxFlowPx) {
+    const LkStereoTrack &previousTrack =
+        (*options.previousTracks)[request.index];
+    const cv::Point2f &currentLeft =
+        (*options.currentLeftPoints)[request.index];
+    cv::Point2f currentRight = (*options.currentRightPoints)[request.index];
+    if (!HasTrackedStereoSampleWindow(options, request.previousImageSize,
+                                      previousTrack, currentLeft, currentRight) ||
+        cv::norm(currentLeft - previousTrack.left) > LK_MAX_FLOW_PX) {
         return;
     }
 
     float zncc = -1.0f;
-    if (!RefineRightPointByStereoZncc(left32f, currentLeft, right32f, currentRight, currentRight, zncc)) {
+    if (!RefineRightPointByStereoZncc(
+            {request.left32f, currentLeft, request.right32f, currentRight,
+             currentRight, zncc})) {
         return;
     }
-    AppendTrackedStereoObservation(options, previousTrack, currentLeft, currentRight, zncc, result);
+    AppendTrackedStereoObservation(
+        {options, previousTrack, currentLeft, currentRight, zncc,
+         request.result});
 }
 
 } // namespace
@@ -290,7 +317,8 @@ KltTrackedStereoPnpObservationSet BuildKltTrackedStereoPnpObservations(
     options.currentRightImage->convertTo(right32f, CV_32F);
 
     for (size_t i = 0; i < pointCount; ++i) {
-        TryAppendTrackedStereoObservation(options, previousImageSize, left32f, right32f, i, result);
+        TryAppendTrackedStereoObservation(
+            {options, previousImageSize, left32f, right32f, i, result});
     }
 
     result.pnp.rawCandidateCount = static_cast<int>(result.pnp.objectPoints.size());

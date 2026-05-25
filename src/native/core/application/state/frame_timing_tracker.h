@@ -2,9 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
-#include <mutex>
-#include <unordered_map>
+#include <memory>
 
 #include "core/ports/frame_timing.h"
 
@@ -15,6 +13,7 @@ using FrameTimingRecord = SmartDrone::Core::Ports::FrameTimingRecord;
 class FrameTimingTracker final : public SmartDrone::Core::Ports::IFrameTimingTracker {
   public:
     explicit FrameTimingTracker(size_t maxRecords = 4096);
+    ~FrameTimingTracker() override;
 
     void UpsertCapture(uint64_t frameId, uint64_t tCamNs, uint64_t tCbNs);
     void MarkSlamIn(uint64_t frameId, uint64_t tSlamInNs);
@@ -23,13 +22,9 @@ class FrameTimingTracker final : public SmartDrone::Core::Ports::IFrameTimingTra
     bool Lookup(uint64_t frameId, FrameTimingRecord &out) const override;
 
   private:
-    FrameTimingRecord &EnsureRecordLocked(uint64_t frameId);
-    void TrimLocked();
+    struct Impl;
 
-    mutable std::mutex m_mutex;
-    std::unordered_map<uint64_t, FrameTimingRecord> m_records;
-    std::deque<uint64_t> m_order;
-    size_t m_maxRecords{4096};
+    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace SmartDrone::Core::Application

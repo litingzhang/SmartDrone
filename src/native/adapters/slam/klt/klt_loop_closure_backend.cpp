@@ -23,7 +23,7 @@ LoopMatch FindBestLoopMatch(const LkLoopClosureState &state,
     LoopMatch best;
     for (size_t i = 0; i < state.keyframes.size(); ++i) {
         const LkLoopKeyframe &keyframe = state.keyframes[i];
-        if (frameId <= keyframe.frameId + kLkLoopMinAgeFrames) {
+        if (frameId <= keyframe.frameId + LK_LOOP_MIN_AGE_FRAMES) {
             continue;
         }
         const double similarity =
@@ -39,8 +39,8 @@ LoopMatch FindBestLoopMatch(const LkLoopClosureState &state,
 bool CanApplyLoopClosure(const LkLoopClosureState &state,
                          const LoopMatch &match, uint64_t frameId)
 {
-    return match.index >= 0 && match.similarity >= kLkLoopMinSimilarity &&
-           frameId >= state.lastClosureFrameId + kLkLoopCooldownFrames;
+    return match.index >= 0 && match.similarity >= LK_LOOP_MIN_SIMILARITY &&
+           frameId >= state.lastClosureFrameId + LK_LOOP_COOLDOWN_FRAMES;
 }
 
 void LogLoopClosure(uint64_t frameId, const LkLoopKeyframe &loop,
@@ -76,7 +76,7 @@ bool ShouldAddLoopKeyframe(const LkLoopClosureState &state, uint64_t frameId)
 {
     return state.keyframes.empty() ||
            frameId >= state.keyframes.back().frameId +
-                          kLkLoopKeyframeIntervalFrames;
+                          LK_LOOP_KEYFRAME_INTERVAL_FRAMES;
 }
 
 void AddLoopKeyframe(LkLoopClosureState &state, uint64_t frameId,
@@ -86,7 +86,7 @@ void AddLoopKeyframe(LkLoopClosureState &state, uint64_t frameId,
 {
     state.keyframes.push_back(
         LkLoopKeyframe{frameId, rawTwc, corrected, descriptor});
-    while (state.keyframes.size() > kLkLoopMaxKeyframes) {
+    while (state.keyframes.size() > LK_LOOP_MAX_KEYFRAMES) {
         state.keyframes.pop_front();
     }
 }

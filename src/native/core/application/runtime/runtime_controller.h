@@ -1,9 +1,9 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
+#include <cstdint>
 #include <functional>
-#include <mutex>
+#include <memory>
 #include <string>
 
 #include "core/application/config/runtime_app_types.h"
@@ -46,24 +46,22 @@ class UnifiedRuntimeController final : public IRuntimeCommandTarget {
     CommandResult ApplyConfig(const ConfigUpdate &update) override;
 
   private:
-    UnifiedConfig CurrentConfigUnlocked() const;
     CommandResult RequestCalibCleanup();
     CommandResult RunCalibCleanup();
     void StepPendingCalibCleanup();
+    bool CalibCleanupPending() const;
+    bool TryScheduleCalibCleanup();
+    bool TakePendingCalibCleanup(std::int64_t deadlineMs);
     void ApplySessionRedeployRequest(EpgRedeployCoordinator &coordinator);
 
-    UnifiedConfig m_config;
+    std::shared_ptr<const UnifiedConfig> m_config;
     LiveRuntimeTuning &m_tuning;
     PublishRuntimeModeFn m_publishRuntimeMode;
     CleanupCalibDataFn m_cleanupCalibData;
-    mutable std::mutex m_mu;
     RuntimeConfigService m_configService;
     RuntimeSessionSupervisor m_sessionSupervisor;
-    mutable std::mutex m_forceRestartMtx;
-    std::chrono::steady_clock::time_point m_forceRestartAt{};
-    std::mutex m_calibCleanupMtx;
-    bool m_calibCleanupPending{false};
-    std::chrono::steady_clock::time_point m_calibCleanupDeadline{};
+    std::atomic<std::int64_t> m_forceRestartAtMs{0};
+    std::atomic<std::int64_t> m_calibCleanupDeadlineMs{0};
 };
 
 } // namespace SmartDrone::Core::Application

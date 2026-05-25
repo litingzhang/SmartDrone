@@ -190,7 +190,6 @@ class SlamDfxTask final : public Epg::ITask {
     std::shared_ptr<SlamSessionRuntimeService> m_service;
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
-    std::array<std::shared_ptr<SlamPublishedFrame>, 4> m_pendingFrames{};
 };
 
 class SlamUdpTask final : public Epg::ITask {

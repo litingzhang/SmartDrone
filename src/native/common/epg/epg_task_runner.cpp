@@ -1,8 +1,15 @@
 #include "common/epg/epg_internal.h"
 
-#include <vector>
+#include <algorithm>
+#include <cerrno>
+#include <limits>
+#include <poll.h>
 #include <pthread.h>
 #include <sched.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
+
+#include <vector>
 
 namespace Epg {
 namespace {
@@ -54,6 +61,36 @@ void StoreBudgetDiagnostics(TaskDiagnostics &diag,
     }
 }
 
+TaskDiagnosticsSnapshot SnapshotTaskDiagnostics(const TaskDiagnostics &diag)
+{
+    TaskDiagnosticsSnapshot result;
+    result.loopCount = diag.loopCount.load(std::memory_order_relaxed);
+    result.errorCount = diag.errorCount.load(std::memory_order_relaxed);
+    result.idleWakeups = diag.idleWakeups.load(std::memory_order_relaxed);
+    result.lastLoopUs = diag.lastLoopUs.load(std::memory_order_relaxed);
+    result.maxLoopUs = diag.maxLoopUs.load(std::memory_order_relaxed);
+    result.totalLoopUs = diag.totalLoopUs.load(std::memory_order_relaxed);
+    result.resourceWaitCount =
+        diag.resourceWaitCount.load(std::memory_order_relaxed);
+    result.lastResourceWaitUs =
+        diag.lastResourceWaitUs.load(std::memory_order_relaxed);
+    result.maxResourceWaitUs =
+        diag.maxResourceWaitUs.load(std::memory_order_relaxed);
+    result.totalResourceWaitUs =
+        diag.totalResourceWaitUs.load(std::memory_order_relaxed);
+    result.firstLoopMs = diag.firstLoopMs.load(std::memory_order_relaxed);
+    result.lastLoopMs = diag.lastLoopMs.load(std::memory_order_relaxed);
+    result.budgetOverrunCount =
+        diag.budgetOverrunCount.load(std::memory_order_relaxed);
+    result.deadlineMissCount =
+        diag.deadlineMissCount.load(std::memory_order_relaxed);
+    result.schedulingErrorCount =
+        diag.schedulingErrorCount.load(std::memory_order_relaxed);
+    result.lastSchedulingError =
+        diag.lastSchedulingError.load(std::memory_order_relaxed);
+    return result;
+}
+
 std::uint64_t PercentileValue(std::vector<std::uint64_t> values,
                               std::uint64_t percentile)
 {
@@ -66,30 +103,37 @@ std::uint64_t PercentileValue(std::vector<std::uint64_t> values,
     return values[index];
 }
 
-bool WaitUntilRunningOrStopped(std::condition_variable &cv,
-                               std::mutex &mutex,
-                               const std::chrono::steady_clock::time_point &time,
-                               const std::atomic<bool> &running)
+int CreateWakeEventFd()
 {
-    std::unique_lock<std::mutex> lock(mutex);
-    cv.wait_until(lock, time, [&running]() {
-        return !running.load(std::memory_order_acquire);
-    });
-    return running.load(std::memory_order_acquire);
+    const int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (fd >= 0) {
+        return fd;
+    }
+    return -1;
 }
 
-bool WaitForConfiguredPhase(std::condition_variable &cv,
-                            std::mutex &mutex,
-                            const TaskSchedulingConfig &scheduling,
-                            const std::atomic<bool> &running)
+int TimeoutUntil(const std::chrono::steady_clock::time_point &deadline)
 {
-    if (!scheduling.phaseOffsetConfigured ||
-        scheduling.phaseOffsetMs == 0) {
-        return running.load(std::memory_order_acquire);
+    const auto remaining = deadline - std::chrono::steady_clock::now();
+    const auto remainingUs =
+        std::chrono::duration_cast<std::chrono::microseconds>(remaining).count();
+    if (remainingUs <= 0) {
+        return 0;
     }
-    const auto wakeAt = std::chrono::steady_clock::now() +
-        std::chrono::milliseconds(scheduling.phaseOffsetMs);
-    return WaitUntilRunningOrStopped(cv, mutex, wakeAt, running);
+    const auto timeoutMs = (remainingUs + 999) / 1000;
+    const auto maxTimeout = std::numeric_limits<int>::max();
+    return timeoutMs > maxTimeout ? maxTimeout : static_cast<int>(timeoutMs);
+}
+
+std::chrono::milliseconds WakeFallbackSleep(int timeoutMs)
+{
+    if (timeoutMs < 0) {
+        return std::chrono::milliseconds(1);
+    }
+    if (timeoutMs == 0) {
+        return std::chrono::milliseconds(0);
+    }
+    return std::chrono::milliseconds(std::min(timeoutMs, 1));
 }
 
 } // namespace
@@ -102,7 +146,8 @@ EventPipelineGraph::TaskRunner::TaskRunner(TaskConfig config,
     : m_config(std::move(config)),
       m_task(std::move(task)),
       m_context(std::move(inputs), std::move(outputs)),
-      m_triggerQueues(std::move(triggerQueues))
+      m_triggerQueues(std::move(triggerQueues)),
+      m_wakeEventFd(CreateWakeEventFd())
 {
     m_context.AttachDiagnostics(&m_diag);
 }
@@ -110,6 +155,10 @@ EventPipelineGraph::TaskRunner::TaskRunner(TaskConfig config,
 EventPipelineGraph::TaskRunner::~TaskRunner()
 {
     Stop();
+    if (m_wakeEventFd >= 0) {
+        (void)::close(m_wakeEventFd);
+        m_wakeEventFd = -1;
+    }
 }
 
 const std::string &EventPipelineGraph::TaskRunner::Name() const
@@ -158,10 +207,15 @@ void EventPipelineGraph::TaskRunner::Stop()
 
 void EventPipelineGraph::TaskRunner::Notify()
 {
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_wakeEventFd < 0) {
+        return;
     }
-    m_cv.notify_one();
+    const eventfd_t value = 1;
+    const int result = ::eventfd_write(m_wakeEventFd, value);
+    if (result != 0 && errno != EAGAIN) {
+        m_diag.schedulingErrorCount.fetch_add(1, std::memory_order_relaxed);
+        m_diag.lastSchedulingError.store(errno, std::memory_order_relaxed);
+    }
 }
 
 TaskDiagnosticsSnapshot EventPipelineGraph::TaskRunner::Diagnostics() const
@@ -209,11 +263,14 @@ void EventPipelineGraph::TaskRunner::Run()
 
 void EventPipelineGraph::TaskRunner::StoreLoopSample(std::uint64_t elapsedUs)
 {
-    std::lock_guard<std::mutex> lock(m_sampleMutex);
-    m_loopSamples[m_loopSampleCursor] = elapsedUs;
+    m_loopSamples[m_loopSampleCursor].store(elapsedUs,
+                                            std::memory_order_relaxed);
     m_loopSampleCursor = (m_loopSampleCursor + 1) % m_loopSamples.size();
-    if (m_loopSampleCount < m_loopSamples.size()) {
-        ++m_loopSampleCount;
+    auto count = m_loopSampleCount.load(std::memory_order_relaxed);
+    while (count < m_loopSamples.size() &&
+           !m_loopSampleCount.compare_exchange_weak(
+               count, count + 1, std::memory_order_release,
+               std::memory_order_relaxed)) {
     }
 }
 
@@ -221,10 +278,11 @@ void EventPipelineGraph::TaskRunner::FillLoopPercentiles(
     TaskDiagnosticsSnapshot &snapshot) const
 {
     std::vector<std::uint64_t> values;
-    {
-        std::lock_guard<std::mutex> lock(m_sampleMutex);
-        values.assign(m_loopSamples.begin(),
-                      m_loopSamples.begin() + m_loopSampleCount);
+    const auto count = std::min(m_loopSampleCount.load(std::memory_order_acquire),
+                                m_loopSamples.size());
+    values.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        values.push_back(m_loopSamples[index].load(std::memory_order_relaxed));
     }
     snapshot.p50LoopUs = PercentileValue(values, 50);
     snapshot.p90LoopUs = PercentileValue(values, 90);
@@ -281,34 +339,94 @@ bool EventPipelineGraph::TaskRunner::WaitForTrigger()
     case TriggerMode::Periodic:
         if (m_config.scheduling.phaseOffsetConfigured &&
             m_diag.loopCount.load(std::memory_order_relaxed) == 0) {
-            return WaitForConfiguredPhase(
-                m_cv, m_mutex, m_config.scheduling, m_running);
+            return WaitForConfiguredPhase();
         }
         if (m_config.trigger.interval.count() > 0) {
-            std::unique_lock<std::mutex> lock(m_mutex);
-            m_cv.wait_for(lock, m_config.trigger.interval,
-                          [this]() { return !m_running.load(std::memory_order_acquire); });
+            return WaitForDuration(m_config.trigger.interval);
         }
         return m_running.load(std::memory_order_acquire);
 
     case TriggerMode::AnyQueueReady:
-    case TriggerMode::AllQueueReady: {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_cv.wait(lock, [this]() {
-            return !m_running.load(std::memory_order_acquire) || QueuesReady();
-        });
-        return m_running.load(std::memory_order_acquire);
-    }
+    case TriggerMode::AllQueueReady:
+        return WaitForQueueTrigger();
 
-    case TriggerMode::PeriodicOrAnyQueueReady: {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_cv.wait_for(lock, m_config.trigger.interval, [this]() {
-            return !m_running.load(std::memory_order_acquire) || QueuesReady();
-        });
-        return m_running.load(std::memory_order_acquire);
-    }
+    case TriggerMode::PeriodicOrAnyQueueReady:
+        return WaitForPeriodicOrQueueTrigger();
     }
     return false;
+}
+
+bool EventPipelineGraph::TaskRunner::WaitForConfiguredPhase()
+{
+    if (m_config.scheduling.phaseOffsetMs == 0) {
+        return m_running.load(std::memory_order_acquire);
+    }
+    return WaitForDuration(
+        std::chrono::milliseconds(m_config.scheduling.phaseOffsetMs));
+}
+
+bool EventPipelineGraph::TaskRunner::WaitForDuration(
+    std::chrono::milliseconds duration)
+{
+    if (duration.count() <= 0) {
+        return m_running.load(std::memory_order_acquire);
+    }
+    const auto deadline = std::chrono::steady_clock::now() + duration;
+    while (m_running.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        PollWakeEvent(TimeoutUntil(deadline));
+    }
+    return m_running.load(std::memory_order_acquire);
+}
+
+bool EventPipelineGraph::TaskRunner::WaitForQueueTrigger()
+{
+    while (m_running.load(std::memory_order_acquire) && !QueuesReady()) {
+        PollWakeEvent(-1);
+    }
+    return m_running.load(std::memory_order_acquire);
+}
+
+bool EventPipelineGraph::TaskRunner::WaitForPeriodicOrQueueTrigger()
+{
+    if (QueuesReady()) {
+        return m_running.load(std::memory_order_acquire);
+    }
+    const auto deadline =
+        std::chrono::steady_clock::now() + m_config.trigger.interval;
+    while (m_running.load(std::memory_order_acquire) && !QueuesReady() &&
+           std::chrono::steady_clock::now() < deadline) {
+        PollWakeEvent(TimeoutUntil(deadline));
+    }
+    return m_running.load(std::memory_order_acquire);
+}
+
+void EventPipelineGraph::TaskRunner::PollWakeEvent(int timeoutMs)
+{
+    if (m_wakeEventFd < 0) {
+        std::this_thread::sleep_for(WakeFallbackSleep(timeoutMs));
+        return;
+    }
+    pollfd fd{};
+    fd.fd = m_wakeEventFd;
+    fd.events = POLLIN;
+    while (m_running.load(std::memory_order_acquire)) {
+        const int result = ::poll(&fd, 1, timeoutMs);
+        if (result >= 0 || errno != EINTR) {
+            break;
+        }
+    }
+    DrainWakeEvents();
+}
+
+void EventPipelineGraph::TaskRunner::DrainWakeEvents()
+{
+    if (m_wakeEventFd < 0) {
+        return;
+    }
+    eventfd_t value = 0;
+    while (::eventfd_read(m_wakeEventFd, &value) == 0) {
+    }
 }
 
 bool EventPipelineGraph::TaskRunner::QueuesReady() const

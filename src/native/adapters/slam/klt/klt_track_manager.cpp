@@ -43,7 +43,7 @@ bool RefreshLkStereoSeedsIfNeeded(SlamModeSharedState &state, const cv::Mat &lef
                                   const cv::Mat &rightRect, uint64_t frameId, bool force)
 {
     const bool cadenceDue =
-        state.m_lkLastSeedFrameId == 0 || frameId >= state.m_lkLastSeedFrameId + kLkGridRefillIntervalFrames;
+        state.m_lkLastSeedFrameId == 0 || frameId >= state.m_lkLastSeedFrameId + LK_GRID_REFILL_INTERVAL_FRAMES;
     if (!force && (!cadenceDue || !LkHasDegradedGridCell(state.m_lkTracks, leftRect.size()))) {
         return false;
     }
@@ -59,20 +59,25 @@ bool RefreshLkStereoSeedsIfNeeded(SlamModeSharedState &state, const cv::Mat &lef
     return state.m_lkTracks.size() > before;
 }
 
-void UpdateLkTracksAfterPoseEstimate(SlamModeSharedState &state, const cv::Mat &leftRect,
-                                     const cv::Mat &rightRect, uint64_t frameId,
-                                     std::vector<LkStereoTrack> trackedTracks, int inlierCount)
+void UpdateLkTracksAfterPoseEstimate(UpdateLkTracksAfterPoseEstimateRequest request)
 {
     const bool hardRecoveryRefill =
-        trackedTracks.size() < static_cast<size_t>(kLkHardRecoveryMinTracks) ||
-        inlierCount < kLkHardRecoveryMinInliers;
-    state.m_lkTracks = hardRecoveryRefill ? std::vector<LkStereoTrack>{}
-                                          : SelectLkTracksGridBalanced(trackedTracks, leftRect.size());
+        request.trackedTracks.size() <
+            static_cast<size_t>(LK_HARD_RECOVERY_MIN_TRACKS) ||
+        request.inlierCount < LK_HARD_RECOVERY_MIN_INLIERS;
+    request.state.m_lkTracks =
+        hardRecoveryRefill
+            ? std::vector<LkStereoTrack>{}
+            : SelectLkTracksGridBalanced(request.trackedTracks,
+                                         request.leftRect.size());
     if (hardRecoveryRefill) {
-        RefreshLkStereoSeedsIfNeeded(state, leftRect, rightRect, frameId, true);
+        RefreshLkStereoSeedsIfNeeded(request.state, request.leftRect,
+                                     request.rightRect, request.frameId, true);
     }
-    RefreshLkStereoSeedsIfNeeded(state, leftRect, rightRect, frameId, false);
-    state.m_lkTracks = SelectLkTracksGridBalanced(state.m_lkTracks, leftRect.size());
+    RefreshLkStereoSeedsIfNeeded(request.state, request.leftRect,
+                                 request.rightRect, request.frameId, false);
+    request.state.m_lkTracks = SelectLkTracksGridBalanced(
+        request.state.m_lkTracks, request.leftRect.size());
 }
 
 void CopyLkTrackFeaturesToOutput(const std::vector<LkStereoTrack> &tracks,

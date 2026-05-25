@@ -54,7 +54,7 @@ class CalibCameraInputPort::Impl final {
         if (!m_cameraProvider || !m_opened) {
             return {CalibFrameCaptureStatus::SessionAbort};
         }
-        if (!m_cameraProvider->GrabStereo(frame.stereo, 0, true)) {
+        if (!m_cameraProvider->GrabStereo(frame.stereo, true)) {
             return HandleCameraGrabFailure();
         }
         if (!AcceptFrameTiming(frame)) {

@@ -1,70 +1,36 @@
 #include "adapters/slam/engine/slam_engine_factory.h"
 
-#include <array>
 #include <cstddef>
 #include <iostream>
-#include <mutex>
+
+#include "adapters/slam/fixed_factory_registry.h"
 
 namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
-constexpr size_t kMaxSlamEngineFactorySlots = 16;
+constexpr std::size_t MAX_SLAM_ENGINE_FACTORY_SLOTS = 16;
 
-struct SlamEngineFactoryRegistryEntry {
-    SlamBackend backend{SlamBackend::Klt};
-    SlamEngineFactory factory{nullptr};
-};
-
-std::array<SlamEngineFactoryRegistryEntry, kMaxSlamEngineFactorySlots> &
+FixedFactoryRegistry<SlamBackend, SlamEngineFactory,
+                     MAX_SLAM_ENGINE_FACTORY_SLOTS> &
 SlamEngineFactoryRegistry()
 {
-    static std::array<SlamEngineFactoryRegistryEntry, kMaxSlamEngineFactorySlots>
-        registry{};
+    static FixedFactoryRegistry<SlamBackend, SlamEngineFactory,
+                                MAX_SLAM_ENGINE_FACTORY_SLOTS>
+        registry;
     return registry;
-}
-
-std::mutex &SlamEngineFactoryRegistryMutex()
-{
-    static std::mutex mutex;
-    return mutex;
 }
 
 SlamEngineFactory LookupSlamEngineFactory(SlamBackend backend)
 {
-    std::lock_guard<std::mutex> lock(SlamEngineFactoryRegistryMutex());
-    for (const SlamEngineFactoryRegistryEntry &entry :
-         SlamEngineFactoryRegistry()) {
-        if (entry.factory != nullptr && entry.backend == backend) {
-            return entry.factory;
-        }
-    }
-    return nullptr;
+    return SlamEngineFactoryRegistry().Find(backend);
 }
 
 } // namespace
 
 void RegisterSlamEngineFactory(SlamBackend backend, SlamEngineFactory factory)
 {
-    if (factory == nullptr) {
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(SlamEngineFactoryRegistryMutex());
-    auto &registry = SlamEngineFactoryRegistry();
-    for (SlamEngineFactoryRegistryEntry &entry : registry) {
-        if (entry.factory != nullptr && entry.backend == backend) {
-            entry.factory = factory;
-            return;
-        }
-    }
-    for (SlamEngineFactoryRegistryEntry &entry : registry) {
-        if (entry.factory == nullptr) {
-            entry.backend = backend;
-            entry.factory = factory;
-            return;
-        }
-    }
+    SlamEngineFactoryRegistry().Register(backend, factory);
 }
 
 SlamEngineFactoryRegistrar::SlamEngineFactoryRegistrar(

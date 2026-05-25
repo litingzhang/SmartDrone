@@ -107,9 +107,9 @@ void ProcessContinuousKltTrackingFrame(
     out.matchesInliers = poseEstimate.inlierCount;
     out.trackedMapPointCount = static_cast<uint32_t>(poseEstimate.inlierCount);
     out.localMapPointCount = static_cast<uint32_t>(objectPoints.size());
-    UpdateLkTracksAfterPoseEstimate(state, frontend.leftRect, frontend.rightRect,
-                                    request.frameId, std::move(trackedTracks),
-                                    poseEstimate.inlierCount);
+    UpdateLkTracksAfterPoseEstimate(
+        {state, frontend.leftRect, frontend.rightRect, request.frameId,
+         std::move(trackedTracks), poseEstimate.inlierCount});
     if (request.extractFeatures) {
         CopyLkTrackFeaturesToOutput(state.m_lkTracks, out);
     }
@@ -191,13 +191,13 @@ void ProcessPerFrameKltTrackingFrame(
                          std::chrono::steady_clock::now() - updateStartTp)
                          .count();
     if (!poseEstimate.poseUpdated) {
-        MarkSlamOutputPoseLost(out, Core::Ports::kSlamTrackingLost);
+        MarkSlamOutputPoseLost(out, Core::Ports::SLAM_TRACKING_LOST);
     }
     ++state.m_lkFrameCount;
 }
 
-const SlamEngineFactoryRegistrar kKltSlamEngineRegistrar(SlamBackend::Klt,
-                                                         CreateKltSlamEngine);
+const SlamEngineFactoryRegistrar KLT_SLAM_ENGINE_REGISTRAR(
+    SlamBackend::Klt, CreateKltSlamEngine);
 
 } // namespace
 
@@ -312,7 +312,7 @@ KltSlamEngine::ProcessContinuousKlt(const Core::Ports::SlamInputBatch &input,
     KltContinuousFrontendResult frontend = RunKltContinuousFrontend(
         state, input.stereo.left.gray, input.stereo.right.gray);
     if (!frontend.valid) {
-        MarkSlamOutputPoseLost(out, Core::Ports::kSlamTrackingLost);
+        MarkSlamOutputPoseLost(out, Core::Ports::SLAM_TRACKING_LOST);
         return out;
     }
 
@@ -346,7 +346,7 @@ KltSlamEngine::ProcessPerFrameKlt(const Core::Ports::SlamInputBatch &input,
     CopyKltFrontendTimings(frontend, out);
 
     if (!frontend.valid) {
-        MarkSlamOutputPoseLost(out, Core::Ports::kSlamTrackingLost);
+        MarkSlamOutputPoseLost(out, Core::Ports::SLAM_TRACKING_LOST);
         return out;
     }
 

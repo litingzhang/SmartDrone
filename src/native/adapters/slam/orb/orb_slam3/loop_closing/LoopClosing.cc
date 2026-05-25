@@ -250,12 +250,6 @@ void LoopClosing::AbortGlobalBundleAdjustment()
     mnFullBAIdx++;
 }
 
-
-void LoopClosing::Run()
-{
-    Step();
-}
-
 bool LoopClosing::Step()
 {
     {

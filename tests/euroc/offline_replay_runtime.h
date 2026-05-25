@@ -240,7 +240,8 @@ std::optional<Sophus::SE3f>
 LoadReplayBodyExtrinsics(const OfflineReplayOptions &opts)
 {
     if (UseImu(opts.sensorMode) || opts.sensorMode != SensorMode::Stereo ||
-        !EnvFlagEnabled("SMART_DRONE_EUROC_OUTPUT_BODY_FRAME", false)) {
+        !SmartDrone::Common::EnvFlagEnabled(
+            "SMART_DRONE_EUROC_OUTPUT_BODY_FRAME", false)) {
         return std::nullopt;
     }
     auto extrinsics = LoadBodyToCameraExtrinsics(opts.settings);
@@ -263,7 +264,7 @@ BuildReplayRunnerConfig(const OfflineReplayOptions &opts)
             .backendStepEveryN = std::max(1, opts.backendStepEveryN),
             .useImu = UseImu(opts.sensorMode),
             .preferLatestFrame = true,
-            .timeoutMs = opts.timeoutMs,
+            .staleFrameThresholdMs = opts.staleFrameThresholdMs,
             .shutdownEngineOnFinish = false};
 }
 

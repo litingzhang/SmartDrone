@@ -2,9 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <vector>
 
+#include "common/environment.h"
+#include "common/numeric_parse.h"
 #include "core/application/config/orb_acceleration_config.h"
 #include "core/application/config/slam_backend_availability.h"
 
@@ -313,7 +314,12 @@ int ArgReader::GetInt(const char *name, int defaultValue) const
 {
     for (int i = 1; i + 1 < m_argc; ++i) {
         if (std::string(m_argv[i]) == name) {
-            return std::stoi(m_argv[i + 1]);
+            int parsed = defaultValue;
+            if (!SmartDrone::Common::TryParseIntPrefix(
+                    m_argv[i + 1], 10, parsed)) {
+                throw std::invalid_argument(m_argv[i + 1]);
+            }
+            return parsed;
         }
     }
     return defaultValue;
@@ -323,7 +329,12 @@ int64_t ArgReader::GetInt64(const char *name, int64_t defaultValue) const
 {
     for (int i = 1; i + 1 < m_argc; ++i) {
         if (std::string(m_argv[i]) == name) {
-            return std::stoll(m_argv[i + 1]);
+            int64_t parsed = defaultValue;
+            if (!SmartDrone::Common::TryParseInt64Prefix(
+                    m_argv[i + 1], 10, parsed)) {
+                throw std::invalid_argument(m_argv[i + 1]);
+            }
+            return parsed;
         }
     }
     return defaultValue;
@@ -333,7 +344,12 @@ float ArgReader::GetFloat(const char *name, float defaultValue) const
 {
     for (int i = 1; i + 1 < m_argc; ++i) {
         if (std::string(m_argv[i]) == name) {
-            return std::stof(m_argv[i + 1]);
+            float parsed = defaultValue;
+            if (!SmartDrone::Common::TryParseFloatPrefix(m_argv[i + 1],
+                                                         parsed)) {
+                throw std::invalid_argument(m_argv[i + 1]);
+            }
+            return parsed;
         }
     }
     return defaultValue;
@@ -368,20 +384,17 @@ uint8_t ArgReader::GetUint8HexOrDec(const char *name, uint8_t defaultValue,
 uint8_t ArgReader::ParseUint8HexOrDec(const std::string &text,
                                       uint8_t defaultValue)
 {
-    try {
-        int base = 10;
-        if (text.size() > 2 && text[0] == '0' &&
-            (text[1] == 'x' || text[1] == 'X')) {
-            base = 16;
-        }
-        const int value = std::stoi(text, nullptr, base);
-        if (value < 0 || value > 255) {
-            return defaultValue;
-        }
-        return static_cast<uint8_t>(value);
-    } catch (...) {
+    int base = 10;
+    if (text.size() > 2 && text[0] == '0' &&
+        (text[1] == 'x' || text[1] == 'X')) {
+        base = 16;
+    }
+    int value = defaultValue;
+    if (!SmartDrone::Common::TryParseIntFull(text.c_str(), base, value) ||
+        value < 0 || value > 255) {
         return defaultValue;
     }
+    return static_cast<uint8_t>(value);
 }
 
 namespace {
@@ -525,14 +538,15 @@ void ParseDpvoRuntimeConfig(const ArgReader &argReader, const char *argv0,
         argReader.GetInt("--dpvo-optimization-window", 7);
 }
 
-std::vector<std::string> BuildVisualFeatureRepoCandidates(const char *home)
+std::vector<std::string> BuildVisualFeatureRepoCandidates(
+    const std::string &home)
 {
     std::vector<std::string> repoCandidates;
     repoCandidates.emplace_back("LightGlue");
     repoCandidates.emplace_back("lightglue");
     repoCandidates.emplace_back("third_party/LightGlue");
     repoCandidates.emplace_back("third_party/lightglue");
-    if (home == nullptr) {
+    if (home.empty()) {
         return repoCandidates;
     }
     repoCandidates.push_back((fs::path(home) / "LightGlue").string());
@@ -552,8 +566,9 @@ std::string ResolveVisualFeatureRepo(const ArgReader &argReader,
     if (!explicitRepo.empty()) {
         return ResolveRuntimePath(explicitRepo, argv0);
     }
+    const std::string home = SmartDrone::Common::EnvStringValue("HOME", "");
     return ResolveFirstExistingRuntimePath(
-        BuildVisualFeatureRepoCandidates(std::getenv("HOME")), argv0);
+        BuildVisualFeatureRepoCandidates(home), argv0);
 }
 
 void ParseVisualFeatureRuntimeConfig(const ArgReader &argReader,

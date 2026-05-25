@@ -3,7 +3,6 @@
 #include <atomic>
 #include <cstdio>
 #include <iostream>
-#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -67,7 +66,6 @@ class CalibOutputStore::Impl final {
 
     bool WriteImuSample(const ImuSample &sample)
     {
-        std::lock_guard<std::mutex> lock(m_fileMu);
         if (!m_fImu) {
             return false;
         }
@@ -86,21 +84,23 @@ class CalibOutputStore::Impl final {
         return true;
     }
 
-    void FlushAndClose()
+    bool FlushAndClose()
     {
-        std::lock_guard<std::mutex> fileLock(m_fileMu);
+        if (!m_opened) {
+            return true;
+        }
         std::cerr << "[calib-sync] flushing outputs on calib stop saved="
                   << m_saved.load() << "\n";
-        FlushCalibOutputs(
+        const bool synced = FlushCalibOutputs(
             {m_fCam0, m_fCam1, m_fImu, m_savedImagePaths, m_root, m_cam0Dir,
              m_cam1Dir});
         CloseLocked();
         m_opened = false;
+        return synced;
     }
 
     void Close()
     {
-        std::lock_guard<std::mutex> fileLock(m_fileMu);
         CloseLocked();
         m_opened = false;
     }
@@ -222,7 +222,6 @@ class CalibOutputStore::Impl final {
 
     void RecordSavedPair(const CalibSavePair &pair)
     {
-        std::lock_guard<std::mutex> lock(m_fileMu);
         std::fprintf(m_fCam0, "%lld,%s\n",
                      static_cast<long long>(pair.pairNs), pair.name.c_str());
         std::fprintf(m_fCam1, "%lld,%s\n",
@@ -270,7 +269,6 @@ class CalibOutputStore::Impl final {
     }
 
     CalibOutputStoreConfig m_config;
-    mutable std::mutex m_fileMu;
     std::string m_outRoot;
     fs::path m_root;
     fs::path m_cam0Dir;
@@ -307,9 +305,9 @@ bool CalibOutputStore::WriteImuSample(const ImuSample &sample)
     return m_impl->WriteImuSample(sample);
 }
 
-void CalibOutputStore::FlushAndClose()
+bool CalibOutputStore::FlushAndClose()
 {
-    m_impl->FlushAndClose();
+    return m_impl->FlushAndClose();
 }
 
 void CalibOutputStore::Close()

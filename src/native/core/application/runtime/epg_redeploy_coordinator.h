@@ -1,10 +1,8 @@
 #pragma once
 
 #include <atomic>
-#include <chrono>
-#include <condition_variable>
 #include <cstdint>
-#include <mutex>
+#include <memory>
 #include <string>
 
 namespace SmartDrone::Core::Application {
@@ -32,7 +30,6 @@ class EpgRedeployCoordinator final {
     bool TakeSystemRedeployRequest();
     bool TakeSystemRedeployRequest(EpgRedeployRequest &request);
     bool SystemRedeployRequested() const;
-    bool WaitForSystemRedeploy(std::chrono::milliseconds timeout) const;
 
     void RequestSessionRedeploy();
     void RequestSessionRedeploy(EpgRedeployRequest request);
@@ -41,13 +38,11 @@ class EpgRedeployCoordinator final {
     bool SessionRedeployRequested() const;
 
   private:
-    std::atomic<bool> m_systemRedeployRequested{false};
-    std::atomic<bool> m_sessionRedeployRequested{false};
-    mutable std::mutex m_systemRedeployMutex;
-    mutable std::condition_variable m_systemRedeployCv;
-    mutable std::mutex m_sessionRedeployMutex;
-    EpgRedeployRequest m_systemRequest;
-    EpgRedeployRequest m_sessionRequest;
+    std::shared_ptr<const EpgRedeployRequest> SystemRequest() const;
+    std::shared_ptr<const EpgRedeployRequest> SessionRequest() const;
+
+    std::shared_ptr<const EpgRedeployRequest> m_systemRequest;
+    std::shared_ptr<const EpgRedeployRequest> m_sessionRequest;
 };
 
 } // namespace SmartDrone::Core::Application

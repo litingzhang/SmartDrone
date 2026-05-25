@@ -159,7 +159,7 @@ TEST(EventPipelineGraph, RunsPipelineConfiguredFromJsonFile)
     EventPipelineGraph graph(registry);
 
     graph.Configure(Epg::ParseGraphConfigJsonFile(
-        std::string(TEST_EPG_DIR) + "/basic_pipeline.json"));
+        TestEpgPath("basic_pipeline.json").string()));
 
     graph.Start();
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -185,7 +185,7 @@ TEST(EventPipelineGraph, TaskCanPublishToMultipleQueuesForDifferentConsumers)
     EventPipelineGraph graph(registry);
 
     graph.Configure(Epg::ParseGraphConfigJsonFile(
-        std::string(TEST_EPG_DIR) + "/fanout_pipeline.json"));
+        TestEpgPath("fanout_pipeline.json").string()));
 
     graph.Start();
     std::this_thread::sleep_for(std::chrono::milliseconds(30));

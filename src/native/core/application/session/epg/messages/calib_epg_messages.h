@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 
+#include "core/domain/imu_sample.h"
 #include "core/ports/camera_provider.h"
 
 namespace SmartDrone::Core::Application {
@@ -37,19 +38,20 @@ struct CalibStopRequest {
     bool sessionOk{false};
 };
 
-struct CalibStorageStatus {
+struct CalibImuSample {
     bool ok{true};
-};
-
-struct CalibImuStatus {
-    bool ok{true};
+    ImuSample sample{};
 };
 
 struct CalibPreviewStatus {
-    bool ok{true};
+    bool sessionOk{true};
 };
 
 struct CalibFlushRequest {
+    bool sessionOk{true};
+};
+
+struct CalibStorageFlushed {
     bool sessionOk{true};
 };
 

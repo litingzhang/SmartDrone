@@ -9,14 +9,14 @@
 
 namespace SmartDrone::Adapters::Slam {
 
-constexpr double kPoseStabilizerDefaultDtSec = 1.0 / 20.0;
-constexpr double kPoseStabilizerMinDtSec = 1.0 / 120.0;
-constexpr double kPoseStabilizerMaxDtSec = 0.25;
-constexpr float kPoseStabilizerMaxSpeedMps = 3.0f;
-constexpr float kPoseStabilizerMaxStepMeters = 0.055f;
-constexpr float kPoseStabilizerMaxRotStepDeg = 3.0f;
-constexpr float kPoseStabilizerVelocityAlpha = 0.35f;
-constexpr float kPoseStabilizerPredictedVelocityDecay = 0.985f;
+constexpr double POSE_STABILIZER_DEFAULT_DT_SEC = 1.0 / 20.0;
+constexpr double POSE_STABILIZER_MIN_DT_SEC = 1.0 / 120.0;
+constexpr double POSE_STABILIZER_MAX_DT_SEC = 0.25;
+constexpr float POSE_STABILIZER_MAX_SPEED_MPS = 3.0f;
+constexpr float POSE_STABILIZER_MAX_STEP_METERS = 0.055f;
+constexpr float POSE_STABILIZER_MAX_ROT_STEP_DEG = 3.0f;
+constexpr float POSE_STABILIZER_VELOCITY_ALPHA = 0.35f;
+constexpr float POSE_STABILIZER_PREDICTED_VELOCITY_DECAY = 0.985f;
 
 bool TrackingStateCanPublishPose(int trackingState);
 bool IsSuperPointTrackingStateSafe(int trackingState);
@@ -32,7 +32,7 @@ Eigen::Quaternionf PoseQuaternion(const Core::Ports::PoseEstimate &pose);
 float QuaternionAngleDeg(const Eigen::Quaternionf &a, const Eigen::Quaternionf &b);
 void LimitPoseRotationStep(const Core::Ports::PoseEstimate &reference, Core::Ports::PoseEstimate &pose,
                            float maxRotationStepDeg);
-void ClampVelocityVector(float &vx, float &vy, float &vz, float maxSpeed = kPoseStabilizerMaxSpeedMps);
+void ClampVelocityVector(float &vx, float &vy, float &vz, float maxSpeed = POSE_STABILIZER_MAX_SPEED_MPS);
 
 Sophus::SE3f PoseEstimateToSe3(const Core::Ports::PoseEstimate &pose);
 Core::Ports::PoseEstimate Se3ToPoseEstimate(const Sophus::SE3f &pose);

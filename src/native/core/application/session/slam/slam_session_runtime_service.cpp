@@ -2,10 +2,10 @@
 
 #include <atomic>
 #include <chrono>
-#include <cstdlib>
-#include <mutex>
+#include <memory>
 #include <utility>
 
+#include "common/environment.h"
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/session/slam/slam_session_processing_port.h"
@@ -17,35 +17,15 @@
 namespace SmartDrone::Core::Application {
 namespace {
 
-int EnvIntClamped(const char *name, int fallback, int minValue, int maxValue)
-{
-    const char *value = std::getenv(name);
-    if (value == nullptr || value[0] == '\0') {
-        return fallback;
-    }
-    char *end = nullptr;
-    const long parsed = std::strtol(value, &end, 10);
-    if (end == value) {
-        return fallback;
-    }
-    if (parsed < minValue) {
-        return minValue;
-    }
-    if (parsed > maxValue) {
-        return maxValue;
-    }
-    return static_cast<int>(parsed);
-}
-
 std::uint64_t EpgBackendTickMinIntervalMs()
 {
-    return static_cast<std::uint64_t>(EnvIntClamped(
+    return static_cast<std::uint64_t>(SmartDrone::Common::EnvIntValueClamped(
         "SMART_DRONE_EPG_BACKEND_TICK_MIN_INTERVAL_MS", 50, 0, 1000));
 }
 
 std::uint64_t EpgBackendTickTrackingCooldownMs()
 {
-    return static_cast<std::uint64_t>(EnvIntClamped(
+    return static_cast<std::uint64_t>(SmartDrone::Common::EnvIntValueClamped(
         "SMART_DRONE_EPG_BACKEND_TICK_TRACKING_COOLDOWN_MS", 50, 0, 1000));
 }
 
@@ -65,50 +45,22 @@ bool WithinCooldown(std::uint64_t nowMs,
            nowMs - lastStepMs < minIntervalMs;
 }
 
-template <typename Result, typename Operation>
-Result RunLockedRuntimeOperation(
-    const std::shared_ptr<SlamSessionRuntime> &runtime,
-    std::mutex &mutex,
-    Operation operation)
-{
-    Result output;
-    if (!runtime) {
-        return output;
+template <typename Flag>
+class AtomicBoolResetGuard {
+  public:
+    explicit AtomicBoolResetGuard(Flag &flag)
+        : m_flag(flag)
+    {
     }
 
-    const auto waitBegin = std::chrono::steady_clock::now();
-    std::lock_guard<std::mutex> lock(mutex);
-    const auto waitEnd = std::chrono::steady_clock::now();
-    output = operation(*runtime);
-    output.resourceWaitUs = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            waitEnd - waitBegin)
-            .count());
-    return output;
-}
-
-template <typename Result, typename Payload, typename Operation>
-Result RunLockedPayloadOperation(
-    const std::shared_ptr<SlamSessionRuntime> &runtime,
-    std::shared_ptr<Payload> payload,
-    std::mutex &mutex,
-    Operation operation)
-{
-    Result output;
-    if (!runtime || !payload) {
-        return output;
+    ~AtomicBoolResetGuard()
+    {
+        m_flag.store(false, std::memory_order_release);
     }
 
-    const auto waitBegin = std::chrono::steady_clock::now();
-    std::lock_guard<std::mutex> lock(mutex);
-    const auto waitEnd = std::chrono::steady_clock::now();
-    output = operation(*runtime, std::move(payload));
-    output.resourceWaitUs = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            waitEnd - waitBegin)
-            .count());
-    return output;
-}
+  private:
+    Flag &m_flag;
+};
 
 } // namespace
 
@@ -149,8 +101,22 @@ class SlamSessionRuntimeService::Impl final {
                                     ISlamPublishedFramePayload &frame);
 
   private:
+    struct RuntimeState {
+        std::shared_ptr<SlamSessionRuntime> runtime;
+        std::uint64_t sessionId{0};
+        bool started{false};
+        bool startFailed{false};
+    };
+
+    std::shared_ptr<const RuntimeState> LoadRuntimeState() const;
+    void StoreRuntimeState(std::shared_ptr<const RuntimeState> state);
+    bool TryAcquireStartSlot(std::shared_ptr<const RuntimeState> &state);
+    std::shared_ptr<SlamSessionRuntime> CreateRuntime() const;
+    bool StartRuntime(const std::shared_ptr<SlamSessionRuntime> &runtime,
+                      std::uint64_t sessionId);
     std::shared_ptr<SlamSessionRuntime> Runtime() const;
     std::shared_ptr<SlamSessionRuntime> Runtime(std::uint64_t sessionId) const;
+    static SlamTaskStepResult MissingRuntimeResult();
 
     UnifiedConfig m_cfg;
     LiveRuntimeTuning &m_tuning;
@@ -160,24 +126,13 @@ class SlamSessionRuntimeService::Impl final {
     LivePoseState &m_livePose;
     std::atomic<bool> &m_runningFlag;
     const ApplicationRuntimeFactories &m_factories;
-    mutable std::mutex m_mu;
-    mutable std::mutex m_inputStageMu;
-    mutable std::mutex m_trackingStageMu;
-    mutable std::mutex m_posePostprocessStageMu;
-    mutable std::mutex m_pointCloudOutputMu;
-    mutable std::mutex m_dfxOutputMu;
-    mutable std::mutex m_livePoseOutputMu;
-    mutable std::mutex m_mavlinkOutputMu;
-    mutable std::mutex m_udpOutputMu;
-    mutable std::mutex m_previewOutputMu;
     std::unique_ptr<SlamSessionProcessingPort> m_processingPort;
-    std::shared_ptr<SlamSessionRuntime> m_runtime;
+    std::shared_ptr<const RuntimeState> m_runtimeState;
+    std::atomic<bool> m_starting{false};
     std::atomic<bool> m_stopped{true};
+    std::atomic<bool> m_backendBusy{false};
     std::atomic<std::uint64_t> m_lastBackendStepMs{0};
     std::atomic<std::uint64_t> m_lastTrackingStepMs{0};
-    std::uint64_t m_sessionId{0};
-    bool m_started{false};
-    bool m_startFailed{false};
 };
 
 SlamSessionRuntimeService::Impl::Impl(
@@ -192,6 +147,9 @@ SlamSessionRuntimeService::Impl::Impl(
       m_factories(config.factories),
       m_processingPort(std::make_unique<SlamSessionProcessingPort>())
 {
+    std::atomic_store_explicit(&m_runtimeState,
+                               std::make_shared<const RuntimeState>(),
+                               std::memory_order_release);
 }
 
 SlamSessionRuntimeService::Impl::~Impl()
@@ -201,15 +159,44 @@ SlamSessionRuntimeService::Impl::~Impl()
 
 bool SlamSessionRuntimeService::Impl::EnsureStarted()
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    if (m_started) {
+    std::shared_ptr<const RuntimeState> current = LoadRuntimeState();
+    if (current->started) {
         return true;
     }
-    if (m_startFailed) {
+    if (current->startFailed) {
+        return false;
+    }
+    if (!TryAcquireStartSlot(current)) {
+        return LoadRuntimeState()->started;
+    }
+    AtomicBoolResetGuard<std::atomic<bool>> startingGuard(m_starting);
+    current = LoadRuntimeState();
+    if (current->started) {
+        return true;
+    }
+    if (current->startFailed) {
         return false;
     }
 
-    m_runtime = std::make_shared<SlamSessionRuntime>(SlamSessionRuntimeConfig{
+    return StartRuntime(CreateRuntime(), current->sessionId);
+}
+
+bool SlamSessionRuntimeService::Impl::TryAcquireStartSlot(
+    std::shared_ptr<const RuntimeState> &state)
+{
+    bool expected = false;
+    if (!m_starting.compare_exchange_strong(expected, true,
+                                            std::memory_order_acq_rel)) {
+        state = LoadRuntimeState();
+        return false;
+    }
+    return true;
+}
+
+std::shared_ptr<SlamSessionRuntime>
+SlamSessionRuntimeService::Impl::CreateRuntime() const
+{
+    return std::make_shared<SlamSessionRuntime>(SlamSessionRuntimeConfig{
         m_cfg,
         m_tuning,
         m_telemetry,
@@ -219,24 +206,29 @@ bool SlamSessionRuntimeService::Impl::EnsureStarted()
         m_runningFlag,
         m_factories,
     });
+}
+
+bool SlamSessionRuntimeService::Impl::StartRuntime(
+    const std::shared_ptr<SlamSessionRuntime> &runtime,
+    std::uint64_t sessionId)
+{
     m_stopped.store(false, std::memory_order_release);
-    if (!m_runtime->Start()) {
-        m_runtime.reset();
-        m_startFailed = true;
+    if (!runtime->Start()) {
+        StoreRuntimeState(std::make_shared<const RuntimeState>(
+            RuntimeState{nullptr, sessionId, false, true}));
         m_stopped.store(true, std::memory_order_release);
         return false;
     }
-    m_runtime->PrepareFramePorts();
+    runtime->PrepareFramePorts();
 
-    m_started = true;
-    ++m_sessionId;
+    StoreRuntimeState(std::make_shared<const RuntimeState>(
+        RuntimeState{runtime, sessionId + 1, true, false}));
     return true;
 }
 
 bool SlamSessionRuntimeService::Impl::StartFailed() const
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    return m_startFailed;
+    return LoadRuntimeState()->startFailed;
 }
 
 bool SlamSessionRuntimeService::Impl::Stopped() const
@@ -246,18 +238,16 @@ bool SlamSessionRuntimeService::Impl::Stopped() const
 
 std::uint64_t SlamSessionRuntimeService::Impl::SessionId() const
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    return m_started ? m_sessionId : 0;
+    std::shared_ptr<const RuntimeState> state = LoadRuntimeState();
+    return state->started ? state->sessionId : 0;
 }
 
 void SlamSessionRuntimeService::Impl::Stop()
 {
-    std::shared_ptr<SlamSessionRuntime> runtime;
-    {
-        std::lock_guard<std::mutex> lock(m_mu);
-        runtime = std::move(m_runtime);
-        m_started = false;
-    }
+    std::shared_ptr<const RuntimeState> state = LoadRuntimeState();
+    StoreRuntimeState(std::make_shared<const RuntimeState>(
+        RuntimeState{nullptr, state->sessionId, false, state->startFailed}));
+    std::shared_ptr<SlamSessionRuntime> runtime = state->runtime;
     if (runtime) {
         runtime->Stop();
     }
@@ -281,11 +271,11 @@ bool SlamSessionRuntimeService::Impl::ImuReady() const
 
 SlamTaskStepResult SlamSessionRuntimeService::Impl::StepBackend()
 {
-    return RunLockedRuntimeOperation<SlamTaskStepResult>(
-        Runtime(), m_trackingStageMu,
-        [this](SlamSessionRuntime &runtime) {
-            return m_processingPort->StepBackend(runtime);
-        });
+    auto runtime = Runtime();
+    if (!runtime) {
+        return MissingRuntimeResult();
+    }
+    return m_processingPort->StepBackend(*runtime);
 }
 
 SlamTaskStepResult SlamSessionRuntimeService::Impl::StepBackendIfIdle()
@@ -307,10 +297,12 @@ SlamTaskStepResult SlamSessionRuntimeService::Impl::StepBackendIfIdle()
         return {true, true, false};
     }
 
-    std::unique_lock<std::mutex> lock(m_trackingStageMu, std::try_to_lock);
-    if (!lock.owns_lock()) {
+    bool expected = false;
+    if (!m_backendBusy.compare_exchange_strong(expected, true,
+                                               std::memory_order_acq_rel)) {
         return {true, true, false};
     }
+    AtomicBoolResetGuard<std::atomic<bool>> busyGuard(m_backendBusy);
     SlamTaskStepResult result = m_processingPort->StepBackend(*runtime);
     m_lastBackendStepMs.store(SteadyNowMs(), std::memory_order_relaxed);
     return result;
@@ -319,24 +311,24 @@ SlamTaskStepResult SlamSessionRuntimeService::Impl::StepBackendIfIdle()
 SlamPrepareFrameResult SlamSessionRuntimeService::Impl::AcquireAndPrepareFrame(
     std::uint64_t sessionId)
 {
-    return RunLockedRuntimeOperation<SlamPrepareFrameResult>(
-        Runtime(sessionId), m_inputStageMu,
-        [this](SlamSessionRuntime &runtime) {
-            return m_processingPort->AcquireAndPrepareFrame(runtime);
-        });
+    SlamPrepareFrameResult output;
+    auto runtime = Runtime(sessionId);
+    if (!runtime) {
+        return output;
+    }
+    return m_processingPort->AcquireAndPrepareFrame(*runtime);
 }
 
 SlamTrackFrameResult SlamSessionRuntimeService::Impl::TrackPreparedFrame(
     std::uint64_t sessionId,
     std::shared_ptr<ISlamPreparedFramePayload> frame)
 {
-    SlamTrackFrameResult result = RunLockedPayloadOperation<SlamTrackFrameResult>(
-        Runtime(sessionId), std::move(frame), m_trackingStageMu,
-        [this](SlamSessionRuntime &runtime,
-               std::shared_ptr<ISlamPreparedFramePayload> payload) {
-            return m_processingPort->TrackPreparedFrame(runtime,
-                                                        std::move(payload));
-        });
+    SlamTrackFrameResult result;
+    auto runtime = Runtime(sessionId);
+    if (runtime && frame) {
+        result = m_processingPort->TrackPreparedFrame(*runtime,
+                                                      std::move(frame));
+    }
     if (result.sessionAvailable) {
         m_lastTrackingStepMs.store(SteadyNowMs(), std::memory_order_relaxed);
     }
@@ -348,96 +340,114 @@ SlamSessionRuntimeService::Impl::PostprocessTrackedFrame(
     std::uint64_t sessionId,
     std::shared_ptr<ISlamTrackedFramePayload> frame)
 {
-    return RunLockedPayloadOperation<SlamPublishFrameResult>(
-        Runtime(sessionId), std::move(frame), m_posePostprocessStageMu,
-        [this](SlamSessionRuntime &runtime,
-               std::shared_ptr<ISlamTrackedFramePayload> payload) {
-            return m_processingPort->PostprocessTrackedFrame(
-                runtime, std::move(payload));
-        });
+    SlamPublishFrameResult output;
+    auto runtime = Runtime(sessionId);
+    if (!runtime || !frame) {
+        return output;
+    }
+    return m_processingPort->PostprocessTrackedFrame(*runtime,
+                                                     std::move(frame));
 }
 
 SlamTaskStepResult SlamSessionRuntimeService::Impl::EmitPointCloud(
     std::uint64_t sessionId,
     ISlamPublishedFramePayload &frame)
 {
-    return RunLockedRuntimeOperation<SlamTaskStepResult>(
-        Runtime(sessionId), m_pointCloudOutputMu,
-        [this, &frame](SlamSessionRuntime &runtime) {
-            return m_processingPort->EmitPointCloud(runtime, frame);
-        });
+    auto runtime = Runtime(sessionId);
+    if (!runtime) {
+        return MissingRuntimeResult();
+    }
+    return m_processingPort->EmitPointCloud(*runtime, frame);
 }
 
 SlamTaskStepResult SlamSessionRuntimeService::Impl::EmitDfx(
     std::uint64_t sessionId,
     ISlamPublishedFramePayload &frame)
 {
-    return RunLockedRuntimeOperation<SlamTaskStepResult>(
-        Runtime(sessionId), m_dfxOutputMu,
-        [this, &frame](SlamSessionRuntime &runtime) {
-            return m_processingPort->EmitDfx(runtime, frame);
-        });
+    auto runtime = Runtime(sessionId);
+    if (!runtime) {
+        return MissingRuntimeResult();
+    }
+    return m_processingPort->EmitDfx(*runtime, frame);
 }
 
 SlamTaskStepResult SlamSessionRuntimeService::Impl::EmitUdp(
     std::uint64_t sessionId,
     ISlamPublishedFramePayload &frame)
 {
-    return RunLockedRuntimeOperation<SlamTaskStepResult>(
-        Runtime(sessionId), m_udpOutputMu,
-        [this, &frame](SlamSessionRuntime &runtime) {
-            return m_processingPort->EmitUdp(runtime, frame);
-        });
+    auto runtime = Runtime(sessionId);
+    if (!runtime) {
+        return MissingRuntimeResult();
+    }
+    return m_processingPort->EmitUdp(*runtime, frame);
 }
 
 SlamTaskStepResult SlamSessionRuntimeService::Impl::FlushPreview(
     std::uint64_t sessionId,
     ISlamPublishedFramePayload &frame)
 {
-    return RunLockedRuntimeOperation<SlamTaskStepResult>(
-        Runtime(sessionId), m_previewOutputMu,
-        [this, &frame](SlamSessionRuntime &runtime) {
-            return m_processingPort->FlushPreview(runtime, frame);
-        });
+    auto runtime = Runtime(sessionId);
+    if (!runtime) {
+        return MissingRuntimeResult();
+    }
+    return m_processingPort->FlushPreview(*runtime, frame);
 }
 
 SlamTaskStepResult SlamSessionRuntimeService::Impl::EmitMavlink(
     std::uint64_t sessionId,
     ISlamPublishedFramePayload &frame)
 {
-    return RunLockedRuntimeOperation<SlamTaskStepResult>(
-        Runtime(sessionId), m_mavlinkOutputMu,
-        [this, &frame](SlamSessionRuntime &runtime) {
-            return m_processingPort->EmitMavlink(runtime, frame);
-        });
+    auto runtime = Runtime(sessionId);
+    if (!runtime) {
+        return MissingRuntimeResult();
+    }
+    return m_processingPort->EmitMavlink(*runtime, frame);
 }
 
 SlamTaskStepResult SlamSessionRuntimeService::Impl::EmitLivePose(
     std::uint64_t sessionId,
     ISlamPublishedFramePayload &frame)
 {
-    return RunLockedRuntimeOperation<SlamTaskStepResult>(
-        Runtime(sessionId), m_livePoseOutputMu,
-        [this, &frame](SlamSessionRuntime &runtime) {
-            return m_processingPort->EmitLivePose(runtime, frame);
-        });
+    auto runtime = Runtime(sessionId);
+    if (!runtime) {
+        return MissingRuntimeResult();
+    }
+    return m_processingPort->EmitLivePose(*runtime, frame);
+}
+
+std::shared_ptr<const SlamSessionRuntimeService::Impl::RuntimeState>
+SlamSessionRuntimeService::Impl::LoadRuntimeState() const
+{
+    return std::atomic_load_explicit(&m_runtimeState,
+                                     std::memory_order_acquire);
+}
+
+void SlamSessionRuntimeService::Impl::StoreRuntimeState(
+    std::shared_ptr<const RuntimeState> state)
+{
+    std::atomic_store_explicit(&m_runtimeState, std::move(state),
+                               std::memory_order_release);
 }
 
 std::shared_ptr<SlamSessionRuntime>
 SlamSessionRuntimeService::Impl::Runtime() const
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    return m_runtime;
+    return LoadRuntimeState()->runtime;
 }
 
 std::shared_ptr<SlamSessionRuntime> SlamSessionRuntimeService::Impl::Runtime(
     std::uint64_t sessionId) const
 {
-    std::lock_guard<std::mutex> lock(m_mu);
-    if (!m_started || sessionId == 0 || sessionId != m_sessionId) {
+    std::shared_ptr<const RuntimeState> state = LoadRuntimeState();
+    if (!state->started || sessionId == 0 || sessionId != state->sessionId) {
         return nullptr;
     }
-    return m_runtime;
+    return state->runtime;
+}
+
+SlamTaskStepResult SlamSessionRuntimeService::Impl::MissingRuntimeResult()
+{
+    return {false, false, false};
 }
 
 SlamSessionRuntimeService::SlamSessionRuntimeService(

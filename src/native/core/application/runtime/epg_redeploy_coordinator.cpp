@@ -64,12 +64,10 @@ void EpgRedeployCoordinator::RequestSystemRedeploy()
 void EpgRedeployCoordinator::RequestSystemRedeploy(
     EpgRedeployRequest request)
 {
-    {
-        std::lock_guard<std::mutex> lock(m_systemRedeployMutex);
-        m_systemRequest = std::move(request);
-        m_systemRedeployRequested.store(true, std::memory_order_release);
-    }
-    m_systemRedeployCv.notify_all();
+    auto snapshot =
+        std::make_shared<const EpgRedeployRequest>(std::move(request));
+    std::atomic_store_explicit(&m_systemRequest, std::move(snapshot),
+                               std::memory_order_release);
 }
 
 bool EpgRedeployCoordinator::TakeSystemRedeployRequest()
@@ -81,28 +79,24 @@ bool EpgRedeployCoordinator::TakeSystemRedeployRequest()
 bool EpgRedeployCoordinator::TakeSystemRedeployRequest(
     EpgRedeployRequest &request)
 {
-    std::lock_guard<std::mutex> lock(m_systemRedeployMutex);
-    if (!m_systemRedeployRequested.load(std::memory_order_acquire)) {
+    auto snapshot = SystemRequest();
+    if (!snapshot) {
         return false;
     }
-    m_systemRedeployRequested.store(false, std::memory_order_release);
-    request = m_systemRequest;
-    m_systemRequest = {};
+    request = *snapshot;
+    std::shared_ptr<const EpgRedeployRequest> expected = snapshot;
+    (void)std::atomic_compare_exchange_strong_explicit(
+        &m_systemRequest,
+        &expected,
+        std::shared_ptr<const EpgRedeployRequest>{},
+        std::memory_order_acq_rel,
+        std::memory_order_acquire);
     return true;
 }
 
 bool EpgRedeployCoordinator::SystemRedeployRequested() const
 {
-    return m_systemRedeployRequested.load(std::memory_order_acquire);
-}
-
-bool EpgRedeployCoordinator::WaitForSystemRedeploy(
-    std::chrono::milliseconds timeout) const
-{
-    std::unique_lock<std::mutex> lock(m_systemRedeployMutex);
-    return m_systemRedeployCv.wait_for(lock, timeout, [this]() {
-        return SystemRedeployRequested();
-    });
+    return static_cast<bool>(SystemRequest());
 }
 
 void EpgRedeployCoordinator::RequestSessionRedeploy()
@@ -113,11 +107,10 @@ void EpgRedeployCoordinator::RequestSessionRedeploy()
 void EpgRedeployCoordinator::RequestSessionRedeploy(
     EpgRedeployRequest request)
 {
-    {
-        std::lock_guard<std::mutex> lock(m_sessionRedeployMutex);
-        m_sessionRequest = std::move(request);
-        m_sessionRedeployRequested.store(true, std::memory_order_release);
-    }
+    auto snapshot =
+        std::make_shared<const EpgRedeployRequest>(std::move(request));
+    std::atomic_store_explicit(&m_sessionRequest, std::move(snapshot),
+                               std::memory_order_release);
 }
 
 bool EpgRedeployCoordinator::TakeSessionRedeployRequest()
@@ -129,19 +122,38 @@ bool EpgRedeployCoordinator::TakeSessionRedeployRequest()
 bool EpgRedeployCoordinator::TakeSessionRedeployRequest(
     EpgRedeployRequest &request)
 {
-    std::lock_guard<std::mutex> lock(m_sessionRedeployMutex);
-    if (!m_sessionRedeployRequested.load(std::memory_order_acquire)) {
+    auto snapshot = SessionRequest();
+    if (!snapshot) {
         return false;
     }
-    m_sessionRedeployRequested.store(false, std::memory_order_release);
-    request = m_sessionRequest;
-    m_sessionRequest = {};
+    request = *snapshot;
+    std::shared_ptr<const EpgRedeployRequest> expected = snapshot;
+    (void)std::atomic_compare_exchange_strong_explicit(
+        &m_sessionRequest,
+        &expected,
+        std::shared_ptr<const EpgRedeployRequest>{},
+        std::memory_order_acq_rel,
+        std::memory_order_acquire);
     return true;
 }
 
 bool EpgRedeployCoordinator::SessionRedeployRequested() const
 {
-    return m_sessionRedeployRequested.load(std::memory_order_acquire);
+    return static_cast<bool>(SessionRequest());
+}
+
+std::shared_ptr<const EpgRedeployRequest>
+EpgRedeployCoordinator::SystemRequest() const
+{
+    return std::atomic_load_explicit(&m_systemRequest,
+                                     std::memory_order_acquire);
+}
+
+std::shared_ptr<const EpgRedeployRequest>
+EpgRedeployCoordinator::SessionRequest() const
+{
+    return std::atomic_load_explicit(&m_sessionRequest,
+                                     std::memory_order_acquire);
 }
 
 } // namespace SmartDrone::Core::Application

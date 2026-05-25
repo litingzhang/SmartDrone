@@ -2,20 +2,23 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <iostream>
 #include <optional>
 #include <string_view>
 
+#include <poll.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <time.h>
-
-#include "common/runtime_state.h"
+#include <unistd.h>
 
 namespace {
 
-constexpr int32_t kSlamAeMaxExposureUs = 7000;
-constexpr float kSlamAeMaxGain = 6.0f;
+constexpr int32_t SLAM_AE_MAX_EXPOSURE_US = 7000;
+constexpr float SLAM_AE_MAX_GAIN = 6.0f;
+constexpr int CALLBACK_WAIT_TIMEOUT_MS = 100;
 
 struct R16CompressionState {
     bool initialized{false};
@@ -38,11 +41,6 @@ void MUnmap(void *p, size_t len)
     if (p && p != MAP_FAILED) {
         munmap(p, len);
     }
-}
-
-int64_t Abs64(int64_t x)
-{
-    return x < 0 ? -x : x;
 }
 
 int64_t NowNs()
@@ -204,7 +202,7 @@ bool LibcameraMonoCam::Open(const MonoCameraOpenParams &params)
     m_controls.set(libcamera::controls::FrameDurationLimits,
                    libcamera::Span<const int64_t, 2>({frameDurationUs, frameDurationUs}));
     const int32_t exposureCapUs =
-        static_cast<int32_t>(std::max<int64_t>(1, std::min<int64_t>(kSlamAeMaxExposureUs, frameDurationUs - 500)));
+        static_cast<int32_t>(std::max<int64_t>(1, std::min<int64_t>(SLAM_AE_MAX_EXPOSURE_US, frameDurationUs - 500)));
     ConfigureControls(params, frameDurationUs, exposureCapUs);
 
     if (!ConfigureCamera()) {
@@ -228,7 +226,6 @@ bool LibcameraMonoCam::Open(const MonoCameraOpenParams &params)
     if (!MapBuffers(buffers) || !CreateRequests(buffers)) {
         return false;
     }
-    CreateFramePool(buffers.size() + 2);
 
     m_cam->requestCompleted.connect(this, &LibcameraMonoCam::OnRequestComplete);
     return true;
@@ -241,12 +238,14 @@ bool LibcameraMonoCam::PrepareOpen(const MonoCameraOpenParams &params)
     m_camIndex = params.camIndex;
     m_active.store(true, std::memory_order_relaxed);
     m_streamFault.store(false, std::memory_order_relaxed);
-    {
-        std::lock_guard<std::mutex> lock(m_callbackMu);
-        m_closing = false;
-        m_callbacksInFlight = 0;
-    }
+    m_closing.store(false, std::memory_order_release);
+    m_callbacksInFlight.store(0, std::memory_order_release);
     if (!m_cam) {
+        return false;
+    }
+    if (!PrepareCallbackEvent()) {
+        m_active.store(false, std::memory_order_relaxed);
+        m_cam.reset();
         return false;
     }
     if (!m_cam->acquire()) {
@@ -277,7 +276,7 @@ bool LibcameraMonoCam::ConfigureStream(const MonoCameraOpenParams &params)
 void LibcameraMonoCam::ConfigureControls(const MonoCameraOpenParams &params, int64_t frameDurationUs,
                                          int32_t exposureCapUs)
 {
-    const float gainCap = kSlamAeMaxGain;
+    const float gainCap = SLAM_AE_MAX_GAIN;
     m_aeConfiguredAuto = !params.aeDisable;
     if (params.aeDisable) {
         const int32_t manualExposureUs = std::max<int32_t>(1, std::min<int32_t>(params.exposureUs, exposureCapUs));
@@ -362,7 +361,8 @@ bool LibcameraMonoCam::MapBuffers(const std::vector<std::unique_ptr<libcamera::F
     return true;
 }
 
-bool LibcameraMonoCam::CreateRequests(const std::vector<std::unique_ptr<libcamera::FrameBuffer>> &buffers)
+bool LibcameraMonoCam::CreateRequests(
+    const std::vector<std::unique_ptr<libcamera::FrameBuffer>> &buffers)
 {
     m_requests.clear();
     for (auto &buf : buffers) {
@@ -376,27 +376,9 @@ bool LibcameraMonoCam::CreateRequests(const std::vector<std::unique_ptr<libcamer
     return true;
 }
 
-void LibcameraMonoCam::CreateFramePool(size_t slotCount)
-{
-    std::lock_guard<std::mutex> lock(m_framePoolMu);
-    m_framePool = std::make_shared<FramePoolState>();
-    m_framePool->active.store(true, std::memory_order_relaxed);
-    m_framePool->slots.reserve(slotCount);
-    for (size_t i = 0; i < slotCount; ++i) {
-        m_framePool->slots.push_back(std::make_unique<FrameSlot>());
-        m_framePool->freeSlots.push_back(m_framePool->slots.back().get());
-    }
-}
-
 void LibcameraMonoCam::Stop()
 {
     m_active.store(false, std::memory_order_relaxed);
-    {
-        std::lock_guard<std::mutex> lock(m_framePoolMu);
-        if (m_framePool) {
-            m_framePool->active.store(false, std::memory_order_relaxed);
-        }
-    }
     if (m_cam) {
         m_cam->stop();
     }
@@ -406,10 +388,7 @@ void LibcameraMonoCam::Close()
 {
     m_active.store(false, std::memory_order_relaxed);
     SetSink(nullptr);
-    {
-        std::lock_guard<std::mutex> lock(m_callbackMu);
-        m_closing = true;
-    }
+    m_closing.store(true, std::memory_order_release);
 
     if (m_cam) {
         m_cam->requestCompleted.disconnect(this, &LibcameraMonoCam::OnRequestComplete);
@@ -420,6 +399,7 @@ void LibcameraMonoCam::Close()
     }
 
     WaitForCallbacks();
+    CloseCallbackEvent();
 
     for (auto &kv : m_bufferMaps) {
         for (auto &pm : kv.second) {
@@ -435,14 +415,6 @@ void LibcameraMonoCam::Close()
     m_allocator.reset();
     m_config.reset();
     m_stream = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(m_framePoolMu);
-        if (m_framePool) {
-            m_framePool->active.store(false, std::memory_order_relaxed);
-            m_framePool->freeSlots.clear();
-        }
-        m_framePool.reset();
-    }
 
     if (m_cam) {
         m_cam->release();
@@ -452,8 +424,11 @@ void LibcameraMonoCam::Close()
 
 void LibcameraMonoCam::SetSink(std::function<void(FrameItem &&)> sink)
 {
-    std::lock_guard<std::mutex> lock(m_sinkMu);
-    m_sink = std::move(sink);
+    auto state = std::make_shared<SinkState>();
+    state->sink = std::move(sink);
+    std::atomic_store_explicit(&m_sinkState,
+                               std::shared_ptr<const SinkState>(state),
+                               std::memory_order_release);
 }
 
 libcamera::PixelFormat LibcameraMonoCam::PixelFmt() const
@@ -481,17 +456,66 @@ bool LibcameraMonoCam::Healthy() const
     return !m_streamFault.load(std::memory_order_relaxed);
 }
 
+bool LibcameraMonoCam::PrepareCallbackEvent()
+{
+    CloseCallbackEvent();
+    m_callbackEventFd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (m_callbackEventFd >= 0) {
+        return true;
+    }
+    std::cerr << "[cam] callback eventfd failed cam=" << m_camIndex
+              << " errno=" << errno << "\n";
+    return false;
+}
+
+void LibcameraMonoCam::CloseCallbackEvent()
+{
+    if (m_callbackEventFd < 0) {
+        return;
+    }
+    (void)::close(m_callbackEventFd);
+    m_callbackEventFd = -1;
+}
+
+void LibcameraMonoCam::NotifyCallbackCompleted()
+{
+    if (m_callbackEventFd < 0) {
+        return;
+    }
+    const uint64_t value = 1;
+    (void)::write(m_callbackEventFd, &value, sizeof(value));
+}
+
+void LibcameraMonoCam::ReleaseCallback()
+{
+    const size_t previous =
+        m_callbacksInFlight.fetch_sub(1, std::memory_order_acq_rel);
+    if (previous == 1U) {
+        NotifyCallbackCompleted();
+    }
+}
+
+void LibcameraMonoCam::DrainCallbackEvent()
+{
+    if (m_callbackEventFd < 0) {
+        return;
+    }
+    uint64_t value = 0;
+    while (::read(m_callbackEventFd, &value, sizeof(value)) > 0) {
+    }
+}
+
 LibcameraMonoCam::CallbackScope::CallbackScope(LibcameraMonoCam *owner)
     : self(owner)
 {
     if (!self) {
         return;
     }
-    std::lock_guard<std::mutex> lock(self->m_callbackMu);
-    if (self->m_closing) {
+    self->m_callbacksInFlight.fetch_add(1, std::memory_order_acq_rel);
+    if (self->m_closing.load(std::memory_order_acquire)) {
+        self->ReleaseCallback();
         return;
     }
-    ++self->m_callbacksInFlight;
     armed = true;
 }
 
@@ -500,11 +524,7 @@ LibcameraMonoCam::CallbackScope::~CallbackScope()
     if (!self || !armed) {
         return;
     }
-    std::lock_guard<std::mutex> lock(self->m_callbackMu);
-    --self->m_callbacksInFlight;
-    if (self->m_callbacksInFlight == 0) {
-        self->m_callbackCv.notify_all();
-    }
+    self->ReleaseCallback();
 }
 
 bool LibcameraMonoCam::CallbackScope::Active() const
@@ -514,19 +534,37 @@ bool LibcameraMonoCam::CallbackScope::Active() const
 
 void LibcameraMonoCam::WaitForCallbacks()
 {
-    std::unique_lock<std::mutex> lock(m_callbackMu);
-    while (m_callbacksInFlight != 0) {
-        if (m_callbackCv.wait_for(lock, std::chrono::seconds(1), [this] { return m_callbacksInFlight == 0; })) {
-            break;
+    size_t waitLoops = 0;
+    while (m_callbacksInFlight.load(std::memory_order_acquire) != 0) {
+        if ((waitLoops % 100U) == 0U) {
+            std::cerr << "[cam] waiting callbacks cam=" << m_camIndex
+                      << " in_flight="
+                      << m_callbacksInFlight.load(std::memory_order_acquire)
+                      << "\n";
         }
-        std::cerr << "[cam] waiting callbacks cam=" << m_camIndex << " in_flight=" << m_callbacksInFlight << "\n";
+        ++waitLoops;
+        pollfd fd{};
+        fd.fd = m_callbackEventFd;
+        fd.events = POLLIN;
+        const int result = ::poll(&fd, 1, CALLBACK_WAIT_TIMEOUT_MS);
+        if (result > 0) {
+            DrainCallbackEvent();
+        }
+        if (result < 0 && errno != EINTR) {
+            std::cerr << "[cam] callback wait poll failed cam=" << m_camIndex
+                      << " errno=" << errno << "\n";
+        }
     }
 }
 
 std::function<void(FrameItem &&)> LibcameraMonoCam::CopySink() const
 {
-    std::lock_guard<std::mutex> lock(m_sinkMu);
-    return m_sink;
+    std::shared_ptr<const SinkState> state =
+        std::atomic_load_explicit(&m_sinkState, std::memory_order_acquire);
+    if (!state) {
+        return {};
+    }
+    return state->sink;
 }
 
 bool LibcameraMonoCam::RequeueRequest(libcamera::Request *req)
@@ -575,15 +613,8 @@ void LibcameraMonoCam::OnRequestComplete(libcamera::Request *req)
         return;
     }
 
-    auto frameSlot = AcquireFrameSlot();
-    if (!frameSlot) {
-        RequeueIfActive(req);
-        return;
-    }
-
-    ConvertFrameToGray(m_config->at(0), data, md.sequence, frameSlot->gray);
-    item.gray = frameSlot->gray;
-    PublishFrame(std::move(item), std::move(frameSlot));
+    ConvertFrameToGray(m_config->at(0), data, md.sequence, item.gray);
+    PublishFrame(std::move(item));
     RequeueIfActive(req);
 }
 
@@ -601,14 +632,14 @@ void LibcameraMonoCam::LogIspMetadata(const libcamera::FrameMetadata &metadata,
               << " ae_cfg=" << (m_aeConfiguredAuto ? "auto" : "manual") << " ae_meta=" << metaAeText
               << " exp_us=" << (metaExposureUs.has_value() ? *metaExposureUs : -1)
               << " gain=" << (metaGain.has_value() ? *metaGain : -1.0f) << "\n";
-    if (metaExposureUs.has_value() && *metaExposureUs > kSlamAeMaxExposureUs) {
+    if (metaExposureUs.has_value() && *metaExposureUs > SLAM_AE_MAX_EXPOSURE_US) {
         std::cerr << "[cam_isp_warn] cam=" << m_camIndex << " seq=" << metadata.sequence
-                  << " exposure high for slam exp_us=" << *metaExposureUs << " cap_us=" << kSlamAeMaxExposureUs
+                  << " exposure high for slam exp_us=" << *metaExposureUs << " cap_us=" << SLAM_AE_MAX_EXPOSURE_US
                   << "\n";
     }
-    if (metaGain.has_value() && *metaGain > kSlamAeMaxGain) {
+    if (metaGain.has_value() && *metaGain > SLAM_AE_MAX_GAIN) {
         std::cerr << "[cam_isp_warn] cam=" << m_camIndex << " seq=" << metadata.sequence
-                  << " gain high for slam gain=" << *metaGain << " cap=" << kSlamAeMaxGain << "\n";
+                  << " gain high for slam gain=" << *metaGain << " cap=" << SLAM_AE_MAX_GAIN << "\n";
     }
 }
 
@@ -660,9 +691,8 @@ void LibcameraMonoCam::ConvertFrameToGray(const libcamera::StreamConfiguration &
     }
 }
 
-void LibcameraMonoCam::PublishFrame(FrameItem &&item, std::shared_ptr<FrameSlot> frameSlot)
+void LibcameraMonoCam::PublishFrame(FrameItem &&item)
 {
-    item.owner = std::shared_ptr<void>(std::move(frameSlot));
     auto sink = CopySink();
     if (sink) {
         sink(std::move(item));
@@ -675,30 +705,3 @@ void LibcameraMonoCam::RequeueIfActive(libcamera::Request *req)
         RequeueRequest(req);
     }
 }
-
-std::shared_ptr<LibcameraMonoCam::FrameSlot> LibcameraMonoCam::AcquireFrameSlot()
-{
-    std::lock_guard<std::mutex> lock(m_framePoolMu);
-    if (!m_framePool) {
-        return {};
-    }
-    std::lock_guard<std::mutex> poolLock(m_framePool->mu);
-    if (m_framePool->freeSlots.empty()) {
-        return {};
-    }
-    FrameSlot *slot = m_framePool->freeSlots.front();
-    m_framePool->freeSlots.pop_front();
-    std::shared_ptr<FramePoolState> framePool = m_framePool;
-    return std::shared_ptr<FrameSlot>(slot, [framePool](FrameSlot *s) {
-        if (!framePool || !s || !framePool->active.load(std::memory_order_relaxed)) {
-            return;
-        }
-        std::lock_guard<std::mutex> lock(framePool->mu);
-        if (!framePool->active.load(std::memory_order_relaxed)) {
-            return;
-        }
-        framePool->freeSlots.push_back(s);
-    });
-}
-
-#include "stereo_ov9281_pairing.h"

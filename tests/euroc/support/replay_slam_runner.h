@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
 #include <functional>
 #include <vector>
 
@@ -19,7 +20,7 @@ struct ReplaySlamRunnerConfig {
     int backendStepEveryN{1};
     bool useImu{true};
     bool preferLatestFrame{true};
-    int timeoutMs{1000};
+    int staleFrameThresholdMs{1000};
     bool extractFeatures{false};
     bool extractPointCloud{false};
     bool shutdownEngineOnFinish{true};
@@ -108,6 +109,48 @@ class ReplaySlamRunner {
         const ReplayPoseSampleCallback &sampleCallback = {});
 
   private:
+    struct FrameRunResult {
+        bool keepRunning{true};
+        bool hasSample{false};
+        ReplayPoseSample sample{};
+    };
+    struct FrameRunContext {
+        SmartDrone::Core::Application::FrameTimingTracker *timingTracker{nullptr};
+        SmartDrone::Core::Application::StereoBatch batch{};
+        SmartDrone::Core::Ports::SlamInputBatch input{};
+        std::vector<SmartDrone::Core::Ports::ImuReading> imuWindow;
+        SmartDrone::Core::Ports::SlamOutput output{};
+        std::chrono::steady_clock::time_point acquireStart{};
+        std::chrono::steady_clock::time_point acquireEnd{};
+        std::chrono::steady_clock::time_point imuStart{};
+        std::chrono::steady_clock::time_point imuEnd{};
+        std::chrono::steady_clock::time_point slamStart{};
+        std::chrono::steady_clock::time_point slamEnd{};
+        std::chrono::steady_clock::time_point backendStart{};
+        std::chrono::steady_clock::time_point backendEnd{};
+        bool ranBackendStep{false};
+    };
+
+    bool StartProviders();
+    void StopProviders();
+    FrameRunResult RunFrame(
+        SmartDrone::Core::Application::FrameTimingTracker *timingTracker);
+    bool AcquireFrame(FrameRunContext &context);
+    void PrepareSlamInput(FrameRunContext &context);
+    void AttachImuWindow(FrameRunContext &context);
+    void ProcessSlamFrame(FrameRunContext &context);
+    void RunBackendStepIfNeeded(FrameRunContext &context);
+    static ReplayPoseSample BuildReplayPoseSample(
+        const FrameRunContext &context);
+    static void CopyVisualFeatureFields(
+        ReplayPoseSample &sample,
+        const SmartDrone::Core::Ports::SlamOutput &output);
+    static void CopyTimingFields(
+        ReplayPoseSample &sample, const FrameRunContext &context);
+    static void CopyMappingFields(
+        ReplayPoseSample &sample,
+        const SmartDrone::Core::Ports::SlamOutput &output);
+
     SmartDrone::Core::Ports::ICameraProvider &m_camera;
     SmartDrone::Core::Ports::IImuProvider &m_imu;
     SmartDrone::Core::Ports::ISlamEngine &m_slamEngine;

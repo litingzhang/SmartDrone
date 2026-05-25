@@ -21,7 +21,7 @@ struct DpvoTensorRtEngine::Impl {
         Core::Ports::SlamOutput out{};
         out.frameId = input.frameId;
         out.captureTimestampNs = input.captureTimestampNs;
-        out.trackingState = Core::Ports::kSlamTrackingLost;
+        out.trackingState = Core::Ports::SLAM_TRACKING_LOST;
         return out;
     }
 

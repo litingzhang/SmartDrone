@@ -37,12 +37,12 @@ void LibcameraStereoCamera::Stop()
     Close();
 }
 
-bool LibcameraStereoCamera::GrabStereo(Core::Ports::StereoFrame &out, int timeoutMs, bool preferLatest,
+bool LibcameraStereoCamera::GrabStereo(Core::Ports::StereoFrame &out, bool preferLatest,
                                        uint64_t minTimestampNs)
 {
     FrameItem left;
     FrameItem right;
-    if (!m_impl.GrabPair(left, right, timeoutMs, preferLatest, minTimestampNs)) {
+    if (!m_impl.GrabPair(left, right, preferLatest, minTimestampNs)) {
         return false;
     }
     out.left.cameraId = left.camIndex;

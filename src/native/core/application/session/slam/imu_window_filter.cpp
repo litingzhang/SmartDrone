@@ -8,9 +8,9 @@ namespace {
 
 using ImuReading = SmartDrone::Core::Ports::ImuReading;
 
-constexpr float kMaxAccelNormMps2 = 200.0f;
-constexpr float kMaxGyroNormRadps = 40.0f;
-constexpr double kMinSampleDtSec = 1e-6;
+constexpr float MAX_ACCEL_NORM_MPS2 = 200.0f;
+constexpr float MAX_GYRO_NORM_RADPS = 40.0f;
+constexpr double MIN_SAMPLE_DT_SEC = 1e-6;
 
 double ImuSampleTimeSec(const ImuReading &sample)
 {
@@ -23,7 +23,7 @@ bool ImuReadingInPhysicalRange(const ImuReading &sample)
         sample.ax * sample.ax + sample.ay * sample.ay + sample.az * sample.az);
     const float gyroNorm = std::sqrt(
         sample.gx * sample.gx + sample.gy * sample.gy + sample.gz * sample.gz);
-    return accelNorm <= kMaxAccelNormMps2 && gyroNorm <= kMaxGyroNormRadps;
+    return accelNorm <= MAX_ACCEL_NORM_MPS2 && gyroNorm <= MAX_GYRO_NORM_RADPS;
 }
 
 bool AcceptImuSampleTime(double sampleTime, ImuWindowValidation &stats,
@@ -31,7 +31,7 @@ bool AcceptImuSampleTime(double sampleTime, ImuWindowValidation &stats,
 {
     if (haveLastTime) {
         const double dt = sampleTime - lastTime;
-        if (!(dt > kMinSampleDtSec)) {
+        if (!(dt > MIN_SAMPLE_DT_SEC)) {
             ++stats.droppedNonMonotonic;
             return false;
         }

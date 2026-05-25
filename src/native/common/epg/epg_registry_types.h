@@ -4,7 +4,6 @@
 
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <type_traits>
 #include <typeindex>
@@ -90,11 +89,17 @@ class TypeCatalog {
     template <class T>
     bool RegisterMessage(const std::string &name)
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_messages[name] = [name](Registry &registry) {
-            registry.RegisterMessageType<T>(name);
-        };
-        return true;
+        std::shared_ptr<const CatalogSnapshot> current = LoadSnapshot();
+        while (current) {
+            auto next = std::make_shared<CatalogSnapshot>(*current);
+            next->messages[name] = [name](Registry &registry) {
+                registry.RegisterMessageType<T>(name);
+            };
+            if (ReplaceSnapshot(current, std::move(next))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     template <class TTask>
@@ -104,15 +109,22 @@ class TypeCatalog {
     {
         static_assert(std::is_base_of<ITask, TTask>::value,
                       "reflected task must derive from ITask");
-        std::lock_guard<std::mutex> lock(m_mutex);
         TaskReflectionInfo info;
         info.name = std::move(name);
         info.inputs = std::move(inputs);
         info.outputs = std::move(outputs);
         const auto registeredName = info.name;
-        m_tasks[info.name] = std::move(info);
-        m_taskNamesByType[std::type_index(typeid(TTask))] = registeredName;
-        return true;
+        std::shared_ptr<const CatalogSnapshot> current = LoadSnapshot();
+        while (current) {
+            auto next = std::make_shared<CatalogSnapshot>(*current);
+            next->tasks[info.name] = info;
+            next->taskNamesByType[std::type_index(typeid(TTask))] =
+                registeredName;
+            if (ReplaceSnapshot(current, std::move(next))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     template <class TTask>
@@ -158,11 +170,19 @@ class TypeCatalog {
         std::vector<PortSpec> outputs;
     };
 
-    mutable std::mutex m_mutex;
-    std::unordered_map<std::string, std::function<void(Registry &)>>
-        m_messages;
-    std::unordered_map<std::string, TaskReflectionInfo> m_tasks;
-    std::unordered_map<std::type_index, std::string> m_taskNamesByType;
+    struct CatalogSnapshot {
+        std::unordered_map<std::string, std::function<void(Registry &)>>
+            messages;
+        std::unordered_map<std::string, TaskReflectionInfo> tasks;
+        std::unordered_map<std::type_index, std::string> taskNamesByType;
+    };
+
+    TypeCatalog();
+    std::shared_ptr<const CatalogSnapshot> LoadSnapshot() const;
+    bool ReplaceSnapshot(std::shared_ptr<const CatalogSnapshot> &expected,
+                         std::shared_ptr<const CatalogSnapshot> next);
+
+    std::shared_ptr<const CatalogSnapshot> m_snapshot;
 };
 
 } // namespace Epg

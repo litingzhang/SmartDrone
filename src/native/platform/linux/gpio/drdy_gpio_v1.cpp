@@ -40,16 +40,10 @@ bool DrdyGpio::OpenLine(unsigned lineOffset)
     return true;
 }
 
-bool DrdyGpio::WaitForGpiodEvent(int timeoutMs)
+bool DrdyGpio::EdgeEventReady()
 {
     timespec timeoutTs{};
-    timespec *timeoutPtr = nullptr;
-    if (timeoutMs >= 0) {
-        timeoutTs.tv_sec = timeoutMs / 1000;
-        timeoutTs.tv_nsec = static_cast<long>(timeoutMs % 1000) * 1000000L;
-        timeoutPtr = &timeoutTs;
-    }
-    return gpiod_line_event_wait(AsLine(m_line), timeoutPtr) > 0;
+    return gpiod_line_event_wait(AsLine(m_line), &timeoutTs) > 0;
 }
 
 int64_t DrdyGpio::ReadLatestEventTimestamp()

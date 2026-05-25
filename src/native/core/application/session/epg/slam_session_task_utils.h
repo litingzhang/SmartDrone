@@ -8,7 +8,7 @@ namespace SmartDrone::Core::Application {
 
 struct UnifiedConfig;
 
-constexpr std::chrono::milliseconds kSlamResourcePollInterval{100};
+constexpr std::chrono::milliseconds SLAM_RESOURCE_POLL_INTERVAL{100};
 
 std::chrono::milliseconds SlamInputInterval(int slamInputFps, int cameraFps);
 void ApplySlamRuntimePacing(Epg::GraphConfig &config, const UnifiedConfig &cfg);

@@ -194,7 +194,7 @@ int OrbSlam3Runtime::TrackingState() const
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
     return system != nullptr ? system->GetTrackingState()
-                             : Core::Ports::kSlamTrackingNoImagesYet;
+                             : Core::Ports::SLAM_TRACKING_NO_IMAGES_YET;
 }
 
 int OrbSlam3Runtime::TrackedMapPointCount() const
@@ -207,15 +207,15 @@ int OrbSlam3Runtime::TrackedMapPointCount() const
 bool OrbSlam3Runtime::IsTrackingInitializing() const
 {
     const int state = TrackingState();
-    return state == Core::Ports::kSlamTrackingNoImagesYet ||
-           state == Core::Ports::kSlamTrackingNotInitialized;
+    return state == Core::Ports::SLAM_TRACKING_NO_IMAGES_YET ||
+           state == Core::Ports::SLAM_TRACKING_NOT_INITIALIZED;
 }
 
 bool OrbSlam3Runtime::IsTrackingRecovering() const
 {
     const int state = TrackingState();
-    return state == Core::Ports::kSlamTrackingRecentlyLost ||
-           state == Core::Ports::kSlamTrackingLost;
+    return state == Core::Ports::SLAM_TRACKING_RECENTLY_LOST ||
+           state == Core::Ports::SLAM_TRACKING_LOST;
 }
 
 bool OrbSlam3Runtime::HasTrackingInitialized() const

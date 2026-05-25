@@ -166,22 +166,24 @@ bool Icm42688ConfigSequencer::DelayElapsed(std::chrono::steady_clock::time_point
 
 void Icm42688ConfigSequencer::AdvanceWaitStage()
 {
-    if (m_stage == Stage::WaitAfterReset || m_stage == Stage::WaitAfterPower || m_stage == Stage::WaitAfterRate) {
+    if (m_stage == Stage::DelayAfterReset || m_stage == Stage::DelayAfterPower || m_stage == Stage::DelayAfterRate) {
         m_stage = m_nextStage;
     }
 }
 
-void Icm42688ConfigSequencer::WaitFor(std::chrono::steady_clock::time_point now, std::chrono::milliseconds delay,
-                                      Stage nextStage)
+void Icm42688ConfigSequencer::ScheduleDelay(
+    std::chrono::steady_clock::time_point now,
+    std::chrono::milliseconds delay,
+    Stage nextStage)
 {
     m_nextStage = nextStage;
     m_resumeAt = now + delay;
     if (nextStage == Stage::PowerOn) {
-        m_stage = Stage::WaitAfterReset;
+        m_stage = Stage::DelayAfterReset;
     } else if (nextStage == Stage::ConfigureRate) {
-        m_stage = Stage::WaitAfterPower;
+        m_stage = Stage::DelayAfterPower;
     } else {
-        m_stage = Stage::WaitAfterRate;
+        m_stage = Stage::DelayAfterRate;
     }
 }
 
@@ -191,7 +193,7 @@ Icm42688ConfigSequencer::Status Icm42688ConfigSequencer::StepStart(
     if (!spi.WriteReg(REG_DEVICE_CONFIG, 0x01)) {
         return Fail();
     }
-    WaitFor(now, std::chrono::milliseconds(100), Stage::PowerOn);
+    ScheduleDelay(now, std::chrono::milliseconds(100), Stage::PowerOn);
     return Status::Pending;
 }
 
@@ -202,7 +204,7 @@ Icm42688ConfigSequencer::Status Icm42688ConfigSequencer::StepPowerOn(
     spi.WriteReg(REG_INT_SOURCE0, 0x08);
     spi.WriteReg(REG_INT_CONFIG1, 0x00);
     spi.WriteReg(REG_PWR_MGMT0, 0x0F);
-    WaitFor(now, std::chrono::milliseconds(20), Stage::ConfigureRate);
+    ScheduleDelay(now, std::chrono::milliseconds(20), Stage::ConfigureRate);
     return Status::Pending;
 }
 
@@ -215,7 +217,7 @@ Icm42688ConfigSequencer::Status Icm42688ConfigSequencer::StepConfigureRate(
     if (!spi.WriteReg(REG_GYRO_CONFIG0, gyroConfig0) || !spi.WriteReg(REG_ACCEL_CONFIG0, accelConfig0)) {
         return Fail();
     }
-    WaitFor(now, std::chrono::milliseconds(20), Stage::Done);
+    ScheduleDelay(now, std::chrono::milliseconds(20), Stage::Done);
     return Status::Pending;
 }
 

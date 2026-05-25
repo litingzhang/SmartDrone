@@ -11,6 +11,16 @@ namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
+struct PopulateRawMatchesRequest {
+    const Core::Ports::StereoMatchSelectionInput &input;
+    const Core::Ports::VisualFeatureSet &leftFeatures;
+    const Core::Ports::VisualFeatureSet &rightFeatures;
+    const cv::Mat &leftPrepared;
+    const cv::Mat &rightPrepared;
+    const Core::Ports::IStereoPairBuilder &pairBuilder;
+    Core::Ports::StereoMatchSelection &selection;
+};
+
 bool HasStereoFeatureInput(
     const Core::Ports::StereoMatchSelectionInput &input)
 {
@@ -166,17 +176,13 @@ void InitializeMatchSelectionState(
         EnvFlagEnabled("SMART_DRONE_SP_LG_INIT_TRUST_SELECT_CLOSE_PAIRS", false);
 }
 
-void PopulateRawMatches(
-    const Core::Ports::StereoMatchSelectionInput &input,
-    const Core::Ports::VisualFeatureSet &leftFeatures,
-    const Core::Ports::VisualFeatureSet &rightFeatures,
-    const cv::Mat &leftPrepared, const cv::Mat &rightPrepared,
-    const Core::Ports::IStereoPairBuilder &pairBuilder,
-    Core::Ports::StereoMatchSelection &selection)
+void PopulateRawMatches(const PopulateRawMatchesRequest &request)
 {
+    Core::Ports::StereoMatchSelection &selection = request.selection;
     if (selection.initializationTrustedPairSelection) {
         selection.initializationTrustedMatches = SelectInitializationTrustedPairs(
-            leftFeatures, rightFeatures, leftPrepared, rightPrepared, pairBuilder);
+            request.leftFeatures, request.rightFeatures, request.leftPrepared,
+            request.rightPrepared, request.pairBuilder);
         if (!selection.initializationTrustedMatches.empty()) {
             return;
         }
@@ -185,7 +191,8 @@ void PopulateRawMatches(
     }
 
     selection.rawMatches = BuildStereoPairsForSelection(
-        leftFeatures, rightFeatures, leftPrepared, rightPrepared, pairBuilder);
+        request.leftFeatures, request.rightFeatures, request.leftPrepared,
+        request.rightPrepared, request.pairBuilder);
 }
 
 void ApplyInitializationStereoBias(
@@ -294,8 +301,8 @@ bool SelectStereoFeatureMatches(
         input.pairBuilder != nullptr ? *input.pairBuilder : defaultPairBuilder;
 
     InitializeMatchSelectionState(input, leftFeatures, rightFeatures, selection);
-    PopulateRawMatches(input, leftFeatures, rightFeatures, leftPrepared,
-                       rightPrepared, pairBuilder, selection);
+    PopulateRawMatches({input, leftFeatures, rightFeatures, leftPrepared,
+                        rightPrepared, pairBuilder, selection});
     ApplyInitializationStereoBias(input, selection);
 
     selection.filteredMatches =

@@ -16,13 +16,13 @@
 
 namespace SmartDrone::Core::Application {
 
-constexpr uint8_t kCmdPointCloud = 0xF2;
-constexpr uint8_t kCmdHeartbeat = CMD_HEARTBEAT;
-constexpr uint16_t kPointCloudHeaderLen = 4;
-constexpr size_t kMaxTlvPayloadLen = 0xFFFFu;
-constexpr size_t kPointCloudPointStrideBytes = 12u;
-constexpr size_t kMaxPointCloudPointsPerFrame =
-    (kMaxTlvPayloadLen - kPointCloudHeaderLen) / kPointCloudPointStrideBytes;
+constexpr uint8_t CMD_POINT_CLOUD = 0xF2;
+constexpr uint8_t CMD_HEARTBEAT_RUNTIME = CMD_HEARTBEAT;
+constexpr uint16_t POINT_CLOUD_HEADER_LEN = 4;
+constexpr size_t MAX_TLV_PAYLOAD_LEN = 0xFFFFu;
+constexpr size_t POINT_CLOUD_POINT_STRIDE_BYTES = 12u;
+constexpr size_t MAX_POINT_CLOUD_POINTS_PER_FRAME =
+    (MAX_TLV_PAYLOAD_LEN - POINT_CLOUD_HEADER_LEN) / POINT_CLOUD_POINT_STRIDE_BYTES;
 
 using BuildCapabilitiesPayloadFn = std::function<std::vector<uint8_t>()>;
 using BuildConfigPayloadFn =

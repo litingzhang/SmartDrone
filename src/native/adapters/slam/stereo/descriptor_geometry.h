@@ -6,7 +6,7 @@
 
 namespace SmartDrone::Adapters::Slam {
 
-constexpr int kDescriptorPatchBorder = 19;
+constexpr int DESCRIPTOR_PATCH_BORDER = 19;
 
 cv::KeyPoint MakeDescriptorKeyPoint(const cv::Point2f &pt);
 bool IsPointSafeForDescriptor(const cv::Point2f &pt, const cv::Mat &gray);

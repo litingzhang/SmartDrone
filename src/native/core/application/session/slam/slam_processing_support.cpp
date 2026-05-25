@@ -178,9 +178,9 @@ AutoSlamModeController::SlamOperationMode AutoSlamModeController::Observe(bool t
                                                                           double frameGapMs, size_t leftFeatureCount,
                                                                           size_t rightFeatureCount)
 {
-    const bool frameGapAcceptable = frameGapMs <= 0.0 || frameGapMs <= kStableFrameGapMs;
-    const bool featuresStable = leftFeatureCount >= kStableLeftFeatures && rightFeatureCount >= kStableRightFeatures;
-    const bool featuresWeak = leftFeatureCount < kWeakLeftFeatures || rightFeatureCount < kWeakRightFeatures;
+    const bool frameGapAcceptable = frameGapMs <= 0.0 || frameGapMs <= STABLE_FRAME_GAP_MS;
+    const bool featuresStable = leftFeatureCount >= STABLE_LEFT_FEATURES && rightFeatureCount >= STABLE_RIGHT_FEATURES;
+    const bool featuresWeak = leftFeatureCount < WEAK_LEFT_FEATURES || rightFeatureCount < WEAK_RIGHT_FEATURES;
     const bool stableNow = trackingUsable && quality != PoseQuality::Lost && frameGapAcceptable && featuresStable;
     const bool weakNow = !trackingUsable || quality == PoseQuality::Lost || !frameGapAcceptable || featuresWeak;
 
@@ -192,10 +192,10 @@ AutoSlamModeController::SlamOperationMode AutoSlamModeController::Observe(bool t
         m_stableFrames = 0;
     }
 
-    if (m_effectiveMode == SlamOperationMode::Mapping && m_stableFrames >= kFramesToLocalization) {
+    if (m_effectiveMode == SlamOperationMode::Mapping && m_stableFrames >= FRAMES_TO_LOCALIZATION) {
         m_effectiveMode = SlamOperationMode::Localization;
         m_stableFrames = 0;
-    } else if (m_effectiveMode == SlamOperationMode::Localization && m_weakFrames >= kFramesToMapping) {
+    } else if (m_effectiveMode == SlamOperationMode::Localization && m_weakFrames >= FRAMES_TO_MAPPING) {
         m_effectiveMode = SlamOperationMode::Mapping;
         m_weakFrames = 0;
     }

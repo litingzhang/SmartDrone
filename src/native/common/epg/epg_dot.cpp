@@ -7,8 +7,19 @@
 #include <set>
 #include <sstream>
 
+#include "common/numeric_parse.h"
+#include "common/epg/epg_trigger_modes.h"
+
 namespace Epg {
 namespace {
+
+constexpr char DOT_RECORD_OPEN = '{';
+constexpr char DOT_RECORD_CLOSE = '}';
+constexpr char DOT_QUOTE = '"';
+constexpr char DOT_ATTRIBUTE_OPEN = '[';
+constexpr char DOT_ATTRIBUTE_CLOSE = ']';
+constexpr char DOT_STATEMENT_END = ';';
+constexpr char DOT_FIELD_SEPARATOR = ',';
 
 std::string Trim(const std::string &value)
 {
@@ -34,14 +45,8 @@ std::string StripQuotes(std::string value)
 
 std::size_t ParseSize(const std::string &value, const std::string &field)
 {
-    std::size_t parsedChars = 0;
     std::size_t parsed = 0;
-    try {
-        parsed = std::stoul(value, &parsedChars, 10);
-    } catch (const std::exception &) {
-        throw std::runtime_error("DOT numeric field is invalid: " + field + "=" + value);
-    }
-    if (parsedChars != value.size()) {
+    if (!SmartDrone::Common::TryParseSizeFull(value.c_str(), parsed)) {
         throw std::runtime_error("DOT numeric field is invalid: " + field + "=" + value);
     }
     return parsed;
@@ -65,14 +70,8 @@ bool ParseBool(const std::string &value, const std::string &field)
 
 int ParseInt(const std::string &value, const std::string &field)
 {
-    std::size_t parsedChars = 0;
     int parsed = 0;
-    try {
-        parsed = std::stoi(value, &parsedChars, 10);
-    } catch (const std::exception &) {
-        throw std::runtime_error("DOT integer field is invalid: " + field + "=" + value);
-    }
-    if (parsedChars != value.size()) {
+    if (!SmartDrone::Common::TryParseIntFull(value.c_str(), 10, parsed)) {
         throw std::runtime_error("DOT integer field is invalid: " + field + "=" + value);
     }
     return parsed;
@@ -165,7 +164,8 @@ std::string RequireField(const std::map<std::string, std::string> &fields,
 std::vector<std::string> ParseRecordLabelFields(std::string label)
 {
     label = StripQuotes(std::move(label));
-    if (label.size() >= 2 && label.front() == '{' && label.back() == '}') {
+    if (label.size() >= 2 && label.front() == DOT_RECORD_OPEN &&
+        label.back() == DOT_RECORD_CLOSE) {
         label = label.substr(1, label.size() - 2);
     }
     return Split(label, '|');
@@ -222,19 +222,19 @@ std::map<std::string, std::string> ParseAttributeBlock(const std::string &text)
     };
 
     for (char c : text) {
-        if (c == '"') {
+        if (c == DOT_QUOTE) {
             inQuote = !inQuote;
             current.push_back(c);
             continue;
         }
         if (inQuote) {
-            if (c == '{') {
+            if (c == DOT_RECORD_OPEN) {
                 ++nestedBraces;
-            } else if (c == '}' && nestedBraces > 0) {
+            } else if (c == DOT_RECORD_CLOSE && nestedBraces > 0) {
                 --nestedBraces;
             }
         }
-        if (!inQuote && c == ',') {
+        if (!inQuote && c == DOT_FIELD_SEPARATOR) {
             flush();
             continue;
         }
@@ -261,13 +261,6 @@ std::string AutoQueueName(const std::string &fromNode,
 {
     return SanitizeQueueName(fromNode + "_" + std::to_string(fromPort) +
                              "_to_" + toNode + "_" + std::to_string(toPort));
-}
-
-bool IsQueueTriggeredMode(TriggerMode mode)
-{
-    return mode == TriggerMode::AnyQueueReady ||
-           mode == TriggerMode::AllQueueReady ||
-           mode == TriggerMode::PeriodicOrAnyQueueReady;
 }
 
 std::vector<std::string> ResolveTriggerQueues(
@@ -363,7 +356,7 @@ void SkipDotLineComment(const std::string &dotText, std::size_t &index)
 
 void HandleStatementBrace(StatementCollector &collector, char c)
 {
-    if (c == '{') {
+    if (c == DOT_RECORD_OPEN) {
         ++collector.depth;
         collector.current.clear();
         collector.statementDepth = collector.depth;
@@ -377,15 +370,16 @@ void HandleStatementBrace(StatementCollector &collector, char c)
 
 bool TryFinishStatement(StatementCollector &collector, char c)
 {
-    if (!collector.inQuote && c == '[') {
+    if (!collector.inQuote && c == DOT_ATTRIBUTE_OPEN) {
         collector.inAttributes = true;
         return false;
     }
-    if (!collector.inQuote && c == ']') {
+    if (!collector.inQuote && c == DOT_ATTRIBUTE_CLOSE) {
         collector.inAttributes = false;
         return false;
     }
-    if (collector.inQuote || collector.inAttributes || c != ';') {
+    if (collector.inQuote || collector.inAttributes ||
+        c != DOT_STATEMENT_END) {
         return false;
     }
     FlushCollectedStatement(collector);
@@ -405,14 +399,15 @@ std::vector<DotStatement> CollectStatements(const std::string &dotText)
     StatementCollector collector;
     for (std::size_t i = 0; i < dotText.size(); ++i) {
         const char c = dotText[i];
-        if (c == '"') {
+        if (c == DOT_QUOTE) {
             collector.inQuote = !collector.inQuote;
         }
         if (IsDotLineComment(dotText, i, collector)) {
             SkipDotLineComment(dotText, i);
             continue;
         }
-        if (!collector.inQuote && (c == '{' || c == '}')) {
+        if (!collector.inQuote &&
+            (c == DOT_RECORD_OPEN || c == DOT_RECORD_CLOSE)) {
             HandleStatementBrace(collector, c);
             continue;
         }
@@ -433,7 +428,7 @@ std::size_t FindSubgraphOpenBrace(const std::string &dotText,
     if (begin == std::string::npos) {
         throw std::runtime_error("DOT subgraph not found: " + subgraphName);
     }
-    const auto open = dotText.find('{', begin + needle.size());
+    const auto open = dotText.find(DOT_RECORD_OPEN, begin + needle.size());
     if (open == std::string::npos) {
         throw std::runtime_error("DOT subgraph missing body: " + subgraphName);
     }
@@ -448,18 +443,18 @@ std::size_t FindMatchingBrace(const std::string &dotText,
     int depth = 0;
     for (std::size_t i = open; i < dotText.size(); ++i) {
         const char c = dotText[i];
-        if (c == '"') {
+        if (c == DOT_QUOTE) {
             inQuote = !inQuote;
             continue;
         }
         if (inQuote) {
             continue;
         }
-        if (c == '{') {
+        if (c == DOT_RECORD_OPEN) {
             ++depth;
             continue;
         }
-        if (c == '}') {
+        if (c == DOT_RECORD_CLOSE) {
             --depth;
             if (depth == 0) {
                 return i;

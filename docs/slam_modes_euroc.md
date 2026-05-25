@@ -31,7 +31,7 @@ flowchart TD
 | --- | --- | --- | --- |
 | KLT Tracking | `--slam-backend klt --feature-frontend lk_gftt_per_frame` | `KltSlamEngine`: GFTT feature detection, OpenCV/VPI pyramidal LK, stereo depth, and PnP | Default lightweight runtime |
 | DPVO TensorRT | `--slam-backend dpvo_tensorrt --feature-frontend lk_gftt_per_frame` | `DpvoTensorRtEngine`: backend-level learned VO route | Optional Jetson learned-VO backend |
-| ORB | `--slam-backend orbslam3 --feature-frontend orb` | Optional absorbed ORB-SLAM3 backend with native ORB extraction, stereo tracking, local mapping, loop closure, and relocalization | Historical accuracy reference |
+| ORB | `--slam-backend orbslam3 --feature-frontend orb` | Optional ORB-SLAM3 backend with native ORB extraction, stereo tracking, local mapping, loop closure, and relocalization | Historical accuracy reference |
 | SuperPoint + LightGlue | `--slam-backend orbslam3 --feature-frontend superpoint_lightglue` | Optional ORB-SLAM3 backend with TensorRT SuperPoint/LightGlue stereo-feature injection | Archived learned-feature reference/experiment path |
 
 Detailed flow documents:
@@ -302,7 +302,7 @@ trajectory export or post-run fill was used.
 
 ## Interpretation
 
-- ORB remains a historical native ORB-SLAM3 EuRoC accuracy reference when the optional internal ORB-SLAM3 backend is enabled.
+- ORB remains a historical native ORB-SLAM3 EuRoC accuracy reference when the optional ORB-SLAM3 backend is enabled.
 - SuperPoint + LightGlue uses the native TensorRT frontend path and is close to ORB on MH_01 and MH_02 in the archived regression.
 - SuperPoint + LightGlue is slightly better than ORB on MH_02 and much improved on MH_04/MH_05 relative to the previous SP+LG regression, but MH_03 remains behind the ORB reference.
 - KLT Tracking is a real GFTT plus pyramidal KLT VO path. It is suitable as a lightweight tracking baseline, but it still drifts more than ORB or SuperPoint + LightGlue on difficult Machine Hall sequences.

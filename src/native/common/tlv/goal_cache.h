@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <mutex>
+#include <memory>
 
 #include "tlv_protocol.h"
 
@@ -27,25 +27,13 @@ struct MoveGoal {
 
 class GoalCache {
   public:
-    void Set(const MoveGoal &goal)
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_goal = goal;
-        m_hasGoal = true;
-    }
+    GoalCache();
+    ~GoalCache();
 
-    bool Get(MoveGoal *outGoal) const
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (!m_hasGoal || outGoal == nullptr) {
-            return false;
-        }
-        *outGoal = m_goal;
-        return true;
-    }
+    void Set(const MoveGoal &goal);
+    bool Get(MoveGoal *outGoal) const;
 
   private:
-    mutable std::mutex m_mutex;
-    bool m_hasGoal{false};
-    MoveGoal m_goal{};
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
 };

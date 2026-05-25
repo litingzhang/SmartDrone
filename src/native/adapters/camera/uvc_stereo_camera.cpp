@@ -27,9 +27,9 @@ namespace SmartDrone::Adapters::Camera {
 
 namespace {
 
-constexpr size_t kDefaultBufferCount = 4;
-constexpr int32_t kFallbackExposureAbsoluteMax = 10000;
-constexpr int32_t kAutoExposureGainFloor = 32;
+constexpr size_t DEFAULT_BUFFER_COUNT = 4;
+constexpr int32_t FALLBACK_EXPOSURE_ABSOLUTE_MAX = 10000;
+constexpr int32_t AUTO_EXPOSURE_GAIN_FLOOR = 32;
 
 uint32_t YuyvFourcc()
 {
@@ -96,7 +96,7 @@ bool QueryUvcControl(int fd, uint32_t id, UvcControlInfo &out)
     out.def = query.default_value;
     if (out.max < out.min) {
         if (id == V4L2_CID_EXPOSURE_ABSOLUTE) {
-            out.max = std::max<int32_t>(out.min, kFallbackExposureAbsoluteMax);
+            out.max = std::max<int32_t>(out.min, FALLBACK_EXPOSURE_ABSOLUTE_MAX);
             std::cerr << "[uvc] warning: exposure_absolute reports invalid range min=" << query.minimum
                       << " max=" << query.maximum << "; using fallback max=" << out.max << "\n";
         } else {
@@ -145,7 +145,7 @@ void ConfigureUvcControls(int fd, int deviceIndex, bool aeDisable, int exposureU
 
     if (haveGain) {
         const int requestedGain = std::max(0, static_cast<int>(std::lround(gain)));
-        const int effectiveGain = aeDisable ? requestedGain : std::max(requestedGain, kAutoExposureGainFloor);
+        const int effectiveGain = aeDisable ? requestedGain : std::max(requestedGain, AUTO_EXPOSURE_GAIN_FLOOR);
         const int32_t clampedGain = std::clamp<int32_t>(effectiveGain, gainInfo.min, gainInfo.max);
         SetUvcControl(fd, V4L2_CID_GAIN, clampedGain, "gain");
         std::cerr << "[uvc] control device=" << deviceIndex << " gain=" << clampedGain << "\n";
@@ -282,13 +282,13 @@ void UvcStereoCamera::ResetOpenState(
 
 void UvcStereoCamera::MarkOpenHealthy()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_open = true;
-    m_running = true;
+    m_open.store(true, std::memory_order_release);
+    m_running.store(true, std::memory_order_release);
     m_diag = {};
     m_diag.healthy = true;
     m_diag.acceptFrames = true;
     m_diag.pairTolNs = 0;
+    PublishDiagnostics();
 }
 
 bool UvcStereoCamera::Open(const Core::Ports::CameraOpenConfig &config)
@@ -321,18 +321,12 @@ bool UvcStereoCamera::Open(const Core::Ports::CameraOpenConfig &config)
 
 void UvcStereoCamera::Close()
 {
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_running = false;
-        m_open = false;
-        m_diag.acceptFrames = false;
-    }
-    {
-        std::lock_guard<std::mutex> captureLock(m_captureMu);
-        CloseDevice();
-    }
+    m_running.store(false, std::memory_order_release);
+    m_open.store(false, std::memory_order_release);
+    m_diag.acceptFrames = false;
+    PublishDiagnostics();
+    CloseDevice();
 
-    std::lock_guard<std::mutex> lock(m_mutex);
     m_queue.clear();
     m_lastFrameTimestampNs = 0;
     m_lastPairTimestampNs = 0;
@@ -341,11 +335,12 @@ void UvcStereoCamera::Close()
     m_diag.lastFrameAgeMsR = -1;
     m_diag.lastPairAgeMs = -1;
     m_diag.pairedQueue = 0;
+    PublishDiagnostics();
 }
 
 bool UvcStereoCamera::Start()
 {
-    return m_open;
+    return m_open.load(std::memory_order_acquire);
 }
 
 void UvcStereoCamera::Stop()
@@ -353,19 +348,17 @@ void UvcStereoCamera::Stop()
     Close();
 }
 
-bool UvcStereoCamera::GrabStereo(Core::Ports::StereoFrame &out, int timeoutMs, bool preferLatest, uint64_t minTimestampNs)
+bool UvcStereoCamera::GrabStereo(Core::Ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs)
 {
-    std::lock_guard<std::mutex> captureLock(m_captureMu);
     if (TryPopOrStop(out, preferLatest, minTimestampNs)) {
         return true;
     }
 
-    const int waitMs = std::max(0, timeoutMs);
-    const auto status = CaptureOnce(waitMs);
+    const auto status = CaptureOnce();
     if (status == CaptureStatus::Frame && preferLatest) {
         DrainReadyFrames();
     }
-    if (status == CaptureStatus::Stopped || status == CaptureStatus::Fatal || status == CaptureStatus::Timeout) {
+    if (status == CaptureStatus::Stopped || status == CaptureStatus::Fatal) {
         return false;
     }
     return TryPopOrStop(out, preferLatest, minTimestampNs);
@@ -373,8 +366,7 @@ bool UvcStereoCamera::GrabStereo(Core::Ports::StereoFrame &out, int timeoutMs, b
 
 bool UvcStereoCamera::TryPopOrStop(Core::Ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (PopCandidateLocked(out, preferLatest, minTimestampNs)) {
+    if (PopCandidate(out, preferLatest, minTimestampNs)) {
         return true;
     }
     return false;
@@ -383,13 +375,13 @@ bool UvcStereoCamera::TryPopOrStop(Core::Ports::StereoFrame &out, bool preferLat
 void UvcStereoCamera::DrainReadyFrames()
 {
     for (size_t i = 0; i < m_buffers.size(); ++i) {
-        if (CaptureOnce(0) != CaptureStatus::Frame) {
+        if (CaptureOnce() != CaptureStatus::Frame) {
             return;
         }
     }
 }
 
-bool UvcStereoCamera::PopCandidateLocked(Core::Ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs)
+bool UvcStereoCamera::PopCandidate(Core::Ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs)
 {
     auto candidate = m_queue.end();
     if (preferLatest) {
@@ -415,24 +407,21 @@ bool UvcStereoCamera::PopCandidateLocked(Core::Ports::StereoFrame &out, bool pre
     m_queue.erase(m_queue.begin(), std::next(candidate));
     m_diag.pairedQueue = m_queue.size();
     m_diag.lastPairAgeMs = 0;
+    PublishDiagnostics();
     return true;
 }
 
-UvcStereoCamera::CaptureStatus UvcStereoCamera::CaptureOnce(int timeoutMs)
+UvcStereoCamera::CaptureStatus UvcStereoCamera::CaptureOnce()
 {
-    int fd = -1;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (!m_running) {
-            return CaptureStatus::Stopped;
-        }
-        fd = m_fd;
+    if (!m_running.load(std::memory_order_acquire)) {
+        return CaptureStatus::Stopped;
     }
+    const int fd = m_fd.load(std::memory_order_acquire);
     if (fd < 0) {
         return CaptureStatus::Stopped;
     }
 
-    const CaptureStatus ready = PollCaptureReady(fd, timeoutMs);
+    const CaptureStatus ready = PollCaptureReady(fd);
     if (ready != CaptureStatus::Frame) {
         return ready;
     }
@@ -452,12 +441,12 @@ UvcStereoCamera::CaptureStatus UvcStereoCamera::CaptureOnce(int timeoutMs)
     return CaptureStatus::Frame;
 }
 
-UvcStereoCamera::CaptureStatus UvcStereoCamera::PollCaptureReady(int fd, int timeoutMs)
+UvcStereoCamera::CaptureStatus UvcStereoCamera::PollCaptureReady(int fd)
 {
     pollfd pfd{};
     pfd.fd = fd;
     pfd.events = POLLIN;
-    const int pollRc = ::poll(&pfd, 1, std::max(0, timeoutMs));
+    const int pollRc = ::poll(&pfd, 1, 0);
     if (pollRc < 0) {
         if (errno == EINTR) {
             return CaptureStatus::NoFrame;
@@ -466,7 +455,7 @@ UvcStereoCamera::CaptureStatus UvcStereoCamera::PollCaptureReady(int fd, int tim
         return CaptureStatus::Fatal;
     }
     if (pollRc == 0) {
-        return CaptureStatus::Timeout;
+        return CaptureStatus::NoFrame;
     }
     if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
         MarkCaptureFault(false);
@@ -557,30 +546,45 @@ Core::Ports::StereoFrame UvcStereoCamera::BuildStereoFrame(const cv::Mat &packed
 
 void UvcStereoCamera::MarkCaptureFault(bool acceptingFrames)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_running) {
+    if (m_running.load(std::memory_order_acquire)) {
         m_diag.healthy = false;
         m_diag.acceptFrames = acceptingFrames;
         ++m_diag.droppedPairs;
+        PublishDiagnostics();
     }
 }
 
 Core::Ports::CameraHealth UvcStereoCamera::GetHealth() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return {m_diag.healthy, m_diag.droppedPairs};
+    const std::shared_ptr<const DiagnosticsSnapshot> snapshot =
+        LoadDiagnosticsSnapshot();
+    if (!snapshot) {
+        return {};
+    }
+    return {snapshot->diagnostics.healthy,
+            snapshot->diagnostics.droppedPairs};
 }
 
 Core::Ports::CameraDiagnostics UvcStereoCamera::GetDiagnostics() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    Core::Ports::CameraDiagnostics out = m_diag;
+    const std::shared_ptr<const DiagnosticsSnapshot> snapshot =
+        LoadDiagnosticsSnapshot();
+    if (!snapshot) {
+        return {};
+    }
+    Core::Ports::CameraDiagnostics out = snapshot->diagnostics;
     const uint64_t nowNs = MonoTimeUs() * 1000ULL;
     out.lastFrameAgeMsL =
-        m_lastFrameTimestampNs > 0 ? static_cast<int64_t>((nowNs - m_lastFrameTimestampNs) / 1000000ULL) : -1;
+        snapshot->lastFrameTimestampNs > 0
+            ? static_cast<int64_t>(
+                  (nowNs - snapshot->lastFrameTimestampNs) / 1000000ULL)
+            : -1;
     out.lastFrameAgeMsR = out.lastFrameAgeMsL;
     out.lastPairAgeMs =
-        m_lastPairTimestampNs > 0 ? static_cast<int64_t>((nowNs - m_lastPairTimestampNs) / 1000000ULL) : -1;
+        snapshot->lastPairTimestampNs > 0
+            ? static_cast<int64_t>(
+                  (nowNs - snapshot->lastPairTimestampNs) / 1000000ULL)
+            : -1;
     return out;
 }
 
@@ -689,7 +693,7 @@ bool UvcStereoCamera::RequestAndMapBuffers(int fd, const std::string &devicePath
                                            std::vector<MappedBuffer> &buffers)
 {
     v4l2_requestbuffers request{};
-    request.count = static_cast<uint32_t>(kDefaultBufferCount);
+    request.count = static_cast<uint32_t>(DEFAULT_BUFFER_COUNT);
     request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     request.memory = V4L2_MEMORY_MMAP;
     if (!IoctlRetry(fd, VIDIOC_REQBUFS, &request) || request.count == 0) {
@@ -756,12 +760,11 @@ void UvcStereoCamera::ReleaseMappedBuffers(std::vector<MappedBuffer> &buffers)
 
 void UvcStereoCamera::StoreOpenedDevice(int fd, const v4l2_format &format, std::vector<MappedBuffer> &&buffers)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_fd = fd;
     m_streaming = true;
     m_pixelFormat = format.fmt.pix.pixelformat;
     m_bytesPerLine = format.fmt.pix.bytesperline;
     m_buffers = std::move(buffers);
+    m_fd.store(fd, std::memory_order_release);
 }
 
 void UvcStereoCamera::LogOpenedDevice(const DeviceOpenParams &params, const v4l2_capability &caps,
@@ -770,7 +773,9 @@ void UvcStereoCamera::LogOpenedDevice(const DeviceOpenParams &params, const v4l2
     double actualFps = 0.0;
     v4l2_streamparm actualParm{};
     actualParm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if (IoctlRetry(m_fd, VIDIOC_G_PARM, &actualParm) && actualParm.parm.capture.timeperframe.numerator != 0) {
+    const int fd = m_fd.load(std::memory_order_acquire);
+    if (fd >= 0 && IoctlRetry(fd, VIDIOC_G_PARM, &actualParm) &&
+        actualParm.parm.capture.timeperframe.numerator != 0) {
         const auto &tpf = actualParm.parm.capture.timeperframe;
         actualFps = static_cast<double>(tpf.denominator) / static_cast<double>(tpf.numerator);
     }
@@ -791,7 +796,7 @@ void UvcStereoCamera::LogOpenedDevice(const DeviceOpenParams &params, const v4l2
     firstProbe.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     firstProbe.memory = V4L2_MEMORY_MMAP;
     firstProbe.index = 0;
-    if (IoctlRetry(m_fd, VIDIOC_QUERYBUF, &firstProbe)) {
+    if (fd >= 0 && IoctlRetry(fd, VIDIOC_QUERYBUF, &firstProbe)) {
         std::cerr << "[uvc] buffer timestamps=" << TimestampFlagToString(firstProbe.flags) << "\n";
     }
     if (format.fmt.pix.pixelformat != YuyvFourcc()) {
@@ -802,19 +807,13 @@ void UvcStereoCamera::LogOpenedDevice(const DeviceOpenParams &params, const v4l2
 
 void UvcStereoCamera::CloseDevice()
 {
-    int fd = -1;
-    bool streaming = false;
+    const int fd = m_fd.exchange(-1, std::memory_order_acq_rel);
+    const bool streaming = m_streaming;
+    m_streaming = false;
+    m_pixelFormat = 0;
+    m_bytesPerLine = 0;
     std::vector<MappedBuffer> buffers;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        fd = m_fd;
-        streaming = m_streaming;
-        m_fd = -1;
-        m_streaming = false;
-        m_pixelFormat = 0;
-        m_bytesPerLine = 0;
-        buffers.swap(m_buffers);
-    }
+    buffers.swap(m_buffers);
 
     if (fd >= 0 && streaming) {
         v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -836,8 +835,7 @@ void UvcStereoCamera::CloseDevice()
 
 void UvcStereoCamera::PushFrame(Core::Ports::StereoFrame &&frame, uint64_t captureTimestampNs)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (!m_running) {
+    if (!m_running.load(std::memory_order_acquire)) {
         return;
     }
 
@@ -863,6 +861,26 @@ void UvcStereoCamera::PushFrame(Core::Ports::StereoFrame &&frame, uint64_t captu
     m_diag.pairedQueue = m_queue.size();
     m_lastFrameTimestampNs = captureTimestampNs;
     m_lastPairTimestampNs = captureTimestampNs;
+    PublishDiagnostics();
+}
+
+void UvcStereoCamera::PublishDiagnostics()
+{
+    DiagnosticsSnapshot snapshot{};
+    snapshot.diagnostics = m_diag;
+    snapshot.lastFrameTimestampNs = m_lastFrameTimestampNs;
+    snapshot.lastPairTimestampNs = m_lastPairTimestampNs;
+    std::atomic_store_explicit(
+        &m_diagSnapshot,
+        std::make_shared<const DiagnosticsSnapshot>(std::move(snapshot)),
+        std::memory_order_release);
+}
+
+std::shared_ptr<const UvcStereoCamera::DiagnosticsSnapshot>
+UvcStereoCamera::LoadDiagnosticsSnapshot() const
+{
+    return std::atomic_load_explicit(&m_diagSnapshot,
+                                     std::memory_order_acquire);
 }
 
 } // namespace SmartDrone::Adapters::Camera

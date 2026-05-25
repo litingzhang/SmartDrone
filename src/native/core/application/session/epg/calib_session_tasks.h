@@ -71,7 +71,14 @@ class CalibStorageWriteTask final : public Epg::ITask {
     void OnTick(Epg::TaskContext &context) override;
 
   private:
+    void DrainSavePairs(Epg::TaskContext &context);
+    void DrainImuSamples(Epg::TaskContext &context);
+    void DrainFlushRequests(Epg::TaskContext &context);
+    void Flush(Epg::TaskContext &context, bool sessionOk);
+
     std::shared_ptr<CalibRuntimeState> m_state;
+    bool m_sessionOk{true};
+    bool m_flushed{false};
 };
 
 class CalibUdpPreviewTask final : public Epg::ITask {
@@ -92,7 +99,7 @@ class CalibImuWriterTask final : public Epg::ITask {
 
   private:
     void PushResult(Epg::TaskContext &context,
-                    CalibImuSampleStatus status);
+                    const CalibImuSampleResult &result);
 
     std::shared_ptr<CalibRuntimeState> m_state;
     std::atomic<bool> &m_stop;

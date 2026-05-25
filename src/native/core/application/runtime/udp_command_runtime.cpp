@@ -18,8 +18,8 @@
 namespace SmartDrone::Core::Application {
 namespace {
 
-constexpr auto kHeartbeatTimeout = std::chrono::seconds(3);
-constexpr auto kOpenRetryPeriod = std::chrono::seconds(1);
+constexpr auto HEARTBEAT_TIMEOUT = std::chrono::seconds(3);
+constexpr auto OPEN_RETRY_PERIOD = std::chrono::seconds(1);
 
 RouteResult HandleRuntimeModeFrame(const TlvFrame &frame,
                                    IRuntimeCommandTarget &commandTarget)
@@ -139,7 +139,7 @@ RuntimeCommandHook *ResolveCommandHook(const UdpCommandRuntimeConfig &config)
 
 class CommandPeerGate {
   public:
-    static constexpr auto kPeerTimeout = std::chrono::seconds(5);
+    static constexpr auto PEER_TIMEOUT = std::chrono::seconds(5);
 
     bool Accept(const UdpPeer &peer,
                 const std::chrono::steady_clock::time_point &now)
@@ -147,7 +147,7 @@ class CommandPeerGate {
         if (!peer.valid) {
             return false;
         }
-        if (!m_lockedPeer.valid || (now - m_lastSeen) > kPeerTimeout) {
+        if (!m_lockedPeer.valid || (now - m_lastSeen) > PEER_TIMEOUT) {
             m_lockedPeer = peer;
             m_lastSeen = now;
             return true;
@@ -205,7 +205,7 @@ class UdpCommandRuntime::Impl final {
         }
         EnsureRouter();
         if (!m_server.Open(static_cast<uint16_t>(m_config.port))) {
-            m_nextOpenAttempt = now + kOpenRetryPeriod;
+            m_nextOpenAttempt = now + OPEN_RETRY_PERIOD;
             std::cerr << "[udp_cmd] open failed on 0.0.0.0:" << m_config.port
                       << "\n";
             return false;
@@ -417,7 +417,7 @@ class UdpCommandRuntime::Impl final {
         }
         m_lastHeartbeatTx = now;
         const TlvFrameBuildRequest heartbeatRequest{
-            TLV_VER, kCmdHeartbeat, 0, 0, MonoTimeMs32(), nullptr, 0};
+            TLV_VER, CMD_HEARTBEAT_RUNTIME, 0, 0, MonoTimeMs32(), nullptr, 0};
         std::vector<uint8_t> heartbeatFrame = MakeFrame(heartbeatRequest);
         m_server.SendTo(m_activePeer, heartbeatFrame.data(), heartbeatFrame.size());
     }
@@ -428,7 +428,7 @@ class UdpCommandRuntime::Impl final {
         const bool vehicleArmed =
             m_config.readRuntimeState(snapshot) && snapshot.armed;
         if (!m_haveHeartbeatPeer || !vehicleArmed || m_heartbeatLandTriggered ||
-            now - m_lastHeartbeatRx <= kHeartbeatTimeout) {
+            now - m_lastHeartbeatRx <= HEARTBEAT_TIMEOUT) {
             if (!vehicleArmed) {
                 m_heartbeatLandTriggered = false;
             }
@@ -494,10 +494,10 @@ class UdpCommandRuntime::Impl final {
                         size_t pointCount)
     {
         const size_t cappedPointCount =
-            std::min(pointCount, kMaxPointCloudPointsPerFrame);
+            std::min(pointCount, MAX_POINT_CLOUD_POINTS_PER_FRAME);
         std::vector<uint8_t> payload;
-        payload.reserve(kPointCloudHeaderLen +
-                        cappedPointCount * kPointCloudPointStrideBytes);
+        payload.reserve(POINT_CLOUD_HEADER_LEN +
+                        cappedPointCount * POINT_CLOUD_POINT_STRIDE_BYTES);
         WriteU16Le(payload, static_cast<uint16_t>(cappedPointCount));
         WriteU16Le(payload, static_cast<uint16_t>(snapshot.pointCloudSeq & 0xFFFFu));
         for (size_t index = 0; index < cappedPointCount * 3; ++index) {
@@ -505,7 +505,7 @@ class UdpCommandRuntime::Impl final {
         }
         const TlvFrameBuildRequest cloudRequest{
             TLV_VER,
-            kCmdPointCloud,
+            CMD_POINT_CLOUD,
             0,
             snapshot.seq,
             MonoTimeMs32(),

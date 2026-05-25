@@ -16,7 +16,7 @@
 namespace SmartDrone::Core::Application {
 namespace {
 
-constexpr uint64_t kPoseAxisLogEveryNFrames = 30;
+constexpr uint64_t POSE_AXIS_LOG_EVERY_N_FRAMES = 30;
 
 uint8_t ComposeResetCounter(uint8_t sessionBase, uint8_t continuityCounter)
 {
@@ -41,10 +41,10 @@ struct RuntimeTbcOverride {
 Sophus::SE3f BuildBodyToCamFromRuntimeOverride(
     const RuntimeTbcOverride &overrideValue)
 {
-    constexpr float kDegToRad = 0.017453292519943295769f;
-    const float rollRad = overrideValue.rollDeg * kDegToRad;
-    const float pitchRad = overrideValue.pitchDeg * kDegToRad;
-    const float yawRad = overrideValue.yawDeg * kDegToRad;
+    constexpr float degToRad = 0.017453292519943295769f;
+    const float rollRad = overrideValue.rollDeg * degToRad;
+    const float pitchRad = overrideValue.pitchDeg * degToRad;
+    const float yawRad = overrideValue.yawDeg * degToRad;
     const Eigen::AngleAxisf rollRotation(rollRad, Eigen::Vector3f::UnitX());
     const Eigen::AngleAxisf pitchRotation(pitchRad, Eigen::Vector3f::UnitY());
     const Eigen::AngleAxisf yawRotation(yawRad, Eigen::Vector3f::UnitZ());
@@ -56,8 +56,8 @@ Sophus::SE3f BuildBodyToCamFromRuntimeOverride(
 
 Sophus::SE3f BuildBodyToCamPitchDelta(float pitchDeg)
 {
-    constexpr float kDegToRad = 0.017453292519943295769f;
-    const Eigen::AngleAxisf pitchRotation(pitchDeg * kDegToRad,
+    constexpr float degToRad = 0.017453292519943295769f;
+    const Eigen::AngleAxisf pitchRotation(pitchDeg * degToRad,
                                           Eigen::Vector3f::UnitY());
     return Sophus::SE3f(Sophus::SO3f(Eigen::Quaternionf(pitchRotation)),
                         Eigen::Vector3f::Zero());
@@ -105,14 +105,14 @@ SlamFramePosePostprocessPort::ResolveTrackingContext(
 {
     const bool debugRightOnlyFeatures = tracked.frame->debugRightOnlyFeatures;
     TrackingContext tracking{};
-    tracking.state = debugRightOnlyFeatures ? Ports::kSlamTrackingLost
+    tracking.state = debugRightOnlyFeatures ? Ports::SLAM_TRACKING_LOST
                                             : tracked.slamOutput.trackingState;
     tracking.usable = !debugRightOnlyFeatures &&
                       Ports::IsSlamTrackingPoseUsable(tracking.state);
     tracking.mapId = debugRightOnlyFeatures ? 0UL : tracked.slamOutput.mapId;
     m_sharedState.lastTrackingState.store(tracking.state);
     m_sharedState.lastTrackingUsable.store(tracking.usable);
-    if (tracking.mapId != PosePostprocessor::ContinuityMapper::kInvalidMapId &&
+    if (tracking.mapId != PosePostprocessor::ContinuityMapper::INVALID_MAP_ID &&
         tracking.mapId != m_state.lastRawMapId) {
         m_state.lastRawMapId = tracking.mapId;
     }
@@ -198,7 +198,7 @@ void SlamFramePosePostprocessPort::MaybeLogPoseAxis(
     const PosePostprocessor::Result &poseResult) const
 {
     if (m_ctx.useImu || m_ctx.monoMode || !tracked.slamOutput.poseValid ||
-        (tracked.slamOutput.frameId % kPoseAxisLogEveryNFrames) != 0) {
+        (tracked.slamOutput.frameId % POSE_AXIS_LOG_EVERY_N_FRAMES) != 0) {
         return;
     }
 

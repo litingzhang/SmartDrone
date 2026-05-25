@@ -9,10 +9,21 @@
 
 namespace SmartDrone::Adapters::Slam {
 
+struct VpiRemapCurrentStereoRequest {
+    const cv::Mat &leftRaw;
+    const cv::Mat &rightRaw;
+    cv::Mat &leftRect;
+    cv::Mat &rightRect;
+    std::shared_ptr<LkPerFrameVpiState> &state;
+    const cv::Mat &map1x;
+    const cv::Mat &map1y;
+    const cv::Mat &map2x;
+    const cv::Mat &map2y;
+    bool &logged;
+};
+
 bool StoreVpiPreviousRectified(std::shared_ptr<LkPerFrameVpiState> &state);
-bool VpiRemapCurrentStereo(const cv::Mat &leftRaw, const cv::Mat &rightRaw, cv::Mat &leftRect, cv::Mat &rightRect,
-                           std::shared_ptr<LkPerFrameVpiState> &state, const cv::Mat &map1x,
-                           const cv::Mat &map1y, const cv::Mat &map2x, const cv::Mat &map2y, bool &logged);
+bool VpiRemapCurrentStereo(const VpiRemapCurrentStereoRequest &request);
 bool ComputeVpiCudaDisparity(const cv::Mat &left, const cv::Mat &right, cv::Mat &disp,
                              std::shared_ptr<LkPerFrameVpiState> &state, bool &logged);
 bool HasVpiPreviousRectified(const std::shared_ptr<LkPerFrameVpiState> &state);

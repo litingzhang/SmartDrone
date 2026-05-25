@@ -6,7 +6,6 @@
 #include <chrono>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <typeindex>
@@ -189,8 +188,10 @@ class SpscSharedPtrQueue final : public IQueue {
 
     void SetNotifier(std::function<void()> notifier) override
     {
-        std::lock_guard<std::mutex> lock(m_notifierMutex);
-        m_notifier = std::move(notifier);
+        auto snapshot =
+            std::make_shared<const std::function<void()>>(std::move(notifier));
+        std::atomic_store_explicit(&m_notifier, std::move(snapshot),
+                                   std::memory_order_release);
     }
 
   private:
@@ -233,14 +234,11 @@ class SpscSharedPtrQueue final : public IQueue {
 
     void Notify()
     {
-        std::function<void()> notifier;
-        {
-            std::lock_guard<std::mutex> lock(m_notifierMutex);
-            notifier = m_notifier;
-        }
-        if (notifier) {
+        auto notifier = std::atomic_load_explicit(
+            &m_notifier, std::memory_order_acquire);
+        if (notifier && *notifier) {
             m_diag.wakeups.fetch_add(1, std::memory_order_relaxed);
-            notifier();
+            (*notifier)();
         }
     }
 
@@ -253,8 +251,7 @@ class SpscSharedPtrQueue final : public IQueue {
     mutable QueueDiagnostics m_diag;
     std::atomic<std::size_t> m_head{0};
     std::atomic<std::size_t> m_tail{0};
-    mutable std::mutex m_notifierMutex;
-    std::function<void()> m_notifier;
+    std::shared_ptr<const std::function<void()>> m_notifier;
 };
 
 class TaskContext {

@@ -22,60 +22,70 @@
 
 namespace SmartDrone::Adapters::Slam {
 
+namespace {
+
+void DestroyVpiArray(VPIArray &array)
+{
+    if (array != nullptr) {
+        vpiArrayDestroy(array);
+        array = nullptr;
+    }
+}
+
+void DestroyVpiImage(VPIImage &image)
+{
+    if (image != nullptr) {
+        vpiImageDestroy(image);
+        image = nullptr;
+    }
+}
+
+void DestroyVpiPayload(VPIPayload &payload)
+{
+    if (payload != nullptr) {
+        vpiPayloadDestroy(payload);
+        payload = nullptr;
+    }
+}
+
+void DestroyVpiPyramid(VPIPyramid &pyramid)
+{
+    if (pyramid != nullptr) {
+        vpiPyramidDestroy(pyramid);
+        pyramid = nullptr;
+    }
+}
+
+void DestroyVpiStream(VPIStream &stream)
+{
+    if (stream != nullptr) {
+        vpiStreamDestroy(stream);
+        stream = nullptr;
+    }
+}
+
+} // namespace
+
 struct LkPerFrameVpiState {
     ~LkPerFrameVpiState()
     {
-        if (prevPts != nullptr) {
-            vpiArrayDestroy(prevPts);
-        }
-        if (curPts != nullptr) {
-            vpiArrayDestroy(curPts);
-        }
-        if (trackStatus != nullptr) {
-            vpiArrayDestroy(trackStatus);
-        }
-        if (prevPyr != nullptr) {
-            vpiPyramidDestroy(prevPyr);
-        }
-        if (curPyr != nullptr) {
-            vpiPyramidDestroy(curPyr);
-        }
-        if (lkPayload != nullptr) {
-            vpiPayloadDestroy(lkPayload);
-        }
-        if (leftRect != nullptr) {
-            vpiImageDestroy(leftRect);
-        }
-        if (rightRect != nullptr) {
-            vpiImageDestroy(rightRect);
-        }
-        if (prevLeftRect != nullptr) {
-            vpiImageDestroy(prevLeftRect);
-        }
-        if (prevRightRect != nullptr) {
-            vpiImageDestroy(prevRightRect);
-        }
-        if (leftRemapPayload != nullptr) {
-            vpiPayloadDestroy(leftRemapPayload);
-        }
-        if (rightRemapPayload != nullptr) {
-            vpiPayloadDestroy(rightRemapPayload);
-        }
-        if (leftWrapper != nullptr) {
-            vpiImageDestroy(leftWrapper);
-        }
-        if (rightWrapper != nullptr) {
-            vpiImageDestroy(rightWrapper);
-        }
-        if (disparity != nullptr) {
-            vpiImageDestroy(disparity);
-        }
-        if (stereoPayload != nullptr) {
-            vpiPayloadDestroy(stereoPayload);
-        }
-        if (stream != nullptr) {
-            vpiStreamDestroy(stream);
-        }
+        DestroyVpiArray(prevPts);
+        DestroyVpiArray(curPts);
+        DestroyVpiArray(trackStatus);
+        DestroyVpiPyramid(prevPyr);
+        DestroyVpiPyramid(curPyr);
+        DestroyVpiPayload(lkPayload);
+        DestroyVpiImage(leftRect);
+        DestroyVpiImage(rightRect);
+        DestroyVpiImage(prevLeftRect);
+        DestroyVpiImage(prevRightRect);
+        DestroyVpiPayload(leftRemapPayload);
+        DestroyVpiPayload(rightRemapPayload);
+        DestroyVpiImage(leftWrapper);
+        DestroyVpiImage(rightWrapper);
+        DestroyVpiImage(disparity);
+        DestroyVpiPayload(stereoPayload);
+        DestroyVpiStream(stream);
         vpiWarpMapFreeData(&leftWarp);
         vpiWarpMapFreeData(&rightWarp);
     }
@@ -107,11 +117,41 @@ struct LkPerFrameVpiState {
 
 namespace {
 
-constexpr int kVpiStereoConfidenceThreshold = 32767;
-constexpr int kVpiStereoP1 = 20;
-constexpr int kVpiStereoP2 = 176;
-constexpr float kVpiStereoUniqueness = 0.38f;
-constexpr int kVpiStereoIncludeDiagonals = 1;
+constexpr int VPI_STEREO_CONFIDENCE_THRESHOLD = 32767;
+constexpr int VPI_STEREO_P1 = 20;
+constexpr int VPI_STEREO_P2 = 176;
+constexpr float VPI_STEREO_UNIQUENESS = 0.38f;
+constexpr int VPI_STEREO_INCLUDE_DIAGONALS = 1;
+
+struct VpiRemapResourcesRequest {
+    std::shared_ptr<LkPerFrameVpiState> &state;
+    const cv::Mat &map1x;
+    const cv::Mat &map1y;
+    const cv::Mat &map2x;
+    const cv::Mat &map2y;
+    bool &logged;
+};
+
+struct VpiPerFrameStateRequest {
+    std::shared_ptr<LkPerFrameVpiState> &state;
+    const cv::Size &size;
+    const cv::Mat &map1x;
+    const cv::Mat &map1y;
+    const cv::Mat &map2x;
+    const cv::Mat &map2y;
+    int maxDisparity;
+    bool &logged;
+};
+
+struct VpiPyrLkRequest {
+    const cv::Mat &prevLeft;
+    VPIImage prevLeftImage;
+    VPIImage curLeftImage;
+    const std::vector<cv::Point2f> &pts0;
+    std::vector<cv::Point2f> &pts1;
+    std::vector<uint8_t> &statusOut;
+    std::shared_ptr<LkPerFrameVpiState> &state;
+};
 
 const char *VpiStatusName(VPIStatus status)
 {
@@ -205,15 +245,15 @@ bool CreateVpiPerFrameStream(std::shared_ptr<LkPerFrameVpiState> &state,
                              status, "cpu_sgbm");
 }
 
-bool CreateVpiRemapResources(std::shared_ptr<LkPerFrameVpiState> &state,
-                             const cv::Mat &map1x, const cv::Mat &map1y,
-                             const cv::Mat &map2x, const cv::Mat &map2y,
-                             bool &logged)
+bool CreateVpiRemapResources(const VpiRemapResourcesRequest &request)
 {
-    if (!FillVpiWarpMapFromOpenCvMaps(map1x, map1y, state->leftWarp) ||
-        !FillVpiWarpMapFromOpenCvMaps(map2x, map2y, state->rightWarp)) {
+    auto &state = request.state;
+    if (!FillVpiWarpMapFromOpenCvMaps(request.map1x, request.map1y,
+                                      state->leftWarp) ||
+        !FillVpiWarpMapFromOpenCvMaps(request.map2x, request.map2y,
+                                      state->rightWarp)) {
         return FailVpiStateSetup(
-            state, logged,
+            state, request.logged,
             "VPI remap warp map build failed; fallback=cpu_sgbm");
     }
 
@@ -227,7 +267,7 @@ bool CreateVpiRemapResources(std::shared_ptr<LkPerFrameVpiState> &state,
     if (status == VPI_SUCCESS) {
         return true;
     }
-    return FailVpiStateSetup(state, logged,
+    return FailVpiStateSetup(state, request.logged,
                              "VPI remap payload create failed", status,
                              "cpu_sgbm");
 }
@@ -275,7 +315,7 @@ bool CreateVpiStereoPayload(std::shared_ptr<LkPerFrameVpiState> &state,
     createParams.downscaleFactor = 1;
     createParams.includeDiagonals =
         EnvIntValue("SMART_DRONE_VPI_STEREO_DIAG",
-                    kVpiStereoIncludeDiagonals);
+                    VPI_STEREO_INCLUDE_DIAGONALS);
     status = vpiCreateStereoDisparityEstimator(
         VPI_BACKEND_CUDA, size.width, size.height, VPI_IMAGE_FORMAT_U8,
         &createParams, &state->stereoPayload);
@@ -336,16 +376,16 @@ bool CreateVpiLkArrays(std::shared_ptr<LkPerFrameVpiState> &state,
                        bool &logged)
 {
     VPIStatus status = vpiArrayCreate(
-        kLkGfttPerFrameMaxCorners, VPI_ARRAY_TYPE_KEYPOINT_F32,
+        LK_GFTT_PER_FRAME_MAX_CORNERS, VPI_ARRAY_TYPE_KEYPOINT_F32,
         VPI_BACKEND_CUDA | VPI_BACKEND_CPU, &state->prevPts);
     if (status == VPI_SUCCESS) {
         status = vpiArrayCreate(
-            kLkGfttPerFrameMaxCorners, VPI_ARRAY_TYPE_KEYPOINT_F32,
+            LK_GFTT_PER_FRAME_MAX_CORNERS, VPI_ARRAY_TYPE_KEYPOINT_F32,
             VPI_BACKEND_CUDA | VPI_BACKEND_CPU, &state->curPts);
     }
     if (status == VPI_SUCCESS) {
         status = vpiArrayCreate(
-            kLkGfttPerFrameMaxCorners, VPI_ARRAY_TYPE_U8,
+            LK_GFTT_PER_FRAME_MAX_CORNERS, VPI_ARRAY_TYPE_U8,
             VPI_BACKEND_CUDA | VPI_BACKEND_CPU, &state->trackStatus);
     }
     if (status == VPI_SUCCESS) {
@@ -362,24 +402,27 @@ void LogVpiPerFrameStateReady(const cv::Size &size, int maxDisparity)
               << " pyr_lk=available size=" << size.width << "x" << size.height
               << " max_disparity=" << maxDisparity
               << " conf=" << EnvIntValue("SMART_DRONE_VPI_STEREO_CONF",
-                                          kVpiStereoConfidenceThreshold)
+                                          VPI_STEREO_CONFIDENCE_THRESHOLD)
               << " p1="
-              << EnvIntValue("SMART_DRONE_VPI_STEREO_P1", kVpiStereoP1)
+              << EnvIntValue("SMART_DRONE_VPI_STEREO_P1", VPI_STEREO_P1)
               << " p2="
-              << EnvIntValue("SMART_DRONE_VPI_STEREO_P2", kVpiStereoP2)
+              << EnvIntValue("SMART_DRONE_VPI_STEREO_P2", VPI_STEREO_P2)
               << " uniqueness="
               << EnvFloatValue("SMART_DRONE_VPI_STEREO_UNIQUENESS",
-                               kVpiStereoUniqueness)
+                               VPI_STEREO_UNIQUENESS)
               << " diag=" << EnvIntValue("SMART_DRONE_VPI_STEREO_DIAG",
-                                          kVpiStereoIncludeDiagonals)
+                                          VPI_STEREO_INCLUDE_DIAGONALS)
               << "\n";
 }
 
-bool EnsureVpiPerFrameState(std::shared_ptr<LkPerFrameVpiState> &state, const cv::Size &size,
-                            const cv::Mat &map1x, const cv::Mat &map1y, const cv::Mat &map2x, const cv::Mat &map2y,
-                            int maxDisparity, bool &logged)
+bool EnsureVpiPerFrameState(const VpiPerFrameStateRequest &request)
 {
-    const bool recreate = !state || state->width != size.width || state->height != size.height ||
+    auto &state = request.state;
+    const cv::Size &size = request.size;
+    const int maxDisparity = request.maxDisparity;
+    bool &logged = request.logged;
+    const bool recreate = !state || state->width != size.width ||
+                          state->height != size.height ||
                           state->maxDisparity != maxDisparity;
     if (!recreate) {
         return true;
@@ -387,7 +430,8 @@ bool EnsureVpiPerFrameState(std::shared_ptr<LkPerFrameVpiState> &state, const cv
 
     ResetVpiPerFrameState(state, size, maxDisparity);
     if (!CreateVpiPerFrameStream(state, logged) ||
-        !CreateVpiRemapResources(state, map1x, map1y, map2x, map2y, logged) ||
+        !CreateVpiRemapResources({state, request.map1x, request.map1y,
+                                  request.map2x, request.map2y, logged}) ||
         !CreateVpiRectifiedImages(state, size, logged) ||
         !CreateVpiStereoPayload(state, size, maxDisparity, logged) ||
         !CreateVpiDisparityImage(state, size, logged) ||
@@ -405,10 +449,10 @@ bool EnsureVpiPerFrameState(std::shared_ptr<LkPerFrameVpiState> &state, const cv
 void ConfigureVpiStereoParams(VPIStereoDisparityEstimatorParams &params, int maxDisparity)
 {
     params.maxDisparity = maxDisparity;
-    params.confidenceThreshold = EnvIntValue("SMART_DRONE_VPI_STEREO_CONF", kVpiStereoConfidenceThreshold);
-    params.p1 = EnvIntValue("SMART_DRONE_VPI_STEREO_P1", kVpiStereoP1);
-    params.p2 = EnvIntValue("SMART_DRONE_VPI_STEREO_P2", kVpiStereoP2);
-    params.uniqueness = EnvFloatValue("SMART_DRONE_VPI_STEREO_UNIQUENESS", kVpiStereoUniqueness);
+    params.confidenceThreshold = EnvIntValue("SMART_DRONE_VPI_STEREO_CONF", VPI_STEREO_CONFIDENCE_THRESHOLD);
+    params.p1 = EnvIntValue("SMART_DRONE_VPI_STEREO_P1", VPI_STEREO_P1);
+    params.p2 = EnvIntValue("SMART_DRONE_VPI_STEREO_P2", VPI_STEREO_P2);
+    params.uniqueness = EnvFloatValue("SMART_DRONE_VPI_STEREO_UNIQUENESS", VPI_STEREO_UNIQUENESS);
 }
 
 bool DownloadVpiDisparity(const cv::Size &size, VPIImage disparityImage, cv::Mat &disp)
@@ -628,25 +672,27 @@ bool DownloadVpiPyrLkResult(int count, std::vector<cv::Point2f> &pts1,
     return true;
 }
 
-bool ComputeVpiCudaPyrLk(const cv::Mat &prevLeft, VPIImage prevLeftImage, VPIImage curLeftImage,
-                         const std::vector<cv::Point2f> &pts0, std::vector<cv::Point2f> &pts1,
-                         std::vector<uint8_t> &statusOut, std::shared_ptr<LkPerFrameVpiState> &state)
+bool ComputeVpiCudaPyrLk(const VpiPyrLkRequest &request)
 {
-    pts1.clear();
-    statusOut.clear();
-    if (!HasValidPyrLkState(state, curLeftImage, pts0)) {
+    request.pts1.clear();
+    request.statusOut.clear();
+    if (!HasValidPyrLkState(request.state, request.curLeftImage,
+                            request.pts0)) {
         return false;
     }
-    if (prevLeftImage == nullptr && prevLeft.empty()) {
+    if (request.prevLeftImage == nullptr && request.prevLeft.empty()) {
         return false;
     }
 
-    const int count = std::min<int>(static_cast<int>(pts0.size()), kLkGfttPerFrameMaxCorners);
-    if (!UploadVpiPyrLkPoints(pts0, count, state) ||
-        !RunVpiPyrLk(prevLeft, prevLeftImage, curLeftImage, state)) {
+    const int count = std::min<int>(static_cast<int>(request.pts0.size()),
+                                    LK_GFTT_PER_FRAME_MAX_CORNERS);
+    if (!UploadVpiPyrLkPoints(request.pts0, count, request.state) ||
+        !RunVpiPyrLk(request.prevLeft, request.prevLeftImage,
+                     request.curLeftImage, request.state)) {
         return false;
     }
-    return DownloadVpiPyrLkResult(count, pts1, statusOut, state);
+    return DownloadVpiPyrLkResult(count, request.pts1, request.statusOut,
+                                  request.state);
 }
 
 } // namespace
@@ -676,16 +722,19 @@ bool StoreVpiPreviousRectified(std::shared_ptr<LkPerFrameVpiState> &state)
     return true;
 }
 
-bool VpiRemapCurrentStereo(const cv::Mat &leftRaw, const cv::Mat &rightRaw, cv::Mat &leftRect, cv::Mat &rightRect,
-                           std::shared_ptr<LkPerFrameVpiState> &state, const cv::Mat &map1x, const cv::Mat &map1y,
-                           const cv::Mat &map2x, const cv::Mat &map2y, bool &logged)
+bool VpiRemapCurrentStereo(const VpiRemapCurrentStereoRequest &request)
 {
+    const cv::Mat &leftRaw = request.leftRaw;
+    const cv::Mat &rightRaw = request.rightRaw;
+    std::shared_ptr<LkPerFrameVpiState> &state = request.state;
     if (leftRaw.empty() || rightRaw.empty() || leftRaw.size() != rightRaw.size() || leftRaw.type() != CV_8UC1 ||
-        rightRaw.type() != CV_8UC1 || map1x.empty() || map2x.empty()) {
+        rightRaw.type() != CV_8UC1 || request.map1x.empty() || request.map2x.empty()) {
         return false;
     }
     const int maxDisparity = std::clamp(((leftRaw.cols / 8 + 15) / 16) * 16, 16, 256);
-    if (!EnsureVpiPerFrameState(state, leftRaw.size(), map1x, map1y, map2x, map2y, maxDisparity, logged)) {
+    if (!EnsureVpiPerFrameState({state, leftRaw.size(), request.map1x,
+                                 request.map1y, request.map2x, request.map2y,
+                                 maxDisparity, request.logged})) {
         return false;
     }
 
@@ -718,9 +767,9 @@ bool VpiRemapCurrentStereo(const cv::Mat &leftRaw, const cv::Mat &rightRaw, cv::
         state.reset();
         return false;
     }
-    leftRect = DownloadVpiU8Image(state->leftRect);
-    rightRect = DownloadVpiU8Image(state->rightRect);
-    return !leftRect.empty() && !rightRect.empty();
+    request.leftRect = DownloadVpiU8Image(state->leftRect);
+    request.rightRect = DownloadVpiU8Image(state->rightRect);
+    return !request.leftRect.empty() && !request.rightRect.empty();
 }
 
 bool CreateStandaloneVpiDisparityState(const cv::Mat &left,
@@ -756,7 +805,7 @@ bool CreateStandaloneVpiDisparityState(const cv::Mat &left,
     createParams.downscaleFactor = 1;
     createParams.includeDiagonals =
         EnvIntValue("SMART_DRONE_VPI_STEREO_DIAG",
-                    kVpiStereoIncludeDiagonals);
+                    VPI_STEREO_INCLUDE_DIAGONALS);
     status = vpiCreateStereoDisparityEstimator(
         VPI_BACKEND_CUDA, left.cols, left.rows, VPI_IMAGE_FORMAT_U8,
         &createParams, &state->stereoPayload);
@@ -917,7 +966,9 @@ bool ComputeVpiCudaCurrentPyrLk(const cv::Mat &prevLeft, const std::vector<cv::P
         return false;
     }
     VPIImage prevLeftImage = state->hasPrevRect ? state->prevLeftRect : nullptr;
-    return ComputeVpiCudaPyrLk(prevLeft, prevLeftImage, state->leftRect, pts0, pts1, statusOut, state);
+    return ComputeVpiCudaPyrLk(
+        {prevLeft, prevLeftImage, state->leftRect, pts0, pts1, statusOut,
+         state});
 }
 
 } // namespace SmartDrone::Adapters::Slam

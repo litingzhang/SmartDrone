@@ -1,23 +1,17 @@
-TEST(EventPipelineGraphRedeploy, WaitsForSystemRedeploySignal)
+TEST(EventPipelineGraphRedeploy, TakesSystemRedeploySignal)
 {
     SmartDrone::Core::Application::EpgRedeployCoordinator redeploy;
-    std::atomic<bool> requested{false};
-    std::thread worker([&redeploy, &requested]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        requested.store(true);
-        redeploy.RequestSystemRedeploy({
-            "cluster_system_runtime_graph",
-            "optimized config changed",
-        });
+    redeploy.RequestSystemRedeploy({
+        "cluster_system_runtime_graph",
+        "optimized config changed",
     });
 
-    EXPECT_TRUE(redeploy.WaitForSystemRedeploy(std::chrono::milliseconds(200)));
-    EXPECT_TRUE(requested.load());
+    EXPECT_TRUE(redeploy.SystemRedeployRequested());
     SmartDrone::Core::Application::EpgRedeployRequest request;
     EXPECT_TRUE(redeploy.TakeSystemRedeployRequest(request));
     EXPECT_EQ(request.graphName, "cluster_system_runtime_graph");
     EXPECT_EQ(request.reason, "optimized config changed");
-    worker.join();
+    EXPECT_FALSE(redeploy.TakeSystemRedeployRequest(request));
 }
 
 TEST(EventPipelineGraphDotTopology, RunsBasicTopologyFromDot)

@@ -1,8 +1,6 @@
 #include "core/application/session/calib/calib_runtime_state.h"
 
-#include <algorithm>
 #include <iostream>
-#include <mutex>
 #include <utility>
 
 #include "common/tlv/tlv_protocol.h"
@@ -37,11 +35,10 @@ class CalibRuntimeState::Impl final {
 
     bool EnsureStarted()
     {
-        std::lock_guard<std::mutex> lock(m_mu);
-        if (m_started) {
+        if (m_started.load(std::memory_order_acquire)) {
             return true;
         }
-        if (m_startFailed) {
+        if (m_startFailed.load(std::memory_order_acquire)) {
             return false;
         }
 
@@ -54,7 +51,7 @@ class CalibRuntimeState::Impl final {
         if (openResult.status != CalibSessionPortOpenStatus::Ready) {
             return HandleOpenFailure(openResult.status);
         }
-        m_started = true;
+        m_started.store(true, std::memory_order_release);
         return true;
     }
 
@@ -92,6 +89,15 @@ class CalibRuntimeState::Impl final {
         return ports->WriteSavePair(pair);
     }
 
+    bool WriteImuSample(const ImuSample &sample)
+    {
+        CalibSessionPortSet *ports = Ports();
+        if (!ports) {
+            return false;
+        }
+        return ports->WriteImuSample(sample);
+    }
+
     bool EnqueuePreview(const CalibStereoFrame &frame)
     {
         CalibSessionPortSet *ports = Ports();
@@ -110,29 +116,68 @@ class CalibRuntimeState::Impl final {
         return ports->StepImuSample();
     }
 
+    void RequestStop()
+    {
+        m_stop.store(true);
+    }
+
+    bool FlushStorage()
+    {
+        CalibSessionPortSet *ports = Ports();
+        if (!ports) {
+            ports = m_ports.get();
+        }
+        if (!ports) {
+            return false;
+        }
+        return ports->FlushAndCloseStorage();
+    }
+
+    void MarkStorageFlushed()
+    {
+        m_storageFlushed.store(true, std::memory_order_release);
+    }
+
+    bool StorageFlushed() const
+    {
+        return m_storageFlushed.load(std::memory_order_acquire);
+    }
+
     bool Finalized() const
     {
-        std::lock_guard<std::mutex> lock(m_mu);
-        return m_finalized;
+        return m_finalized.load(std::memory_order_acquire);
+    }
+
+    void FinalizeAfterStorageFlushed(bool sessionOk)
+    {
+        bool expected = false;
+        if (!m_finalized.compare_exchange_strong(expected, true,
+                                                 std::memory_order_acq_rel)) {
+            return;
+        }
+        FinalizeNonStoragePorts(sessionOk);
     }
 
     void Finalize(bool sessionOk)
     {
-        std::lock_guard<std::mutex> lock(m_mu);
-        FinalizeLocked(sessionOk);
+        if (Finalized()) {
+            return;
+        }
+        const bool storageOk = FlushStorage();
+        MarkStorageFlushed();
+        sessionOk = sessionOk && storageOk;
+        FinalizeAfterStorageFlushed(sessionOk);
     }
 
   private:
     CalibSessionPortSet *Ports()
     {
-        std::lock_guard<std::mutex> lock(m_mu);
-        return m_ports.get();
+        return m_portsView.load(std::memory_order_acquire);
     }
 
     const CalibSessionPortSet *Ports() const
     {
-        std::lock_guard<std::mutex> lock(m_mu);
-        return m_ports.get();
+        return m_portsView.load(std::memory_order_acquire);
     }
 
     CalibSessionPortOpenResult OpenPorts()
@@ -140,29 +185,30 @@ class CalibRuntimeState::Impl final {
         m_ports.reset(
             new CalibSessionPortSet(
                 {m_aliases, m_cfg.calib.root, m_factories}));
-        return m_ports->Open();
+        CalibSessionPortOpenResult result = m_ports->Open();
+        if (result.status == CalibSessionPortOpenStatus::Ready) {
+            m_portsView.store(m_ports.get(), std::memory_order_release);
+        }
+        return result;
     }
 
     bool HandleOpenFailure(CalibSessionPortOpenStatus status)
     {
-        m_startFailed = true;
+        m_startFailed.store(true, std::memory_order_release);
         if (status == CalibSessionPortOpenStatus::StorageFailed) {
             return false;
         }
         m_stop.store(true);
-        FinalizeLocked(false);
+        Finalize(false);
         return false;
     }
 
-    void FinalizeLocked(bool sessionOk)
+    void FinalizeNonStoragePorts(bool sessionOk)
     {
-        if (m_finalized) {
-            return;
-        }
-        m_finalized = true;
         m_stop.store(true);
+        m_portsView.store(nullptr, std::memory_order_release);
         if (m_ports) {
-            m_ports->StopAndFlush();
+            m_ports->StopPorts();
             m_ports->LogFinalStatus();
         }
         m_livePose.SetRuntimeMode(RUNTIME_MODE_IDLE);
@@ -174,12 +220,13 @@ class CalibRuntimeState::Impl final {
     std::atomic<bool> &m_stop;
     LivePoseState &m_livePose;
     const ApplicationRuntimeFactories &m_factories;
-    mutable std::mutex m_mu;
     MainRuntimeAliases m_aliases{};
     std::unique_ptr<CalibSessionPortSet> m_ports;
-    bool m_started{false};
-    bool m_startFailed{false};
-    bool m_finalized{false};
+    std::atomic<CalibSessionPortSet *> m_portsView{nullptr};
+    std::atomic<bool> m_storageFlushed{false};
+    std::atomic<bool> m_started{false};
+    std::atomic<bool> m_startFailed{false};
+    std::atomic<bool> m_finalized{false};
 };
 
 CalibRuntimeState::CalibRuntimeState(CalibRuntimeStateConfig config)
@@ -217,6 +264,11 @@ bool CalibRuntimeState::WriteSavePair(const CalibSavePair &pair)
     return m_impl->WriteSavePair(pair);
 }
 
+bool CalibRuntimeState::WriteImuSample(const ImuSample &sample)
+{
+    return m_impl->WriteImuSample(sample);
+}
+
 bool CalibRuntimeState::EnqueuePreview(const CalibStereoFrame &frame)
 {
     return m_impl->EnqueuePreview(frame);
@@ -227,9 +279,34 @@ CalibImuSampleResult CalibRuntimeState::StepImuSample()
     return m_impl->StepImuSample();
 }
 
+void CalibRuntimeState::RequestStop()
+{
+    m_impl->RequestStop();
+}
+
+bool CalibRuntimeState::FlushStorage()
+{
+    return m_impl->FlushStorage();
+}
+
+void CalibRuntimeState::MarkStorageFlushed()
+{
+    m_impl->MarkStorageFlushed();
+}
+
+bool CalibRuntimeState::StorageFlushed() const
+{
+    return m_impl->StorageFlushed();
+}
+
 bool CalibRuntimeState::Finalized() const
 {
     return m_impl->Finalized();
+}
+
+void CalibRuntimeState::FinalizeAfterStorageFlushed(bool sessionOk)
+{
+    m_impl->FinalizeAfterStorageFlushed(sessionOk);
 }
 
 void CalibRuntimeState::Finalize(bool sessionOk)

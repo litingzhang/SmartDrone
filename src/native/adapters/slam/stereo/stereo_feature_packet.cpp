@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <chrono>
 #include <climits>
-#include <cstring>
 
 #include "adapters/slam/stereo/descriptor_geometry.h"
 #include "adapters/slam/engine/slam_env.h"
@@ -13,8 +12,8 @@ namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
-constexpr size_t kStereoFeatureMaxLeftFeatures = 1200;
-constexpr size_t kStereoFeatureMaxLeftFeaturesLimit = 2500;
+constexpr size_t STEREO_FEATURE_MAX_LEFT_FEATURES = 1200;
+constexpr size_t STEREO_FEATURE_MAX_LEFT_FEATURES_LIMIT = 2500;
 using Core::Ports::IVisualDescriptorProvider;
 using Core::Ports::StereoFeatureObservationPacket;
 using Core::Ports::StereoFeaturePacket;
@@ -33,7 +32,7 @@ struct OrbStereoAugmentOptions {
     int maxHamming{60};
     int maxSecondBest{80};
     float ratio{0.85f};
-    float minZncc{kStereoMinZnccScore};
+    float minZncc{STEREO_MIN_ZNCC_SCORE};
 };
 struct OrbStereoAugmentFeatures {
     std::vector<cv::KeyPoint> leftKeypoints;
@@ -53,6 +52,15 @@ struct OrbStereoAugmentCandidateRequest {
     const cv::Mat *leftGray32f{nullptr};
     const cv::Mat *rightGray32f{nullptr};
     size_t leftIndex{0};
+};
+struct CollectOrbStereoAugmentCandidatesRequest {
+    const IVisualDescriptorProvider *leftProvider{nullptr};
+    const OrbStereoAugmentFeatures *features{nullptr};
+    const StereoFeatureObservationPacket *stereoData{nullptr};
+    const OrbStereoAugmentOptions *options{nullptr};
+    const cv::Mat *leftGray{nullptr};
+    const cv::Mat *rightGray{nullptr};
+    OrbStereoAugmentMatchState *matchState{nullptr};
 };
 struct StereoFeaturePacketBuildContext {
     const StereoFeaturePacketBuildInput *input{nullptr};
@@ -86,51 +94,42 @@ struct AllLeftStereoDescriptorRequest {
     const std::vector<cv::Point2f> *stereoLeftPoints{nullptr};
     const std::vector<cv::Point2f> *stereoRightPoints{nullptr};
 };
-uint64_t HashFloatValue(uint64_t hash, float value)
-{
-    uint32_t bits = 0;
-    static_assert(sizeof(bits) == sizeof(value), "unexpected float size");
-    std::memcpy(&bits, &value, sizeof(bits));
-    hash ^= static_cast<uint64_t>(bits);
-    hash *= 1099511628211ULL;
-    return hash;
-}
-uint64_t HashIntValue(uint64_t hash, int value)
-{
-    hash ^= static_cast<uint64_t>(static_cast<uint32_t>(value));
-    hash *= 1099511628211ULL;
-    return hash;
-}
-
-uint64_t HashMatSample(uint64_t hash, const cv::Mat &mat)
-{
-    hash = HashIntValue(hash, mat.rows);
-    hash = HashIntValue(hash, mat.cols);
-    hash = HashIntValue(hash, mat.type());
-    if (mat.empty()) {
-        return hash;
-    }
-    const int rowStride = std::max(1, mat.rows / 16);
-    if (mat.type() == CV_32F) {
-        const int colStride = std::max(1, mat.cols / 16);
-        for (int row = 0; row < mat.rows; row += rowStride) {
-            const float *data = mat.ptr<float>(row);
-            for (int col = 0; col < mat.cols; col += colStride) {
-                hash = HashFloatValue(hash, data[col]);
-            }
-        }
-    } else if (mat.type() == CV_8U) {
-        const int colStride = std::max(1, mat.cols / 32);
-        for (int row = 0; row < mat.rows; row += rowStride) {
-            const uint8_t *data = mat.ptr<uint8_t>(row);
-            for (int col = 0; col < mat.cols; col += colStride) {
-                hash ^= static_cast<uint64_t>(data[col]);
-                hash *= 1099511628211ULL;
-            }
-        }
-    }
-    return hash;
-}
+struct FinalizeStereoObservationsFromPairsRequest {
+    const IVisualDescriptorProvider *leftProvider{nullptr};
+    const IVisualDescriptorProvider *rightProvider{nullptr};
+    const cv::Mat *leftGray{nullptr};
+    const cv::Mat *rightGray{nullptr};
+    const std::vector<cv::Point2f> *leftPoints{nullptr};
+    const std::vector<cv::Point2f> *rightPoints{nullptr};
+    StereoFeatureObservationPacket *outData{nullptr};
+};
+struct FinalizeStereoObservationsWithAllLeftRequest {
+    const IVisualDescriptorProvider *leftProvider{nullptr};
+    const IVisualDescriptorProvider *rightProvider{nullptr};
+    const cv::Mat *leftGray{nullptr};
+    const cv::Mat *rightGray{nullptr};
+    const std::vector<cv::Point2f> *allLeftPoints{nullptr};
+    const std::vector<StereoMatchPair> *stereoMatches{nullptr};
+    const VisualFeatureSet *leftFeatures{nullptr};
+    const VisualFeatureSet *rightFeatures{nullptr};
+    StereoFeatureObservationPacket *outData{nullptr};
+};
+struct FilteredStereoPointPair {
+    std::vector<cv::Point2f> left;
+    std::vector<cv::Point2f> right;
+};
+struct AppendDescriptorStereoAugmentFeaturesRequest {
+    const IVisualDescriptorProvider *leftProvider{nullptr};
+    const IVisualDescriptorProvider *rightProvider{nullptr};
+    const cv::Mat *leftGray{nullptr};
+    const cv::Mat *rightGray{nullptr};
+    StereoFeatureObservationPacket *stereoData{nullptr};
+    size_t maxExtraPairs{0};
+};
+struct LeftOnlyAugmentFeatures {
+    std::vector<cv::KeyPoint> keypoints;
+    cv::Mat descriptors;
+};
 bool HasInputImages(const StereoFeaturePacketBuildInput &input)
 {
     return input.leftPrepared != nullptr && input.rightPrepared != nullptr &&
@@ -148,10 +147,7 @@ void AppendDescriptorLeftOnlyFeatures(
     StereoFeatureObservationPacket &stereoData, size_t maxLeftFeatures);
 
 size_t AppendDescriptorStereoAugmentFeatures(
-    const IVisualDescriptorProvider *leftProvider,
-    const IVisualDescriptorProvider *rightProvider, const cv::Mat &leftGray,
-    const cv::Mat &rightGray, StereoFeatureObservationPacket &stereoData,
-    size_t maxExtraPairs);
+    const AppendDescriptorStereoAugmentFeaturesRequest &request);
 StereoFeaturePacketBuildContext BuildPacketContext(
     const StereoFeaturePacketBuildInput &input)
 {
@@ -267,56 +263,70 @@ bool BuildStereoObservationsFromFeatureMatches(
     return true;
 }
 
-bool FinalizeStereoObservationsFromPairs(
-    const IVisualDescriptorProvider *leftProvider,
-    const IVisualDescriptorProvider *rightProvider, const cv::Mat &leftGray,
-    const cv::Mat &rightGray, const std::vector<cv::Point2f> &leftPoints,
-    const std::vector<cv::Point2f> &rightPoints,
+FilteredStereoPointPair FilterSafeStereoPoints(
+    const FinalizeStereoObservationsFromPairsRequest &request)
+{
+    FilteredStereoPointPair filtered;
+    filtered.left.reserve(request.leftPoints->size());
+    filtered.right.reserve(request.rightPoints->size());
+    const cv::Mat &leftGray = *request.leftGray;
+    const cv::Mat &rightGray = *request.rightGray;
+    const auto &leftPoints = *request.leftPoints;
+    const auto &rightPoints = *request.rightPoints;
+    for (size_t i = 0; i < leftPoints.size(); ++i) {
+        if (!IsPointSafeForDescriptor(leftPoints[i], leftGray) ||
+            !IsPointSafeForDescriptor(rightPoints[i], rightGray)) {
+            continue;
+        }
+        filtered.left.push_back(leftPoints[i]);
+        filtered.right.push_back(rightPoints[i]);
+    }
+    return filtered;
+}
+
+bool ComputeFilteredStereoDescriptors(
+    const FinalizeStereoObservationsFromPairsRequest &request,
+    const FilteredStereoPointPair &filtered,
     StereoFeatureObservationPacket &outData)
 {
+    if (filtered.left.empty() || filtered.left.size() != filtered.right.size()) {
+        return false;
+    }
+    if (!request.leftProvider->ComputeDescriptorsAtPoints(
+            *request.leftGray, filtered.left, outData.leftKeypoints,
+            outData.leftDescriptors) ||
+        !request.rightProvider->ComputeDescriptorsAtPoints(
+            *request.rightGray, filtered.right, outData.rightKeypoints,
+            outData.rightDescriptors)) {
+        return false;
+    }
+    return outData.leftKeypoints.size() == outData.rightKeypoints.size() &&
+           outData.leftDescriptors.rows == outData.rightDescriptors.rows &&
+           outData.leftDescriptors.rows ==
+               static_cast<int>(outData.leftKeypoints.size());
+}
+
+bool FinalizeStereoObservationsFromPairs(
+    const FinalizeStereoObservationsFromPairsRequest &request)
+{
+    const auto *leftProvider = request.leftProvider;
+    const auto *rightProvider = request.rightProvider;
+    const cv::Mat &leftGray = *request.leftGray;
+    const cv::Mat &rightGray = *request.rightGray;
+    const auto &leftPoints = *request.leftPoints;
+    const auto &rightPoints = *request.rightPoints;
+    StereoFeatureObservationPacket &outData = *request.outData;
     if (leftProvider == nullptr || rightProvider == nullptr || leftGray.empty() ||
         rightGray.empty() || leftPoints.empty() ||
         leftPoints.size() != rightPoints.size()) {
         return false;
     }
 
-    std::vector<cv::Point2f> filteredLeft;
-    std::vector<cv::Point2f> filteredRight;
-    filteredLeft.reserve(leftPoints.size());
-    filteredRight.reserve(rightPoints.size());
-    for (size_t i = 0; i < leftPoints.size(); ++i) {
-        if (!IsPointSafeForDescriptor(leftPoints[i], leftGray) ||
-            !IsPointSafeForDescriptor(rightPoints[i], rightGray)) {
-            continue;
-        }
-        filteredLeft.push_back(leftPoints[i]);
-        filteredRight.push_back(rightPoints[i]);
-    }
-
-    if (filteredLeft.empty() || filteredLeft.size() != filteredRight.size()) {
+    const FilteredStereoPointPair filtered = FilterSafeStereoPoints(request);
+    if (!ComputeFilteredStereoDescriptors(request, filtered, outData)) {
         return false;
     }
 
-    std::vector<cv::KeyPoint> leftKeypoints;
-    std::vector<cv::KeyPoint> rightKeypoints;
-    cv::Mat leftDescriptors;
-    cv::Mat rightDescriptors;
-    if (!leftProvider->ComputeDescriptorsAtPoints(
-            leftGray, filteredLeft, leftKeypoints, leftDescriptors) ||
-        !rightProvider->ComputeDescriptorsAtPoints(
-            rightGray, filteredRight, rightKeypoints, rightDescriptors)) {
-        return false;
-    }
-    if (leftKeypoints.size() != rightKeypoints.size() ||
-        leftDescriptors.rows != rightDescriptors.rows ||
-        leftDescriptors.rows != static_cast<int>(leftKeypoints.size())) {
-        return false;
-    }
-
-    outData.leftKeypoints = std::move(leftKeypoints);
-    outData.rightKeypoints = std::move(rightKeypoints);
-    outData.leftDescriptors = std::move(leftDescriptors);
-    outData.rightDescriptors = std::move(rightDescriptors);
     outData.matchedStereoPairs = true;
     outData.leftToRightMatch.resize(outData.leftKeypoints.size());
     for (size_t i = 0; i < outData.leftToRightMatch.size(); ++i) {
@@ -377,7 +387,7 @@ OrbStereoAugmentOptions LoadOrbStereoAugmentOptions()
         "SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_RATIO", 0.85f, 0.1f, 1.0f);
     options.minZncc =
         EnvFloatValueClamped("SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_MIN_ZNCC",
-                             kStereoMinZnccScore, -1.0f, 1.0f);
+                             STEREO_MIN_ZNCC_SCORE, -1.0f, 1.0f);
     return options;
 }
 
@@ -391,22 +401,22 @@ bool PassesOrbStereoRatioTest(int bestDistance, int secondDistance,
            bestDistance <= static_cast<int>(options.ratio * secondDistance);
 }
 
-int FindBestOrbStereoRightIndex(
-    const IVisualDescriptorProvider &leftProvider,
-    const OrbStereoAugmentFeatures &features, const cv::Mat &rightGray,
-    size_t leftIndex, int &bestDistance, int &secondDistance)
+int FindBestOrbStereoRightIndex(const OrbStereoAugmentCandidateRequest &request,
+                                int &bestDistance, int &secondDistance)
 {
+    const OrbStereoAugmentFeatures &features = *request.features;
+    const size_t leftIndex = request.leftIndex;
     const cv::Point2f &leftPt = features.leftKeypoints[leftIndex].pt;
     int bestRight = -1;
     bestDistance = INT_MAX;
     secondDistance = INT_MAX;
     for (size_t ri = 0; ri < features.rightKeypoints.size(); ++ri) {
         const cv::Point2f &rightPt = features.rightKeypoints[ri].pt;
-        if (!IsPointSafeForDescriptor(rightPt, rightGray) ||
+        if (!IsPointSafeForDescriptor(rightPt, *request.rightGray) ||
             !IsStereoPairGeometricallyValid(leftPt, rightPt)) {
             continue;
         }
-        const int distance = leftProvider.DescriptorDistance(
+        const int distance = request.leftProvider->DescriptorDistance(
             features.leftDescriptors.row(static_cast<int>(leftIndex)),
             features.rightDescriptors.row(static_cast<int>(ri)));
         if (distance < bestDistance) {
@@ -428,9 +438,8 @@ bool BuildOrbStereoAugmentCandidate(
     const OrbStereoAugmentOptions &options = *request.options;
     int bestDistance = INT_MAX;
     int secondDistance = INT_MAX;
-    const int bestRight = FindBestOrbStereoRightIndex(
-        *request.leftProvider, features, *request.rightGray, request.leftIndex,
-        bestDistance, secondDistance);
+    const int bestRight =
+        FindBestOrbStereoRightIndex(request, bestDistance, secondDistance);
     if (bestRight < 0 ||
         !PassesOrbStereoRatioTest(bestDistance, secondDistance, options)) {
         return false;
@@ -469,32 +478,31 @@ void SortOrbStereoAugmentCandidates(
 }
 
 std::vector<OrbStereoAugmentCandidate> CollectOrbStereoAugmentCandidates(
-    const IVisualDescriptorProvider &leftProvider,
-    const OrbStereoAugmentFeatures &features,
-    const StereoFeatureObservationPacket &stereoData,
-    const OrbStereoAugmentOptions &options, const cv::Mat &leftGray,
-    const cv::Mat &rightGray, OrbStereoAugmentMatchState &matchState)
+    const CollectOrbStereoAugmentCandidatesRequest &request)
 {
+    const OrbStereoAugmentFeatures &features = *request.features;
+    const StereoFeatureObservationPacket &stereoData = *request.stereoData;
+    OrbStereoAugmentMatchState &matchState = *request.matchState;
     cv::Mat leftGray32f;
     cv::Mat rightGray32f;
-    leftGray.convertTo(leftGray32f, CV_32F);
-    rightGray.convertTo(rightGray32f, CV_32F);
+    request.leftGray->convertTo(leftGray32f, CV_32F);
+    request.rightGray->convertTo(rightGray32f, CV_32F);
 
     std::vector<OrbStereoAugmentCandidate> candidates;
     candidates.reserve(
         std::min(features.leftKeypoints.size(), features.rightKeypoints.size()));
     for (size_t li = 0; li < features.leftKeypoints.size(); ++li) {
         const cv::Point2f &leftPt = features.leftKeypoints[li].pt;
-        if (!IsPointSafeForDescriptor(leftPt, leftGray) ||
+        if (!IsPointSafeForDescriptor(leftPt, *request.leftGray) ||
             IsPointNearExistingKeypoint(leftPt, stereoData.leftKeypoints)) {
             continue;
         }
 
         OrbStereoAugmentCandidate candidate;
-        const OrbStereoAugmentCandidateRequest request{
-            &leftProvider, &features, &options, &rightGray, &leftGray32f,
-            &rightGray32f, li};
-        if (!BuildOrbStereoAugmentCandidate(request, candidate)) {
+        const OrbStereoAugmentCandidateRequest candidateRequest{
+            request.leftProvider, request.features, request.options,
+            request.rightGray, &leftGray32f, &rightGray32f, li};
+        if (!BuildOrbStereoAugmentCandidate(candidateRequest, candidate)) {
             continue;
         }
         const size_t rightIndex = static_cast<size_t>(candidate.rightIndex);
@@ -698,13 +706,13 @@ bool MergeAllLeftStereoDescriptors(AllLeftStereoDescriptorData &data,
 }
 
 bool FinalizeStereoObservationsFromPairsWithAllLeft(
-    const IVisualDescriptorProvider *leftProvider,
-    const IVisualDescriptorProvider *rightProvider, const cv::Mat &leftGray,
-    const cv::Mat &rightGray, const std::vector<cv::Point2f> &allLeftPoints,
-    const std::vector<StereoMatchPair> &stereoMatches,
-    const VisualFeatureSet &leftFeatures, const VisualFeatureSet &rightFeatures,
-    StereoFeatureObservationPacket &outData)
+    const FinalizeStereoObservationsWithAllLeftRequest &request)
 {
+    const auto *leftProvider = request.leftProvider;
+    const auto *rightProvider = request.rightProvider;
+    const cv::Mat &leftGray = *request.leftGray;
+    const cv::Mat &rightGray = *request.rightGray;
+    const auto &allLeftPoints = *request.allLeftPoints;
     if (leftProvider == nullptr || rightProvider == nullptr || leftGray.empty() ||
         rightGray.empty() || allLeftPoints.empty()) {
         return false;
@@ -718,7 +726,8 @@ bool FinalizeStereoObservationsFromPairsWithAllLeft(
     std::vector<cv::Point2f> stereoLeftPoints;
     std::vector<cv::Point2f> stereoRightPoints;
     const SafeStereoMatchPointRequest matchRequest{
-        &leftGray, &rightGray, &stereoMatches, &leftFeatures, &rightFeatures};
+        &leftGray, &rightGray, request.stereoMatches, request.leftFeatures,
+        request.rightFeatures};
     if (!CollectSafeStereoMatchPoints(matchRequest,
                                       stereoLeftPoints, stereoRightPoints)) {
         return false;
@@ -731,7 +740,7 @@ bool FinalizeStereoObservationsFromPairsWithAllLeft(
     if (!ComputeAllLeftStereoDescriptors(descriptorRequest, descriptorData)) {
         return false;
     }
-    return MergeAllLeftStereoDescriptors(descriptorData, outData);
+    return MergeAllLeftStereoDescriptors(descriptorData, *request.outData);
 }
 
 bool TryNativeDescriptorInject(const StereoFeaturePacketBuildContext &context,
@@ -767,10 +776,10 @@ bool TryAllLeftGeometricDepth(const StereoFeaturePacketBuildContext &context,
     }
 
     return FinalizeStereoObservationsFromPairsWithAllLeft(
-        input.leftDescriptorProvider, input.rightDescriptorProvider,
-        *input.leftPrepared, *input.rightPrepared, *input.matchedLeftPoints,
-        *depthMatches, *input.leftFeatures, *input.rightFeatures,
-        packet.observations);
+        {input.leftDescriptorProvider, input.rightDescriptorProvider,
+         input.leftPrepared, input.rightPrepared, input.matchedLeftPoints,
+         depthMatches, input.leftFeatures, input.rightFeatures,
+         &packet.observations});
 }
 
 bool BuildBaseStereoObservations(const StereoFeaturePacketBuildContext &context,
@@ -784,9 +793,9 @@ bool BuildBaseStereoObservations(const StereoFeaturePacketBuildContext &context,
         return true;
     }
     return FinalizeStereoObservationsFromPairs(
-        input.leftDescriptorProvider, input.rightDescriptorProvider,
-        *input.leftPrepared, *input.rightPrepared, *input.matchedLeftPoints,
-        *input.matchedRightPoints, packet.observations);
+        {input.leftDescriptorProvider, input.rightDescriptorProvider,
+         input.leftPrepared, input.rightPrepared, input.matchedLeftPoints,
+         input.matchedRightPoints, &packet.observations});
 }
 
 void AppendStereoAugmentFeatures(const StereoFeaturePacketBuildContext &context,
@@ -802,9 +811,9 @@ void AppendStereoAugmentFeatures(const StereoFeaturePacketBuildContext &context,
     const size_t maxExtraPairs = EnvSizeValueClamped(
         "SMART_DRONE_SP_LG_ORB_STEREO_AUGMENT_MAX_PAIRS", 96, 1, 512);
     packet.orbStereoAugmentPairs = AppendDescriptorStereoAugmentFeatures(
-        input.leftDescriptorProvider, input.rightDescriptorProvider,
-        *input.leftPrepared, *input.rightPrepared, packet.observations,
-        maxExtraPairs);
+        {input.leftDescriptorProvider, input.rightDescriptorProvider,
+         input.leftPrepared, input.rightPrepared, &packet.observations,
+         maxExtraPairs});
     packet.monoAugmentMs += std::chrono::duration<double, std::milli>(
                                 std::chrono::steady_clock::now() -
                                 augmentStartTp)
@@ -826,8 +835,8 @@ void AppendLeftOnlyAugmentFeatures(
     const auto augmentStartTp = std::chrono::steady_clock::now();
     const size_t maxLeftFeatures = EnvSizeValueClamped(
         "SMART_DRONE_STEREO_FEATURE_MAX_LEFT_FEATURES",
-        kStereoFeatureMaxLeftFeatures, kStereoFeatureMaxLeftFeatures,
-        kStereoFeatureMaxLeftFeaturesLimit);
+        STEREO_FEATURE_MAX_LEFT_FEATURES, STEREO_FEATURE_MAX_LEFT_FEATURES,
+        STEREO_FEATURE_MAX_LEFT_FEATURES_LIMIT);
     AppendDescriptorLeftOnlyFeatures(input.leftDescriptorProvider,
                                      *input.leftPrepared, packet.observations,
                                      maxLeftFeatures);
@@ -843,67 +852,90 @@ void ApplyMonoAugmentFeatures(const StereoFeaturePacketBuildContext &context,
     AppendStereoAugmentFeatures(context, packet);
     AppendLeftOnlyAugmentFeatures(context, packet);
 }
-
-void AppendDescriptorLeftOnlyFeatures(
-    const IVisualDescriptorProvider *leftProvider, const cv::Mat &leftGray,
+bool LoadLeftOnlyAugmentFeatures(const IVisualDescriptorProvider *leftProvider,
+                                 const cv::Mat &leftGray,
+                                 LeftOnlyAugmentFeatures &features)
+{
+    if (leftProvider == nullptr || leftGray.empty()) {
+        return false;
+    }
+    if (!leftProvider->DetectAndCompute(leftGray, features.keypoints,
+                                        features.descriptors)) {
+        return false;
+    }
+    return !features.keypoints.empty() && !features.descriptors.empty() &&
+           features.descriptors.type() == CV_8U &&
+           features.descriptors.rows == static_cast<int>(features.keypoints.size());
+}
+std::vector<int> SelectLeftOnlyAugmentRows(
+    const LeftOnlyAugmentFeatures &features, const cv::Mat &leftGray,
     StereoFeatureObservationPacket &stereoData, size_t maxLeftFeatures)
 {
-    if (leftProvider == nullptr || leftGray.empty() ||
-        stereoData.leftKeypoints.size() >= maxLeftFeatures) {
-        return;
-    }
-
-    std::vector<cv::KeyPoint> orbKeypoints;
-    cv::Mat orbDescriptors;
-    if (!leftProvider->DetectAndCompute(leftGray, orbKeypoints, orbDescriptors)) {
-        return;
-    }
-    if (orbKeypoints.empty() || orbDescriptors.empty() ||
-        orbDescriptors.type() != CV_8U ||
-        orbDescriptors.rows != static_cast<int>(orbKeypoints.size())) {
-        return;
-    }
-
     const size_t initialLeftCount = stereoData.leftKeypoints.size();
     std::vector<int> selectedRows;
     selectedRows.reserve(
-        std::min(orbKeypoints.size(), maxLeftFeatures - initialLeftCount));
-    for (size_t i = 0; i < orbKeypoints.size() &&
+        std::min(features.keypoints.size(), maxLeftFeatures - initialLeftCount));
+    for (size_t i = 0; i < features.keypoints.size() &&
                        initialLeftCount + selectedRows.size() < maxLeftFeatures;
          ++i) {
-        if (!IsPointSafeForDescriptor(orbKeypoints[i].pt, leftGray) ||
-            IsPointNearExistingKeypoint(orbKeypoints[i].pt,
+        if (!IsPointSafeForDescriptor(features.keypoints[i].pt, leftGray) ||
+            IsPointNearExistingKeypoint(features.keypoints[i].pt,
                                         stereoData.leftKeypoints)) {
             continue;
         }
-        stereoData.leftKeypoints.push_back(orbKeypoints[i]);
+        stereoData.leftKeypoints.push_back(features.keypoints[i]);
         selectedRows.push_back(static_cast<int>(i));
     }
-    if (selectedRows.empty()) {
-        return;
-    }
-
+    return selectedRows;
+}
+void MergeLeftOnlyAugmentDescriptors(const LeftOnlyAugmentFeatures &features,
+                                     const std::vector<int> &selectedRows,
+                                     StereoFeatureObservationPacket &stereoData)
+{
     cv::Mat mergedDescriptors;
     if (!stereoData.leftDescriptors.empty()) {
         stereoData.leftDescriptors.copyTo(mergedDescriptors);
     } else {
-        mergedDescriptors.create(0, orbDescriptors.cols, orbDescriptors.type());
+        mergedDescriptors.create(0, features.descriptors.cols,
+                                 features.descriptors.type());
     }
     for (int row : selectedRows) {
-        mergedDescriptors.push_back(orbDescriptors.row(row));
+        mergedDescriptors.push_back(features.descriptors.row(row));
     }
     stereoData.leftDescriptors = std::move(mergedDescriptors);
     if (!stereoData.leftToRightMatch.empty()) {
         stereoData.leftToRightMatch.resize(stereoData.leftKeypoints.size(), -1);
     }
 }
+void AppendDescriptorLeftOnlyFeatures(
+    const IVisualDescriptorProvider *leftProvider, const cv::Mat &leftGray,
+    StereoFeatureObservationPacket &stereoData, size_t maxLeftFeatures)
+{
+    if (stereoData.leftKeypoints.size() >= maxLeftFeatures) {
+        return;
+    }
+
+    LeftOnlyAugmentFeatures features;
+    if (!LoadLeftOnlyAugmentFeatures(leftProvider, leftGray, features)) {
+        return;
+    }
+    const std::vector<int> selectedRows = SelectLeftOnlyAugmentRows(
+        features, leftGray, stereoData, maxLeftFeatures);
+    if (selectedRows.empty()) {
+        return;
+    }
+    MergeLeftOnlyAugmentDescriptors(features, selectedRows, stereoData);
+}
 
 size_t AppendDescriptorStereoAugmentFeatures(
-    const IVisualDescriptorProvider *leftProvider,
-    const IVisualDescriptorProvider *rightProvider, const cv::Mat &leftGray,
-    const cv::Mat &rightGray, StereoFeatureObservationPacket &stereoData,
-    size_t maxExtraPairs)
+    const AppendDescriptorStereoAugmentFeaturesRequest &request)
 {
+    const auto *leftProvider = request.leftProvider;
+    const auto *rightProvider = request.rightProvider;
+    const cv::Mat &leftGray = *request.leftGray;
+    const cv::Mat &rightGray = *request.rightGray;
+    StereoFeatureObservationPacket &stereoData = *request.stereoData;
+    const size_t maxExtraPairs = request.maxExtraPairs;
     if (leftProvider == nullptr || rightProvider == nullptr || leftGray.empty() ||
         rightGray.empty() || maxExtraPairs == 0) {
         return 0;
@@ -924,9 +956,9 @@ size_t AppendDescriptorStereoAugmentFeatures(
     matchState.bestRightDistance.assign(features.rightKeypoints.size(), INT_MAX);
     const OrbStereoAugmentOptions options = LoadOrbStereoAugmentOptions();
     std::vector<OrbStereoAugmentCandidate> candidates =
-        CollectOrbStereoAugmentCandidates(*leftProvider, features, stereoData,
-                                          options, leftGray, rightGray,
-                                          matchState);
+        CollectOrbStereoAugmentCandidates(
+            {leftProvider, &features, &stereoData, &options, &leftGray,
+             &rightGray, &matchState});
     if (candidates.empty()) {
         return 0;
     }
@@ -939,31 +971,6 @@ size_t AppendDescriptorStereoAugmentFeatures(
     return appended;
 }
 } // namespace
-uint64_t HashStereoFeatureObservations(
-    const Core::Ports::StereoFeatureObservationPacket &data)
-{
-    uint64_t hash = 1469598103934665603ULL;
-    hash = HashIntValue(hash, static_cast<int>(data.leftKeypoints.size()));
-    hash = HashIntValue(hash, static_cast<int>(data.rightKeypoints.size()));
-    hash = HashIntValue(hash, data.matchedStereoPairs ? 1 : 0);
-    const size_t leftCount = std::min<size_t>(data.leftKeypoints.size(), 512);
-    for (size_t i = 0; i < leftCount; ++i) {
-        hash = HashFloatValue(hash, data.leftKeypoints[i].pt.x);
-        hash = HashFloatValue(hash, data.leftKeypoints[i].pt.y);
-    }
-    const size_t rightCount = std::min<size_t>(data.rightKeypoints.size(), 512);
-    for (size_t i = 0; i < rightCount; ++i) {
-        hash = HashFloatValue(hash, data.rightKeypoints[i].pt.x);
-        hash = HashFloatValue(hash, data.rightKeypoints[i].pt.y);
-    }
-    const size_t matchCount = std::min<size_t>(data.leftToRightMatch.size(), 512);
-    for (size_t i = 0; i < matchCount; ++i) {
-        hash = HashIntValue(hash, data.leftToRightMatch[i]);
-    }
-    hash = HashMatSample(hash, data.leftDescriptors);
-    hash = HashMatSample(hash, data.rightDescriptors);
-    return hash;
-}
 bool BuildStereoFeaturePacket(
     const Core::Ports::StereoFeaturePacketBuildInput &input,
     Core::Ports::StereoFeaturePacket &packet)
@@ -988,10 +995,5 @@ bool DefaultStereoFeaturePacketBuilder::BuildPacket(
     Core::Ports::StereoFeaturePacket &packet) const
 {
     return BuildStereoFeaturePacket(input, packet);
-}
-uint64_t DefaultStereoFeaturePacketBuilder::HashStereoData(
-    const Core::Ports::StereoFeatureObservationPacket &data) const
-{
-    return HashStereoFeatureObservations(data);
 }
 } // namespace SmartDrone::Adapters::Slam

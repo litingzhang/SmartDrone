@@ -10,12 +10,12 @@ class DrdyGpio {
     ~DrdyGpio();
 
     bool Open(const std::string &chipPath, unsigned lineOffset);
-    bool WaitTs(int timeoutMs, int64_t &tsNsOut);
+    bool ReadReadyTimestamp(int64_t &tsNsOut);
 
   private:
     bool OpenChip(const std::string &chipPath);
     bool OpenLine(unsigned lineOffset);
-    bool WaitForGpiodEvent(int timeoutMs);
+    bool EdgeEventReady();
     void CloseGpiodResources();
     int64_t ReadLatestEventTimestamp();
 

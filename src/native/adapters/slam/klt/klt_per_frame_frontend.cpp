@@ -87,9 +87,11 @@ void RectifyKltPerFrameInput(SlamModeSharedState &state,
     if (request.requestVpiRemap && !state.m_lkMap1x.empty() &&
         !state.m_lkMap2x.empty()) {
         result.usedVpiRemap = VpiRemapCurrentStereo(
-            result.leftRect, result.rightRect, leftRect, rightRect,
-            state.m_lkPerFrameVpi, state.m_lkMap1x, state.m_lkMap1y,
-            state.m_lkMap2x, state.m_lkMap2y, state.m_lkPerFrameAccelLogged);
+            VpiRemapCurrentStereoRequest{
+                result.leftRect, result.rightRect, leftRect, rightRect,
+                state.m_lkPerFrameVpi, state.m_lkMap1x, state.m_lkMap1y,
+                state.m_lkMap2x, state.m_lkMap2y,
+                state.m_lkPerFrameAccelLogged});
     }
     if (!result.usedVpiRemap && !state.m_lkMap1x.empty() &&
         !state.m_lkMap2x.empty()) {
@@ -159,12 +161,12 @@ std::vector<cv::Point2f> SelectKltPerFramePreviousPoints(
 {
     std::vector<cv::Point2f> rawPreviousPoints;
     cv::goodFeaturesToTrack(state.m_lkPrevLeft, rawPreviousPoints,
-                            kLkGfttPerFrameMaxCorners, kLkGfttQualityLevel,
-                            kLkGfttMinDistancePx, cv::Mat(), kLkGfttBlockSize,
-                            false, kLkGfttHarrisK);
+                            LK_GFTT_PER_FRAME_MAX_CORNERS, LK_GFTT_QUALITY_LEVEL,
+                            LK_GFTT_MIN_DISTANCE_PX, cv::Mat(), LK_GFTT_BLOCK_SIZE,
+                            false, LK_GFTT_HARRIS_K);
     return SelectGfttPointsGridBalanced(
-        rawPreviousPoints, state.m_lkPrevLeft.size(), kLkGfttPerFrameMaxCorners,
-        kLkGfttPerFrameMaxCornersPerCell);
+        rawPreviousPoints, state.m_lkPrevLeft.size(), LK_GFTT_PER_FRAME_MAX_CORNERS,
+        LK_GFTT_PER_FRAME_MAX_CORNERS_PER_CELL);
 }
 
 bool ComputeKltPerFrameFlow(
@@ -236,6 +238,36 @@ double MsSince(std::chrono::steady_clock::time_point start,
     return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
+void TrackKltPerFrameAgainstPrevious(
+    SlamModeSharedState &state, const KltPerFrameAccelerationRequest &request,
+    KltPerFrameFrontendResult &result)
+{
+    const auto disparityStart = std::chrono::steady_clock::now();
+    KltPerFrameTrackingData tracking;
+    if (!ComputeKltPerFrameDisparity(state, request, result,
+                                     tracking.disparity)) {
+        ComputeCpuKltPerFrameDisparity(state, result, tracking.disparity);
+    }
+    const auto disparityEnd = std::chrono::steady_clock::now();
+    result.disparityMs = MsSince(disparityStart, disparityEnd);
+
+    const auto gfttStart = std::chrono::steady_clock::now();
+    tracking.previousPoints = SelectKltPerFramePreviousPoints(state);
+    const auto gfttEnd = std::chrono::steady_clock::now();
+    result.gfttMs = MsSince(gfttStart, gfttEnd);
+
+    const auto flowStart = std::chrono::steady_clock::now();
+    (void)ComputeKltPerFrameFlow(state, request, result, tracking);
+    ComputeKltPerFrameBackwardFlow(result, state, tracking);
+    const auto flowEnd = std::chrono::steady_clock::now();
+    result.flowMs = MsSince(flowStart, flowEnd);
+
+    const auto candidateStart = std::chrono::steady_clock::now();
+    BuildKltPerFrameObservations(state, result, tracking);
+    const auto candidateEnd = std::chrono::steady_clock::now();
+    result.candidateMs = MsSince(candidateStart, candidateEnd);
+}
+
 } // namespace
 
 KltPerFrameFrontendResult RunKltPerFrameFrontend(SlamModeSharedState &state,
@@ -262,30 +294,7 @@ KltPerFrameFrontendResult RunKltPerFrameFrontend(SlamModeSharedState &state,
         return result;
     }
 
-    const auto disparityStart = std::chrono::steady_clock::now();
-    KltPerFrameTrackingData tracking;
-    if (!ComputeKltPerFrameDisparity(state, request, result,
-                                     tracking.disparity)) {
-        ComputeCpuKltPerFrameDisparity(state, result, tracking.disparity);
-    }
-    const auto disparityEnd = std::chrono::steady_clock::now();
-    result.disparityMs = MsSince(disparityStart, disparityEnd);
-
-    const auto gfttStart = std::chrono::steady_clock::now();
-    tracking.previousPoints = SelectKltPerFramePreviousPoints(state);
-    const auto gfttEnd = std::chrono::steady_clock::now();
-    result.gfttMs = MsSince(gfttStart, gfttEnd);
-
-    const auto flowStart = std::chrono::steady_clock::now();
-    (void)ComputeKltPerFrameFlow(state, request, result, tracking);
-    ComputeKltPerFrameBackwardFlow(result, state, tracking);
-    const auto flowEnd = std::chrono::steady_clock::now();
-    result.flowMs = MsSince(flowStart, flowEnd);
-
-    const auto candidateStart = std::chrono::steady_clock::now();
-    BuildKltPerFrameObservations(state, result, tracking);
-    const auto candidateEnd = std::chrono::steady_clock::now();
-    result.candidateMs = MsSince(candidateStart, candidateEnd);
+    TrackKltPerFrameAgainstPrevious(state, request, result);
     return result;
 }
 
@@ -296,7 +305,7 @@ bool ShouldRefreshKltPerFrameReference(
     return !frontend.useKeyframeReference ||
            (state.m_lkFrameCount %
             static_cast<uint32_t>(std::max(1, frontend.keyframeInterval))) == 0 ||
-           inlierCount < std::max(kLkMinPnPInliers * 2, 24);
+           inlierCount < std::max(LK_MIN_PNP_INLIERS * 2, 24);
 }
 
 void UpdateKltPerFrameReferenceFrame(

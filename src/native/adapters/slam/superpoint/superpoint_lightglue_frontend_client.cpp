@@ -15,7 +15,7 @@ CreateSuperPointLightGlueFrontendClient()
 }
 
 const VisualFeatureFrontendClientRegistrar
-    kSuperPointLightGlueFrontendClientRegistration(
+    SUPER_POINT_LIGHT_GLUE_FRONTEND_CLIENT_REGISTRATION(
         FeatureFrontend::SuperPointLightGlue,
         &CreateSuperPointLightGlueFrontendClient);
 

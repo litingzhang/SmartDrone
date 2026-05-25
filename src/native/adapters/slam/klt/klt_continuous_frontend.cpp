@@ -7,19 +7,23 @@
 namespace SmartDrone::Adapters::Slam {
 namespace {
 
+struct ContinuousStereoTrackingResult {
+    std::vector<cv::Point2f> currentLeftPoints;
+    std::vector<cv::Point2f> currentRightPoints;
+    std::vector<uchar> leftStatus;
+    std::vector<uchar> rightStatus;
+};
+
 KltTrackedStereoPnpObservationBuilderOptions BuildContinuousObservationOptions(
     SlamModeSharedState &state, const KltContinuousFrontendResult &result,
-    const std::vector<cv::Point2f> &currentLeftPoints,
-    const std::vector<cv::Point2f> &currentRightPoints,
-    const std::vector<uchar> &leftStatus,
-    const std::vector<uchar> &rightStatus)
+    const ContinuousStereoTrackingResult &tracking)
 {
     KltTrackedStereoPnpObservationBuilderOptions options;
     options.previousTracks = &state.m_lkTracks;
-    options.currentLeftPoints = &currentLeftPoints;
-    options.currentRightPoints = &currentRightPoints;
-    options.leftStatus = &leftStatus;
-    options.rightStatus = &rightStatus;
+    options.currentLeftPoints = &tracking.currentLeftPoints;
+    options.currentRightPoints = &tracking.currentRightPoints;
+    options.leftStatus = &tracking.leftStatus;
+    options.rightStatus = &tracking.rightStatus;
     options.previousImageSize = state.m_lkPrevLeft.size();
     options.currentLeftImage = &result.leftRect;
     options.currentRightImage = &result.rightRect;
@@ -33,10 +37,7 @@ KltTrackedStereoPnpObservationBuilderOptions BuildContinuousObservationOptions(
 
 void TrackContinuousStereoPoints(SlamModeSharedState &state,
                                  const KltContinuousFrontendResult &result,
-                                 std::vector<cv::Point2f> &currentLeftPoints,
-                                 std::vector<cv::Point2f> &currentRightPoints,
-                                 std::vector<uchar> &leftStatus,
-                                 std::vector<uchar> &rightStatus)
+                                 ContinuousStereoTrackingResult &tracking)
 {
     const std::vector<cv::Point2f> previousLeftPoints =
         ExtractLkTrackLeftPoints(state.m_lkTracks);
@@ -46,12 +47,12 @@ void TrackContinuousStereoPoints(SlamModeSharedState &state,
     const std::vector<cv::Point2f> previousRightPoints =
         ExtractLkTrackRightPoints(state.m_lkTracks);
     Core::Ports::IPointTracker2d &pointTracker = state.PointTracker2d();
-    (void)pointTracker.TrackForwardBackward(state.m_lkPrevLeft, result.leftRect,
-                                            previousLeftPoints, currentLeftPoints,
-                                            leftStatus);
-    (void)pointTracker.TrackForwardBackward(state.m_lkPrevRight, result.rightRect,
-                                            previousRightPoints,
-                                            currentRightPoints, rightStatus);
+    (void)pointTracker.TrackForwardBackward(ForwardBackwardTrackingRequest{
+        state.m_lkPrevLeft, result.leftRect, previousLeftPoints,
+        tracking.currentLeftPoints, tracking.leftStatus});
+    (void)pointTracker.TrackForwardBackward(ForwardBackwardTrackingRequest{
+        state.m_lkPrevRight, result.rightRect, previousRightPoints,
+        tracking.currentRightPoints, tracking.rightStatus});
 }
 
 } // namespace
@@ -76,20 +77,14 @@ KltContinuousFrontendResult RunKltContinuousFrontend(SlamModeSharedState &state,
         SelectLkTracksGridBalanced(state.m_lkTracks, state.m_lkPrevLeft.size());
     std::vector<cv::Point2f> previousLeftPoints =
         ExtractLkTrackLeftPoints(state.m_lkTracks);
-    std::vector<cv::Point2f> currentLeftPoints;
-    std::vector<cv::Point2f> currentRightPoints;
-    std::vector<uchar> leftStatus;
-    std::vector<uchar> rightStatus;
-    TrackContinuousStereoPoints(state, result, currentLeftPoints,
-                                currentRightPoints, leftStatus, rightStatus);
+    ContinuousStereoTrackingResult tracking;
+    TrackContinuousStereoPoints(state, result, tracking);
     result.horizontalLateralFlow =
-        IsHorizontalLateralFlow(previousLeftPoints, currentLeftPoints, leftStatus,
-                                result.leftRect.size());
+        IsHorizontalLateralFlow(previousLeftPoints, tracking.currentLeftPoints,
+                                tracking.leftStatus, result.leftRect.size());
 
     const KltTrackedStereoPnpObservationBuilderOptions observationOptions =
-        BuildContinuousObservationOptions(state, result, currentLeftPoints,
-                                          currentRightPoints, leftStatus,
-                                          rightStatus);
+        BuildContinuousObservationOptions(state, result, tracking);
     result.observations =
         state.VisualPnpObservationBuilder().BuildTrackedStereoObservations(
             observationOptions);

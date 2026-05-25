@@ -23,7 +23,7 @@ struct StereoBatch {
 struct StereoAcquireRequest {
     Ports::ICameraProvider &camera;
     int slamInputFps{};
-    int timeoutMs{};
+    int staleFrameThresholdMs{};
     StereoBatch &out;
     FrameTimingTracker *timingTracker{};
 };
@@ -37,10 +37,10 @@ struct StereoFrameTiming {
 struct StereoGrabFailureLog {
     Ports::CameraDiagnostics diagnostics;
     uint64_t minTimestampNs{};
-    int timeoutMs{};
+    int staleFrameThresholdMs{};
     int clampedSlamInputFps{};
     bool packedStereo{};
-    const char *likelyCause{"stereo_frame_wait_timeout"};
+    const char *likelyCause{"no_eligible_stereo_frame"};
 };
 
 enum class StereoAcquireStatus : uint8_t {
@@ -53,15 +53,16 @@ class PerceptionPipeline {
   public:
     explicit PerceptionPipeline(PerceptionPipelineConfig cfg);
 
-    StereoAcquireStatus AcquireNextStereoBatch(Ports::ICameraProvider &camera, int slamInputFps, int timeoutMs,
-                                               StereoBatch &out, FrameTimingTracker *timingTracker = nullptr);
+    StereoAcquireStatus AcquireNextStereoBatch(Ports::ICameraProvider &camera, int slamInputFps,
+                                               int staleFrameThresholdMs, StereoBatch &out,
+                                               FrameTimingTracker *timingTracker = nullptr);
     StereoAcquireStatus AcquireNextStereoBatch(const StereoAcquireRequest &request);
 
     int ClampTargetFps(int requestedFps) const;
 
   private:
     uint64_t ComputeMinCaptureTimestampNs() const;
-    StereoAcquireStatus HandleGrabFailure(Ports::ICameraProvider &camera, int timeoutMs,
+    StereoAcquireStatus HandleGrabFailure(Ports::ICameraProvider &camera, int staleFrameThresholdMs,
                                           int clampedSlamInputFps, uint64_t minTimestampNs) const;
     const char *ClassifyGrabFailureCause(const StereoGrabFailureLog &failure) const;
     void LogGrabFailure(const StereoGrabFailureLog &failure) const;

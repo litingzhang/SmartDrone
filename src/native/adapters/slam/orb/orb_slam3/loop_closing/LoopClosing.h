@@ -62,8 +62,6 @@ public:
 
     void SetLocalMapper(LocalMapping* pLocalMapper);
 
-    // Main function
-    void Run();
     bool Step();
 
     void InsertKeyFrame(KeyFrame *pKF);

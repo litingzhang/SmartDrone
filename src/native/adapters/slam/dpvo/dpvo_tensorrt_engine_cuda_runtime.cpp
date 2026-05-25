@@ -1,6 +1,61 @@
 #include "adapters/slam/dpvo/dpvo_tensorrt_engine_cuda_runtime.h"
 
+#include <dlfcn.h>
+
+#include "adapters/slam/engine/slam_env.h"
+
 namespace SmartDrone::Adapters::Slam::DpvoTensorRtInternal {
+
+DpvoCudaKernelRuntime::~DpvoCudaKernelRuntime()
+{
+    Reset();
+}
+
+bool DpvoCudaKernelRuntime::Initialize(cudaStream_t stream, std::string *err)
+{
+    Reset();
+    if (!EnvFlagEnabled("SMART_DRONE_DPVO_CUDA_KERNELS", true)) {
+        if (err != nullptr) {
+            *err = "disabled by SMART_DRONE_DPVO_CUDA_KERNELS";
+        }
+        return false;
+    }
+    if (stream == nullptr) {
+        if (err != nullptr) {
+            *err = "CUDA stream is not initialized";
+        }
+        return false;
+    }
+    if (!OpenLibraries(err) || !LoadNvrtcSymbols(err) ||
+        !LoadDriverSymbols(err) || !EnsureDriverContext(err) ||
+        !CompileAndLoad(err) || !RunCorrelationSmoke(stream, err)) {
+        Reset();
+        return false;
+    }
+    m_ready = true;
+    return true;
+}
+
+template <typename T>
+bool DpvoCudaKernelRuntime::LoadSymbol(void *handle, const char *name, T *out,
+                                       std::string *err)
+{
+    if (handle == nullptr || name == nullptr || out == nullptr) {
+        return false;
+    }
+    dlerror();
+    void *symbol = dlsym(handle, name);
+    const char *dlErr = dlerror();
+    if (dlErr != nullptr || symbol == nullptr) {
+        if (err != nullptr) {
+            *err = std::string("missing CUDA symbol ") + name + ": " +
+                   (dlErr != nullptr ? dlErr : "not found");
+        }
+        return false;
+    }
+    *out = reinterpret_cast<T>(symbol);
+    return true;
+}
 
 bool DpvoCudaKernelRuntime::OpenLibraryAny(std::initializer_list<const char *> names, void **handle,
                     std::string *err)
@@ -134,9 +189,9 @@ bool DpvoCudaKernelRuntime::EnsureDriverContext(std::string *err)
     return false;
 }
 
-bool DpvoCudaKernelRuntime::CompileAndLoad(std::string *err)
+const char *DpvoCudaKernelRuntime::CudaKernelSource() const
 {
-    static constexpr const char *kSource = R"CUDA(
+    return R"CUDA(
 extern "C" __global__ void dpvo_corr_patch3_smoke(
 const float *patch,
 const float *fmap,
@@ -317,17 +372,26 @@ for (int i = start; i < end; ++i) {
 }
 }
 )CUDA";
+}
 
-    nvrtcProgram program = nullptr;
-    if (!CheckNvrtc(m_nvrtcCreateProgram(&program, kSource,
-                                         "dpvo_native_kernels.cu", 0, nullptr,
-                                         nullptr),
-                    "nvrtcCreateProgram", err)) {
-        return false;
-    }
+bool DpvoCudaKernelRuntime::CreateNvrtcProgram(nvrtcProgram &program,
+                                               std::string *err) const
+{
+    return CheckNvrtc(m_nvrtcCreateProgram(&program, CudaKernelSource(),
+                                           "dpvo_native_kernels.cu", 0,
+                                           nullptr, nullptr),
+                      "nvrtcCreateProgram", err);
+}
+
+bool DpvoCudaKernelRuntime::CompileNvrtcProgram(nvrtcProgram program,
+                                                std::string *err) const
+{
     const char *options[] = {"--gpu-architecture=compute_72", "--std=c++14"};
     const nvrtcResult compileResult =
         m_nvrtcCompileProgram(program, 2, options);
+    if (compileResult == NVRTC_SUCCESS) {
+        return true;
+    }
     size_t logSize = 0;
     (void)m_nvrtcGetProgramLogSize(program, &logSize);
     std::string log;
@@ -335,158 +399,242 @@ for (int i = start; i < end; ++i) {
         log.resize(logSize);
         (void)m_nvrtcGetProgramLog(program, log.data());
     }
-    if (compileResult != NVRTC_SUCCESS) {
-        if (err != nullptr) {
-            const char *text = m_nvrtcGetErrorString != nullptr
-                                   ? m_nvrtcGetErrorString(compileResult)
-                                   : "unknown NVRTC error";
-            *err = std::string("nvrtcCompileProgram failed: ") +
-                   (text != nullptr ? text : "") +
-                   (log.empty() ? std::string{} : "\n" + log);
-        }
-        (void)m_nvrtcDestroyProgram(&program);
-        return false;
+    if (err != nullptr) {
+        const char *text = m_nvrtcGetErrorString != nullptr
+                               ? m_nvrtcGetErrorString(compileResult)
+                               : "unknown NVRTC error";
+        *err = std::string("nvrtcCompileProgram failed: ") +
+               (text != nullptr ? text : "") +
+               (log.empty() ? std::string{} : "\n" + log);
     }
+    return false;
+}
+
+bool DpvoCudaKernelRuntime::ExtractNvrtcPtx(nvrtcProgram program,
+                                            std::vector<char> &ptx,
+                                            std::string *err) const
+{
     size_t ptxSize = 0;
     if (!CheckNvrtc(m_nvrtcGetPTXSize(program, &ptxSize), "nvrtcGetPTXSize",
                     err)) {
-        (void)m_nvrtcDestroyProgram(&program);
         return false;
     }
-    std::vector<char> ptx(ptxSize);
-    if (!CheckNvrtc(m_nvrtcGetPTX(program, ptx.data()), "nvrtcGetPTX", err)) {
-        (void)m_nvrtcDestroyProgram(&program);
-        return false;
-    }
-    (void)m_nvrtcDestroyProgram(&program);
+    ptx.resize(ptxSize);
+    return CheckNvrtc(m_nvrtcGetPTX(program, ptx.data()), "nvrtcGetPTX", err);
+}
 
-    if (!CheckDriver(m_cuModuleLoadData(&m_module, ptx.data()),
-                     "cuModuleLoadData", err) ||
-        !CheckDriver(m_cuModuleGetFunction(&m_corrSmokeKernel, m_module,
-                                           "dpvo_corr_patch3_smoke"),
-                     "cuModuleGetFunction", err) ||
-        !CheckDriver(m_cuModuleGetFunction(&m_corrBatchKernel, m_module,
-                                           "dpvo_corr_batch"),
-                     "cuModuleGetFunction", err) ||
-        !CheckDriver(m_cuModuleGetFunction(&m_softAggKernel, m_module,
-                                           "dpvo_softagg_expand"),
-                     "cuModuleGetFunction", err)) {
+bool DpvoCudaKernelRuntime::LoadCudaModule(const std::vector<char> &ptx,
+                                           std::string *err)
+{
+    return CheckDriver(m_cuModuleLoadData(&m_module, ptx.data()),
+                       "cuModuleLoadData", err);
+}
+
+bool DpvoCudaKernelRuntime::BindCudaKernel(CUfunction &function,
+                                           const char *name, std::string *err)
+{
+    return CheckDriver(m_cuModuleGetFunction(&function, m_module, name),
+                       "cuModuleGetFunction", err);
+}
+
+bool DpvoCudaKernelRuntime::BindCudaKernels(std::string *err)
+{
+    return BindCudaKernel(m_corrSmokeKernel, "dpvo_corr_patch3_smoke", err) &&
+           BindCudaKernel(m_corrBatchKernel, "dpvo_corr_batch", err) &&
+           BindCudaKernel(m_softAggKernel, "dpvo_softagg_expand", err);
+}
+
+bool DpvoCudaKernelRuntime::CompileAndLoad(std::string *err)
+{
+    nvrtcProgram program = nullptr;
+    if (!CreateNvrtcProgram(program, err)) {
+        return false;
+    }
+    std::vector<char> ptx;
+    const bool compiled = CompileNvrtcProgram(program, err) &&
+                          ExtractNvrtcPtx(program, ptx, err);
+    (void)m_nvrtcDestroyProgram(&program);
+    return compiled && LoadCudaModule(ptx, err) && BindCudaKernels(err);
+}
+
+DpvoCudaKernelRuntime::CorrelationSmokeCase
+DpvoCudaKernelRuntime::BuildCorrelationSmokeCase() const
+{
+    CorrelationSmokeCase smoke;
+    smoke.patch.assign(static_cast<size_t>(smoke.channels) * 9U, 0.0f);
+    smoke.fmap.assign(static_cast<size_t>(smoke.channels) *
+                          static_cast<size_t>(smoke.height) *
+                          static_cast<size_t>(smoke.width),
+                      0.0f);
+    for (size_t i = 0; i < smoke.patch.size(); ++i) {
+        smoke.patch[i] = 0.01f * static_cast<float>(i + 1U);
+    }
+    for (size_t i = 0; i < smoke.fmap.size(); ++i) {
+        smoke.fmap[i] = 0.02f * static_cast<float>((i % 17U) + 1U);
+    }
+    smoke.expected = ComputeCorrelationSmokeExpected(smoke);
+    return smoke;
+}
+
+float DpvoCudaKernelRuntime::ComputeCorrelationSmokeExpected(
+    const CorrelationSmokeCase &smoke) const
+{
+    float expected = 0.0f;
+    for (int c = 0; c < smoke.channels; ++c) {
+        for (int py = 0; py < 3; ++py) {
+            for (int px = 0; px < 3; ++px) {
+                const int p = py * 3 + px;
+                const int yy = smoke.y + py - 1;
+                const int xx = smoke.x + px - 1;
+                const size_t patchIndex =
+                    static_cast<size_t>(c) * 9U + static_cast<size_t>(p);
+                const size_t fmapIndex =
+                    (static_cast<size_t>(c) *
+                         static_cast<size_t>(smoke.height) +
+                     static_cast<size_t>(yy)) *
+                        static_cast<size_t>(smoke.width) +
+                    static_cast<size_t>(xx);
+                expected += smoke.patch[patchIndex] * smoke.fmap[fmapIndex];
+            }
+        }
+    }
+    return expected;
+}
+
+bool DpvoCudaKernelRuntime::AllocateCorrelationSmokeBuffers(
+    const CorrelationSmokeCase &smoke, CorrelationSmokeDeviceBuffers &buffers,
+    std::string *err) const
+{
+    if (cudaMalloc(&buffers.patch, smoke.patch.size() * sizeof(float)) !=
+            cudaSuccess ||
+        cudaMalloc(&buffers.fmap, smoke.fmap.size() * sizeof(float)) !=
+            cudaSuccess ||
+        cudaMalloc(&buffers.out, sizeof(float)) != cudaSuccess) {
+        if (err != nullptr) {
+            *err = "cudaMalloc failed during DPVO CUDA smoke test";
+        }
         return false;
     }
     return true;
 }
-bool DpvoCudaKernelRuntime::RunCorrelationSmoke(cudaStream_t stream, std::string *err)
-{
-    constexpr int channels = 4;
-    constexpr int height = 5;
-    constexpr int width = 5;
-    constexpr int x = 2;
-    constexpr int y = 2;
-    std::vector<float> patch(static_cast<size_t>(channels) * 9U, 0.0f);
-    std::vector<float> fmap(static_cast<size_t>(channels) * height * width,
-                            0.0f);
-    for (size_t i = 0; i < patch.size(); ++i) {
-        patch[i] = 0.01f * static_cast<float>(i + 1U);
-    }
-    for (size_t i = 0; i < fmap.size(); ++i) {
-        fmap[i] = 0.02f * static_cast<float>((i % 17U) + 1U);
-    }
-    float expected = 0.0f;
-    for (int c = 0; c < channels; ++c) {
-        for (int py = 0; py < 3; ++py) {
-            for (int px = 0; px < 3; ++px) {
-                const int p = py * 3 + px;
-                const int yy = y + py - 1;
-                const int xx = x + px - 1;
-                expected +=
-                    patch[static_cast<size_t>(c) * 9U + static_cast<size_t>(p)] *
-                    fmap[(static_cast<size_t>(c) * height + static_cast<size_t>(yy)) *
-                             width +
-                         static_cast<size_t>(xx)];
-            }
-        }
-    }
 
-    void *patchDev = nullptr;
-    void *fmapDev = nullptr;
-    void *outDev = nullptr;
-    auto cleanup = [&]() {
-        if (patchDev != nullptr) {
-            cudaFree(patchDev);
-        }
-        if (fmapDev != nullptr) {
-            cudaFree(fmapDev);
-        }
-        if (outDev != nullptr) {
-            cudaFree(outDev);
-        }
-    };
-    if (cudaMalloc(&patchDev, patch.size() * sizeof(float)) != cudaSuccess ||
-        cudaMalloc(&fmapDev, fmap.size() * sizeof(float)) != cudaSuccess ||
-        cudaMalloc(&outDev, sizeof(float)) != cudaSuccess) {
-        if (err != nullptr) {
-            *err = "cudaMalloc failed during DPVO CUDA smoke test";
-        }
-        cleanup();
-        return false;
-    }
+bool DpvoCudaKernelRuntime::CopyCorrelationSmokeInputs(
+    const CorrelationSmokeCase &smoke,
+    const CorrelationSmokeDeviceBuffers &buffers, cudaStream_t stream,
+    std::string *err) const
+{
     cudaError_t rc =
-        cudaMemcpyAsync(patchDev, patch.data(), patch.size() * sizeof(float),
+        cudaMemcpyAsync(buffers.patch, smoke.patch.data(),
+                        smoke.patch.size() * sizeof(float),
                         cudaMemcpyHostToDevice, stream);
     if (rc == cudaSuccess) {
-        rc = cudaMemcpyAsync(fmapDev, fmap.data(), fmap.size() * sizeof(float),
+        rc = cudaMemcpyAsync(buffers.fmap, smoke.fmap.data(),
+                             smoke.fmap.size() * sizeof(float),
                              cudaMemcpyHostToDevice, stream);
     }
-    if (rc != cudaSuccess) {
-        if (err != nullptr) {
-            *err = std::string(
-                       "cudaMemcpyAsync failed during DPVO CUDA smoke test: ") +
-                   cudaGetErrorString(rc);
-        }
-        cleanup();
-        return false;
+    if (rc == cudaSuccess) {
+        return true;
     }
+    if (err != nullptr) {
+        *err = std::string(
+                   "cudaMemcpyAsync failed during DPVO CUDA smoke test: ") +
+               cudaGetErrorString(rc);
+    }
+    return false;
+}
 
-    CUdeviceptr patchArg = reinterpret_cast<CUdeviceptr>(patchDev);
-    CUdeviceptr fmapArg = reinterpret_cast<CUdeviceptr>(fmapDev);
-    CUdeviceptr outArg = reinterpret_cast<CUdeviceptr>(outDev);
-    int channelsArg = channels;
-    int heightArg = height;
-    int widthArg = width;
-    int xArg = x;
-    int yArg = y;
+bool DpvoCudaKernelRuntime::LaunchCorrelationSmokeKernel(
+    const CorrelationSmokeCase &smoke,
+    const CorrelationSmokeDeviceBuffers &buffers, cudaStream_t stream,
+    std::string *err)
+{
+    CUdeviceptr patchArg = reinterpret_cast<CUdeviceptr>(buffers.patch);
+    CUdeviceptr fmapArg = reinterpret_cast<CUdeviceptr>(buffers.fmap);
+    CUdeviceptr outArg = reinterpret_cast<CUdeviceptr>(buffers.out);
+    int channelsArg = smoke.channels;
+    int heightArg = smoke.height;
+    int widthArg = smoke.width;
+    int xArg = smoke.x;
+    int yArg = smoke.y;
     void *args[] = {&patchArg, &fmapArg, &outArg, &channelsArg,
                     &heightArg, &widthArg, &xArg, &yArg};
-    if (!CheckDriver(m_cuLaunchKernel(m_corrSmokeKernel, 1, 1, 1, 32, 1, 1,
-                                      32 * sizeof(float),
-                                      reinterpret_cast<CUstream>(stream), args,
-                                      nullptr),
-                     "cuLaunchKernel", err)) {
-        cleanup();
-        return false;
-    }
-    float got = 0.0f;
-    rc = cudaMemcpyAsync(&got, outDev, sizeof(float), cudaMemcpyDeviceToHost,
-                         stream);
+    return CheckDriver(
+        m_cuLaunchKernel(m_corrSmokeKernel, 1, 1, 1, 32, 1, 1,
+                         32 * sizeof(float), reinterpret_cast<CUstream>(stream),
+                         args, nullptr),
+        "cuLaunchKernel", err);
+}
+
+bool DpvoCudaKernelRuntime::ReadCorrelationSmokeOutput(
+    const CorrelationSmokeDeviceBuffers &buffers, cudaStream_t stream,
+    float &got, std::string *err) const
+{
+    cudaError_t rc = cudaMemcpyAsync(&got, buffers.out, sizeof(float),
+                                     cudaMemcpyDeviceToHost, stream);
     if (rc == cudaSuccess) {
         rc = cudaStreamSynchronize(stream);
     }
-    cleanup();
-    if (rc != cudaSuccess) {
-        if (err != nullptr) {
-            *err = std::string("CUDA smoke synchronization failed: ") +
-                   cudaGetErrorString(rc);
-        }
-        return false;
+    if (rc == cudaSuccess) {
+        return true;
     }
-    if (std::fabs(got - expected) > 1e-4f) {
+    if (err != nullptr) {
+        *err = std::string("CUDA smoke synchronization failed: ") +
+               cudaGetErrorString(rc);
+    }
+    return false;
+}
+
+bool DpvoCudaKernelRuntime::ValidateCorrelationSmokeOutput(
+    const CorrelationSmokeCase &smoke, float got, std::string *err) const
+{
+    if (std::fabs(got - smoke.expected) > 1e-4f) {
         if (err != nullptr) {
-            *err = "CUDA smoke mismatch expected=" + std::to_string(expected) +
+            *err = "CUDA smoke mismatch expected=" +
+                   std::to_string(smoke.expected) +
                    " got=" + std::to_string(got);
         }
         return false;
     }
-    m_smokeExpected = expected;
+    return true;
+}
+
+void DpvoCudaKernelRuntime::ReleaseCorrelationSmokeBuffers(
+    CorrelationSmokeDeviceBuffers &buffers) const
+{
+    if (buffers.patch != nullptr) {
+        cudaFree(buffers.patch);
+        buffers.patch = nullptr;
+    }
+    if (buffers.fmap != nullptr) {
+        cudaFree(buffers.fmap);
+        buffers.fmap = nullptr;
+    }
+    if (buffers.out != nullptr) {
+        cudaFree(buffers.out);
+        buffers.out = nullptr;
+    }
+}
+
+bool DpvoCudaKernelRuntime::RunCorrelationSmoke(cudaStream_t stream,
+                                                std::string *err)
+{
+    const CorrelationSmokeCase smoke = BuildCorrelationSmokeCase();
+    CorrelationSmokeDeviceBuffers buffers;
+    if (!AllocateCorrelationSmokeBuffers(smoke, buffers, err) ||
+        !CopyCorrelationSmokeInputs(smoke, buffers, stream, err) ||
+        !LaunchCorrelationSmokeKernel(smoke, buffers, stream, err)) {
+        ReleaseCorrelationSmokeBuffers(buffers);
+        return false;
+    }
+    float got = 0.0f;
+    const bool outputOk =
+        ReadCorrelationSmokeOutput(buffers, stream, got, err) &&
+        ValidateCorrelationSmokeOutput(smoke, got, err);
+    ReleaseCorrelationSmokeBuffers(buffers);
+    if (!outputOk) {
+        return false;
+    }
+    m_smokeExpected = smoke.expected;
     m_smokeGot = got;
     return true;
 }

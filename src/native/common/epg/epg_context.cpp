@@ -155,11 +155,18 @@ TypeCatalog &TypeCatalog::Global()
     return catalog;
 }
 
+TypeCatalog::TypeCatalog()
+{
+    std::atomic_store_explicit(&m_snapshot,
+                               std::make_shared<const CatalogSnapshot>(),
+                               std::memory_order_release);
+}
+
 std::string TypeCatalog::ReflectedTaskName(std::type_index taskType) const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    const auto it = m_taskNamesByType.find(taskType);
-    if (it == m_taskNamesByType.end()) {
+    std::shared_ptr<const CatalogSnapshot> snapshot = LoadSnapshot();
+    const auto it = snapshot->taskNamesByType.find(taskType);
+    if (it == snapshot->taskNamesByType.end()) {
         throw std::runtime_error("missing reflected EventPipelineGraph task type");
     }
     return it->second;
@@ -185,8 +192,8 @@ TypeCatalog::TaskFactoryResolver TypeCatalog::MakeTaskFactoryResolver(
 
 void TypeCatalog::RegisterReflectedMessageTypes(Registry &registry) const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (const auto &message : m_messages) {
+    std::shared_ptr<const CatalogSnapshot> snapshot = LoadSnapshot();
+    for (const auto &message : snapshot->messages) {
         message.second(registry);
     }
 }
@@ -200,17 +207,15 @@ void TypeCatalog::RegisterReflectedTaskTypes(
         throw std::runtime_error("EventPipelineGraph task factory resolver must be callable");
     }
 
+    std::shared_ptr<const CatalogSnapshot> snapshot = LoadSnapshot();
     std::vector<TaskReflectionInfo> reflectedTasks;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        reflectedTasks.reserve(taskTypes.size());
-        for (const auto &taskType : taskTypes) {
-            const auto it = m_tasks.find(taskType);
-            if (it == m_tasks.end()) {
-                throw std::runtime_error("missing reflected EventPipelineGraph task type: " + taskType);
-            }
-            reflectedTasks.push_back(it->second);
+    reflectedTasks.reserve(taskTypes.size());
+    for (const auto &taskType : taskTypes) {
+        const auto it = snapshot->tasks.find(taskType);
+        if (it == snapshot->tasks.end()) {
+            throw std::runtime_error("missing reflected EventPipelineGraph task type: " + taskType);
         }
+        reflectedTasks.push_back(it->second);
     }
 
     for (const auto &task : reflectedTasks) {
@@ -220,6 +225,22 @@ void TypeCatalog::RegisterReflectedTaskTypes(
         }
         registry.RegisterTaskFactory(task.name, task.inputs, task.outputs, std::move(factory));
     }
+}
+
+std::shared_ptr<const TypeCatalog::CatalogSnapshot>
+TypeCatalog::LoadSnapshot() const
+{
+    return std::atomic_load_explicit(&m_snapshot, std::memory_order_acquire);
+}
+
+bool TypeCatalog::ReplaceSnapshot(
+    std::shared_ptr<const CatalogSnapshot> &expected,
+    std::shared_ptr<const CatalogSnapshot> next)
+{
+    return std::atomic_compare_exchange_weak_explicit(&m_snapshot, &expected,
+                                                      std::move(next),
+                                                      std::memory_order_acq_rel,
+                                                      std::memory_order_acquire);
 }
 
 } // namespace Epg

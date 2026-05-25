@@ -53,7 +53,7 @@ void ApplySlamRuntimePacing(Epg::GraphConfig &config, const UnifiedConfig &cfg)
 {
     ValidateEpgTaskRuntimeTuning(EpgManifestForDomain(EpgDomain::SlamSession),
                                  config, SLAM_RUNTIME_TUNING);
-    OverrideTaskInterval(config, "SlamResourceTask", kSlamResourcePollInterval);
+    OverrideTaskInterval(config, "SlamResourceTask", SLAM_RESOURCE_POLL_INTERVAL);
     OverrideTaskInterval(config, "SlamClockTask",
                          SlamInputInterval(cfg.app.runtime.slamInputFps,
                                            cfg.app.camera.fps));

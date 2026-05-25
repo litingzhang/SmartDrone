@@ -1,12 +1,11 @@
 #include "core/application/state/pose_postprocessor.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
-#include <cstdlib>
 #include <iostream>
 #include <string>
 
+#include "common/environment.h"
 #include "common/time_utils.h"
 
 namespace SmartDrone::Core::Application {
@@ -14,33 +13,6 @@ namespace SmartDrone::Core::Application {
 namespace {
 
 using PoseEstimate = SmartDrone::Core::Ports::PoseEstimate;
-
-bool EnvFlagEnabled(const char *name, bool defaultValue)
-{
-    const char *value = std::getenv(name);
-    if (value == nullptr || *value == '\0') {
-        return defaultValue;
-    }
-    std::string normalized(value);
-    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return !(normalized == "0" || normalized == "false" || normalized == "off" || normalized == "no" ||
-             normalized == "disabled");
-}
-
-float EnvFloatValueClamped(const char *name, float fallback, float minValue, float maxValue)
-{
-    const char *value = std::getenv(name);
-    if (value == nullptr || *value == '\0') {
-        return fallback;
-    }
-    char *end = nullptr;
-    const float parsed = std::strtof(value, &end);
-    if (end == value || !std::isfinite(parsed)) {
-        return fallback;
-    }
-    return std::clamp(parsed, minValue, maxValue);
-}
 
 void NormalizeQuat(float &w, float &x, float &y, float &z)
 {
@@ -143,7 +115,7 @@ void BlendQuatToward(const PoseEstimate &from, const PoseEstimate &to, float sca
 Sophus::SE3f PosePostprocessor::ContinuityMapper::MapPose(unsigned long mapId, bool trackingUsable,
                                                           const Sophus::SE3f &rawPoseWc)
 {
-    if (mapId != kInvalidMapId && (!haveMapId || mapId != lastMapId)) {
+    if (mapId != INVALID_MAP_ID && (!haveMapId || mapId != lastMapId)) {
         pendingReset = haveMapId;
         haveMapId = true;
         lastMapId = mapId;
@@ -201,7 +173,7 @@ PoseEstimate PosePostprocessor::StartupAligner::AlignPose(const PoseEstimate &po
         const float worldZ = havePublishedPose ? holdPose.z : 0.0f;
         zOffset = worldZ - poseNed.z;
         haveZOffset = true;
-        weakUntilUs = nowUs + kWeakHoldUs;
+        weakUntilUs = nowUs + WEAK_HOLD_US;
     }
 
     PoseEstimate out = poseNed;
@@ -261,7 +233,7 @@ void PosePostprocessor::StartupAligner::ApplyRangeProtection(PoseEstimate &, uin
     if (latestRange.signalQuality == 0 || !std::isfinite(latestRange.currentDistance)) {
         return;
     }
-    if (latestRange.currentDistance >= kRangeHardFloorM) {
+    if (latestRange.currentDistance >= RANGE_HARD_FLOOR_M) {
         return;
     }
 }
@@ -280,7 +252,8 @@ PosePostprocessor::OutputGuard::HandleInvalidPose(const GuardRequest &request)
         return BuildResult(request.pose, request.quality, false, 0.0f, 0.0f);
     }
     ++guardHitCount;
-    if (EnvFlagEnabled("SMART_DRONE_ONLINE_POSE_GUARD_DFX", false)) {
+    if (SmartDrone::Common::EnvFlagEnabled(
+            "SMART_DRONE_ONLINE_POSE_GUARD_DFX", false)) {
         std::cerr << "[pose_guard] invalid pose replaced with last published pose hits=" << guardHitCount << "\n";
     }
     CommitPose(lastPose, request.frameNs);
@@ -313,7 +286,8 @@ PosePostprocessor::OutputGuard::ClampPose(const GuardRequest &request, float raw
 void PosePostprocessor::OutputGuard::MaybeLogClamp(int64_t frameNs, float rawStepM, float maxStepM, float rawRotRad,
                                                    float maxRotRad)
 {
-    if (!EnvFlagEnabled("SMART_DRONE_ONLINE_POSE_GUARD_DFX", false)) {
+    if (!SmartDrone::Common::EnvFlagEnabled(
+            "SMART_DRONE_ONLINE_POSE_GUARD_DFX", false)) {
         return;
     }
     const bool timeToLog = frameNs <= 0 || lastLogFrameNs <= 0 || frameNs - lastLogFrameNs > 500000000LL;
@@ -329,7 +303,8 @@ void PosePostprocessor::OutputGuard::MaybeLogClamp(int64_t frameNs, float rawSte
 PosePostprocessor::OutputGuard::GuardResult
 PosePostprocessor::OutputGuard::GuardPose(const GuardRequest &request)
 {
-    if (!EnvFlagEnabled("SMART_DRONE_ONLINE_POSE_STEP_GUARD", true)) {
+    if (!SmartDrone::Common::EnvFlagEnabled(
+            "SMART_DRONE_ONLINE_POSE_STEP_GUARD", true)) {
         if (request.trackingUsable && request.quality != PoseQuality::Lost && IsFinitePose(request.pose)) {
             CommitPose(request.pose, request.frameNs);
         }
@@ -368,9 +343,11 @@ PosePostprocessor::OutputGuard::GuardPose(const GuardRequest &request)
 float PosePostprocessor::OutputGuard::ComputeAllowedStep(int64_t frameNs) const
 {
     const float maxFrameStep =
-        EnvFloatValueClamped("SMART_DRONE_ONLINE_POSE_GUARD_MAX_STEP_M", 0.18f, 0.02f, 2.0f);
+        SmartDrone::Common::EnvFloatValueClamped(
+            "SMART_DRONE_ONLINE_POSE_GUARD_MAX_STEP_M", 0.18f, 0.02f, 2.0f);
     const float maxSpeed =
-        EnvFloatValueClamped("SMART_DRONE_ONLINE_POSE_GUARD_MAX_SPEED_MPS", 3.0f, 0.1f, 20.0f);
+        SmartDrone::Common::EnvFloatValueClamped(
+            "SMART_DRONE_ONLINE_POSE_GUARD_MAX_SPEED_MPS", 3.0f, 0.1f, 20.0f);
     if (!haveLastPose || frameNs <= lastFrameNs) {
         return maxFrameStep;
     }
@@ -385,9 +362,11 @@ float PosePostprocessor::OutputGuard::ComputeAllowedStep(int64_t frameNs) const
 float PosePostprocessor::OutputGuard::ComputeAllowedRotation(int64_t frameNs) const
 {
     const float maxFrameRot =
-        EnvFloatValueClamped("SMART_DRONE_ONLINE_POSE_GUARD_MAX_ROT_RAD", 0.12f, 0.01f, 1.5f);
+        SmartDrone::Common::EnvFloatValueClamped(
+            "SMART_DRONE_ONLINE_POSE_GUARD_MAX_ROT_RAD", 0.12f, 0.01f, 1.5f);
     const float maxRotSpeed =
-        EnvFloatValueClamped("SMART_DRONE_ONLINE_POSE_GUARD_MAX_ROT_RPS", 2.5f, 0.1f, 20.0f);
+        SmartDrone::Common::EnvFloatValueClamped(
+            "SMART_DRONE_ONLINE_POSE_GUARD_MAX_ROT_RPS", 2.5f, 0.1f, 20.0f);
     if (!haveLastPose || frameNs <= lastFrameNs) {
         return maxFrameRot;
     }
@@ -452,14 +431,14 @@ bool PosePostprocessor::VelocityTracker::RawVelocityUsable(const RawVelocity &ve
     if (!std::isfinite(velocity.vx) || !std::isfinite(velocity.vy) || !std::isfinite(velocity.vz)) {
         return false;
     }
-    return std::fabs(velocity.vx) <= kMaxHorizontalSpeedMps && std::fabs(velocity.vy) <= kMaxHorizontalSpeedMps &&
-           std::fabs(velocity.vz) <= kMaxVerticalSpeedMps;
+    return std::fabs(velocity.vx) <= MAX_HORIZONTAL_SPEED_MPS && std::fabs(velocity.vy) <= MAX_HORIZONTAL_SPEED_MPS &&
+           std::fabs(velocity.vz) <= MAX_VERTICAL_SPEED_MPS;
 }
 
 void PosePostprocessor::VelocityTracker::UpdateFilteredVelocity(const RawVelocity &velocity, float dt)
 {
-    const float alphaXY = dt / (kHorizontalTauSec + dt);
-    const float alphaZ = dt / (kVerticalTauSec + dt);
+    const float alphaXY = dt / (HORIZONTAL_TAU_SEC + dt);
+    const float alphaZ = dt / (VERTICAL_TAU_SEC + dt);
     if (!haveFilteredVelocity) {
         filteredVelocity.vx = velocity.vx;
         filteredVelocity.vy = velocity.vy;

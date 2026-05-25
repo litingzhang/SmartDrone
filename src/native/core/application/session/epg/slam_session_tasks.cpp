@@ -15,8 +15,6 @@ constexpr Epg::PortId STATUS_OUTPUT_PORT = 1;
 constexpr Epg::PortId POSE_POSTPROCESS_STATUS_OUTPUT_PORT = 4;
 constexpr Epg::PortId DFX_STATUS_OUTPUT_PORT = 0;
 constexpr Epg::PortId PREVIEW_READY_OUTPUT_PORT = 0;
-constexpr std::array<Epg::PortId, 4> PUBLISHED_FRAME_FAN_OUT_PORTS{
-    0, 1, 2, 3};
 constexpr std::array<Epg::PortId, 4> TRACKED_FRAME_INPUT_PORTS{0, 1, 2, 3};
 constexpr std::array<Epg::PortId, 13> SLAM_MONITOR_STATUS_INPUT_PORTS{
     0,
@@ -185,29 +183,6 @@ bool ValidPublishedFrame(const std::shared_ptr<SlamPublishedFrame> &frame)
     return frame && frame->sessionId != 0 && frame->frame;
 }
 
-bool SamePublishedFrame(const std::shared_ptr<SlamPublishedFrame> &lhs,
-                        const std::shared_ptr<SlamPublishedFrame> &rhs)
-{
-    return ValidPublishedFrame(lhs) && ValidPublishedFrame(rhs) &&
-           lhs->sessionId == rhs->sessionId && lhs->frame == rhs->frame;
-}
-
-bool AllPendingFramesReady(
-    const std::array<std::shared_ptr<SlamPublishedFrame>, 4> &frames)
-{
-    return SamePublishedFrame(frames[0], frames[1]) &&
-           SamePublishedFrame(frames[0], frames[2]) &&
-           SamePublishedFrame(frames[0], frames[3]);
-}
-
-void ResetPendingFrames(
-    std::array<std::shared_ptr<SlamPublishedFrame>, 4> &frames)
-{
-    for (auto &frame : frames) {
-        frame.reset();
-    }
-}
-
 void RunPublishedOutputTask(Epg::TaskContext &context,
                             SlamSessionRuntimeService &service,
                             PublishedOutputFn outputFn)
@@ -223,7 +198,7 @@ void RunPublishedOutputTask(Epg::TaskContext &context,
         return;
     }
 
-    context.Push(0, published);
+    context.Push(0, std::move(published));
     PushSlamStatus(context, result.sessionOk, false, STATUS_OUTPUT_PORT);
 }
 
@@ -534,10 +509,7 @@ void SlamPosePostprocessTask::OnTick(Epg::TaskContext &context)
         return;
     }
 
-    for (const Epg::PortId port : PUBLISHED_FRAME_FAN_OUT_PORTS) {
-        PushSlamPublishedFrame(context, port, tracked->sessionId,
-                               result.frame);
-    }
+    PushSlamPublishedFrame(context, 0, tracked->sessionId, result.frame);
 }
 
 SlamPointCloudTask::SlamPointCloudTask(
@@ -573,16 +545,10 @@ void SlamDfxTask::OnTick(Epg::TaskContext &context)
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
         return;
     }
-    for (Epg::PortId port = 0; port < m_pendingFrames.size(); ++port) {
-        if (auto frame = context.TryPopLatest<SlamPublishedFrame>(port)) {
-            m_pendingFrames[port] = std::move(frame);
-        }
-    }
-    if (!AllPendingFramesReady(m_pendingFrames)) {
+    const auto published = context.TryPopLatest<SlamPublishedFrame>(0);
+    if (!ValidPublishedFrame(published)) {
         return;
     }
-    const auto published = m_pendingFrames[0];
-    ResetPendingFrames(m_pendingFrames);
 
     SlamTaskStepResult result =
         m_service->EmitDfx(published->sessionId, *published->frame);
@@ -617,6 +583,7 @@ void SlamUdpTask::OnTick(Epg::TaskContext &context)
 
     PushSlamPreviewReady(context, PREVIEW_READY_OUTPUT_PORT,
                          published->sessionId, published->frame);
+    context.Push(1, std::move(published));
     PushSlamStatus(context, result.sessionOk, false, STATUS_OUTPUT_PORT);
 }
 

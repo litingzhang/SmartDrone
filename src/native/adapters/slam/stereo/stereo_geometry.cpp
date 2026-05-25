@@ -12,8 +12,8 @@ namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
-constexpr float kStereoZnccRefineSearchRadiusPx = 10.0f;
-constexpr float kStereoZnccAroundDisparitySearchRadiusPx = 96.0f;
+constexpr float STEREO_ZNCC_REFINE_SEARCH_RADIUS_PX = 10.0f;
+constexpr float STEREO_ZNCC_AROUND_DISPARITY_SEARCH_RADIUS_PX = 96.0f;
 
 struct ZnccSearchRange {
     int minRightX{0};
@@ -37,23 +37,23 @@ bool HasZnccImages(const cv::Mat &leftGray32f, const cv::Mat &rightGray32f)
 
 bool IsPatchCenterInside(const cv::Mat &image, const cv::Point2f &point)
 {
-    return point.x >= static_cast<float>(kStereoPatchRadiusPx) &&
-           point.y >= static_cast<float>(kStereoPatchRadiusPx) &&
-           point.x < static_cast<float>(image.cols - kStereoPatchRadiusPx) &&
-           point.y < static_cast<float>(image.rows - kStereoPatchRadiusPx);
+    return point.x >= static_cast<float>(STEREO_PATCH_RADIUS_PX) &&
+           point.y >= static_cast<float>(STEREO_PATCH_RADIUS_PX) &&
+           point.x < static_cast<float>(image.cols - STEREO_PATCH_RADIUS_PX) &&
+           point.y < static_cast<float>(image.rows - STEREO_PATCH_RADIUS_PX);
 }
 
 int RightImageMaxPatchCenterX(const cv::Mat &rightGray32f)
 {
-    return rightGray32f.cols - kStereoPatchRadiusPx - 1;
+    return rightGray32f.cols - STEREO_PATCH_RADIUS_PX - 1;
 }
 
 ZnccSearchRange MakeFullDisparitySearchRange(const cv::Mat &rightGray32f,
                                              const cv::Point2f &leftPt)
 {
     const int minRightX = static_cast<int>(
-        std::ceil(std::max(static_cast<float>(kStereoPatchRadiusPx),
-                           leftPt.x - kStereoMaxDisparityPx)));
+        std::ceil(std::max(static_cast<float>(STEREO_PATCH_RADIUS_PX),
+                           leftPt.x - STEREO_MAX_DISPARITY_PX)));
     const int maxRightX = static_cast<int>(std::floor(std::min(
         leftPt.x - StereoMinDisparityPx(),
         static_cast<float>(RightImageMaxPatchCenterX(rightGray32f)))));
@@ -64,8 +64,8 @@ ZnccSearchRange MakeRefineSearchRange(const cv::Mat &rightGray32f,
                                       const cv::Point2f &leftPt,
                                       const cv::Point2f &predictedRightPt)
 {
-    const float minRightX = std::max(static_cast<float>(kStereoPatchRadiusPx),
-                                     leftPt.x - kStereoMaxDisparityPx);
+    const float minRightX = std::max(static_cast<float>(STEREO_PATCH_RADIUS_PX),
+                                     leftPt.x - STEREO_MAX_DISPARITY_PX);
     const float maxRightX = std::min(
         leftPt.x - StereoMinDisparityPx(),
         static_cast<float>(RightImageMaxPatchCenterX(rightGray32f)));
@@ -73,9 +73,9 @@ ZnccSearchRange MakeRefineSearchRange(const cv::Mat &rightGray32f,
         return {1, 0};
     }
     return {static_cast<int>(std::floor(std::max(
-                minRightX, predictedRightPt.x - kStereoZnccRefineSearchRadiusPx))),
+                minRightX, predictedRightPt.x - STEREO_ZNCC_REFINE_SEARCH_RADIUS_PX))),
             static_cast<int>(std::ceil(std::min(
-                maxRightX, predictedRightPt.x + kStereoZnccRefineSearchRadiusPx)))};
+                maxRightX, predictedRightPt.x + STEREO_ZNCC_REFINE_SEARCH_RADIUS_PX)))};
 }
 
 ZnccSearchRange MakeExpectedDisparitySearchRange(
@@ -84,13 +84,13 @@ ZnccSearchRange MakeExpectedDisparitySearchRange(
 {
     const float centerRightX = leftPt.x - expectedDisparity;
     const int minRightX = static_cast<int>(std::ceil(
-        std::max({static_cast<float>(kStereoPatchRadiusPx),
-                  leftPt.x - kStereoMaxDisparityPx,
-                  centerRightX - kStereoZnccAroundDisparitySearchRadiusPx})));
+        std::max({static_cast<float>(STEREO_PATCH_RADIUS_PX),
+                  leftPt.x - STEREO_MAX_DISPARITY_PX,
+                  centerRightX - STEREO_ZNCC_AROUND_DISPARITY_SEARCH_RADIUS_PX})));
     const int maxRightX = static_cast<int>(std::floor(std::min(
         {leftPt.x - StereoMinDisparityPx(),
          static_cast<float>(RightImageMaxPatchCenterX(rightGray32f)),
-         centerRightX + kStereoZnccAroundDisparitySearchRadiusPx})));
+         centerRightX + STEREO_ZNCC_AROUND_DISPARITY_SEARCH_RADIUS_PX})));
     return {minRightX, maxRightX};
 }
 
@@ -130,7 +130,7 @@ bool SearchBestZnccRightPoint(const ZnccSearchRequest &request,
     if (selectedRank != nullptr) {
         *selectedRank = bestRank;
     }
-    return bestScore >= kTemporalStereoMinZnccScore &&
+    return bestScore >= TEMPORAL_STEREO_MIN_ZNCC_SCORE &&
            IsStereoPairGeometricallyValid(*request.leftPt, rightPt);
 }
 
@@ -139,8 +139,8 @@ bool SearchBestZnccRightPoint(const ZnccSearchRequest &request,
 float StereoMinDisparityPx()
 {
     return EnvFloatValueClamped("SMART_DRONE_STEREO_FEATURE_MIN_DISPARITY_PX",
-                                kStereoMinDisparityPx, 0.05f,
-                                kStereoMaxDisparityPx);
+                                STEREO_MIN_DISPARITY_PX, 0.05f,
+                                STEREO_MAX_DISPARITY_PX);
 }
 
 bool ComputePatchZncc(const cv::Mat &leftGray32f, const cv::Point2f &leftPt,
@@ -152,7 +152,7 @@ bool ComputePatchZncc(const cv::Mat &leftGray32f, const cv::Point2f &leftPt,
         return false;
     }
 
-    const int patchSize = 2 * kStereoPatchRadiusPx + 1;
+    const int patchSize = 2 * STEREO_PATCH_RADIUS_PX + 1;
     if (!IsPatchCenterInside(leftGray32f, leftPt) ||
         !IsPatchCenterInside(rightGray32f, rightPt)) {
         return false;
@@ -194,18 +194,20 @@ bool IsStereoPairGeometricallyValid(const cv::Point2f &leftPt,
 {
     const float yDelta = std::fabs(leftPt.y - rightPt.y);
     const float disparity = leftPt.x - rightPt.x;
-    return yDelta <= kStereoMaxEpipolarDeltaPx &&
+    return yDelta <= STEREO_MAX_EPIPOLAR_DELTA_PX &&
            disparity >= StereoMinDisparityPx() &&
-           disparity <= kStereoMaxDisparityPx;
+           disparity <= STEREO_MAX_DISPARITY_PX;
 }
 
-bool RefineRightPointByStereoZncc(const cv::Mat &leftGray32f,
-                                  const cv::Point2f &leftPt,
-                                  const cv::Mat &rightGray32f,
-                                  const cv::Point2f &predictedRightPt,
-                                  cv::Point2f &refinedRightPt,
-                                  float &bestScore)
+bool RefineRightPointByStereoZncc(
+    const RefineRightPointByStereoZnccRequest &request)
 {
+    const cv::Mat &leftGray32f = request.leftGray32f;
+    const cv::Point2f &leftPt = request.leftPt;
+    const cv::Mat &rightGray32f = request.rightGray32f;
+    const cv::Point2f &predictedRightPt = request.predictedRightPt;
+    cv::Point2f &refinedRightPt = request.refinedRightPt;
+    float &bestScore = request.bestScore;
     bestScore = -1.0f;
     refinedRightPt = predictedRightPt;
     if (!HasZnccImages(leftGray32f, rightGray32f)) {
@@ -223,14 +225,15 @@ bool RefineRightPointByStereoZncc(const cv::Mat &leftGray32f,
         IsStereoPairGeometricallyValid(leftPt, predictedRightPt) &&
         ComputePatchZncc(leftGray32f, leftPt, rightGray32f, predictedRightPt,
                          predictedScore) &&
-        predictedScore >= kTemporalStereoMinZnccScore;
+        predictedScore >= TEMPORAL_STEREO_MIN_ZNCC_SCORE;
 
     float searchScore = havePredictedScore ? predictedScore : -1.0f;
     float searchRank = -1.0f;
     cv::Point2f searchRightPt = refinedRightPt;
-    ZnccSearchRequest request{&leftGray32f, &leftPt, &rightGray32f, range,
-                              0.015f, leftPt.x - predictedRightPt.x, true};
-    if (SearchBestZnccRightPoint(request, searchRightPt, searchScore,
+    ZnccSearchRequest searchRequest{
+        &leftGray32f, &leftPt, &rightGray32f, range, 0.015f,
+        leftPt.x - predictedRightPt.x, true};
+    if (SearchBestZnccRightPoint(searchRequest, searchRightPt, searchScore,
                                  &searchRank) &&
         (!havePredictedScore || searchRank > predictedScore + 0.03f)) {
         bestScore = searchScore;
@@ -238,7 +241,7 @@ bool RefineRightPointByStereoZncc(const cv::Mat &leftGray32f,
     } else if (havePredictedScore) {
         bestScore = predictedScore;
     }
-    return bestScore >= kTemporalStereoMinZnccScore &&
+    return bestScore >= TEMPORAL_STEREO_MIN_ZNCC_SCORE &&
            IsStereoPairGeometricallyValid(leftPt, refinedRightPt);
 }
 
@@ -262,13 +265,15 @@ bool FindRightPointByStereoZncc(const cv::Mat &leftGray32f,
     return SearchBestZnccRightPoint(request, rightPt, bestScore);
 }
 
-bool FindRightPointByStereoZnccAroundDisparity(const cv::Mat &leftGray32f,
-                                               const cv::Point2f &leftPt,
-                                               const cv::Mat &rightGray32f,
-                                               float expectedDisparity,
-                                               cv::Point2f &rightPt,
-                                               float &bestScore)
+bool FindRightPointByStereoZnccAroundDisparity(
+    const FindRightPointByStereoZnccAroundDisparityRequest &request)
 {
+    const cv::Mat &leftGray32f = request.leftGray32f;
+    const cv::Point2f &leftPt = request.leftPt;
+    const cv::Mat &rightGray32f = request.rightGray32f;
+    const float expectedDisparity = request.expectedDisparity;
+    cv::Point2f &rightPt = request.rightPt;
+    float &bestScore = request.bestScore;
     bestScore = -1.0f;
     if (!HasZnccImages(leftGray32f, rightGray32f) ||
         !(expectedDisparity > 0.0f) || !std::isfinite(expectedDisparity)) {
@@ -283,23 +288,24 @@ bool FindRightPointByStereoZnccAroundDisparity(const cv::Mat &leftGray32f,
                                           rightPt, bestScore);
     }
 
-    const ZnccSearchRequest request{&leftGray32f, &leftPt, &rightGray32f,
-                                    range, 0.0015f, expectedDisparity, true};
-    return SearchBestZnccRightPoint(request, rightPt, bestScore);
+    const ZnccSearchRequest searchRequest{
+        &leftGray32f, &leftPt, &rightGray32f, range, 0.0015f,
+        expectedDisparity, true};
+    return SearchBestZnccRightPoint(searchRequest, rightPt, bestScore);
 }
 
 float ComputeStereoCandidateQuality(float descriptorScore, float zncc,
                                     float epipolarErrorPx, float disparity)
 {
     const float descriptorTerm =
-        std::clamp((descriptorScore - kStereoMinDescriptorSimilarity) /
-                       std::max(1e-3f, 1.0f - kStereoMinDescriptorSimilarity),
+        std::clamp((descriptorScore - STEREO_MIN_DESCRIPTOR_SIMILARITY) /
+                       std::max(1e-3f, 1.0f - STEREO_MIN_DESCRIPTOR_SIMILARITY),
                    0.0f, 1.0f);
     const float znccTerm = std::clamp((zncc + 1.0f) * 0.5f, 0.0f, 1.0f);
     const float epipolarPenalty = std::clamp(
-        epipolarErrorPx / std::max(1e-3f, kStereoMaxEpipolarDeltaPx), 0.0f, 1.0f);
+        epipolarErrorPx / std::max(1e-3f, STEREO_MAX_EPIPOLAR_DELTA_PX), 0.0f, 1.0f);
     const float disparityPenalty =
-        (disparity < 2.0f || disparity > kStereoMaxDisparityPx * 0.85f) ? 0.25f
+        (disparity < 2.0f || disparity > STEREO_MAX_DISPARITY_PX * 0.85f) ? 0.25f
                                                                         : 0.0f;
     return std::clamp(0.50f * descriptorTerm + 0.35f * znccTerm +
                           0.15f * (1.0f - epipolarPenalty) - disparityPenalty,
@@ -338,8 +344,8 @@ FilterStereoPairsByDisparityConsistency(
     std::nth_element(absDeviation.begin(), madIt, absDeviation.end());
     const float mad = *madIt;
     const float tolerance =
-        std::max(kStereoDisparityMinTolerancePx,
-                 kStereoDisparityMadScale * std::max(mad, 1.0f));
+        std::max(STEREO_DISPARITY_MIN_TOLERANCE_PX,
+                 STEREO_DISPARITY_MAD_SCALE * std::max(mad, 1.0f));
 
     std::vector<Core::Ports::StereoMatchPair> filtered;
     filtered.reserve(matches.size());
