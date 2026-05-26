@@ -390,13 +390,22 @@ std::vector<SmartDrone::Core::Ports::ImuReading> ReplayImuProvider::PopWindow(in
     while (m_cursor < m_dataset.ImuSamples().size() && m_dataset.ImuSamples()[m_cursor].timestampNs < fromNs) {
         ++m_cursor;
     }
-    size_t index = m_cursor;
+    const size_t includePreviousIndex =
+        (m_cursor > 0 && m_dataset.ImuSamples()[m_cursor - 1].timestampNs < fromNs)
+            ? (m_cursor - 1)
+            : m_cursor;
+
+    size_t index = includePreviousIndex;
     while (index < m_dataset.ImuSamples().size()) {
         const ReplayImuSample &sample = m_dataset.ImuSamples()[index];
         if (sample.timestampNs > toNs) {
             break;
         }
-        out.push_back({sample.timestampNs, sample.ax, sample.ay, sample.az, sample.gx, sample.gy, sample.gz});
+        if (sample.timestampNs >= fromNs || index == includePreviousIndex) {
+            out.push_back(
+                {sample.timestampNs, sample.ax, sample.ay, sample.az, sample.gx,
+                 sample.gy, sample.gz});
+        }
         ++index;
     }
     m_cursor = index;

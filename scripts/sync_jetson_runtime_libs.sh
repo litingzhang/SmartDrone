@@ -5,6 +5,7 @@ usage() {
     cat <<'EOF'
 Usage:
   ./scripts/sync_jetson_runtime_libs.sh [--jetson HOST] [--sysroot PATH] [--setup-key] [--with-tensorrt]
+                                       [--extra-manifest FILE] [--with-openvins]
 
 Copies Jetson runtime libraries required by TensorRT SuperPoint into the cross-build
 sysroot, preserving their absolute directory layout.
@@ -14,6 +15,9 @@ Options:
   --sysroot PATH  Target sysroot; defaults to JETSON_SYSROOT or ../sysroots/jetson-orin-nx
   --setup-key     Generate/install a dedicated SSH key before syncing
   --with-tensorrt Also sync TensorRT runtime libraries and headers if installed
+  --with-openvins Also sync Jetson-side OpenVINS dependencies listed in toolchain/jetson_openvins_extra_libs.txt
+  --extra-manifest FILE
+                  Additional absolute paths on the Jetson to sync into the sysroot
 EOF
 }
 
@@ -23,6 +27,8 @@ JETSON_HOST="${JETSON_SSH_HOST:-jetson}"
 SYSROOT="${JETSON_SYSROOT:-$REPO_ROOT/../sysroots/jetson-orin-nx}"
 SETUP_KEY=0
 WITH_TENSORRT=0
+WITH_OPENVINS=0
+EXTRA_MANIFEST=""
 SSH_KEY="${SMART_DRONE_JETSON_SSH_KEY:-$HOME/.ssh/smartdrone_jetson_ed25519}"
 
 while [ "$#" -gt 0 ]; do
@@ -56,6 +62,21 @@ while [ "$#" -gt 0 ]; do
             ;;
         --with-tensorrt)
             WITH_TENSORRT=1
+            ;;
+        --with-openvins)
+            WITH_OPENVINS=1
+            ;;
+        --extra-manifest)
+            if [ "$#" -lt 2 ]; then
+                echo "--extra-manifest requires a value" >&2
+                usage
+                exit 1
+            fi
+            EXTRA_MANIFEST="$2"
+            shift
+            ;;
+        --extra-manifest=*)
+            EXTRA_MANIFEST="${1#--extra-manifest=}"
             ;;
         -h|--help)
             usage
@@ -124,6 +145,35 @@ if [ "$WITH_TENSORRT" -eq 1 ]; then
     done
 fi
 
+if [ -n "$EXTRA_MANIFEST" ]; then
+    if [ ! -f "$EXTRA_MANIFEST" ]; then
+        echo "extra manifest not found: $EXTRA_MANIFEST" >&2
+        exit 1
+    fi
+    while IFS= read -r path; do
+        if [ -n "$path" ]; then
+            required_libs+=("$path")
+        fi
+    done < "$EXTRA_MANIFEST"
+fi
+
+if [ "$WITH_OPENVINS" -eq 1 ]; then
+    OPENVINS_MANIFEST="$REPO_ROOT/toolchain/jetson_openvins_extra_libs.txt"
+    if [ ! -f "$OPENVINS_MANIFEST" ]; then
+        echo "OpenVINS manifest not found: $OPENVINS_MANIFEST" >&2
+        exit 1
+    fi
+    while IFS= read -r path; do
+        if [ -n "$path" ]; then
+            required_libs+=("$path")
+        fi
+    done < "$OPENVINS_MANIFEST"
+    required_libs+=(
+        /home/nvidia/openvins_deps/prefix/usr/lib/aarch64-linux-gnu/libboost_system.so.1.71.0
+        /home/nvidia/openvins_deps/prefix/usr/lib/aarch64-linux-gnu/libboost_filesystem.so.1.71.0
+    )
+fi
+
 echo "JETSON_HOST:$JETSON_HOST"
 echo "SYSROOT:$SYSROOT"
 if [ -f "$SSH_KEY" ]; then
@@ -153,6 +203,32 @@ if [ "$WITH_TENSORRT" -eq 1 ]; then
         rsync -avRL --copy-links -e "$RSYNC_SSH" \
             "$JETSON_HOST:/usr/local/cuda-11.4/targets/aarch64-linux/include/" "$SYSROOT/"
     fi
+fi
+
+if [ "$WITH_OPENVINS" -eq 1 ]; then
+    for lib in boost_system boost_filesystem; do
+        for base in \
+            "$SYSROOT/usr/lib/aarch64-linux-gnu" \
+            "$SYSROOT/lib/aarch64-linux-gnu" \
+            "$SYSROOT/home/nvidia/openvins_deps/prefix/usr/lib/aarch64-linux-gnu"; do
+            versioned="$(find "$base" -maxdepth 1 -type f -name "lib${lib}.so.*" | sort | head -n 1)"
+            if [ -n "$versioned" ]; then
+                ln -sf "$(basename "$versioned")" "$base/lib${lib}.so"
+            fi
+        done
+    done
+
+    for remote_dir in \
+        /home/nvidia/openvins_deps/prefix/usr/include/ceres \
+        /home/nvidia/openvins_deps/prefix/usr/include/glog \
+        /home/nvidia/openvins_deps/prefix/usr/include/gflags \
+        /home/nvidia/openvins_deps/prefix/usr/lib/cmake/Ceres; do
+        if ssh "${SSH_ARGS[@]}" "$JETSON_HOST" "test -d '$remote_dir'"; then
+            mkdir -p "$SYSROOT${remote_dir}"
+            ssh "${SSH_ARGS[@]}" "$JETSON_HOST" \
+                "tar -C '$remote_dir' -cf - ." | tar -C "$SYSROOT${remote_dir}" -xf -
+        fi
+    done
 fi
 
 echo "Jetson runtime libraries synced."

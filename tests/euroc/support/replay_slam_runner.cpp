@@ -1,6 +1,5 @@
 #include "support/replay_slam_runner.h"
 
-#include <algorithm>
 #include <chrono>
 
 namespace SmartDrone::Tests {
@@ -24,10 +23,6 @@ ReplaySlamRunner::ReplaySlamRunner(
       m_pipeline(SmartDrone::Core::Application::PerceptionPipelineConfig{
           cfg.cameraFps, cfg.preferLatestFrame})
 {
-    m_slamControl =
-        dynamic_cast<SmartDrone::Core::Ports::ISlamRuntimeControl *>(
-            &m_slamEngine);
-    m_backendStepEveryN = std::max(1, m_cfg.backendStepEveryN);
 }
 
 std::vector<ReplayPoseSample> ReplaySlamRunner::Run(
@@ -98,7 +93,6 @@ ReplaySlamRunner::FrameRunResult ReplaySlamRunner::RunFrame(
     PrepareSlamInput(context);
     AttachImuWindow(context);
     ProcessSlamFrame(context);
-    RunBackendStepIfNeeded(context);
     return {true, true, BuildReplayPoseSample(context)};
 }
 
@@ -139,18 +133,6 @@ void ReplaySlamRunner::ProcessSlamFrame(FrameRunContext &context)
     context.output = m_slamEngine.Process(context.input, m_cfg.extractFeatures,
                                           m_cfg.extractPointCloud);
     context.slamEnd = std::chrono::steady_clock::now();
-}
-
-void ReplaySlamRunner::RunBackendStepIfNeeded(FrameRunContext &context)
-{
-    context.ranBackendStep =
-        m_slamControl != nullptr &&
-        context.output.frameId % static_cast<uint64_t>(m_backendStepEveryN) == 0U;
-    context.backendStart = std::chrono::steady_clock::now();
-    if (context.ranBackendStep) {
-        m_slamControl->StepBackend();
-    }
-    context.backendEnd = std::chrono::steady_clock::now();
 }
 
 ReplayPoseSample ReplaySlamRunner::BuildReplayPoseSample(
@@ -206,10 +188,7 @@ void ReplaySlamRunner::CopyTimingFields(
         DurationMs(context.acquireStart, context.acquireEnd);
     sample.replayImuMs = DurationMs(context.imuStart, context.imuEnd);
     sample.slamTotalMs = DurationMs(context.slamStart, context.slamEnd);
-    sample.slamBackendStepMs =
-        context.ranBackendStep
-            ? DurationMs(context.backendStart, context.backendEnd)
-            : 0.0;
+    sample.slamBackendStepMs = 0.0;
     sample.inputPrepareMs = output.inputPrepareMs;
     sample.frontendMs = output.frontendMs;
     sample.stereoPairMs = output.stereoPairMs;

@@ -19,6 +19,7 @@
 
 #include "common/environment.h"
 #include "common/numeric_parse.h"
+#include "adapters/imu/icm42688_imu_provider.h"
 #include "adapters/slam/engine/slam_engine_factory.h"
 #include "adapters/slam/engine/slam_mode_state.h"
 #include "adapters/slam/superpoint/visual_feature_frontend_client.h"
@@ -30,6 +31,7 @@
 #include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/runtime/epg_dfx_snapshot.h"
 #include "core/application/runtime/runtime_aliases.h"
+#include "core/application/sensors/imu_runtime_state.h"
 #include "core/application/session/epg/slam_session_graph_service.h"
 #include "core/application/session/slam/slam_runtime_control_port.h"
 #include "core/application/session/stream/preview_output_port.h"
@@ -71,7 +73,6 @@ struct OfflineReplayOptions {
     int visualFeatureInputMaxHeight{409};
     int cameraFps{60};
     int slamInputFps{20};
-    int backendStepEveryN{1};
     int staleFrameThresholdMs{1000};
     size_t maxFrames{0};
     bool lkLoopClosure{false};
@@ -337,8 +338,7 @@ constexpr const char *OFFLINE_REPLAY_USAGE_TEXT =
     "  --summary-json <file> Optional summary JSON output path\n"
     "  --final-euroc-trajectory <file> Optional final ORB-SLAM3 EuRoC "
     "trajectory after shutdown\n"
-    "  --epg-profile-out <file> Run stereo-only replay through SLAM EPG and "
-    "copy the profile JSON\n"
+    "  --epg-profile-out <file> Copy SLAM EPG profile JSON after EPG replay\n"
     "  --epg-optimized-out <file> Optional optimized SLAM EPG config output "
     "for --epg-profile-out\n"
     "  --epg-solver-report-out <file> Optional solver report output for "
@@ -350,7 +350,7 @@ constexpr const char *OFFLINE_REPLAY_USAGE_TEXT =
     "  --settings <file>     Camera/SLAM settings YAML path\n"
     "  --sensor-mode <mode>  stereo|stereo-imu|mono|mono-imu\n"
     "  --stereo-only         Shortcut for --sensor-mode stereo\n"
-    "  --slam-backend <mode> klt|dpvo|orbslam3, default klt\n"
+    "  --slam-backend <mode> klt|dpvo|openvins|orbslam3, default klt\n"
     "  --feature-frontend <mode> "
     "orb|superpoint_lightglue|lk|lk_gftt_per_frame, default "
     "lk_gftt_per_frame\n"
@@ -382,7 +382,6 @@ constexpr const char *OFFLINE_REPLAY_USAGE_TEXT =
     "mapping|localization|relocalization|tracking-only|auto\n"
     "  --fps <n>             Camera FPS for replay pacing, default 60\n"
     "  --slam-fps <n>        SLAM input FPS, default 20\n"
-    "  --backend-step-every-n <n> Backend maintenance cadence, default 1\n"
     "  --stale-frame-threshold-ms <n> Stereo stale diagnostic threshold, default 1000\n"
     "  --timeout-ms <n>      Deprecated alias for --stale-frame-threshold-ms\n"
     "  --max-frames <n>      Maximum output frames, default 0(all)\n"
@@ -587,8 +586,6 @@ void ParseReplayModeOptions(int argc, char **argv, OfflineReplayOptions &opts)
         GetOptionValue(argc, argv, "--slam-mode", "mapping"));
     opts.cameraFps = GetOptionInt(argc, argv, "--fps", opts.cameraFps);
     opts.slamInputFps = GetOptionInt(argc, argv, "--slam-fps", opts.slamInputFps);
-    opts.backendStepEveryN = GetOptionInt(
-        argc, argv, "--backend-step-every-n", opts.backendStepEveryN);
     opts.staleFrameThresholdMs = GetOptionIntWithLegacyFallback(
         argc, argv, "--stale-frame-threshold-ms", "--timeout-ms",
         opts.staleFrameThresholdMs);

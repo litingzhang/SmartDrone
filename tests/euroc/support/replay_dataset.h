@@ -58,6 +58,15 @@ class ReplayDataset {
     std::vector<ReplayImuSample> m_imuSamples;
 };
 
+void SetReplayImuSampleSourceDataset(const ReplayDataset &dataset);
+void ClearReplayImuSampleSourceDataset();
+
+class ReplayImuSampleSourceScope final {
+  public:
+    explicit ReplayImuSampleSourceScope(const ReplayDataset &dataset);
+    ~ReplayImuSampleSourceScope();
+};
+
 struct ReplayCameraProgress {
     std::atomic<size_t> framesConsumed{0};
     std::atomic<bool> finished{false};

@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 
+if(POLICY CMP0144)
+  cmake_policy(SET CMP0144 NEW)
+endif()
+
 include(FetchContent)
 
 option(CROSS_AARCH64 "Enable aarch64 cross compile" ON)
@@ -23,6 +27,8 @@ set(SMART_DRONE_GPIOD_V2 OFF)
 set(SMART_DRONE_VPI_AVAILABLE OFF)
 set(SMART_DRONE_RESOLVED_VPI_ROOT "")
 set(SMART_DRONE_TENSORRT_AVAILABLE OFF)
+set(SMART_DRONE_OPENVINS_AVAILABLE OFF)
+set(SMART_DRONE_OPENVINS_CERES_AVAILABLE OFF)
 set(SMART_DRONE_GPIOD_INCLUDE_DIRS "")
 set(SMART_DRONE_GPIOD_LIBRARY_DIRS "")
 set(SMART_DRONE_GPIOD_LIBRARIES gpiod)
@@ -30,7 +36,15 @@ set(SMART_DRONE_GPIOD_CFLAGS_OTHER "")
 option(SMART_DRONE_ENABLE_VPI "Enable NVIDIA VPI acceleration when headers and libraries are available" OFF)
 option(SMART_DRONE_ENABLE_OPENCV_CUDA_ORB "Enable experimental OpenCV CUDA ORB extraction when supported" OFF)
 option(SMART_DRONE_ENABLE_ORB_SLAM3 "Build the optional ORB-SLAM3 backend from src/native/adapters/slam/orb/orb_slam3" OFF)
+option(SMART_DRONE_ENABLE_OPENVINS "Build the optional OpenVINS backend from an external open_vins checkout" OFF)
 set(SMART_DRONE_VPI_ROOT "" CACHE PATH "NVIDIA VPI root, e.g. /opt/nvidia/vpi2")
+set(SMART_DRONE_OPENVINS_ROOT "" CACHE PATH "OpenVINS root containing ov_core/ ov_init/ ov_msckf/")
+if(SMART_DRONE_OPENVINS_ROOT STREQUAL "" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/open_vins/ov_core/src/utils/sensor_data.h")
+  set(SMART_DRONE_OPENVINS_ROOT
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/open_vins"
+      CACHE PATH "OpenVINS root containing ov_core/ ov_init/ ov_msckf/" FORCE)
+endif()
 
 if(NOT BUILD_SMART_DRONE AND NOT ENABLE_UNIT_TESTS AND NOT ENABLE_OFFLINE_REPLAY)
   message(FATAL_ERROR "Enable BUILD_SMART_DRONE, ENABLE_UNIT_TESTS, or ENABLE_OFFLINE_REPLAY")
@@ -69,6 +83,10 @@ set(SMART_DRONE_ORB_MODULE_ROOT "${SMART_DRONE_REPO_ROOT}/src/native/adapters/sl
 set(SMART_DRONE_SOPHUS_ROOT "${SMART_DRONE_REPO_ROOT}/third_party/Sophus")
 set(SMART_DRONE_DBOW2_ROOT "${SMART_DRONE_REPO_ROOT}/third_party/DBoW2")
 set(SMART_DRONE_G2O_ROOT "${SMART_DRONE_REPO_ROOT}/third_party/g2o")
+set(SMART_DRONE_OPENVINS_CORE_SOURCES "")
+set(SMART_DRONE_OPENVINS_INIT_SOURCES "")
+set(SMART_DRONE_OPENVINS_INIT_CERES_SOURCES "")
+set(SMART_DRONE_OPENVINS_MSCKF_SOURCES "")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -82,6 +100,114 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 list(PREPEND CMAKE_PREFIX_PATH "${SYSROOT}/usr")
+
+function(seed_smart_drone_openvins_jetson_prefix)
+  if(NOT CROSS_AARCH64 OR NOT SMART_DRONE_ENABLE_OPENVINS)
+    return()
+  endif()
+
+  set(_SMART_DRONE_OPENVINS_JETSON_PREFIX
+    "${SYSROOT}/home/nvidia/openvins_deps/prefix/usr")
+  if(NOT EXISTS "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}")
+    return()
+  endif()
+
+  list(PREPEND CMAKE_PREFIX_PATH "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}")
+  set(Boost_NO_SYSTEM_PATHS ON CACHE BOOL
+      "Prefer Jetson OpenVINS Boost prefix when cross-compiling" FORCE)
+  set(Boost_ROOT "${SYSROOT}/usr" CACHE PATH
+      "Jetson sysroot Boost include prefix" FORCE)
+  set(BOOST_ROOT "${Boost_ROOT}" CACHE PATH
+      "Jetson sysroot Boost include prefix" FORCE)
+  set(BOOST_INCLUDEDIR "${SYSROOT}/usr/include" CACHE PATH
+      "Jetson sysroot Boost include dir" FORCE)
+  set(BOOST_LIBRARYDIR
+      "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/lib/aarch64-linux-gnu" CACHE PATH
+      "Jetson OpenVINS Boost library dir" FORCE)
+  set(Boost_INCLUDE_DIR "${BOOST_INCLUDEDIR}" CACHE PATH
+      "Jetson OpenVINS Boost include dir" FORCE)
+  set(Boost_LIBRARY_DIR_RELEASE "${BOOST_LIBRARYDIR}" CACHE PATH
+      "Jetson OpenVINS Boost library dir" FORCE)
+  set(Boost_LIBRARY_DIR_DEBUG "${BOOST_LIBRARYDIR}" CACHE PATH
+      "Jetson OpenVINS Boost library dir" FORCE)
+  set(Boost_SYSTEM_LIBRARY_RELEASE
+      "${BOOST_LIBRARYDIR}/libboost_system.so" CACHE FILEPATH
+      "Jetson OpenVINS boost_system" FORCE)
+  set(Boost_SYSTEM_LIBRARY_DEBUG "${Boost_SYSTEM_LIBRARY_RELEASE}" CACHE FILEPATH
+      "Jetson OpenVINS boost_system" FORCE)
+  set(Boost_FILESYSTEM_LIBRARY_RELEASE
+      "${BOOST_LIBRARYDIR}/libboost_filesystem.so" CACHE FILEPATH
+      "Jetson OpenVINS boost_filesystem" FORCE)
+  set(Boost_FILESYSTEM_LIBRARY_DEBUG
+      "${Boost_FILESYSTEM_LIBRARY_RELEASE}" CACHE FILEPATH
+      "Jetson OpenVINS boost_filesystem" FORCE)
+
+  if(EXISTS "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/lib/cmake/Ceres/CeresConfig.cmake")
+    set(Ceres_DIR
+        "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/lib/cmake/Ceres" CACHE PATH
+        "Jetson OpenVINS Ceres config" FORCE)
+  endif()
+  set(GLOG_INCLUDE_DIR_HINTS
+      "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/include" CACHE PATH
+      "Jetson OpenVINS glog include hint" FORCE)
+  set(GLOG_LIBRARY_DIR_HINTS
+      "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/lib/aarch64-linux-gnu" CACHE PATH
+      "Jetson OpenVINS glog library hint" FORCE)
+  set(GLOG_INCLUDE_DIR
+      "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/include" CACHE PATH
+      "Jetson OpenVINS glog include dir" FORCE)
+  set(GLOG_LIBRARY
+      "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/lib/aarch64-linux-gnu/libglog.so"
+      CACHE FILEPATH "Jetson OpenVINS glog library" FORCE)
+  set(GFLAGS_INCLUDE_DIR_HINTS
+      "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/include" CACHE PATH
+      "Jetson OpenVINS gflags include hint" FORCE)
+  set(GFLAGS_LIBRARY_DIR_HINTS
+      "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/lib/aarch64-linux-gnu" CACHE PATH
+      "Jetson OpenVINS gflags library hint" FORCE)
+  set(GFLAGS_INCLUDE_DIR
+      "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/include" CACHE PATH
+      "Jetson OpenVINS gflags include dir" FORCE)
+  set(GFLAGS_LIBRARY
+      "${_SMART_DRONE_OPENVINS_JETSON_PREFIX}/lib/aarch64-linux-gnu/libgflags.so"
+      CACHE FILEPATH "Jetson OpenVINS gflags library" FORCE)
+endfunction()
+
+seed_smart_drone_openvins_jetson_prefix()
+
+function(link_smart_drone_openvins_jetson_deps target_name)
+  if(NOT CROSS_AARCH64 OR NOT SMART_DRONE_ENABLE_OPENVINS)
+    return()
+  endif()
+  set(_SMART_DRONE_OPENVINS_JETSON_LIBDIR
+    "${SYSROOT}/home/nvidia/openvins_deps/prefix/usr/lib/aarch64-linux-gnu")
+  set(_SMART_DRONE_OPENVINS_JETSON_CERESDIR
+    "${SYSROOT}/home/nvidia/openvins_deps/prefix/usr/lib")
+  if(NOT EXISTS "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}")
+    return()
+  endif()
+
+  target_link_directories(${target_name} PRIVATE
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}"
+    "${_SMART_DRONE_OPENVINS_JETSON_CERESDIR}")
+  target_link_options(${target_name} PRIVATE
+    "-Wl,-rpath-link,${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}"
+    "-Wl,-rpath-link,${_SMART_DRONE_OPENVINS_JETSON_CERESDIR}")
+  target_link_libraries(${target_name} PRIVATE
+    "${_SMART_DRONE_OPENVINS_JETSON_CERESDIR}/libceres.so.1.14.0"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libglog.so"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libgflags.so"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libspqr.so.2"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libcholmod.so.3"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libcxsparse.so.3"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libamd.so.2"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libcamd.so.2"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libccolamd.so.2"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libmetis.so.5"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libatlas.so.3"
+    "${_SMART_DRONE_OPENVINS_JETSON_LIBDIR}/libf77blas.so.3"
+    "${SYSROOT}/usr/lib/aarch64-linux-gnu/libsuitesparseconfig.so.5")
+endfunction()
 
 function(resolve_smart_drone_vpi)
   set(SMART_DRONE_VPI_AVAILABLE OFF PARENT_SCOPE)
@@ -218,6 +344,63 @@ function(add_native_orb_slam3)
                    EXCLUDE_FROM_ALL)
 endfunction()
 
+function(resolve_smart_drone_openvins)
+  set(SMART_DRONE_OPENVINS_AVAILABLE OFF PARENT_SCOPE)
+  set(SMART_DRONE_OPENVINS_CERES_AVAILABLE OFF PARENT_SCOPE)
+  if(NOT SMART_DRONE_ENABLE_OPENVINS)
+    return()
+  endif()
+  if(NOT SMART_DRONE_OPENVINS_ROOT)
+    message(FATAL_ERROR
+      "SMART_DRONE_ENABLE_OPENVINS=ON requires SMART_DRONE_OPENVINS_ROOT to point to an open_vins checkout.")
+  endif()
+  if(NOT EXISTS "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/utils/sensor_data.h"
+     OR NOT EXISTS "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src/init/InertialInitializer.cpp"
+     OR NOT EXISTS "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src/core/VioManager.cpp")
+    message(FATAL_ERROR
+      "SMART_DRONE_OPENVINS_ROOT='${SMART_DRONE_OPENVINS_ROOT}' does not look like an open_vins checkout.")
+  endif()
+  set(SMART_DRONE_OPENVINS_CORE_SOURCES
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/utils/print.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/track/TrackKLT.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/track/TrackBase.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/track/TrackAruco.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/track/TrackDescriptor.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/track/TrackSIM.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/types/Landmark.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/cpi/CpiV1.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/cpi/CpiV2.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/feat/FeatureDatabase.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/feat/Feature.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/feat/FeatureInitializer.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src/sim/BsplineSE3.cpp"
+    PARENT_SCOPE)
+  set(SMART_DRONE_OPENVINS_INIT_SOURCES
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src/init/InertialInitializer.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src/static/StaticInitializer.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src/sim/SimulatorInit.cpp"
+    PARENT_SCOPE)
+  set(SMART_DRONE_OPENVINS_INIT_CERES_SOURCES
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src/dynamic/DynamicInitializer.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src/ceres/Factor_ImuCPIv1.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src/ceres/Factor_GenericPrior.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src/ceres/Factor_ImageReprojCalib.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src/ceres/State_JPLQuatLocal.cpp"
+    PARENT_SCOPE)
+  set(SMART_DRONE_OPENVINS_MSCKF_SOURCES
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src/core/VioManager.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src/core/VioManagerHelper.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src/update/UpdaterHelper.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src/update/UpdaterMSCKF.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src/update/UpdaterSLAM.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src/update/UpdaterZeroVelocity.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src/state/Propagator.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src/state/StateHelper.cpp"
+    "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src/state/State.cpp"
+    PARENT_SCOPE)
+  set(SMART_DRONE_OPENVINS_AVAILABLE ON PARENT_SCOPE)
+endfunction()
+
 function(configure_superpoint_native_target target_name)
   set(_SMART_DRONE_JETSON_DEP_DIRS
     "${SYSROOT}/usr/local/cuda/targets/aarch64-linux/lib"
@@ -322,6 +505,17 @@ endif()
 if(BUILD_SMART_DRONE)
   find_package(Threads REQUIRED)
   find_package(OpenCV REQUIRED COMPONENTS core calib3d features2d imgproc video videoio)
+  resolve_smart_drone_openvins()
+  if(SMART_DRONE_ENABLE_OPENVINS)
+    set(Boost_NO_BOOST_CMAKE ON)
+    find_package(Boost REQUIRED COMPONENTS system filesystem)
+    find_package(Ceres QUIET)
+    if(Ceres_FOUND)
+      set(SMART_DRONE_OPENVINS_CERES_AVAILABLE ON)
+    else()
+      message(WARNING "Ceres not found; OpenVINS will build without dynamic initialization support")
+    endif()
+  endif()
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(GPIOD REQUIRED libgpiod)
   set(SMART_DRONE_GPIOD_INCLUDE_DIRS ${GPIOD_INCLUDE_DIRS})
@@ -367,6 +561,35 @@ if(BUILD_SMART_DRONE)
   add_subdirectory(src/native)
   configure_common_target(smart_drone)
   configure_sophus_target(smart_drone)
+  if(SMART_DRONE_ENABLE_OPENVINS)
+    target_compile_definitions(smart_drone PRIVATE SMART_DRONE_HAS_OPENVINS=1)
+    if(NOT SMART_DRONE_OPENVINS_CERES_AVAILABLE)
+      target_compile_definitions(smart_drone PRIVATE SMART_DRONE_OPENVINS_DISABLE_CERES=1)
+    endif()
+    target_sources(smart_drone PRIVATE
+      ${SMART_DRONE_OPENVINS_CORE_SOURCES}
+      ${SMART_DRONE_OPENVINS_INIT_SOURCES}
+      ${SMART_DRONE_OPENVINS_MSCKF_SOURCES}
+    )
+    if(SMART_DRONE_OPENVINS_CERES_AVAILABLE)
+      target_sources(smart_drone PRIVATE
+        ${SMART_DRONE_OPENVINS_INIT_CERES_SOURCES}
+      )
+    endif()
+    target_include_directories(smart_drone PRIVATE
+      "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src"
+      "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src"
+      "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src"
+    )
+    if(SMART_DRONE_OPENVINS_CERES_AVAILABLE)
+      target_include_directories(smart_drone PRIVATE ${CERES_INCLUDE_DIRS})
+    endif()
+    target_link_libraries(smart_drone PRIVATE ${Boost_LIBRARIES})
+    if(SMART_DRONE_OPENVINS_CERES_AVAILABLE AND NOT CROSS_AARCH64)
+      target_link_libraries(smart_drone PRIVATE ${CERES_LIBRARIES})
+    endif()
+    link_smart_drone_openvins_jetson_deps(smart_drone)
+  endif()
   if(SMART_DRONE_ENABLE_ORB_SLAM3)
     configure_orb_target(smart_drone)
   endif()
@@ -392,6 +615,41 @@ if(ENABLE_UNIT_TESTS)
 endif()
 
 if(ENABLE_UNIT_TESTS OR ENABLE_OFFLINE_REPLAY)
+  resolve_smart_drone_openvins()
+  if(SMART_DRONE_ENABLE_OPENVINS AND NOT BUILD_SMART_DRONE)
+    set(Boost_NO_BOOST_CMAKE ON)
+    find_package(Boost REQUIRED COMPONENTS system filesystem)
+    if(DEFINED GLOG_INCLUDE_DIR_HINTS AND NOT GLOG_INCLUDE_DIR)
+      set(GLOG_INCLUDE_DIR "${GLOG_INCLUDE_DIR_HINTS}" CACHE PATH
+          "Preseeded glog include directory for Ceres" FORCE)
+    endif()
+    if(DEFINED GLOG_LIBRARY_DIR_HINTS AND NOT GLOG_LIBRARY)
+      find_library(_SMART_DRONE_PRESEEDED_GLOG NAMES glog
+                   HINTS "${GLOG_LIBRARY_DIR_HINTS}")
+      if(_SMART_DRONE_PRESEEDED_GLOG)
+        set(GLOG_LIBRARY "${_SMART_DRONE_PRESEEDED_GLOG}" CACHE FILEPATH
+            "Preseeded glog library for Ceres" FORCE)
+      endif()
+    endif()
+    if(DEFINED GFLAGS_INCLUDE_DIR_HINTS AND NOT GFLAGS_INCLUDE_DIR)
+      set(GFLAGS_INCLUDE_DIR "${GFLAGS_INCLUDE_DIR_HINTS}" CACHE PATH
+          "Preseeded gflags include directory for Ceres" FORCE)
+    endif()
+    if(DEFINED GFLAGS_LIBRARY_DIR_HINTS AND NOT GFLAGS_LIBRARY)
+      find_library(_SMART_DRONE_PRESEEDED_GFLAGS NAMES gflags
+                   HINTS "${GFLAGS_LIBRARY_DIR_HINTS}")
+      if(_SMART_DRONE_PRESEEDED_GFLAGS)
+        set(GFLAGS_LIBRARY "${_SMART_DRONE_PRESEEDED_GFLAGS}" CACHE FILEPATH
+            "Preseeded gflags library for Ceres" FORCE)
+      endif()
+    endif()
+    find_package(Ceres QUIET)
+    if(Ceres_FOUND)
+      set(SMART_DRONE_OPENVINS_CERES_AVAILABLE ON)
+    else()
+      message(WARNING "Ceres not found; OpenVINS replay build will disable dynamic initialization support")
+    endif()
+  endif()
   enable_testing()
   add_subdirectory(tests)
 endif()

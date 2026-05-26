@@ -140,6 +140,7 @@ if(ENABLE_OFFLINE_REPLAY)
     euroc/support/replay_dataset.cpp
     euroc/support/replay_imu_sample_source.cpp
     euroc/support/replay_slam_runner.cpp
+    ../src/native/adapters/imu/icm42688_imu_provider.cpp
     ../src/native/common/epg/epg_context.cpp
     ../src/native/common/epg/epg.cpp
     ../src/native/common/epg/epg_dot.cpp
@@ -149,9 +150,15 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/common/time_utils.cpp
     ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_config.cpp
     ../src/native/adapters/slam/dpvo/dpvo_runtime_options.cpp
+    ../src/native/adapters/slam/engine/slam_engine_adapter.cpp
     ../src/native/adapters/slam/engine/slam_engine_factory.cpp
     ../src/native/adapters/slam/engine/slam_env.cpp
     ../src/native/adapters/slam/engine/slam_mode_state.cpp
+    ../src/native/adapters/slam/engine/slam_mode_strategy.cpp
+    ../src/native/adapters/slam/engine/slam_tracking_backend.cpp
+    ../src/native/adapters/slam/openvins/openvins_runtime.cpp
+    ../src/native/adapters/slam/openvins/openvins_backend.cpp
+    ../src/native/adapters/slam/openvins/openvins_slam_engine.cpp
     ../src/native/adapters/slam/klt/klt_slam_engine.cpp
     ../src/native/adapters/slam/klt/klt_continuous_frontend.cpp
     ../src/native/adapters/slam/klt/klt_loop_closure_backend.cpp
@@ -179,6 +186,8 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/adapters/slam/superpoint/visual_feature_frontend_client.cpp
     ../src/native/adapters/slam/superpoint/superpoint_runtime_options.cpp
     ../src/native/adapters/slam/superpoint/superpoint_lightglue_frontend_client.cpp
+    ../src/native/adapters/slam/superpoint/visual_feature_lightglue_mode_strategy.cpp
+    ../src/native/adapters/slam/orb/orb_mode_strategy.cpp
     ../src/native/common/environment.cpp
     ../src/native/common/logger.cpp
     ../src/native/common/numeric_parse.cpp
@@ -186,7 +195,6 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/core/ports/visual_tracking.cpp
     ../src/native/core/application/config/app_args.cpp
     ../src/native/core/application/config/orb_acceleration_config.cpp
-    ../src/native/core/application/config/slam_backend_availability.cpp
     ../src/native/core/application/epg/epg_discrete_global_solver.cpp
     ../src/native/core/application/epg/epg_graph_runtime.cpp
     ../src/native/core/application/epg/epg_cpu_binding_solver_exact.cpp
@@ -291,6 +299,41 @@ if(ENABLE_OFFLINE_REPLAY)
     configure_orb_target(smart_drone_offline_replay)
   endif()
 
+  if(SMART_DRONE_ENABLE_OPENVINS)
+    target_sources(smart_drone_offline_replay PRIVATE
+      ${SMART_DRONE_OPENVINS_CORE_SOURCES}
+      ${SMART_DRONE_OPENVINS_INIT_SOURCES}
+      ${SMART_DRONE_OPENVINS_MSCKF_SOURCES}
+      ../src/native/core/application/config/slam_backend_availability_openvins.cpp
+    )
+    if(SMART_DRONE_OPENVINS_CERES_AVAILABLE)
+      target_sources(smart_drone_offline_replay PRIVATE
+        ${SMART_DRONE_OPENVINS_INIT_CERES_SOURCES}
+      )
+    endif()
+    set_source_files_properties(
+      ../src/native/core/application/config/slam_backend_availability.cpp
+      PROPERTIES HEADER_FILE_ONLY ON)
+    target_compile_definitions(smart_drone_offline_replay PRIVATE SMART_DRONE_HAS_OPENVINS=1)
+    if(NOT SMART_DRONE_OPENVINS_CERES_AVAILABLE)
+      target_compile_definitions(smart_drone_offline_replay PRIVATE SMART_DRONE_OPENVINS_DISABLE_CERES=1)
+    endif()
+    target_include_directories(smart_drone_offline_replay PRIVATE
+      "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src"
+      "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src"
+      "${SMART_DRONE_OPENVINS_ROOT}/ov_msckf/src"
+    )
+    if(SMART_DRONE_OPENVINS_CERES_AVAILABLE)
+      target_include_directories(smart_drone_offline_replay PRIVATE
+        ${CERES_INCLUDE_DIRS})
+    endif()
+    target_link_libraries(smart_drone_offline_replay PRIVATE ${Boost_LIBRARIES})
+    if(SMART_DRONE_OPENVINS_CERES_AVAILABLE AND NOT CROSS_AARCH64)
+      target_link_libraries(smart_drone_offline_replay PRIVATE ${CERES_LIBRARIES})
+    endif()
+    link_smart_drone_openvins_jetson_deps(smart_drone_offline_replay)
+  endif()
+
   if(TARGET Eigen3::Eigen)
     target_link_libraries(smart_drone_offline_replay PRIVATE Eigen3::Eigen)
   else()
@@ -304,7 +347,7 @@ if(ENABLE_OFFLINE_REPLAY)
   set(SMART_DRONE_REPLAY_SUPERPOINT_SOURCE
     ../src/native/adapters/slam/superpoint/superpoint_native_extractor.cpp)
 
-  if(SMART_DRONE_ENABLE_VPI)
+  if(SMART_DRONE_ENABLE_VPI AND NOT SMART_DRONE_ENABLE_OPENVINS)
     resolve_smart_drone_vpi()
     if(SMART_DRONE_VPI_AVAILABLE)
       set(SMART_DRONE_REPLAY_VPI_SOURCE
@@ -321,7 +364,7 @@ if(ENABLE_OFFLINE_REPLAY)
     endif()
   endif()
 
-  if(CROSS_AARCH64)
+  if(CROSS_AARCH64 AND NOT SMART_DRONE_ENABLE_OPENVINS)
     configure_superpoint_native_target(smart_drone_offline_replay)
     if(SMART_DRONE_TENSORRT_AVAILABLE)
       set(SMART_DRONE_REPLAY_DPVO_SOURCE
@@ -336,6 +379,15 @@ if(ENABLE_OFFLINE_REPLAY)
       set(SMART_DRONE_REPLAY_SUPERPOINT_SOURCE
         ../src/native/adapters/slam/superpoint/superpoint_native_extractor_trt.cpp)
     endif()
+  endif()
+
+  if(SMART_DRONE_ENABLE_OPENVINS)
+    set(SMART_DRONE_REPLAY_VPI_SOURCE
+      ../src/native/adapters/slam/klt/klt_vpi_acceleration_stub.cpp)
+    set(SMART_DRONE_REPLAY_DPVO_SOURCE
+      ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine.cpp)
+    set(SMART_DRONE_REPLAY_SUPERPOINT_SOURCE
+      ../src/native/adapters/slam/superpoint/superpoint_native_extractor.cpp)
   endif()
 
   target_sources(smart_drone_offline_replay PRIVATE

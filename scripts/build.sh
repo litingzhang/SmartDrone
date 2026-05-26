@@ -5,7 +5,7 @@ usage() {
     cat <<'EOF'
 Usage:
   ./scripts/build.sh [smart_drone|android|all|test|replay] [--clean] [--reconfigure] [--jetson-orin-nx]
-                   [--jobs N] [--camera-provider NAME] [--enable-orb-slam3]
+                   [--jobs N] [--camera-provider NAME] [--enable-orb-slam3] [--enable-openvins]
 
 Modes:
   smart_drone     Build the unified runtime target
@@ -25,6 +25,10 @@ Options:
                   OpenCV install prefix that provides cudafeatures2d for --opencv-cuda-orb
   --enable-orb-slam3
                   Build and link the optional ORB-SLAM3 backend from src/native/adapters/slam/orb/orb_slam3
+  --enable-openvins
+                  Build and link the optional OpenVINS backend from SMART_DRONE_OPENVINS_ROOT
+  --openvins-root PATH
+                  OpenVINS checkout root containing ov_core/, ov_init/, and ov_msckf/
   --jobs N        Build parallelism; defaults to BUILD_JOBS or nproc
   --camera-provider NAME
                   Native camera provider, e.g. libcamera_stereo_ov9281 or uvc_stereo_opencv
@@ -47,6 +51,19 @@ find_first_executable() {
     for path in "$@"; do
         if [ -n "$path" ] && [ -x "$path" ]; then
             printf '%s\n' "$path"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_first_openvins_root() {
+    local root
+    for root in "$@"; do
+        if [ -n "$root" ] && [ -f "$root/ov_core/src/utils/sensor_data.h" ] && \
+           [ -f "$root/ov_init/src/init/InertialInitializer.cpp" ] && \
+           [ -f "$root/ov_msckf/src/core/VioManager.cpp" ]; then
+            printf '%s\n' "$root"
             return 0
         fi
     done
@@ -85,6 +102,9 @@ cmake_cache_needs_reconfigure() {
     if ! cache_value_matches "$cache_file" "SMART_DRONE_ENABLE_OPENCV_CUDA_ORB" "$ENABLE_OPENCV_CUDA_ORB"; then
         return 0
     fi
+    if ! cache_value_matches "$cache_file" "SMART_DRONE_ENABLE_OPENVINS" "$ENABLE_OPENVINS"; then
+        return 0
+    fi
     return 1
 }
 
@@ -99,10 +119,13 @@ FORCE_RECONFIGURE=0
 JETSON_ORIN_NX=0
 NATIVE_RECONFIGURE_REQUIRED=0
 ENABLE_ORB_SLAM3="${SMART_DRONE_ENABLE_ORB_SLAM3:-OFF}"
+ENABLE_OPENVINS="${SMART_DRONE_ENABLE_OPENVINS:-OFF}"
 BUILD_JOBS_OVERRIDE=""
 CAMERA_PROVIDER_OVERRIDE=""
 ENABLE_OPENCV_CUDA_ORB=OFF
 OPENCV_CUDA_ORB_ROOT="${OPENCV_CUDA_ORB_ROOT:-}"
+OPENVINS_ROOT="${SMART_DRONE_OPENVINS_ROOT:-}"
+CERES_DIR_OVERRIDE="${CERES_DIR:-}"
 
 case "$MODE" in
     smart_drone)
@@ -147,6 +170,21 @@ while [ "$#" -gt 0 ]; do
             ;;
         --enable-orb-slam3)
             ENABLE_ORB_SLAM3=ON
+            ;;
+        --enable-openvins)
+            ENABLE_OPENVINS=ON
+            ;;
+        --openvins-root)
+            if [ "$#" -lt 2 ]; then
+                echo "--openvins-root requires a value" >&2
+                usage
+                exit 1
+            fi
+            OPENVINS_ROOT="$2"
+            shift
+            ;;
+        --openvins-root=*)
+            OPENVINS_ROOT="${1#--openvins-root=}"
             ;;
         --opencv-cuda-orb-root)
             if [ "$#" -lt 2 ]; then
@@ -301,6 +339,49 @@ if [ -n "${SMART_DRONE_CAMERA_PROVIDER:-}" ]; then
 fi
 configure_native_args+=(-DSMART_DRONE_ENABLE_OPENCV_CUDA_ORB="$ENABLE_OPENCV_CUDA_ORB")
 configure_native_args+=(-DSMART_DRONE_ENABLE_ORB_SLAM3="$ENABLE_ORB_SLAM3")
+if [ "$ENABLE_OPENVINS" = "ON" ] && [ -z "$OPENVINS_ROOT" ]; then
+    OPENVINS_ROOT="$(find_first_openvins_root \
+        "$REPO_ROOT/third_party/open_vins" \
+        "$REPO_ROOT/third_party/openvins" \
+        "$REPO_ROOT/../open_vins" \
+        "$REPO_ROOT/../openvins" \
+        "$HOME/workspace/open_vins" \
+        "$HOME/workspace/openvins" \
+        "$HOME/open_vins" \
+        "$HOME/openvins" \
+        "/tmp/open_vins" || true)"
+fi
+if [ "$ENABLE_OPENVINS" = "ON" ] && [ -z "$CERES_DIR_OVERRIDE" ]; then
+    if [ "$JETSON_ORIN_NX" -eq 1 ]; then
+        CERES_DIR_OVERRIDE="$(find_first_existing_dir \
+            "$SYSROOT/home/nvidia/openvins_deps/prefix/usr/lib/cmake/Ceres" \
+            "$SYSROOT/usr/lib/cmake/Ceres" \
+            "$SYSROOT/usr/lib/aarch64-linux-gnu/cmake/Ceres" || true)"
+    else
+        CERES_DIR_OVERRIDE="$(find_first_existing_dir \
+            "$REPO_ROOT/output/third_party/ceres/lib/cmake/Ceres" \
+            "$REPO_ROOT/../output/third_party/ceres/lib/cmake/Ceres" \
+            "$HOME/workspace/SmartDrone/output/third_party/ceres/lib/cmake/Ceres" || true)"
+    fi
+fi
+if [ "$ENABLE_OPENVINS" = "ON" ] && [ "$JETSON_ORIN_NX" -eq 1 ]; then
+    OPENVINS_JETSON_PREFIX="$(find_first_existing_dir \
+        "$SYSROOT/home/nvidia/openvins_deps/prefix/usr" \
+        "$SYSROOT/usr" || true)"
+    if [ -n "$OPENVINS_JETSON_PREFIX" ]; then
+        configure_native_args+=(-DBoost_ROOT="$OPENVINS_JETSON_PREFIX")
+        configure_native_args+=(-DBOOST_ROOT="$OPENVINS_JETSON_PREFIX")
+        configure_native_args+=(-DBOOST_INCLUDEDIR="$OPENVINS_JETSON_PREFIX/include")
+        configure_native_args+=(-DBOOST_LIBRARYDIR="$OPENVINS_JETSON_PREFIX/lib/aarch64-linux-gnu")
+    fi
+fi
+configure_native_args+=(-DSMART_DRONE_ENABLE_OPENVINS="$ENABLE_OPENVINS")
+if [ -n "$OPENVINS_ROOT" ]; then
+    configure_native_args+=(-DSMART_DRONE_OPENVINS_ROOT="$OPENVINS_ROOT")
+fi
+if [ -n "$CERES_DIR_OVERRIDE" ]; then
+    configure_native_args+=(-DCeres_DIR="$CERES_DIR_OVERRIDE")
+fi
 if [ "$ENABLE_OPENCV_CUDA_ORB" = "ON" ]; then
     if [ -z "$OPENCV_CUDA_ORB_ROOT" ]; then
         OPENCV_CUDA_ORB_ROOT="$(find_first_existing_dir \
@@ -367,6 +448,11 @@ sync_native_artifacts() {
             copy_artifact "$REPO_ROOT/config/$cfg" "$config_dir/$cfg"
         fi
     done
+    if [ -d "$REPO_ROOT/config/openvins" ]; then
+        rm -rf "$config_dir/openvins"
+        mkdir -p "$config_dir/openvins"
+        cp -f "$REPO_ROOT"/config/openvins/*.yaml "$config_dir/openvins/" 2>/dev/null || true
+    fi
     if [ -d "$REPO_ROOT/config/runtime_graph" ]; then
         rm -rf "$config_dir/runtime_graph"
         mkdir -p "$config_dir/runtime_graph"
@@ -465,6 +551,13 @@ echo "BUILD_JOBS:$BUILD_JOBS"
 echo "CMAKE_BUILD_TYPE:$CMAKE_BUILD_TYPE"
 echo "OPENCV_CUDA_ORB:$ENABLE_OPENCV_CUDA_ORB"
 echo "ORB_SLAM3:$ENABLE_ORB_SLAM3"
+echo "OPENVINS:$ENABLE_OPENVINS"
+if [ -n "$OPENVINS_ROOT" ]; then
+    echo "OPENVINS_ROOT:$OPENVINS_ROOT"
+fi
+if [ -n "$CERES_DIR_OVERRIDE" ]; then
+    echo "CERES_DIR:$CERES_DIR_OVERRIDE"
+fi
 if [ -n "$OPENCV_CUDA_ORB_ROOT" ]; then
     echo "OPENCV_CUDA_ORB_ROOT:$OPENCV_CUDA_ORB_ROOT"
 fi
@@ -521,7 +614,14 @@ if [ "$BUILD_REPLAY" -eq 1 ]; then
             -DBUILD_SMART_DRONE=OFF
             -DENABLE_OFFLINE_REPLAY=ON
             -DSMART_DRONE_ENABLE_ORB_SLAM3="$ENABLE_ORB_SLAM3"
+            -DSMART_DRONE_ENABLE_OPENVINS="$ENABLE_OPENVINS"
         )
+        if [ -n "$OPENVINS_ROOT" ]; then
+            replay_configure_args+=(-DSMART_DRONE_OPENVINS_ROOT="$OPENVINS_ROOT")
+        fi
+        if [ -n "$CERES_DIR_OVERRIDE" ]; then
+            replay_configure_args+=(-DCeres_DIR="$CERES_DIR_OVERRIDE")
+        fi
         if [ "$JETSON_ORIN_NX" -eq 1 ]; then
             replay_configure_args+=(
                 "${configure_native_args[@]}"

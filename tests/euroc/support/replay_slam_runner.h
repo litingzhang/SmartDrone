@@ -10,14 +10,12 @@
 #include "core/application/state/perception_pipeline.h"
 #include "core/ports/imu_provider.h"
 #include "core/ports/slam_engine.h"
-#include "core/ports/slam_runtime_control.h"
 
 namespace SmartDrone::Tests {
 
 struct ReplaySlamRunnerConfig {
     int cameraFps{60};
     int slamInputFps{20};
-    int backendStepEveryN{1};
     bool useImu{true};
     bool preferLatestFrame{true};
     int staleFrameThresholdMs{1000};
@@ -126,9 +124,6 @@ class ReplaySlamRunner {
         std::chrono::steady_clock::time_point imuEnd{};
         std::chrono::steady_clock::time_point slamStart{};
         std::chrono::steady_clock::time_point slamEnd{};
-        std::chrono::steady_clock::time_point backendStart{};
-        std::chrono::steady_clock::time_point backendEnd{};
-        bool ranBackendStep{false};
     };
 
     bool StartProviders();
@@ -139,7 +134,6 @@ class ReplaySlamRunner {
     void PrepareSlamInput(FrameRunContext &context);
     void AttachImuWindow(FrameRunContext &context);
     void ProcessSlamFrame(FrameRunContext &context);
-    void RunBackendStepIfNeeded(FrameRunContext &context);
     static ReplayPoseSample BuildReplayPoseSample(
         const FrameRunContext &context);
     static void CopyVisualFeatureFields(
@@ -154,11 +148,9 @@ class ReplaySlamRunner {
     SmartDrone::Core::Ports::ICameraProvider &m_camera;
     SmartDrone::Core::Ports::IImuProvider &m_imu;
     SmartDrone::Core::Ports::ISlamEngine &m_slamEngine;
-    SmartDrone::Core::Ports::ISlamRuntimeControl *m_slamControl{nullptr};
     ReplaySlamRunnerConfig m_cfg;
     SmartDrone::Core::Application::PerceptionPipeline m_pipeline;
     int64_t m_lastFrameNs{0};
-    int m_backendStepEveryN{1};
 };
 
 } // namespace SmartDrone::Tests
