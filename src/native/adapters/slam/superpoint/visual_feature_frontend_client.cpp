@@ -99,10 +99,6 @@ void ConfigureLightGlueEnvironmentDefaults()
     SmartDrone::Common::SetEnvVarIfUnset(
         "SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK", "120");
     SmartDrone::Common::SetEnvVarIfUnset(
-        "SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE", "1");
-    SmartDrone::Common::SetEnvVarIfUnset(
-        "SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS", "35");
-    SmartDrone::Common::SetEnvVarIfUnset(
         "SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE", "0");
     SmartDrone::Common::SetEnvVarIfUnset("SMART_DRONE_REALTIME_POSE_CONTINUITY",
                                          "1");

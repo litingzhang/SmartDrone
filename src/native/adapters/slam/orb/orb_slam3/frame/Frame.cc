@@ -262,7 +262,6 @@ Frame::Frame(const Frame &frame)
       mRlr(frame.mRlr), mtlr(frame.mtlr), mTrl(frame.mTrl), mTcw(frame.mTcw),
       mbHasPose(false), mbHasVelocity(false) {
   mbStereoFeatureInjected = frame.mbStereoFeatureInjected;
-  mpMutexImu = std::make_shared<std::mutex>();
   for (int i = 0; i < FRAME_GRID_COLS; i++)
     for (int j = 0; j < FRAME_GRID_ROWS; j++) {
       mGrid[i][j] = frame.mGrid[i][j];
@@ -381,9 +380,6 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight,
   } else {
     mVw.setZero();
   }
-
-  mpMutexImu = std::make_shared<std::mutex>();
-
   // Set no stereo fisheye information
   Nleft = -1;
   Nright = -1;
@@ -478,9 +474,6 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth,
   } else {
     mVw.setZero();
   }
-
-  mpMutexImu = std::make_shared<std::mutex>();
-
   // Set no stereo fisheye information
   Nleft = -1;
   Nright = -1;
@@ -589,8 +582,6 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp,
   } else {
     mVw.setZero();
   }
-
-  mpMutexImu = std::make_shared<std::mutex>();
 }
 
 Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight,
@@ -657,8 +648,6 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight,
   } else {
     mVw.setZero();
   }
-
-  mpMutexImu = std::make_shared<std::mutex>();
 }
 
 Frame::Frame(const cv::Mat &imGray, const double &timeStamp,
@@ -735,8 +724,6 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp,
   } else {
     mVw.setZero();
   }
-
-  mpMutexImu = std::make_shared<std::mutex>();
 }
 
 void Frame::LoadStereoFeatureFrameData(const StereoFeatureFrameData &features) {
@@ -1481,12 +1468,10 @@ bool Frame::UnprojectStereo(const int &i, Eigen::Vector3f &x3D) {
 }
 
 bool Frame::imuIsPreintegrated() {
-  // unique_lock<std::mutex> lock(*mpMutexImu);
   return mbImuPreintegrated;
 }
 
 void Frame::setIntegrated() {
-  // std::lock_guard<std::mutex> lock(*mpMutexImu);
   mbImuPreintegrated = true;
 }
 
@@ -1589,9 +1574,6 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight,
   mvbOutlier = vector<bool>(N, false);
 
   AssignFeaturesToGrid();
-
-  mpMutexImu = std::make_shared<std::mutex>();
-
   UndistortKeyPoints();
 }
 

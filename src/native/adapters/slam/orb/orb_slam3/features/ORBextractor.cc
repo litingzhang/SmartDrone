@@ -62,9 +62,9 @@
 #include <opencv2/cudawarping.hpp>
 #endif
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdlib>
-#include <mutex>
 #include <string>
 #include <vector>
 #include <iostream>
@@ -124,6 +124,23 @@ namespace ORB_SLAM3
 
 #ifdef SMART_DRONE_HAS_OPENCV_CUDA_ORB
     static void WarmOpenCvCudaOrbContext();
+
+    template <typename Fn>
+    static void RunOnceNoLock(std::atomic<bool> &done, Fn fn)
+    {
+        bool expected = false;
+        if (!done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+            return;
+        try
+        {
+            fn();
+        }
+        catch (...)
+        {
+            done.store(false, std::memory_order_release);
+            throw;
+        }
+    }
 #endif
 
     static float IC_Angle(const Mat& image, Point2f pt,  const vector<int> & u_max)
@@ -538,8 +555,8 @@ namespace ORB_SLAM3
             if (cv::cuda::getCudaEnabledDeviceCount() <= 0)
                 return false;
 
-            static std::once_flag logOnce;
-            std::call_once(logOnce, []() {
+            static std::atomic<bool> logOnce{false};
+            RunOnceNoLock(logOnce, []() {
                 std::cerr << "[orb_cuda_pyramid] backend=opencv_cuda_resize\n";
             });
 
@@ -575,8 +592,8 @@ namespace ORB_SLAM3
         }
         catch (const cv::Exception &)
         {
-            static std::once_flag warnOnce;
-            std::call_once(warnOnce, []() {
+            static std::atomic<bool> warnOnce{false};
+            RunOnceNoLock(warnOnce, []() {
                 std::cerr << "[orb_cuda_pyramid] failed; fallback=cpu_pyramid\n";
             });
             return false;
@@ -1215,8 +1232,8 @@ namespace ORB_SLAM3
 
     static void WarmOpenCvCudaOrbContext()
     {
-        static std::once_flag once;
-        std::call_once(once, []() {
+        static std::atomic<bool> once{false};
+        RunOnceNoLock(once, []() {
             if (cv::cuda::getCudaEnabledDeviceCount() <= 0)
                 return;
 

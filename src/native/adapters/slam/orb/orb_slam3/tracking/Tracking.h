@@ -42,8 +42,6 @@
 #include "core/ports/tracked_visual_data.h"
 
 #include "GeometricCamera.h"
-
-#include <mutex>
 #include <unordered_set>
 
 namespace ORB_SLAM3 {
@@ -142,8 +140,6 @@ public:
   KeyFrame *GetLastKeyFrame() { return mpLastKeyFrame; }
 
   void CreateMapInAtlas();
-  // std::mutex mMutexTracks;
-
   //--
   void NewDataset();
   int GetNumberDataset();
@@ -301,7 +297,6 @@ protected:
   // Vector of IMU measurements from previous to current frame (to be filled by
   // PreintegrateIMU)
   std::vector<IMU::Point> mvImuFromLastFrame;
-  std::mutex mMutexImuQueue;
 
   // Imu calibration parameters
   IMU::Calib *mpImuCalib;
@@ -434,7 +429,6 @@ protected:
   bool mbStopped;
   bool mbStopRequested;
   bool mbNotStop;
-  std::mutex mMutexStop;
 #endif
 
 public:

@@ -339,6 +339,47 @@ TEST(EventPipelineGraph, TaskBudgetAndDeadlineViolationsAreCounted)
     EXPECT_GT(diag.p50LoopUs, 0u);
 }
 
+TEST(EventPipelineGraph, SerializesTasksSharingNonCpuResource)
+{
+    std::atomic<int> active{0};
+    std::atomic<int> overlaps{0};
+    Registry registry;
+    const auto factory = [&active, &overlaps]() {
+        return std::unique_ptr<ITask>(
+            new TestResourceGuardTask(active, overlaps));
+    };
+    registry.RegisterTaskFactory("ResourceTaskA", {}, {}, factory);
+    registry.RegisterTaskFactory("ResourceTaskB", {}, {}, factory);
+
+    EventPipelineGraph graph(registry);
+    graph.ConfigureJson(R"({
+      "queues": [],
+      "tasks": [
+        {
+          "name": "resource_a",
+          "type": "ResourceTaskA",
+          "trigger": {"mode": "periodic", "interval_ms": 1},
+          "scheduling": {"resource": "slam_backend"}
+        },
+        {
+          "name": "resource_b",
+          "type": "ResourceTaskB",
+          "trigger": {"mode": "periodic", "interval_ms": 1},
+          "scheduling": {"resource": "slam_backend"}
+        }
+      ]
+    })");
+
+    graph.Start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    graph.Stop();
+
+    const auto diagnostics = graph.TaskDiagnostics();
+    EXPECT_GT(diagnostics.at("resource_a").loopCount, 0u);
+    EXPECT_GT(diagnostics.at("resource_b").loopCount, 0u);
+    EXPECT_EQ(overlaps.load(std::memory_order_relaxed), 0);
+}
+
 TEST(EventPipelineGraph, ContextSlotErrorsAreCountedAsTaskErrors)
 {
     auto registry = MakeRegistry();

@@ -8,7 +8,8 @@ ReplayOutputAdjustment BuildReplayOutputAdjustment(
 
 int RunOfflineReplay(const OfflineReplayOptions &opts)
 {
-    if (!opts.epgProfileOut.empty()) {
+    if (!opts.epgProfileOut.empty() ||
+        opts.slamBackend == SlamBackend::OrbSlam3) {
         return RunEpgProfileReplay(opts);
     }
     const SmartDrone::Tests::ReplayDataset dataset =

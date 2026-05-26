@@ -1,7 +1,7 @@
-using ReplayApplicationFactories =
-    SmartDrone::Core::Application::ApplicationRuntimeFactories;
-using ReplayCameraOpenConfig =
-    SmartDrone::Core::Ports::CameraOpenConfig;
+using ReplayApplicationFactories = SmartDrone::Core::Application::ApplicationRuntimeFactories;
+using ReplayCameraOpenConfig = SmartDrone::Core::Ports::CameraOpenConfig;
+using ReplayImuProviderConfig =
+    SmartDrone::Adapters::Imu::Icm42688ImuProviderConfig;
 using ReplayMainRuntimeAliases =
     SmartDrone::Core::Application::MainRuntimeAliases;
 using ReplaySlamResourceConfig =
@@ -240,9 +240,10 @@ ReplaySlamResources CreateEpgReplaySlamResources(
         SmartDrone::Adapters::Slam::CreateSlamEngine(
             BuildEpgReplayEngineConfig(config));
     ReplaySlamResources resources{};
-    resources.control =
-        std::make_unique<SmartDrone::Core::Application::SlamRuntimeControlPort>(
-            slamEngine.control);
+    resources.control = std::make_unique<
+        SmartDrone::Core::Application::SlamRuntimeControlPort>(
+        slamEngine.control);
+    resources.backendMaintenance = slamEngine.backendMaintenance;
     resources.engine = std::move(slamEngine.engine);
     return resources;
 }
@@ -315,6 +316,15 @@ ReplayCameraOpenConfig BuildEpgReplayCameraOpenConfig(
     return config;
 }
 
+ReplayImuProviderConfig MakeEpgReplayImuProviderConfig(
+    const ReplayMainRuntimeAliases &aliases)
+{
+    const int64_t imuDtNs = 1000000000LL / std::max(1, aliases.imuHz);
+    const int64_t slackBeforeNs = std::max<int64_t>(2 * imuDtNs, 5000000);
+    const int64_t slackAfterNs = std::max<int64_t>(2 * imuDtNs, 5000000);
+    return {slackBeforeNs, slackAfterNs};
+}
+
 ReplayApplicationFactories BuildEpgReplayFactories(
     const SmartDrone::Tests::ReplayDataset &dataset,
     std::shared_ptr<SmartDrone::Tests::ReplayCameraProgress> progress)
@@ -332,10 +342,10 @@ ReplayApplicationFactories BuildEpgReplayFactories(
             return CreateEpgReplaySlamResources(config);
         };
     factories.createImuProvider =
-        [&dataset](SmartDrone::Core::Application::ImuThreadState &,
-                   const ReplayMainRuntimeAliases &) {
-            return std::make_unique<SmartDrone::Tests::ReplayImuProvider>(
-                dataset);
+        [](SmartDrone::Core::Application::ImuThreadState &state,
+           const SmartDrone::Core::Application::MainRuntimeAliases &aliases) {
+            return std::make_unique<SmartDrone::Adapters::Imu::Icm42688ImuProvider>(
+                state.imuBuffer, MakeEpgReplayImuProviderConfig(aliases));
         };
     factories.startVisualFeatureFrontendSession =
         [](const ReplayMainRuntimeAliases &aliases,
@@ -408,6 +418,9 @@ fs::path DefaultEpgSolverReportPath()
 
 int CopyEpgReplayProfile(const OfflineReplayOptions &opts)
 {
+    if (opts.epgProfileOut.empty()) {
+        return 0;
+    }
     const fs::path source{"/tmp/smartdrone_epg_slam_profile.json"};
     if (!fs::exists(source)) {
         std::cerr << "EPG replay did not produce profile: " << source << "\n";
@@ -448,14 +461,11 @@ int OptimizeEpgReplayProfileIfRequested(const OfflineReplayOptions &opts)
 
 int RunEpgProfileReplay(const OfflineReplayOptions &opts)
 {
-    if (UseImu(opts.sensorMode)) {
-        std::cerr << "EPG replay profile currently requires --stereo-only\n";
-        return 2;
-    }
     auto progress =
         std::make_shared<SmartDrone::Tests::ReplayCameraProgress>();
     const SmartDrone::Tests::ReplayDataset dataset =
         SmartDrone::Tests::ReplayDataset::Load(opts.datasetRoot, opts.maxFrames);
+    SmartDrone::Tests::ReplayImuSampleSourceScope replayImuSource(dataset);
     ReplayUnifiedConfig cfg = BuildReplayUnifiedConfig(opts);
     SmartDrone::Core::Application::LiveRuntimeTuning tuning;
     ConfigureEpgReplayTuning(opts, tuning);

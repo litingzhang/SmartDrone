@@ -22,7 +22,6 @@
 #ifndef SYSTEM_H
 #define SYSTEM_H
 
-#include <mutex>
 #include <opencv2/core/core.hpp>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,8 +106,7 @@ public:
 
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  // Initialize the SLAM system. It launches the Local Mapping, Loop Closing and
-  // Viewer threads.
+  // Initialize the SLAM system. Backend modules are advanced by the EPG graph.
   System(const string &strVocFile, const string &strSettingsFile,
          const eSensor sensor, const bool bUseViewer = false,
          const int initFr = 0, const string &strSequence = std::string());
@@ -131,6 +129,8 @@ public:
                                       const cv::Mat &imRight,
                                       cv::Mat &imLeftPrepared,
                                       cv::Mat &imRightPrepared) const;
+  void RequestBackendStop();
+  bool BackendStopped() const;
   void StepBackend();
   Sophus::SE3f TrackStereoPreparedWithFeatures(
       const cv::Mat &imLeftPrepared, const cv::Mat &imRightPrepared,
@@ -173,8 +173,7 @@ public:
   void Reset();
   void ResetActiveMap();
 
-  // All threads will be requested to finish.
-  // It waits until all threads have finished.
+  // All backend modules must already be drained by EPG backend ticks.
   // This function must be called before saving the trajectory.
   void Shutdown();
   bool isShutDown();
@@ -249,8 +248,6 @@ public:
                                   SlamBackendMappingResult &result);
   bool ApplyLoopClosingOperation(const SlamBackendLoopClosureRequest &request,
                                  SlamBackendLoopClosureResult &result);
-  void WaitForLocalMappingIdleIfRequested();
-
   // For debugging
   double GetTimeFromIMUInit();
   bool isLost();
@@ -270,6 +267,9 @@ private:
   void SaveAtlas(int type);
   bool LoadAtlas(int type);
   void StoreLocalMappingWaitStats(const LocalMappingWaitStats &stats);
+  void ApplyPendingModeChange();
+  void ApplyPendingReset();
+  void UpdateTrackingState();
 
   string CalculateCheckSum(string filename, int type);
 
@@ -299,8 +299,8 @@ private:
   std::unique_ptr<IOrbTrackingBackend> mpTrackingBackend;
 
   // Loop Closer. It searches loops with every new keyframe. If there is a loop
-  // it performs a pose graph optimization and full bundle adjustment (in a new
-  // thread) afterwards.
+  // it performs pose graph optimization and full bundle adjustment when the EPG
+  // backend task advances it.
   LoopClosing *mpLoopCloser;
   std::unique_ptr<IOrbLoopClosingBackend> mpLoopClosingBackend;
   std::unique_ptr<IOrbOptimizationBackend> mpOptimizationBackend;
@@ -311,15 +311,13 @@ private:
   // FrameDrawer* mpFrameDrawer;
   // MapDrawer* mpMapDrawer;
 
-  // System runtime modules: Tracking, Local Mapping, Loop Closing, Viewer.
+  // System runtime modules advanced by the EPG session graph.
 
   // Reset flag
-  std::mutex mMutexReset;
   bool mbReset;
   bool mbResetActiveMap;
 
   // Change mode flags
-  std::mutex mMutexMode;
   bool mbActivateLocalizationMode;
   bool mbDeactivateLocalizationMode;
 
@@ -328,9 +326,7 @@ private:
 
   // Tracking state
   int mTrackingState;
-  std::mutex mMutexState;
   LocalMappingWaitStats mLastLocalMappingWaitStats;
-  mutable std::mutex mMutexLocalMappingWaitStats;
 
   //
   string mStrLoadAtlasFromFile;

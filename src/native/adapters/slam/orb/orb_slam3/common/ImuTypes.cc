@@ -175,7 +175,6 @@ void Preintegrated::Initialize(const Bias &b_)
 
 void Preintegrated::Reintegrate()
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     const std::vector<integrable> aux = mvMeasurements;
     Initialize(bu);
     for(size_t i=0;i<aux.size();i++)
@@ -250,9 +249,6 @@ void Preintegrated::MergePrevious(Preintegrated* pPrev)
 {
     if (pPrev==this)
         return;
-
-    std::unique_lock<std::mutex> lock1(mMutex);
-    std::unique_lock<std::mutex> lock2(pPrev->mMutex);
     Bias bav;
     bav.bwx = bu.bwx;
     bav.bwy = bu.bwy;
@@ -274,7 +270,6 @@ void Preintegrated::MergePrevious(Preintegrated* pPrev)
 
 void Preintegrated::SetNewBias(const Bias &bu_)
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     if (!std::isfinite(bu_.bax) || !std::isfinite(bu_.bay) || !std::isfinite(bu_.baz) ||
         !std::isfinite(bu_.bwx) || !std::isfinite(bu_.bwy) || !std::isfinite(bu_.bwz)) {
         return;
@@ -291,14 +286,12 @@ void Preintegrated::SetNewBias(const Bias &bu_)
 
 IMU::Bias Preintegrated::GetDeltaBias(const Bias &b_)
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     return IMU::Bias(b_.bax-b.bax,b_.bay-b.bay,b_.baz-b.baz,b_.bwx-b.bwx,b_.bwy-b.bwy,b_.bwz-b.bwz);
 }
 
 
 Eigen::Matrix3f Preintegrated::GetDeltaRotation(const Bias &b_)
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     Eigen::Vector3f dbg;
     dbg << b_.bwx-b.bwx,b_.bwy-b.bwy,b_.bwz-b.bwz;
     const Eigen::Vector3f rot = JRg * dbg;
@@ -310,7 +303,6 @@ Eigen::Matrix3f Preintegrated::GetDeltaRotation(const Bias &b_)
 
 Eigen::Vector3f Preintegrated::GetDeltaVelocity(const Bias &b_)
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     Eigen::Vector3f dbg, dba;
     dbg << b_.bwx-b.bwx,b_.bwy-b.bwy,b_.bwz-b.bwz;
     dba << b_.bax-b.bax,b_.bay-b.bay,b_.baz-b.baz;
@@ -323,7 +315,6 @@ Eigen::Vector3f Preintegrated::GetDeltaVelocity(const Bias &b_)
 
 Eigen::Vector3f Preintegrated::GetDeltaPosition(const Bias &b_)
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     Eigen::Vector3f dbg, dba;
     dbg << b_.bwx-b.bwx,b_.bwy-b.bwy,b_.bwz-b.bwz;
     dba << b_.bax-b.bax,b_.bay-b.bay,b_.baz-b.baz;
@@ -336,7 +327,6 @@ Eigen::Vector3f Preintegrated::GetDeltaPosition(const Bias &b_)
 
 Eigen::Matrix3f Preintegrated::GetUpdatedDeltaRotation()
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     const Eigen::Vector3f rot = JRg * db.head(3);
     if (!rot.allFinite()) {
         return NormalizeRotation(dR);
@@ -346,7 +336,6 @@ Eigen::Matrix3f Preintegrated::GetUpdatedDeltaRotation()
 
 Eigen::Vector3f Preintegrated::GetUpdatedDeltaVelocity()
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     const Eigen::Vector3f delta = JVg * db.head(3) + JVa * db.tail(3);
     if (!delta.allFinite()) {
         return dV;
@@ -356,7 +345,6 @@ Eigen::Vector3f Preintegrated::GetUpdatedDeltaVelocity()
 
 Eigen::Vector3f Preintegrated::GetUpdatedDeltaPosition()
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     const Eigen::Vector3f delta = JPg*db.head(3) + JPa*db.tail(3);
     if (!delta.allFinite()) {
         return dP;
@@ -365,36 +353,30 @@ Eigen::Vector3f Preintegrated::GetUpdatedDeltaPosition()
 }
 
 Eigen::Matrix3f Preintegrated::GetOriginalDeltaRotation() {
-    std::unique_lock<std::mutex> lock(mMutex);
     return dR;
 }
 
 Eigen::Vector3f Preintegrated::GetOriginalDeltaVelocity() {
-    std::unique_lock<std::mutex> lock(mMutex);
     return dV;
 }
 
 Eigen::Vector3f Preintegrated::GetOriginalDeltaPosition()
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     return dP;
 }
 
 Bias Preintegrated::GetOriginalBias()
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     return b;
 }
 
 Bias Preintegrated::GetUpdatedBias()
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     return bu;
 }
 
 Eigen::Matrix<float,6,1> Preintegrated::GetDeltaBias()
 {
-    std::unique_lock<std::mutex> lock(mMutex);
     return db;
 }
 

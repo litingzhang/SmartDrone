@@ -28,7 +28,6 @@
 #include "SerializationUtils.h"
 
 #include <opencv2/core/core.hpp>
-#include <mutex>
 
 #include <boost/serialization/serialization.hpp>
 #include <boost/serialization/array.hpp>
@@ -203,8 +202,6 @@ public:
     double mInitV;
     KeyFrame* mpHostKF;
 
-    static std::mutex mGlobalMutex;
-
     unsigned int mnOriginMapId;
 
 protected:    
@@ -243,11 +240,6 @@ protected:
      float mfMaxDistance;
 
      Map* mpMap;
-
-     // Mutex
-     std::mutex mMutexPos;
-     std::mutex mMutexFeatures;
-     std::mutex mMutexMap;
 
 };
 

@@ -225,20 +225,20 @@ digraph EpgTopology {
     SlamPosePostprocessTask -> SlamPointCloudTask [
       taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
-    SlamPointCloudTask -> SlamLivePoseTask [
-      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
+    SlamPosePostprocessTask -> SlamLivePoseTask [
+      taillabel="1", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
-    SlamLivePoseTask -> SlamMavlinkTask [
-      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
+    SlamPosePostprocessTask -> SlamMavlinkTask [
+      taillabel="2", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
-    SlamMavlinkTask -> SlamUdpTask [
-      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
+    SlamPosePostprocessTask -> SlamUdpTask [
+      taillabel="3", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
+    ];
+    SlamPosePostprocessTask -> SlamDfxTask [
+      taillabel="4", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamUdpTask -> SlamPreviewTxTask [
       taillabel="0", headlabel="0", label="SlamPreviewReady\ndepth=512\noverflow=overwrite_oldest"
-    ];
-    SlamPreviewTxTask -> SlamDfxTask [
-      taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamDfxTask -> SlamMonitorTask [
       taillabel="0", headlabel="0", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
@@ -262,7 +262,7 @@ digraph EpgTopology {
       taillabel="1", headlabel="6", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamPosePostprocessTask -> SlamMonitorTask [
-      taillabel="4", headlabel="7", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
+      taillabel="5", headlabel="7", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamPointCloudTask -> SlamMonitorTask [
       taillabel="1", headlabel="8", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"

@@ -23,6 +23,8 @@ class OrbSlam3Runtime final : public Core::Ports::ISlamTrackingBackend {
 
     bool Available() const override;
     void SetOperationMode(Core::Domain::SlamOperationMode mode) override;
+    void RequestBackendStop() override;
+    bool BackendStopped() const override;
     void StepBackend() override;
     void Shutdown() override;
     bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path) override;

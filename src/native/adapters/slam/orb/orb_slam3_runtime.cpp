@@ -71,6 +71,20 @@ void OrbSlam3Runtime::StepBackend()
     }
 }
 
+void OrbSlam3Runtime::RequestBackendStop()
+{
+    ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
+    if (system != nullptr) {
+        system->RequestBackendStop();
+    }
+}
+
+bool OrbSlam3Runtime::BackendStopped() const
+{
+    ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;
+    return system == nullptr || system->BackendStopped();
+}
+
 void OrbSlam3Runtime::SetOperationMode(Core::Domain::SlamOperationMode mode)
 {
     ORB_SLAM3::System *system = m_impl ? m_impl->system.get() : nullptr;

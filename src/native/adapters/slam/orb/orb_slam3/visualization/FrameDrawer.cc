@@ -22,7 +22,6 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
-#include<mutex>
 
 namespace ORB_SLAM3
 {
@@ -58,9 +57,8 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
     cv::Scalar standardColor(0,255,0);
     cv::Scalar odometryColor(255,0,0);
 
-    //Copy variables within scoped mutex
+    // Copy variables from the EPG-serialized tracking state.
     {
-        unique_lock<mutex> lock(mMutex);
         state=mState;
         if(mState==Tracking::SYSTEM_NOT_READY)
             mState=Tracking::NO_IMAGES_YET;
@@ -210,9 +208,8 @@ cv::Mat FrameDrawer::DrawRightFrame(float imageScale)
     vector<bool> vbVO, vbMap; // Tracked MapPoints in current frame
     int state; // Tracking state
 
-    //Copy variables within scoped mutex
+    // Copy variables from the EPG-serialized tracking state.
     {
-        unique_lock<mutex> lock(mMutex);
         state=mState;
         if(mState==Tracking::SYSTEM_NOT_READY)
             mState=Tracking::NO_IMAGES_YET;
@@ -235,7 +232,7 @@ cv::Mat FrameDrawer::DrawRightFrame(float imageScale)
         {
             vCurrentKeys = mvCurrentKeysRight;
         }
-    } // destroy scoped mutex -> release mutex
+    }
 
     if(imageScale != 1.f)
     {
@@ -369,7 +366,6 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
 
 void FrameDrawer::Update(Tracking *pTracker)
 {
-    unique_lock<mutex> lock(mMutex);
     pTracker->mImGray.copyTo(mIm);
     mvCurrentKeys=pTracker->mCurrentFrame.mvKeys;
     mThDepth = pTracker->mCurrentFrame.mThDepth;

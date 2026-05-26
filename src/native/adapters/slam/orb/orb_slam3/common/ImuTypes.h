@@ -27,7 +27,6 @@
 #include <Eigen/Geometry>
 #include <Eigen/Dense>
 #include <sophus/se3.hpp>
-#include <mutex>
 
 #include "SerializationUtils.h"
 
@@ -246,8 +245,6 @@ private:
     };
 
     std::vector<integrable> mvMeasurements;
-
-    std::mutex mMutex;
 };
 
 // Lie Algebra Functions

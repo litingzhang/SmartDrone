@@ -11,6 +11,7 @@
 #include "core/application/session/slam/slam_backend_maintenance_port.h"
 
 namespace SmartDrone::Core::Ports {
+class ISlamBackendMaintenance;
 class ISlamSessionTelemetryPort;
 } // namespace SmartDrone::Core::Ports
 
@@ -28,6 +29,8 @@ struct SlamFramePortSetConfig {
     SmartDrone::Core::Ports::ISlamSessionTelemetryPort &telemetry;
     SmartDrone::Core::Ports::ISlamEngine &slamEngine;
     SlamRuntimeControlPort &slamControl;
+    SmartDrone::Core::Ports::ISlamBackendMaintenance *slamBackendMaintenance{
+        nullptr};
     SmartDrone::Core::Ports::ICameraProvider &cameraProvider;
     SmartDrone::Core::Ports::IImuProvider &imuProvider;
     SmartDrone::Core::Ports::IPosePublisher &posePublisher;

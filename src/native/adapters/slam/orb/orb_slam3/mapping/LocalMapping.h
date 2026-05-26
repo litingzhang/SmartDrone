@@ -24,8 +24,6 @@
 #include "Atlas.h"
 #include "KeyFrameDatabase.h"
 #include "Settings.h"
-
-#include <mutex>
 #include <memory>
 
 
@@ -76,15 +74,12 @@ public:
     bool isFinished();
 
     int KeyframesInQueue(){
-        unique_lock<std::mutex> lock(mMutexNewKFs);
         return mlNewKeyFrames.size();
     }
 
     bool IsInitializing();
     double GetCurrKFTime();
     KeyFrame* GetCurrKF();
-
-    std::mutex mMutexImuInit;
 
     Eigen::MatrixXd mcovInertial;
     Eigen::Matrix3d mRwg;
@@ -152,13 +147,11 @@ protected:
     bool mbResetRequested;
     bool mbResetRequestedActiveMap;
     Map* mpMapToReset;
-    std::mutex mMutexReset;
 
     bool CheckFinish();
     void SetFinish();
     bool mbFinishRequested;
     bool mbFinished;
-    std::mutex mMutexFinish;
 
     Atlas* mpAtlas;
 
@@ -172,17 +165,13 @@ protected:
 
     std::list<MapPoint*> mlpRecentAddedMapPoints;
 
-    std::mutex mMutexNewKFs;
-
     bool mbAbortBA;
 
     bool mbStopped;
     bool mbStopRequested;
     bool mbNotStop;
-    std::mutex mMutexStop;
 
     bool mbAcceptKeyFrames;
-    std::mutex mMutexAccept;
 
     void InitializeIMU(float priorG = 1e2, float priorA = 1e6, bool bFirst = false);
     void ScaleRefinement();

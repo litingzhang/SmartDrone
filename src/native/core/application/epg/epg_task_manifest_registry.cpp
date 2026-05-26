@@ -71,7 +71,7 @@ const EpgTaskManifest SLAM_SESSION_MANIFEST{
         {"SlamImuPollTask", false, true, true},
     },
     {
-        {"SlamResourceTask", "resource_open", "session_resource", 5000, 50000, false},
+        {"SlamResourceTask", "resource_open", "slam_backend", 5000, 50000, false},
         {"SlamClockTask", "frame_clock", "cpu", 500, 2000, false},
         {"SlamImuPollTask", "imu_poll", "imu", 1000, 2000, false},
         {"SlamBackendTickTask", "backend_maintenance", "slam_backend", 2000, 5000, true, {"slam_backend_maintenance"}, true},

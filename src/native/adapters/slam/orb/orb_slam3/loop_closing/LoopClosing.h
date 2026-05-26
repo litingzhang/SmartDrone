@@ -28,7 +28,6 @@
 
 #include <boost/algorithm/string.hpp>
 #include <memory>
-#include <mutex>
 #include "g2o/types/types_seven_dof_expmap.h"
 
 namespace ORB_SLAM3
@@ -73,11 +72,9 @@ public:
     void RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoopKF);
 
     bool isRunningGBA(){
-        unique_lock<std::mutex> lock(mMutexGBA);
         return mbRunningGBA;
     }
     bool isFinishedGBA(){
-        unique_lock<std::mutex> lock(mMutexGBA);
         return mbFinishedGBA;
     }   
     void AbortGlobalBundleAdjustment();
@@ -152,13 +149,11 @@ protected:
     bool mbResetRequested;
     bool mbResetActiveMapRequested;
     Map* mpMapToReset;
-    std::mutex mMutexReset;
 
     bool CheckFinish();
     void SetFinish();
     bool mbFinishRequested;
     bool mbFinished;
-    std::mutex mMutexFinish;
 
     Atlas* mpAtlas;
     IOrbTrackingBackend* mpTrackingBackend{nullptr};
@@ -171,8 +166,6 @@ protected:
     std::unique_ptr<IOrbPlaceRecognitionBackend> mpPlaceRecognitionBackend;
 
     std::list<KeyFrame*> mlpLoopKeyFrameQueue;
-
-    std::mutex mMutexLoopQueue;
 
     // Loop detector parameters
     float mnCovisibilityConsistencyTh;
@@ -222,7 +215,6 @@ protected:
     bool mbRunningGBA;
     bool mbFinishedGBA;
     bool mbStopGBA;
-    std::mutex mMutexGBA;
 
     // Fix scale in the stereo/RGB-D case
     bool mbFixScale;

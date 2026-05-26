@@ -27,7 +27,6 @@
 #include "KannalaBrandt8.h"
 
 #include <set>
-#include <mutex>
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/export.hpp>
 
@@ -140,8 +139,8 @@ public:
     long unsigned int GetNumLivedMP();
 
 protected:
-    void CreateNewMapLocked();
-    void SelectUsableMapLocked();
+    void CreateNewMapInternal();
+    void SelectUsableMapInternal();
 
     std::set<Map*> mspMaps;
     std::set<Map*> mspBadMaps;
@@ -160,10 +159,6 @@ protected:
     // Class references for the map reconstruction from the save file
     KeyFrameDatabase* mpKeyFrameDB;
     ORBVocabulary* mpORBVocabulary;
-
-    // Mutex
-    std::mutex mMutexAtlas;
-
 
 }; // class Atlas
 

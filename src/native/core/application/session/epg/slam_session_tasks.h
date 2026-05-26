@@ -23,6 +23,7 @@ class SlamResourceTask final : public Epg::ITask {
     std::atomic<bool> &m_stop;
     std::atomic<bool> &m_runningFlag;
     bool m_readyEmitted{false};
+    bool m_backendStopRequested{false};
 };
 
 class SlamClockTask final : public Epg::ITask {

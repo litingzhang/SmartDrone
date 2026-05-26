@@ -26,8 +26,6 @@
 #include "System.h"
 #include "Settings.h"
 
-#include <mutex>
-
 namespace ORB_SLAM3
 {
 
@@ -45,10 +43,6 @@ public:
 
     void newParameterLoader(Settings* settings);
 
-    // Main draw function. Draw points, keyframes, the current camera pose and the last processed
-    // frame. Drawing is refreshed according to the camera fps. We use Pangolin.
-    void Run();
-
     void RequestFinish();
 
     void RequestStop();
@@ -56,8 +50,6 @@ public:
     bool isFinished();
 
     bool isStopped();
-
-    bool isStepByStep();
 
     void Release();
 
@@ -67,8 +59,6 @@ public:
 private:
 
     bool ParseViewerParamFile(cv::FileStorage &fSettings);
-
-    bool Stop();
 
     System* mpSystem;
     FrameDrawer* mpFrameDrawer;
@@ -82,17 +72,11 @@ private:
 
     float mViewpointX, mViewpointY, mViewpointZ, mViewpointF;
 
-    bool CheckFinish();
-    void SetFinish();
     bool mbFinishRequested;
     bool mbFinished;
-    std::mutex mMutexFinish;
 
     bool mbStopped;
     bool mbStopRequested;
-    std::mutex mMutexStop;
-
-    bool mbStopTrack;
 
 };
 

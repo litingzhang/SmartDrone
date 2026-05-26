@@ -33,12 +33,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
-#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <sys/stat.h>
 #include <sys/types.h>
 // #include <pangolin/pangolin.h>
@@ -66,10 +64,6 @@ namespace ORB_SLAM3 {
 
 namespace {
 
-template <typename T> T ClampValue(T value, T minValue, T maxValue) {
-  return std::max(minValue, std::min(value, maxValue));
-}
-
 bool VpiRemapStereoForOrb(const cv::Mat &, const cv::Mat &, cv::Mat &,
                           cv::Mat &, const cv::Mat &, const cv::Mat &,
                           const cv::Mat &, const cv::Mat &) {
@@ -93,48 +87,15 @@ bool EnvFlagEnabled(const char *name, bool fallback) {
   return !(text == "0" || text == "false" || text == "off" || text == "no");
 }
 
-int EnvIntClamped(const char *name, int fallback, int minValue, int maxValue) {
-  const char *value = std::getenv(name);
-  if (!value || value[0] == '\0')
-    return fallback;
-
-  char *end = nullptr;
-  const long parsed = std::strtol(value, &end, 10);
-  if (end == value)
-    return fallback;
-
-  return ClampValue(static_cast<int>(parsed), minValue, maxValue);
-}
-
-LocalMappingWaitStats WaitForLocalMappingIdle(
+LocalMappingWaitStats SnapshotLocalMappingStatus(
     IOrbLocalMappingBackend *localMapper) {
   LocalMappingWaitStats stats;
   if (localMapper == nullptr)
     return stats;
 
-  const int maxSteps = EnvIntClamped(
-      "SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_STEPS", 8, 1, 256);
-  const int timeoutMs = maxSteps;
-  stats.timeoutMs = timeoutMs;
   OrbLocalMappingStatus status = localMapper->Status();
   stats.queueBefore = status.keyframesInQueue;
   stats.acceptingBefore = status.acceptingKeyframes;
-  if (!EnvFlagEnabled("SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE", false)) {
-    stats.queueAfter = stats.queueBefore;
-    stats.acceptingAfter = stats.acceptingBefore;
-    return stats;
-  }
-
-  stats.requested = true;
-  const auto start = std::chrono::steady_clock::now();
-  for (int i = 0; i < maxSteps && (status.keyframesInQueue > 0 || !status.acceptingKeyframes); ++i) {
-    localMapper->Step();
-    status = localMapper->Status();
-  }
-  stats.timedOut = status.keyframesInQueue > 0 || !status.acceptingKeyframes;
-  const auto end = std::chrono::steady_clock::now();
-  stats.waitMs = std::chrono::duration<double, std::milli>(end - start).count();
-  status = localMapper->Status();
   stats.queueAfter = status.keyframesInQueue;
   stats.acceptingAfter = status.acceptingKeyframes;
   return stats;
@@ -146,17 +107,8 @@ void RequestLocalMappingStop(IOrbLocalMappingBackend *localMapper) {
   }
 }
 
-void WaitLocalMappingStopped(IOrbLocalMappingBackend *localMapper) {
-  if (localMapper == nullptr) {
-    return;
-  }
-  constexpr int kStopDrainMaxSteps = 256;
-  for (int i = 0; i < kStopDrainMaxSteps; ++i) {
-    if (localMapper->Status().stopped) {
-      return;
-    }
-    localMapper->Step();
-  }
+bool LocalMappingStopped(IOrbLocalMappingBackend *localMapper) {
+  return localMapper == nullptr || localMapper->Status().stopped;
 }
 
 void ReleaseLocalMapping(IOrbLocalMappingBackend *localMapper) {
@@ -172,16 +124,20 @@ void ApplyLocalizationModeChange(IOrbLocalMappingBackend *localMapper,
   if (tracker == nullptr) {
     return;
   }
-  if (activateLocalizationMode) {
-    RequestLocalMappingStop(localMapper);
-    WaitLocalMappingStopped(localMapper);
-    tracker->SetOnlyTracking(true);
-    activateLocalizationMode = false;
-  }
   if (deactivateLocalizationMode) {
     tracker->SetOnlyTracking(false);
     ReleaseLocalMapping(localMapper);
     deactivateLocalizationMode = false;
+    activateLocalizationMode = false;
+    return;
+  }
+  if (activateLocalizationMode) {
+    RequestLocalMappingStop(localMapper);
+    if (!LocalMappingStopped(localMapper)) {
+      return;
+    }
+    tracker->SetOnlyTracking(true);
+    activateLocalizationMode = false;
   }
 }
 
@@ -519,12 +475,50 @@ bool System::PrepareStereoImagesForTracking(const cv::Mat &imLeft,
 }
 
 void System::StepBackend() {
+  ApplyPendingModeChange();
   if (mpLocalMappingBackend != nullptr) {
     mpLocalMappingBackend->Step();
   }
   if (mpLoopClosingBackend != nullptr) {
     mpLoopClosingBackend->Step();
   }
+  ApplyPendingModeChange();
+}
+
+void System::RequestBackendStop() {
+  if (mpLocalMappingBackend != nullptr) {
+    mpLocalMappingBackend->RequestFinish();
+  }
+  if (mpLoopClosingBackend != nullptr) {
+    mpLoopClosingBackend->RequestFinish();
+    mpLoopClosingBackend->AbortGlobalBundleAdjustment();
+  }
+}
+
+bool System::BackendStopped() const {
+  const bool localMappingStopped =
+      mpLocalMappingBackend == nullptr || mpLocalMappingBackend->Status().finished;
+  const bool loopClosingStopped =
+      mpLoopClosingBackend == nullptr ||
+      (mpLoopClosingBackend->Status().finished &&
+       !mpLoopClosingBackend->Status().runningGlobalBundleAdjustment);
+  return localMappingStopped && loopClosingStopped;
+}
+
+void System::ApplyPendingModeChange() {
+  ApplyLocalizationModeChange(mpLocalMappingBackend.get(),
+                              mpTrackingBackend.get(),
+                              mbActivateLocalizationMode,
+                              mbDeactivateLocalizationMode);
+}
+
+void System::ApplyPendingReset() {
+  ResetTrackingIfRequested(mpTrackingBackend.get(), mbReset,
+                           mbResetActiveMap);
+}
+
+void System::UpdateTrackingState() {
+  UpdateTrackingStateFromBackend(mpTrackingBackend.get(), mTrackingState);
 }
 
 Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight,
@@ -542,21 +536,8 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight,
   cv::Mat imRightToFeed;
   PrepareStereoImagesForTracking(imLeft, imRight, imLeftToFeed, imRightToFeed);
 
-  // Check mode change
-  {
-    unique_lock<mutex> lock(mMutexMode);
-    ApplyLocalizationModeChange(mpLocalMappingBackend.get(),
-                                mpTrackingBackend.get(),
-                                mbActivateLocalizationMode,
-                                mbDeactivateLocalizationMode);
-  }
-
-  // Check reset
-  {
-    unique_lock<mutex> lock(mMutexReset);
-    ResetTrackingIfRequested(mpTrackingBackend.get(), mbReset,
-                             mbResetActiveMap);
-  }
+  ApplyPendingModeChange();
+  ApplyPendingReset();
 
   if (mSensor == System::IMU_STEREO)
     PushImuMeasurements(mpTrackingBackend.get(), vImuMeas);
@@ -571,13 +552,10 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight,
 
   // std::cout << "out grabber" << std::endl;
 
-  {
-    unique_lock<mutex> lock2(mMutexState);
-    UpdateTrackingStateFromBackend(mpTrackingBackend.get(), mTrackingState);
-  }
+  UpdateTrackingState();
 
   StoreLocalMappingWaitStats(
-      WaitForLocalMappingIdle(mpLocalMappingBackend.get()));
+      SnapshotLocalMappingStatus(mpLocalMappingBackend.get()));
 
   return Tcw;
 }
@@ -614,19 +592,8 @@ Sophus::SE3f System::TrackStereoWithFeatures(
     imRightToFeed = imRight;
   }
 
-  {
-    unique_lock<mutex> lock(mMutexMode);
-    ApplyLocalizationModeChange(mpLocalMappingBackend.get(),
-                                mpTrackingBackend.get(),
-                                mbActivateLocalizationMode,
-                                mbDeactivateLocalizationMode);
-  }
-
-  {
-    unique_lock<mutex> lock(mMutexReset);
-    ResetTrackingIfRequested(mpTrackingBackend.get(), mbReset,
-                             mbResetActiveMap);
-  }
+  ApplyPendingModeChange();
+  ApplyPendingReset();
 
   if (mSensor == System::IMU_STEREO)
     PushImuMeasurements(mpTrackingBackend.get(), vImuMeas);
@@ -639,13 +606,10 @@ Sophus::SE3f System::TrackStereoWithFeatures(
                     filename})
           : Sophus::SE3f();
 
-  {
-    unique_lock<mutex> lock2(mMutexState);
-    UpdateTrackingStateFromBackend(mpTrackingBackend.get(), mTrackingState);
-  }
+  UpdateTrackingState();
 
   StoreLocalMappingWaitStats(
-      WaitForLocalMappingIdle(mpLocalMappingBackend.get()));
+      SnapshotLocalMappingStatus(mpLocalMappingBackend.get()));
 
   return Tcw;
 }
@@ -661,19 +625,8 @@ Sophus::SE3f System::TrackStereoPreparedWithFeatures(
     exit(-1);
   }
 
-  {
-    unique_lock<mutex> lock(mMutexMode);
-    ApplyLocalizationModeChange(mpLocalMappingBackend.get(),
-                                mpTrackingBackend.get(),
-                                mbActivateLocalizationMode,
-                                mbDeactivateLocalizationMode);
-  }
-
-  {
-    unique_lock<mutex> lock(mMutexReset);
-    ResetTrackingIfRequested(mpTrackingBackend.get(), mbReset,
-                             mbResetActiveMap);
-  }
+  ApplyPendingModeChange();
+  ApplyPendingReset();
 
   if (mSensor == System::IMU_STEREO)
     PushImuMeasurements(mpTrackingBackend.get(), vImuMeas);
@@ -686,13 +639,10 @@ Sophus::SE3f System::TrackStereoPreparedWithFeatures(
                     filename})
           : Sophus::SE3f();
 
-  {
-    unique_lock<mutex> lock2(mMutexState);
-    UpdateTrackingStateFromBackend(mpTrackingBackend.get(), mTrackingState);
-  }
+  UpdateTrackingState();
 
   StoreLocalMappingWaitStats(
-      WaitForLocalMappingIdle(mpLocalMappingBackend.get()));
+      SnapshotLocalMappingStatus(mpLocalMappingBackend.get()));
 
   return Tcw;
 }
@@ -717,21 +667,8 @@ Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap,
     cv::resize(depthmap, imDepthToFeed, settings_->newImSize());
   }
 
-  // Check mode change
-  {
-    unique_lock<mutex> lock(mMutexMode);
-    ApplyLocalizationModeChange(mpLocalMappingBackend.get(),
-                                mpTrackingBackend.get(),
-                                mbActivateLocalizationMode,
-                                mbDeactivateLocalizationMode);
-  }
-
-  // Check reset
-  {
-    unique_lock<mutex> lock(mMutexReset);
-    ResetTrackingIfRequested(mpTrackingBackend.get(), mbReset,
-                             mbResetActiveMap);
-  }
+  ApplyPendingModeChange();
+  ApplyPendingReset();
 
   if (mSensor == System::IMU_RGBD)
     PushImuMeasurements(mpTrackingBackend.get(), vImuMeas);
@@ -743,8 +680,7 @@ Sophus::SE3f System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap,
                                     filename})
           : Sophus::SE3f();
 
-  unique_lock<mutex> lock2(mMutexState);
-  UpdateTrackingStateFromBackend(mpTrackingBackend.get(), mTrackingState);
+  UpdateTrackingState();
   return Tcw;
 }
 
@@ -752,11 +688,8 @@ Sophus::SE3f System::TrackMonocular(const cv::Mat &im, const double &timestamp,
                                     const vector<IMU::Point> &vImuMeas,
                                     string filename) {
 
-  {
-    unique_lock<mutex> lock(mMutexReset);
-    if (mbShutDown)
-      return Sophus::SE3f();
-  }
+  if (mbShutDown)
+    return Sophus::SE3f();
 
   if (mSensor != MONOCULAR && mSensor != IMU_MONOCULAR) {
     cerr << "ERROR: you called TrackMonocular but input sensor was not set to "
@@ -772,21 +705,8 @@ Sophus::SE3f System::TrackMonocular(const cv::Mat &im, const double &timestamp,
     imToFeed = resizedIm;
   }
 
-  // Check mode change
-  {
-    unique_lock<mutex> lock(mMutexMode);
-    ApplyLocalizationModeChange(mpLocalMappingBackend.get(),
-                                mpTrackingBackend.get(),
-                                mbActivateLocalizationMode,
-                                mbDeactivateLocalizationMode);
-  }
-
-  // Check reset
-  {
-    unique_lock<mutex> lock(mMutexReset);
-    ResetTrackingIfRequested(mpTrackingBackend.get(), mbReset,
-                             mbResetActiveMap);
-  }
+  ApplyPendingModeChange();
+  ApplyPendingReset();
 
   if (mSensor == System::IMU_MONOCULAR)
     PushImuMeasurements(mpTrackingBackend.get(), vImuMeas);
@@ -797,8 +717,7 @@ Sophus::SE3f System::TrackMonocular(const cv::Mat &im, const double &timestamp,
                 OrbMonocularTrackRequest{&imToFeed, timestamp, filename})
           : Sophus::SE3f();
 
-  unique_lock<mutex> lock2(mMutexState);
-  UpdateTrackingStateFromBackend(mpTrackingBackend.get(), mTrackingState);
+  UpdateTrackingState();
 
   return Tcw;
 }
@@ -807,11 +726,8 @@ Sophus::SE3f System::TrackMonocularWithFeatures(
     const cv::Mat &im, const MonoFeatureFrameData &features,
     const double &timestamp, const vector<IMU::Point> &vImuMeas,
     string filename) {
-  {
-    unique_lock<mutex> lock(mMutexReset);
-    if (mbShutDown)
-      return Sophus::SE3f();
-  }
+  if (mbShutDown)
+    return Sophus::SE3f();
 
   if (mSensor != MONOCULAR && mSensor != IMU_MONOCULAR) {
     cerr << "ERROR: you called TrackMonocularWithFeatures but input sensor was "
@@ -828,19 +744,8 @@ Sophus::SE3f System::TrackMonocularWithFeatures(
     imToFeed = resizedIm;
   }
 
-  {
-    unique_lock<mutex> lock(mMutexMode);
-    ApplyLocalizationModeChange(mpLocalMappingBackend.get(),
-                                mpTrackingBackend.get(),
-                                mbActivateLocalizationMode,
-                                mbDeactivateLocalizationMode);
-  }
-
-  {
-    unique_lock<mutex> lock(mMutexReset);
-    ResetTrackingIfRequested(mpTrackingBackend.get(), mbReset,
-                             mbResetActiveMap);
-  }
+  ApplyPendingModeChange();
+  ApplyPendingReset();
 
   if (mSensor == System::IMU_MONOCULAR)
     PushImuMeasurements(mpTrackingBackend.get(), vImuMeas);
@@ -852,19 +757,16 @@ Sophus::SE3f System::TrackMonocularWithFeatures(
                                                 timestamp, filename})
           : Sophus::SE3f();
 
-  unique_lock<mutex> lock2(mMutexState);
-  UpdateTrackingStateFromBackend(mpTrackingBackend.get(), mTrackingState);
+  UpdateTrackingState();
 
   return Tcw;
 }
 
 void System::ActivateLocalizationMode() {
-  unique_lock<mutex> lock(mMutexMode);
   mbActivateLocalizationMode = true;
 }
 
 void System::DeactivateLocalizationMode() {
-  unique_lock<mutex> lock(mMutexMode);
   mbDeactivateLocalizationMode = true;
 }
 
@@ -893,45 +795,23 @@ unsigned long System::GetCurrentMapId() {
 }
 
 void System::Reset() {
-  unique_lock<mutex> lock(mMutexReset);
   mbReset = true;
 }
 
 void System::ResetActiveMap() {
-  unique_lock<mutex> lock(mMutexReset);
   mbResetActiveMap = true;
 }
 
 void System::Shutdown() {
-  {
-    unique_lock<mutex> lock(mMutexReset);
-    if (mbShutDown)
-      return;
-    mbShutDown = true;
-  }
+  if (mbShutDown)
+    return;
+  mbShutDown = true;
 
   cout << "Shutdown" << endl;
 
-  if (mpLocalMappingBackend != nullptr) {
-    mpLocalMappingBackend->RequestFinish();
-  }
-  if (mpLoopClosingBackend != nullptr) {
-    mpLoopClosingBackend->RequestFinish();
-    mpLoopClosingBackend->AbortGlobalBundleAdjustment();
-  }
-  constexpr int kShutdownBackendDrainMaxIterations = 1000;
-  int drainIterations = 0;
-  while (((mpLocalMappingBackend != nullptr &&
-           !mpLocalMappingBackend->Status().finished) ||
-          (mpLoopClosingBackend != nullptr &&
-           (!mpLoopClosingBackend->Status().finished ||
-            mpLoopClosingBackend->Status().runningGlobalBundleAdjustment))) &&
-         drainIterations < kShutdownBackendDrainMaxIterations) {
-    StepBackend();
-    ++drainIterations;
-  }
-  if (drainIterations >= kShutdownBackendDrainMaxIterations) {
-    cerr << "ORB backend shutdown drain timed out" << endl;
+  RequestBackendStop();
+  if (!BackendStopped()) {
+    cerr << "ORB backend shutdown requested before EPG drain finished" << endl;
   }
 
   if (!mStrSaveAtlasToFile.empty()) {
@@ -951,7 +831,6 @@ void System::Shutdown() {
 }
 
 bool System::isShutDown() {
-  unique_lock<mutex> lock(mMutexReset);
   return mbShutDown;
 }
 
@@ -1546,7 +1425,6 @@ void System::SaveDebugData(const int &initIdx) {
 }
 
 int System::GetTrackingState() {
-  unique_lock<mutex> lock(mMutexState);
   return mTrackingState;
 }
 
@@ -1656,17 +1534,10 @@ void System::LogStereoFeatureDfx(uint64_t frameId,
 }
 
 LocalMappingWaitStats System::GetLastLocalMappingWaitStats() const {
-  unique_lock<mutex> lock(mMutexLocalMappingWaitStats);
   return mLastLocalMappingWaitStats;
 }
 
-void System::WaitForLocalMappingIdleIfRequested() {
-  StoreLocalMappingWaitStats(
-      WaitForLocalMappingIdle(mpLocalMappingBackend.get()));
-}
-
 void System::StoreLocalMappingWaitStats(const LocalMappingWaitStats &stats) {
-  unique_lock<mutex> lock(mMutexLocalMappingWaitStats);
   mLastLocalMappingWaitStats = stats;
 }
 

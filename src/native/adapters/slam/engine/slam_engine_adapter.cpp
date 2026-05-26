@@ -105,6 +105,18 @@ void SlamEngineAdapter::SetStereoVoPerFrameAcceleration(
     m_modeState->m_lkPerFrameAccelLogged = false;
 }
 
+void SlamEngineAdapter::RequestBackendStop()
+{
+    if (m_trackingBackend) {
+        m_trackingBackend->RequestBackendStop();
+    }
+}
+
+bool SlamEngineAdapter::BackendStopped() const
+{
+    return !m_trackingBackend || m_trackingBackend->BackendStopped();
+}
+
 void SlamEngineAdapter::StepBackend()
 {
     if (m_trackingBackend) {

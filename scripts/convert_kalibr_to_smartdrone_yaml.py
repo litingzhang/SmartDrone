@@ -11,6 +11,7 @@ Outputs:
 - stereo yaml for SmartDrone native backends and the optional ORB-SLAM3 backend
 - stereo_inertial yaml for SmartDrone native backends and the optional ORB-SLAM3 backend
 - mono_inertial_right yaml for right-camera mono-imu mode
+- optional OpenVINS estimator / kalibr yaml triplet
 
 Example:
   python3 scripts/convert_kalibr_to_smartdrone_yaml.py \
@@ -172,6 +173,14 @@ def format_opencv_mat4(name: str, T):
         f"  dt: f\n"
         f"  data: [{values}]\n"
     )
+
+
+def format_yaml_list(values):
+    return "[" + ", ".join(str(v) for v in values) + "]"
+
+
+def format_yaml_float_list(values):
+    return "[" + ", ".join(format_float(float(v)) for v in values) + "]"
 
 
 def extract_camera(cam_node, key_prefix: str):
@@ -379,6 +388,137 @@ def build_mono_inertial_right_yaml(cam1, T_b_c2, imu_cfg, fps, far_points):
     return "\n".join(lines)
 
 
+def build_openvins_estimator_yaml():
+    lines = [
+        "%YAML:1.0",
+        "",
+        'verbosity: "INFO"',
+        "use_fej: true",
+        'integration: "rk4"',
+        "use_stereo: true",
+        "max_cameras: 2",
+        "",
+        "calib_cam_extrinsics: true",
+        "calib_cam_intrinsics: true",
+        "calib_cam_timeoffset: true",
+        "calib_imu_intrinsics: false",
+        "calib_imu_g_sensitivity: false",
+        "",
+        "max_clones: 11",
+        "max_slam: 50",
+        "max_slam_in_update: 25",
+        "max_msckf_in_update: 40",
+        "dt_slam_delay: 1.0",
+        "gravity_mag: 9.81",
+        "",
+        'feat_rep_msckf: "GLOBAL_3D"',
+        'feat_rep_slam: "ANCHORED_MSCKF_INVERSE_DEPTH"',
+        'feat_rep_aruco: "ANCHORED_MSCKF_INVERSE_DEPTH"',
+        "",
+        "try_zupt: false",
+        "zupt_chi2_multipler: 0",
+        "zupt_max_velocity: 0.1",
+        "zupt_noise_multiplier: 10.0",
+        "zupt_max_disparity: 0.5",
+        "zupt_only_at_beginning: false",
+        "",
+        "init_window_time: 2.0",
+        "init_imu_thresh: 1.5",
+        "init_max_disparity: 10.0",
+        "init_max_features: 50",
+        "init_dyn_use: false",
+        "init_dyn_mle_opt_calib: false",
+        "init_dyn_mle_max_iter: 50",
+        "init_dyn_mle_max_time: 0.05",
+        "init_dyn_mle_max_threads: 6",
+        "init_dyn_num_pose: 6",
+        "init_dyn_min_deg: 10.0",
+        "init_dyn_inflation_ori: 10",
+        "init_dyn_inflation_vel: 100",
+        "init_dyn_inflation_bg: 10",
+        "init_dyn_inflation_ba: 100",
+        "init_dyn_min_rec_cond: 1e-12",
+        "init_dyn_bias_g: [0.0, 0.0, 0.0]",
+        "init_dyn_bias_a: [0.0, 0.0, 0.0]",
+        "",
+        "record_timing_information: false",
+        'record_timing_filepath: "/tmp/ov_msckf_timing.txt"',
+        "save_total_state: false",
+        'filepath_est: "/tmp/ov_estimate.txt"',
+        'filepath_std: "/tmp/ov_estimate_std.txt"',
+        'filepath_gt: "/tmp/ov_groundtruth.txt"',
+        "",
+        "use_klt: true",
+        "num_pts: 200",
+        "fast_threshold: 20",
+        "grid_x: 5",
+        "grid_y: 5",
+        "min_px_dist: 10",
+        "knn_ratio: 0.70",
+        "track_frequency: 20.0",
+        "downsample_cameras: false",
+        "num_opencv_threads: 4",
+        'histogram_method: "HISTOGRAM"',
+        "",
+        "use_aruco: false",
+        "num_aruco: 1024",
+        "downsize_aruco: true",
+        "",
+        "up_msckf_sigma_px: 1",
+        "up_msckf_chi2_multipler: 1",
+        "up_slam_sigma_px: 1",
+        "up_slam_chi2_multipler: 1",
+        "up_aruco_sigma_px: 1",
+        "up_aruco_chi2_multipler: 1",
+        "use_mask: false",
+        "",
+        'relative_config_imu: "kalibr_imu_chain.yaml"',
+        'relative_config_imucam: "kalibr_imucam_chain.yaml"',
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def build_openvins_imu_yaml(imu_cfg):
+    gyro_noise = float(imu_cfg["gyroscope_noise_density"])
+    gyro_walk = float(imu_cfg["gyroscope_random_walk"])
+    accel_noise = float(imu_cfg["accelerometer_noise_density"])
+    accel_walk = float(imu_cfg["accelerometer_random_walk"])
+    lines = [
+        "imu0:",
+        f"  update_rate: {format_float(float(imu_cfg['update_rate']))}",
+        f"  gyroscope_noise_density: {format_float(gyro_noise)}",
+        f"  gyroscope_random_walk: {format_float(gyro_walk)}",
+        f"  accelerometer_noise_density: {format_float(accel_noise)}",
+        f"  accelerometer_random_walk: {format_float(accel_walk)}",
+        f"  model: {imu_cfg.get('model', 'calibrated')}",
+        f"  rostopic: {imu_cfg.get('rostopic', '/imu0')}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def build_openvins_imucam_yaml(camchain, cam0, cam1):
+    def build_cam_block(key, cam_node, cam):
+        lines = [
+            f"{key}:",
+            f"  T_cam_imu: {format_yaml_list(cam_node['T_cam_imu'])}",
+            f"  camera_model: {cam_node.get('camera_model', 'pinhole')}",
+            f"  distortion_model: {cam_node.get('distortion_model', 'radtan')}",
+            f"  intrinsics: {format_yaml_float_list([cam['fx'], cam['fy'], cam['cx'], cam['cy']])}",
+            f"  distortion_coeffs: {format_yaml_float_list([cam['k1'], cam['k2'], cam['p1'], cam['p2']])}",
+            f"  resolution: {format_yaml_list([cam['width'], cam['height']])}",
+        ]
+        if 'rostopic' in cam_node:
+            lines.append(f"  rostopic: {cam_node['rostopic']}")
+        if key == "cam1" and "T_cn_cnm1" in cam_node:
+            lines.append(f"  T_cn_cnm1: {format_yaml_list(cam_node['T_cn_cnm1'])}")
+        lines.append("")
+        return "\n".join(lines)
+
+    return build_cam_block("cam0", camchain["cam0"], cam0) + build_cam_block("cam1", camchain["cam1"], cam1)
+
+
 def write_text(path: str, text: str):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
@@ -400,6 +540,9 @@ def main():
     parser.add_argument("--fps", type=int, default=60, help="Camera fps to write into output yaml")
     parser.add_argument("--stereo-th-depth", type=float, default=40.0, help="Stereo.ThDepth value")
     parser.add_argument("--far-points", type=float, default=8.0, help="System.thFarPoints value")
+    parser.add_argument("--out-openvins-estimator", default="", help="Output OpenVINS estimator_config.yaml")
+    parser.add_argument("--out-openvins-imucam", default="", help="Output OpenVINS kalibr_imucam_chain.yaml")
+    parser.add_argument("--out-openvins-imu", default="", help="Output OpenVINS kalibr_imu_chain.yaml")
     args = parser.parse_args()
 
     camchain_path = args.camchain
@@ -451,12 +594,24 @@ def main():
     write_text(args.out_stereo_plain, stereo_plain_text)
     write_text(args.out_stereo, stereo_text)
     write_text(args.out_mono_right, mono_right_text)
+    if args.out_openvins_estimator:
+        write_text(args.out_openvins_estimator, build_openvins_estimator_yaml())
+    if args.out_openvins_imucam:
+        write_text(args.out_openvins_imucam, build_openvins_imucam_yaml(camchain, cam0, cam1))
+    if args.out_openvins_imu:
+        write_text(args.out_openvins_imu, build_openvins_imu_yaml(imu_cfg))
 
     print(f"[info] camchain: {camchain_path}")
     print(f"[info] imu: {imu_path}")
     print(f"[done] wrote stereo yaml: {args.out_stereo_plain}")
     print(f"[done] wrote stereo yaml: {args.out_stereo}")
     print(f"[done] wrote mono right yaml: {args.out_mono_right}")
+    if args.out_openvins_estimator:
+        print(f"[done] wrote OpenVINS estimator yaml: {args.out_openvins_estimator}")
+    if args.out_openvins_imucam:
+        print(f"[done] wrote OpenVINS imucam yaml: {args.out_openvins_imucam}")
+    if args.out_openvins_imu:
+        print(f"[done] wrote OpenVINS imu yaml: {args.out_openvins_imu}")
 
 
 if __name__ == "__main__":

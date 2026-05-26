@@ -32,10 +32,6 @@
 #include <boost/serialization/base_object.hpp>
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/list.hpp>
-
-#include<mutex>
-
-
 namespace ORB_SLAM3
 {
 
@@ -92,9 +88,6 @@ protected:
 
    // For save relation without pointer, this is necessary for save/load function
    std::vector<list<long unsigned int> > mvBackupInvertedFileId;
-
-   // Mutex
-   std::mutex mMutex;
 
 };
 

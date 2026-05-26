@@ -20,7 +20,6 @@
 #include "MapPoint.h"
 #include "KeyFrame.h"
 // #include <pangolin/pangolin.h>
-#include <mutex>
 
 namespace ORB_SLAM3
 {
@@ -440,7 +439,6 @@ void MapDrawer::DrawCurrentCamera(pangolin::OpenGlMatrix &Twc)
 
 void MapDrawer::SetCurrentCameraPose(const Sophus::SE3f &Tcw)
 {
-    unique_lock<mutex> lock(mMutexCamera);
     mCameraPose = Tcw.inverse();
 }
 
@@ -448,7 +446,6 @@ void MapDrawer::GetCurrentOpenGLCameraMatrix(pangolin::OpenGlMatrix &M, pangolin
 {
     Eigen::Matrix4f Twc;
     {
-        unique_lock<mutex> lock(mMutexCamera);
         Twc = mCameraPose.matrix();
     }
 

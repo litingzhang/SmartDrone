@@ -9,6 +9,7 @@
 #include "adapters/slam/engine/slam_engine_factory.h"
 #include "adapters/slam/engine/slam_mode_state.h"
 #include "core/domain/runtime_mode.h"
+#include "core/ports/slam_backend_maintenance.h"
 #include "core/ports/slam_engine.h"
 
 namespace SmartDrone::Adapters::Slam {
@@ -20,7 +21,10 @@ class SlamModeStrategy;
 
 namespace SmartDrone::Adapters::Slam {
 
-class SlamEngineAdapter final : public Core::Ports::ISlamEngine, public ISlamRuntimeControl {
+class SlamEngineAdapter final
+    : public Core::Ports::ISlamEngine,
+      public ISlamRuntimeControl,
+      public Core::Ports::ISlamBackendMaintenance {
   public:
     SlamEngineAdapter(std::unique_ptr<Core::Ports::ISlamTrackingBackend> backend, SlamInputMode inputMode, bool useImu,
                       std::string settingsPath = {});
@@ -33,6 +37,8 @@ class SlamEngineAdapter final : public Core::Ports::ISlamEngine, public ISlamRun
     void SetVisualFeatureInputSizeLimit(int maxWidth, int maxHeight) override;
     void SetStereoVoLoopClosure(bool enabled, float scale = 1.20f, float relaxation = 1.40f) override;
     void SetStereoVoPerFrameAcceleration(std::string acceleration) override;
+    void RequestBackendStop() override;
+    bool BackendStopped() const override;
     void StepBackend() override;
     void Stop() override;
     bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path) override;

@@ -34,8 +34,6 @@
 
 #include "Converter.h"
 #include "Settings.h"
-
-#include <mutex>
 #include <opencv2/opencv.hpp>
 
 #include "core/ports/visual_feature_data.h"
@@ -181,8 +179,6 @@ public:
   inline Eigen::Matrix3f GetRotationInverse() { return mRwc; }
 
   inline Sophus::SE3<float> GetPose() const {
-    // TODO: can the Frame pose be accsessed from several threads? should this
-    // be protected somehow?
     return mTcw;
   }
 
@@ -354,9 +350,6 @@ private:
   bool mbIsSet;
 
   bool mbImuPreintegrated;
-
-  std::shared_ptr<std::mutex> mpMutexImu;
-
 public:
   GeometricCamera *mpCamera, *mpCamera2;
 

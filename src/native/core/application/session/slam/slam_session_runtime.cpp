@@ -88,6 +88,8 @@ class SlamSessionRuntime::Impl final {
     void Stop();
     bool StepImuPoll();
     bool ImuReady() const;
+    void RequestBackendStop();
+    bool BackendStopped();
     SlamFrameStageResult StepBackend();
     SlamFrameStageResult AcquireAndPrepareFrame(SlamPreparedFrameData &frame);
     SlamFrameStageResult TrackPreparedFrame(
@@ -120,6 +122,8 @@ class SlamSessionRuntime::Impl final {
 
     std::unique_ptr<SmartDrone::Core::Ports::ISlamEngine> m_slamEngine;
     std::unique_ptr<SlamRuntimeControlPort> m_slamRuntimeControl;
+    SmartDrone::Core::Ports::ISlamBackendMaintenance *m_slamBackendMaintenance{
+        nullptr};
     std::unique_ptr<SlamSessionResourceLifecycle> m_resourceLifecycle;
     AutoSlamModeController m_autoSlamModeController{};
     StereoBodyExtrinsics m_stereoBodyExtrinsics{};
@@ -178,6 +182,7 @@ SlamSessionRuntime::Impl::Impl(SlamSessionRuntimeConfig config)
 
     auto engineResources = m_factories.createSlamEngineResources(
         {config.cfg, m_aliases, m_effectiveSettingsPath, m_useImu});
+    m_slamBackendMaintenance = engineResources.backendMaintenance;
     m_slamEngine = std::move(engineResources.engine);
     m_slamRuntimeControl = std::move(engineResources.control);
     m_cameraProvider = m_factories.createCameraProvider();
@@ -389,6 +394,16 @@ bool SlamSessionRuntime::Impl::ImuReady() const
     return false;
 }
 
+void SlamSessionRuntime::Impl::RequestBackendStop()
+{
+    FramePorts().BackendMaintenancePort().RequestStop();
+}
+
+bool SlamSessionRuntime::Impl::BackendStopped()
+{
+    return FramePorts().BackendMaintenancePort().Stopped();
+}
+
 SlamFrameStageResult SlamSessionRuntime::Impl::StepBackend()
 {
     return MakeStageResult(FramePorts().BackendMaintenancePort().StepBackend());
@@ -412,6 +427,7 @@ SlamFramePortSet &SlamSessionRuntime::Impl::FramePorts()
                 m_telemetry,
                 *m_slamEngine,
                 *m_slamRuntimeControl,
+                m_slamBackendMaintenance,
                 *m_cameraProvider,
                 *m_imuProvider,
                 m_posePublisher,
@@ -534,6 +550,16 @@ bool SlamSessionRuntime::StepImuPoll()
 bool SlamSessionRuntime::ImuReady() const
 {
     return m_impl->ImuReady();
+}
+
+void SlamSessionRuntime::RequestBackendStop()
+{
+    m_impl->RequestBackendStop();
+}
+
+bool SlamSessionRuntime::BackendStopped()
+{
+    return m_impl->BackendStopped();
 }
 
 SlamFrameStageResult SlamSessionRuntime::StepBackend()

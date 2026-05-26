@@ -1,11 +1,9 @@
 #include "core/application/session/slam/slam_session_runtime_service.h"
 
 #include <atomic>
-#include <chrono>
 #include <memory>
 #include <utility>
 
-#include "common/environment.h"
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/session/slam/slam_session_processing_port.h"
@@ -16,34 +14,6 @@
 
 namespace SmartDrone::Core::Application {
 namespace {
-
-std::uint64_t EpgBackendTickMinIntervalMs()
-{
-    return static_cast<std::uint64_t>(SmartDrone::Common::EnvIntValueClamped(
-        "SMART_DRONE_EPG_BACKEND_TICK_MIN_INTERVAL_MS", 50, 0, 1000));
-}
-
-std::uint64_t EpgBackendTickTrackingCooldownMs()
-{
-    return static_cast<std::uint64_t>(SmartDrone::Common::EnvIntValueClamped(
-        "SMART_DRONE_EPG_BACKEND_TICK_TRACKING_COOLDOWN_MS", 50, 0, 1000));
-}
-
-std::uint64_t SteadyNowMs()
-{
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count());
-}
-
-bool WithinCooldown(std::uint64_t nowMs,
-                    std::uint64_t lastStepMs,
-                    std::uint64_t minIntervalMs)
-{
-    return minIntervalMs > 0 && lastStepMs > 0 &&
-           nowMs - lastStepMs < minIntervalMs;
-}
 
 template <typename Flag>
 class AtomicBoolResetGuard {
@@ -77,8 +47,9 @@ class SlamSessionRuntimeService::Impl final {
 
     bool StepImuPoll();
     bool ImuReady() const;
+    void RequestBackendStop();
+    bool BackendStopped() const;
     SlamTaskStepResult StepBackend();
-    SlamTaskStepResult StepBackendIfIdle();
     SlamPrepareFrameResult AcquireAndPrepareFrame(std::uint64_t sessionId);
     SlamTrackFrameResult TrackPreparedFrame(
         std::uint64_t sessionId,
@@ -130,9 +101,6 @@ class SlamSessionRuntimeService::Impl final {
     std::shared_ptr<const RuntimeState> m_runtimeState;
     std::atomic<bool> m_starting{false};
     std::atomic<bool> m_stopped{true};
-    std::atomic<bool> m_backendBusy{false};
-    std::atomic<std::uint64_t> m_lastBackendStepMs{0};
-    std::atomic<std::uint64_t> m_lastTrackingStepMs{0};
 };
 
 SlamSessionRuntimeService::Impl::Impl(
@@ -269,6 +237,20 @@ bool SlamSessionRuntimeService::Impl::ImuReady() const
     return runtime ? runtime->ImuReady() : false;
 }
 
+void SlamSessionRuntimeService::Impl::RequestBackendStop()
+{
+    auto runtime = Runtime();
+    if (runtime) {
+        runtime->RequestBackendStop();
+    }
+}
+
+bool SlamSessionRuntimeService::Impl::BackendStopped() const
+{
+    auto runtime = Runtime();
+    return !runtime || runtime->BackendStopped();
+}
+
 SlamTaskStepResult SlamSessionRuntimeService::Impl::StepBackend()
 {
     auto runtime = Runtime();
@@ -276,36 +258,6 @@ SlamTaskStepResult SlamSessionRuntimeService::Impl::StepBackend()
         return MissingRuntimeResult();
     }
     return m_processingPort->StepBackend(*runtime);
-}
-
-SlamTaskStepResult SlamSessionRuntimeService::Impl::StepBackendIfIdle()
-{
-    auto runtime = Runtime();
-    if (!runtime) {
-        return {};
-    }
-    const std::uint64_t nowMs = SteadyNowMs();
-    const std::uint64_t minIntervalMs = EpgBackendTickMinIntervalMs();
-    const std::uint64_t trackingCooldownMs =
-        EpgBackendTickTrackingCooldownMs();
-    const std::uint64_t lastBackendStepMs =
-        m_lastBackendStepMs.load(std::memory_order_relaxed);
-    const std::uint64_t lastTrackingStepMs =
-        m_lastTrackingStepMs.load(std::memory_order_relaxed);
-    if (WithinCooldown(nowMs, lastBackendStepMs, minIntervalMs) ||
-        WithinCooldown(nowMs, lastTrackingStepMs, trackingCooldownMs)) {
-        return {true, true, false};
-    }
-
-    bool expected = false;
-    if (!m_backendBusy.compare_exchange_strong(expected, true,
-                                               std::memory_order_acq_rel)) {
-        return {true, true, false};
-    }
-    AtomicBoolResetGuard<std::atomic<bool>> busyGuard(m_backendBusy);
-    SlamTaskStepResult result = m_processingPort->StepBackend(*runtime);
-    m_lastBackendStepMs.store(SteadyNowMs(), std::memory_order_relaxed);
-    return result;
 }
 
 SlamPrepareFrameResult SlamSessionRuntimeService::Impl::AcquireAndPrepareFrame(
@@ -328,9 +280,6 @@ SlamTrackFrameResult SlamSessionRuntimeService::Impl::TrackPreparedFrame(
     if (runtime && frame) {
         result = m_processingPort->TrackPreparedFrame(*runtime,
                                                       std::move(frame));
-    }
-    if (result.sessionAvailable) {
-        m_lastTrackingStepMs.store(SteadyNowMs(), std::memory_order_relaxed);
     }
     return result;
 }
@@ -493,14 +442,19 @@ bool SlamSessionRuntimeService::ImuReady() const
     return m_impl->ImuReady();
 }
 
+void SlamSessionRuntimeService::RequestBackendStop()
+{
+    m_impl->RequestBackendStop();
+}
+
+bool SlamSessionRuntimeService::BackendStopped() const
+{
+    return m_impl->BackendStopped();
+}
+
 SlamTaskStepResult SlamSessionRuntimeService::StepBackend()
 {
     return m_impl->StepBackend();
-}
-
-SlamTaskStepResult SlamSessionRuntimeService::StepBackendIfIdle()
-{
-    return m_impl->StepBackendIfIdle();
 }
 
 SlamPrepareFrameResult SlamSessionRuntimeService::AcquireAndPrepareFrame(

@@ -15,6 +15,14 @@ struct MainRuntimeAliases;
 struct UnifiedConfig;
 class SlamRuntimeControlPort;
 
+} // namespace SmartDrone::Core::Application
+
+namespace SmartDrone::Core::Ports {
+class ISlamBackendMaintenance;
+} // namespace SmartDrone::Core::Ports
+
+namespace SmartDrone::Core::Application {
+
 class ISlamVisualFeatureFrontendSession {
   public:
     virtual ~ISlamVisualFeatureFrontendSession() = default;
@@ -32,6 +40,8 @@ struct SlamSessionEngineResourceConfig {
 struct SlamSessionEngineResources {
     std::unique_ptr<SmartDrone::Core::Ports::ISlamEngine> engine;
     std::unique_ptr<SlamRuntimeControlPort> control;
+    SmartDrone::Core::Ports::ISlamBackendMaintenance *backendMaintenance{
+        nullptr};
 };
 
 struct SlamVisualFeatureFrontendStartResult {

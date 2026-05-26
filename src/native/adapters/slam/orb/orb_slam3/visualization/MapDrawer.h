@@ -25,9 +25,6 @@
 #include"KeyFrame.h"
 #include "Settings.h"
 #include<pangolin/pangolin.h>
-
-#include<mutex>
-
 namespace ORB_SLAM3
 {
 
@@ -62,8 +59,6 @@ private:
     float mCameraLineWidth;
 
     Sophus::SE3f mCameraPose;
-
-    std::mutex mMutexCamera;
 
     float mfFrameColors[6][3] = {{0.0f, 0.0f, 1.0f},
                                 {0.8f, 0.4f, 1.0f},

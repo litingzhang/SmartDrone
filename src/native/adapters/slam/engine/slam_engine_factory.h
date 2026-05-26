@@ -37,6 +37,7 @@ struct SlamEngineFactoryConfig {
 struct ControlledSlamEngine {
     std::unique_ptr<Core::Ports::ISlamEngine> engine;
     ISlamRuntimeControl *control{nullptr};
+    Core::Ports::ISlamBackendMaintenance *backendMaintenance{nullptr};
 };
 
 using SlamEngineFactory =

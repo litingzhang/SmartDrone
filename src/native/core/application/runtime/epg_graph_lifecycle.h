@@ -32,6 +32,7 @@ class EpgGraphLifecycle final {
     void StopSynchronously();
 
   private:
+    bool StepSynchronousStopUntilReady();
     void RequestGraphStopIfReady();
     void FinishStopIfReady();
     void ResetGraphAndResources();

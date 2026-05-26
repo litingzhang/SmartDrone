@@ -177,6 +177,11 @@ SlamBackend ParseSlamBackendText(const std::string &text)
         normalized == "dpvo-trt") {
         return SlamBackend::DpvoTensorRt;
     }
+    if (normalized == "openvins" || normalized == "open-vins" ||
+        normalized == "open_vins" || normalized == "ov_msckf" ||
+        normalized == "ov-msckf" || normalized == "ov") {
+        return SlamBackend::OpenVins;
+    }
     if (normalized == "orbslam3" || normalized == "orb-slam3" ||
         normalized == "orb_slam3" || normalized == "orb") {
         return SlamBackend::OrbSlam3;
@@ -189,6 +194,9 @@ SlamBackend NormalizeSlamBackendForBuild(SlamBackend backend)
     if (backend == SlamBackend::OrbSlam3 && !OrbSlam3BackendAvailable()) {
         return SlamBackend::Klt;
     }
+    if (backend == SlamBackend::OpenVins && !OpenVinsBackendAvailable()) {
+        return SlamBackend::Klt;
+    }
     return backend;
 }
 
@@ -199,6 +207,8 @@ const char *ToSlamBackendText(SlamBackend backend)
         return "klt";
     case SlamBackend::DpvoTensorRt:
         return "dpvo_tensorrt";
+    case SlamBackend::OpenVins:
+        return "openvins";
     case SlamBackend::OrbSlam3:
     default:
         return "orbslam3";

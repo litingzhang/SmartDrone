@@ -37,8 +37,6 @@ SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_POINTS=24
 SMART_DRONE_EXTERNAL_STEREO_INIT_MIN_CLOSE_RATIO=0.30
 SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT=1
 SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE=0.965
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35
 SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0
 SMART_DRONE_REALTIME_POSE_CONTINUITY=1
 SMART_DRONE_SUPERPOINT_INPUT_MAX_WIDTH=640
@@ -64,8 +62,7 @@ SMART_DRONE_EUROC_OUTPUT_POSITION_SCALE=0.998
 | Parallel SuperPoint postprocess | `SMART_DRONE_SUPERPOINT_PARALLEL_POST=1` | Accepted in Jetson profile defaults. |
 | Filtered stereo injection | `SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT=1` | Accepted. Current strict MH04/MH05 validation uses filtered ZNCC, epipolar, disparity, and grid-balanced pairs. |
 | External stereo depth scale | `SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE=0.965` | Accepted current compensation for SP+LG external stereo depth. |
-| LocalMapping wait | `SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1`, timeout `35 ms` | Accepted. Improves current-frame pose consistency at a latency cost;
-strict run averaged about `55 - 56 ms / frame`.| |
+| LocalMapping scheduling | EPG `SlamBackendTickTask` on `slam_backend` | Accepted replacement for the old inline LocalMapping wait. Tracking records queue/status snapshots instead of stepping LocalMapping. |
     Current - frame pose output | `SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE =
     0` |
     Accepted.Keeps realtime output on the pose returned by `Track()` rather than
@@ -197,7 +194,7 @@ Position scale sweep results:
 
 Observation: MH04 SP+LG has visible run-to-run variance even with the same output scale (`0.998` was `0.0583 m` in round 1 and `0.0959 m` in the scale repeat). Treat single-run gains as tentative unless a repeat confirms them.
 
-LocalMapping wait sweep results:
+Legacy inline LocalMapping wait sweep results, before the EPG backend scheduling change:
 
 | Wait timeout ms | Strict OK | Frames | Pose-valid | ATE RMSE (m) | RPE RMSE (m) | Decision |
 | ---: | ---: | ---: | ---: | ---: | ---: | --- |
@@ -209,8 +206,6 @@ Current recommendation after this optimization pass:
 
 ```bash
 SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE=0.965
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35
 SMART_DRONE_SP_LG_REALTIME_QUALITY_GATE=0
 SMART_DRONE_SP_LG_INIT_TRUST_SELECT_CLOSE_PAIRS=0
 SMART_DRONE_EUROC_OUTPUT_POSITION_SCALE=0.998
@@ -362,8 +357,6 @@ SMART_DRONE_LIGHTGLUE_EVERY_N=4
 SMART_DRONE_LIGHTGLUE_POINTS=512
 SMART_DRONE_SUPERPOINT_MAX_POINTS=512
 SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE=0.965
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35
 SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0
 SMART_DRONE_REALTIME_POSE_CONTINUITY=1
 SMART_DRONE_REALTIME_POSE_RESET_GUARD=0

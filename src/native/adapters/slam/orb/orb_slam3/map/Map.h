@@ -25,7 +25,6 @@
 
 #include <set>
 // #include <pangolin/pangolin.h>
-#include <mutex>
 
 #include <boost/serialization/base_object.hpp>
 
@@ -138,10 +137,8 @@ public:
     vector<KeyFrame*> mvpKeyFrameOrigins;
     vector<unsigned long int> mvBackupKeyFrameOriginsId;
     KeyFrame* mpFirstRegionKF;
-    std::mutex mMutexMapUpdate;
 
-    // This avoid that two points are created simultaneously in separate threads (id conflict)
-    std::mutex mMutexPointCreation;
+    // Map point ids are allocated by the EPG-serialized backend.
 
     bool mbFail;
 
@@ -197,9 +194,6 @@ protected:
     bool mbIsInertial;
     bool mbIMU_BA1;
     bool mbIMU_BA2;
-
-    // Mutex
-    std::mutex mMutexMap;
 
 };
 

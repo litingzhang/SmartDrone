@@ -12,9 +12,11 @@ namespace SmartDrone::Core::Application {
 namespace {
 
 constexpr Epg::PortId STATUS_OUTPUT_PORT = 1;
-constexpr Epg::PortId POSE_POSTPROCESS_STATUS_OUTPUT_PORT = 4;
+constexpr Epg::PortId POSE_POSTPROCESS_STATUS_OUTPUT_PORT = 5;
 constexpr Epg::PortId DFX_STATUS_OUTPUT_PORT = 0;
 constexpr Epg::PortId PREVIEW_READY_OUTPUT_PORT = 0;
+constexpr std::array<Epg::PortId, 5> PUBLISHED_FRAME_OUTPUT_PORTS{0, 1, 2, 3,
+                                                                   4};
 constexpr std::array<Epg::PortId, 4> TRACKED_FRAME_INPUT_PORTS{0, 1, 2, 3};
 constexpr std::array<Epg::PortId, 13> SLAM_MONITOR_STATUS_INPUT_PORTS{
     0,
@@ -215,6 +217,13 @@ SlamResourceTask::SlamResourceTask(
 void SlamResourceTask::OnTick(Epg::TaskContext &context)
 {
     if (!ShouldRunTask(m_runningFlag, m_stop)) {
+        if (!m_backendStopRequested) {
+            m_service->RequestBackendStop();
+            m_backendStopRequested = true;
+        }
+        if (!m_service->BackendStopped()) {
+            return;
+        }
         m_service->Stop();
         return;
     }
@@ -285,10 +294,11 @@ SlamBackendTickTask::SlamBackendTickTask(
 void SlamBackendTickTask::OnTick(Epg::TaskContext &context)
 {
     (void)context;
-    if (!ShouldRunTask(m_runningFlag, m_stop)) {
+    if (!ShouldRunTask(m_runningFlag, m_stop) &&
+        m_service->BackendStopped()) {
         return;
     }
-    const SlamTaskStepResult result = m_service->StepBackendIfIdle();
+    const SlamTaskStepResult result = m_service->StepBackend();
     if (result.abortRequested) {
         m_stop.store(true);
     }
@@ -509,7 +519,9 @@ void SlamPosePostprocessTask::OnTick(Epg::TaskContext &context)
         return;
     }
 
-    PushSlamPublishedFrame(context, 0, tracked->sessionId, result.frame);
+    for (const auto port : PUBLISHED_FRAME_OUTPUT_PORTS) {
+        PushSlamPublishedFrame(context, port, tracked->sessionId, result.frame);
+    }
 }
 
 SlamPointCloudTask::SlamPointCloudTask(
@@ -583,7 +595,6 @@ void SlamUdpTask::OnTick(Epg::TaskContext &context)
 
     PushSlamPreviewReady(context, PREVIEW_READY_OUTPUT_PORT,
                          published->sessionId, published->frame);
-    context.Push(1, std::move(published));
     PushSlamStatus(context, result.sessionOk, false, STATUS_OUTPUT_PORT);
 }
 
@@ -611,7 +622,6 @@ void SlamPreviewTxTask::OnTick(Epg::TaskContext &context)
         return;
     }
 
-    PushSlamPublishedFrame(context, 0, preview->sessionId, preview->frame);
     PushSlamStatus(context, result.sessionOk, false, STATUS_OUTPUT_PORT);
 }
 

@@ -3,6 +3,7 @@
 #include <functional>
 #include <set>
 #include <sstream>
+#include <unordered_map>
 #include <utility>
 
 namespace Epg {
@@ -248,6 +249,25 @@ std::uint64_t AverageResourceWaitUs(const TaskDiagnosticsSnapshot &diag)
         return 0;
     }
     return diag.totalResourceWaitUs / diag.resourceWaitCount;
+}
+
+bool TaskResourceNeedsGate(const std::string &resource)
+{
+    return !resource.empty() && resource.rfind("cpu", 0) != 0;
+}
+
+std::shared_ptr<TaskResourceGate> ResolveResourceGate(
+    std::unordered_map<std::string, std::shared_ptr<TaskResourceGate>> &gates,
+    const std::string &resource)
+{
+    if (!TaskResourceNeedsGate(resource)) {
+        return {};
+    }
+    auto &gate = gates[resource];
+    if (!gate) {
+        gate = std::make_shared<TaskResourceGate>();
+    }
+    return gate;
 }
 
 std::uint64_t UtilizationPpm(const TaskDiagnosticsSnapshot &diag)
@@ -554,14 +574,16 @@ void EventPipelineGraph::PublishTaskProducedQueues(const ConfigureUsage &usage)
 
 void EventPipelineGraph::CreateConfiguredTaskRunners(const GraphConfig &config)
 {
+    std::unordered_map<std::string, std::shared_ptr<TaskResourceGate>> gates;
     for (const auto &taskConfig : config.tasks) {
         const auto *taskType = m_registry.FindTaskType(taskConfig.type);
-        m_runners.emplace_back(new TaskRunner(
+        m_runners.emplace_back(new TaskRunner(TaskRunnerSpec{
             taskConfig,
             taskType->factory(),
             MakeInputQueueBindings(taskConfig),
             MakeOutputQueueBindings(taskConfig),
-            MakeTriggerQueueBindings(taskConfig)));
+            MakeTriggerQueueBindings(taskConfig),
+            ResolveResourceGate(gates, taskConfig.scheduling.resource)}));
     }
 }
 

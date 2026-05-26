@@ -43,6 +43,8 @@ class SlamSessionRuntime {
     void Stop();
     bool StepImuPoll();
     bool ImuReady() const;
+    void RequestBackendStop();
+    bool BackendStopped();
     SlamFrameStageResult StepBackend();
     SlamFrameStageResult AcquireAndPrepareFrame(SlamPreparedFrameData &frame);
     SlamFrameStageResult TrackPreparedFrame(

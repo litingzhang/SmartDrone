@@ -60,8 +60,8 @@ DescriptorList SlamModeDescriptors()
         Make(ConfigRegistry::SLAM_INPUT_FPS,
              "Input frame rate delivered to the SLAM engine", true, false, false),
         Make(ConfigRegistry::SLAM_BACKEND,
-             "SLAM backend selection: klt, dpvo_tensorrt, or orbslam3 when "
-             "compiled",
+             "SLAM backend selection: klt, dpvo_tensorrt, openvins, or "
+             "orbslam3 when compiled",
              false, true, false),
         Make(ConfigRegistry::SLAM_FEATURE_FRONTEND,
              "Feature frontend selection such as lk_gftt_per_frame, lk, orb, "

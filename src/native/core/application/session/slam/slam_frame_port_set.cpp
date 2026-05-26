@@ -57,7 +57,8 @@ SlamBackendMaintenancePort &SlamFramePortSet::BackendMaintenancePort()
 {
     if (!m_backendMaintenancePort) {
         m_backendMaintenancePort =
-            std::make_unique<SlamBackendMaintenancePort>(m_cfg.slamControl);
+            std::make_unique<SlamBackendMaintenancePort>(
+                m_cfg.slamBackendMaintenance);
     }
     return *m_backendMaintenancePort;
 }

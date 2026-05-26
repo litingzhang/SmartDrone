@@ -32,8 +32,6 @@
 #include "GeometricCamera.h"
 #include "SerializationUtils.h"
 
-#include <mutex>
-
 #include <boost/serialization/base_object.hpp>
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/map.hpp>
@@ -305,7 +303,7 @@ public:
 
     bool bImu;
 
-    // The following variables are accessed from one execution flow or never change (no mutex needed).
+    // The following variables are accessed from the EPG-serialized backend.
 public:
 
     static long unsigned int nNextId;
@@ -424,7 +422,7 @@ public:
     //bool mbHasHessian;
     //cv::Mat mHessianPose;
 
-    // The following variables need a mutex for concurrent access.
+    // The following variables are owned by the EPG-serialized backend.
 protected:
     // sophus poses
     Sophus::SE3<float> mTcw;
@@ -494,12 +492,6 @@ protected:
 
     // Calibration
     Eigen::Matrix3f mK_;
-
-    // Mutex
-    std::mutex mMutexPose; // for pose, velocity and biases
-    std::mutex mMutexConnections;
-    std::mutex mMutexFeatures;
-    std::mutex mMutexMap;
 
 public:
     GeometricCamera* mpCamera, *mpCamera2;

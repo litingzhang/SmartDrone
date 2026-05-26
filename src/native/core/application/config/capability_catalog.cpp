@@ -24,6 +24,9 @@ std::vector<Domain::PerceptionMode> DefaultPerceptionModes(
 std::vector<std::string> DefaultSlamEngines()
 {
     std::vector<std::string> engines{"klt", "dpvo_tensorrt"};
+    if (OpenVinsBackendAvailable()) {
+        engines.push_back("openvins");
+    }
     if (OrbSlam3BackendAvailable()) {
         engines.push_back("orbslam3");
     }
@@ -46,6 +49,9 @@ std::vector<std::string> DefaultBehaviorNotes(
         "slam.feature_frontend.lk_gftt_per_frame=klt_tracking_pnp_vo",
         "slam.lk_seed.gftt=shi_tomasi_good_features_to_track",
     };
+    if (OpenVinsBackendAvailable()) {
+        notes.push_back("slam.backend.openvins=external_openvins_msckf_backend");
+    }
     if (orbAvailable) {
         notes.push_back(
             "slam.backend.orbslam3=orb_slam3_backend_with_selectable_frontends");

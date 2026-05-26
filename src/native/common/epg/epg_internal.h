@@ -6,17 +6,27 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <thread>
 
 namespace Epg {
 
+struct TaskResourceGate {
+    std::atomic<bool> busy{false};
+};
+
+struct TaskRunnerSpec {
+    TaskConfig config;
+    std::unique_ptr<ITask> task;
+    std::unordered_map<PortId, IQueue *> inputs;
+    std::unordered_map<PortId, IQueue *> outputs;
+    std::vector<IQueue *> triggerQueues;
+    std::shared_ptr<TaskResourceGate> resourceGate;
+};
+
 class EventPipelineGraph::TaskRunner {
   public:
-    TaskRunner(TaskConfig config,
-               std::unique_ptr<ITask> task,
-               std::unordered_map<PortId, IQueue *> inputs,
-               std::unordered_map<PortId, IQueue *> outputs,
-               std::vector<IQueue *> triggerQueues);
+    explicit TaskRunner(TaskRunnerSpec spec);
     ~TaskRunner();
 
     const std::string &Name() const;
@@ -41,6 +51,8 @@ class EventPipelineGraph::TaskRunner {
     void DrainWakeEvents();
     bool QueuesReady() const;
     bool BackpressureBlocked() const;
+    bool WaitForResourceGate();
+    void ReleaseResourceGate();
     void StoreLoopSample(std::uint64_t elapsedUs);
     void FillLoopPercentiles(TaskDiagnosticsSnapshot &snapshot) const;
 
@@ -48,6 +60,7 @@ class EventPipelineGraph::TaskRunner {
     std::unique_ptr<ITask> m_task;
     TaskContext m_context;
     std::vector<IQueue *> m_triggerQueues;
+    std::shared_ptr<TaskResourceGate> m_resourceGate;
     mutable ::Epg::TaskDiagnostics m_diag;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_exited{true};

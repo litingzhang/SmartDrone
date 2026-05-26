@@ -254,6 +254,7 @@ SlamSessionEngineResources CreateSlamEngineResources(
     SlamSessionEngineResources resources{};
     resources.control =
         std::make_unique<SlamRuntimeControlPort>(slamEngine.control);
+    resources.backendMaintenance = slamEngine.backendMaintenance;
     resources.engine = std::move(slamEngine.engine);
     return resources;
 }

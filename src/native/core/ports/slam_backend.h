@@ -7,6 +7,7 @@
 #include <opencv2/core.hpp>
 #include <sophus/se3.hpp>
 
+#include "core/ports/slam_backend_maintenance.h"
 #include "core/domain/runtime_mode.h"
 #include "core/ports/slam_backend_modules.h"
 #include "core/ports/slam_backend_state.h"
@@ -46,15 +47,12 @@ struct PreparedStereoFeatureTrackRequest {
     bool useImu{false};
 };
 
-class ISlamBackendLifecycle {
+class ISlamBackendLifecycle : public ISlamBackendMaintenance {
   public:
     virtual ~ISlamBackendLifecycle() = default;
 
     virtual bool Available() const = 0;
     virtual void SetOperationMode(Core::Domain::SlamOperationMode mode) = 0;
-    virtual void StepBackend()
-    {
-    }
     virtual void Shutdown() = 0;
 };
 

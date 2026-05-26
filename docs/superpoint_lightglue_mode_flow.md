@@ -259,10 +259,9 @@ pair. Current MH04/MH05 validation uses this path for strict realtime replay out
 depth produced from SuperPoint/LightGlue keypoints before ORB map optimization. Leave it environment-overridable
 when validating a new camera model or dataset.
 
-`SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1` is enabled by default for the current SP+LG realtime pose profile. It waits
-up to `SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35` after each ORB-SLAM3 stereo tracking call so the pose
-published for that replay frame can see the latest LocalMapping update. This is a deliberate latency/accuracy tradeoff:
-the strict MH04/MH05 Jetson run averaged about `55-56 ms/frame`.
+ORB LocalMapping is advanced by the EPG `SlamBackendTickTask` on the shared `slam_backend` resource. Tracking does not
+wait for or step LocalMapping inline; the DFX fields record the LocalMapping queue and accepting-state snapshot after
+the current `Track()` call.
 
 `SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0` keeps realtime output on the current pose returned by `Track()`. The EuRoC-style reference-keyframe trajectory pose remains an opt-in diagnostic path because it can include LocalMapping reference updates and is not the strict current-frame output contract. `SMART_DRONE_REALTIME_POSE_CONTINUITY=1` handles only current-frame bootstrap/transient lost outputs so the frame still emits a finite pose. It does not rewrite older CSV rows and does not use future frames to post-fill missing poses.
 

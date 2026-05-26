@@ -1,10 +1,16 @@
 #include "core/application/runtime/epg_graph_lifecycle.h"
 
+#include <chrono>
 #include <utility>
 
 #include "common/epg/epg.h"
 
 namespace SmartDrone::Core::Application {
+namespace {
+
+constexpr auto SYNCHRONOUS_STOP_TIMEOUT = std::chrono::seconds(5);
+
+} // namespace
 
 EpgGraphLifecycle::EpgGraphLifecycle(EpgGraphLifecycleConfig config)
     : m_stop(config.stop),
@@ -68,11 +74,27 @@ void EpgGraphLifecycle::StopSynchronously()
         return;
     }
     RequestStop();
+    if (StepSynchronousStopUntilReady()) {
+        return;
+    }
     if (m_stopResources) {
         m_stopResources();
     }
     m_graph->Stop();
     ResetGraphAndResources();
+}
+
+bool EpgGraphLifecycle::StepSynchronousStopUntilReady()
+{
+    const auto deadline =
+        std::chrono::steady_clock::now() + SYNCHRONOUS_STOP_TIMEOUT;
+    while (m_graph && std::chrono::steady_clock::now() < deadline) {
+        StepStop();
+        if (m_done) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void EpgGraphLifecycle::RequestGraphStopIfReady()

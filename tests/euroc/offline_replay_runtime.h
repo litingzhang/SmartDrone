@@ -261,7 +261,6 @@ BuildReplayRunnerConfig(const OfflineReplayOptions &opts)
 {
     return {.cameraFps = opts.cameraFps,
             .slamInputFps = opts.slamInputFps,
-            .backendStepEveryN = std::max(1, opts.backendStepEveryN),
             .useImu = UseImu(opts.sensorMode),
             .preferLatestFrame = true,
             .staleFrameThresholdMs = opts.staleFrameThresholdMs,

@@ -55,6 +55,9 @@ set(SMART_DRONE_ADAPTER_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine_config.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_runtime_options.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_runtime.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_backend.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_slam_engine.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/stereo_feature_frontend_runner.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/descriptor_geometry.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/stereo_pair_builder.cpp"
@@ -158,12 +161,28 @@ if(SMART_DRONE_ENABLE_ORB_SLAM3)
   list(APPEND SMART_DRONE_ADAPTER_SOURCES ${SMART_DRONE_ORB_SOURCES})
 endif()
 
+if(NOT SMART_DRONE_ENABLE_OPENVINS)
+  list(REMOVE_ITEM SMART_DRONE_ADAPTER_SOURCES
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_runtime.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_backend.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_slam_engine.cpp"
+  )
+endif()
+
 set(SMART_DRONE_SLAM_BACKEND_AVAILABILITY_SOURCE
   "${SMART_DRONE_NATIVE_ROOT}/core/application/config/slam_backend_availability.cpp"
 )
-if(SMART_DRONE_ENABLE_ORB_SLAM3)
+if(SMART_DRONE_ENABLE_ORB_SLAM3 AND SMART_DRONE_ENABLE_OPENVINS)
+  set(SMART_DRONE_SLAM_BACKEND_AVAILABILITY_SOURCE
+    "${SMART_DRONE_NATIVE_ROOT}/core/application/config/slam_backend_availability_orb_openvins.cpp"
+  )
+elseif(SMART_DRONE_ENABLE_ORB_SLAM3)
   set(SMART_DRONE_SLAM_BACKEND_AVAILABILITY_SOURCE
     "${SMART_DRONE_NATIVE_ROOT}/core/application/config/slam_backend_availability_orb.cpp"
+  )
+elseif(SMART_DRONE_ENABLE_OPENVINS)
+  set(SMART_DRONE_SLAM_BACKEND_AVAILABILITY_SOURCE
+    "${SMART_DRONE_NATIVE_ROOT}/core/application/config/slam_backend_availability_openvins.cpp"
   )
 endif()
 

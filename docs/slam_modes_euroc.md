@@ -82,8 +82,6 @@ SMART_DRONE_SP_LG_BOOTSTRAP_TRUST_FRONTEND_PAIRS=1
 SMART_DRONE_SP_LG_TRUST_FRONTEND_PAIRS_OK_STREAK=20
 SMART_DRONE_SP_LG_FILTERED_STEREO_INJECT=1
 SMART_DRONE_EXTERNAL_STEREO_DEPTH_SCALE=0.965
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35
 SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0
 SMART_DRONE_REALTIME_POSE_CONTINUITY=1
 SMART_DRONE_SUPERPOINT_INPUT_MAX_WIDTH=640
@@ -156,10 +154,9 @@ descriptors directly into ORB-SLAM3. On MH01 it reduced `external_pack_ms` from 
 pairs that pass the ZNCC, epipolar, disparity, and grid-balance checks. Strict realtime validation on MH04/MH05 uses
 this path with the SP+LG external depth scale set to `0.965`.
 
-`SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1` is part of the current SP+LG realtime pose profile. It waits up to
-`SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35` after each stereo tracking call so the pose published for the
-current replay frame can see the latest LocalMapping update. This is intentionally a latency/accuracy tradeoff: the
-strict MH04/MH05 run below averaged about `55-56 ms/frame` on Jetson.
+ORB LocalMapping is advanced by the EPG `SlamBackendTickTask` on the shared `slam_backend` resource. Tracking publishes
+the current `Track()` pose and records a LocalMapping status snapshot; it no longer waits for or steps LocalMapping
+inline after each stereo call.
 
 `SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0` publishes the current pose returned by ORB-SLAM3 `Track()`. The
 EuRoC-style reference-keyframe trajectory pose is kept as an opt-in diagnostic path, not the strict realtime output
@@ -222,8 +219,6 @@ SMART_DRONE_LIGHTGLUE_MIN_SCORE=0.02 \
 SMART_DRONE_LIGHTGLUE_MAX_Y_DIFF_PX=1.5 \
 SMART_DRONE_LIGHTGLUE_MIN_DISPARITY_PX=0.8 \
 SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=10 \
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1 \
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35 \
 SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0 \
 SMART_DRONE_REALTIME_POSE_CONTINUITY=1 \
 EUROC_SEQUENCES="MH_01_easy MH_02_easy MH_03_medium MH_04_difficult MH_05_difficult" \
@@ -250,8 +245,6 @@ SMART_DRONE_LIGHTGLUE_MIN_SCORE=0.02 \
 SMART_DRONE_LIGHTGLUE_MAX_Y_DIFF_PX=1.5 \
 SMART_DRONE_LIGHTGLUE_MIN_DISPARITY_PX=0.8 \
 SMART_DRONE_EXTERNAL_STEREO_MAX_PAIRS_PER_CELL=10 \
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE=1 \
-SMART_DRONE_ORB_WAIT_LOCAL_MAPPING_IDLE_TIMEOUT_MS=35 \
 SMART_DRONE_ORB_LIVE_EUROC_TRAJECTORY_POSE=0 \
 SMART_DRONE_REALTIME_POSE_CONTINUITY=1 \
 EUROC_SEQUENCES="MH_01_easy MH_02_easy MH_03_medium MH_04_difficult MH_05_difficult" \

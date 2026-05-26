@@ -4,3 +4,8 @@ bool OrbSlam3BackendAvailable()
 {
     return false;
 }
+
+bool OpenVinsBackendAvailable()
+{
+    return false;
+}

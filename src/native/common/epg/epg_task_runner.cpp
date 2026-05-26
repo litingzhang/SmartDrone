@@ -39,6 +39,28 @@ void UpdateMaxLoopUs(TaskDiagnostics &diag, std::uint64_t elapsedUs)
     }
 }
 
+void UpdateMaxResourceWaitUs(TaskDiagnostics &diag, std::uint64_t waitUs)
+{
+    auto max = diag.maxResourceWaitUs.load(std::memory_order_relaxed);
+    while (waitUs > max &&
+           !diag.maxResourceWaitUs.compare_exchange_weak(
+               max, waitUs,
+               std::memory_order_relaxed,
+               std::memory_order_relaxed)) {
+    }
+}
+
+void StoreResourceWait(TaskDiagnostics &diag, std::uint64_t waitUs)
+{
+    if (waitUs == 0) {
+        return;
+    }
+    diag.resourceWaitCount.fetch_add(1, std::memory_order_relaxed);
+    diag.lastResourceWaitUs.store(waitUs, std::memory_order_relaxed);
+    diag.totalResourceWaitUs.fetch_add(waitUs, std::memory_order_relaxed);
+    UpdateMaxResourceWaitUs(diag, waitUs);
+}
+
 void StoreLoopTiming(TaskDiagnostics &diag, std::uint64_t elapsedUs)
 {
     const std::uint64_t nowMs = SteadyNowMs();
@@ -138,15 +160,12 @@ std::chrono::milliseconds WakeFallbackSleep(int timeoutMs)
 
 } // namespace
 
-EventPipelineGraph::TaskRunner::TaskRunner(TaskConfig config,
-                                           std::unique_ptr<ITask> task,
-                                           std::unordered_map<PortId, IQueue *> inputs,
-                                           std::unordered_map<PortId, IQueue *> outputs,
-                                           std::vector<IQueue *> triggerQueues)
-    : m_config(std::move(config)),
-      m_task(std::move(task)),
-      m_context(std::move(inputs), std::move(outputs)),
-      m_triggerQueues(std::move(triggerQueues)),
+EventPipelineGraph::TaskRunner::TaskRunner(TaskRunnerSpec spec)
+    : m_config(std::move(spec.config)),
+      m_task(std::move(spec.task)),
+      m_context(std::move(spec.inputs), std::move(spec.outputs)),
+      m_triggerQueues(std::move(spec.triggerQueues)),
+      m_resourceGate(std::move(spec.resourceGate)),
       m_wakeEventFd(CreateWakeEventFd())
 {
     m_context.AttachDiagnostics(&m_diag);
@@ -242,6 +261,9 @@ void EventPipelineGraph::TaskRunner::Run()
             m_diag.idleWakeups.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
+        if (!WaitForResourceGate()) {
+            break;
+        }
 
         const auto begin = std::chrono::steady_clock::now();
         try {
@@ -250,6 +272,7 @@ void EventPipelineGraph::TaskRunner::Run()
             m_diag.errorCount.fetch_add(1, std::memory_order_relaxed);
         }
         const auto end = std::chrono::steady_clock::now();
+        ReleaseResourceGate();
         const auto elapsedUs =
             std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
         const auto elapsed = static_cast<std::uint64_t>(elapsedUs);
@@ -451,6 +474,40 @@ bool EventPipelineGraph::TaskRunner::BackpressureBlocked() const
         }
     }
     return false;
+}
+
+bool EventPipelineGraph::TaskRunner::WaitForResourceGate()
+{
+    if (!m_resourceGate) {
+        return true;
+    }
+    const auto waitStart = std::chrono::steady_clock::now();
+    bool waited = false;
+    while (m_running.load(std::memory_order_acquire)) {
+        bool idle = false;
+        if (m_resourceGate->busy.compare_exchange_strong(
+                idle, true, std::memory_order_acq_rel,
+                std::memory_order_relaxed)) {
+            if (waited) {
+                const auto waitUs =
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - waitStart).count();
+                StoreResourceWait(m_diag, static_cast<std::uint64_t>(waitUs));
+            }
+            return true;
+        }
+        waited = true;
+        PollWakeEvent(1);
+    }
+    return false;
+}
+
+void EventPipelineGraph::TaskRunner::ReleaseResourceGate()
+{
+    if (!m_resourceGate) {
+        return;
+    }
+    m_resourceGate->busy.store(false, std::memory_order_release);
 }
 
 } // namespace Epg

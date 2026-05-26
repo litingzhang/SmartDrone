@@ -30,6 +30,7 @@ enum class SlamBackend : uint8_t {
     Klt = 0,
     OrbSlam3 = 1,
     DpvoTensorRt = 2,
+    OpenVins = 3,
 };
 
 enum class SlamOperationMode : uint8_t {

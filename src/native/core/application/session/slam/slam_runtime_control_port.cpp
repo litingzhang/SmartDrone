@@ -67,12 +67,4 @@ void SlamRuntimeControlPort::SetStereoVoPerFrameAcceleration(
     m_control->SetStereoVoPerFrameAcceleration(acceleration);
 }
 
-void SlamRuntimeControlPort::StepBackend()
-{
-    if (m_control == nullptr) {
-        return;
-    }
-    m_control->StepBackend();
-}
-
 } // namespace SmartDrone::Core::Application

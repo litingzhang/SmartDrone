@@ -21,6 +21,7 @@ CreateOrbSlam3SlamEngine(const SlamEngineFactoryConfig &config)
         std::move(backend), config.inputMode, config.useImu, config.settingsPath);
     ControlledSlamEngine out{};
     out.control = engine.get();
+    out.backendMaintenance = engine.get();
     out.engine = std::move(engine);
     return out;
 }

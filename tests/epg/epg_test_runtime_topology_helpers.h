@@ -113,7 +113,7 @@ void ExpectSlamOutputTopology(const Epg::GraphConfig &config)
     const auto *livePose = FindRuntimeTopologyTask(config, "SlamLivePoseTask");
     ASSERT_NE(livePose, nullptr);
     EXPECT_EQ(livePose->inputs.at(0),
-              "SlamPointCloudTask_0_to_SlamLivePoseTask_0");
+              "SlamPosePostprocessTask_1_to_SlamLivePoseTask_0");
 }
 
 void ExpectSlamPublishTopology(const Epg::GraphConfig &config)
@@ -121,11 +121,17 @@ void ExpectSlamPublishTopology(const Epg::GraphConfig &config)
     const auto *mavlink = FindRuntimeTopologyTask(config, "SlamMavlinkTask");
     ASSERT_NE(mavlink, nullptr);
     EXPECT_EQ(mavlink->inputs.at(0),
-              "SlamLivePoseTask_0_to_SlamMavlinkTask_0");
+              "SlamPosePostprocessTask_2_to_SlamMavlinkTask_0");
 
     const auto *udp = FindRuntimeTopologyTask(config, "SlamUdpTask");
     ASSERT_NE(udp, nullptr);
-    EXPECT_EQ(udp->inputs.at(0), "SlamMavlinkTask_0_to_SlamUdpTask_0");
+    EXPECT_EQ(udp->inputs.at(0),
+              "SlamPosePostprocessTask_3_to_SlamUdpTask_0");
+
+    const auto *dfx = FindRuntimeTopologyTask(config, "SlamDfxTask");
+    ASSERT_NE(dfx, nullptr);
+    EXPECT_EQ(dfx->inputs.at(0),
+              "SlamPosePostprocessTask_4_to_SlamDfxTask_0");
 
     const auto *dfxSnapshot =
         FindRuntimeTopologyTask(config, "SlamGraphDfxSnapshotTask");

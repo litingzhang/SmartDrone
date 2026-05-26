@@ -26,8 +26,6 @@
 
 #include<opencv2/core/core.hpp>
 #include<opencv2/features2d/features2d.hpp>
-
-#include<mutex>
 #include <unordered_set>
 
 
@@ -70,8 +68,6 @@ protected:
     float mThDepth;
 
     Atlas* mpAtlas;
-
-    std::mutex mMutex;
     vector<pair<cv::Point2f, cv::Point2f> > mvTracks;
 
     Frame mCurrentFrame;

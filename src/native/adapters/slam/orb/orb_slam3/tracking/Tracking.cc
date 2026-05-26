@@ -43,7 +43,6 @@
 #include <string>
 
 #include <chrono>
-#include <mutex>
 using namespace std;
 
 namespace {
@@ -2137,7 +2136,6 @@ Sophus::SE3f Tracking::GrabImageMonocularWithFeatures(
 }
 
 void Tracking::GrabImuData(const IMU::Point &imuMeasurement) {
-  unique_lock<mutex> lock(mMutexImuQueue);
   mlQueueImuData.push_back(imuMeasurement);
 }
 
@@ -2159,7 +2157,6 @@ void Tracking::PreintegrateIMU() {
   }
 
   while (true) {
-    unique_lock<mutex> lock(mMutexImuQueue);
     if (mlQueueImuData.empty()) {
       break;
     }
@@ -2332,7 +2329,6 @@ void Tracking::Track() {
       cerr
           << "ERROR: Frame with a timestamp older than previous frame detected!"
           << endl;
-      unique_lock<mutex> lock(mMutexImuQueue);
       mlQueueImuData.clear();
       CreateMapInAtlas();
       return;
@@ -2394,8 +2390,7 @@ void Tracking::Track() {
   }
   mbCreatedMap = false;
 
-  // Get Map Mutex -> Map cannot be changed
-  unique_lock<mutex> lock(pCurrentMap->mMutexMapUpdate);
+  // EPG serializes map updates through the slam_backend resource.
 
   mbMapUpdated = false;
 
@@ -5009,12 +5004,10 @@ float Tracking::GetImageScale() { return mImageScale; }
 
 #ifdef REGISTER_LOOP
 void Tracking::RequestStop() {
-  unique_lock<mutex> lock(mMutexStop);
   mbStopRequested = true;
 }
 
 bool Tracking::Stop() {
-  unique_lock<mutex> lock(mMutexStop);
   if (mbStopRequested && !mbNotStop) {
     mbStopped = true;
     cout << "Tracking STOP" << endl;
@@ -5025,17 +5018,14 @@ bool Tracking::Stop() {
 }
 
 bool Tracking::stopRequested() {
-  unique_lock<mutex> lock(mMutexStop);
   return mbStopRequested;
 }
 
 bool Tracking::isStopped() {
-  unique_lock<mutex> lock(mMutexStop);
   return mbStopped;
 }
 
 void Tracking::Release() {
-  unique_lock<mutex> lock(mMutexStop);
   mbStopped = false;
   mbStopRequested = false;
 }

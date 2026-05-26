@@ -31,6 +31,7 @@ Current responsibility split:
 
 - `SlamResourceTask`: owns the existing `SlamSessionRuntime` lifecycle and emits readiness after startup.
 - `SlamClockTask`: emits the frame tick queue. The static DOT default is 50 ms, and the SLAM session applies the manifest-declared runtime tuning for the configured SLAM input FPS at startup.
+- `SlamBackendTickTask`: advances backend maintenance work through the `slam_backend` resource.
 - `SlamImuGateTask`: consumes runtime readiness and ticks, waits for IMU readiness, rate-limits frame readiness from the live SLAM input FPS, and emits `SlamFrameReady`.
 - `SlamAcquireTask`: runs `SlamFrameInputPort::AcquireAndPrepareFrame` and emits `SlamPreparedFrame`.
 - `SlamTrackingRouteTask`: routes prepared frames to the selected tracking strategy queue.
@@ -48,11 +49,11 @@ input, tracking, pose-postprocess, and output ports plus their narrow contexts. 
 mode feedback, input pacing/warmup state, pose-continuity state, and output timing/DFX state so each EPG stage has a
 clear state boundary.
 
-These tasks protect mutable SLAM stage state with stage-local mutexes for input, tracking/backend, and pose
-postprocess. Shared tracking/mode feedback and output timing/DFX feedback are atomic state objects, and independent
-output branches use branch-local locks so EPG fan-out can overlap when their data ownership is separate. Backend
-control calls are serialized through `SlamRuntimeControlPort`, keeping raw backend control access out of individual
-EPG stage ports.
+Mutable SLAM backend access is serialized by the EPG scheduling resource declared in the task manifest. ORB tracking,
+visual-feature tracking, point-cloud extraction, and backend maintenance share the `slam_backend` resource, so the
+runtime enters only one of those task bodies at a time. Shared tracking/mode feedback and output timing/DFX feedback
+remain atomic state objects. Backend control calls are serialized through `SlamRuntimeControlPort`, keeping raw backend
+control access out of individual EPG stage ports.
 
 ## Calibration Graph
 
@@ -86,5 +87,5 @@ Current responsibility split:
 ## Migration Boundary
 
 The graph layer controls session launch, task wakeup, queue transfer, and status propagation for active native sessions.
-The remaining safety boundaries are stage-local mutexes for stateful SLAM stages, atomic shared/output-feedback values,
-branch-local locks around side-effect outputs, and the serialized SLAM runtime-control port.
+The remaining safety boundaries are EPG resource serialization for stateful native resources, atomic shared/output
+feedback values, and the serialized SLAM runtime-control port.

@@ -1,18 +1,30 @@
 #include "core/application/session/slam/slam_backend_maintenance_port.h"
 
-#include "core/application/session/slam/slam_runtime_control_port.h"
-
 namespace SmartDrone::Core::Application {
 
 SlamBackendMaintenancePort::SlamBackendMaintenancePort(
-    SlamRuntimeControlPort &control)
-    : m_control(control)
+    SmartDrone::Core::Ports::ISlamBackendMaintenance *backend)
+    : m_backend(backend)
 {
+}
+
+void SlamBackendMaintenancePort::RequestStop()
+{
+    if (m_backend != nullptr) {
+        m_backend->RequestBackendStop();
+    }
+}
+
+bool SlamBackendMaintenancePort::Stopped() const
+{
+    return m_backend == nullptr || m_backend->BackendStopped();
 }
 
 SlamFrameStepResult SlamBackendMaintenancePort::StepBackend()
 {
-    m_control.StepBackend();
+    if (m_backend != nullptr) {
+        m_backend->StepBackend();
+    }
     return SlamFrameStepResult::Continue;
 }
 

@@ -229,6 +229,29 @@ class TestSlowTask final : public ITask {
     }
 };
 
+class TestResourceGuardTask final : public ITask {
+  public:
+    TestResourceGuardTask(std::atomic<int> &active,
+                          std::atomic<int> &overlaps)
+        : m_active(active), m_overlaps(overlaps)
+    {
+    }
+
+    void OnTick(TaskContext &context) override
+    {
+        (void)context;
+        if (m_active.fetch_add(1, std::memory_order_acq_rel) != 0) {
+            m_overlaps.fetch_add(1, std::memory_order_relaxed);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        m_active.fetch_sub(1, std::memory_order_acq_rel);
+    }
+
+  private:
+    std::atomic<int> &m_active;
+    std::atomic<int> &m_overlaps;
+};
+
 class ReflectedSourceTask final : public ITask {
   public:
     void OnTick(TaskContext &context) override

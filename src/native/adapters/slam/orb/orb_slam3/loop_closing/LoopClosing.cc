@@ -28,10 +28,6 @@
 #include "Sim3Solver.h"
 #include "TrackingBackend.h"
 #include "Tracking.h"
-
-#include<mutex>
-
-
 namespace ORB_SLAM3
 {
 namespace
@@ -243,7 +239,6 @@ void LoopClosing::SetLocalMapper(LocalMapping *pLocalMapper)
 
 void LoopClosing::AbortGlobalBundleAdjustment()
 {
-    unique_lock<mutex> lock(mMutexGBA);
     if(!mbRunningGBA)
         return;
     mbStopGBA = true;
@@ -253,7 +248,6 @@ void LoopClosing::AbortGlobalBundleAdjustment()
 bool LoopClosing::Step()
 {
     {
-        unique_lock<mutex> lock(mMutexFinish);
         if (mbFinished && mbFinishRequested)
             return false;
         if (mbFinished)
@@ -474,14 +468,12 @@ bool LoopClosing::Step()
 
 void LoopClosing::InsertKeyFrame(KeyFrame *pKF)
 {
-    unique_lock<mutex> lock(mMutexLoopQueue);
     if(pKF->mnId!=0)
         mlpLoopKeyFrameQueue.push_back(pKF);
 }
 
 bool LoopClosing::CheckNewKeyFrames()
 {
-    unique_lock<mutex> lock(mMutexLoopQueue);
     return(!mlpLoopKeyFrameQueue.empty());
 }
 
@@ -492,7 +484,6 @@ bool LoopClosing::NewDetectCommonRegions()
         return false;
 
     {
-        unique_lock<mutex> lock(mMutexLoopQueue);
         mpCurrentKF = mlpLoopKeyFrameQueue.front();
         mlpLoopKeyFrameQueue.pop_front();
         // Avoid that a keyframe can be erased while it is being process by this thread
@@ -1178,7 +1169,6 @@ void LoopClosing::CorrectLoop()
     if(isRunningGBA())
     {
         cout << "Stoping Global Bundle Adjustment...";
-        unique_lock<mutex> lock(mMutexGBA);
         mbStopGBA = true;
 
         mnFullBAIdx++;
@@ -1227,8 +1217,7 @@ void LoopClosing::CorrectLoop()
 #endif
 
     {
-        // Get Map Mutex
-        unique_lock<mutex> lock(pLoopMap->mMutexMapUpdate);
+        // EPG serializes map updates through the slam_backend resource.
 
         const bool bImuInit = pLoopMap->isImuInitialized();
 
@@ -1427,7 +1416,6 @@ void LoopClosing::MergeLocal()
     // If a Global Bundle Adjustment is running, abort it
     if(isRunningGBA())
     {
-        unique_lock<mutex> lock(mMutexGBA);
         mbStopGBA = true;
 
         mnFullBAIdx++;
@@ -1692,8 +1680,6 @@ void LoopClosing::MergeLocal()
     }*/
 
     {
-        unique_lock<mutex> currentLock(pCurrentMap->mMutexMapUpdate); // We update the current map with the Merge information
-        unique_lock<mutex> mergeLock(pMergeMap->mMutexMapUpdate); // We remove the Kfs and MPs in the merged area from the old map
 
         //std::cout << "Merge local window: " << spLocalWindowKFs.size() << std::endl;
         //std::cout << "[Merge]: init merging maps " << std::endl;
@@ -1842,7 +1828,6 @@ void LoopClosing::MergeLocal()
     else {
         if(TrackingIsMonocular(mpTrackingBackend))
         {
-            unique_lock<mutex> currentLock(pCurrentMap->mMutexMapUpdate); // We update the current map with the Merge information
 
             for(KeyFrame* pKFi : vpCurrentMapKFs)
             {
@@ -1917,9 +1902,7 @@ void LoopClosing::MergeLocal()
 
 
         {
-            // Get Merge Map Mutex
-            unique_lock<mutex> currentLock(pCurrentMap->mMutexMapUpdate); // We update the current map with the Merge information
-            unique_lock<mutex> mergeLock(pMergeMap->mMutexMapUpdate); // We remove the Kfs and MPs in the merged area from the old map
+            // EPG serializes merge map updates through the slam_backend resource.
 
             //std::cout << "Merge outside KFs: " << vpCurrentMapKFs.size() << std::endl;
             for(KeyFrame* pKFi : vpCurrentMapKFs)
@@ -2000,7 +1983,6 @@ void LoopClosing::MergeLocal2()
     // If a Global Bundle Adjustment is running, abort it
     if(isRunningGBA())
     {
-        unique_lock<mutex> lock(mMutexGBA);
         mbStopGBA = true;
 
         mnFullBAIdx++;
@@ -2020,8 +2002,6 @@ void LoopClosing::MergeLocal2()
     {
         float s_on = mSold_new.scale();
         Sophus::SE3f T_on(mSold_new.rotation().cast<float>(), mSold_new.translation().cast<float>());
-
-        unique_lock<mutex> lock(mpAtlas->GetCurrentMap()->mMutexMapUpdate);
 
         //cout << "KFs before empty: " << mpAtlas->GetCurrentMap()->KeyFramesInMap() << endl;
         EmptyLocalMappingQueue(mpLocalMappingBackend.get());
@@ -2056,7 +2036,6 @@ void LoopClosing::MergeLocal2()
             mpOptimizationBackend.get(),
             OrbInertialBiasOptimizationRequest{pCurrentMap, &bg, &ba});
         IMU::Bias b (ba[0],ba[1],ba[2],bg[0],bg[1],bg[2]);
-        unique_lock<mutex> lock(mpAtlas->GetCurrentMap()->mMutexMapUpdate);
         UpdateTrackingFrameImu(
             mpTrackingBackend,
             OrbTrackingFrameImuUpdate{1.0f, b,
@@ -2076,9 +2055,7 @@ void LoopClosing::MergeLocal2()
     // Load KFs and MPs from merge map
     //cout << "updating current map" << endl;
     {
-        // Get Merge Map Mutex (This section stops tracking!!)
-        unique_lock<mutex> currentLock(pCurrentMap->mMutexMapUpdate); // We update the current map with the Merge information
-        unique_lock<mutex> mergeLock(pMergeMap->mMutexMapUpdate); // We remove the Kfs and MPs in the merged area from the old map
+        // EPG serializes merge map updates and keeps tracking out of this section.
 
 
         vector<KeyFrame*> vpMergeMapKFs = pMergeMap->GetAllKeyFrames();
@@ -2337,8 +2314,7 @@ void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap, vector
             OrbSim3FuseRequest{
                 pKFi, &Scw, &vpMapPoints, 4.0f, &vpReplacePoints});
 
-        // Get Map Mutex
-        unique_lock<mutex> lock(pMap->mMutexMapUpdate);
+        // EPG serializes map updates through the slam_backend resource.
         const int nLP = vpMapPoints.size();
         for(int i=0; i<nLP;i++)
         {
@@ -2385,8 +2361,7 @@ void LoopClosing::SearchAndFuse(const vector<KeyFrame*> &vConectedKFs, vector<Ma
             OrbSim3FuseRequest{
                 pKF, &Scw, &vpMapPoints, 4.0f, &vpReplacePoints});
 
-        // Get Map Mutex
-        unique_lock<mutex> lock(pMap->mMutexMapUpdate);
+        // EPG serializes map updates through the slam_backend resource.
         const int nLP = vpMapPoints.size();
         for(int i=0; i<nLP;i++)
         {
@@ -2417,7 +2392,6 @@ void LoopClosing::RequestResetActiveMap(Map *pMap)
 
 void LoopClosing::RequestResetAsync(Map *pMap, bool activeMapOnly)
 {
-    unique_lock<mutex> lock(mMutexReset);
     if (activeMapOnly) {
         mbResetActiveMapRequested = true;
         mpMapToReset = pMap;
@@ -2428,7 +2402,6 @@ void LoopClosing::RequestResetAsync(Map *pMap, bool activeMapOnly)
 
 void LoopClosing::ResetIfRequested()
 {
-    unique_lock<mutex> lock(mMutexReset);
     if(mbResetRequested)
     {
         cout << "Loop closer reset requested..." << endl;
@@ -2503,7 +2476,6 @@ void LoopClosing::RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoop
     // not included in the Global BA and they are not consistent with the updated map.
     // We need to propagate the correction through the spanning tree
     {
-        unique_lock<mutex> lock(mMutexGBA);
         if(idx!=mnFullBAIdx)
             return;
 
@@ -2520,9 +2492,7 @@ void LoopClosing::RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoop
 
             WaitLocalMappingStopped(mpLocalMappingBackend.get(), true);
 
-            // Get Map Mutex
-            unique_lock<mutex> lock(pActiveMap->mMutexMapUpdate);
-            // cout << "LC: Update Map Mutex adquired" << endl;
+            // EPG serializes map updates through the slam_backend resource.
 
             //pActiveMap->PrintEssentialGraph();
             // Correct keyframes starting at map first keyframe
@@ -2707,26 +2677,22 @@ void LoopClosing::RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoop
 
 void LoopClosing::RequestFinish()
 {
-    unique_lock<mutex> lock(mMutexFinish);
     // cout << "LC: Finish requested" << endl;
     mbFinishRequested = true;
 }
 
 bool LoopClosing::CheckFinish()
 {
-    unique_lock<mutex> lock(mMutexFinish);
     return mbFinishRequested;
 }
 
 void LoopClosing::SetFinish()
 {
-    unique_lock<mutex> lock(mMutexFinish);
     mbFinished = true;
 }
 
 bool LoopClosing::isFinished()
 {
-    unique_lock<mutex> lock(mMutexFinish);
     return mbFinished;
 }
 
