@@ -7,6 +7,7 @@
 #include "core/application/session/stream/preview_output_port.h"
 #include "core/application/session/slam/slam_runtime_control_port.h"
 #include "core/ports/camera_provider.h"
+#include "core/ports/imu_provider.h"
 #include "core/ports/slam_engine.h"
 #include "core/ports/visual_feature_frontend.h"
 
@@ -27,7 +28,7 @@ SlamSessionResourceStartResult SlamSessionResourceLifecycle::StartFrameResources
 {
     SlamSessionResourceStartResult result;
     StartVisualFeatureFrontend(result);
-    if (!OpenUdp() || !StartImuPoller() || !OpenCamera()) {
+    if (!OpenUdp() || !StartImuResources() || !OpenCamera()) {
         Stop(false);
         return result;
     }
@@ -49,6 +50,10 @@ void SlamSessionResourceLifecycle::Stop(bool logProgress)
         if (logProgress) {
             std::cerr << "[session] slam imu stopped\n";
         }
+    }
+    if (m_imuProviderStarted && m_config.imuProvider != nullptr) {
+        m_config.imuProvider->Stop();
+        m_imuProviderStarted = false;
     }
     if (m_udpOpen && m_config.previewOutput != nullptr) {
         m_config.previewOutput->Close();
@@ -116,11 +121,15 @@ bool SlamSessionResourceLifecycle::OpenUdp()
     return false;
 }
 
-bool SlamSessionResourceLifecycle::StartImuPoller()
+bool SlamSessionResourceLifecycle::StartImuResources()
 {
     if (!m_config.useImu) {
         return true;
     }
+    if (m_config.imuProvider == nullptr || !m_config.imuProvider->Start()) {
+        return false;
+    }
+    m_imuProviderStarted = true;
     return m_config.imuPoller != nullptr && m_config.imuPoller->Start();
 }
 

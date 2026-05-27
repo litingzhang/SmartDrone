@@ -10,7 +10,7 @@ void ExpectSystemRuntimeManifestArtifacts(
     EXPECT_EQ(system.topologyPath, "config/epg/epg_topology.dot");
     EXPECT_EQ(
         system.topologyVersion,
-        BuildEpgTaskTopologyVersion({system.topologyPath, "v6"}));
+        BuildEpgTaskTopologyVersion({system.topologyPath, "v8"}));
     EXPECT_EQ(system.artifactPaths.dfxSnapshotPath,
               "/tmp/smartdrone_epg_system.json");
     EXPECT_EQ(system.artifactPaths.profilePath,
@@ -26,7 +26,7 @@ void ExpectSlamSessionManifestArtifacts(
     const SmartDrone::Core::Application::EpgTaskManifest &slam)
 {
     const auto slamTaskTypes = EpgTaskCatalogTypes(slam);
-    EXPECT_EQ(slamTaskTypes.size(), 20u);
+    EXPECT_EQ(slamTaskTypes.size(), 21u);
     EXPECT_EQ(slamTaskTypes.back(), "EpgDfxSnapshotTask");
     EXPECT_EQ(slam.topologyPath, system.topologyPath);
     EXPECT_EQ(slam.topologyVersion, system.topologyVersion);

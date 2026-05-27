@@ -45,32 +45,10 @@ Core::Ports::SlamOutput OpenVinsSlamEngine::Process(
     const Sophus::SE3f tcw = m_runtime.TrackRaw(request);
     out.trackingState = m_runtime.TrackingState();
     if (!m_runtime.HasTrackingInitialized()) {
-        out.pose.valid = true;
-        out.poseValid = true;
-        out.trackingState = Core::Ports::SLAM_TRACKING_RECENTLY_LOST;
-        static int bootstrapLogCount = 0;
-        if (bootstrapLogCount < 5) {
-            ++bootstrapLogCount;
-            std::cerr << "[openvins_engine] bootstrap frame="
-                      << input.frameId << " tracking=" << out.trackingState
-                      << " poseValid=" << out.poseValid
-                      << " pose.valid=" << out.pose.valid << "\n";
-        }
-        return out;
+        return BuildBootstrapOutput(input);
     }
     if (!TrackingStateCanPublishPose(out.trackingState)) {
-        if (m_haveLastPose) {
-            out.pose = m_lastPose;
-            out.pose.valid = true;
-            out.poseValid = true;
-            out.trackingState = Core::Ports::SLAM_TRACKING_RECENTLY_LOST;
-            static int continuityLogCount = 0;
-            if (continuityLogCount < 5) {
-                ++continuityLogCount;
-                std::cerr << "[openvins_engine] continuity frame="
-                          << input.frameId << " tracking=" << out.trackingState
-                          << " poseValid=" << out.poseValid << "\n";
-            }
+        if (FillContinuityPose(input, out)) {
             return out;
         }
         MarkSlamOutputPoseLost(out, out.trackingState);
@@ -83,6 +61,45 @@ Core::Ports::SlamOutput OpenVinsSlamEngine::Process(
         m_haveLastPose = true;
     }
     return out;
+}
+
+Core::Ports::SlamOutput OpenVinsSlamEngine::BuildBootstrapOutput(
+    const Core::Ports::SlamInputBatch &input) const
+{
+    Core::Ports::SlamOutput out{};
+    out.frameId = input.frameId;
+    out.captureTimestampNs = input.captureTimestampNs;
+    out.trackingState = Core::Ports::SLAM_TRACKING_NOT_INITIALIZED;
+    static int bootstrapLogCount = 0;
+    if (bootstrapLogCount < 5) {
+        ++bootstrapLogCount;
+        std::cerr << "[openvins_engine] bootstrap frame=" << input.frameId
+                  << " tracking=" << out.trackingState
+                  << " poseValid=" << out.poseValid
+                  << " pose.valid=" << out.pose.valid << "\n";
+    }
+    return out;
+}
+
+bool OpenVinsSlamEngine::FillContinuityPose(
+    const Core::Ports::SlamInputBatch &input,
+    Core::Ports::SlamOutput &out)
+{
+    if (!m_haveLastPose) {
+        return false;
+    }
+    out.pose = m_lastPose;
+    out.pose.valid = true;
+    out.poseValid = true;
+    out.trackingState = Core::Ports::SLAM_TRACKING_RECENTLY_LOST;
+    static int continuityLogCount = 0;
+    if (continuityLogCount < 5) {
+        ++continuityLogCount;
+        std::cerr << "[openvins_engine] continuity frame=" << input.frameId
+                  << " tracking=" << out.trackingState
+                  << " poseValid=" << out.poseValid << "\n";
+    }
+    return true;
 }
 
 void OpenVinsSlamEngine::SetOperationMode(Core::Domain::SlamOperationMode mode)

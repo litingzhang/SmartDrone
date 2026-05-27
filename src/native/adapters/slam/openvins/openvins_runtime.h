@@ -71,6 +71,8 @@ class OpenVinsRuntime final : public Core::Ports::ISlamTrackingBackend {
         Core::Ports::SlamBackendLoopClosureResult &result) override;
 
   private:
+    void RecordTrajectorySample();
+
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 };

@@ -73,6 +73,10 @@ void AddSlamProcessingTaskFactories(EpgTaskFactoryEntries &entries,
         return new SlamOrbTrackingTask(deps.service, deps.stop,
                                        deps.runningFlag);
     });
+    AddFactory<SlamOpenVinsTrackingTask>(entries, catalog, [deps]() {
+        return new SlamOpenVinsTrackingTask(deps.service, deps.stop,
+                                            deps.runningFlag);
+    });
     AddFactory<SlamVisualFeatureTrackingTask>(entries, catalog, [deps]() {
         return new SlamVisualFeatureTrackingTask(deps.service, deps.stop,
                                                  deps.runningFlag);

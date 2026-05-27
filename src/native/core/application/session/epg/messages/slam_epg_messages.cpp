@@ -26,6 +26,9 @@ const bool SLAM_DPVO_PREPARED_FRAME_REGISTERED =
 const bool SLAM_ORB_PREPARED_FRAME_REGISTERED =
     Epg::TypeCatalog::Global().RegisterMessage<SlamOrbPreparedFrame>(
         "SlamOrbPreparedFrame");
+const bool SLAM_OPENVINS_PREPARED_FRAME_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterMessage<SlamOpenVinsPreparedFrame>(
+        "SlamOpenVinsPreparedFrame");
 const bool SLAM_VISUAL_FEATURE_PREPARED_FRAME_REGISTERED =
     Epg::TypeCatalog::Global()
         .RegisterMessage<SlamVisualFeaturePreparedFrame>(

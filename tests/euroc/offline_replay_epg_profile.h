@@ -1,15 +1,9 @@
 using ReplayApplicationFactories = SmartDrone::Core::Application::ApplicationRuntimeFactories;
 using ReplayCameraOpenConfig = SmartDrone::Core::Ports::CameraOpenConfig;
-using ReplayImuProviderConfig =
-    SmartDrone::Adapters::Imu::Icm42688ImuProviderConfig;
-using ReplayMainRuntimeAliases =
-    SmartDrone::Core::Application::MainRuntimeAliases;
-using ReplaySlamResourceConfig =
-    SmartDrone::Core::Application::SlamSessionEngineResourceConfig;
-using ReplaySlamResources =
-    SmartDrone::Core::Application::SlamSessionEngineResources;
-using ReplayUnifiedConfig =
-    SmartDrone::Core::Application::UnifiedConfig;
+using ReplayMainRuntimeAliases = SmartDrone::Core::Application::MainRuntimeAliases;
+using ReplaySlamResourceConfig = SmartDrone::Core::Application::SlamSessionEngineResourceConfig;
+using ReplaySlamResources = SmartDrone::Core::Application::SlamSessionEngineResources;
+using ReplayUnifiedConfig = SmartDrone::Core::Application::UnifiedConfig;
 
 class ReplayNoopPreviewOutputPort final
     : public SmartDrone::Core::Application::IPreviewOutputPort {
@@ -18,11 +12,9 @@ class ReplayNoopPreviewOutputPort final
         override
     {
     }
-
     void StepOnce() override
     {
     }
-
     void StepAll() override
     {
     }
@@ -104,18 +96,20 @@ class ReplayEpgPoseCsvPublisher final
         return true;
     }
 
-    void PublishPose(
-        const SmartDrone::Core::Ports::PosePublishRequest &request) override
+    void PublishPose(const SmartDrone::Core::Ports::PosePublishRequest &request)
+        override
     {
         auto sample = BuildSample(request);
         sample = AdjustReplayOutputSample(
             sample, m_adjustment.timestampOffsetNs, m_adjustment.positionScale,
             m_adjustment.bodyFromCameraExtrinsics);
+        if (!ShouldWriteSample(sample)) {
+            return;
+        }
         WriteReplayCsvSample(m_csv, sample);
         m_csv.flush();
         m_outputs.push_back(sample);
     }
-
     size_t OutputCount() const
     {
         return m_outputs.size();
@@ -134,6 +128,19 @@ class ReplayEpgPoseCsvPublisher final
                                     ((std::max(left, right) -
                                       std::min(left, right)) /
                                      2ULL));
+    }
+
+    bool ShouldWriteSample(const SmartDrone::Tests::ReplayPoseSample &sample) const
+    {
+        if (sample.poseValid && IsRealtimeTrackingState(sample.trackingState)) {
+            return true;
+        }
+        return m_outputs.empty() && sample.trackingState == 1 &&
+               !sample.poseValid;
+    }
+    static bool IsRealtimeTrackingState(int state)
+    {
+        return state == 2 || state == 3;
     }
 
     SmartDrone::Tests::ReplayPoseSample BuildSample(
@@ -316,15 +323,6 @@ ReplayCameraOpenConfig BuildEpgReplayCameraOpenConfig(
     return config;
 }
 
-ReplayImuProviderConfig MakeEpgReplayImuProviderConfig(
-    const ReplayMainRuntimeAliases &aliases)
-{
-    const int64_t imuDtNs = 1000000000LL / std::max(1, aliases.imuHz);
-    const int64_t slackBeforeNs = std::max<int64_t>(2 * imuDtNs, 5000000);
-    const int64_t slackAfterNs = std::max<int64_t>(2 * imuDtNs, 5000000);
-    return {slackBeforeNs, slackAfterNs};
-}
-
 ReplayApplicationFactories BuildEpgReplayFactories(
     const SmartDrone::Tests::ReplayDataset &dataset,
     std::shared_ptr<SmartDrone::Tests::ReplayCameraProgress> progress)
@@ -342,10 +340,11 @@ ReplayApplicationFactories BuildEpgReplayFactories(
             return CreateEpgReplaySlamResources(config);
         };
     factories.createImuProvider =
-        [](SmartDrone::Core::Application::ImuThreadState &state,
+        [&dataset](SmartDrone::Core::Application::ImuThreadState &,
            const SmartDrone::Core::Application::MainRuntimeAliases &aliases) {
-            return std::make_unique<SmartDrone::Adapters::Imu::Icm42688ImuProvider>(
-                state.imuBuffer, MakeEpgReplayImuProviderConfig(aliases));
+            (void)aliases;
+            return std::make_unique<SmartDrone::Tests::ReplayImuProvider>(
+                dataset);
         };
     factories.startVisualFeatureFrontendSession =
         [](const ReplayMainRuntimeAliases &aliases,

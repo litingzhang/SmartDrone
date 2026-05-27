@@ -83,7 +83,9 @@ void ExpectSlamTrackingTopology(const Epg::GraphConfig &config)
     EXPECT_EQ(route->outputs.at(2),
               "SlamTrackingRouteTask_2_to_SlamOrbTrackingTask_0");
     EXPECT_EQ(route->outputs.at(3),
-              "SlamTrackingRouteTask_3_to_SlamVisualFeatureTrackingTask_0");
+              "SlamTrackingRouteTask_3_to_SlamOpenVinsTrackingTask_0");
+    EXPECT_EQ(route->outputs.at(4),
+              "SlamTrackingRouteTask_4_to_SlamVisualFeatureTrackingTask_0");
     EXPECT_EQ(
         route->trigger.queues,
         (std::vector<std::string>{
@@ -102,7 +104,9 @@ void ExpectSlamOutputTopology(const Epg::GraphConfig &config)
     EXPECT_EQ(posePostprocess->inputs.at(2),
               "SlamOrbTrackingTask_0_to_SlamPosePostprocessTask_2");
     EXPECT_EQ(posePostprocess->inputs.at(3),
-              "SlamVisualFeatureTrackingTask_0_to_SlamPosePostprocessTask_3");
+              "SlamOpenVinsTrackingTask_0_to_SlamPosePostprocessTask_3");
+    EXPECT_EQ(posePostprocess->inputs.at(4),
+              "SlamVisualFeatureTrackingTask_0_to_SlamPosePostprocessTask_4");
 
     const auto *pointCloud =
         FindRuntimeTopologyTask(config, "SlamPointCloudTask");
@@ -144,17 +148,17 @@ void ExpectSlamMonitorTopology(const Epg::GraphConfig &config)
 {
     const auto *monitor = FindRuntimeTopologyTask(config, "SlamMonitorTask");
     ASSERT_NE(monitor, nullptr);
-    EXPECT_EQ(monitor->inputs.at(11),
-              "SlamUdpTask_1_to_SlamMonitorTask_11");
     EXPECT_EQ(monitor->inputs.at(12),
-              "SlamPreviewTxTask_1_to_SlamMonitorTask_12");
+              "SlamUdpTask_1_to_SlamMonitorTask_12");
+    EXPECT_EQ(monitor->inputs.at(13),
+              "SlamPreviewTxTask_1_to_SlamMonitorTask_13");
     EXPECT_NE(std::find(monitor->trigger.queues.begin(),
                         monitor->trigger.queues.end(),
-                        "SlamUdpTask_1_to_SlamMonitorTask_11"),
+                        "SlamUdpTask_1_to_SlamMonitorTask_12"),
               monitor->trigger.queues.end());
     EXPECT_NE(std::find(monitor->trigger.queues.begin(),
                         monitor->trigger.queues.end(),
-                        "SlamPreviewTxTask_1_to_SlamMonitorTask_12"),
+                        "SlamPreviewTxTask_1_to_SlamMonitorTask_13"),
               monitor->trigger.queues.end());
 }
 

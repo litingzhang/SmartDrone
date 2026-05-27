@@ -1,8 +1,8 @@
 #include "adapters/slam/openvins/openvins_runtime.h"
 
+#include <cmath>
 #include <fstream>
 #include <iomanip>
-#include <iostream>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -11,15 +11,8 @@
 #include <opencv2/imgproc.hpp>
 #include <sophus/se3.hpp>
 
+#include "adapters/slam/openvins/openvins_runtime_driver.h"
 #include "core/ports/slam_tracking_state.h"
-
-#if defined(SMART_DRONE_HAS_OPENVINS)
-#include "core/VioManager.h"
-#include "core/VioManagerOptions.h"
-#include "state/State.h"
-#include "utils/opencv_yaml_parse.h"
-#include "utils/sensor_data.h"
-#endif
 
 namespace SmartDrone::Adapters::Slam {
 
@@ -35,19 +28,28 @@ Sophus::SE3f IdentityPose()
     return Sophus::SE3f();
 }
 
+struct TrajectorySample {
+    double timestampSec{0.0};
+    Sophus::SE3f twc{};
+};
+
+void ConvertGrayImage(const cv::Mat &src, cv::Mat &dst)
+{
+    if (src.empty()) {
+        dst.release();
+        return;
+    }
+    if (src.type() == CV_8UC1) {
+        dst = src;
+        return;
+    }
+    cv::cvtColor(src, dst, cv::COLOR_BGR2GRAY);
+}
+
 } // namespace
 
 struct OpenVinsRuntime::Impl {
-    struct TrajectorySample {
-        double timestampSec{0.0};
-        Sophus::SE3f twc{};
-    };
-
-#if defined(SMART_DRONE_HAS_OPENVINS)
-    std::unique_ptr<ov_msckf::VioManager> manager;
-#endif
-    bool available{false};
-    bool initialized{false};
+    std::unique_ptr<OpenVinsRuntimeDriver> driver;
     bool lastPoseLost{true};
     double lastTimestampSec{0.0};
     Sophus::SE3f lastTwc{};
@@ -57,29 +59,15 @@ struct OpenVinsRuntime::Impl {
 OpenVinsRuntime::OpenVinsRuntime(std::string settingsPath)
     : m_impl(std::make_unique<Impl>())
 {
-#if defined(SMART_DRONE_HAS_OPENVINS)
-    if (!settingsPath.empty()) {
-        auto parser = std::make_shared<ov_core::YamlParser>(settingsPath, false);
-        if (parser != nullptr && parser->successful()) {
-            ov_msckf::VioManagerOptions options;
-            options.print_and_load(parser);
-#if defined(SMART_DRONE_OPENVINS_DISABLE_CERES)
-            options.init_options.init_dyn_use = false;
-#endif
-            m_impl->manager = std::make_unique<ov_msckf::VioManager>(options);
-            m_impl->available = m_impl->manager != nullptr;
-        }
-    }
-#else
-    (void)settingsPath;
-#endif
+    m_impl->driver = CreateOpenVinsRuntimeDriver(settingsPath);
 }
 
 OpenVinsRuntime::~OpenVinsRuntime() = default;
 
 bool OpenVinsRuntime::Available() const
 {
-    return m_impl != nullptr && m_impl->available;
+    return m_impl != nullptr && m_impl->driver != nullptr &&
+           m_impl->driver->Available();
 }
 
 void OpenVinsRuntime::SetOperationMode(Core::Domain::SlamOperationMode mode)
@@ -105,11 +93,9 @@ void OpenVinsRuntime::Shutdown()
     if (m_impl == nullptr) {
         return;
     }
-#if defined(SMART_DRONE_HAS_OPENVINS)
-    m_impl->manager.reset();
-#endif
-    m_impl->available = false;
-    m_impl->initialized = false;
+    if (m_impl->driver != nullptr) {
+        m_impl->driver->Shutdown();
+    }
     m_impl->lastPoseLost = true;
     m_impl->lastTimestampSec = 0.0;
     m_impl->lastTwc = IdentityPose();
@@ -128,7 +114,7 @@ bool OpenVinsRuntime::ShutdownAndSaveTrajectoryEuRoC(const std::string &path)
     }
 
     stream << std::fixed << std::setprecision(9);
-    for (const Impl::TrajectorySample &sample : m_impl->trajectory) {
+    for (const TrajectorySample &sample : m_impl->trajectory) {
         const Eigen::Vector3f t = sample.twc.translation();
         const Eigen::Quaternionf q(sample.twc.so3().unit_quaternion());
         const int64_t timestampNs =
@@ -148,72 +134,45 @@ bool OpenVinsRuntime::ShutdownAndSaveTrajectoryEuRoC(const std::string &path)
 Sophus::SE3f OpenVinsRuntime::TrackRaw(
     const Core::Ports::SlamTrackRequest &request)
 {
-    if (request.input == nullptr || request.inputMode != Core::Ports::SlamInputMode::Stereo ||
-        !request.useImu || !Available()) {
+    const bool validInput = request.input != nullptr &&
+                            request.inputMode ==
+                                Core::Ports::SlamInputMode::Stereo &&
+                            request.useImu;
+    if (!validInput || !Available()) {
         return IdentityPose();
     }
-#if defined(SMART_DRONE_HAS_OPENVINS)
-    ov_core::CameraData cameraData;
-    cameraData.timestamp = request.input->frameTimeSec;
-    cameraData.sensor_ids = {0, 1};
-    cameraData.images = {request.input->stereo.left.gray, request.input->stereo.right.gray};
-    cameraData.masks = {
-        cv::Mat::zeros(request.input->stereo.left.gray.rows,
-                       request.input->stereo.left.gray.cols, CV_8UC1),
-        cv::Mat::zeros(request.input->stereo.right.gray.rows,
-                       request.input->stereo.right.gray.cols, CV_8UC1)};
-    if (cameraData.images[0].empty() || cameraData.images[1].empty()) {
-        std::cerr << "[openvins] empty stereo image left="
-                  << cameraData.images[0].cols << "x" << cameraData.images[0].rows
-                  << " right=" << cameraData.images[1].cols << "x" << cameraData.images[1].rows
-                  << " frame_id=" << request.input->frameId << "\n";
-    }
 
-    for (const Core::Ports::ImuReading &reading : request.input->imu) {
-        ov_core::ImuData imuData;
-        imuData.timestamp = static_cast<double>(reading.timestampNs) * 1e-9;
-        imuData.wm << static_cast<double>(reading.gx), static_cast<double>(reading.gy),
-            static_cast<double>(reading.gz);
-        imuData.am << static_cast<double>(reading.ax), static_cast<double>(reading.ay),
-            static_cast<double>(reading.az);
-        m_impl->manager->feed_measurement_imu(imuData);
-    }
-
-    m_impl->manager->feed_measurement_camera(cameraData);
-    m_impl->initialized = m_impl->manager->initialized();
-    if (!m_impl->initialized) {
+    const Sophus::SE3f tcw = m_impl->driver->TrackRaw(request);
+    if (!m_impl->driver->Initialized()) {
         m_impl->lastPoseLost = true;
         return IdentityPose();
     }
 
-    const std::shared_ptr<ov_msckf::State> state = m_impl->manager->get_state();
-    if (state == nullptr || state->_imu == nullptr) {
-        m_impl->lastPoseLost = true;
-        return IdentityPose();
-    }
-
-    const Eigen::Vector4d qGtoI = state->_imu->quat();
-    const Eigen::Vector3d pIinG = state->_imu->pos();
-    Eigen::Quaterniond qGtoIQuat(qGtoI(3), qGtoI(0), qGtoI(1), qGtoI(2));
-    qGtoIQuat.normalize();
-    const Eigen::Quaternionf qTwc = qGtoIQuat.conjugate().cast<float>();
-    const Eigen::Vector3f tTwc = pIinG.cast<float>();
-    m_impl->lastTwc = Sophus::SE3f(Sophus::SO3f(qTwc), tTwc);
+    m_impl->lastTwc = tcw.inverse();
     m_impl->lastTimestampSec = request.input->frameTimeSec;
     m_impl->lastPoseLost = false;
-    if (!m_impl->trajectory.empty() &&
-        m_impl->lastTimestampSec <= m_impl->trajectory.back().timestampSec) {
-        if (m_impl->lastTimestampSec == m_impl->trajectory.back().timestampSec) {
-            m_impl->trajectory.back() = {m_impl->lastTimestampSec,
-                                         m_impl->lastTwc};
-        }
-    } else {
-        m_impl->trajectory.push_back({m_impl->lastTimestampSec, m_impl->lastTwc});
+    RecordTrajectorySample();
+    return tcw;
+}
+
+void OpenVinsRuntime::RecordTrajectorySample()
+{
+    if (m_impl == nullptr) {
+        return;
     }
-    return m_impl->lastTwc.inverse();
-#else
-    return IdentityPose();
-#endif
+    const TrajectorySample sample{m_impl->lastTimestampSec, m_impl->lastTwc};
+    if (m_impl->trajectory.empty()) {
+        m_impl->trajectory.push_back(sample);
+        return;
+    }
+    TrajectorySample &last = m_impl->trajectory.back();
+    if (sample.timestampSec > last.timestampSec) {
+        m_impl->trajectory.push_back(sample);
+        return;
+    }
+    if (sample.timestampSec == last.timestampSec) {
+        last = sample;
+    }
 }
 
 Sophus::SE3f OpenVinsRuntime::TrackPreparedStereoWithFeatures(
@@ -234,19 +193,8 @@ bool OpenVinsRuntime::PrepareStereoImagesForTracking(
     if (request.left == nullptr || request.right == nullptr) {
         return false;
     }
-    const auto convertGray = [](const cv::Mat &src, cv::Mat &dst) {
-        if (src.empty()) {
-            dst.release();
-            return;
-        }
-        if (src.type() == CV_8UC1) {
-            dst = src;
-            return;
-        }
-        cv::cvtColor(src, dst, cv::COLOR_BGR2GRAY);
-    };
-    convertGray(*request.left, result.leftPrepared);
-    convertGray(*request.right, result.rightPrepared);
+    ConvertGrayImage(*request.left, result.leftPrepared);
+    ConvertGrayImage(*request.right, result.rightPrepared);
     return !result.leftPrepared.empty() && !result.rightPrepared.empty();
 }
 
@@ -255,7 +203,7 @@ int OpenVinsRuntime::TrackingState() const
     if (!Available()) {
         return Core::Ports::SLAM_TRACKING_NO_IMAGES_YET;
     }
-    if (!m_impl->initialized) {
+    if (!HasTrackingInitialized()) {
         return Core::Ports::SLAM_TRACKING_NOT_INITIALIZED;
     }
     return m_impl->lastPoseLost ? Core::Ports::SLAM_TRACKING_RECENTLY_LOST
@@ -283,7 +231,8 @@ bool OpenVinsRuntime::IsTrackingRecovering() const
 
 bool OpenVinsRuntime::HasTrackingInitialized() const
 {
-    return m_impl != nullptr && m_impl->initialized;
+    return m_impl != nullptr && m_impl->driver != nullptr &&
+           m_impl->driver->Initialized();
 }
 
 const Core::Ports::IVisualDescriptorProvider *
@@ -364,7 +313,8 @@ Core::Ports::VisualMapSnapshot OpenVinsRuntime::ExtractVisualMapSnapshot(
 }
 
 void OpenVinsRuntime::LogStereoFeatureDiagnostics(
-    uint64_t frameId, const Core::Ports::StereoFeatureObservationPacket &observations) const
+    uint64_t frameId,
+    const Core::Ports::StereoFeatureObservationPacket &observations) const
 {
     (void)frameId;
     (void)observations;

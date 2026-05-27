@@ -140,6 +140,20 @@ class SlamOrbTrackingTask final : public Epg::ITask {
     std::atomic<bool> &m_runningFlag;
 };
 
+class SlamOpenVinsTrackingTask final : public Epg::ITask {
+  public:
+    SlamOpenVinsTrackingTask(
+        std::shared_ptr<SlamSessionRuntimeService> service,
+        std::atomic<bool> &stop,
+        std::atomic<bool> &runningFlag);
+    void OnTick(Epg::TaskContext &context) override;
+
+  private:
+    std::shared_ptr<SlamSessionRuntimeService> m_service;
+    std::atomic<bool> &m_stop;
+    std::atomic<bool> &m_runningFlag;
+};
+
 class SlamVisualFeatureTrackingTask final : public Epg::ITask {
   public:
     SlamVisualFeatureTrackingTask(

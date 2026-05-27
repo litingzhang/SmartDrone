@@ -55,7 +55,7 @@ set(SMART_DRONE_ADAPTER_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine_config.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_runtime_options.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_runtime.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_runtime_stub.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_backend.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_slam_engine.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/stereo/stereo_feature_frontend_runner.cpp"
@@ -161,9 +161,17 @@ if(SMART_DRONE_ENABLE_ORB_SLAM3)
   list(APPEND SMART_DRONE_ADAPTER_SOURCES ${SMART_DRONE_ORB_SOURCES})
 endif()
 
-if(NOT SMART_DRONE_ENABLE_OPENVINS)
+if(SMART_DRONE_ENABLE_OPENVINS)
   list(REMOVE_ITEM SMART_DRONE_ADAPTER_SOURCES
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_runtime_stub.cpp"
+  )
+  list(APPEND SMART_DRONE_ADAPTER_SOURCES
     "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_runtime.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_runtime_openvins.cpp"
+  )
+else()
+  list(REMOVE_ITEM SMART_DRONE_ADAPTER_SOURCES
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_runtime_stub.cpp"
     "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_backend.cpp"
     "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/openvins/openvins_slam_engine.cpp"
   )

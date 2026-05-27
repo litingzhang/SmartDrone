@@ -278,6 +278,7 @@ SlamSessionRuntime::Impl::BuildResourceLifecycleConfig()
     return {
         *m_slamEngine,
         m_cameraProvider.get(),
+        m_imuProvider.get(),
         &m_imuPoller,
         m_previewOutputRuntime.get(),
         m_useImu,

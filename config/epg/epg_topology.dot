@@ -152,6 +152,9 @@ digraph EpgTopology {
     SlamOrbTrackingTask [
       label="{SlamOrbTrackingTask|type=SlamOrbTrackingTask|trigger=any_queue_ready|trigger_queues=SlamOrbPreparedFrame}"
     ];
+    SlamOpenVinsTrackingTask [
+      label="{SlamOpenVinsTrackingTask|type=SlamOpenVinsTrackingTask|trigger=any_queue_ready|trigger_queues=SlamOpenVinsPreparedFrame}"
+    ];
     SlamVisualFeatureTrackingTask [
       label="{SlamVisualFeatureTrackingTask|type=SlamVisualFeatureTrackingTask|trigger=any_queue_ready|trigger_queues=SlamVisualFeaturePreparedFrame}"
     ];
@@ -208,7 +211,10 @@ digraph EpgTopology {
       taillabel="2", headlabel="0", label="SlamOrbPreparedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamTrackingRouteTask -> SlamVisualFeatureTrackingTask [
-      taillabel="3", headlabel="0", label="SlamVisualFeaturePreparedFrame\ndepth=512\noverflow=overwrite_oldest"
+      taillabel="4", headlabel="0", label="SlamVisualFeaturePreparedFrame\ndepth=512\noverflow=overwrite_oldest"
+    ];
+    SlamTrackingRouteTask -> SlamOpenVinsTrackingTask [
+      taillabel="3", headlabel="0", label="SlamOpenVinsPreparedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamKltTrackingTask -> SlamPosePostprocessTask [
       taillabel="0", headlabel="0", label="SlamTrackedFrame\ndepth=512\noverflow=overwrite_oldest"
@@ -219,8 +225,11 @@ digraph EpgTopology {
     SlamOrbTrackingTask -> SlamPosePostprocessTask [
       taillabel="0", headlabel="2", label="SlamTrackedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
-    SlamVisualFeatureTrackingTask -> SlamPosePostprocessTask [
+    SlamOpenVinsTrackingTask -> SlamPosePostprocessTask [
       taillabel="0", headlabel="3", label="SlamTrackedFrame\ndepth=512\noverflow=overwrite_oldest"
+    ];
+    SlamVisualFeatureTrackingTask -> SlamPosePostprocessTask [
+      taillabel="0", headlabel="4", label="SlamTrackedFrame\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamPosePostprocessTask -> SlamPointCloudTask [
       taillabel="0", headlabel="0", label="SlamPublishedFrame\ndepth=512\noverflow=overwrite_oldest"
@@ -262,22 +271,25 @@ digraph EpgTopology {
       taillabel="1", headlabel="6", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamPosePostprocessTask -> SlamMonitorTask [
-      taillabel="5", headlabel="7", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
+      taillabel="5", headlabel="8", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
     ];
     SlamPointCloudTask -> SlamMonitorTask [
-      taillabel="1", headlabel="8", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
-    ];
-    SlamLivePoseTask -> SlamMonitorTask [
       taillabel="1", headlabel="9", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
     ];
-    SlamMavlinkTask -> SlamMonitorTask [
+    SlamLivePoseTask -> SlamMonitorTask [
       taillabel="1", headlabel="10", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
     ];
-    SlamUdpTask -> SlamMonitorTask [
+    SlamMavlinkTask -> SlamMonitorTask [
       taillabel="1", headlabel="11", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
     ];
-    SlamPreviewTxTask -> SlamMonitorTask [
+    SlamUdpTask -> SlamMonitorTask [
       taillabel="1", headlabel="12", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
+    ];
+    SlamPreviewTxTask -> SlamMonitorTask [
+      taillabel="1", headlabel="13", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
+    ];
+    SlamOpenVinsTrackingTask -> SlamMonitorTask [
+      taillabel="1", headlabel="7", label="SlamStatus\ndepth=512\noverflow=overwrite_oldest"
     ];
   }
 

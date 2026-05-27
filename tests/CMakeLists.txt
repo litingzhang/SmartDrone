@@ -157,8 +157,7 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/adapters/slam/engine/slam_mode_strategy.cpp
     ../src/native/adapters/slam/engine/slam_tracking_backend.cpp
     ../src/native/adapters/slam/openvins/openvins_runtime.cpp
-    ../src/native/adapters/slam/openvins/openvins_backend.cpp
-    ../src/native/adapters/slam/openvins/openvins_slam_engine.cpp
+    ../src/native/adapters/slam/openvins/openvins_runtime_stub.cpp
     ../src/native/adapters/slam/klt/klt_slam_engine.cpp
     ../src/native/adapters/slam/klt/klt_continuous_frontend.cpp
     ../src/native/adapters/slam/klt/klt_loop_closure_backend.cpp
@@ -195,6 +194,7 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/core/ports/visual_tracking.cpp
     ../src/native/core/application/config/app_args.cpp
     ../src/native/core/application/config/orb_acceleration_config.cpp
+    ../src/native/core/application/config/slam_backend_availability.cpp
     ../src/native/core/application/epg/epg_discrete_global_solver.cpp
     ../src/native/core/application/epg/epg_graph_runtime.cpp
     ../src/native/core/application/epg/epg_cpu_binding_solver_exact.cpp
@@ -300,7 +300,13 @@ if(ENABLE_OFFLINE_REPLAY)
   endif()
 
   if(SMART_DRONE_ENABLE_OPENVINS)
+    set_source_files_properties(
+      ../src/native/adapters/slam/openvins/openvins_runtime_stub.cpp
+      PROPERTIES HEADER_FILE_ONLY ON)
     target_sources(smart_drone_offline_replay PRIVATE
+      ../src/native/adapters/slam/openvins/openvins_runtime_openvins.cpp
+      ../src/native/adapters/slam/openvins/openvins_backend.cpp
+      ../src/native/adapters/slam/openvins/openvins_slam_engine.cpp
       ${SMART_DRONE_OPENVINS_CORE_SOURCES}
       ${SMART_DRONE_OPENVINS_INIT_SOURCES}
       ${SMART_DRONE_OPENVINS_MSCKF_SOURCES}
@@ -309,15 +315,17 @@ if(ENABLE_OFFLINE_REPLAY)
     if(SMART_DRONE_OPENVINS_CERES_AVAILABLE)
       target_sources(smart_drone_offline_replay PRIVATE
         ${SMART_DRONE_OPENVINS_INIT_CERES_SOURCES}
+        ../src/native/adapters/slam/openvins/openvins_dynamic_init_enabled.cpp
+      )
+    else()
+      target_sources(smart_drone_offline_replay PRIVATE
+        ${SMART_DRONE_OPENVINS_INIT_DYNAMIC_SOURCE}
+        ../src/native/adapters/slam/openvins/openvins_dynamic_init_disabled.cpp
       )
     endif()
     set_source_files_properties(
       ../src/native/core/application/config/slam_backend_availability.cpp
       PROPERTIES HEADER_FILE_ONLY ON)
-    target_compile_definitions(smart_drone_offline_replay PRIVATE SMART_DRONE_HAS_OPENVINS=1)
-    if(NOT SMART_DRONE_OPENVINS_CERES_AVAILABLE)
-      target_compile_definitions(smart_drone_offline_replay PRIVATE SMART_DRONE_OPENVINS_DISABLE_CERES=1)
-    endif()
     target_include_directories(smart_drone_offline_replay PRIVATE
       "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src"
       "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src"

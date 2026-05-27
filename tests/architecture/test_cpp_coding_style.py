@@ -80,6 +80,7 @@ def IsExcluded(path: Path) -> bool:
         for marker in (
             "/third_party/",
             "/src/native/adapters/slam/orb/orb_slam3/",
+            "/src/native/adapters/slam/openvins/open_vins/",
             "/src/android/app/.cxx/",
             "/output/",
         )

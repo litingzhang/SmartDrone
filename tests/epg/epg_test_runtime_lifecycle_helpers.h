@@ -4,7 +4,7 @@ void RequestTestSystemRedeploy(
     redeploy.RequestSystemRedeploy({
         "cluster_system_runtime_graph",
         "optimized config changed",
-        "config/epg/epg_topology.dot:v6",
+        "config/epg/epg_topology.dot:v8",
         "cluster_system_runtime_graph",
         "/tmp/smartdrone_epg_system_profile.json",
         1000,
@@ -20,7 +20,7 @@ void ExpectTestSystemRedeployRequest(
 {
     EXPECT_EQ(request.graphName, "cluster_system_runtime_graph");
     EXPECT_EQ(request.reason, "optimized config changed");
-    EXPECT_EQ(request.topologyVersion, "config/epg/epg_topology.dot:v6");
+    EXPECT_EQ(request.topologyVersion, "config/epg/epg_topology.dot:v8");
     EXPECT_EQ(request.sourceProfile, "cluster_system_runtime_graph");
     EXPECT_EQ(request.sourceProfilePath,
               "/tmp/smartdrone_epg_system_profile.json");
@@ -53,7 +53,7 @@ void RequestTestSessionRedeploy(
     redeploy.RequestSessionRedeploy({
         "cluster_slam_session_graph",
         "optimized config changed",
-        "config/epg/epg_topology.dot:v6",
+        "config/epg/epg_topology.dot:v8",
         "cluster_slam_session_graph",
         "/tmp/smartdrone_epg_slam_profile.json",
         2000,

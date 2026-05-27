@@ -22,6 +22,7 @@ class IPreviewOutputRuntime;
 struct SlamSessionResourceLifecycleConfig {
     SmartDrone::Core::Ports::ISlamEngine &slamEngine;
     SmartDrone::Core::Ports::ICameraProvider *cameraProvider{nullptr};
+    SmartDrone::Core::Ports::IImuProvider *imuProvider{nullptr};
     ImuSensorPoller *imuPoller{nullptr};
     IPreviewOutputRuntime *previewOutput{nullptr};
     bool useImu{false};
@@ -59,13 +60,14 @@ class SlamSessionResourceLifecycle final {
   private:
     void StartVisualFeatureFrontend(SlamSessionResourceStartResult &result);
     bool OpenUdp();
-    bool StartImuPoller();
+    bool StartImuResources();
     bool OpenCamera();
 
     SlamSessionResourceLifecycleConfig m_config;
     std::unique_ptr<ISlamVisualFeatureFrontendSession> m_visualFeatureSession;
     bool m_slamStarted{false};
     bool m_udpOpen{false};
+    bool m_imuProviderStarted{false};
     bool m_cameraOpen{false};
 };
 

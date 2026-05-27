@@ -58,6 +58,11 @@ struct SlamOrbPreparedFrame {
     std::shared_ptr<ISlamPreparedFramePayload> frame;
 };
 
+struct SlamOpenVinsPreparedFrame {
+    std::uint64_t sessionId{0};
+    std::shared_ptr<ISlamPreparedFramePayload> frame;
+};
+
 struct SlamVisualFeaturePreparedFrame {
     std::uint64_t sessionId{0};
     std::shared_ptr<ISlamPreparedFramePayload> frame;

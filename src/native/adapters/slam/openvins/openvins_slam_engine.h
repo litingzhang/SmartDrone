@@ -40,6 +40,11 @@ class OpenVinsSlamEngine final
     void StepBackend() override;
 
   private:
+    Core::Ports::SlamOutput BuildBootstrapOutput(
+        const Core::Ports::SlamInputBatch &input) const;
+    bool FillContinuityPose(const Core::Ports::SlamInputBatch &input,
+                            Core::Ports::SlamOutput &out);
+
     OpenVinsRuntime m_runtime;
     Core::Ports::PoseEstimate m_lastPose{};
     bool m_haveLastPose{false};

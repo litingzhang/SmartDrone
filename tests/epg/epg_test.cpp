@@ -62,6 +62,7 @@ struct SlamPreparedFrame {};
 struct SlamKltPreparedFrame {};
 struct SlamDpvoPreparedFrame {};
 struct SlamOrbPreparedFrame {};
+struct SlamOpenVinsPreparedFrame {};
 struct SlamVisualFeaturePreparedFrame {};
 struct SlamTrackedFrame {};
 struct SlamPublishedFrame {};
@@ -348,9 +349,19 @@ TEST(OrbAccelerationConfigTest, KeepsLegacyCliFallbackForUnknownValues)
     EXPECT_EQ("vpi-remap", NormalizeOrbAccelerationOrCpu("vpi"));
 }
 
+void RegisterSlamShapeMessages(Registry &registry);
+void RegisterSlamShapeTasks(Registry &registry);
+
 Registry MakeSlamShapeRegistry()
 {
     Registry registry;
+    RegisterSlamShapeMessages(registry);
+    RegisterSlamShapeTasks(registry);
+    return registry;
+}
+
+void RegisterSlamShapeMessages(Registry &registry)
+{
     registry.RegisterMessageType<SlamResourceReady>("SlamResourceReady");
     registry.RegisterMessageType<SlamTick>("SlamTick");
     registry.RegisterMessageType<SlamImuReady>("SlamImuReady");
@@ -362,13 +373,18 @@ Registry MakeSlamShapeRegistry()
         "SlamDpvoPreparedFrame");
     registry.RegisterMessageType<SlamOrbPreparedFrame>(
         "SlamOrbPreparedFrame");
+    registry.RegisterMessageType<SlamOpenVinsPreparedFrame>(
+        "SlamOpenVinsPreparedFrame");
     registry.RegisterMessageType<SlamVisualFeaturePreparedFrame>(
         "SlamVisualFeaturePreparedFrame");
     registry.RegisterMessageType<SlamTrackedFrame>("SlamTrackedFrame");
     registry.RegisterMessageType<SlamPublishedFrame>("SlamPublishedFrame");
     registry.RegisterMessageType<SlamPreviewReady>("SlamPreviewReady");
     registry.RegisterMessageType<SlamStatus>("SlamStatus");
+}
 
+void RegisterSlamShapeTasks(Registry &registry)
+{
     const auto factory = []() {
         return std::unique_ptr<ITask>(new TestHeartbeatTask());
     };
@@ -382,6 +398,8 @@ Registry MakeSlamShapeRegistry()
     registry.RegisterTaskFactory("SlamKltTrackingTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamDpvoTrackingTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamOrbTrackingTask", {}, {}, factory);
+    registry.RegisterTaskFactory("SlamOpenVinsTrackingTask", {}, {},
+                                 factory);
     registry.RegisterTaskFactory("SlamVisualFeatureTrackingTask", {}, {},
                                  factory);
     registry.RegisterTaskFactory("SlamPosePostprocessTask", {}, {}, factory);
@@ -393,7 +411,6 @@ Registry MakeSlamShapeRegistry()
     registry.RegisterTaskFactory("SlamDfxTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamMonitorTask", {}, {}, factory);
     registry.RegisterTaskFactory("EpgDfxSnapshotTask", {}, {}, factory);
-    return registry;
 }
 
 Registry MakeSystemShapeRegistry()

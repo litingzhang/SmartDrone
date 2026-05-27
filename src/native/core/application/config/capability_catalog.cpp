@@ -50,7 +50,7 @@ std::vector<std::string> DefaultBehaviorNotes(
         "slam.lk_seed.gftt=shi_tomasi_good_features_to_track",
     };
     if (OpenVinsBackendAvailable()) {
-        notes.push_back("slam.backend.openvins=external_openvins_msckf_backend");
+        notes.push_back("slam.backend.openvins=in_tree_openvins_msckf_backend");
     }
     if (orbAvailable) {
         notes.push_back(

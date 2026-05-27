@@ -12,6 +12,8 @@ Environment variables:
   REMOTE_SERVICE     systemd service name, default: smart_drone
   SYSTEMD_UNIT_FILE  Optional local systemd unit file to install remotely.
                      Default: <repo>/smart_drone.service
+  EUROC_EVAL_ROOT    Jetson EuRoC eval deploy directory.
+                     Default: <REMOTE_DIR>/euroc_eval
   CLEAN_LEGACY_DIRS  1 to remove legacy Jetson project directories after
                      deployment. Default: 0
   RESTART_SERVICE    1 to restart service after deploy, default: 0
@@ -137,6 +139,9 @@ STEREO_YAML="$ARTIFACT_ROOT/config/stereo.yaml"
 MONO_YAML="$ARTIFACT_ROOT/config/mono_right.yaml"
 MONO_IMU_YAML="$ARTIFACT_ROOT/config/mono_inertial_right.yaml"
 RUNTIME_GRAPH_CONFIG_DIR="$ARTIFACT_ROOT/config/runtime_graph"
+EPG_CONFIG_DIR="$ARTIFACT_ROOT/config/epg"
+REPLAY_ARTIFACT_DIR="$ARTIFACT_ROOT/offline-replay"
+EUROC_EVAL_ROOT="${EUROC_EVAL_ROOT:-$REMOTE_DIR/euroc_eval}"
 SSH_PASSWORD="${SSH_PASSWORD:-}"
 SSH_CMD=(ssh)
 SCP_CMD=(scp)
@@ -200,6 +205,21 @@ upload_dir_atomic() {
         "rm -rf '$remote_tmp' && mkdir -p '$remote_tmp' && tar -xf - -C '$remote_tmp' && rm -rf '$remote_dst' && mv '$remote_tmp' '$remote_dst'"
 }
 
+upload_absolute_atomic() {
+    local local_path="$1"
+    local remote_dst="$2"
+    local remote_dir
+    local remote_tmp
+
+    remote_dir="$(dirname "$remote_dst")"
+    remote_tmp="$remote_dst.new"
+
+    echo "upload $remote_dst"
+    "${SSH_CMD[@]}" "$TARGET_HOST" "mkdir -p '$remote_dir'"
+    "${SCP_CMD[@]}" "$local_path" "$TARGET_HOST:$remote_tmp"
+    "${SSH_CMD[@]}" "$TARGET_HOST" "mv '$remote_tmp' '$remote_dst'"
+}
+
 upload_artifact_root() {
     local remote_parent
     local remote_name
@@ -242,6 +262,36 @@ cleanup_legacy_dirs() {
     run_remote_sudo "rm -rf /home/nvidia/SmartDrone_cross /home/nvidia/SmartDrone_codex /home/nvidia/smart_drone.service.codex"
 }
 
+upload_jetson_euroc_eval_bundle() {
+    local replay_bin="$REPLAY_ARTIFACT_DIR/smart_drone_offline_replay"
+    local replay_epg="$REPLAY_ARTIFACT_DIR/config/epg/epg_topology.dot"
+
+    if [ "$DEPLOY_PLATFORM" != "jetson-orin-nx" ]; then
+        return 0
+    fi
+    if [ ! -f "$replay_bin" ]; then
+        return 0
+    fi
+
+    echo "upload Jetson EuRoC eval bundle -> $TARGET_HOST:$EUROC_EVAL_ROOT"
+    upload_absolute_atomic "$replay_bin" \
+        "$EUROC_EVAL_ROOT/bin/smart_drone_offline_replay"
+    upload_absolute_atomic "$SCRIPT_DIR/run_jetson_mh04_openvins_accuracy_perf.sh" \
+        "$EUROC_EVAL_ROOT/scripts/run_jetson_mh04_openvins_accuracy_perf.sh"
+    upload_absolute_atomic "$REPO_ROOT/tests/euroc/evaluate_euroc_regression.py" \
+        "$EUROC_EVAL_ROOT/tests/euroc/evaluate_euroc_regression.py"
+    if [ -f "$replay_epg" ]; then
+        upload_absolute_atomic "$replay_epg" \
+            "$EUROC_EVAL_ROOT/config/epg/epg_topology.dot"
+    fi
+    if [ -d "$REPO_ROOT/config/openvins" ]; then
+        upload_dir_atomic "$REPO_ROOT/config/openvins" \
+            "euroc_eval/config/openvins"
+    fi
+    "${SSH_CMD[@]}" "$TARGET_HOST" \
+        "chmod +x '$EUROC_EVAL_ROOT/bin/smart_drone_offline_replay' '$EUROC_EVAL_ROOT/scripts/run_jetson_mh04_openvins_accuracy_perf.sh' '$EUROC_EVAL_ROOT/tests/euroc/evaluate_euroc_regression.py'"
+}
+
 if [ "$ADB_ONLY" != "1" ]; then
     require_file "$SMART_DRONE_BIN"
     require_file "$CALIB_YAML"
@@ -271,7 +321,12 @@ if [ "$ADB_ONLY" != "1" ]; then
         if [ -d "$RUNTIME_GRAPH_CONFIG_DIR" ]; then
             upload_dir_atomic "$RUNTIME_GRAPH_CONFIG_DIR" "config/runtime_graph"
         fi
+        if [ -d "$EPG_CONFIG_DIR" ]; then
+            upload_dir_atomic "$EPG_CONFIG_DIR" "config/epg"
+        fi
     fi
+
+    upload_jetson_euroc_eval_bundle
 
     install_systemd_unit
     cleanup_legacy_dirs

@@ -17,8 +17,9 @@ constexpr Epg::PortId DFX_STATUS_OUTPUT_PORT = 0;
 constexpr Epg::PortId PREVIEW_READY_OUTPUT_PORT = 0;
 constexpr std::array<Epg::PortId, 5> PUBLISHED_FRAME_OUTPUT_PORTS{0, 1, 2, 3,
                                                                    4};
-constexpr std::array<Epg::PortId, 4> TRACKED_FRAME_INPUT_PORTS{0, 1, 2, 3};
-constexpr std::array<Epg::PortId, 13> SLAM_MONITOR_STATUS_INPUT_PORTS{
+constexpr std::array<Epg::PortId, 5> TRACKED_FRAME_INPUT_PORTS{0, 1, 2, 3,
+                                                               4};
+constexpr std::array<Epg::PortId, 14> SLAM_MONITOR_STATUS_INPUT_PORTS{
     0,
     1,
     2,
@@ -32,12 +33,14 @@ constexpr std::array<Epg::PortId, 13> SLAM_MONITOR_STATUS_INPUT_PORTS{
     10,
     11,
     12,
+    13,
 };
 
 enum class SlamTrackingRoute : std::uint8_t {
     Klt,
     Dpvo,
     Orb,
+    OpenVins,
     VisualFeature,
 };
 
@@ -65,6 +68,9 @@ SlamTrackingRoute ResolveTrackingRoute(const SlamPreparedFrame &prepared)
     }
     if (frame->slamBackend == SlamBackend::DpvoTensorRt) {
         return SlamTrackingRoute::Dpvo;
+    }
+    if (frame->slamBackend == SlamBackend::OpenVins) {
+        return SlamTrackingRoute::OpenVins;
     }
     if (frame->slamBackend != SlamBackend::OrbSlam3) {
         return SlamTrackingRoute::Klt;
@@ -405,8 +411,11 @@ void SlamTrackingRouteTask::OnTick(Epg::TaskContext &context)
     case SlamTrackingRoute::Orb:
         PushSlamRouteFrame<SlamOrbPreparedFrame>(context, 2, *prepared);
         break;
+    case SlamTrackingRoute::OpenVins:
+        PushSlamRouteFrame<SlamOpenVinsPreparedFrame>(context, 3, *prepared);
+        break;
     case SlamTrackingRoute::VisualFeature:
-        PushSlamRouteFrame<SlamVisualFeaturePreparedFrame>(context, 3,
+        PushSlamRouteFrame<SlamVisualFeaturePreparedFrame>(context, 4,
                                                            *prepared);
         break;
     case SlamTrackingRoute::Klt:
@@ -468,6 +477,24 @@ void SlamOrbTrackingTask::OnTick(Epg::TaskContext &context)
         return;
     }
     RunTrackingStageTask<SlamOrbPreparedFrame>(context, *m_service);
+}
+
+SlamOpenVinsTrackingTask::SlamOpenVinsTrackingTask(
+    std::shared_ptr<SlamSessionRuntimeService> service,
+    std::atomic<bool> &stop,
+    std::atomic<bool> &runningFlag)
+    : m_service(std::move(service)),
+      m_stop(stop),
+      m_runningFlag(runningFlag)
+{
+}
+
+void SlamOpenVinsTrackingTask::OnTick(Epg::TaskContext &context)
+{
+    if (!ShouldRunTask(m_runningFlag, m_stop)) {
+        return;
+    }
+    RunTrackingStageTask<SlamOpenVinsPreparedFrame>(context, *m_service);
 }
 
 SlamVisualFeatureTrackingTask::SlamVisualFeatureTrackingTask(
@@ -707,6 +734,9 @@ const bool SLAM_DPVO_TRACKING_TASK_REGISTERED =
 const bool SLAM_ORB_TRACKING_TASK_REGISTERED =
     Epg::TypeCatalog::Global().RegisterTaskType<SlamOrbTrackingTask>(
         "SlamOrbTrackingTask");
+const bool SLAM_OPENVINS_TRACKING_TASK_REGISTERED =
+    Epg::TypeCatalog::Global().RegisterTaskType<SlamOpenVinsTrackingTask>(
+        "SlamOpenVinsTrackingTask");
 const bool SLAM_VISUAL_FEATURE_TRACKING_TASK_REGISTERED =
     Epg::TypeCatalog::Global().RegisterTaskType<
         SlamVisualFeatureTrackingTask>("SlamVisualFeatureTrackingTask");

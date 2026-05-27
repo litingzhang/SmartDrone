@@ -35,7 +35,7 @@ Current responsibility split:
 - `SlamImuGateTask`: consumes runtime readiness and ticks, waits for IMU readiness, rate-limits frame readiness from the live SLAM input FPS, and emits `SlamFrameReady`.
 - `SlamAcquireTask`: runs `SlamFrameInputPort::AcquireAndPrepareFrame` and emits `SlamPreparedFrame`.
 - `SlamTrackingRouteTask`: routes prepared frames to the selected tracking strategy queue.
-- `SlamKltTrackingTask`, `SlamDpvoTrackingTask`, `SlamOrbTrackingTask`, and `SlamVisualFeatureTrackingTask`: run `SlamFrameTrackingPort::TrackPreparedFrame` for the selected strategy and emit `SlamTrackedFrame`.
+- `SlamKltTrackingTask`, `SlamDpvoTrackingTask`, `SlamOrbTrackingTask`, `SlamOpenVinsTrackingTask`, and `SlamVisualFeatureTrackingTask`: run `SlamFrameTrackingPort::TrackPreparedFrame` for the selected strategy and emit `SlamTrackedFrame`.
 - `SlamPosePostprocessTask`: consumes tracked frames from the strategy branches, runs `SlamFramePosePostprocessPort::PostprocessTrackedFrame`, and fans out the same `SlamPublishedFrame` snapshot to output tasks.
 - `SlamPointCloudTask`: emits the point-cloud side effect and reports `SlamStatus`.
 - `SlamLivePoseTask`: emits the live-pose side effect and reports `SlamStatus`.
@@ -50,7 +50,7 @@ mode feedback, input pacing/warmup state, pose-continuity state, and output timi
 clear state boundary.
 
 Mutable SLAM backend access is serialized by the EPG scheduling resource declared in the task manifest. ORB tracking,
-visual-feature tracking, point-cloud extraction, and backend maintenance share the `slam_backend` resource, so the
+OpenVINS tracking, visual-feature tracking, point-cloud extraction, and backend maintenance share the `slam_backend` resource, so the
 runtime enters only one of those task bodies at a time. Shared tracking/mode feedback and output timing/DFX feedback
 remain atomic state objects. Backend control calls are serialized through `SlamRuntimeControlPort`, keeping raw backend
 control access out of individual EPG stage ports.
