@@ -10,6 +10,10 @@
 namespace fs = std::filesystem;
 
 const char *DefaultSettingsForSensorMode(SensorMode mode);
+SensorMode NormalizeSensorModeForSlamBackend(SensorMode mode,
+                                             SlamBackend backend);
+const char *DefaultSettingsForSlamBackend(SensorMode mode,
+                                          SlamBackend backend);
 SensorMode ParseSensorModeText(const std::string &text);
 const char *ToSensorModeText(SensorMode mode);
 FeatureFrontend ParseFeatureFrontendText(const std::string &text);
@@ -24,6 +28,9 @@ std::string ResolveRuntimePath(const std::string &path, const char *argv0);
 std::string
 ResolveSettingsForSensorMode(SensorMode mode,
                              const std::string &currentSettingsPath);
+std::string
+ResolveSettingsForSlamBackend(SensorMode mode, SlamBackend backend,
+                              const std::string &currentSettingsPath);
 
 struct CameraConfig {
     int width{640};

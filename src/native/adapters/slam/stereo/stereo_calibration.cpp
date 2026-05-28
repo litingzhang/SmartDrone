@@ -23,7 +23,7 @@ cv::Mat MakeDistCoeffsLocal(float k1, float k2, float p1, float p2)
 
 bool ValidIntrinsics(const StereoCameraIntrinsics &intrinsics)
 {
-    return intrinsics.fx > 0.0f && intrinsics.fy > 0.0f && !intrinsics.K.empty();
+    return intrinsics.fx > 0.0f && intrinsics.fy > 0.0f && !intrinsics.cameraMatrix.empty();
 }
 
 void LoadCameraIntrinsics(cv::FileStorage &fs, StereoCalibration &calibration)
@@ -47,18 +47,18 @@ bool IntrinsicsPositive(const StereoCalibration &calibration)
 void BuildCalibrationMatrices(cv::FileStorage &fs,
                               StereoCalibration &calibration)
 {
-    calibration.left.K =
+    calibration.left.cameraMatrix =
         MakeCameraMatrixLocal(calibration.left.fx, calibration.left.fy,
                               calibration.left.cx, calibration.left.cy);
-    calibration.right.K =
+    calibration.right.cameraMatrix =
         MakeCameraMatrixLocal(calibration.right.fx, calibration.right.fy,
                               calibration.right.cx, calibration.right.cy);
-    calibration.left.D =
+    calibration.left.distCoeffs =
         MakeDistCoeffsLocal(static_cast<float>(fs["Camera1.k1"]),
                             static_cast<float>(fs["Camera1.k2"]),
                             static_cast<float>(fs["Camera1.p1"]),
                             static_cast<float>(fs["Camera1.p2"]));
-    calibration.right.D =
+    calibration.right.distCoeffs =
         MakeDistCoeffsLocal(static_cast<float>(fs["Camera2.k1"]),
                             static_cast<float>(fs["Camera2.k2"]),
                             static_cast<float>(fs["Camera2.p1"]),
@@ -67,10 +67,10 @@ void BuildCalibrationMatrices(cv::FileStorage &fs,
 
 void LoadStereoTransform(cv::FileStorage &fs, StereoCalibration &calibration)
 {
-    fs["Stereo.T_c1_c2"] >> calibration.T_c1_c2;
-    if (calibration.T_c1_c2.empty() || calibration.T_c1_c2.rows != 4 ||
-        calibration.T_c1_c2.cols != 4) {
-        calibration.T_c1_c2.release();
+    fs["Stereo.T_c1_c2"] >> calibration.rightToLeftTransform;
+    if (calibration.rightToLeftTransform.empty() || calibration.rightToLeftTransform.rows != 4 ||
+        calibration.rightToLeftTransform.cols != 4) {
+        calibration.rightToLeftTransform.release();
         std::cerr << "[stereo_calib] Stereo.T_c1_c2 missing; falling back to "
                      "Camera.bf baseline\n";
     }
@@ -81,11 +81,11 @@ void LoadStereoBaseline(cv::FileStorage &fs, StereoCalibration &calibration)
     const float bf = static_cast<float>(fs["Camera.bf"]);
     calibration.baselineMeters =
         bf > 0.0f ? bf / calibration.left.fx : 0.0f;
-    if (calibration.T_c1_c2.empty()) {
+    if (calibration.rightToLeftTransform.empty()) {
         return;
     }
     cv::Mat T64;
-    calibration.T_c1_c2.convertTo(T64, CV_64F);
+    calibration.rightToLeftTransform.convertTo(T64, CV_64F);
     calibration.baselineMeters = std::abs(static_cast<float>(T64.at<double>(0, 3)));
 }
 
@@ -148,23 +148,23 @@ bool EnsureStereoRectifier(StereoCalibration &calibration,
     cv::Mat t = (cv::Mat_<double>(3, 1)
                      << -static_cast<double>(calibration.baselineMeters),
                  0.0, 0.0);
-    if (!calibration.T_c1_c2.empty()) {
+    if (!calibration.rightToLeftTransform.empty()) {
         cv::Mat T64;
-        calibration.T_c1_c2.convertTo(T64, CV_64F);
+        calibration.rightToLeftTransform.convertTo(T64, CV_64F);
         cv::Mat Tlr = T64.inv();
         R = Tlr(cv::Rect(0, 0, 3, 3)).clone();
         t = Tlr(cv::Rect(3, 0, 1, 3)).clone();
     }
 
     cv::Mat R1, R2, P1, P2, Q;
-    cv::stereoRectify(calibration.left.K, calibration.left.D, calibration.right.K,
-                      calibration.right.D, inputSize, R, t, R1, R2, P1, P2, Q,
+    cv::stereoRectify(calibration.left.cameraMatrix, calibration.left.distCoeffs, calibration.right.cameraMatrix,
+                      calibration.right.distCoeffs, inputSize, R, t, R1, R2, P1, P2, Q,
                       cv::CALIB_ZERO_DISPARITY, -1.0, inputSize);
     cv::initUndistortRectifyMap(
-        calibration.left.K, calibration.left.D, R1, P1, inputSize, CV_32FC1,
+        calibration.left.cameraMatrix, calibration.left.distCoeffs, R1, P1, inputSize, CV_32FC1,
         calibration.rectification.leftMapX, calibration.rectification.leftMapY);
     cv::initUndistortRectifyMap(
-        calibration.right.K, calibration.right.D, R2, P2, inputSize, CV_32FC1,
+        calibration.right.cameraMatrix, calibration.right.distCoeffs, R2, P2, inputSize, CV_32FC1,
         calibration.rectification.rightMapX, calibration.rectification.rightMapY);
 
     calibration.left.fx = static_cast<float>(P1.at<double>(0, 0));

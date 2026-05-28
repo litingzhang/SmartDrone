@@ -22,6 +22,7 @@ namespace SmartDrone::Adapters::Slam {
 using SuperPointTensorRtInternal::BuildDescriptorGridHwc;
 using SuperPointTensorRtInternal::BuildInputBatch;
 using SuperPointTensorRtInternal::Candidate;
+using SuperPointTensorRtInternal::CandidateExtractionRequest;
 using SuperPointTensorRtInternal::CudaPinnedHostBuffer;
 using SuperPointTensorRtInternal::DurationMs;
 using SuperPointTensorRtInternal::EnvFlag;
@@ -246,7 +247,7 @@ struct SuperPointNativeExtractor::Impl {
     bool MatchWithLightGlue(const SuperPointLightGlueMatchRequest &request);
     void ResetLightGlueStats();
     bool PrepareLightGlueMatchContext(const SuperPointLightGlueMatchRequest &request,
-                                      LightGlueMatchContext &context) const;
+                                      LightGlueMatchContext &context);
     void PackLightGlueInputs(const LightGlueMatchContext &context);
     bool RunLightGlueForward(LightGlueMatchContext &context,
                              TensorRtForwardStats &matchStats);

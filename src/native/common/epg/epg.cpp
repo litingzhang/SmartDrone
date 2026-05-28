@@ -382,6 +382,47 @@ void EventPipelineGraph::ConfigureJson(const std::string &jsonText)
     Configure(ParseGraphConfigJson(jsonText));
 }
 
+IQueue *EventPipelineGraph::FindExternalIngressQueue(
+    const std::string &queueName)
+{
+    auto it = m_queues.find(queueName);
+    if (it == m_queues.end()) {
+        throw std::runtime_error(
+            "EventPipelineGraph ingress queue not found: " + queueName);
+    }
+    return it->second.get();
+}
+
+void EventPipelineGraph::ValidateExternalIngressQueueType(
+    const IQueue *queue, const std::string &queueName,
+    std::type_index expectedType) const
+{
+    if (queue->TypeIndex() != expectedType) {
+        throw std::runtime_error(
+            "EventPipelineGraph ingress queue type mismatch: " + queueName);
+    }
+}
+
+void EventPipelineGraph::ValidateExternalIngressQueueProducer(
+    const std::string &queueName) const
+{
+    if (m_taskProducedQueues.find(queueName) != m_taskProducedQueues.end()) {
+        throw std::runtime_error(
+            "EventPipelineGraph ingress queue already has task producer: " +
+            queueName);
+    }
+}
+
+void EventPipelineGraph::MarkExternalIngressQueue(
+    const std::string &queueName)
+{
+    if (!m_externalIngressQueues.insert(queueName).second) {
+        throw std::runtime_error(
+            "EventPipelineGraph ingress already exists for queue: " +
+            queueName);
+    }
+}
+
 void EventPipelineGraph::Configure(const GraphConfig &config)
 {
     if (m_running) {

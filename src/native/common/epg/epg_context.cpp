@@ -24,6 +24,31 @@ TaskContext::TaskContext(std::unordered_map<PortId, IQueue *> inputs,
 {
 }
 
+void ValidateSpscQueueDepth(std::size_t queueDepth)
+{
+    if (queueDepth != 0) {
+        return;
+    }
+    throw std::invalid_argument("SPSC queue depth must be greater than zero");
+}
+
+void FillQueueDiagnosticsSnapshot(const QueueDiagnostics &diag,
+                                  QueueDiagnosticsSnapshot &snapshot)
+{
+    snapshot.pushed = diag.pushed.load(std::memory_order_relaxed);
+    snapshot.popped = diag.popped.load(std::memory_order_relaxed);
+    snapshot.droppedNewest = diag.droppedNewest.load(std::memory_order_relaxed);
+    snapshot.overwrittenOldest =
+        diag.overwrittenOldest.load(std::memory_order_relaxed);
+    snapshot.wakeups = diag.wakeups.load(std::memory_order_relaxed);
+    snapshot.maxDepthObserved =
+        diag.maxDepthObserved.load(std::memory_order_relaxed);
+    snapshot.firstActivityMs =
+        diag.firstActivityMs.load(std::memory_order_relaxed);
+    snapshot.lastActivityMs =
+        diag.lastActivityMs.load(std::memory_order_relaxed);
+}
+
 bool TaskContext::InputReady(PortId port) const
 {
     auto it = m_inputs.find(port);
@@ -67,6 +92,37 @@ const IQueue *TaskContext::OutputQueueByPort(PortId port) const
     return it == m_outputs.end() ? nullptr : it->second;
 }
 
+IQueue *TaskContext::InputQueueByPort(PortId port) const
+{
+    auto it = m_inputs.find(port);
+    if (it == m_inputs.end()) {
+        throw std::runtime_error("missing input port: " + std::to_string(port));
+    }
+    return it->second;
+}
+
+IQueue *TaskContext::OutputQueueByPortMutable(PortId port) const
+{
+    auto it = m_outputs.find(port);
+    if (it == m_outputs.end()) {
+        throw std::runtime_error("missing output port: " +
+                                 std::to_string(port));
+    }
+    return it->second;
+}
+
+void TaskContext::ValidateQueueType(IQueue *queue, PortId port,
+                                    std::type_index expectedType,
+                                    const char *direction)
+{
+    if (queue->TypeIndex() == expectedType) {
+        return;
+    }
+    throw std::runtime_error(std::string(direction) +
+                             " port type mismatch: " +
+                             std::to_string(port));
+}
+
 void TaskContext::AttachDiagnostics(TaskDiagnostics *diagnostics)
 {
     m_diagnostics = diagnostics;
@@ -90,7 +146,8 @@ void Registry::RegisterTaskFactory(const std::string &name,
                                    TaskFactory factory)
 {
     if (!factory) {
-        throw std::runtime_error("registered task factory must be callable: " + name);
+        throw std::runtime_error(
+            "registered task factory must be callable: " + name);
     }
 
     TaskTypeInfo info;
@@ -101,6 +158,38 @@ void Registry::RegisterTaskFactory(const std::string &name,
     m_taskTypes[name] = std::move(info);
 }
 
+Registry::QueueTypeInfo Registry::MakeQueueTypeInfo(
+    const std::string &name, std::type_index type, QueueFactory factory)
+{
+    QueueTypeInfo info;
+    info.name = name;
+    info.type = type;
+    info.factory = std::move(factory);
+    return info;
+}
+
+Registry::TaskTypeInfo Registry::MakeTaskTypeInfo(
+    const std::string &name, std::vector<PortSpec> inputs,
+    std::vector<PortSpec> outputs, TaskFactory factory)
+{
+    TaskTypeInfo info;
+    info.name = name;
+    info.inputs = std::move(inputs);
+    info.outputs = std::move(outputs);
+    info.factory = std::move(factory);
+    return info;
+}
+
+void Registry::RegisterQueueType(QueueTypeInfo info)
+{
+    m_queueTypes[info.name] = std::move(info);
+}
+
+void Registry::RegisterTaskTypeInfo(TaskTypeInfo info)
+{
+    m_taskTypes[info.name] = std::move(info);
+}
+
 namespace {
 
 void MergePortSpecs(std::vector<PortSpec> &existing,
@@ -109,16 +198,20 @@ void MergePortSpecs(std::vector<PortSpec> &existing,
                     const char *direction)
 {
     for (const auto &port : incoming) {
-        auto it = std::find_if(existing.begin(), existing.end(), [&port](const PortSpec &current) {
-            return current.id == port.id;
-        });
+        auto it = std::find_if(
+            existing.begin(), existing.end(),
+            [&port](const PortSpec &current) {
+                return current.id == port.id;
+            });
         if (it == existing.end()) {
             existing.push_back(port);
             continue;
         }
         if (it->type != port.type) {
-            throw std::runtime_error("EventPipelineGraph task " + std::string(direction) +
-                                     " port type mismatch: " + taskName + "." + std::to_string(port.id));
+            throw std::runtime_error(
+                "EventPipelineGraph task " + std::string(direction) +
+                " port type mismatch: " + taskName + "." +
+                std::to_string(port.id));
         }
     }
 }
@@ -131,7 +224,8 @@ void Registry::MergeTaskPorts(const std::string &name,
 {
     auto it = m_taskTypes.find(name);
     if (it == m_taskTypes.end()) {
-        throw std::runtime_error("cannot merge ports into unregistered task type: " + name);
+        throw std::runtime_error(
+            "cannot merge ports into unregistered task type: " + name);
     }
     MergePortSpecs(it->second.inputs, inputs, name, "input");
     MergePortSpecs(it->second.outputs, outputs, name, "output");
@@ -160,6 +254,47 @@ TypeCatalog::TypeCatalog()
     std::atomic_store_explicit(&m_snapshot,
                                std::make_shared<const CatalogSnapshot>(),
                                std::memory_order_release);
+}
+
+TypeCatalog::TaskReflectionInfo TypeCatalog::MakeTaskReflectionInfo(
+    std::string name, std::vector<PortSpec> inputs,
+    std::vector<PortSpec> outputs)
+{
+    TaskReflectionInfo info;
+    info.name = std::move(name);
+    info.inputs = std::move(inputs);
+    info.outputs = std::move(outputs);
+    return info;
+}
+
+bool TypeCatalog::RegisterMessageFactory(
+    const std::string &name, std::function<void(Registry &)> factory)
+{
+    std::shared_ptr<const CatalogSnapshot> current = LoadSnapshot();
+    while (current) {
+        auto next = std::make_shared<CatalogSnapshot>(*current);
+        next->messages[name] = factory;
+        if (ReplaceSnapshot(current, std::move(next))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool TypeCatalog::RegisterTaskReflection(std::type_index taskType,
+                                         TaskReflectionInfo info)
+{
+    const auto registeredName = info.name;
+    std::shared_ptr<const CatalogSnapshot> current = LoadSnapshot();
+    while (current) {
+        auto next = std::make_shared<CatalogSnapshot>(*current);
+        next->tasks[info.name] = info;
+        next->taskNamesByType[taskType] = registeredName;
+        if (ReplaceSnapshot(current, std::move(next))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string TypeCatalog::ReflectedTaskName(std::type_index taskType) const

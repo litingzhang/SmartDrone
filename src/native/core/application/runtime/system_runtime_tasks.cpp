@@ -7,10 +7,10 @@
 namespace SmartDrone::Core::Application {
 namespace {
 
-using UdpPhaseStepFn = void (UdpCommandRuntime::*)();
+using UdpPhaseStepFn = void (IUdpCommandRuntimePhase::*)();
 
 void RunUdpPhaseTask(Epg::TaskContext &context,
-                     const std::shared_ptr<UdpCommandRuntime> &runtime,
+                     const std::shared_ptr<IUdpCommandRuntimePhase> &runtime,
                      UdpPhaseStepFn step,
                      std::uint64_t &pulseSequence)
 {
@@ -21,7 +21,8 @@ void RunUdpPhaseTask(Epg::TaskContext &context,
     PushSystemRuntimePulse(context, pulseSequence);
 }
 
-void StopUdpRuntime(const std::shared_ptr<UdpCommandRuntime> &runtime)
+void StopUdpRuntime(
+    const std::shared_ptr<IUdpCommandRuntimePhase> &runtime)
 {
     if (runtime) {
         runtime->Stop();
@@ -68,7 +69,8 @@ const bool SETPOINT_STREAM_TASK_REGISTERED =
     Epg::TypeCatalog::Global().RegisterTaskType<SetpointStreamTask>(
         "SetpointStreamTask");
 
-UdpReceiveTask::UdpReceiveTask(std::shared_ptr<UdpCommandRuntime> runtime)
+UdpReceiveTask::UdpReceiveTask(
+    std::shared_ptr<IUdpCommandRuntimePhase> runtime)
     : m_runtime(std::move(runtime))
 {
 }
@@ -80,7 +82,7 @@ UdpReceiveTask::~UdpReceiveTask()
 
 void UdpReceiveTask::OnTick(Epg::TaskContext &context)
 {
-    RunUdpPhaseTask(context, m_runtime, &UdpCommandRuntime::StepReceive,
+    RunUdpPhaseTask(context, m_runtime, &IUdpCommandRuntimePhase::StepReceive,
                     m_pulseSequence);
 }
 
@@ -89,7 +91,7 @@ const bool UDP_RECEIVE_TASK_REGISTERED =
         "UdpReceiveTask");
 
 UdpHeartbeatTxTask::UdpHeartbeatTxTask(
-    std::shared_ptr<UdpCommandRuntime> runtime)
+    std::shared_ptr<IUdpCommandRuntimePhase> runtime)
     : m_runtime(std::move(runtime))
 {
 }
@@ -101,8 +103,8 @@ UdpHeartbeatTxTask::~UdpHeartbeatTxTask()
 
 void UdpHeartbeatTxTask::OnTick(Epg::TaskContext &context)
 {
-    RunUdpPhaseTask(context, m_runtime, &UdpCommandRuntime::StepHeartbeatTx,
-                    m_pulseSequence);
+    RunUdpPhaseTask(context, m_runtime,
+                    &IUdpCommandRuntimePhase::StepHeartbeatTx, m_pulseSequence);
 }
 
 const bool UDP_HEARTBEAT_TX_TASK_REGISTERED =
@@ -110,7 +112,7 @@ const bool UDP_HEARTBEAT_TX_TASK_REGISTERED =
         "UdpHeartbeatTxTask");
 
 UdpHeartbeatTimeoutTask::UdpHeartbeatTimeoutTask(
-    std::shared_ptr<UdpCommandRuntime> runtime)
+    std::shared_ptr<IUdpCommandRuntimePhase> runtime)
     : m_runtime(std::move(runtime))
 {
 }
@@ -123,7 +125,7 @@ UdpHeartbeatTimeoutTask::~UdpHeartbeatTimeoutTask()
 void UdpHeartbeatTimeoutTask::OnTick(Epg::TaskContext &context)
 {
     RunUdpPhaseTask(context, m_runtime,
-                    &UdpCommandRuntime::StepHeartbeatTimeout,
+                    &IUdpCommandRuntimePhase::StepHeartbeatTimeout,
                     m_pulseSequence);
 }
 
@@ -131,7 +133,8 @@ const bool UDP_HEARTBEAT_TIMEOUT_TASK_REGISTERED =
     Epg::TypeCatalog::Global().RegisterTaskType<UdpHeartbeatTimeoutTask>(
         "UdpHeartbeatTimeoutTask");
 
-UdpStateTxTask::UdpStateTxTask(std::shared_ptr<UdpCommandRuntime> runtime)
+UdpStateTxTask::UdpStateTxTask(
+    std::shared_ptr<IUdpCommandRuntimePhase> runtime)
     : m_runtime(std::move(runtime))
 {
 }
@@ -143,7 +146,7 @@ UdpStateTxTask::~UdpStateTxTask()
 
 void UdpStateTxTask::OnTick(Epg::TaskContext &context)
 {
-    RunUdpPhaseTask(context, m_runtime, &UdpCommandRuntime::StepStateTx,
+    RunUdpPhaseTask(context, m_runtime, &IUdpCommandRuntimePhase::StepStateTx,
                     m_pulseSequence);
 }
 
@@ -152,7 +155,7 @@ const bool UDP_STATE_TX_TASK_REGISTERED =
         "UdpStateTxTask");
 
 UdpPointCloudTxTask::UdpPointCloudTxTask(
-    std::shared_ptr<UdpCommandRuntime> runtime)
+    std::shared_ptr<IUdpCommandRuntimePhase> runtime)
     : m_runtime(std::move(runtime))
 {
 }
@@ -164,7 +167,8 @@ UdpPointCloudTxTask::~UdpPointCloudTxTask()
 
 void UdpPointCloudTxTask::OnTick(Epg::TaskContext &context)
 {
-    RunUdpPhaseTask(context, m_runtime, &UdpCommandRuntime::StepPointCloudTx,
+    RunUdpPhaseTask(context, m_runtime,
+                    &IUdpCommandRuntimePhase::StepPointCloudTx,
                     m_pulseSequence);
 }
 

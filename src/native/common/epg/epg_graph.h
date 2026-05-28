@@ -75,28 +75,8 @@ class EventPipelineGraph {
     template <class T>
     ExternalIngress<T> CreateExternalIngress(const std::string &queueName)
     {
-        auto it = m_queues.find(queueName);
-        if (it == m_queues.end()) {
-            throw std::runtime_error(
-                "EventPipelineGraph ingress queue not found: " + queueName);
-        }
-        IQueue *queue = it->second.get();
-        if (queue->TypeIndex() != std::type_index(typeid(T))) {
-            throw std::runtime_error(
-                "EventPipelineGraph ingress queue type mismatch: " +
-                queueName);
-        }
-        if (m_taskProducedQueues.find(queueName) !=
-            m_taskProducedQueues.end()) {
-            throw std::runtime_error(
-                "EventPipelineGraph ingress queue already has task producer: " +
-                queueName);
-        }
-        if (!m_externalIngressQueues.insert(queueName).second) {
-            throw std::runtime_error(
-                "EventPipelineGraph ingress already exists for queue: " +
-                queueName);
-        }
+        IQueue *queue = ValidatedExternalIngressQueue<T>(queueName);
+        MarkExternalIngressQueue(queueName);
         return ExternalIngress<T>(queue);
     }
 
@@ -115,6 +95,23 @@ class EventPipelineGraph {
     class TaskRunner;
     struct ConfigureUsage;
 
+    template <class T>
+    IQueue *ValidatedExternalIngressQueue(const std::string &queueName)
+    {
+        IQueue *queue = FindExternalIngressQueue(queueName);
+        ValidateExternalIngressQueueType(
+            queue, queueName, std::type_index(typeid(T)));
+        ValidateExternalIngressQueueProducer(queueName);
+        return queue;
+    }
+
+    IQueue *FindExternalIngressQueue(const std::string &queueName);
+    void ValidateExternalIngressQueueType(
+        const IQueue *queue, const std::string &queueName,
+        std::type_index expectedType) const;
+    void ValidateExternalIngressQueueProducer(
+        const std::string &queueName) const;
+    void MarkExternalIngressQueue(const std::string &queueName);
     void ResetConfiguredGraph();
     void CreateConfiguredQueues(const GraphConfig &config,
                                 ConfigureUsage &usage);

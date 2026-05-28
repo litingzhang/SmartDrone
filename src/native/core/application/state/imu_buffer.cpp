@@ -112,7 +112,8 @@ void UpdateMaxTimestamp(std::atomic<std::int64_t> &target,
 
 } // namespace
 
-struct ImuBuffer::Impl {
+class ImuBuffer::Impl {
+  public:
     void Push(const ImuSample &sample)
     {
         const std::uint64_t sampleSequence =

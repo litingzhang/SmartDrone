@@ -65,15 +65,24 @@ void CopyStateToSnapshot(const LivePoseData &state,
 
 } // namespace
 
-struct LivePoseState::Impl {
+class LivePoseState::Impl {
+  public:
     Impl()
-        : state(std::make_shared<LivePoseData>())
+        : m_state(std::make_shared<LivePoseData>())
     {
     }
 
     std::shared_ptr<const LivePoseData> Load() const
     {
-        return std::atomic_load_explicit(&state, LIVE_POSE_READ_ORDER);
+        return std::atomic_load_explicit(&m_state, LIVE_POSE_READ_ORDER);
+    }
+
+    bool TryPublish(std::shared_ptr<const LivePoseData> &current,
+                    std::shared_ptr<const LivePoseData> published)
+    {
+        return std::atomic_compare_exchange_weak_explicit(
+            &m_state, &current, std::move(published), LIVE_POSE_WRITE_ORDER,
+            LIVE_POSE_READ_ORDER);
     }
 
     template <typename ApplyFn>
@@ -85,15 +94,13 @@ struct LivePoseState::Impl {
             apply(next);
             std::shared_ptr<const LivePoseData> published =
                 std::make_shared<LivePoseData>(std::move(next));
-            if (std::atomic_compare_exchange_weak_explicit(
-                    &state, &current, published, LIVE_POSE_WRITE_ORDER,
-                    LIVE_POSE_READ_ORDER)) {
+            if (TryPublish(current, std::move(published))) {
                 return;
             }
         }
     }
 
-    std::shared_ptr<const LivePoseData> state;
+    std::shared_ptr<const LivePoseData> m_state;
 };
 
 LivePoseState::LivePoseState()
@@ -191,9 +198,7 @@ bool LivePoseState::ConsumeSnapshot(Snapshot &out)
         next.dirty = false;
         std::shared_ptr<const LivePoseData> published =
             std::make_shared<LivePoseData>(std::move(next));
-        if (std::atomic_compare_exchange_weak_explicit(
-                &m_impl->state, &current, published, LIVE_POSE_WRITE_ORDER,
-                LIVE_POSE_READ_ORDER)) {
+        if (m_impl->TryPublish(current, published)) {
             CopyStateToSnapshot(*published, out);
             return true;
         }

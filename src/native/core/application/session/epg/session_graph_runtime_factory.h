@@ -15,7 +15,7 @@ namespace SmartDrone::Core::Application {
 
 struct ApplicationRuntimeFactories;
 struct LiveRuntimeTuning;
-struct LivePoseState;
+class LivePoseState;
 struct UnifiedConfig;
 
 struct SessionGraphRuntimeFactoryConfig {

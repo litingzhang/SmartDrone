@@ -1,6 +1,49 @@
 #include "adapters/slam/dpvo/dpvo_tensorrt_engine_cuda_runtime.h"
 
 namespace SmartDrone::Adapters::Slam::DpvoTensorRtInternal {
+namespace {
+
+const char *CudaBufferName(const char *name)
+{
+    return name != nullptr ? name : "unnamed";
+}
+
+} // namespace
+
+template <typename T>
+bool DpvoCudaKernelRuntime::CopyVectorToDevice(
+    const std::vector<T> &src, CudaDeviceBuffer &dst, cudaStream_t stream,
+    const char *name, std::string *err)
+{
+    if (src.empty()) {
+        if (err != nullptr) {
+            *err = std::string("empty DPVO CUDA buffer: ") +
+                   CudaBufferName(name);
+        }
+        return false;
+    }
+    const size_t bytes = src.size() * sizeof(T);
+    if (!dst.Ensure(bytes, err)) {
+        return false;
+    }
+    const cudaError_t rc = cudaMemcpyAsync(dst.Data(), src.data(), bytes,
+                                           cudaMemcpyHostToDevice, stream);
+    if (rc == cudaSuccess) {
+        return true;
+    }
+    if (err != nullptr) {
+        *err = std::string("cudaMemcpyAsync failed for DPVO CUDA buffer ") +
+               CudaBufferName(name) + ": " + cudaGetErrorString(rc);
+    }
+    return false;
+}
+
+template bool DpvoCudaKernelRuntime::CopyVectorToDevice<float>(
+    const std::vector<float> &src, CudaDeviceBuffer &dst, cudaStream_t stream,
+    const char *name, std::string *err);
+template bool DpvoCudaKernelRuntime::CopyVectorToDevice<int>(
+    const std::vector<int> &src, CudaDeviceBuffer &dst, cudaStream_t stream,
+    const char *name, std::string *err);
 
 DpvoCudaKernelRuntime::CorrelationBatchShape
 DpvoCudaKernelRuntime::CorrelationShape(int edgeCount)

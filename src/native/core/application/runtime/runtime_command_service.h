@@ -1,10 +1,9 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
-#include <unordered_map>
-#include <variant>
 
+#include "core/application/runtime/runtime_command_result.h"
+#include "core/application/runtime/runtime_config_update.h"
 #include "core/domain/runtime_mode.h"
 
 namespace SmartDrone::Core::Application {
@@ -21,17 +20,6 @@ struct RuntimeAction {
 
     Type type{Type::StartRuntime};
     Domain::RuntimeSelection selection{};
-};
-
-using ConfigValue = std::variant<int64_t, double, bool, std::string>;
-
-struct ConfigUpdate {
-    std::unordered_map<std::string, ConfigValue> values;
-};
-
-struct CommandResult {
-    bool ok{false};
-    std::string message;
 };
 
 class IRuntimeCommandTarget {

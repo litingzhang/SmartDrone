@@ -37,6 +37,10 @@ class IQueue {
     virtual void SetNotifier(std::function<void()> notifier) = 0;
 };
 
+void ValidateSpscQueueDepth(std::size_t queueDepth);
+void FillQueueDiagnosticsSnapshot(const QueueDiagnostics &diag,
+                                  QueueDiagnosticsSnapshot &snapshot);
+
 template <class T>
 class SpscSharedPtrQueue final : public IQueue {
   public:
@@ -51,10 +55,7 @@ class SpscSharedPtrQueue final : public IQueue {
           m_overflow(overflow),
           m_slots(m_capacity)
     {
-        if (queueDepth == 0) {
-            throw std::invalid_argument(
-                "SPSC queue depth must be greater than zero");
-        }
+        ValidateSpscQueueDepth(queueDepth);
     }
 
     const std::string &Name() const override
@@ -90,55 +91,23 @@ class SpscSharedPtrQueue final : public IQueue {
     bool Push(std::shared_ptr<T> item)
     {
         auto head = m_head.load(std::memory_order_relaxed);
-        auto tail = m_tail.load(std::memory_order_acquire);
-        auto next = Increment(head);
-
-        if (next == tail) {
-            if (m_overflow == OverflowPolicy::DropNewest) {
-                m_diag.droppedNewest.fetch_add(1, std::memory_order_relaxed);
-                StoreQueueActivity();
-                return false;
-            }
-
-            while (next == tail) {
-                auto tailNext = Increment(tail);
-                if (m_tail.compare_exchange_weak(tail, tailNext,
-                                                 std::memory_order_acq_rel,
-                                                 std::memory_order_acquire)) {
-                    m_diag.overwrittenOldest.fetch_add(
-                        1, std::memory_order_relaxed);
-                    break;
-                }
-            }
+        const auto next = Increment(head);
+        if (!EnsureWritableSlot(next)) {
+            return false;
         }
-
-        m_slots[head] = std::move(item);
-        m_head.store(next, std::memory_order_release);
-        m_diag.pushed.fetch_add(1, std::memory_order_relaxed);
-        StoreQueueActivity();
-        UpdateMaxDepth(Size());
-        Notify();
+        CommitPush(head, next, std::move(item));
         return true;
     }
 
     std::shared_ptr<T> TryPop()
     {
         for (;;) {
-            auto tail = m_tail.load(std::memory_order_acquire);
-            const auto head = m_head.load(std::memory_order_acquire);
-            if (tail == head) {
-                return {};
+            PopClaim claim = TryClaimPopSlot();
+            if (claim.status == PopClaimStatus::Claimed) {
+                return CommitPop(claim.tail);
             }
-
-            const auto next = Increment(tail);
-            if (m_tail.compare_exchange_weak(tail, next,
-                                             std::memory_order_acq_rel,
-                                             std::memory_order_acquire)) {
-                auto item = std::move(m_slots[tail]);
-                m_slots[tail].reset();
-                m_diag.popped.fetch_add(1, std::memory_order_relaxed);
-                StoreQueueActivity();
-                return item;
+            if (QueueWasEmpty(claim)) {
+                return {};
             }
         }
     }
@@ -170,19 +139,7 @@ class SpscSharedPtrQueue final : public IQueue {
     QueueDiagnosticsSnapshot Diagnostics() const override
     {
         QueueDiagnosticsSnapshot snapshot;
-        snapshot.pushed = m_diag.pushed.load(std::memory_order_relaxed);
-        snapshot.popped = m_diag.popped.load(std::memory_order_relaxed);
-        snapshot.droppedNewest =
-            m_diag.droppedNewest.load(std::memory_order_relaxed);
-        snapshot.overwrittenOldest =
-            m_diag.overwrittenOldest.load(std::memory_order_relaxed);
-        snapshot.wakeups = m_diag.wakeups.load(std::memory_order_relaxed);
-        snapshot.maxDepthObserved =
-            m_diag.maxDepthObserved.load(std::memory_order_relaxed);
-        snapshot.firstActivityMs =
-            m_diag.firstActivityMs.load(std::memory_order_relaxed);
-        snapshot.lastActivityMs =
-            m_diag.lastActivityMs.load(std::memory_order_relaxed);
+        FillQueueDiagnosticsSnapshot(m_diag, snapshot);
         return snapshot;
     }
 
@@ -195,9 +152,97 @@ class SpscSharedPtrQueue final : public IQueue {
     }
 
   private:
+    enum class PopClaimStatus {
+        Empty,
+        Retry,
+        Claimed,
+    };
+
+    struct PopClaim {
+        PopClaimStatus status{PopClaimStatus::Retry};
+        std::size_t tail{0};
+    };
+
+    static bool QueueWasEmpty(const PopClaim &claim)
+    {
+        return claim.status == PopClaimStatus::Empty;
+    }
+
     std::size_t Increment(std::size_t value) const
     {
         return (value + 1) % m_capacity;
+    }
+
+    bool EnsureWritableSlot(std::size_t next)
+    {
+        auto tail = m_tail.load(std::memory_order_acquire);
+        return next != tail || HandleFullQueue(tail);
+    }
+
+    bool HandleFullQueue(std::size_t &tail)
+    {
+        if (m_overflow == OverflowPolicy::DropNewest) {
+            m_diag.droppedNewest.fetch_add(1, std::memory_order_relaxed);
+            StoreQueueActivity();
+            return false;
+        }
+        DropOldestItem(tail);
+        return true;
+    }
+
+    void DropOldestItem(std::size_t &tail)
+    {
+        while (true) {
+            if (TryAdvanceTail(tail)) {
+                RecordOverwriteOldest();
+                return;
+            }
+        }
+    }
+
+    PopClaim TryClaimPopSlot()
+    {
+        std::size_t tail = m_tail.load(std::memory_order_acquire);
+        if (tail == m_head.load(std::memory_order_acquire)) {
+            return {PopClaimStatus::Empty, tail};
+        }
+        if (TryAdvanceTail(tail)) {
+            return {PopClaimStatus::Claimed, tail};
+        }
+        return {PopClaimStatus::Retry, tail};
+    }
+
+    bool TryAdvanceTail(std::size_t &tail)
+    {
+        const auto tailNext = Increment(tail);
+        return m_tail.compare_exchange_weak(tail, tailNext,
+                                            std::memory_order_acq_rel,
+                                            std::memory_order_acquire);
+    }
+
+    void RecordOverwriteOldest()
+    {
+        m_diag.overwrittenOldest.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void CommitPush(std::size_t head, std::size_t next,
+                    std::shared_ptr<T> item)
+    {
+        m_slots[head] = std::move(item);
+        m_head.store(next, std::memory_order_release);
+        m_diag.pushed.fetch_add(1, std::memory_order_relaxed);
+        StoreQueueActivity();
+        UpdateMaxDepth(Size());
+        Notify();
+    }
+
+    std::shared_ptr<T> CommitPop(std::size_t tail)
+    {
+        auto item = std::move(m_slots[tail]);
+        m_slots[tail].reset();
+        m_diag.popped.fetch_add(1, std::memory_order_relaxed);
+        StoreQueueActivity();
+        return item;
     }
 
     void UpdateMaxDepth(std::size_t observed)
@@ -300,32 +345,24 @@ class TaskContext {
     template <class T>
     IQueue *InputQueue(PortId port)
     {
-        auto it = m_inputs.find(port);
-        if (it == m_inputs.end()) {
-            throw std::runtime_error("missing input port: " +
-                                     std::to_string(port));
-        }
-        if (it->second->TypeIndex() != std::type_index(typeid(T))) {
-            throw std::runtime_error("input port type mismatch: " +
-                                     std::to_string(port));
-        }
-        return it->second;
+        IQueue *queue = InputQueueByPort(port);
+        ValidateQueueType(queue, port, std::type_index(typeid(T)), "input");
+        return queue;
     }
 
     template <class T>
     IQueue *OutputQueue(PortId port)
     {
-        auto it = m_outputs.find(port);
-        if (it == m_outputs.end()) {
-            throw std::runtime_error("missing output port: " +
-                                     std::to_string(port));
-        }
-        if (it->second->TypeIndex() != std::type_index(typeid(T))) {
-            throw std::runtime_error("output port type mismatch: " +
-                                     std::to_string(port));
-        }
-        return it->second;
+        IQueue *queue = OutputQueueByPortMutable(port);
+        ValidateQueueType(queue, port, std::type_index(typeid(T)), "output");
+        return queue;
     }
+
+    IQueue *InputQueueByPort(PortId port) const;
+    IQueue *OutputQueueByPortMutable(PortId port) const;
+    static void ValidateQueueType(IQueue *queue, PortId port,
+                                  std::type_index expectedType,
+                                  const char *direction);
 
     std::unordered_map<PortId, IQueue *> m_inputs;
     std::unordered_map<PortId, IQueue *> m_outputs;

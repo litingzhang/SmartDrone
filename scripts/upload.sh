@@ -140,6 +140,7 @@ MONO_YAML="$ARTIFACT_ROOT/config/mono_right.yaml"
 MONO_IMU_YAML="$ARTIFACT_ROOT/config/mono_inertial_right.yaml"
 RUNTIME_GRAPH_CONFIG_DIR="$ARTIFACT_ROOT/config/runtime_graph"
 EPG_CONFIG_DIR="$ARTIFACT_ROOT/config/epg"
+OPENVINS_CONFIG_DIR="$ARTIFACT_ROOT/config/openvins"
 REPLAY_ARTIFACT_DIR="$ARTIFACT_ROOT/offline-replay"
 EUROC_EVAL_ROOT="${EUROC_EVAL_ROOT:-$REMOTE_DIR/euroc_eval}"
 SSH_PASSWORD="${SSH_PASSWORD:-}"
@@ -323,6 +324,9 @@ if [ "$ADB_ONLY" != "1" ]; then
         fi
         if [ -d "$EPG_CONFIG_DIR" ]; then
             upload_dir_atomic "$EPG_CONFIG_DIR" "config/epg"
+        fi
+        if [ -d "$OPENVINS_CONFIG_DIR" ]; then
+            upload_dir_atomic "$OPENVINS_CONFIG_DIR" "config/openvins"
         fi
     fi
 

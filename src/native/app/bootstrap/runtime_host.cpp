@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -16,8 +15,7 @@
 #include "common/environment.h"
 #include "common/runtime_state.h"
 #include "core/application/runtime/application_runtime_factories.h"
-#include "common/tlv/udp_server.h"
-#include "core/application/runtime/payload_builders.h"
+#include "core/application/runtime/live_pose_runtime_snapshots.h"
 #include "core/application/runtime/px4_udp_hooks.h"
 #include "core/application/runtime/runtime_aliases.h"
 #include "core/application/runtime/runtime_controller.h"
@@ -46,12 +44,10 @@ using Px4UdpHooks = SmartDrone::Core::Application::Px4UdpHooks;
 using Px4UdpHooksConfig = SmartDrone::Core::Application::Px4UdpHooksConfig;
 using Px4VehicleControlPort = SmartDrone::Adapters::Telemetry::Px4VehicleControlPort;
 using RuntimeSessionSupervisor = SmartDrone::Core::Application::RuntimeSessionSupervisor;
-using RuntimeGateSnapshot = SmartDrone::Core::Application::RuntimeGateSnapshot;
 using SessionGraphRuntimeFactoryConfig = SmartDrone::Core::Application::SessionGraphRuntimeFactoryConfig;
 using SystemRuntimeGraph = SmartDrone::Core::Application::SystemRuntimeGraph;
 using SystemRuntimeGraphConfig = SmartDrone::Core::Application::SystemRuntimeGraphConfig;
 using UdpCommandRuntimeConfig = SmartDrone::Core::Application::UdpCommandRuntimeConfig;
-using UdpRuntimeStateSnapshot = SmartDrone::Core::Application::UdpRuntimeStateSnapshot;
 using UnifiedConfig = SmartDrone::Core::Application::UnifiedConfig;
 using UnifiedRuntimeController = SmartDrone::Core::Application::UnifiedRuntimeController;
 using UnifiedRuntimeControllerConfig = SmartDrone::Core::Application::UnifiedRuntimeControllerConfig;
@@ -132,57 +128,13 @@ RuntimeSessionSupervisor::CreateSessionFn BuildSessionRuntimeFactory(LiveRuntime
     };
 }
 
-UdpRuntimeStateSnapshot ToUdpRuntimeStateSnapshot(const LivePoseState::Snapshot &input)
-{
-    UdpRuntimeStateSnapshot output{};
-    output.hasPeer = input.hasPeer;
-    output.peer = input.peer;
-    output.runtimeMode = input.runtimeMode;
-    output.slamMode = input.slamMode;
-    output.trackingState = input.trackingState;
-    output.armed = input.armed;
-    output.px4MainMode = input.px4MainMode;
-    output.px4SubMode = input.px4SubMode;
-    output.resetCounter = input.resetCounter;
-    output.resetMapCount = input.resetMapCount;
-    output.x = input.x;
-    output.y = input.y;
-    output.z = input.z;
-    output.qw = input.qw;
-    output.qx = input.qx;
-    output.qy = input.qy;
-    output.qz = input.qz;
-    output.seq = input.seq;
-    output.pointCloudXyz = input.pointCloudXyz;
-    output.pointCloudSeq = input.pointCloudSeq;
-    return output;
-}
-
-RuntimeGateSnapshot ToRuntimeGateSnapshot(const LivePoseState::Snapshot &input)
-{
-    RuntimeGateSnapshot output{};
-    output.runtimeMode = input.runtimeMode;
-    output.poseValid = input.poseValid;
-    output.trackingState = input.trackingState;
-    output.poseQuality = input.poseQuality;
-    return output;
-}
-
 Px4UdpHooksConfig BuildPx4UdpHooksConfig(IVehicleControlPort &vehicleControl, LivePoseState &livePose)
 {
     return Px4UdpHooksConfig{
         vehicleControl,
-        [&livePose](RuntimeGateSnapshot &snapshot) {
-            LivePoseState::Snapshot liveSnapshot{};
-            if (!livePose.ReadSnapshot(liveSnapshot)) {
-                return false;
-            }
-            snapshot = ToRuntimeGateSnapshot(liveSnapshot);
-            return true;
-        },
-        [&livePose](bool armed, uint8_t mainMode, uint8_t subMode) {
-            livePose.SetVehicleFlightState(armed, mainMode, subMode);
-        }};
+        SmartDrone::Core::Application::MakeRuntimeGateReader(livePose),
+        SmartDrone::Core::Application::MakeVehicleFlightStatePublisher(
+            livePose)};
 }
 
 UnifiedRuntimeControllerConfig BuildRuntimeControllerConfig(
@@ -193,9 +145,8 @@ UnifiedRuntimeControllerConfig BuildRuntimeControllerConfig(
         BuildSessionRuntimeFactory(input.tuning, input.telemetry,
                                    input.posePublisher, input.livePose,
                                    input.factories),
-        [&livePose = input.livePose](ControllerMode mode) {
-            livePose.SetRuntimeMode(static_cast<uint8_t>(mode));
-        },
+        SmartDrone::Core::Application::MakeRuntimeModePublisher(
+            input.livePose),
         [](const std::string &root) { return SmartDrone::Core::Application::CleanupCalibDataDirs(root); }};
 }
 
@@ -207,15 +158,10 @@ UdpCommandRuntimeConfig BuildUdpCommandRuntimeConfig(Px4UdpHooks &hooks, Unified
     config.commandTarget = &controller;
     config.currentConfig = [&controller]() { return controller.CurrentConfig(); };
     config.currentRuntimeMode = [&controller]() { return controller.CurrentDesiredMode(); };
-    config.updateCommandPeer = [&livePose](const UdpPeer &peer) { livePose.UpdatePeer(peer); };
-    config.readRuntimeState = [&livePose](UdpRuntimeStateSnapshot &snapshot) {
-        LivePoseState::Snapshot liveSnapshot{};
-        if (!livePose.ReadSnapshot(liveSnapshot)) {
-            return false;
-        }
-        snapshot = ToUdpRuntimeStateSnapshot(liveSnapshot);
-        return true;
-    };
+    config.updateCommandPeer =
+        SmartDrone::Core::Application::MakeCommandPeerUpdater(livePose);
+    config.readRuntimeState =
+        SmartDrone::Core::Application::MakeUdpRuntimeStateReader(livePose);
     return config;
 }
 
@@ -234,16 +180,7 @@ SystemRuntimeGraphConfig BuildSystemRuntimeGraphConfig(BuildSystemRuntimeGraphCo
         },
         std::move(input.redeploy),
         std::move(input.commandRuntime),
-        [cameraProvider = input.factories.cameraProvider]() {
-            return SmartDrone::Core::Application::BuildCapabilitiesPayload(
-                cameraProvider);
-        },
-        [cameraProvider = input.factories.cameraProvider](
-            const UnifiedConfig &currentConfig, ControllerMode currentMode) {
-            return SmartDrone::Core::Application::BuildConfigPayload(
-                currentConfig, currentMode, cameraProvider);
-        },
-        [](const UdpPeer &peer) { return UdpPeerToIpString(peer); }};
+        input.factories.cameraProvider};
 }
 
 void LogSystemGraphRedeployRequest(const EpgRedeployRequest &request)

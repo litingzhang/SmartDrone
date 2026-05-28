@@ -53,6 +53,20 @@ std::string GetStringWithLegacyFallback(const ArgReader &args, const char *name,
     return args.GetString(legacyName, defaultValue);
 }
 
+fs::path ResolveDefaultSettingsFromCurrent(const fs::path &defaultSettings,
+                                           const fs::path &currentPath)
+{
+    const fs::path parent = currentPath.parent_path();
+    if (parent.filename() == "config") {
+        return parent.parent_path() / defaultSettings;
+    }
+    if (parent.filename() == "openvins" &&
+        parent.parent_path().filename() == "config") {
+        return parent.parent_path().parent_path() / defaultSettings;
+    }
+    return parent / defaultSettings.filename();
+}
+
 } // namespace
 
 const char *DefaultSettingsForSensorMode(SensorMode mode)
@@ -68,6 +82,23 @@ const char *DefaultSettingsForSensorMode(SensorMode mode)
     default:
         return "config/stereo.yaml";
     }
+}
+
+SensorMode NormalizeSensorModeForSlamBackend(SensorMode mode,
+                                             SlamBackend backend)
+{
+    if (backend != SlamBackend::OpenVins) {
+        return mode;
+    }
+    return SensorMode::StereoImu;
+}
+
+const char *DefaultSettingsForSlamBackend(SensorMode mode, SlamBackend backend)
+{
+    if (backend == SlamBackend::OpenVins) {
+        return "config/openvins/estimator_config.yaml";
+    }
+    return DefaultSettingsForSensorMode(mode);
 }
 
 SensorMode ParseSensorModeText(const std::string &text)
@@ -291,17 +322,24 @@ std::string
 ResolveSettingsForSensorMode(SensorMode mode,
                              const std::string &currentSettingsPath)
 {
-    const fs::path targetName =
-        fs::path(DefaultSettingsForSensorMode(mode)).filename();
+    return ResolveSettingsForSlamBackend(mode, SlamBackend::Klt,
+                                         currentSettingsPath);
+}
+
+std::string
+ResolveSettingsForSlamBackend(SensorMode mode, SlamBackend backend,
+                              const std::string &currentSettingsPath)
+{
+    const fs::path defaultSettings(DefaultSettingsForSlamBackend(mode, backend));
     if (!currentSettingsPath.empty()) {
         const fs::path currentPath(currentSettingsPath);
         if (currentPath.is_absolute()) {
-            return (currentPath.parent_path() / targetName)
+            return ResolveDefaultSettingsFromCurrent(defaultSettings, currentPath)
                 .lexically_normal()
                 .string();
         }
     }
-    return ResolveRuntimePath(DefaultSettingsForSensorMode(mode), nullptr);
+    return ResolveRuntimePath(defaultSettings.string(), nullptr);
 }
 
 ArgReader::ArgReader(int argc, char **argv)
@@ -422,9 +460,6 @@ void ParseSensorSettings(const ArgReader &argReader, const char *argv0,
 {
     config.sensorMode =
         ParseSensorModeText(argReader.GetString("--sensor-mode", "stereo"));
-    const char *defaultSettings = DefaultSettingsForSensorMode(config.sensorMode);
-    config.settings = ResolveRuntimePath(
-        argReader.GetString("--settings", defaultSettings), argv0);
 }
 
 void ParseCameraPackingFlags(const ArgReader &argReader,
@@ -529,6 +564,17 @@ void ParseCoreRuntimeConfig(const ArgReader &argReader, const char *argv0,
         "--vocab",
         config.runtime.slamBackend == SlamBackend::OrbSlam3 ? "ORBvoc.txt" : "");
     config.vocab = ResolveRuntimePath(vocabArg, argv0);
+}
+
+void ResolveSlamBackendSettings(const ArgReader &argReader, const char *argv0,
+                                AppConfig &config)
+{
+    config.sensorMode = NormalizeSensorModeForSlamBackend(
+        config.sensorMode, config.runtime.slamBackend);
+    const char *defaultSettings = DefaultSettingsForSlamBackend(
+        config.sensorMode, config.runtime.slamBackend);
+    config.settings = ResolveRuntimePath(
+        argReader.GetString("--settings", defaultSettings), argv0);
 }
 
 void ParseDpvoRuntimeConfig(const ArgReader &argReader, const char *argv0,
@@ -645,6 +691,7 @@ AppConfig ParseAppConfig(int argc, char **argv)
     config.udp = ParseUdpConfig(argReader);
     config.imu = ParseImuRuntimeConfig(argReader);
     ParseCoreRuntimeConfig(argReader, argv0, config);
+    ResolveSlamBackendSettings(argReader, argv0, config);
     ParseDpvoRuntimeConfig(argReader, argv0, config.runtime);
     ParseVisualFeatureRuntimeConfig(argReader, argv0, config.runtime);
     ParseSlamFeatureTuningConfig(argReader, config.runtime);

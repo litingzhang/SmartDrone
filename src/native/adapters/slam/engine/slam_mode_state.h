@@ -25,7 +25,8 @@ using LkLoopClosureState = Core::Ports::LoopClosureState;
 
 struct LkPerFrameVpiState;
 
-struct SlamModeSharedState {
+class SlamModeSharedState {
+  public:
     SlamModeSharedState() = default;
     ~SlamModeSharedState();
 

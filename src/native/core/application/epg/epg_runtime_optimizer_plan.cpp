@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <unistd.h>
 #include <vector>
 
@@ -28,6 +29,19 @@ std::size_t HardwareCpuCount()
     }
     return std::min<std::size_t>(static_cast<std::size_t>(detected),
                                  SOLVER_LIMITS.maxCpuBindingCores);
+}
+
+std::set<std::string> PreserveAccuracyTaskNames(
+    const Epg::GraphConfig &config,
+    const std::vector<TaskSolverNode> &nodes)
+{
+    std::set<std::string> names;
+    for (const auto &node : nodes) {
+        if (node.catalog && node.catalog->preserveAccuracy) {
+            names.insert(config.tasks[node.index].name);
+        }
+    }
+    return names;
 }
 
 void ApplySelectedQueueCandidates(EpgRuntimeOptimizerPlan &plan,
@@ -58,12 +72,15 @@ void ApplySelectedTaskCandidates(EpgRuntimeOptimizerPlan &plan,
 
 void ApplyCpuAndTopologySchedule(
     EpgRuntimeOptimizerPlan &plan,
+    const std::vector<TaskSolverNode> &taskNodes,
     const std::map<std::string, std::uint64_t> &durations)
 {
     const auto cpuBinding = Solver::BuildCpuBindingSchedule(
         plan.config, durations, HardwareCpuCount(),
         SOLVER_LIMITS.maxExactCpuBindingStates);
-    ApplyEpgOptimizerCpuBindingSchedule(plan.config, plan.decisions, cpuBinding);
+    ApplyEpgOptimizerCpuBindingSchedule(
+        plan.config, plan.decisions, cpuBinding,
+        PreserveAccuracyTaskNames(plan.config, taskNodes));
     if (!HasExecutionPlanChange(plan.decisions)) {
         return;
     }
@@ -89,7 +106,7 @@ EpgRuntimeOptimizerPlan BuildEpgOptimizerPlan(
     ApplySelectedQueueCandidates(plan, queueNodes, solution);
     ApplySelectedTaskCandidates(plan, taskNodes, solution);
     ApplyCpuAndTopologySchedule(
-        plan, BuildTaskDurationsMs(taskNodes, plan.config));
+        plan, taskNodes, BuildTaskDurationsMs(taskNodes, plan.config));
     return plan;
 }
 

@@ -77,7 +77,7 @@ bool DpvoNativeSolver::PrepareStepInputs(
     }
     PredictNewestPose(*frames);
     if (!request.graph.Initialized()) {
-        m_lastTcw = frames->back().Tcw;
+        m_lastTcw = frames->back().tcw;
         m_hasPose = true;
         return false;
     }
@@ -561,13 +561,13 @@ void DpvoNativeSolver::ApplyPoseUpdate(
             edgeCoords[static_cast<size_t>(PATCH_CENTER) * 2U + 1U] +
                 postAgg.delta[static_cast<size_t>(e) * 2U + 1U]};
     }
-    const Sophus::SE3f beforeBaNewest = request.frames.back().Tcw;
+    const Sophus::SE3f beforeBaNewest = request.frames.back().tcw;
     RunBundleAdjustment({request.frames, request.edges,
                          request.step.graph.PatchesPerFrame(),
                          request.step.graph.OptimizationWindow(),
                          request.step.intrinsics, target, postAgg.weight});
-    if (!AcceptPoseStep(beforeBaNewest, request.frames.back().Tcw)) {
-        request.frames.back().Tcw = beforeBaNewest;
+    if (!AcceptPoseStep(beforeBaNewest, request.frames.back().tcw)) {
+        request.frames.back().tcw = beforeBaNewest;
     }
     if (m_bootstrapComplete) {
         request.step.graph.MaybeRemoveKeyframe(request.step.intrinsics);
@@ -601,7 +601,7 @@ bool DpvoNativeSolver::Step(const DpvoNativeSolverStepRequest &request)
         ApplyPoseUpdate(iteration, buffers, postAgg);
     }
     m_bootstrapComplete = true;
-    m_lastTcw = frames->back().Tcw;
+    m_lastTcw = frames->back().tcw;
     m_hasPose = true;
     if (request.updateMs != nullptr) {
         *request.updateMs = ElapsedMs(t0, std::chrono::steady_clock::now());

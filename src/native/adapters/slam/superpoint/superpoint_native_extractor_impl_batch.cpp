@@ -240,7 +240,7 @@ SuperPointNativeExtractor::Impl::CurrentSuperPointDiagnostics() const
 
 bool SuperPointNativeExtractor::Impl::PrepareLightGlueMatchContext(
     const SuperPointLightGlueMatchRequest &request,
-    LightGlueMatchContext &context) const
+    LightGlueMatchContext &context)
 {
     if (!lightGlueEngine || lightGluePointCount <= 0 ||
         request.leftRaw.descriptors.empty() ||

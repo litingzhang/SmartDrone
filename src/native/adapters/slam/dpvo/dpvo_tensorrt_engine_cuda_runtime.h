@@ -125,31 +125,7 @@ class DpvoCudaKernelRuntime {
     template <typename T>
     bool CopyVectorToDevice(const std::vector<T> &src, CudaDeviceBuffer &dst,
                             cudaStream_t stream, const char *name,
-                            std::string *err)
-    {
-        if (src.empty()) {
-            if (err != nullptr) {
-                *err = std::string("empty DPVO CUDA buffer: ") +
-                       (name != nullptr ? name : "unnamed");
-            }
-            return false;
-        }
-        const size_t bytes = src.size() * sizeof(T);
-        if (!dst.Ensure(bytes, err)) {
-            return false;
-        }
-        const cudaError_t rc = cudaMemcpyAsync(dst.Data(), src.data(), bytes,
-                                               cudaMemcpyHostToDevice, stream);
-        if (rc != cudaSuccess) {
-            if (err != nullptr) {
-                *err = std::string("cudaMemcpyAsync failed for DPVO CUDA buffer ") +
-                       (name != nullptr ? name : "unnamed") + ": " +
-                       cudaGetErrorString(rc);
-            }
-            return false;
-        }
-        return true;
-    }
+                            std::string *err);
 
     bool OpenLibraryAny(std::initializer_list<const char *> names, void **handle,
                         std::string *err);

@@ -81,17 +81,20 @@ write_system_info() {
 
 evaluate_run() {
   local run_dir="$1"
-  if ! python3 "$EVAL" \
+  if python3 "$EVAL" \
       --dataset "$DATA/MH_04_difficult/mav0" \
       --estimate "$run_dir/euroc_pose.csv" \
       --out-json "$run_dir/euroc_metrics.json" \
       --require-realtime-pose \
       >"$run_dir/eval.log" 2>&1; then
-    echo "evaluation failed: $run_dir" >&2
-    tail -80 "$run_dir/replay.log" >&2 || true
-    tail -80 "$run_dir/eval.log" >&2 || true
-    exit 1
+    echo "pass" >"$run_dir/eval_status.txt"
+    return 0
   fi
+  echo "fail" >"$run_dir/eval_status.txt"
+  echo "evaluation failed: $run_dir" >&2
+  tail -80 "$run_dir/replay.log" >&2 || true
+  tail -80 "$run_dir/eval.log" >&2 || true
+  return 1
 }
 
 run_epg_openvins() {
@@ -99,6 +102,7 @@ run_epg_openvins() {
   local run_dir="$OUT/$label"
   shift
   echo "=== MH04 OpenVINS EPG $label ==="
+  local replay_status=0
   run_profiled_replay "$run_dir" \
     "$BIN" \
     --dataset "$DATA/MH_04_difficult/mav0" \
@@ -111,7 +115,13 @@ run_epg_openvins() {
     --slam-backend openvins \
     --feature-frontend lk_gftt_per_frame \
     --epg-profile-out "$run_dir/epg_profile.json" \
-    "$@"
+    "$@" || replay_status="$?"
+  if [[ "$replay_status" -ne 0 ]]; then
+    echo "fail" >"$run_dir/replay_status.txt"
+    tail -80 "$run_dir/replay.log" >&2 || true
+    return "$replay_status"
+  fi
+  echo "pass" >"$run_dir/replay_status.txt"
   evaluate_run "$run_dir"
 }
 
@@ -120,18 +130,34 @@ write_system_info
 rm -f "$EPG_DIR/optimized_slam_session_graph.json" \
       "$EPG_DIR/optimized_slam_session_graph_report.json"
 
-run_epg_openvins static \
-  --epg-optimized-out "$OUT/optimized_slam_session_graph.json" \
-  --epg-solver-report-out "$OUT/optimized_slam_session_graph_report.json"
+static_status=0
+if run_epg_openvins static \
+    --epg-optimized-out "$OUT/optimized_slam_session_graph.json" \
+    --epg-solver-report-out "$OUT/optimized_slam_session_graph_report.json"; then
+  static_status=0
+else
+  static_status="$?"
+fi
 
-cp -f "$OUT/optimized_slam_session_graph.json" \
-      "$EPG_DIR/optimized_slam_session_graph.json"
-cp -f "$OUT/optimized_slam_session_graph_report.json" \
-      "$EPG_DIR/optimized_slam_session_graph_report.json"
+optimized_status=0
+if [[ -f "$OUT/optimized_slam_session_graph.json" ]]; then
+  cp -f "$OUT/optimized_slam_session_graph.json" \
+        "$EPG_DIR/optimized_slam_session_graph.json"
+  cp -f "$OUT/optimized_slam_session_graph_report.json" \
+        "$EPG_DIR/optimized_slam_session_graph_report.json"
 
-run_epg_openvins optimized
+  if run_epg_openvins optimized; then
+    optimized_status=0
+  else
+    optimized_status="$?"
+  fi
+else
+  optimized_status=1
+  mkdir -p "$OUT/optimized"
+  echo "optimized graph was not generated" >"$OUT/optimized/eval_status.txt"
+fi
 
-python3 - "$OUT" <<'PY'
+python3 - "$OUT" "$static_status" "$optimized_status" <<'PY'
 import json
 import math
 import re
@@ -139,8 +165,14 @@ from pathlib import Path
 import sys
 
 out = Path(sys.argv[1])
+statuses = {
+    "static": int(sys.argv[2]),
+    "optimized": int(sys.argv[3]),
+}
 
 def load_json(path):
+    if not path.exists():
+        return {}
     return json.loads(path.read_text(encoding="utf-8"))
 
 def parse_elapsed(path):
@@ -167,12 +199,12 @@ def format_float(value, digits):
     return f"{value:.{digits}f}"
 
 def task_metric(profile, name, field):
-    task = profile["diagnostics"]["tasks"].get(name, {})
+    task = profile.get("diagnostics", {}).get("tasks", {}).get(name, {})
     return float(task.get(field, math.inf)) / 1000.0
 
 def queue_drops(profile):
     total = 0
-    for queue in profile["diagnostics"]["queues"].values():
+    for queue in profile.get("diagnostics", {}).get("queues", {}).values():
         total += int(queue.get("droppedNewest", 0))
         total += int(queue.get("overwrittenOldest", 0))
     return total
@@ -186,9 +218,10 @@ def row(label):
     replay_fps = rows / elapsed if elapsed > 0 else math.nan
     return {
         "label": label,
-        "ate": float(metrics["ate_rmse_m"]),
-        "rpe": float(metrics["rpe_trans_rmse_m"]),
-        "matched": int(metrics["matched_pairs"]),
+        "status": "PASS" if statuses[label] == 0 else "FAIL",
+        "ate": float(metrics.get("ate_rmse_m", math.nan)),
+        "rpe": float(metrics.get("rpe_trans_rmse_m", math.nan)),
+        "matched": int(metrics.get("matched_pairs") or 0),
         "rows": rows,
         "replay_fps": replay_fps,
         "openvins_mean": task_metric(profile, "SlamOpenVinsTrackingTask", "averageLoopUs"),
@@ -209,29 +242,37 @@ lines = [
     f"- Result directory: `{out}`",
     "- Replay path: `SlamOpenVinsTrackingTask` inside the SLAM EPG graph.",
     "",
-    "| Profile | Rows | Matched | ATE RMSE (m) | RPE RMSE (m) | Replay FPS | OpenVINS mean/p90/p99/max ms | Acquire mean ms | Backend tick mean ms | Queue drops |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Profile | Status | Rows | Matched | ATE RMSE (m) | RPE RMSE (m) | Replay FPS | OpenVINS mean/p90/p99/max ms | Acquire mean ms | Backend tick mean ms | Queue drops |",
+    "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
 ]
 for item in (static, optimized):
     lines.append(
-        f"| {item['label']} | {item['rows']} | {item['matched']} | "
-        f"{item['ate']:.4f} | {item['rpe']:.4f} | "
+        f"| {item['label']} | {item['status']} | {item['rows']} | "
+        f"{item['matched']} | {format_float(item['ate'], 4)} | "
+        f"{format_float(item['rpe'], 4)} | "
         f"{format_float(item['replay_fps'], 2)} | "
-        f"{item['openvins_mean']:.2f}/{item['openvins_p90']:.2f}/"
-        f"{item['openvins_p99']:.2f}/{item['openvins_max']:.2f} | "
-        f"{item['acquire_mean']:.2f} | {item['backend_tick_mean']:.2f} | "
+        f"{format_float(item['openvins_mean'], 2)}/"
+        f"{format_float(item['openvins_p90'], 2)}/"
+        f"{format_float(item['openvins_p99'], 2)}/"
+        f"{format_float(item['openvins_max'], 2)} | "
+        f"{format_float(item['acquire_mean'], 2)} | "
+        f"{format_float(item['backend_tick_mean'], 2)} | "
         f"{item['drops']} |"
     )
 
-lines.extend([
-    "",
-    f"- ATE delta optimized-static: `{optimized['ate'] - static['ate']:.6f} m`",
-    f"- RPE delta optimized-static: `{optimized['rpe'] - static['rpe']:.6f} m`",
-    f"- OpenVINS mean delta optimized-static: `{optimized['openvins_mean'] - static['openvins_mean']:.3f} ms`",
-])
+if math.isfinite(static["ate"]) and math.isfinite(optimized["ate"]):
+    lines.extend([
+        "",
+        f"- ATE delta optimized-static: `{optimized['ate'] - static['ate']:.6f} m`",
+        f"- RPE delta optimized-static: `{optimized['rpe'] - static['rpe']:.6f} m`",
+        f"- OpenVINS mean delta optimized-static: `{optimized['openvins_mean'] - static['openvins_mean']:.3f} ms`",
+    ])
 
 (out / "openvins_epg_summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 print("\n".join(lines))
 PY
 
 echo "summary: $OUT/openvins_epg_summary.md"
+if [[ "$static_status" -ne 0 || "$optimized_status" -ne 0 ]]; then
+  exit 1
+fi

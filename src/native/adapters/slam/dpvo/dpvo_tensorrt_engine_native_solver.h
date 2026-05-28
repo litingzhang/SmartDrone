@@ -63,7 +63,7 @@ class DpvoNativeSolver {
         std::vector<float> *out;
     };
     struct AddBlockRequest {
-        Eigen::MatrixXf &H;
+        Eigen::MatrixXf &hessian;
         int row;
         int col;
         const Eigen::VectorXf &a;
@@ -188,23 +188,23 @@ class DpvoNativeSolver {
         std::unordered_map<int, int> patchVar;
     };
     struct BundleAdjustmentSystem {
-        Eigen::MatrixXf B;
-        Eigen::MatrixXf E;
-        Eigen::VectorXf C;
-        Eigen::VectorXf v;
-        Eigen::VectorXf u;
+        Eigen::MatrixXf poseHessian;
+        Eigen::MatrixXf poseDepthJacobian;
+        Eigen::VectorXf depthHessian;
+        Eigen::VectorXf poseGradient;
+        Eigen::VectorXf depthGradient;
     };
     struct BundleEdgeProjection {
         int edgeIndex{0};
         int srcPoseBase{-1};
         int dstPoseBase{-1};
         int depthIndex{-1};
-        Eigen::Matrix3f R{Eigen::Matrix3f::Identity()};
+        Eigen::Matrix3f relativeRotation{Eigen::Matrix3f::Identity()};
         Eigen::Vector3f t{Eigen::Vector3f::Zero()};
-        float X{0.0f};
-        float Y{0.0f};
-        float Z{0.0f};
-        float W{0.0f};
+        float targetX{0.0f};
+        float targetY{0.0f};
+        float targetZ{0.0f};
+        float patchInvDepth{0.0f};
         float invZ{0.0f};
         float invZ2{0.0f};
         float rx{0.0f};
@@ -272,7 +272,7 @@ class DpvoNativeSolver {
     static void SoftAggExpand(const SoftAggExpandRequest &request);
     static ErrorStats CompareVectors(const std::vector<float> &a,
                                      const std::vector<float> &b);
-    static void AdjSE3(const Eigen::Vector3f &t, const Eigen::Matrix3f &R,
+    static void AdjSE3(const Eigen::Vector3f &t, const Eigen::Matrix3f &rotation,
                        const Eigen::Matrix<float, 6, 1> &x,
                        Eigen::Matrix<float, 6, 1> *y);
     static void AddBlock(const AddBlockRequest &request);
@@ -319,9 +319,10 @@ class DpvoNativeSolver {
         const BundleSolveRequest &request, BundleAdjustmentSolution &solution);
     static bool SolveBundleAdjustmentSchur(
         const BundleSolveRequest &request, BundleAdjustmentSolution &solution);
-    static void DampenBundleSystem(Eigen::MatrixXf &H,
+    static void DampenBundleSystem(Eigen::MatrixXf &hessian,
                                    const BundleAdjustmentState &state);
-    static void DampenBundleSchurSystem(Eigen::MatrixXf &S, int poseDim);
+    static void DampenBundleSchurSystem(Eigen::MatrixXf &schurHessian,
+                                        int poseDim);
     static void ApplyBundleAdjustmentSolution(
         const RunBundleAdjustmentRequest &request,
         const BundleAdjustmentState &state,

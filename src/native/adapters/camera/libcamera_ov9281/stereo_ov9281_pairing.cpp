@@ -17,7 +17,7 @@ int64_t Abs64(int64_t value)
 
 } // namespace
 
-bool LibcameraStereoOV9281_TsPair::Open(const StereoCameraOpenParams &params)
+bool LibcameraStereoOv9281TsPair::Open(const StereoCameraOpenParams &params)
 {
     Close();
     ResetPairingState();
@@ -34,7 +34,7 @@ bool LibcameraStereoOV9281_TsPair::Open(const StereoCameraOpenParams &params)
     return true;
 }
 
-void LibcameraStereoOV9281_TsPair::ApplyOpenParams(const StereoCameraOpenParams &params)
+void LibcameraStereoOv9281TsPair::ApplyOpenParams(const StereoCameraOpenParams &params)
 {
     m_w = params.width;
     m_h = params.height;
@@ -44,7 +44,7 @@ void LibcameraStereoOV9281_TsPair::ApplyOpenParams(const StereoCameraOpenParams 
     m_keepWindowNs = params.keepWindowNs;
 }
 
-bool LibcameraStereoOV9281_TsPair::StartCameraManager()
+bool LibcameraStereoOv9281TsPair::StartCameraManager()
 {
     m_cm = std::make_unique<libcamera::CameraManager>();
     if (!m_cm->start()) {
@@ -54,7 +54,7 @@ bool LibcameraStereoOV9281_TsPair::StartCameraManager()
     return false;
 }
 
-bool LibcameraStereoOV9281_TsPair::SelectCameras(int leftCamIndex, int rightCamIndex)
+bool LibcameraStereoOv9281TsPair::SelectCameras(int leftCamIndex, int rightCamIndex)
 {
     const auto &cams = m_cm->cameras();
     if (cams.size() < 2) {
@@ -81,7 +81,7 @@ bool LibcameraStereoOV9281_TsPair::SelectCameras(int leftCamIndex, int rightCamI
     return true;
 }
 
-bool LibcameraStereoOV9281_TsPair::OpenMonoCameras(const StereoCameraOpenParams &params)
+bool LibcameraStereoOv9281TsPair::OpenMonoCameras(const StereoCameraOpenParams &params)
 {
     auto sink = [&](FrameItem &&fi) { PushFrame(std::move(fi)); };
     const MonoCameraOpenParams leftParams{m_camL, 0, params.width, params.height, params.fps, params.aeDisable,
@@ -102,7 +102,7 @@ bool LibcameraStereoOV9281_TsPair::OpenMonoCameras(const StereoCameraOpenParams 
     return true;
 }
 
-bool LibcameraStereoOV9281_TsPair::StartMonoCameras()
+bool LibcameraStereoOv9281TsPair::StartMonoCameras()
 {
     if (!m_left.Start()) {
         return false;
@@ -113,7 +113,7 @@ bool LibcameraStereoOV9281_TsPair::StartMonoCameras()
     return true;
 }
 
-void LibcameraStereoOV9281_TsPair::LogMonoFormats() const
+void LibcameraStereoOv9281TsPair::LogMonoFormats() const
 {
     std::cerr << "Left fmt=" << m_left.PixelFmt().toString() << " size=" << m_left.SizeWH().toString()
               << " stride=" << m_left.Stride() << "\n";
@@ -121,7 +121,7 @@ void LibcameraStereoOV9281_TsPair::LogMonoFormats() const
               << " stride=" << m_right.Stride() << "\n";
 }
 
-void LibcameraStereoOV9281_TsPair::Close()
+void LibcameraStereoOv9281TsPair::Close()
 {
     m_acceptFrames.store(false, std::memory_order_relaxed);
     m_left.SetSink(nullptr);
@@ -146,14 +146,15 @@ void LibcameraStereoOV9281_TsPair::Close()
     ResetPairingState();
 }
 
-bool LibcameraStereoOV9281_TsPair::GrabPair(FrameItem &L, FrameItem &R, bool preferLatest,
+bool LibcameraStereoOv9281TsPair::GrabPair(FrameItem &left, FrameItem &right,
+                                            bool preferLatest,
                                             uint64_t minTimestampNs)
 {
     DrainPendingFrames();
-    return TryGrabPair(L, R, preferLatest, minTimestampNs);
+    return TryGrabPair(left, right, preferLatest, minTimestampNs);
 }
 
-void LibcameraStereoOV9281_TsPair::DropPairsBefore(size_t selectedIndex)
+void LibcameraStereoOv9281TsPair::DropPairsBefore(size_t selectedIndex)
 {
     if (selectedIndex > 0) {
         m_droppedPaired.fetch_add(selectedIndex, std::memory_order_relaxed);
@@ -163,8 +164,8 @@ void LibcameraStereoOV9281_TsPair::DropPairsBefore(size_t selectedIndex)
     }
 }
 
-bool LibcameraStereoOV9281_TsPair::TryGrabPair(
-    FrameItem &L, FrameItem &R, bool preferLatest, uint64_t minTimestampNs)
+bool LibcameraStereoOv9281TsPair::TryGrabPair(
+    FrameItem &left, FrameItem &right, bool preferLatest, uint64_t minTimestampNs)
 {
     if (!HasEligiblePair(minTimestampNs)) {
         return false;
@@ -175,86 +176,86 @@ bool LibcameraStereoOV9281_TsPair::TryGrabPair(
     }
     DropPairsBefore(selectedIndex);
     auto &p = m_paired.front();
-    L = std::move(p.first);
-    R = std::move(p.second);
+    left = std::move(p.first);
+    right = std::move(p.second);
     m_paired.pop_front();
-    const int64_t pairMonoNs = std::max(L.arriveNs, R.arriveNs);
+    const int64_t pairMonoNs = std::max(left.arriveNs, right.arriveNs);
     m_lastPairMonoNs.store(pairMonoNs, std::memory_order_relaxed);
     PublishQueueSizes();
     return true;
 }
 
-int64_t LibcameraStereoOV9281_TsPair::LastDtMs() const
+int64_t LibcameraStereoOv9281TsPair::LastDtMs() const
 {
     return m_lastDtMs.load();
 }
 
-uint32_t LibcameraStereoOV9281_TsPair::LastSeq() const
+uint32_t LibcameraStereoOv9281TsPair::LastSeq() const
 {
     return m_lastSeq.load();
 }
 
-uint32_t LibcameraStereoOV9281_TsPair::LastRawSeqL() const
+uint32_t LibcameraStereoOv9281TsPair::LastRawSeqL() const
 {
     return m_lastRawSeq[0].load(std::memory_order_relaxed);
 }
 
-uint32_t LibcameraStereoOV9281_TsPair::LastRawSeqR() const
+uint32_t LibcameraStereoOv9281TsPair::LastRawSeqR() const
 {
     return m_lastRawSeq[1].load(std::memory_order_relaxed);
 }
 
-uint64_t LibcameraStereoOV9281_TsPair::RawCountL() const
+uint64_t LibcameraStereoOv9281TsPair::RawCountL() const
 {
     return m_rawFrameCount[0].load(std::memory_order_relaxed);
 }
 
-uint64_t LibcameraStereoOV9281_TsPair::RawCountR() const
+uint64_t LibcameraStereoOv9281TsPair::RawCountR() const
 {
     return m_rawFrameCount[1].load(std::memory_order_relaxed);
 }
 
-int64_t LibcameraStereoOV9281_TsPair::LastRejectDtUs() const
+int64_t LibcameraStereoOv9281TsPair::LastRejectDtUs() const
 {
     return m_lastRejectDtNs.load(std::memory_order_relaxed) / 1000;
 }
 
-uint64_t LibcameraStereoOV9281_TsPair::DroppedUnpairedL() const
+uint64_t LibcameraStereoOv9281TsPair::DroppedUnpairedL() const
 {
     return m_droppedUnpaired[0].load(std::memory_order_relaxed);
 }
 
-uint64_t LibcameraStereoOV9281_TsPair::DroppedUnpairedR() const
+uint64_t LibcameraStereoOv9281TsPair::DroppedUnpairedR() const
 {
     return m_droppedUnpaired[1].load(std::memory_order_relaxed);
 }
 
-size_t LibcameraStereoOV9281_TsPair::PendL() const
+size_t LibcameraStereoOv9281TsPair::PendL() const
 {
     return m_pendingQueueSize[0].load(std::memory_order_relaxed);
 }
 
-size_t LibcameraStereoOV9281_TsPair::PendR() const
+size_t LibcameraStereoOv9281TsPair::PendR() const
 {
     return m_pendingQueueSize[1].load(std::memory_order_relaxed);
 }
 
-int64_t LibcameraStereoOV9281_TsPair::PairTolNs() const
+int64_t LibcameraStereoOv9281TsPair::PairTolNs() const
 {
     return m_pairThreshNs;
 }
 
-uint64_t LibcameraStereoOV9281_TsPair::DroppedPaired() const
+uint64_t LibcameraStereoOv9281TsPair::DroppedPaired() const
 {
     return m_droppedPaired.load(std::memory_order_relaxed);
 }
 
-bool LibcameraStereoOV9281_TsPair::Healthy() const
+bool LibcameraStereoOv9281TsPair::Healthy() const
 {
     return m_left.Healthy() && m_right.Healthy();
 }
 
-LibcameraStereoOV9281_TsPair::PairingDiagnostics LibcameraStereoOV9281_TsPair::GetDiagnostics() const
+LibcameraStereoOv9281TsPair::PairingDiagnostics LibcameraStereoOv9281TsPair::GetDiagnostics() const
 {
     PairingDiagnostics out{};
     out.healthy = Healthy();
@@ -286,12 +287,12 @@ LibcameraStereoOV9281_TsPair::PairingDiagnostics LibcameraStereoOV9281_TsPair::G
     return out;
 }
 
-uint64_t LibcameraStereoOV9281_TsPair::PairTimestampNs(const std::pair<FrameItem, FrameItem> &pair) const
+uint64_t LibcameraStereoOv9281TsPair::PairTimestampNs(const std::pair<FrameItem, FrameItem> &pair) const
 {
     return (pair.first.tsNs + pair.second.tsNs) / 2ULL;
 }
 
-bool LibcameraStereoOV9281_TsPair::HasEligiblePair(
+bool LibcameraStereoOv9281TsPair::HasEligiblePair(
     uint64_t minTimestampNs) const
 {
     if (m_paired.empty()) {
@@ -308,7 +309,7 @@ bool LibcameraStereoOV9281_TsPair::HasEligiblePair(
     return false;
 }
 
-size_t LibcameraStereoOV9281_TsPair::SelectPairIndex(
+size_t LibcameraStereoOv9281TsPair::SelectPairIndex(
     bool preferLatest, uint64_t minTimestampNs) const
 {
     if (minTimestampNs == 0) {
@@ -327,7 +328,7 @@ size_t LibcameraStereoOV9281_TsPair::SelectPairIndex(
     return selectedIndex;
 }
 
-void LibcameraStereoOV9281_TsPair::PushFrame(FrameItem &&fi)
+void LibcameraStereoOv9281TsPair::PushFrame(FrameItem &&fi)
 {
     if (!m_acceptFrames.load(std::memory_order_relaxed)) {
         return;
@@ -335,7 +336,7 @@ void LibcameraStereoOV9281_TsPair::PushFrame(FrameItem &&fi)
     StorePendingFrame(std::move(fi));
 }
 
-void LibcameraStereoOV9281_TsPair::StorePendingFrame(FrameItem &&fi)
+void LibcameraStereoOv9281TsPair::StorePendingFrame(FrameItem &&fi)
 {
     const int camIndex = fi.camIndex;
     if (camIndex < 0 || camIndex > 1) {
@@ -355,7 +356,7 @@ void LibcameraStereoOV9281_TsPair::StorePendingFrame(FrameItem &&fi)
         std::move(pending), std::memory_order_release);
 }
 
-void LibcameraStereoOV9281_TsPair::DropPendingFramesBefore(
+void LibcameraStereoOv9281TsPair::DropPendingFramesBefore(
     int camIndex, size_t minReadSeq)
 {
     size_t readSeq = m_frameReadSeq[camIndex].load(std::memory_order_acquire);
@@ -366,7 +367,7 @@ void LibcameraStereoOV9281_TsPair::DropPendingFramesBefore(
     }
 }
 
-bool LibcameraStereoOV9281_TsPair::PopPendingFrame(int camIndex,
+bool LibcameraStereoOv9281TsPair::PopPendingFrame(int camIndex,
                                                    FrameItem &frame)
 {
     size_t readSeq = m_frameReadSeq[camIndex].load(std::memory_order_acquire);
@@ -397,7 +398,7 @@ bool LibcameraStereoOV9281_TsPair::PopPendingFrame(int camIndex,
     return false;
 }
 
-void LibcameraStereoOV9281_TsPair::DrainPendingFrames()
+void LibcameraStereoOv9281TsPair::DrainPendingFrames()
 {
     FrameItem frame;
     while (PopPendingFrame(0, frame)) {
@@ -408,7 +409,7 @@ void LibcameraStereoOV9281_TsPair::DrainPendingFrames()
     }
 }
 
-bool LibcameraStereoOV9281_TsPair::TryPair()
+bool LibcameraStereoOv9281TsPair::TryPair()
 {
     if (m_qL.empty() || m_qR.empty()) {
         return false;
@@ -426,8 +427,8 @@ bool LibcameraStereoOV9281_TsPair::TryPair()
     return true;
 }
 
-LibcameraStereoOV9281_TsPair::PairMatchSelection
-LibcameraStereoOV9281_TsPair::SelectPairMatch() const
+LibcameraStereoOv9281TsPair::PairMatchSelection
+LibcameraStereoOv9281TsPair::SelectPairMatch() const
 {
     const size_t bestRightForLeft = FindBestMatchIndex(m_qR, m_qL.front().tsNs);
     const int64_t bestLeftDt =
@@ -450,7 +451,7 @@ LibcameraStereoOV9281_TsPair::SelectPairMatch() const
     return selection;
 }
 
-bool LibcameraStereoOV9281_TsPair::DropOldestUnpaired(int64_t rejectDtNs)
+bool LibcameraStereoOv9281TsPair::DropOldestUnpaired(int64_t rejectDtNs)
 {
     m_lastRejectDtNs.store(rejectDtNs == INT64_MAX ? -1 : rejectDtNs, std::memory_order_relaxed);
     if (m_qL.front().tsNs <= m_qR.front().tsNs) {
@@ -464,27 +465,29 @@ bool LibcameraStereoOV9281_TsPair::DropOldestUnpaired(int64_t rejectDtNs)
     return true;
 }
 
-void LibcameraStereoOV9281_TsPair::CommitPair(
+void LibcameraStereoOv9281TsPair::CommitPair(
     const PairMatchSelection &selection)
 {
-    FrameItem L;
-    FrameItem R;
+    FrameItem left;
+    FrameItem right;
     if (selection.pairFromLeft) {
-        L = std::move(m_qL.front());
-        R = std::move(m_qR[selection.rightIndex]);
+        left = std::move(m_qL.front());
+        right = std::move(m_qR[selection.rightIndex]);
         m_qL.pop_front();
         m_qR.erase(m_qR.begin() + static_cast<std::ptrdiff_t>(selection.rightIndex));
     } else {
-        L = std::move(m_qL[selection.leftIndex]);
-        R = std::move(m_qR.front());
+        left = std::move(m_qL[selection.leftIndex]);
+        right = std::move(m_qR.front());
         m_qL.erase(m_qL.begin() + static_cast<std::ptrdiff_t>(selection.leftIndex));
         m_qR.pop_front();
     }
 
-    m_lastDtMs.store((static_cast<int64_t>(R.tsNs) - static_cast<int64_t>(L.tsNs)) / 1'000'000);
-    m_lastSeq.store(L.seq);
+    m_lastDtMs.store((static_cast<int64_t>(right.tsNs) -
+                      static_cast<int64_t>(left.tsNs)) /
+                     1'000'000);
+    m_lastSeq.store(left.seq);
 
-    m_paired.push_back({std::move(L), std::move(R)});
+    m_paired.push_back({std::move(left), std::move(right)});
     while (static_cast<int>(m_paired.size()) > m_maxPairQueue) {
         m_paired.pop_front();
         m_droppedPaired.fetch_add(1, std::memory_order_relaxed);
@@ -492,7 +495,7 @@ void LibcameraStereoOV9281_TsPair::CommitPair(
     PublishQueueSizes();
 }
 
-size_t LibcameraStereoOV9281_TsPair::FindBestMatchIndex(const std::deque<FrameItem> &q, uint64_t targetTs) const
+size_t LibcameraStereoOv9281TsPair::FindBestMatchIndex(const std::deque<FrameItem> &q, uint64_t targetTs) const
 {
     const size_t limit = std::min(PAIR_LOOKAHEAD, q.size());
     size_t bestIdx = q.size();
@@ -507,7 +510,7 @@ size_t LibcameraStereoOV9281_TsPair::FindBestMatchIndex(const std::deque<FrameIt
     return bestIdx;
 }
 
-void LibcameraStereoOV9281_TsPair::PurgeOld()
+void LibcameraStereoOv9281TsPair::PurgeOld()
 {
     uint64_t newest = 0;
     if (!m_qL.empty()) {
@@ -526,7 +529,7 @@ void LibcameraStereoOV9281_TsPair::PurgeOld()
     purge(m_qR);
 }
 
-void LibcameraStereoOV9281_TsPair::OnFrame(FrameItem &&fi)
+void LibcameraStereoOv9281TsPair::OnFrame(FrameItem &&fi)
 {
     if (fi.camIndex >= 0 && fi.camIndex < 2) {
         m_lastRawSeq[fi.camIndex].store(fi.seq, std::memory_order_relaxed);
@@ -550,7 +553,7 @@ void LibcameraMonoCam::ResetOpenState()
     Close();
 }
 
-void LibcameraStereoOV9281_TsPair::ResetPairingState()
+void LibcameraStereoOv9281TsPair::ResetPairingState()
 {
     m_qL.clear();
     m_qR.clear();
@@ -572,7 +575,7 @@ void LibcameraStereoOV9281_TsPair::ResetPairingState()
     PublishQueueSizes();
 }
 
-void LibcameraStereoOV9281_TsPair::ClearPendingFrames()
+void LibcameraStereoOv9281TsPair::ClearPendingFrames()
 {
     for (int cam = 0; cam < 2; ++cam) {
         const size_t writeSeq =
@@ -586,7 +589,7 @@ void LibcameraStereoOV9281_TsPair::ClearPendingFrames()
     }
 }
 
-void LibcameraStereoOV9281_TsPair::PublishQueueSizes()
+void LibcameraStereoOv9281TsPair::PublishQueueSizes()
 {
     m_pendingQueueSize[0].store(m_qL.size(), std::memory_order_relaxed);
     m_pendingQueueSize[1].store(m_qR.size(), std::memory_order_relaxed);

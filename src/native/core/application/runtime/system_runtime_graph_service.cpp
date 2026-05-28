@@ -6,11 +6,14 @@
 #include <utility>
 
 #include "common/epg/epg.h"
+#include "common/tlv/udp_server.h"
 #include "core/application/epg/epg_graph_runtime.h"
 #include "core/application/runtime/discovery_beacon_runtime.h"
 #include "core/application/runtime/epg_graph_lifecycle.h"
 #include "core/application/runtime/epg_redeploy_coordinator.h"
+#include "core/application/runtime/payload_builders.h"
 #include "core/application/runtime/system_runtime_task_factory.h"
+#include "core/application/runtime/udp_command_runtime.h"
 
 namespace SmartDrone::Core::Application {
 namespace {
@@ -30,7 +33,8 @@ bool ConfigValid(const SystemRuntimeGraphConfig &config)
            UdpCommandRuntimeConfigValid(config.commandRuntime) &&
            config.aliases.cmdPort > 0 &&
            config.aliases.udpPort > 0 &&
-           config.discoveryPort > 0;
+           config.discoveryPort > 0 &&
+           !config.cameraProvider.providerName.empty();
 }
 
 } // namespace
@@ -109,9 +113,18 @@ class SystemRuntimeGraph::Impl final {
     {
         UdpCommandRuntimeConfig commandConfig = m_config.commandRuntime;
         commandConfig.port = m_config.aliases.cmdPort;
-        commandConfig.buildCapabilitiesPayload = m_config.buildCapabilitiesPayload;
-        commandConfig.buildConfigPayload = m_config.buildConfigPayload;
-        commandConfig.peerToIpString = m_config.peerToIpString;
+        commandConfig.buildCapabilitiesPayload =
+            [cameraProvider = m_config.cameraProvider]() {
+                return BuildCapabilitiesPayload(cameraProvider);
+            };
+        commandConfig.buildConfigPayload =
+            [cameraProvider = m_config.cameraProvider](
+                const UnifiedConfig &config, Domain::RuntimeMode mode) {
+                return BuildConfigPayload(config, mode, cameraProvider);
+            };
+        commandConfig.peerToIpString = [](const UdpPeer &peer) {
+            return UdpPeerToIpString(peer);
+        };
         return std::make_shared<UdpCommandRuntime>(std::move(commandConfig));
     }
 

@@ -18,6 +18,11 @@ namespace SmartDrone::Adapters::Slam {
 
 namespace {
 
+struct OpenVinsAdapterOptions {
+    uint64_t initMinFrameId{0};
+    double initMinTimestampSec{0.0};
+};
+
 Sophus::SE3f IdentityPose()
 {
     return Sophus::SE3f();
@@ -59,6 +64,33 @@ void LogEmptyStereoImages(const ov_core::CameraData &cameraData,
               << "\n";
 }
 
+OpenVinsAdapterOptions LoadAdapterOptions(ov_core::YamlParser &parser)
+{
+    OpenVinsAdapterOptions options;
+    int initMinFrameId = 0;
+    parser.parse_config("smart_drone_init_min_frame_id", initMinFrameId,
+                        false);
+    parser.parse_config("smart_drone_init_min_timestamp_sec",
+                        options.initMinTimestampSec, false);
+    if (initMinFrameId > 0) {
+        options.initMinFrameId = static_cast<uint64_t>(initMinFrameId);
+    }
+    return options;
+}
+
+void ApplyAdapterRuntimePolicy(ov_msckf::VioManagerOptions &options)
+{
+    options.num_opencv_threads = 1;
+    options.use_multi_threading_pubs = false;
+    options.use_multi_threading_subs = false;
+    if (options.init_options.init_dyn_use &&
+        !OpenVinsDynamicInitializationAvailable()) {
+        std::cerr << "[openvins] dynamic initialization unavailable; "
+                  << "using static initialization\n";
+        options.init_options.init_dyn_use = false;
+    }
+}
+
 Sophus::SE3f PoseFromState(const ov_msckf::State &state)
 {
     const Eigen::Vector4d qGtoI = state._imu->quat();
@@ -82,8 +114,10 @@ class OpenVinsRuntimeDriverImpl final : public OpenVinsRuntimeDriver {
 
   private:
     void FeedImu(const Core::Ports::SlamInputBatch &input);
+    bool ShouldFeedCamera(const Core::Ports::SlamInputBatch &input) const;
 
     std::unique_ptr<ov_msckf::VioManager> m_manager;
+    OpenVinsAdapterOptions m_options;
     bool m_initialized{false};
 };
 
@@ -99,12 +133,8 @@ OpenVinsRuntimeDriverImpl::OpenVinsRuntimeDriverImpl(
     }
     ov_msckf::VioManagerOptions options;
     options.print_and_load(parser);
-    options.num_opencv_threads = 1;
-    options.use_multi_threading_pubs = false;
-    options.use_multi_threading_subs = false;
-    if (!OpenVinsDynamicInitializationAvailable()) {
-        options.init_options.init_dyn_use = false;
-    }
+    m_options = LoadAdapterOptions(*parser);
+    ApplyAdapterRuntimePolicy(options);
     m_manager = std::make_unique<ov_msckf::VioManager>(options);
 }
 
@@ -129,6 +159,10 @@ Sophus::SE3f OpenVinsRuntimeDriverImpl::TrackRaw(
     ov_core::CameraData cameraData = MakeCameraData(*request.input);
     LogEmptyStereoImages(cameraData, request.input->frameId);
     FeedImu(*request.input);
+    if (!ShouldFeedCamera(*request.input)) {
+        m_initialized = false;
+        return IdentityPose();
+    }
     m_manager->feed_measurement_camera(cameraData);
 
     m_initialized = m_manager->initialized();
@@ -146,6 +180,13 @@ Sophus::SE3f OpenVinsRuntimeDriverImpl::TrackRaw(
 bool OpenVinsRuntimeDriverImpl::Initialized() const
 {
     return m_initialized;
+}
+
+bool OpenVinsRuntimeDriverImpl::ShouldFeedCamera(
+    const Core::Ports::SlamInputBatch &input) const
+{
+    return input.frameId >= m_options.initMinFrameId &&
+           input.frameTimeSec >= m_options.initMinTimestampSec;
 }
 
 void OpenVinsRuntimeDriverImpl::FeedImu(

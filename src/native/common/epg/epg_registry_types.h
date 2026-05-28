@@ -36,15 +36,12 @@ class Registry {
     template <class T>
     void RegisterMessageType(const std::string &name)
     {
-        QueueTypeInfo info;
-        info.name = name;
-        info.type = std::type_index(typeid(T));
-        info.factory = [name](const QueueConfig &config) {
-            return std::unique_ptr<IQueue>(
-                new SpscSharedPtrQueue<T>(config.name, name, config.depth,
-                                          config.overflow));
-        };
-        m_queueTypes[name] = std::move(info);
+        RegisterQueueType(MakeQueueTypeInfo(
+            name, std::type_index(typeid(T)), [name](const QueueConfig &config) {
+                return std::unique_ptr<IQueue>(
+                    new SpscSharedPtrQueue<T>(config.name, name, config.depth,
+                                              config.overflow));
+            }));
     }
 
     template <class TTask>
@@ -52,14 +49,11 @@ class Registry {
                           std::vector<PortSpec> inputs,
                           std::vector<PortSpec> outputs)
     {
-        static_assert(std::is_base_of<ITask, TTask>::value,
+        static_assert(IsTaskType<TTask>(),
                       "registered task must derive from ITask");
-        TaskTypeInfo info;
-        info.name = name;
-        info.inputs = std::move(inputs);
-        info.outputs = std::move(outputs);
-        info.factory = []() { return std::unique_ptr<ITask>(new TTask()); };
-        m_taskTypes[name] = std::move(info);
+        RegisterTaskTypeInfo(MakeTaskTypeInfo(
+            name, std::move(inputs), std::move(outputs),
+            []() { return std::unique_ptr<ITask>(new TTask()); }));
     }
 
     void RegisterTaskFactory(const std::string &name,
@@ -74,6 +68,21 @@ class Registry {
     const TaskTypeInfo *FindTaskType(const std::string &name) const;
 
   private:
+    static QueueTypeInfo MakeQueueTypeInfo(const std::string &name,
+                                           std::type_index type,
+                                           QueueFactory factory);
+    static TaskTypeInfo MakeTaskTypeInfo(const std::string &name,
+                                         std::vector<PortSpec> inputs,
+                                         std::vector<PortSpec> outputs,
+                                         TaskFactory factory);
+    void RegisterQueueType(QueueTypeInfo info);
+    void RegisterTaskTypeInfo(TaskTypeInfo info);
+    template <class TTask>
+    static constexpr bool IsTaskType()
+    {
+        return std::is_base_of<ITask, TTask>::value;
+    }
+
     std::unordered_map<std::string, QueueTypeInfo> m_queueTypes;
     std::unordered_map<std::string, TaskTypeInfo> m_taskTypes;
 };
@@ -89,17 +98,9 @@ class TypeCatalog {
     template <class T>
     bool RegisterMessage(const std::string &name)
     {
-        std::shared_ptr<const CatalogSnapshot> current = LoadSnapshot();
-        while (current) {
-            auto next = std::make_shared<CatalogSnapshot>(*current);
-            next->messages[name] = [name](Registry &registry) {
-                registry.RegisterMessageType<T>(name);
-            };
-            if (ReplaceSnapshot(current, std::move(next))) {
-                return true;
-            }
-        }
-        return false;
+        return RegisterMessageFactory(name, [name](Registry &registry) {
+            registry.RegisterMessageType<T>(name);
+        });
     }
 
     template <class TTask>
@@ -107,30 +108,18 @@ class TypeCatalog {
                       std::vector<PortSpec> inputs,
                       std::vector<PortSpec> outputs)
     {
-        static_assert(std::is_base_of<ITask, TTask>::value,
+        static_assert(IsTaskType<TTask>(),
                       "reflected task must derive from ITask");
-        TaskReflectionInfo info;
-        info.name = std::move(name);
-        info.inputs = std::move(inputs);
-        info.outputs = std::move(outputs);
-        const auto registeredName = info.name;
-        std::shared_ptr<const CatalogSnapshot> current = LoadSnapshot();
-        while (current) {
-            auto next = std::make_shared<CatalogSnapshot>(*current);
-            next->tasks[info.name] = info;
-            next->taskNamesByType[std::type_index(typeid(TTask))] =
-                registeredName;
-            if (ReplaceSnapshot(current, std::move(next))) {
-                return true;
-            }
-        }
-        return false;
+        return RegisterTaskReflection(std::type_index(typeid(TTask)),
+                                      MakeTaskReflectionInfo(
+                                          std::move(name), std::move(inputs),
+                                          std::move(outputs)));
     }
 
     template <class TTask>
     bool RegisterTaskType(std::string name)
     {
-        static_assert(std::is_base_of<ITask, TTask>::value,
+        static_assert(IsTaskType<TTask>(),
                       "reflected task must derive from ITask");
         return RegisterTask<TTask>(std::move(name), {}, {});
     }
@@ -138,7 +127,7 @@ class TypeCatalog {
     template <class TTask>
     std::string ReflectedTaskName() const
     {
-        static_assert(std::is_base_of<ITask, TTask>::value,
+        static_assert(IsTaskType<TTask>(),
                       "reflected task must derive from ITask");
         return ReflectedTaskName(std::type_index(typeid(TTask)));
     }
@@ -148,7 +137,7 @@ class TypeCatalog {
     template <class TTask, class Factory>
     TaskFactoryEntry MakeTaskFactoryEntry(Factory factory) const
     {
-        static_assert(std::is_base_of<ITask, TTask>::value,
+        static_assert(IsTaskType<TTask>(),
                       "reflected task must derive from ITask");
         return {ReflectedTaskName<TTask>(),
                 Registry::TaskFactory(std::move(factory))};
@@ -178,9 +167,21 @@ class TypeCatalog {
     };
 
     TypeCatalog();
+    static TaskReflectionInfo MakeTaskReflectionInfo(
+        std::string name, std::vector<PortSpec> inputs,
+        std::vector<PortSpec> outputs);
+    bool RegisterMessageFactory(
+        const std::string &name, std::function<void(Registry &)> factory);
+    bool RegisterTaskReflection(std::type_index taskType,
+                                TaskReflectionInfo info);
     std::shared_ptr<const CatalogSnapshot> LoadSnapshot() const;
     bool ReplaceSnapshot(std::shared_ptr<const CatalogSnapshot> &expected,
                          std::shared_ptr<const CatalogSnapshot> next);
+    template <class TTask>
+    static constexpr bool IsTaskType()
+    {
+        return std::is_base_of<ITask, TTask>::value;
+    }
 
     std::shared_ptr<const CatalogSnapshot> m_snapshot;
 };

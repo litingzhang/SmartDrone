@@ -10,7 +10,8 @@
 
 namespace SmartDrone::Core::Application {
 
-struct LivePoseState {
+class LivePoseState {
+  public:
     struct Snapshot {
         bool hasPeer{false};
         UdpPeer peer{};
@@ -44,7 +45,7 @@ struct LivePoseState {
     bool ReadSnapshot(Snapshot &out) const;
 
   private:
-    struct Impl;
+    class Impl;
     std::unique_ptr<Impl> m_impl;
 };
 

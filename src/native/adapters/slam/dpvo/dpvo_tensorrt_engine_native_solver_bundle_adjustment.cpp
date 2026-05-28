@@ -7,8 +7,8 @@
 
 namespace SmartDrone::Adapters::Slam::DpvoTensorRtInternal {
 
-DpvoNativeSolver::ErrorStats DpvoNativeSolver::CompareVectors(const std::vector<float> &a,
-                                 const std::vector<float> &b)
+DpvoNativeSolver::ErrorStats DpvoNativeSolver::CompareVectors(
+    const std::vector<float> &a, const std::vector<float> &b)
 {
     ErrorStats stats{};
     const size_t n = std::min(a.size(), b.size());
@@ -25,22 +25,24 @@ DpvoNativeSolver::ErrorStats DpvoNativeSolver::CompareVectors(const std::vector<
     return stats;
 }
 
-void DpvoNativeSolver::AdjSE3(const Eigen::Vector3f &t, const Eigen::Matrix3f &R,
-                   const Eigen::Matrix<float, 6, 1> &x,
-                   Eigen::Matrix<float, 6, 1> *y)
+void DpvoNativeSolver::AdjSE3(const Eigen::Vector3f &t,
+                              const Eigen::Matrix3f &rotation,
+                              const Eigen::Matrix<float, 6, 1> &x,
+                              Eigen::Matrix<float, 6, 1> *y)
 {
     if (y == nullptr) {
         return;
     }
-    const Eigen::Matrix3f Rt = R.transpose();
-    y->template head<3>() = Rt * x.template head<3>();
+    const Eigen::Matrix3f rotationTranspose = rotation.transpose();
+    y->template head<3>() = rotationTranspose * x.template head<3>();
     const Eigen::Vector3f u = x.template head<3>().cross(t);
-    y->template tail<3>() = Rt * x.template tail<3>() + Rt * u;
+    y->template tail<3>() =
+        rotationTranspose * x.template tail<3>() + rotationTranspose * u;
 }
 
 void DpvoNativeSolver::AddBlock(const AddBlockRequest &request)
 {
-    Eigen::MatrixXf &H = request.H;
+    Eigen::MatrixXf &hessian = request.hessian;
     const int row = request.row;
     const int col = request.col;
     const Eigen::VectorXf &a = request.a;
@@ -49,12 +51,12 @@ void DpvoNativeSolver::AddBlock(const AddBlockRequest &request)
     if (row < 0 || col < 0) {
         return;
     }
-    H.block(row, col, a.size(), b.size()).noalias() +=
+    hessian.block(row, col, a.size(), b.size()).noalias() +=
         scale * (a * b.transpose());
 }
 
-void DpvoNativeSolver::AddVector(Eigen::VectorXf &v, int row, const Eigen::VectorXf &a,
-                      float scale)
+void DpvoNativeSolver::AddVector(Eigen::VectorXf &v, int row,
+                                 const Eigen::VectorXf &a, float scale)
 {
     if (row < 0) {
         return;
@@ -149,30 +151,32 @@ bool DpvoNativeSolver::PrepareBundleEdgeProjection(
         return false;
     }
     const DpvoPatchState &patch = source.patches[static_cast<size_t>(patchLocal)];
-    const Sophus::SE3f Tji = targetFrame.Tcw * source.Tcw.inverse();
-    const Eigen::Vector3f Xi((patch.x - request.intrinsics.cx) /
-                                 request.intrinsics.fx,
-                             (patch.y - request.intrinsics.cy) /
-                                 request.intrinsics.fy,
-                             1.0f);
-    const Eigen::Vector3f Xj = Tji.so3().matrix() * Xi + patch.invDepth *
-                               Tji.translation();
-    if (!(Xj.z() > 0.2f) || !std::isfinite(Xj.z())) {
+    const Sophus::SE3f relativePose = targetFrame.tcw * source.tcw.inverse();
+    const DpvoIntrinsics &intrinsics = request.intrinsics;
+    const Eigen::Vector3f sourceBearing((patch.x - intrinsics.cx) / intrinsics.fx,
+                                        (patch.y - intrinsics.cy) / intrinsics.fy,
+                                        1.0f);
+    const Eigen::Vector3f targetPoint =
+        relativePose.so3().matrix() * sourceBearing +
+        patch.invDepth * relativePose.translation();
+    if (!(targetPoint.z() > 0.2f) || !std::isfinite(targetPoint.z())) {
         return false;
     }
-    const float invZ = 1.0f / Xj.z();
-    const float x1 = request.intrinsics.fx * Xj.x() * invZ + request.intrinsics.cx;
-    const float y1 = request.intrinsics.fy * Xj.y() * invZ + request.intrinsics.cy;
+    const float invZ = 1.0f / targetPoint.z();
+    const float x1 =
+        intrinsics.fx * targetPoint.x() * invZ + intrinsics.cx;
+    const float y1 =
+        intrinsics.fy * targetPoint.y() * invZ + intrinsics.cy;
     const float rx = request.target[static_cast<size_t>(edgeIndex)][0] - x1;
     const float ry = request.target[static_cast<size_t>(edgeIndex)][1] - y1;
     if (!BundleProjectionInBounds(request.intrinsics, x1, y1, rx, ry)) {
         return false;
     }
-    FillBundleProjection(request, state, edgeIndex, Tji, projection);
-    projection.X = Xj.x();
-    projection.Y = Xj.y();
-    projection.Z = Xj.z();
-    projection.W = patch.invDepth;
+    FillBundleProjection(request, state, edgeIndex, relativePose, projection);
+    projection.targetX = targetPoint.x();
+    projection.targetY = targetPoint.y();
+    projection.targetZ = targetPoint.z();
+    projection.patchInvDepth = patch.invDepth;
     projection.invZ = invZ;
     projection.invZ2 = invZ * invZ;
     projection.rx = rx;
@@ -210,7 +214,7 @@ void DpvoNativeSolver::FillBundleProjection(
             ? 6 * (edge.targetFrame - state.poseStart)
             : -1;
     projection.depthIndex = state.patchVar.at(edge.patchGlobal);
-    projection.R = relativePose.so3().matrix();
+    projection.relativeRotation = relativePose.so3().matrix();
     projection.t = relativePose.translation();
 }
 
@@ -230,24 +234,24 @@ void DpvoNativeSolver::FillBundleJacobian(
     if (row == 0) {
         depthJacobian =
             intrinsics.fx * (projection.t.x() * projection.invZ -
-                             projection.t.z() * (projection.X * projection.invZ2));
-        jacobian << intrinsics.fx * projection.W * projection.invZ, 0.0f,
-            intrinsics.fx * -projection.X * projection.W * projection.invZ2,
-            intrinsics.fx * -projection.X * projection.Y * projection.invZ2,
-            intrinsics.fx * (1.0f + projection.X * projection.X *
+                             projection.t.z() * (projection.targetX * projection.invZ2));
+        jacobian << intrinsics.fx * projection.patchInvDepth * projection.invZ, 0.0f,
+            intrinsics.fx * -projection.targetX * projection.patchInvDepth * projection.invZ2,
+            intrinsics.fx * -projection.targetX * projection.targetY * projection.invZ2,
+            intrinsics.fx * (1.0f + projection.targetX * projection.targetX *
                                          projection.invZ2),
-            intrinsics.fx * -projection.Y * projection.invZ;
+            intrinsics.fx * -projection.targetY * projection.invZ;
         return;
     }
     depthJacobian =
         intrinsics.fy * (projection.t.y() * projection.invZ -
-                         projection.t.z() * (projection.Y * projection.invZ2));
-    jacobian << 0.0f, intrinsics.fy * projection.W * projection.invZ,
-        intrinsics.fy * -projection.Y * projection.W * projection.invZ2,
-        intrinsics.fy * (-1.0f - projection.Y * projection.Y *
+                         projection.t.z() * (projection.targetY * projection.invZ2));
+    jacobian << 0.0f, intrinsics.fy * projection.patchInvDepth * projection.invZ,
+        intrinsics.fy * -projection.targetY * projection.patchInvDepth * projection.invZ2,
+        intrinsics.fy * (-1.0f - projection.targetY * projection.targetY *
                                      projection.invZ2),
-        intrinsics.fy * (projection.X * projection.Y * projection.invZ2),
-        intrinsics.fy * projection.X * projection.invZ;
+        intrinsics.fy * (projection.targetX * projection.targetY * projection.invZ2),
+        intrinsics.fy * projection.targetX * projection.invZ;
 }
 
 void DpvoNativeSolver::AccumulateBundleResidual(
@@ -262,32 +266,39 @@ void DpvoNativeSolver::AccumulateBundleResidual(
     if (!(w > 1e-6f)) {
         return;
     }
-    Eigen::Matrix<float, 6, 1> Jj;
-    float Jz = 0.0f;
-    FillBundleJacobian(request.bundle.intrinsics, projection, request.row, Jj,
-                       Jz);
-    Eigen::Matrix<float, 6, 1> Ji;
-    AdjSE3(projection.t, projection.R, Jj, &Ji);
-    AddBlock({request.system.B, projection.srcPoseBase,
-              projection.srcPoseBase, Ji, Ji, w});
-    AddBlock({request.system.B, projection.dstPoseBase,
-              projection.dstPoseBase, Jj, Jj, w});
-    AddBlock({request.system.B, projection.srcPoseBase,
-              projection.dstPoseBase, Ji, Jj, -w});
-    AddBlock({request.system.B, projection.dstPoseBase,
-              projection.srcPoseBase, Jj, Ji, -w});
+    Eigen::Matrix<float, 6, 1> targetJacobian;
+    float depthJacobian = 0.0f;
+    FillBundleJacobian(request.bundle.intrinsics, projection, request.row,
+                       targetJacobian, depthJacobian);
+    Eigen::Matrix<float, 6, 1> sourceJacobian;
+    AdjSE3(projection.t, projection.relativeRotation, targetJacobian,
+           &sourceJacobian);
+    AddBlock({request.system.poseHessian, projection.srcPoseBase,
+              projection.srcPoseBase, sourceJacobian, sourceJacobian, w});
+    AddBlock({request.system.poseHessian, projection.dstPoseBase,
+              projection.dstPoseBase, targetJacobian, targetJacobian, w});
+    AddBlock({request.system.poseHessian, projection.srcPoseBase,
+              projection.dstPoseBase, sourceJacobian, targetJacobian, -w});
+    AddBlock({request.system.poseHessian, projection.dstPoseBase,
+              projection.srcPoseBase, targetJacobian, sourceJacobian, -w});
     if (projection.srcPoseBase >= 0) {
-        request.system.E.block(projection.srcPoseBase, projection.depthIndex,
-                               6, 1).noalias() += -w * Jz * Ji;
+        request.system.poseDepthJacobian
+            .block(projection.srcPoseBase, projection.depthIndex, 6, 1)
+            .noalias() += -w * depthJacobian * sourceJacobian;
     }
     if (projection.dstPoseBase >= 0) {
-        request.system.E.block(projection.dstPoseBase, projection.depthIndex,
-                               6, 1).noalias() += w * Jz * Jj;
+        request.system.poseDepthJacobian
+            .block(projection.dstPoseBase, projection.depthIndex, 6, 1)
+            .noalias() += w * depthJacobian * targetJacobian;
     }
-    request.system.C(projection.depthIndex) += w * Jz * Jz;
-    AddVector(request.system.v, projection.srcPoseBase, Ji, -w * residual);
-    AddVector(request.system.v, projection.dstPoseBase, Jj, w * residual);
-    request.system.u(projection.depthIndex) += w * residual * Jz;
+    request.system.depthHessian(projection.depthIndex) +=
+        w * depthJacobian * depthJacobian;
+    AddVector(request.system.poseGradient, projection.srcPoseBase,
+              sourceJacobian, -w * residual);
+    AddVector(request.system.poseGradient, projection.dstPoseBase,
+              targetJacobian, w * residual);
+    request.system.depthGradient(projection.depthIndex) +=
+        w * residual * depthJacobian;
 }
 
 void DpvoNativeSolver::AccumulateBundleStereoPrior(
@@ -314,8 +325,8 @@ void DpvoNativeSolver::AccumulateBundleStereoPrior(
         if (!patch.hasStereoPrior || !std::isfinite(patch.stereoPriorInvDepth)) {
             continue;
         }
-        system.C(entry.second) += priorWeight;
-        system.u(entry.second) +=
+        system.depthHessian(entry.second) += priorWeight;
+        system.depthGradient(entry.second) +=
             priorWeight * (patch.stereoPriorInvDepth - patch.invDepth);
     }
 }
@@ -332,26 +343,30 @@ bool DpvoNativeSolver::SolveBundleAdjustmentDirect(
     const BundleSolveRequest &request, BundleAdjustmentSolution &solution)
 {
     const BundleAdjustmentState &state = request.state;
-    Eigen::MatrixXf H = Eigen::MatrixXf::Zero(state.totalDim, state.totalDim);
+    Eigen::MatrixXf hessian =
+        Eigen::MatrixXf::Zero(state.totalDim, state.totalDim);
     Eigen::VectorXf rhs = Eigen::VectorXf::Zero(state.totalDim);
     if (state.poseDim > 0) {
-        H.block(0, 0, state.poseDim, state.poseDim) = request.system.B;
-        H.block(0, state.poseDim, state.poseDim, state.depthVars) =
-            request.system.E;
-        H.block(state.poseDim, 0, state.depthVars, state.poseDim) =
-            request.system.E.transpose();
-        rhs.head(state.poseDim) = request.system.v;
+        hessian.block(0, 0, state.poseDim, state.poseDim) =
+            request.system.poseHessian;
+        hessian.block(0, state.poseDim, state.poseDim, state.depthVars) =
+            request.system.poseDepthJacobian;
+        hessian.block(state.poseDim, 0, state.depthVars, state.poseDim) =
+            request.system.poseDepthJacobian.transpose();
+        rhs.head(state.poseDim) = request.system.poseGradient;
     }
-    H.block(state.poseDim, state.poseDim, state.depthVars, state.depthVars) =
-        request.system.C.asDiagonal();
-    rhs.tail(state.depthVars) = request.system.u;
-    DampenBundleSystem(H, state);
-    const Eigen::VectorXf dx = H.ldlt().solve(rhs);
+    hessian.block(state.poseDim, state.poseDim, state.depthVars, state.depthVars) =
+        request.system.depthHessian.asDiagonal();
+    rhs.tail(state.depthVars) = request.system.depthGradient;
+    DampenBundleSystem(hessian, state);
+    const Eigen::VectorXf dx = hessian.ldlt().solve(rhs);
     if (dx.size() != state.totalDim || !dx.allFinite()) {
         return false;
     }
-    solution.dxPose = state.poseDim > 0 ? dx.head(state.poseDim)
-                                        : Eigen::VectorXf::Zero(0);
+    solution.dxPose = Eigen::VectorXf::Zero(state.poseDim);
+    if (state.poseDim > 0) {
+        solution.dxPose = dx.head(state.poseDim);
+    }
     solution.dxDepth = dx.tail(state.depthVars);
     return true;
 }
@@ -360,42 +375,51 @@ bool DpvoNativeSolver::SolveBundleAdjustmentSchur(
     const BundleSolveRequest &request, BundleAdjustmentSolution &solution)
 {
     const BundleAdjustmentState &state = request.state;
-    const Eigen::VectorXf Q =
-        (request.system.C.array() + 1e-4f).inverse().matrix();
+    const Eigen::VectorXf depthWeight =
+        (request.system.depthHessian.array() + 1e-4f).inverse().matrix();
     solution.dxPose = Eigen::VectorXf::Zero(state.poseDim);
     if (state.poseDim > 0) {
-        const Eigen::MatrixXf EQ = request.system.E * Q.asDiagonal();
-        Eigen::MatrixXf S = request.system.B - EQ * request.system.E.transpose();
-        Eigen::VectorXf y = request.system.v - EQ * request.system.u;
-        DampenBundleSchurSystem(S, state.poseDim);
-        solution.dxPose = S.ldlt().solve(y);
+        const Eigen::MatrixXf eliminatedJacobian =
+            request.system.poseDepthJacobian * depthWeight.asDiagonal();
+        Eigen::MatrixXf schurHessian =
+            request.system.poseHessian -
+            eliminatedJacobian * request.system.poseDepthJacobian.transpose();
+        Eigen::VectorXf schurGradient =
+            request.system.poseGradient -
+            eliminatedJacobian * request.system.depthGradient;
+        DampenBundleSchurSystem(schurHessian, state.poseDim);
+        solution.dxPose = schurHessian.ldlt().solve(schurGradient);
         if (solution.dxPose.size() != state.poseDim ||
             !solution.dxPose.allFinite()) {
             return false;
         }
         solution.dxDepth =
-            Q.asDiagonal() * (request.system.u -
-                              request.system.E.transpose() * solution.dxPose);
+            depthWeight.asDiagonal() * (request.system.depthGradient -
+                                        request.system.poseDepthJacobian.transpose() *
+                                            solution.dxPose);
     } else {
-        solution.dxDepth = Q.asDiagonal() * request.system.u;
+        solution.dxDepth =
+            depthWeight.asDiagonal() * request.system.depthGradient;
     }
     return solution.dxDepth.size() == state.depthVars &&
            solution.dxDepth.allFinite();
 }
 
-void DpvoNativeSolver::DampenBundleSystem(Eigen::MatrixXf &H,
+void DpvoNativeSolver::DampenBundleSystem(Eigen::MatrixXf &hessian,
                                           const BundleAdjustmentState &state)
 {
     for (int i = 0; i < state.totalDim; ++i) {
         const float base = i < state.poseDim ? 1.0f : 1e-4f;
-        H(i, i) += 1e-4f * std::max(std::fabs(H(i, i)), 1.0f) + base;
+        hessian(i, i) +=
+            1e-4f * std::max(std::fabs(hessian(i, i)), 1.0f) + base;
     }
 }
 
-void DpvoNativeSolver::DampenBundleSchurSystem(Eigen::MatrixXf &S, int poseDim)
+void DpvoNativeSolver::DampenBundleSchurSystem(Eigen::MatrixXf &schurHessian,
+                                               int poseDim)
 {
     for (int i = 0; i < poseDim; ++i) {
-        S(i, i) += 1e-4f * S(i, i) + 1.0f;
+        schurHessian(i, i) += 1e-4f * schurHessian(i, i) + 1.0f;
     }
 }
 
@@ -420,9 +444,9 @@ void DpvoNativeSolver::ApplyBundlePoseUpdates(
     for (int i = 0; i < state.poseVars; ++i) {
         Eigen::Matrix<float, 6, 1> xi = solution.dxPose.segment<6>(6 * i);
         ClampBundlePoseIncrement(xi, maxTransStep, maxRotStep);
-        request.frames[static_cast<size_t>(state.poseStart + i)].Tcw =
+        request.frames[static_cast<size_t>(state.poseStart + i)].tcw =
             Sophus::SE3f::exp(xi) *
-            request.frames[static_cast<size_t>(state.poseStart + i)].Tcw;
+            request.frames[static_cast<size_t>(state.poseStart + i)].tcw;
     }
 }
 

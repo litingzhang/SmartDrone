@@ -580,6 +580,8 @@ void ParseReplayModeOptions(int argc, char **argv, OfflineReplayOptions &opts)
     }
     opts.slamBackend = NormalizeSlamBackendForBuild(ParseSlamBackendText(
         GetOptionValue(argc, argv, "--slam-backend", "klt")));
+    opts.sensorMode =
+        NormalizeSensorModeForSlamBackend(opts.sensorMode, opts.slamBackend);
     opts.featureFrontend = ParseFeatureFrontendText(
         GetOptionValue(argc, argv, "--feature-frontend", "lk_gftt_per_frame"));
     opts.slamMode = ParseSlamOperationModeText(
@@ -660,7 +662,8 @@ void ParseSlamAssetOptions(int argc, char **argv, OfflineReplayOptions &opts)
         ProgramPath(argc, argv));
     opts.settings = ResolveRuntimePath(
         GetOptionValue(argc, argv, "--settings",
-                       DefaultSettingsForSensorMode(opts.sensorMode)),
+                       DefaultSettingsForSlamBackend(opts.sensorMode,
+                                                     opts.slamBackend)),
         ProgramPath(argc, argv));
 }
 

@@ -18,7 +18,7 @@ class FrameTimingTracker;
 class PerceptionPipeline;
 class SlamRuntimeControlPort;
 class IPreviewOutputPort;
-struct LivePoseState;
+class LivePoseState;
 struct LiveRuntimeTuning;
 struct MainRuntimeAliases;
 struct StereoBodyExtrinsics;

@@ -5,6 +5,7 @@ using DpvoTensorRtInternal::DpvoFrameState;
 using DpvoTensorRtInternal::DpvoGraphState;
 using DpvoTensorRtInternal::DpvoIntrinsics;
 using DpvoTensorRtInternal::DpvoNativeSolver;
+using DpvoTensorRtInternal::DpvoNativeSolverStepRequest;
 using DpvoTensorRtInternal::DpvoPatchifierRun;
 using DpvoTensorRtInternal::DpvoPatchifierRuntime;
 using DpvoTensorRtInternal::DpvoPatchState;

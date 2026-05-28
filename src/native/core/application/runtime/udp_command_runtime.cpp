@@ -13,6 +13,7 @@
 #include "common/tlv/tlv_pack.h"
 #include "common/tlv/tlv_parser.h"
 #include "core/application/runtime/runtime_config_frame_codec.h"
+#include "core/application/runtime/runtime_config_update_builder.h"
 #include "core/application/runtime/runtime_command_service.h"
 
 namespace SmartDrone::Core::Application {
@@ -21,12 +22,33 @@ namespace {
 constexpr auto HEARTBEAT_TIMEOUT = std::chrono::seconds(3);
 constexpr auto OPEN_RETRY_PERIOD = std::chrono::seconds(1);
 
+RouteResult ExecuteRuntimeAction(IRuntimeCommandTarget &commandTarget,
+                                 const RuntimeAction &action)
+{
+    RuntimeCommandService service(commandTarget);
+    const CommandResult result = service.ExecuteAction(action);
+    return {result.ok ? ACK_OK : ACK_E_BAD_STATE, result.message};
+}
+
+RouteResult ApplyRuntimeConfigUpdate(IRuntimeCommandTarget &commandTarget,
+                                     const ConfigUpdate &update,
+                                     const RemoteRuntimeConfig &remote)
+{
+    RuntimeCommandService service(commandTarget);
+    const CommandResult result = service.ApplyConfig(update);
+    if (!result.ok) {
+        return {ACK_E_BAD_ARGS, result.message};
+    }
+    return {ACK_OK, BuildRuntimeConfigAckMessage(result.message, remote)};
+}
+
 RouteResult HandleRuntimeModeFrame(const TlvFrame &frame,
                                    IRuntimeCommandTarget &commandTarget)
 {
     using ControllerMode = SmartDrone::Core::Domain::RuntimeMode;
-    if (frame.len != RUNTIME_MODE_PAYLOAD_LEN)
+    if (frame.len != RUNTIME_MODE_PAYLOAD_LEN) {
         return {ACK_E_BAD_LEN, "bad runtime mode len"};
+    }
     RuntimeAction action{};
     if (frame.payload[0] == RUNTIME_MODE_SLAM) {
         action.type = RuntimeAction::Type::StartRuntime;
@@ -40,9 +62,7 @@ RouteResult HandleRuntimeModeFrame(const TlvFrame &frame,
     } else {
         return {ACK_E_BAD_ARGS, "bad runtime mode"};
     }
-    RuntimeCommandService service(commandTarget);
-    const auto result = service.ExecuteAction(action);
-    return {result.ok ? ACK_OK : ACK_E_BAD_STATE, result.message};
+    return ExecuteRuntimeAction(commandTarget, action);
 }
 
 RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
@@ -59,15 +79,12 @@ RouteResult HandleRuntimeConfigFrame(const TlvFrame &frame, const UdpPeer &peer,
     if (remote.exposureUs <= 0 || !std::isfinite(remote.gain)) {
         return {ACK_E_BAD_ARGS, "bad runtime cfg args"};
     }
-    ApplyPeerIp(remote, peer, peerToIpString);
+    const std::string peerIp =
+        peerToIpString ? peerToIpString(peer) : std::string{};
+    ApplyConfigPeerIp(remote, peerIp);
 
-    RuntimeCommandService service(commandTarget);
     const ConfigUpdate update = BuildRuntimeConfigUpdate(remote);
-    const auto result = service.ApplyConfig(update);
-    if (!result.ok) {
-        return {ACK_E_BAD_ARGS, result.message};
-    }
-    return {ACK_OK, BuildRuntimeConfigAckMessage(result.message, remote)};
+    return ApplyRuntimeConfigUpdate(commandTarget, update, remote);
 }
 
 RouteResult HandleCalibCleanFrame(const TlvFrame &frame,
@@ -78,9 +95,7 @@ RouteResult HandleCalibCleanFrame(const TlvFrame &frame,
     }
     RuntimeAction action{};
     action.type = RuntimeAction::Type::CleanCalibration;
-    RuntimeCommandService service(commandTarget);
-    const auto result = service.ExecuteAction(action);
-    return {result.ok ? ACK_OK : ACK_E_BAD_STATE, result.message};
+    return ExecuteRuntimeAction(commandTarget, action);
 }
 
 RouteResult HandleForceRestartFrame(const TlvFrame &frame,
@@ -91,9 +106,7 @@ RouteResult HandleForceRestartFrame(const TlvFrame &frame,
     }
     RuntimeAction action{};
     action.type = RuntimeAction::Type::ForceRestart;
-    RuntimeCommandService service(commandTarget);
-    const auto result = service.ExecuteAction(action);
-    return {result.ok ? ACK_OK : ACK_E_BAD_STATE, result.message};
+    return ExecuteRuntimeAction(commandTarget, action);
 }
 
 RouteResult HandleGetCapabilitiesFrame(

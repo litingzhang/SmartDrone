@@ -21,7 +21,7 @@ class LibcameraStereoCamera final : public Core::Ports::ICameraProvider {
     Core::Ports::CameraProviderSemantics Semantics() const override;
 
   private:
-    LibcameraStereoOV9281_TsPair m_impl;
+    LibcameraStereoOv9281TsPair m_impl;
 };
 
 } // namespace SmartDrone::Adapters::Camera

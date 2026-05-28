@@ -23,18 +23,7 @@ class FixedFactoryRegistry {
         if (factory == nullptr) {
             return false;
         }
-
-        std::shared_ptr<const Snapshot> current = LoadSnapshot();
-        while (current) {
-            auto next = std::make_shared<Snapshot>(*current);
-            if (!Upsert(*next, key, factory)) {
-                return false;
-            }
-            if (ReplaceSnapshot(current, std::move(next))) {
-                return true;
-            }
-        }
-        return false;
+        return TryRegister(key, factory);
     }
 
     Factory Find(Key key) const
@@ -43,12 +32,7 @@ class FixedFactoryRegistry {
         if (!snapshot) {
             return nullptr;
         }
-        for (const Entry &entry : snapshot->entries) {
-            if (entry.factory != nullptr && entry.key == key) {
-                return entry.factory;
-            }
-        }
-        return nullptr;
+        return FindInSnapshot(*snapshot, key);
     }
 
   private:
@@ -63,20 +47,93 @@ class FixedFactoryRegistry {
 
     static bool Upsert(Snapshot &snapshot, Key key, Factory factory)
     {
+        Entry *entry = FindWritableEntry(snapshot, key);
+        if (entry == nullptr) {
+            return false;
+        }
+        entry->key = key;
+        entry->factory = factory;
+        return true;
+    }
+
+    static Entry *FindEntry(Snapshot &snapshot, Key key)
+    {
         for (Entry &entry : snapshot.entries) {
             if (entry.factory != nullptr && entry.key == key) {
-                entry.factory = factory;
-                return true;
+                return &entry;
             }
         }
+        return nullptr;
+    }
+
+    static const Entry *FindEntry(const Snapshot &snapshot, Key key)
+    {
+        for (const Entry &entry : snapshot.entries) {
+            if (entry.factory != nullptr && entry.key == key) {
+                return &entry;
+            }
+        }
+        return nullptr;
+    }
+
+    static Entry *FindEmptyEntry(Snapshot &snapshot)
+    {
         for (Entry &entry : snapshot.entries) {
             if (entry.factory == nullptr) {
-                entry.key = key;
-                entry.factory = factory;
-                return true;
+                return &entry;
+            }
+        }
+        return nullptr;
+    }
+
+    static Entry *FindWritableEntry(Snapshot &snapshot, Key key)
+    {
+        Entry *entry = FindEntry(snapshot, key);
+        return entry != nullptr ? entry : FindEmptyEntry(snapshot);
+    }
+
+    static Factory FindInSnapshot(const Snapshot &snapshot, Key key)
+    {
+        const Entry *entry = FindEntry(snapshot, key);
+        return entry != nullptr ? entry->factory : nullptr;
+    }
+
+    bool TryRegister(Key key, Factory factory)
+    {
+        std::shared_ptr<const Snapshot> current = LoadSnapshot();
+        while (current) {
+            const RegisterStep step = TryRegisterOnce(current, key, factory);
+            if (step != RegisterStep::Retry) {
+                return step == RegisterStep::Registered;
             }
         }
         return false;
+    }
+
+    enum class RegisterStep {
+        Retry,
+        Full,
+        Registered,
+    };
+
+    RegisterStep TryRegisterOnce(
+        std::shared_ptr<const Snapshot> &current, Key key, Factory factory)
+    {
+        std::shared_ptr<Snapshot> next = BuildNextSnapshot(
+            *current, key, factory);
+        if (!next) {
+            current.reset();
+            return RegisterStep::Full;
+        }
+        return ReplaceSnapshot(current, next) ? RegisterStep::Registered :
+                                               RegisterStep::Retry;
+    }
+
+    static std::shared_ptr<Snapshot> BuildNextSnapshot(
+        const Snapshot &current, Key key, Factory factory)
+    {
+        auto next = std::make_shared<Snapshot>(current);
+        return Upsert(*next, key, factory) ? next : nullptr;
     }
 
     std::shared_ptr<const Snapshot> LoadSnapshot() const

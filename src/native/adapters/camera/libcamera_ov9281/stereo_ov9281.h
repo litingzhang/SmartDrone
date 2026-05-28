@@ -129,7 +129,7 @@ class LibcameraMonoCam {
     int m_callbackEventFd{-1};
 };
 
-class LibcameraStereoOV9281_TsPair {
+class LibcameraStereoOv9281TsPair {
   public:
     struct PairingDiagnostics {
         bool healthy{true};
@@ -157,7 +157,7 @@ class LibcameraStereoOV9281_TsPair {
 
     bool Open(const StereoCameraOpenParams &params);
     void Close();
-    bool GrabPair(FrameItem &L, FrameItem &R, bool preferLatest = false,
+    bool GrabPair(FrameItem &left, FrameItem &right, bool preferLatest = false,
                   uint64_t minTimestampNs = 0);
 
     int64_t LastDtMs() const;
@@ -194,7 +194,8 @@ class LibcameraStereoOV9281_TsPair {
     bool HasEligiblePair(uint64_t minTimestampNs) const;
     size_t SelectPairIndex(bool preferLatest, uint64_t minTimestampNs) const;
     void DropPairsBefore(size_t selectedIndex);
-    bool TryGrabPair(FrameItem &L, FrameItem &R, bool preferLatest, uint64_t minTimestampNs);
+    bool TryGrabPair(FrameItem &left, FrameItem &right, bool preferLatest,
+                     uint64_t minTimestampNs);
     void PushFrame(FrameItem &&fi);
     void StorePendingFrame(FrameItem &&fi);
     void DropPendingFramesBefore(int camIndex, size_t minReadSeq);

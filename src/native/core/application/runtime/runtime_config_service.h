@@ -5,7 +5,8 @@
 #include <string>
 
 #include "core/application/config/runtime_app_types.h"
-#include "core/application/runtime/runtime_command_service.h"
+#include "core/application/runtime/runtime_command_result.h"
+#include "core/application/runtime/runtime_config_update.h"
 
 namespace SmartDrone::Core::Application {
 
@@ -21,7 +22,6 @@ class RuntimeConfigService {
     CommandResult ApplyConfig(const ConfigUpdate &update, const UnifiedConfig &currentConfig);
 
   private:
-    static RemoteRuntimeConfig BuildRemoteConfig(const UnifiedConfig &currentConfig);
     std::shared_ptr<const UnifiedConfig> LoadConfig() const;
     bool ReplaceConfig(std::shared_ptr<const UnifiedConfig> &expected,
                        std::shared_ptr<const UnifiedConfig> next);

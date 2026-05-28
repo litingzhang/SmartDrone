@@ -14,7 +14,7 @@ class ISlamSessionTelemetryPort;
 namespace SmartDrone::Core::Application {
 
 struct ApplicationRuntimeFactories;
-struct LivePoseState;
+class LivePoseState;
 struct LiveRuntimeTuning;
 struct UnifiedConfig;
 

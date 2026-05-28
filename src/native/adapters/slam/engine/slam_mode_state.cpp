@@ -22,11 +22,11 @@ void SyncLegacyStereoCalibrationFields(SlamModeSharedState &state)
 {
     const StereoCalibration &calibration = state.m_stereoCalibration;
     state.m_lkCalibrationLoaded = calibration.loaded;
-    state.m_lkK1 = calibration.left.K;
-    state.m_lkK2 = calibration.right.K;
-    state.m_lkD1 = calibration.left.D;
-    state.m_lkD2 = calibration.right.D;
-    state.m_lkTc1c2 = calibration.T_c1_c2;
+    state.m_lkK1 = calibration.left.cameraMatrix;
+    state.m_lkK2 = calibration.right.cameraMatrix;
+    state.m_lkD1 = calibration.left.distCoeffs;
+    state.m_lkD2 = calibration.right.distCoeffs;
+    state.m_lkTc1c2 = calibration.rightToLeftTransform;
     state.m_lkFx = calibration.left.fx;
     state.m_lkFy = calibration.left.fy;
     state.m_lkCx = calibration.left.cx;

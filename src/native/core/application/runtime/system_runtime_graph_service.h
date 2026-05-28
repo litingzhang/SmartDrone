@@ -6,8 +6,9 @@
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/epg_redeploy_coordinator.h"
 #include "core/application/runtime/runtime_aliases.h"
+#include "core/application/runtime/runtime_provider_metadata.h"
 #include "core/application/runtime/system_runtime_step_services.h"
-#include "core/application/runtime/udp_command_runtime.h"
+#include "core/application/runtime/udp_command_runtime_config.h"
 
 namespace SmartDrone::Core::Application {
 
@@ -22,9 +23,7 @@ struct SystemRuntimeGraphConfig {
     std::function<void(EpgRedeployCoordinator &)> stepEpgRedeploy;
     std::shared_ptr<EpgRedeployCoordinator> redeployCoordinator;
     UdpCommandRuntimeConfig commandRuntime;
-    BuildCapabilitiesPayloadFn buildCapabilitiesPayload;
-    BuildConfigPayloadFn buildConfigPayload;
-    PeerToIpStringFn peerToIpString;
+    CameraRuntimeProviderMetadata cameraProvider;
 };
 
 class SystemRuntimeGraph final {

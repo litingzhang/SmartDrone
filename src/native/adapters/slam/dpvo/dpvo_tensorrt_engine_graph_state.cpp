@@ -42,7 +42,7 @@ DpvoFrameState DpvoGraphState::CreateFrameState(
     DpvoFrameState frame{};
     frame.frameId = frameId;
     frame.timestampNs = timestampNs;
-    frame.Tcw = initialPose;
+    frame.tcw = initialPose;
     frame.imageWidth = gray.cols;
     frame.imageHeight = gray.rows;
     LoadFrameFmap(&frame, patchRun);

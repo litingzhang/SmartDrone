@@ -19,8 +19,8 @@ struct StereoCameraIntrinsics {
     float fy{0.0f};
     float cx{0.0f};
     float cy{0.0f};
-    cv::Mat K;
-    cv::Mat D;
+    cv::Mat cameraMatrix;
+    cv::Mat distCoeffs;
 };
 
 struct StereoRectification {
@@ -34,7 +34,7 @@ struct StereoRectification {
 struct StereoCalibration {
     StereoCameraIntrinsics left;
     StereoCameraIntrinsics right;
-    cv::Mat T_c1_c2;
+    cv::Mat rightToLeftTransform;
     float baselineMeters{0.0f};
     bool loaded{false};
     mutable StereoRectification rectification;

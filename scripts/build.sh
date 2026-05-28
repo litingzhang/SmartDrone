@@ -383,6 +383,16 @@ copy_artifact() {
     cp -f "$src" "$dst"
 }
 
+copy_openvins_configs() {
+    local dst_dir="$1"
+    if [ ! -d "$REPO_ROOT/config/openvins" ]; then
+        return
+    fi
+    rm -rf "$dst_dir"
+    mkdir -p "$dst_dir"
+    cp -f "$REPO_ROOT"/config/openvins/*.yaml "$dst_dir/" 2>/dev/null || true
+}
+
 ensure_orb_vocabulary() {
     if [ -f "$ORB_VOCAB_TXT" ]; then
         return 0
@@ -395,8 +405,14 @@ ensure_orb_vocabulary() {
 }
 
 sync_native_artifacts() {
-    local native_bin="$BUILD_DIR/src/native/smart_drone"
-    if [ -f "$native_bin" ]; then
+    local native_bin=""
+    for candidate in "$BUILD_DIR/smart_drone" "$BUILD_DIR/src/native/smart_drone"; do
+        if [ -f "$candidate" ]; then
+            native_bin="$candidate"
+            break
+        fi
+    done
+    if [ -n "$native_bin" ]; then
         copy_artifact "$native_bin" "$NATIVE_ARTIFACTS_DIR/bin/smart_drone"
     fi
 
@@ -410,11 +426,7 @@ sync_native_artifacts() {
             copy_artifact "$REPO_ROOT/config/$cfg" "$config_dir/$cfg"
         fi
     done
-    if [ -d "$REPO_ROOT/config/openvins" ]; then
-        rm -rf "$config_dir/openvins"
-        mkdir -p "$config_dir/openvins"
-        cp -f "$REPO_ROOT"/config/openvins/*.yaml "$config_dir/openvins/" 2>/dev/null || true
-    fi
+    copy_openvins_configs "$config_dir/openvins"
     if [ -d "$REPO_ROOT/config/runtime_graph" ]; then
         rm -rf "$config_dir/runtime_graph"
         mkdir -p "$config_dir/runtime_graph"
@@ -602,6 +614,7 @@ if [ "$BUILD_REPLAY" -eq 1 ]; then
         copy_artifact "$REPO_ROOT/config/epg/epg_topology.dot" \
             "$REPLAY_ARTIFACTS_DIR/config/epg/epg_topology.dot"
     fi
+    copy_openvins_configs "$REPLAY_ARTIFACTS_DIR/config/openvins"
     if [ "$ENABLE_ORB_SLAM3" = "ON" ] && [ "$JETSON_ORIN_NX" -eq 1 ] && [ -f "$REPLAY_BUILD_DIR/orb_slam3/lib/libORB_SLAM3.so" ]; then
         copy_artifact "$REPLAY_BUILD_DIR/orb_slam3/lib/libORB_SLAM3.so" \
             "$NATIVE_ARTIFACTS_DIR/lib/libORB_SLAM3.so"

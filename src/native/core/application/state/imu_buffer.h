@@ -40,6 +40,6 @@ class ImuBuffer final : public SmartDrone::Core::Ports::IImuWindowSource {
                                      int64_t rangeEndNs, size_t cursorIdx,
                                      std::vector<SmartDrone::Core::Ports::ImuReading> &out);
 
-    struct Impl;
+    class Impl;
     std::unique_ptr<Impl> m_impl;
 };

@@ -8,7 +8,7 @@
 namespace SmartDrone::Core::Application {
 
 struct ApplicationRuntimeFactories;
-struct LivePoseState;
+class LivePoseState;
 struct UnifiedConfig;
 
 struct CalibSessionGraphRuntimeConfig {

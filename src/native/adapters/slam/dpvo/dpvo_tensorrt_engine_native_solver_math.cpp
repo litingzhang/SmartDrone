@@ -159,19 +159,19 @@ float DpvoNativeSolver::SampleFeatureBilinear(
 void DpvoNativeSolver::PredictNewestPose(std::vector<DpvoFrameState> &frames)
 {
     if (frames.size() <= 1U) {
-        frames.back().Tcw = Sophus::SE3f();
+        frames.back().tcw = Sophus::SE3f();
         return;
     }
     if (frames.size() == 2U) {
-        frames.back().Tcw = frames[frames.size() - 2U].Tcw;
+        frames.back().tcw = frames[frames.size() - 2U].tcw;
         return;
     }
-    const Sophus::SE3f &p1 = frames[frames.size() - 2U].Tcw;
-    const Sophus::SE3f &p2 = frames[frames.size() - 3U].Tcw;
+    const Sophus::SE3f &p1 = frames[frames.size() - 2U].tcw;
+    const Sophus::SE3f &p2 = frames[frames.size() - 3U].tcw;
     const Sophus::SE3f delta = p1 * p2.inverse();
     Eigen::Matrix<float, 6, 1> xi = delta.log();
     xi *= 0.5f;
-    frames.back().Tcw = Sophus::SE3f::exp(xi) * p1;
+    frames.back().tcw = Sophus::SE3f::exp(xi) * p1;
 }
 
 bool DpvoNativeSolver::AcceptPoseStep(const Sophus::SE3f &reference,
@@ -245,7 +245,7 @@ void DpvoNativeSolver::ReprojectPatch(const std::vector<DpvoFrameState> &frames,
     }
     const DpvoPatchState &patch =
         source.patches[static_cast<size_t>(patchLocal)];
-    const Sophus::SE3f Tji = target.Tcw * source.Tcw.inverse();
+    const Sophus::SE3f Tji = target.tcw * source.tcw.inverse();
     const Eigen::Matrix3f R = Tji.so3().matrix();
     const Eigen::Vector3f t = Tji.translation();
     for (int py = 0; py < PATCH_SIZE; ++py) {

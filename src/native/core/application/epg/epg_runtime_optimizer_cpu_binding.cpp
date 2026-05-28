@@ -1,5 +1,6 @@
 #include "core/application/epg/epg_runtime_optimizer_cpu_binding.h"
 
+#include <set>
 #include <string>
 
 #include "common/environment.h"
@@ -33,6 +34,14 @@ bool ShouldApplyCpuBindingAffinity(const Epg::TaskConfig &task)
            task.scheduling.resource.rfind("cpu", 0) == 0;
 }
 
+bool CanApplyCpuBindingAffinity(
+    const Epg::TaskConfig &task,
+    const std::set<std::string> &preserveAccuracyTasks)
+{
+    return ShouldApplyCpuBindingAffinity(task) &&
+           preserveAccuracyTasks.find(task.name) == preserveAccuracyTasks.end();
+}
+
 void RefreshTopologyDecisionReason(Epg::SolverReportDecision &decision)
 {
     const auto stats = Solver::TaskMetricsFromDecision(decision);
@@ -58,13 +67,14 @@ void RefreshTopologyDecisionReason(Epg::SolverReportDecision &decision)
 void ApplyCpuBindingEntry(Epg::TaskConfig &task,
                           Epg::SolverReportDecision &decision,
                           const Solver::CpuBindingScheduleEntry &entry,
-                          const Solver::CpuBindingSchedule &schedule)
+                          const Solver::CpuBindingSchedule &schedule,
+                          const std::set<std::string> &preserveAccuracyTasks)
 {
     decision.cpuBindingAffinity = entry.cpuAffinity;
     decision.cpuBindingStartMs = entry.startMs;
     decision.cpuBindingFinishMs = entry.finishMs;
     decision.cpuBindingMakespanMs = schedule.makespanMs;
-    if (ShouldApplyCpuBindingAffinity(task)) {
+    if (CanApplyCpuBindingAffinity(task, preserveAccuracyTasks)) {
         task.scheduling.cpuAffinity = entry.cpuAffinity;
         decision.cpuAffinityAfter = entry.cpuAffinity;
     }
@@ -76,7 +86,8 @@ void ApplyCpuBindingEntry(Epg::TaskConfig &task,
 void ApplyEpgOptimizerCpuBindingSchedule(
     Epg::GraphConfig &config,
     std::vector<Epg::SolverReportDecision> &decisions,
-    const EpgSolverPrimitives::CpuBindingSchedule &schedule)
+    const EpgSolverPrimitives::CpuBindingSchedule &schedule,
+    const std::set<std::string> &preserveAccuracyTasks)
 {
     for (auto &task : config.tasks) {
         const auto *entry = FindCpuBindingEntry(schedule, task.name);
@@ -88,7 +99,8 @@ void ApplyEpgOptimizerCpuBindingSchedule(
         if (!decision) {
             continue;
         }
-        ApplyCpuBindingEntry(task, *decision, *entry, schedule);
+        ApplyCpuBindingEntry(task, *decision, *entry, schedule,
+                             preserveAccuracyTasks);
     }
 }
 

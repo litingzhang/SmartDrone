@@ -2,6 +2,9 @@
 
 verbosity: "INFO"
 
+smart_drone_init_min_frame_id: 420
+smart_drone_init_min_timestamp_sec: 0.0
+
 use_fej: true
 integration: "rk4"
 use_stereo: true

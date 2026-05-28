@@ -152,6 +152,170 @@ NATIVE_LOCK_PATTERNS = {
     "pthread_mutex": "native runtime locks are not allowed",
 }
 
+NATIVE_RUNTIME_MAIN_FILE = "src/native/main.cpp"
+RUNTIME_HOST_LIFECYCLE_FILE = "src/native/app/bootstrap/runtime_host.cpp"
+RUNTIME_HOST_LIFECYCLE_FUNCTION = "RunSystemGraphUntilStopped"
+RUNTIME_HOST_ALLOWED_LOOP = (
+    "while (!SmartDrone::Common::RuntimeStopRequested())")
+RUNTIME_HOST_BUSINESS_STEP_PATTERNS = {
+    "PollRxOnce(": "vehicle telemetry polling must run in the system EPG graph",
+    "StepSetpointStream(": "setpoint streaming must run in the system EPG graph",
+    "StepManualControl(": "manual control must run in the system EPG graph",
+    "StepForceRestart(": "restart checks must run in the system EPG graph",
+    "OnSessionSupervisorGraphTick(":
+        "session supervision must run in the system EPG graph",
+    "StepEpgRedeploy(": "session redeploy must run in the system EPG graph",
+    "StepReceive(": "UDP receive must run in the system EPG graph",
+    "StepHeartbeat": "UDP heartbeat must run in the system EPG graph",
+    "StepStateTx(": "UDP state TX must run in the system EPG graph",
+    "StepPointCloudTx(": "UDP point cloud TX must run in the system EPG graph",
+}
+RUNTIME_HOST_ADAPTER_BOUNDARY_PATTERNS = {
+    '#include "common/tlv/udp_server.h"':
+        "runtime host must not depend on UDP wire helpers",
+    '#include "core/application/runtime/payload_builders.h"':
+        "runtime host must not build UDP command payloads",
+    "RuntimeGateSnapshot":
+        "runtime host must use live-pose runtime adapter helpers",
+    "UdpRuntimeStateSnapshot":
+        "runtime host must use live-pose runtime adapter helpers",
+    "UdpPeerToIpString(":
+        "runtime host must not format UDP peers",
+    "ReadSnapshot(":
+        "runtime host must not read LivePoseState snapshots directly",
+    "UpdatePeer(":
+        "runtime host must not write command peer state directly",
+    "SetRuntimeMode(":
+        "runtime host must not write runtime mode state directly",
+    "SetVehicleFlightState(":
+        "runtime host must not write PX4 flight state directly",
+}
+
+SYSTEM_RUNTIME_GRAPH_CONFIG_FILE = (
+    "src/native/core/application/runtime/system_runtime_graph_service.h")
+SYSTEM_RUNTIME_GRAPH_CONFIG_BOUNDARY_PATTERNS = {
+    '#include "core/application/runtime/udp_command_runtime.h"':
+        "system graph config must not depend on concrete UDP command runtime",
+    "UdpCommandRuntime ":
+        "system graph config must not expose concrete UDP command runtime",
+    "std::shared_ptr<UdpCommandRuntime>":
+        "system graph config must not expose concrete UDP command runtime",
+    "BuildCapabilitiesPayloadFn":
+        "system graph config must accept provider metadata, not UDP payload callbacks",
+    "BuildConfigPayloadFn":
+        "system graph config must accept provider metadata, not UDP payload callbacks",
+    "PeerToIpStringFn":
+        "system graph config must not expose UDP peer formatting callbacks",
+}
+
+RUNTIME_CONFIG_FRAME_CODEC_FILES = (
+    "src/native/core/application/runtime/runtime_config_frame_codec.h",
+    "src/native/core/application/runtime/runtime_config_frame_codec.cpp",
+)
+RUNTIME_CONFIG_FRAME_CODEC_BOUNDARY_PATTERNS = {
+    '#include "common/tlv/udp_server.h"':
+        "runtime config frame codec must not depend on UDP peer types",
+    '#include "core/application/runtime/udp_command_runtime.h"':
+        "runtime config frame codec must not depend on UDP command runtime",
+    '#include "core/application/runtime/runtime_command_service.h"':
+        "runtime config frame codec must not depend on command services",
+    '#include "core/application/config/config_registry.h"':
+        "runtime config frame codec must not own config key-to-update mapping",
+    '#include "core/application/runtime/runtime_config_update.h"':
+        "runtime config frame codec must not expose command config updates",
+    "UdpPeer":
+        "runtime config frame codec must receive peer data as config values",
+    "PeerToIpStringFn":
+        "runtime config frame codec must not depend on UDP peer formatting callbacks",
+    "RuntimeCommandService":
+        "runtime config frame codec must not depend on command dispatch",
+    "CommandResult":
+        "runtime config frame codec must not depend on command results",
+    "ConfigRegistry::":
+        "runtime config frame codec must not own config key-to-update mapping",
+    "ConfigUpdate":
+        "runtime config frame codec must not expose command config updates",
+    "BuildRuntimeConfigUpdate(":
+        "runtime config frame codec must not own config key-to-update mapping",
+    "ApplyPeerIp(":
+        "runtime config frame codec must not combine peer formatting with config parsing",
+}
+
+RUNTIME_CONFIG_SERVICE_FILES = (
+    "src/native/core/application/runtime/runtime_config_service.h",
+    "src/native/core/application/runtime/runtime_config_service.cpp",
+)
+RUNTIME_CONFIG_SERVICE_BOUNDARY_PATTERNS = {
+    '#include "core/application/runtime/runtime_command_service.h"':
+        "runtime config service must not depend on command dispatch",
+    '#include "core/application/config/config_registry.h"':
+        "runtime config service must not own config key-to-field mapping",
+    '#include "core/application/runtime/runtime_config_value_assignments.h"':
+        "runtime config service must not assign individual config values",
+    '#include "core/application/session/slam/slam_settings_loader.h"':
+        "runtime config service must not apply calibrated runtime settings directly",
+    "RuntimeCommandService":
+        "runtime config service must not depend on command dispatch",
+    "IRuntimeCommandTarget":
+        "runtime config service must not depend on command targets",
+    "RuntimeAction":
+        "runtime config service must not depend on runtime actions",
+    "ConfigRegistry::":
+        "runtime config service must not own config key-to-field mapping",
+    "AssignStrictInt(":
+        "runtime config service must not assign individual config values",
+    "AssignNumericInt(":
+        "runtime config service must not assign individual config values",
+    "AssignFloat(":
+        "runtime config service must not assign individual config values",
+    "AssignBool(":
+        "runtime config service must not assign individual config values",
+    "AssignString(":
+        "runtime config service must not assign individual config values",
+    "LoadStereoBodyExtrinsics(":
+        "runtime config service must not apply calibrated runtime settings directly",
+    "ResolveSettingsForSlamBackend(":
+        "runtime config service must not resolve backend settings directly",
+    "RuntimeRestartNeeded(":
+        "runtime config service must not own restart diff details",
+    "currentConfig.app.camera":
+        "runtime config service must not project current config fields directly",
+    "currentConfig.app.runtime":
+        "runtime config service must not project current config fields directly",
+    "currentConfig.app.udp":
+        "runtime config service must not project current config fields directly",
+}
+
+SYSTEM_RUNTIME_TASK_BOUNDARY_FILES = (
+    "src/native/core/application/runtime/system_runtime_tasks.h",
+    "src/native/core/application/runtime/system_runtime_task_factory.h",
+)
+SYSTEM_RUNTIME_TASK_BOUNDARY_PATTERNS = {
+    '#include "core/application/runtime/udp_command_runtime.h"':
+        "system runtime tasks must depend on UDP phase interface",
+    "std::shared_ptr<UdpCommandRuntime>":
+        "system runtime tasks must depend on UDP phase interface",
+    "UdpCommandRuntime *":
+        "system runtime tasks must depend on UDP phase interface",
+}
+
+UDP_COMMAND_RUNTIME_HEADER_FILE = (
+    "src/native/core/application/runtime/udp_command_runtime.h")
+UDP_COMMAND_RUNTIME_HEADER_BOUNDARY_PATTERNS = {
+    '#include "common/tlv/udp_server.h"':
+        "UDP command runtime class header must not expose UDP wire helpers",
+    '#include "common/tlv/runtime_command_hooks.h"':
+        "UDP command runtime class header must not expose command hook details",
+    "struct UdpCommandRuntimeConfig":
+        "UDP command runtime config must live in its own header",
+    "struct UdpRuntimeStateSnapshot":
+        "UDP runtime state snapshot must live in config/value header",
+    "BuildCapabilitiesPayloadFn":
+        "UDP command runtime callbacks must live in config/value header",
+    "PeerToIpStringFn":
+        "UDP command runtime callbacks must live in config/value header",
+}
+
 
 def relative_path(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
@@ -417,6 +581,157 @@ def native_lock_violations(root: Path) -> list[str]:
     return violations
 
 
+def native_runtime_entrypoint_violations(root: Path) -> list[str]:
+    violations: list[str] = []
+    main_files: list[str] = []
+    for path in source_files(root, "src/native"):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if " main(" not in text and " main (" not in text:
+            continue
+        main_files.append(relative_path(path, root))
+    if main_files != [NATIVE_RUNTIME_MAIN_FILE]:
+        violations.append(
+            "native runtime must have exactly one production main entrypoint: " +
+            ", ".join(main_files))
+        return violations
+
+    text = (root / NATIVE_RUNTIME_MAIN_FILE).read_text(
+        encoding="utf-8", errors="ignore")
+    if "RuntimeHost runtimeHost" not in text or "runtimeHost.Run(" not in text:
+        violations.append(
+            "native runtime main must delegate execution to RuntimeHost/EPG")
+    return violations
+
+
+def extract_function_body(text: str, function_name: str) -> str:
+    name_index = text.find(function_name)
+    if name_index < 0:
+        return ""
+    brace_index = text.find("{", name_index)
+    if brace_index < 0:
+        return ""
+    depth = 0
+    for index in range(brace_index, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[brace_index:index + 1]
+    return ""
+
+
+def runtime_host_lifecycle_loop_violations(root: Path) -> list[str]:
+    path = root / RUNTIME_HOST_LIFECYCLE_FILE
+    if not path.exists():
+        return [f"runtime host lifecycle file missing: {RUNTIME_HOST_LIFECYCLE_FILE}"]
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    body = extract_function_body(text, RUNTIME_HOST_LIFECYCLE_FUNCTION)
+    if not body:
+        return [
+            "runtime host lifecycle loop must be isolated in " +
+            RUNTIME_HOST_LIFECYCLE_FUNCTION]
+    loop_count = body.count("while (")
+    if loop_count != 1 or RUNTIME_HOST_ALLOWED_LOOP not in body:
+        return [
+            "runtime host may only keep the stop/redeploy lifecycle wait loop"]
+    violations: list[str] = []
+    for pattern, message in RUNTIME_HOST_BUSINESS_STEP_PATTERNS.items():
+        if pattern in body:
+            violations.append(f"{message}: {RUNTIME_HOST_LIFECYCLE_FILE}")
+    return violations
+
+
+def runtime_host_adapter_boundary_violations(root: Path) -> list[str]:
+    path = root / RUNTIME_HOST_LIFECYCLE_FILE
+    if not path.exists():
+        return [f"runtime host file missing: {RUNTIME_HOST_LIFECYCLE_FILE}"]
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    violations: list[str] = []
+    for pattern, message in RUNTIME_HOST_ADAPTER_BOUNDARY_PATTERNS.items():
+        index = text.find(pattern)
+        if index >= 0:
+            line = text.count("\n", 0, index) + 1
+            violations.append(f"{message}: {RUNTIME_HOST_LIFECYCLE_FILE}:{line}")
+    return violations
+
+
+def system_runtime_graph_config_boundary_violations(root: Path) -> list[str]:
+    path = root / SYSTEM_RUNTIME_GRAPH_CONFIG_FILE
+    if not path.exists():
+        return [f"system runtime graph config file missing: {SYSTEM_RUNTIME_GRAPH_CONFIG_FILE}"]
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    violations: list[str] = []
+    for pattern, message in SYSTEM_RUNTIME_GRAPH_CONFIG_BOUNDARY_PATTERNS.items():
+        index = text.find(pattern)
+        if index >= 0:
+            line = text.count("\n", 0, index) + 1
+            violations.append(f"{message}: {SYSTEM_RUNTIME_GRAPH_CONFIG_FILE}:{line}")
+    return violations
+
+
+def runtime_config_frame_codec_boundary_violations(root: Path) -> list[str]:
+    violations: list[str] = []
+    for rel in RUNTIME_CONFIG_FRAME_CODEC_FILES:
+        path = root / rel
+        if not path.exists():
+            violations.append(f"runtime config frame codec file missing: {rel}")
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for pattern, message in RUNTIME_CONFIG_FRAME_CODEC_BOUNDARY_PATTERNS.items():
+            index = text.find(pattern)
+            if index >= 0:
+                line = text.count("\n", 0, index) + 1
+                violations.append(f"{message}: {rel}:{line}")
+    return violations
+
+
+def runtime_config_service_boundary_violations(root: Path) -> list[str]:
+    violations: list[str] = []
+    for rel in RUNTIME_CONFIG_SERVICE_FILES:
+        path = root / rel
+        if not path.exists():
+            violations.append(f"runtime config service file missing: {rel}")
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for pattern, message in RUNTIME_CONFIG_SERVICE_BOUNDARY_PATTERNS.items():
+            index = text.find(pattern)
+            if index >= 0:
+                line = text.count("\n", 0, index) + 1
+                violations.append(f"{message}: {rel}:{line}")
+    return violations
+
+
+def system_runtime_task_boundary_violations(root: Path) -> list[str]:
+    violations: list[str] = []
+    for rel in SYSTEM_RUNTIME_TASK_BOUNDARY_FILES:
+        path = root / rel
+        if not path.exists():
+            violations.append(f"system runtime task boundary file missing: {rel}")
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for pattern, message in SYSTEM_RUNTIME_TASK_BOUNDARY_PATTERNS.items():
+            index = text.find(pattern)
+            if index >= 0:
+                line = text.count("\n", 0, index) + 1
+                violations.append(f"{message}: {rel}:{line}")
+    return violations
+
+
+def udp_command_runtime_header_boundary_violations(root: Path) -> list[str]:
+    path = root / UDP_COMMAND_RUNTIME_HEADER_FILE
+    if not path.exists():
+        return [f"UDP command runtime header missing: {UDP_COMMAND_RUNTIME_HEADER_FILE}"]
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    violations: list[str] = []
+    for pattern, message in UDP_COMMAND_RUNTIME_HEADER_BOUNDARY_PATTERNS.items():
+        index = text.find(pattern)
+        if index >= 0:
+            line = text.count("\n", 0, index) + 1
+            violations.append(f"{message}: {UDP_COMMAND_RUNTIME_HEADER_FILE}:{line}")
+    return violations
+
+
 def main() -> int:
     root = Path(sys.argv[1]).resolve()
     violations = []
@@ -438,6 +753,14 @@ def main() -> int:
     violations.extend(replay_backend_bypass_violations(root))
     violations.extend(non_epg_thread_violations(root))
     violations.extend(native_lock_violations(root))
+    violations.extend(native_runtime_entrypoint_violations(root))
+    violations.extend(runtime_host_lifecycle_loop_violations(root))
+    violations.extend(runtime_host_adapter_boundary_violations(root))
+    violations.extend(system_runtime_graph_config_boundary_violations(root))
+    violations.extend(runtime_config_frame_codec_boundary_violations(root))
+    violations.extend(runtime_config_service_boundary_violations(root))
+    violations.extend(system_runtime_task_boundary_violations(root))
+    violations.extend(udp_command_runtime_header_boundary_violations(root))
     if violations:
         sys.stderr.write("\n".join(violations) + "\n")
         return 1

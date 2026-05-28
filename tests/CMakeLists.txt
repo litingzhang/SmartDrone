@@ -80,14 +80,30 @@ if(ENABLE_UNIT_TESTS)
     application/frame_timing_tracker_test.cpp
     application/goal_cache_test.cpp
     application/imu_buffer_test.cpp
+    application/live_pose_runtime_snapshots_test.cpp
     application/live_pose_state_test.cpp
+    application/runtime_config_modules_test.cpp
     application/runtime_session_supervisor_test.cpp
+    ../src/native/common/environment.cpp
     ../src/native/common/numeric_parse.cpp
     ../src/native/common/tlv/goal_cache.cpp
+    ../src/native/core/application/config/app_args.cpp
+    ../src/native/core/application/config/orb_acceleration_config.cpp
+    ../src/native/core/application/config/slam_backend_availability.cpp
     ../src/native/core/application/session/calib/calib_save_pacing_port.cpp
     ../src/native/core/application/session/calib/calib_storage_helpers.cpp
+    ../src/native/core/application/session/slam/slam_settings_loader.cpp
+    ../src/native/core/application/runtime/live_pose_runtime_snapshots.cpp
     ../src/native/core/application/runtime/mode_manager.cpp
+    ../src/native/core/application/runtime/runtime_config_application.cpp
+    ../src/native/core/application/runtime/runtime_config_message.cpp
+    ../src/native/core/application/runtime/runtime_config_projection.cpp
+    ../src/native/core/application/runtime/runtime_config_validation.cpp
+    ../src/native/core/application/runtime/runtime_config_update_builder.cpp
+    ../src/native/core/application/runtime/runtime_config_value_applier.cpp
+    ../src/native/core/application/runtime/runtime_config_value_assignments.cpp
     ../src/native/core/application/runtime/runtime_session_supervisor.cpp
+    ../src/native/core/domain/runtime_mode.cpp
     ../src/native/core/application/state/frame_timing_tracker.cpp
     ../src/native/core/application/state/imu_buffer.cpp
     ../src/native/core/application/state/live_pose_state.cpp
@@ -95,12 +111,20 @@ if(ENABLE_UNIT_TESTS)
 
   target_include_directories(application_state_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../src/native"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/Sophus"
   )
 
   target_link_libraries(application_state_tests PRIVATE
     GTest::gtest_main
     ${OpenCV_LIBS}
   )
+
+  if(TARGET Eigen3::Eigen)
+    target_link_libraries(application_state_tests PRIVATE Eigen3::Eigen)
+  else()
+    target_include_directories(application_state_tests SYSTEM PRIVATE
+      "/usr/include/eigen3")
+  endif()
 
   add_test(NAME ApplicationStateTests COMMAND application_state_tests)
 
@@ -134,6 +158,18 @@ if(ENABLE_OFFLINE_REPLAY)
   find_package(Python3 COMPONENTS Interpreter QUIET)
 
   set(EUROC_TEST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/euroc")
+  set(SMART_DRONE_REPLAY_BACKEND_AVAILABILITY_SOURCE
+    ../src/native/core/application/config/slam_backend_availability.cpp)
+  if(SMART_DRONE_ENABLE_ORB_SLAM3 AND SMART_DRONE_ENABLE_OPENVINS)
+    set(SMART_DRONE_REPLAY_BACKEND_AVAILABILITY_SOURCE
+      ../src/native/core/application/config/slam_backend_availability_orb_openvins.cpp)
+  elseif(SMART_DRONE_ENABLE_ORB_SLAM3)
+    set(SMART_DRONE_REPLAY_BACKEND_AVAILABILITY_SOURCE
+      ../src/native/core/application/config/slam_backend_availability_orb.cpp)
+  elseif(SMART_DRONE_ENABLE_OPENVINS)
+    set(SMART_DRONE_REPLAY_BACKEND_AVAILABILITY_SOURCE
+      ../src/native/core/application/config/slam_backend_availability_openvins.cpp)
+  endif()
 
   add_executable(smart_drone_offline_replay
     euroc/offline_replay_main.cpp
@@ -194,7 +230,7 @@ if(ENABLE_OFFLINE_REPLAY)
     ../src/native/core/ports/visual_tracking.cpp
     ../src/native/core/application/config/app_args.cpp
     ../src/native/core/application/config/orb_acceleration_config.cpp
-    ../src/native/core/application/config/slam_backend_availability.cpp
+    ${SMART_DRONE_REPLAY_BACKEND_AVAILABILITY_SOURCE}
     ../src/native/core/application/epg/epg_discrete_global_solver.cpp
     ../src/native/core/application/epg/epg_graph_runtime.cpp
     ../src/native/core/application/epg/epg_cpu_binding_solver_exact.cpp
@@ -290,11 +326,9 @@ if(ENABLE_OFFLINE_REPLAY)
       ../src/native/adapters/slam/orb/orb_visual_components.cpp
       ../src/native/adapters/slam/orb/orb_slam3_runtime.cpp
       ../src/native/adapters/slam/orb/orb_slam3_backend.cpp
-      ../src/native/core/application/config/slam_backend_availability_orb.cpp
     )
     set_source_files_properties(
       ../src/native/adapters/slam/engine/slam_output_optional.cpp
-      ../src/native/core/application/config/slam_backend_availability.cpp
       PROPERTIES HEADER_FILE_ONLY ON)
     configure_orb_target(smart_drone_offline_replay)
   endif()
@@ -310,7 +344,6 @@ if(ENABLE_OFFLINE_REPLAY)
       ${SMART_DRONE_OPENVINS_CORE_SOURCES}
       ${SMART_DRONE_OPENVINS_INIT_SOURCES}
       ${SMART_DRONE_OPENVINS_MSCKF_SOURCES}
-      ../src/native/core/application/config/slam_backend_availability_openvins.cpp
     )
     if(SMART_DRONE_OPENVINS_CERES_AVAILABLE)
       target_sources(smart_drone_offline_replay PRIVATE
@@ -323,9 +356,6 @@ if(ENABLE_OFFLINE_REPLAY)
         ../src/native/adapters/slam/openvins/openvins_dynamic_init_disabled.cpp
       )
     endif()
-    set_source_files_properties(
-      ../src/native/core/application/config/slam_backend_availability.cpp
-      PROPERTIES HEADER_FILE_ONLY ON)
     target_include_directories(smart_drone_offline_replay PRIVATE
       "${SMART_DRONE_OPENVINS_ROOT}/ov_core/src"
       "${SMART_DRONE_OPENVINS_ROOT}/ov_init/src"

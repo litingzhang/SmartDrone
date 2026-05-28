@@ -26,7 +26,7 @@ struct DpvoPatchState {
 struct DpvoFrameState {
     uint64_t frameId{0};
     int64_t timestampNs{0};
-    Sophus::SE3f Tcw;
+    Sophus::SE3f tcw;
     std::vector<DpvoPatchState> patches;
     std::vector<float> fmap;
     std::vector<float> fmapLevel4;

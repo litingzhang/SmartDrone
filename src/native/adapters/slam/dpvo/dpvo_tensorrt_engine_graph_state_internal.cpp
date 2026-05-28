@@ -178,7 +178,7 @@ std::array<float, 2> DpvoGraphState::ProjectPatchCenter(
         return {patch.x, patch.y};
     }
     const Sophus::SE3f Tji =
-        request.target.Tcw * request.source.Tcw.inverse();
+        request.target.tcw * request.source.tcw.inverse();
     const Eigen::Matrix3f R =
         request.useOverrideR ? request.overrideR : Tji.so3().matrix();
     const Eigen::Vector3f t = Tji.translation();

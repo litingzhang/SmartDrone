@@ -7,8 +7,7 @@
 
 namespace Epg {
 namespace {
-class JsonValue {
-  public:
+struct JsonValue {
     enum class Kind {
         Null,
         Bool,
