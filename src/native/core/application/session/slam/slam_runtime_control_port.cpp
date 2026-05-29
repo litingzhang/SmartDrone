@@ -67,4 +67,11 @@ void SlamRuntimeControlPort::SetStereoVoPerFrameAcceleration(
     m_control->SetStereoVoPerFrameAcceleration(acceleration);
 }
 
+bool SlamRuntimeControlPort::ShutdownAndSaveTrajectoryEuRoC(
+    const std::string &path)
+{
+    return m_control != nullptr &&
+           m_control->ShutdownAndSaveTrajectoryEuRoC(path);
+}
+
 } // namespace SmartDrone::Core::Application

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include "core/application/session/epg/slam_session_task_results.h"
 
@@ -27,6 +28,7 @@ struct SlamSessionRuntimeServiceConfig {
     LivePoseState &livePose;
     std::atomic<bool> &runningFlag;
     const ApplicationRuntimeFactories &factories;
+    std::string finalEurocTrajectory;
 };
 
 class SlamSessionRuntimeService final {
@@ -39,6 +41,7 @@ class SlamSessionRuntimeService final {
     bool Stopped() const;
     std::uint64_t SessionId() const;
     void Stop();
+    bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path);
 
     bool StepImuPoll();
     bool ImuReady() const;

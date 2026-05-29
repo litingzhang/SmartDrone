@@ -106,8 +106,8 @@ TEST(EventPipelineGraphDot, CompilesSlamSubgraphFromMaintainedTopology)
         "cluster_slam_session_graph",
         registry);
 
-    ASSERT_EQ(config.tasks.size(), 21u);
-    ASSERT_EQ(config.queues.size(), 35u);
+    ASSERT_EQ(config.tasks.size(), 16u);
+    ASSERT_EQ(config.queues.size(), 22u);
 
     EventPipelineGraph graph(registry);
     EXPECT_NO_THROW(graph.Configure(config));

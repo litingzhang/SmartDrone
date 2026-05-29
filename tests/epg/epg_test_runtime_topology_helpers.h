@@ -71,25 +71,17 @@ void ExpectSlamTrackingTopology(const Epg::GraphConfig &config)
         (std::vector<std::string>{
             "SlamImuGateTask_0_to_SlamAcquireTask_0"}));
 
-    const auto *route =
-        FindRuntimeTopologyTask(config, "SlamTrackingRouteTask");
-    ASSERT_NE(route, nullptr);
-    EXPECT_EQ(route->inputs.at(0),
-              "SlamAcquireTask_0_to_SlamTrackingRouteTask_0");
-    EXPECT_EQ(route->outputs.at(0),
-              "SlamTrackingRouteTask_0_to_SlamKltTrackingTask_0");
-    EXPECT_EQ(route->outputs.at(1),
-              "SlamTrackingRouteTask_1_to_SlamDpvoTrackingTask_0");
-    EXPECT_EQ(route->outputs.at(2),
-              "SlamTrackingRouteTask_2_to_SlamOrbTrackingTask_0");
-    EXPECT_EQ(route->outputs.at(3),
-              "SlamTrackingRouteTask_3_to_SlamOpenVinsTrackingTask_0");
-    EXPECT_EQ(route->outputs.at(4),
-              "SlamTrackingRouteTask_4_to_SlamVisualFeatureTrackingTask_0");
+    const auto *tracking =
+        FindRuntimeTopologyTask(config, "SlamTrackingTask");
+    ASSERT_NE(tracking, nullptr);
+    EXPECT_EQ(tracking->inputs.at(0),
+              "SlamAcquireTask_0_to_SlamTrackingTask_0");
+    EXPECT_EQ(tracking->outputs.at(0),
+              "SlamTrackingTask_0_to_SlamPosePostprocessTask_0");
     EXPECT_EQ(
-        route->trigger.queues,
+        tracking->trigger.queues,
         (std::vector<std::string>{
-            "SlamAcquireTask_0_to_SlamTrackingRouteTask_0"}));
+            "SlamAcquireTask_0_to_SlamTrackingTask_0"}));
 }
 
 void ExpectSlamOutputTopology(const Epg::GraphConfig &config)
@@ -98,15 +90,7 @@ void ExpectSlamOutputTopology(const Epg::GraphConfig &config)
         FindRuntimeTopologyTask(config, "SlamPosePostprocessTask");
     ASSERT_NE(posePostprocess, nullptr);
     EXPECT_EQ(posePostprocess->inputs.at(0),
-              "SlamKltTrackingTask_0_to_SlamPosePostprocessTask_0");
-    EXPECT_EQ(posePostprocess->inputs.at(1),
-              "SlamDpvoTrackingTask_0_to_SlamPosePostprocessTask_1");
-    EXPECT_EQ(posePostprocess->inputs.at(2),
-              "SlamOrbTrackingTask_0_to_SlamPosePostprocessTask_2");
-    EXPECT_EQ(posePostprocess->inputs.at(3),
-              "SlamOpenVinsTrackingTask_0_to_SlamPosePostprocessTask_3");
-    EXPECT_EQ(posePostprocess->inputs.at(4),
-              "SlamVisualFeatureTrackingTask_0_to_SlamPosePostprocessTask_4");
+              "SlamTrackingTask_0_to_SlamPosePostprocessTask_0");
 
     const auto *pointCloud =
         FindRuntimeTopologyTask(config, "SlamPointCloudTask");
@@ -148,17 +132,17 @@ void ExpectSlamMonitorTopology(const Epg::GraphConfig &config)
 {
     const auto *monitor = FindRuntimeTopologyTask(config, "SlamMonitorTask");
     ASSERT_NE(monitor, nullptr);
-    EXPECT_EQ(monitor->inputs.at(12),
-              "SlamUdpTask_1_to_SlamMonitorTask_12");
-    EXPECT_EQ(monitor->inputs.at(13),
-              "SlamPreviewTxTask_1_to_SlamMonitorTask_13");
+    EXPECT_EQ(monitor->inputs.at(8),
+              "SlamUdpTask_1_to_SlamMonitorTask_8");
+    EXPECT_EQ(monitor->inputs.at(9),
+              "SlamPreviewTxTask_1_to_SlamMonitorTask_9");
     EXPECT_NE(std::find(monitor->trigger.queues.begin(),
                         monitor->trigger.queues.end(),
-                        "SlamUdpTask_1_to_SlamMonitorTask_12"),
+                        "SlamUdpTask_1_to_SlamMonitorTask_8"),
               monitor->trigger.queues.end());
     EXPECT_NE(std::find(monitor->trigger.queues.begin(),
                         monitor->trigger.queues.end(),
-                        "SlamPreviewTxTask_1_to_SlamMonitorTask_13"),
+                        "SlamPreviewTxTask_1_to_SlamMonitorTask_9"),
               monitor->trigger.queues.end());
 }
 

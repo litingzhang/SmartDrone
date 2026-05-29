@@ -482,7 +482,7 @@ int RunEpgProfileReplay(const OfflineReplayOptions &opts)
         BuildEpgReplayFactories(dataset, progress);
     SmartDrone::Core::Application::SlamSessionGraphRuntime runtime({
         cfg, tuning, telemetry, posePublisher, stop, livePose, runningFlag,
-        factories});
+        factories, opts.finalEurocTrajectory.string()});
     if (!runtime.Start()) {
         return 1;
     }

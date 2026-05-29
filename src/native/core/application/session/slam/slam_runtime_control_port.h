@@ -24,6 +24,7 @@ class SlamRuntimeControlPort final {
     void SetVisualFeatureInputSizeLimit(int maxWidth, int maxHeight);
     void SetStereoVoLoopClosure(bool enabled, float scale, float relaxation);
     void SetStereoVoPerFrameAcceleration(const std::string &acceleration);
+    bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path);
 
   private:
     SmartDrone::Core::Ports::ISlamRuntimeControl *m_control{nullptr};

@@ -17,6 +17,7 @@ std::unique_ptr<ISessionGraphRuntime> CreateSessionGraphRuntime(const SessionGra
             config.livePose,
             config.runningFlag,
             config.factories,
+            {},
         });
     }
     if (config.mode == Domain::RuntimeMode::Calib) {

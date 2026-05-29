@@ -407,6 +407,11 @@ if(ENABLE_OFFLINE_REPLAY)
     if(SMART_DRONE_TENSORRT_AVAILABLE)
       set(SMART_DRONE_REPLAY_DPVO_SOURCE
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_trt.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_bindings.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_patchifier_runtime.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_update_preagg_runtime.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_update_postagg_runtime.cpp
+        ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_cuda_buffers.cpp
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_cuda_runtime.cpp
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_cuda_compute.cpp
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_graph_state.cpp
@@ -415,6 +420,15 @@ if(ENABLE_OFFLINE_REPLAY)
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_native_solver_bundle_adjustment.cpp
         ../src/native/adapters/slam/dpvo/dpvo_tensorrt_engine_native_solver_step.cpp)
       set(SMART_DRONE_REPLAY_SUPERPOINT_SOURCE
+        ../src/native/adapters/slam/superpoint/superpoint_native_extractor_tensorrt_common.cpp
+        ../src/native/adapters/slam/superpoint/superpoint_native_extractor_postprocess_heatmap.cpp
+        ../src/native/adapters/slam/superpoint/superpoint_native_extractor_postprocess_descriptors.cpp
+        ../src/native/adapters/slam/superpoint/superpoint_native_extractor_tensorrt_output.cpp
+        ../src/native/adapters/slam/superpoint/superpoint_native_extractor_tensorrt_utils.cpp
+        ../src/native/adapters/slam/superpoint/superpoint_native_extractor_tensorrt_superpoint.cpp
+        ../src/native/adapters/slam/superpoint/superpoint_native_extractor_tensorrt_lightglue.cpp
+        ../src/native/adapters/slam/superpoint/superpoint_native_extractor_impl_runtime.cpp
+        ../src/native/adapters/slam/superpoint/superpoint_native_extractor_impl_batch.cpp
         ../src/native/adapters/slam/superpoint/superpoint_native_extractor_trt.cpp)
     endif()
   endif()

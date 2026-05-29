@@ -14,7 +14,7 @@ constexpr const char *VEHICLE_TELEMETRY_RX_TASK_TYPE =
     "VehicleTelemetryRxTask";
 constexpr const char *LEGACY_MAVLINK_RX_TASK_TYPE = "MavlinkRxTask";
 constexpr const char *EPG_TOPOLOGY_PATH = "config/epg/epg_topology.dot";
-constexpr const char *EPG_TOPOLOGY_REVISION = "v8";
+constexpr const char *EPG_TOPOLOGY_REVISION = "v9";
 constexpr const char *EPG_SNAPSHOT_DIR = "/tmp";
 constexpr const char *EPG_OPTIMIZED_DIR = "output/epg";
 const EpgTaskTopologySpec EPG_TOPOLOGY_SPEC{
@@ -77,12 +77,7 @@ const EpgTaskManifest SLAM_SESSION_MANIFEST{
         {"SlamBackendTickTask", "backend_maintenance", "slam_backend", 2000, 5000, true, {"slam_backend_maintenance"}, true},
         {"SlamImuGateTask", "sensor_gate", "cpu", 1000, 2000, false},
         {"SlamAcquireTask", "frame_acquire", "camera", 12000, 16000, true, {}, true},
-        {"SlamTrackingRouteTask", "tracking_route", "cpu", 500, 2000, false},
-        {"SlamKltTrackingTask", "klt_tracking", "slam_backend", 24000, 33000, true, {}, true},
-        {"SlamDpvoTrackingTask", "dpvo_tracking", "slam_backend", 24000, 33000, true, {}, true},
-        {"SlamOrbTrackingTask", "orb_tracking", "slam_backend", 24000, 33000, true, {"slam_orb_tracking"}, true},
-        {"SlamOpenVinsTrackingTask", "openvins_tracking", "cpu_openvins", 42000, 50000, true, {"cpu_openvins_isolated"}, true},
-        {"SlamVisualFeatureTrackingTask", "visual_feature_tracking", "slam_backend", 24000, 33000, true, {}, true},
+        {"SlamTrackingTask", "tracking", "slam_backend", 24000, 33000, true, {"slam_tracking_isolated"}, true},
         {"SlamPosePostprocessTask", "pose_postprocess", "cpu", 3000, 5000, true, {}, true},
         {"SlamPointCloudTask", "point_cloud", "slam_backend", 5000, 10000, true, {}, true},
         {"SlamLivePoseTask", "live_pose", "cpu", 2000, 5000, false},

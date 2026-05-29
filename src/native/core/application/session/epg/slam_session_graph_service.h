@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
 
 #include "core/application/session/epg/session_graph_runtime.h"
 
@@ -26,6 +27,7 @@ struct SlamSessionGraphRuntimeConfig {
     LivePoseState &livePose;
     std::atomic<bool> &runningFlag;
     const ApplicationRuntimeFactories &factories;
+    std::string finalEurocTrajectory;
 };
 
 class SlamSessionGraphRuntime final : public ISessionGraphRuntime {

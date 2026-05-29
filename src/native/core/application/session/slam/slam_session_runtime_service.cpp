@@ -44,6 +44,7 @@ class SlamSessionRuntimeService::Impl final {
     bool Stopped() const;
     std::uint64_t SessionId() const;
     void Stop();
+    bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path);
 
     bool StepImuPoll();
     bool ImuReady() const;
@@ -97,6 +98,7 @@ class SlamSessionRuntimeService::Impl final {
     LivePoseState &m_livePose;
     std::atomic<bool> &m_runningFlag;
     const ApplicationRuntimeFactories &m_factories;
+    std::string m_finalEurocTrajectory;
     std::unique_ptr<SlamSessionProcessingPort> m_processingPort;
     std::shared_ptr<const RuntimeState> m_runtimeState;
     std::atomic<bool> m_starting{false};
@@ -113,6 +115,7 @@ SlamSessionRuntimeService::Impl::Impl(
       m_livePose(config.livePose),
       m_runningFlag(config.runningFlag),
       m_factories(config.factories),
+      m_finalEurocTrajectory(std::move(config.finalEurocTrajectory)),
       m_processingPort(std::make_unique<SlamSessionProcessingPort>())
 {
     std::atomic_store_explicit(&m_runtimeState,
@@ -217,9 +220,20 @@ void SlamSessionRuntimeService::Impl::Stop()
         RuntimeState{nullptr, state->sessionId, false, state->startFailed}));
     std::shared_ptr<SlamSessionRuntime> runtime = state->runtime;
     if (runtime) {
+        if (!m_finalEurocTrajectory.empty()) {
+            runtime->ShutdownAndSaveTrajectoryEuRoC(m_finalEurocTrajectory);
+        }
         runtime->Stop();
     }
     m_stopped.store(true, std::memory_order_release);
+}
+
+bool SlamSessionRuntimeService::Impl::ShutdownAndSaveTrajectoryEuRoC(
+    const std::string &path)
+{
+    auto runtime = Runtime();
+    return runtime != nullptr &&
+           runtime->ShutdownAndSaveTrajectoryEuRoC(path);
 }
 
 bool SlamSessionRuntimeService::Impl::StepImuPoll()
@@ -430,6 +444,12 @@ std::uint64_t SlamSessionRuntimeService::SessionId() const
 void SlamSessionRuntimeService::Stop()
 {
     m_impl->Stop();
+}
+
+bool SlamSessionRuntimeService::ShutdownAndSaveTrajectoryEuRoC(
+    const std::string &path)
+{
+    return m_impl->ShutdownAndSaveTrajectoryEuRoC(path);
 }
 
 bool SlamSessionRuntimeService::StepImuPoll()

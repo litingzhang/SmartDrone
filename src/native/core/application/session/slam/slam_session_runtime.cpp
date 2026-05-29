@@ -88,6 +88,7 @@ class SlamSessionRuntime::Impl final {
     void Stop();
     bool StepImuPoll();
     bool ImuReady() const;
+    bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path);
     void RequestBackendStop();
     bool BackendStopped();
     SlamFrameStageResult StepBackend();
@@ -395,6 +396,13 @@ bool SlamSessionRuntime::Impl::ImuReady() const
     return false;
 }
 
+bool SlamSessionRuntime::Impl::ShutdownAndSaveTrajectoryEuRoC(
+    const std::string &path)
+{
+    return m_slamRuntimeControl != nullptr &&
+           m_slamRuntimeControl->ShutdownAndSaveTrajectoryEuRoC(path);
+}
+
 void SlamSessionRuntime::Impl::RequestBackendStop()
 {
     FramePorts().BackendMaintenancePort().RequestStop();
@@ -551,6 +559,12 @@ bool SlamSessionRuntime::StepImuPoll()
 bool SlamSessionRuntime::ImuReady() const
 {
     return m_impl->ImuReady();
+}
+
+bool SlamSessionRuntime::ShutdownAndSaveTrajectoryEuRoC(
+    const std::string &path)
+{
+    return m_impl->ShutdownAndSaveTrajectoryEuRoC(path);
 }
 
 void SlamSessionRuntime::RequestBackendStop()

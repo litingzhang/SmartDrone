@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
 
 #include "core/application/session/slam/slam_frame_step_result.h"
 
@@ -43,6 +44,7 @@ class SlamSessionRuntime {
     void Stop();
     bool StepImuPoll();
     bool ImuReady() const;
+    bool ShutdownAndSaveTrajectoryEuRoC(const std::string &path);
     void RequestBackendStop();
     bool BackendStopped();
     SlamFrameStageResult StepBackend();

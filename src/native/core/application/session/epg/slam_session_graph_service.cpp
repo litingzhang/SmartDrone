@@ -30,6 +30,7 @@ class SlamSessionGraphRuntime::Impl final {
           m_livePose(config.livePose),
           m_runningFlag(config.runningFlag),
           m_factories(config.factories),
+          m_finalEurocTrajectory(std::move(config.finalEurocTrajectory)),
           m_lifecycle(EpgGraphLifecycleConfig{
               m_stop,
               [this]() { return ResourcesStopped(); },
@@ -127,6 +128,7 @@ class SlamSessionGraphRuntime::Impl final {
             m_livePose,
             m_runningFlag,
             m_factories,
+            m_finalEurocTrajectory,
         };
     }
 
@@ -155,6 +157,7 @@ class SlamSessionGraphRuntime::Impl final {
     LivePoseState &m_livePose;
     std::atomic<bool> &m_runningFlag;
     const ApplicationRuntimeFactories &m_factories;
+    std::string m_finalEurocTrajectory;
     std::shared_ptr<SlamSessionRuntimeService> m_runtimeService;
     EpgGraphLifecycle m_lifecycle;
     std::atomic<bool> m_sessionOk{true};

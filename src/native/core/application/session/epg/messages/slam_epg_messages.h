@@ -43,31 +43,6 @@ struct SlamPreparedFrame {
     std::shared_ptr<ISlamPreparedFramePayload> frame;
 };
 
-struct SlamKltPreparedFrame {
-    std::uint64_t sessionId{0};
-    std::shared_ptr<ISlamPreparedFramePayload> frame;
-};
-
-struct SlamDpvoPreparedFrame {
-    std::uint64_t sessionId{0};
-    std::shared_ptr<ISlamPreparedFramePayload> frame;
-};
-
-struct SlamOrbPreparedFrame {
-    std::uint64_t sessionId{0};
-    std::shared_ptr<ISlamPreparedFramePayload> frame;
-};
-
-struct SlamOpenVinsPreparedFrame {
-    std::uint64_t sessionId{0};
-    std::shared_ptr<ISlamPreparedFramePayload> frame;
-};
-
-struct SlamVisualFeaturePreparedFrame {
-    std::uint64_t sessionId{0};
-    std::shared_ptr<ISlamPreparedFramePayload> frame;
-};
-
 struct SlamTrackedFrame {
     std::uint64_t sessionId{0};
     std::shared_ptr<ISlamTrackedFramePayload> frame;

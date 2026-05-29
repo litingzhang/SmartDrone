@@ -59,11 +59,6 @@ struct SlamTick {};
 struct SlamImuReady {};
 struct SlamFrameReady {};
 struct SlamPreparedFrame {};
-struct SlamKltPreparedFrame {};
-struct SlamDpvoPreparedFrame {};
-struct SlamOrbPreparedFrame {};
-struct SlamOpenVinsPreparedFrame {};
-struct SlamVisualFeaturePreparedFrame {};
 struct SlamTrackedFrame {};
 struct SlamPublishedFrame {};
 struct SlamPreviewReady {};
@@ -367,16 +362,6 @@ void RegisterSlamShapeMessages(Registry &registry)
     registry.RegisterMessageType<SlamImuReady>("SlamImuReady");
     registry.RegisterMessageType<SlamFrameReady>("SlamFrameReady");
     registry.RegisterMessageType<SlamPreparedFrame>("SlamPreparedFrame");
-    registry.RegisterMessageType<SlamKltPreparedFrame>(
-        "SlamKltPreparedFrame");
-    registry.RegisterMessageType<SlamDpvoPreparedFrame>(
-        "SlamDpvoPreparedFrame");
-    registry.RegisterMessageType<SlamOrbPreparedFrame>(
-        "SlamOrbPreparedFrame");
-    registry.RegisterMessageType<SlamOpenVinsPreparedFrame>(
-        "SlamOpenVinsPreparedFrame");
-    registry.RegisterMessageType<SlamVisualFeaturePreparedFrame>(
-        "SlamVisualFeaturePreparedFrame");
     registry.RegisterMessageType<SlamTrackedFrame>("SlamTrackedFrame");
     registry.RegisterMessageType<SlamPublishedFrame>("SlamPublishedFrame");
     registry.RegisterMessageType<SlamPreviewReady>("SlamPreviewReady");
@@ -394,14 +379,7 @@ void RegisterSlamShapeTasks(Registry &registry)
     registry.RegisterTaskFactory("SlamBackendTickTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamImuGateTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamAcquireTask", {}, {}, factory);
-    registry.RegisterTaskFactory("SlamTrackingRouteTask", {}, {}, factory);
-    registry.RegisterTaskFactory("SlamKltTrackingTask", {}, {}, factory);
-    registry.RegisterTaskFactory("SlamDpvoTrackingTask", {}, {}, factory);
-    registry.RegisterTaskFactory("SlamOrbTrackingTask", {}, {}, factory);
-    registry.RegisterTaskFactory("SlamOpenVinsTrackingTask", {}, {},
-                                 factory);
-    registry.RegisterTaskFactory("SlamVisualFeatureTrackingTask", {}, {},
-                                 factory);
+    registry.RegisterTaskFactory("SlamTrackingTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamPosePostprocessTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamPointCloudTask", {}, {}, factory);
     registry.RegisterTaskFactory("SlamLivePoseTask", {}, {}, factory);
