@@ -71,6 +71,15 @@ UnifiedConfig MakeBaseConfig()
     runtime.visualFeatureMaxPoints = 400;
     runtime.lkPerFrameAcceleration = "auto";
     runtime.orbAcceleration = "cuda";
+    runtime.avoidanceEnabled = false;
+    runtime.avoidanceHoldOnStaleCloud = true;
+    runtime.avoidanceRadiusM = 1.1f;
+    runtime.avoidanceLookaheadM = 3.0f;
+    runtime.avoidanceSpeedLookaheadS = 1.5f;
+    runtime.avoidanceNearFieldRadiusM = 0.4f;
+    runtime.avoidanceMaxPointCloudAgeMs = 800;
+    runtime.avoidanceMinCloudPoints = 20;
+    runtime.avoidanceMinBlockingPoints = 3;
     return config;
 }
 
@@ -102,6 +111,10 @@ TEST(RuntimeConfigModulesTest, ProjectsUnifiedConfigToRemoteConfig)
     EXPECT_TRUE(remote.useCustomTbc);
     EXPECT_EQ(remote.orbNFeatures, 900);
     EXPECT_EQ(remote.lkPerFrameAcceleration, "auto");
+    EXPECT_FALSE(remote.avoidanceEnabled);
+    EXPECT_TRUE(remote.avoidanceHoldOnStaleCloud);
+    EXPECT_FLOAT_EQ(remote.avoidanceRadiusM, 1.1f);
+    EXPECT_EQ(remote.avoidanceMinCloudPoints, 20);
 }
 
 TEST(RuntimeConfigModulesTest, AppliesConfigValueUpdatesAndRejectsBadTypes)
@@ -122,6 +135,17 @@ TEST(RuntimeConfigModulesTest, AppliesConfigValueUpdatesAndRejectsBadTypes)
                               ConfigValue{int64_t{31}}, remote);
     ASSERT_TRUE(result.ok);
     EXPECT_EQ(remote.slamInputFps, 31);
+
+    result = ApplyConfigValue(std::string(ConfigRegistry::AVOIDANCE_RADIUS_M),
+                              ConfigValue{1.25}, remote);
+    ASSERT_TRUE(result.ok);
+    EXPECT_FLOAT_EQ(remote.avoidanceRadiusM, 1.25f);
+
+    result = ApplyConfigValue(
+        std::string(ConfigRegistry::AVOIDANCE_HOLD_ON_STALE_CLOUD),
+        ConfigValue{true}, remote);
+    ASSERT_TRUE(result.ok);
+    EXPECT_TRUE(remote.avoidanceHoldOnStaleCloud);
 
     result = ApplyConfigValue(std::string(ConfigRegistry::CAMERA_GAIN),
                               ConfigValue{true}, remote);
@@ -155,6 +179,12 @@ TEST(RuntimeConfigModulesTest, BuildsRuntimeConfigUpdate)
     EXPECT_EQ(std::get<std::string>(update.values.at(
                   std::string(ConfigRegistry::SLAM_LK_PER_FRAME_ACCELERATION))),
               remote.lkPerFrameAcceleration);
+    EXPECT_EQ(std::get<bool>(update.values.at(
+                  std::string(ConfigRegistry::AVOIDANCE_ENABLED))),
+              remote.avoidanceEnabled);
+    EXPECT_EQ(std::get<double>(update.values.at(
+                  std::string(ConfigRegistry::AVOIDANCE_RADIUS_M))),
+              static_cast<double>(remote.avoidanceRadiusM));
 }
 
 TEST(RuntimeConfigModulesTest, NormalizesAndValidatesRemoteConfig)
@@ -187,6 +217,16 @@ TEST(RuntimeConfigModulesTest, RejectsInvalidVisualFeatureConfig)
     EXPECT_EQ(err, "visual feature config out of range");
 }
 
+TEST(RuntimeConfigModulesTest, RejectsInvalidAvoidanceConfig)
+{
+    RemoteRuntimeConfig remote = MakeValidRemote();
+    remote.avoidanceRadiusM = 0.1f;
+
+    std::string err;
+    EXPECT_FALSE(ValidateRemoteRuntimeConfig(remote, &err));
+    EXPECT_EQ(err, "avoidance distance config out of range");
+}
+
 TEST(RuntimeConfigModulesTest, AppliesRemoteConfigAndSyncsRuntimeTuning)
 {
     UnifiedConfig config = MakeBaseConfig();
@@ -196,6 +236,9 @@ TEST(RuntimeConfigModulesTest, AppliesRemoteConfigAndSyncsRuntimeTuning)
     remote.tbcTx = 1.0f;
     remote.tbcTy = 2.0f;
     remote.tbcTz = 3.0f;
+    remote.avoidanceEnabled = true;
+    remote.avoidanceRadiusM = 1.4f;
+    remote.avoidanceMinCloudPoints = 24;
 
     const auto applied = ApplyRemoteRuntimeConfig(config, remote);
     EXPECT_TRUE(applied.restartNeeded);
@@ -209,6 +252,9 @@ TEST(RuntimeConfigModulesTest, AppliesRemoteConfigAndSyncsRuntimeTuning)
     EXPECT_EQ(tuning.slamInputFps.load(), remote.slamInputFps);
     EXPECT_EQ(tuning.sendMap.load(), remote.sendMap);
     EXPECT_FLOAT_EQ(tuning.tbcTy.load(), 2.0f);
+    EXPECT_TRUE(tuning.avoidanceEnabled.load());
+    EXPECT_FLOAT_EQ(tuning.avoidanceRadiusM.load(), 1.4f);
+    EXPECT_EQ(tuning.avoidanceMinCloudPoints.load(), 24);
 }
 
 TEST(RuntimeConfigModulesTest, BuildsRuntimeConfigMessage)
@@ -225,6 +271,7 @@ TEST(RuntimeConfigModulesTest, BuildsRuntimeConfigMessage)
     EXPECT_TRUE(Contains(message, "slam_mode=relocalization"));
     EXPECT_TRUE(Contains(message, "slam_fps=60"));
     EXPECT_TRUE(Contains(message, "orb_accel=cuda"));
+    EXPECT_TRUE(Contains(message, "avoid="));
 }
 
 } // namespace

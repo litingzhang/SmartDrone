@@ -30,6 +30,8 @@ class LivePoseState {
         uint32_t seq{0};
         std::shared_ptr<const std::vector<float>> pointCloudXyz;
         uint32_t pointCloudSeq{0};
+        uint64_t pointCloudUpdateUs{0};
+        AvoidanceTelemetry avoidance{};
     };
 
     LivePoseState();
@@ -39,6 +41,7 @@ class LivePoseState {
     void SetRuntimeMode(uint8_t mode);
     void SetSlamMode(uint8_t mode);
     void SetVehicleFlightState(bool armedIn, uint8_t px4MainModeIn, uint8_t px4SubModeIn);
+    void SetAvoidanceTelemetry(const AvoidanceTelemetry &telemetry);
     void UpdatePose(const LivePoseUpdate &update);
     void UpdatePointCloud(std::vector<float> xyz);
     bool ConsumeSnapshot(Snapshot &out);

@@ -16,6 +16,7 @@
 #include "common/runtime_state.h"
 #include "core/application/runtime/application_runtime_factories.h"
 #include "core/application/runtime/live_pose_runtime_snapshots.h"
+#include "core/application/runtime/obstacle_avoidance_config.h"
 #include "core/application/runtime/px4_udp_hooks.h"
 #include "core/application/runtime/runtime_aliases.h"
 #include "core/application/runtime/runtime_controller.h"
@@ -128,12 +129,18 @@ RuntimeSessionSupervisor::CreateSessionFn BuildSessionRuntimeFactory(LiveRuntime
     };
 }
 
-Px4UdpHooksConfig BuildPx4UdpHooksConfig(IVehicleControlPort &vehicleControl, LivePoseState &livePose)
+Px4UdpHooksConfig BuildPx4UdpHooksConfig(IVehicleControlPort &vehicleControl,
+                                         LiveRuntimeTuning &tuning,
+                                         LivePoseState &livePose)
 {
     return Px4UdpHooksConfig{
         vehicleControl,
+        &tuning,
         SmartDrone::Core::Application::MakeRuntimeGateReader(livePose),
+        SmartDrone::Core::Application::MakeAvoidanceSnapshotReader(livePose),
         SmartDrone::Core::Application::MakeVehicleFlightStatePublisher(
+            livePose),
+        SmartDrone::Core::Application::MakeAvoidanceTelemetryPublisher(
             livePose)};
 }
 
@@ -245,6 +252,22 @@ int RunSystemGraphOrFail(SystemRuntimeGraph &systemGraph,
     return runtimeOk ? 0 : 1;
 }
 
+void PrintAvoidanceStartupConfig(const UnifiedConfig &cfg)
+{
+    const auto config = SmartDrone::Core::Application::
+        ObstacleAvoidanceConfigFromRuntime(cfg.app.runtime);
+    std::cerr << "[avoid] enabled=" << (config.enabled ? "Y" : "N")
+              << " radius_m=" << config.radiusM
+              << " lookahead_m=" << config.lookaheadM
+              << " speed_lookahead_s=" << config.speedLookaheadS
+              << " near_field_radius_m=" << config.nearFieldRadiusM
+              << " max_age_ms=" << config.maxPointCloudAgeMs
+              << " min_cloud_points=" << config.minCloudPoints
+              << " min_points=" << config.minBlockingPoints
+              << " hold_on_stale_cloud="
+              << (config.holdOnStaleCloud ? "Y" : "N") << "\n";
+}
+
 } // namespace
 
 int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
@@ -262,12 +285,14 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
         SmartDrone::Core::Application::BuildRuntimeAliases(cfg.app);
     SmartDrone::Core::Application::PrintStartupConfig(
         cfg.app, aliases, factories.cameraProvider, ControllerMode::Idle);
+    PrintAvoidanceStartupConfig(cfg);
 
     std::cerr << "[runtime] epg=on\n";
     RuntimeHostServices services(mavDev, mavBaud,
                                  cfg.app.runtime.jsonDiagnostics);
     Px4UdpHooks hooks(
-        BuildPx4UdpHooksConfig(services.vehicleControl, services.livePose));
+        BuildPx4UdpHooksConfig(services.vehicleControl, services.tuning,
+                               services.livePose));
     UnifiedRuntimeController controller(BuildRuntimeControllerConfig({
         cfg,
         services.tuning,

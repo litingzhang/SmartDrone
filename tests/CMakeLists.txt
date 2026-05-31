@@ -76,25 +76,42 @@ if(ENABLE_UNIT_TESTS)
   add_test(NAME EventPipelineGraphTests COMMAND epg_tests)
 
   add_executable(application_state_tests
+    application/avoidance_state_payload_test.cpp
     application/calib_save_pacing_port_test.cpp
     application/frame_timing_tracker_test.cpp
     application/goal_cache_test.cpp
     application/imu_buffer_test.cpp
+    application/local_occupancy_map_test.cpp
     application/live_pose_runtime_snapshots_test.cpp
     application/live_pose_state_test.cpp
+    application/obstacle_avoidance_policy_test.cpp
+    application/payload_builders_test.cpp
+    application/px4_udp_hooks_test.cpp
     application/runtime_config_modules_test.cpp
     application/runtime_session_supervisor_test.cpp
     ../src/native/common/environment.cpp
     ../src/native/common/numeric_parse.cpp
+    ../src/native/common/time_utils.cpp
+    ../src/native/common/tlv/crc16_ccitt_false.cpp
     ../src/native/common/tlv/goal_cache.cpp
+    ../src/native/common/tlv/tlv_pack.cpp
     ../src/native/core/application/config/app_args.cpp
+    ../src/native/core/application/config/capability_catalog.cpp
+    ../src/native/core/application/config/config_registry.cpp
     ../src/native/core/application/config/orb_acceleration_config.cpp
     ../src/native/core/application/config/slam_backend_availability.cpp
+    ../src/native/core/application/runtime/avoidance_state_payload.cpp
     ../src/native/core/application/session/calib/calib_save_pacing_port.cpp
     ../src/native/core/application/session/calib/calib_storage_helpers.cpp
     ../src/native/core/application/session/slam/slam_settings_loader.cpp
+    ../src/native/core/application/runtime/hover_algorithm_plugin.cpp
+    ../src/native/core/application/runtime/local_occupancy_map.cpp
     ../src/native/core/application/runtime/live_pose_runtime_snapshots.cpp
     ../src/native/core/application/runtime/mode_manager.cpp
+    ../src/native/core/application/runtime/obstacle_avoidance_config.cpp
+    ../src/native/core/application/runtime/obstacle_avoidance_policy.cpp
+    ../src/native/core/application/runtime/payload_builders.cpp
+    ../src/native/core/application/runtime/px4_udp_hooks.cpp
     ../src/native/core/application/runtime/runtime_config_application.cpp
     ../src/native/core/application/runtime/runtime_config_message.cpp
     ../src/native/core/application/runtime/runtime_config_projection.cpp
@@ -107,6 +124,7 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/core/application/state/frame_timing_tracker.cpp
     ../src/native/core/application/state/imu_buffer.cpp
     ../src/native/core/application/state/live_pose_state.cpp
+    ../src/native/core/ports/slam_tracking_state.cpp
   )
 
   target_include_directories(application_state_tests PRIVATE

@@ -26,6 +26,10 @@ public class NativeUdp {
                                                int orbIniThFAST, int orbMinThFAST, int featureFrontend,
                                                int superpointTopK, int superpointMaxPoints, int superpointInputMaxWidth,
                                                int superpointInputMaxHeight, int lkPerFrameAcceleration,
-                                               int orbAcceleration, int slamBackend);
+                                               int orbAcceleration, int slamBackend, boolean avoidanceEnabled,
+                                               boolean avoidanceHoldOnStaleCloud, float avoidanceRadiusM,
+                                               float avoidanceLookaheadM, float avoidanceSpeedLookaheadS,
+                                               float avoidanceNearFieldRadiusM, int avoidanceMaxPointAgeMs,
+                                               int avoidanceMinCloudPoints, int avoidanceMinBlockingPoints);
     public static native byte[] pollRecv();
 }

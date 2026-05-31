@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <vector>
 
+#include <Eigen/Core>
 #include <sophus/se3.hpp>
 
 #include "core/ports/pose_publisher.h"
@@ -44,6 +46,7 @@ class PosePostprocessor {
         PoseQuality quality{PoseQuality::Lost};
         uint8_t resetCounter{0};
         uint16_t resetMapCount{0};
+        std::vector<float> localPointCloudXyz;
         DebugPose debug{};
     };
 
@@ -174,6 +177,7 @@ class PosePostprocessor {
         Sophus::SE3f *stereoReferencePose{nullptr};
         int64_t frameNs{0};
         ReadRangeSensorFn readRangeSensor;
+        const std::vector<float> *rawPointCloudXyz{nullptr};
     };
 
     Result ProcessPose(const ProcessRequest &request);
@@ -181,12 +185,15 @@ class PosePostprocessor {
   private:
     struct PreparedPose {
         Sophus::SE3f twc{Sophus::SE3f()};
+        Sophus::SE3f preparedToLocal{Sophus::SE3f()};
         Result result{};
     };
 
     PreparedPose PreparePose(const ProcessRequest &request);
     void ApplyStereoReference(const ProcessRequest &request, PreparedPose &prepared);
     void PopulateOutputPose(const ProcessRequest &request, PreparedPose &prepared);
+    void PopulatePointCloud(const ProcessRequest &request,
+                            PreparedPose &prepared);
 
     ContinuityMapper m_continuity{};
     StartupAligner m_aligner{};

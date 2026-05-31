@@ -12,6 +12,15 @@ enum class LivePoseQuality : uint8_t {
     Lost = 2,
 };
 
+enum class AvoidanceHoldReason : uint8_t {
+    None = 0,
+    ObstacleAhead = 1,
+    ObstacleNear = 2,
+    PointCloudUnavailable = 3,
+    PointCloudStale = 4,
+    PointCloudSparse = 5,
+};
+
 struct LivePoseValue {
     float x{0.0f};
     float y{0.0f};
@@ -30,6 +39,16 @@ struct LivePoseUpdate {
     LivePoseValue pose{};
     LivePoseQuality quality{LivePoseQuality::Lost};
     bool poseValid{false};
+};
+
+struct AvoidanceTelemetry {
+    bool enabled{false};
+    bool activeGoal{false};
+    bool holding{false};
+    AvoidanceHoldReason holdReason{AvoidanceHoldReason::None};
+    float nearestObstacleM{0.0f};
+    uint32_t holdCount{0};
+    uint32_t pointCloudAgeMs{0};
 };
 
 } // namespace SmartDrone::Core::Application

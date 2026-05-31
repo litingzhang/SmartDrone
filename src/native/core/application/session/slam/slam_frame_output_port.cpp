@@ -66,11 +66,13 @@ SlamFrameStepResult SlamFrameOutputPort::EmitPointCloud(
 
     const auto cloudStartTp = std::chrono::steady_clock::now();
     size_t pointCount = 0;
-    if (m_ctx.aliases.udpEnable && (sendImage || sendFeature || sendMap)) {
-        if (updatePointCloud) {
+    if (updatePointCloud) {
+        m_state.lastPointCloudUpdateNs.store(frame.captureTimestampNs);
+        if (!slamOutput.pointCloudXyz.empty()) {
             m_ctx.livePose.UpdatePointCloud(slamOutput.pointCloudXyz);
-            m_state.lastPointCloudUpdateNs.store(frame.captureTimestampNs);
         }
+    }
+    if (m_ctx.aliases.udpEnable && (sendImage || sendFeature || sendMap)) {
         pointCount = slamOutput.pointCloudXyz.size() / 3;
     }
     published.cloudStartTp = cloudStartTp;

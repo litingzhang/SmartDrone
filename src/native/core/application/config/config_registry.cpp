@@ -183,6 +183,37 @@ DescriptorList StreamDescriptors()
     };
 }
 
+DescriptorList AvoidanceDescriptors()
+{
+    return {
+        Make(ConfigRegistry::AVOIDANCE_ENABLED,
+             "Enable OFFBOARD obstacle-avoidance hold policy", true, false,
+             false),
+        Make(ConfigRegistry::AVOIDANCE_HOLD_ON_STALE_CLOUD,
+             "Hold instead of pass-through when the avoidance point cloud is "
+             "missing, stale, or sparse",
+             true, false, false),
+        Make(ConfigRegistry::AVOIDANCE_RADIUS_M,
+             "Safety corridor radius in meters", true, false, false),
+        Make(ConfigRegistry::AVOIDANCE_LOOKAHEAD_M,
+             "Base obstacle lookahead distance in meters", true, false, false),
+        Make(ConfigRegistry::AVOIDANCE_SPEED_LOOKAHEAD_S,
+             "Extra lookahead seconds multiplied by speed", true, false,
+             false),
+        Make(ConfigRegistry::AVOIDANCE_NEAR_FIELD_RADIUS_M,
+             "Near-field obstacle bubble radius in meters", true, false,
+             false),
+        Make(ConfigRegistry::AVOIDANCE_MAX_POINT_AGE_MS,
+             "Maximum point cloud age before it is stale", true, false, false),
+        Make(ConfigRegistry::AVOIDANCE_MIN_CLOUD_POINTS,
+             "Minimum local point-cloud points required for avoidance", true,
+             false, false),
+        Make(ConfigRegistry::AVOIDANCE_MIN_BLOCKING_POINTS,
+             "Minimum points inside the safety corridor to hold", true, false,
+             false),
+    };
+}
+
 } // namespace
 
 std::vector<Domain::ConfigDescriptor> ConfigRegistry::DefaultDescriptors()
@@ -195,6 +226,7 @@ std::vector<Domain::ConfigDescriptor> ConfigRegistry::DefaultDescriptors()
     AppendDescriptors(descriptors, VisualFeatureDescriptors());
     AppendDescriptors(descriptors, AccelerationDescriptors());
     AppendDescriptors(descriptors, StreamDescriptors());
+    AppendDescriptors(descriptors, AvoidanceDescriptors());
     return descriptors;
 }
 

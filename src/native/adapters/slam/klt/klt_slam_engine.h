@@ -16,7 +16,8 @@ class KltSlamEngine final : public Core::Ports::ISlamEngine, public ISlamRuntime
 
     bool Start() override;
     void Stop() override;
-    Core::Ports::SlamOutput Process(const Core::Ports::SlamInputBatch &input, bool extractFeatures,
+    Core::Ports::SlamOutput Process(const Core::Ports::SlamInputBatch &input,
+                                    bool extractFeatures,
                                     bool extractPointCloud) override;
 
     void SetOperationMode(Core::Domain::SlamOperationMode mode) override;
@@ -27,8 +28,12 @@ class KltSlamEngine final : public Core::Ports::ISlamEngine, public ISlamRuntime
     void SetStereoVoPerFrameAcceleration(std::string acceleration) override;
 
   private:
-    Core::Ports::SlamOutput ProcessContinuousKlt(const Core::Ports::SlamInputBatch &input, bool extractFeatures);
-    Core::Ports::SlamOutput ProcessPerFrameKlt(const Core::Ports::SlamInputBatch &input, bool extractFeatures);
+    Core::Ports::SlamOutput
+    ProcessContinuousKlt(const Core::Ports::SlamInputBatch &input,
+                         bool extractFeatures, bool extractPointCloud);
+    Core::Ports::SlamOutput
+    ProcessPerFrameKlt(const Core::Ports::SlamInputBatch &input,
+                       bool extractFeatures, bool extractPointCloud);
 
     std::unique_ptr<SlamModeSharedState> m_state;
     FeatureFrontend m_frontend{FeatureFrontend::LkGfttPerFrame};

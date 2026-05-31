@@ -117,6 +117,35 @@ TEST(LivePoseStateTest, PublishesPoseAndPointCloud)
     EXPECT_EQ(snapshot.pointCloudXyz->size(), 6U);
     EXPECT_FLOAT_EQ((*snapshot.pointCloudXyz)[4], 5.0f);
     EXPECT_EQ(snapshot.pointCloudSeq, 1U);
+    EXPECT_GT(snapshot.pointCloudUpdateUs, 0U);
+}
+
+TEST(LivePoseStateTest, PublishesAvoidanceTelemetry)
+{
+    LivePoseState state;
+    state.UpdatePeer(MakePeer(14550));
+
+    SmartDrone::Core::Application::AvoidanceTelemetry telemetry{};
+    telemetry.enabled = true;
+    telemetry.activeGoal = true;
+    telemetry.holding = true;
+    telemetry.holdReason =
+        SmartDrone::Core::Application::AvoidanceHoldReason::ObstacleAhead;
+    telemetry.nearestObstacleM = 0.8f;
+    telemetry.holdCount = 3;
+    telemetry.pointCloudAgeMs = 40;
+    state.SetAvoidanceTelemetry(telemetry);
+
+    LivePoseState::Snapshot snapshot{};
+    ASSERT_TRUE(state.ConsumeSnapshot(snapshot));
+    EXPECT_TRUE(snapshot.avoidance.enabled);
+    EXPECT_TRUE(snapshot.avoidance.activeGoal);
+    EXPECT_TRUE(snapshot.avoidance.holding);
+    EXPECT_EQ(snapshot.avoidance.holdReason,
+              SmartDrone::Core::Application::AvoidanceHoldReason::ObstacleAhead);
+    EXPECT_FLOAT_EQ(snapshot.avoidance.nearestObstacleM, 0.8f);
+    EXPECT_EQ(snapshot.avoidance.holdCount, 3U);
+    EXPECT_EQ(snapshot.avoidance.pointCloudAgeMs, 40U);
 }
 
 TEST(LivePoseStateTest, LeavingSlamInvalidatesPose)

@@ -122,6 +122,15 @@ struct RuntimeConfig {
     int orbNLevels{0};
     int orbIniThFAST{0};
     int orbMinThFAST{0};
+    bool avoidanceEnabled{true};
+    bool avoidanceHoldOnStaleCloud{false};
+    float avoidanceRadiusM{0.75f};
+    float avoidanceLookaheadM{2.0f};
+    float avoidanceSpeedLookaheadS{0.0f};
+    float avoidanceNearFieldRadiusM{0.0f};
+    int avoidanceMaxPointCloudAgeMs{600};
+    int avoidanceMinCloudPoints{1};
+    int avoidanceMinBlockingPoints{1};
 };
 
 struct AppConfig {

@@ -12,6 +12,7 @@
 #include "common/tlv/tlv_cmd_router.h"
 #include "common/tlv/tlv_pack.h"
 #include "common/tlv/tlv_parser.h"
+#include "core/application/runtime/avoidance_state_payload.h"
 #include "core/application/runtime/runtime_config_frame_codec.h"
 #include "core/application/runtime/runtime_config_update_builder.h"
 #include "core/application/runtime/runtime_command_service.h"
@@ -274,6 +275,7 @@ class UdpCommandRuntime::Impl final {
             return;
         }
         SendState(snapshot);
+        SendAvoidanceState(snapshot);
     }
 
     void StepPointCloudTx()
@@ -478,6 +480,24 @@ class UdpCommandRuntime::Impl final {
         const TlvFrameBuildRequest stateRequest{
             TLV_VER,
             CMD_STATE,
+            0,
+            snapshot.seq,
+            MonoTimeMs32(),
+            payload.data(),
+            static_cast<uint16_t>(payload.size())};
+        std::vector<uint8_t> stateFrame = MakeFrame(stateRequest);
+        m_server.SendTo(snapshot.peer, stateFrame.data(), stateFrame.size());
+    }
+
+    void SendAvoidanceState(const UdpRuntimeStateSnapshot &snapshot)
+    {
+        std::vector<uint8_t> payload = BuildAvoidanceStatePayload(snapshot);
+        if (payload.size() != AVOIDANCE_STATE_PAYLOAD_LEN) {
+            return;
+        }
+        const TlvFrameBuildRequest stateRequest{
+            TLV_VER,
+            CMD_AVOIDANCE_STATE,
             0,
             snapshot.seq,
             MonoTimeMs32(),

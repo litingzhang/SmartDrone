@@ -86,8 +86,10 @@ SlamFrameStepResult SlamFramePosePostprocessPort::PostprocessTrackedFrame(
     const Sophus::SE3f twcRaw = ResolveRawPose(*tracked, tracking);
     const StereoExtrinsicsContext extrinsics = ResolveStereoExtrinsics();
     const PosePostprocessor::ProcessRequest poseRequest = BuildPoseRequest(
-        twcRaw, tracking, tracked->frame->captureTimestampNs, extrinsics);
+        twcRaw, tracking, tracked->frame->captureTimestampNs,
+        tracked->slamOutput.pointCloudXyz, extrinsics);
     const auto poseResult = m_ctx.posePostprocessor.ProcessPose(poseRequest);
+    tracked->slamOutput.pointCloudXyz = poseResult.localPointCloudXyz;
     MaybeLogPoseAxis(*tracked, tracking, twcRaw, poseResult);
     const auto postEndTp = std::chrono::steady_clock::now();
 
@@ -176,6 +178,7 @@ PosePostprocessor::ProcessRequest
 SlamFramePosePostprocessPort::BuildPoseRequest(
     const Sophus::SE3f &twcRaw, const TrackingContext &tracking,
     int64_t captureTimestampNs,
+    const std::vector<float> &rawPointCloudXyz,
     const StereoExtrinsicsContext &extrinsics) const
 {
     PosePostprocessor::ProcessRequest request{};
@@ -189,6 +192,7 @@ SlamFramePosePostprocessPort::BuildPoseRequest(
     request.stereoReferencePose = &m_state.stereoReferencePose;
     request.frameNs = captureTimestampNs;
     request.readRangeSensor = m_ctx.readRangeSensor;
+    request.rawPointCloudXyz = &rawPointCloudXyz;
     return request;
 }
 

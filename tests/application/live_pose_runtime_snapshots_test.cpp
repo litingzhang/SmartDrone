@@ -9,8 +9,11 @@ namespace {
 
 using SmartDrone::Core::Application::BuildRuntimeGateSnapshot;
 using SmartDrone::Core::Application::BuildUdpRuntimeStateSnapshot;
+using SmartDrone::Core::Application::BuildAvoidanceSnapshot;
+using SmartDrone::Core::Application::AvoidanceHoldReason;
 using SmartDrone::Core::Application::LivePoseQuality;
 using SmartDrone::Core::Application::LivePoseState;
+using SmartDrone::Core::Application::MakeAvoidanceSnapshotReader;
 using SmartDrone::Core::Application::MakeCommandPeerUpdater;
 using SmartDrone::Core::Application::MakeRuntimeGateReader;
 using SmartDrone::Core::Application::MakeRuntimeModePublisher;
@@ -44,6 +47,14 @@ LivePoseState::Snapshot MakeLivePoseSnapshot()
         std::make_shared<const std::vector<float>>(std::vector<float>{
             1.0f, 2.0f, 3.0f});
     snapshot.pointCloudSeq = 8;
+    snapshot.pointCloudUpdateUs = 9000;
+    snapshot.avoidance.enabled = true;
+    snapshot.avoidance.activeGoal = true;
+    snapshot.avoidance.holding = true;
+    snapshot.avoidance.holdReason = AvoidanceHoldReason::ObstacleNear;
+    snapshot.avoidance.nearestObstacleM = 1.25f;
+    snapshot.avoidance.holdCount = 2;
+    snapshot.avoidance.pointCloudAgeMs = 30;
     return snapshot;
 }
 
@@ -84,6 +95,33 @@ TEST(LivePoseRuntimeSnapshotsTest, BuildsUdpRuntimeStateSnapshot)
     ASSERT_TRUE(output.pointCloudXyz);
     EXPECT_EQ(output.pointCloudXyz->size(), 3U);
     EXPECT_EQ(output.pointCloudSeq, 8U);
+    EXPECT_EQ(output.pointCloudUpdateUs, 9000U);
+    EXPECT_TRUE(output.avoidance.enabled);
+    EXPECT_TRUE(output.avoidance.activeGoal);
+    EXPECT_TRUE(output.avoidance.holding);
+    EXPECT_EQ(output.avoidance.holdReason,
+              AvoidanceHoldReason::ObstacleNear);
+    EXPECT_FLOAT_EQ(output.avoidance.nearestObstacleM, 1.25f);
+    EXPECT_EQ(output.avoidance.holdCount, 2U);
+    EXPECT_EQ(output.avoidance.pointCloudAgeMs, 30U);
+}
+
+TEST(LivePoseRuntimeSnapshotsTest, BuildsAvoidanceSnapshot)
+{
+    const LivePoseState::Snapshot input = MakeLivePoseSnapshot();
+    const auto output = BuildAvoidanceSnapshot(input);
+
+    EXPECT_TRUE(output.poseValid);
+    EXPECT_FLOAT_EQ(output.x, 1.0f);
+    EXPECT_FLOAT_EQ(output.y, 2.0f);
+    EXPECT_FLOAT_EQ(output.z, 3.0f);
+    EXPECT_FLOAT_EQ(output.qw, 0.9f);
+    EXPECT_FLOAT_EQ(output.qx, 0.1f);
+    EXPECT_FLOAT_EQ(output.qy, 0.2f);
+    EXPECT_FLOAT_EQ(output.qz, 0.3f);
+    ASSERT_TRUE(output.pointCloudXyz);
+    EXPECT_EQ(output.pointCloudSeq, 8U);
+    EXPECT_EQ(output.pointCloudUpdateUs, 9000U);
 }
 
 TEST(LivePoseRuntimeSnapshotsTest, BuildsLivePoseCallbacks)
@@ -110,6 +148,11 @@ TEST(LivePoseRuntimeSnapshotsTest, BuildsLivePoseCallbacks)
     EXPECT_TRUE(state.armed);
     EXPECT_EQ(state.px4MainMode, 3);
     EXPECT_EQ(state.px4SubMode, 4);
+
+    auto readAvoidance = MakeAvoidanceSnapshotReader(livePose);
+    SmartDrone::Core::Application::AvoidanceSnapshot avoidance{};
+    ASSERT_TRUE(readAvoidance(avoidance));
+    EXPECT_FALSE(avoidance.poseValid);
 }
 
 } // namespace

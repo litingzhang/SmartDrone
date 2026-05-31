@@ -101,6 +101,38 @@ bool ValidateAccelerationConfig(const RemoteRuntimeConfig &remote,
     return true;
 }
 
+bool ValidateAvoidanceConfig(const RemoteRuntimeConfig &remote,
+                             std::string *err)
+{
+    const bool distanceOk =
+        std::isfinite(remote.avoidanceRadiusM) &&
+        std::isfinite(remote.avoidanceLookaheadM) &&
+        std::isfinite(remote.avoidanceSpeedLookaheadS) &&
+        std::isfinite(remote.avoidanceNearFieldRadiusM) &&
+        remote.avoidanceRadiusM >= 0.2f &&
+        remote.avoidanceRadiusM <= 3.0f &&
+        remote.avoidanceLookaheadM >= 0.5f &&
+        remote.avoidanceLookaheadM <= 8.0f &&
+        remote.avoidanceSpeedLookaheadS >= 0.0f &&
+        remote.avoidanceSpeedLookaheadS <= 5.0f &&
+        remote.avoidanceNearFieldRadiusM >= 0.0f &&
+        remote.avoidanceNearFieldRadiusM <= 3.0f;
+    if (!distanceOk) {
+        return SetError(err, "avoidance distance config out of range");
+    }
+    const bool countOk =
+        remote.avoidanceMaxPointCloudAgeMs >= 50 &&
+        remote.avoidanceMaxPointCloudAgeMs <= 5000 &&
+        remote.avoidanceMinCloudPoints >= 1 &&
+        remote.avoidanceMinCloudPoints <= 5000 &&
+        remote.avoidanceMinBlockingPoints >= 1 &&
+        remote.avoidanceMinBlockingPoints <= 50;
+    if (!countOk) {
+        return SetError(err, "avoidance point config out of range");
+    }
+    return true;
+}
+
 } // namespace
 
 void NormalizeRemoteRuntimeConfig(RemoteRuntimeConfig &remote)
@@ -137,7 +169,8 @@ bool ValidateRemoteRuntimeConfig(RemoteRuntimeConfig &remote,
         SetDefaultOrbExtractorConfig(remote);
     }
     return ValidateVisualFeatureConfig(remote, err) &&
-           ValidateAccelerationConfig(remote, err);
+           ValidateAccelerationConfig(remote, err) &&
+           ValidateAvoidanceConfig(remote, err);
 }
 
 } // namespace SmartDrone::Core::Application

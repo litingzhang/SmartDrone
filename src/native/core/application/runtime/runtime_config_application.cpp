@@ -95,6 +95,19 @@ void ApplyRuntimeConfig(RuntimeConfig &runtime,
     runtime.lkPerFrameAcceleration = remote.lkPerFrameAcceleration;
     runtime.orbAcceleration = remote.orbAcceleration;
     runtime.useCustomTbc = remote.useCustomTbc;
+    runtime.avoidanceEnabled = remote.avoidanceEnabled;
+    runtime.avoidanceHoldOnStaleCloud =
+        remote.avoidanceHoldOnStaleCloud;
+    runtime.avoidanceRadiusM = remote.avoidanceRadiusM;
+    runtime.avoidanceLookaheadM = remote.avoidanceLookaheadM;
+    runtime.avoidanceSpeedLookaheadS = remote.avoidanceSpeedLookaheadS;
+    runtime.avoidanceNearFieldRadiusM =
+        remote.avoidanceNearFieldRadiusM;
+    runtime.avoidanceMaxPointCloudAgeMs =
+        remote.avoidanceMaxPointCloudAgeMs;
+    runtime.avoidanceMinCloudPoints = remote.avoidanceMinCloudPoints;
+    runtime.avoidanceMinBlockingPoints =
+        remote.avoidanceMinBlockingPoints;
 }
 
 void ApplyConfiguredTbc(RuntimeConfig &runtime,
@@ -183,6 +196,24 @@ void SyncRuntimeTuning(LiveRuntimeTuning &tuning,
     tuning.tbcRollDeg.store(tbc.rollDeg, std::memory_order_relaxed);
     tuning.tbcPitchDeg.store(tbc.pitchDeg, std::memory_order_relaxed);
     tuning.tbcYawDeg.store(tbc.yawDeg, std::memory_order_relaxed);
+    tuning.avoidanceEnabled.store(remote.avoidanceEnabled,
+                                  std::memory_order_relaxed);
+    tuning.avoidanceHoldOnStaleCloud.store(
+        remote.avoidanceHoldOnStaleCloud, std::memory_order_relaxed);
+    tuning.avoidanceRadiusM.store(remote.avoidanceRadiusM,
+                                  std::memory_order_relaxed);
+    tuning.avoidanceLookaheadM.store(remote.avoidanceLookaheadM,
+                                     std::memory_order_relaxed);
+    tuning.avoidanceSpeedLookaheadS.store(
+        remote.avoidanceSpeedLookaheadS, std::memory_order_relaxed);
+    tuning.avoidanceNearFieldRadiusM.store(
+        remote.avoidanceNearFieldRadiusM, std::memory_order_relaxed);
+    tuning.avoidanceMaxPointCloudAgeMs.store(
+        remote.avoidanceMaxPointCloudAgeMs, std::memory_order_relaxed);
+    tuning.avoidanceMinCloudPoints.store(
+        remote.avoidanceMinCloudPoints, std::memory_order_relaxed);
+    tuning.avoidanceMinBlockingPoints.store(
+        remote.avoidanceMinBlockingPoints, std::memory_order_relaxed);
 }
 
 } // namespace SmartDrone::Core::Application

@@ -6,19 +6,29 @@
 #include <memory>
 #include <utility>
 
+#include "common/time_utils.h"
+#include "core/application/runtime/obstacle_avoidance_config.h"
 #include "core/ports/slam_tracking_state.h"
 
 namespace SmartDrone::Core::Application {
 
 using SmartDrone::Core::Ports::VehicleCommandAckKind;
 using SmartDrone::Core::Ports::VehicleFlightMode;
-using SmartDrone::Core::Ports::VehicleLocalPosition;
 using SmartDrone::Core::Ports::VehicleManualControl;
 using SmartDrone::Core::Ports::VehicleSetpointLocalNed;
 
 Px4UdpHooks::Px4UdpHooks(Px4UdpHooksConfig config)
     : m_vehicleControl(config.vehicleControl), m_readRuntimeGate(std::move(config.readRuntimeGate)),
-      m_publishVehicleFlightState(std::move(config.publishVehicleFlightState))
+      m_readAvoidanceSnapshot(std::move(config.readAvoidanceSnapshot)),
+      m_tuning(config.tuning),
+      m_publishVehicleFlightState(std::move(config.publishVehicleFlightState)),
+      m_publishAvoidanceTelemetry(std::move(config.publishAvoidanceTelemetry)),
+      m_defaultAvoidancePlugin(config.tuning),
+      m_defaultHoverPlugin(),
+      m_avoidancePlugin(config.avoidancePlugin ? config.avoidancePlugin
+                                               : &m_defaultAvoidancePlugin),
+      m_hoverPlugin(config.hoverPlugin ? config.hoverPlugin
+                                       : &m_defaultHoverPlugin)
 {
 }
 
@@ -39,6 +49,19 @@ bool Px4UdpHooks::IsTrackingPoseUsable(int trackingState)
 bool Px4UdpHooks::IsPoseQualityUsable(LivePoseQuality quality)
 {
     return quality != LivePoseQuality::Lost;
+}
+
+uint32_t Px4UdpHooks::PointCloudAgeMs(uint64_t updateUs)
+{
+    if (updateUs == 0) {
+        return 0;
+    }
+    const uint64_t nowUs = MonoTimeUs();
+    if (updateUs >= nowUs) {
+        return 0;
+    }
+    return static_cast<uint32_t>(
+        std::min<uint64_t>(0xFFFFFFFFULL, (nowUs - updateUs) / 1000ULL));
 }
 
 RuntimeCommandGate Px4UdpHooks::ReadCommandGate() const
@@ -69,6 +92,7 @@ bool Px4UdpHooks::ArmVehicle(std::string *err)
 
 bool Px4UdpHooks::DisarmVehicle(std::string *err)
 {
+    ClearActiveOffboardGoal();
     m_vehicleControl.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
     SetManualControlNeutral();
@@ -85,6 +109,7 @@ bool Px4UdpHooks::DisarmVehicle(std::string *err)
 
 bool Px4UdpHooks::StopVehicleImmediately(std::string *err)
 {
+    ClearActiveOffboardGoal();
     m_vehicleControl.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
     DisableRemoteControl(true);
@@ -100,20 +125,21 @@ bool Px4UdpHooks::StopVehicleImmediately(std::string *err)
 bool Px4UdpHooks::EnterGuidedControl(std::string *err)
 {
     // OFFBOARD relies on setpoint stream; disable manual joystick streaming.
+    ClearActiveOffboardGoal();
     m_manualControlStreaming.store(false, std::memory_order_relaxed);
     SetManualControlNeutral();
     SendManualControlSnapshot();
 
-    VehicleLocalPosition local{};
-    if (!m_vehicleControl.GetLocalPositionNed(local, 500000)) {
+    HoverAlgorithmContext hoverContext{};
+    std::string hoverErr;
+    if (!m_hoverPlugin->ApplyOffboardHold(m_vehicleControl, hoverContext,
+                                          &hoverErr)) {
         if (err) {
-            *err = "missing local position for offboard setpoint init";
+            *err = hoverErr.empty() ? "missing local position for offboard setpoint init"
+                                    : hoverErr;
         }
         return false;
     }
-
-    // Initialize OFFBOARD with a hold-position setpoint around current pose.
-    m_vehicleControl.UpdateStreamPosition(local.x, local.y, local.z, NAN);
 
     if (!EnsureSetpointStream()) {
         if (err) {
@@ -140,11 +166,13 @@ bool Px4UdpHooks::EnterGuidedControl(std::string *err)
 bool Px4UdpHooks::HoldVehicle(std::string *err)
 {
     (void)err;
+    ClearActiveOffboardGoal();
     m_vehicleControl.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
     m_offboardModeRequested.store(false, std::memory_order_relaxed);
     EnsureManualControlStream();
-    SetManualControlNeutral();
+    HoverAlgorithmContext hoverContext{};
+    SetManualControlInput(m_hoverPlugin->BuildManualHold(hoverContext));
     SendManualControlSnapshot();
     return true;
 }
@@ -152,6 +180,7 @@ bool Px4UdpHooks::HoldVehicle(std::string *err)
 bool Px4UdpHooks::EnterPositionControl(std::string *err)
 {
     // POSITION mode should not keep OFFBOARD setpoint stream alive.
+    ClearActiveOffboardGoal();
     m_vehicleControl.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
 
@@ -190,6 +219,7 @@ bool Px4UdpHooks::EnterPositionControl(std::string *err)
 
 bool Px4UdpHooks::LandVehicle(std::string *err)
 {
+    ClearActiveOffboardGoal();
     m_vehicleControl.StopSetpointStream();
     m_streamStarted.store(false, std::memory_order_relaxed);
     SetManualControlNeutral();
@@ -209,13 +239,17 @@ bool Px4UdpHooks::LandVehicle(std::string *err)
 bool Px4UdpHooks::ApplyMoveGoal(const MoveGoal &goal, std::string *err)
 {
     if (goal.isRcJoystick) {
-        return ApplyRcMoveGoal(goal);
+        return ApplyRcMoveGoal(goal, err);
     }
     return ApplyOffboardMoveGoal(goal, err);
 }
 
-bool Px4UdpHooks::ApplyRcMoveGoal(const MoveGoal &goal)
+bool Px4UdpHooks::ApplyRcMoveGoal(const MoveGoal &goal, std::string *err)
 {
+    ClearActiveOffboardGoal();
+    if (ApplyRcAvoidanceHoldIfNeeded(goal, err)) {
+        return false;
+    }
     VehicleManualControl input{};
     input.throttleNorm = ClampSignedUnit(goal.throttleNorm);
     input.yawNorm = ClampSignedUnit(goal.yawNorm);
@@ -224,6 +258,38 @@ bool Px4UdpHooks::ApplyRcMoveGoal(const MoveGoal &goal)
     EnsureManualControlStream();
     SetManualControlInput(input);
     SendManualControlSnapshot();
+    return true;
+}
+
+bool Px4UdpHooks::ApplyRcAvoidanceHoldIfNeeded(const MoveGoal &goal,
+                                              std::string *err)
+{
+    if (!m_readAvoidanceSnapshot) {
+        PublishAvoidanceIdle();
+        return false;
+    }
+    AvoidanceSnapshot snapshot{};
+    if (!m_readAvoidanceSnapshot(snapshot)) {
+        PublishAvoidanceIdle();
+        return false;
+    }
+    const AvoidanceDecision decision =
+        m_avoidancePlugin->EvaluateMoveGoal(goal, snapshot);
+    if (!decision.shouldHold) {
+        PublishAvoidanceStatus(decision, snapshot, false);
+        return false;
+    }
+    EnsureManualControlStream();
+    HoverAlgorithmContext hoverContext{};
+    hoverContext.avoidanceSnapshot = snapshot;
+    hoverContext.avoidanceDecision = decision;
+    SetManualControlInput(m_hoverPlugin->BuildManualHold(hoverContext));
+    SendManualControlSnapshot();
+    PublishAvoidanceStatus(decision, snapshot, true);
+    if (err) {
+        *err = decision.reason;
+    }
+    std::cerr << "[avoid] " << decision.reason << "\n";
     return true;
 }
 
@@ -276,15 +342,134 @@ bool Px4UdpHooks::ApplyOffboardMoveGoal(const MoveGoal &goal, std::string *err)
     if (!EnsureOffboardMoveReady(err)) {
         return false;
     }
+    if (ApplyAvoidanceHoldIfNeeded(goal, err)) {
+        ResetActiveOffboardGoal();
+        return false;
+    }
     const VehicleSetpointLocalNed setpoint = BuildMoveSetpoint(goal);
     m_vehicleControl.UpdateStreamSetpoint(setpoint);
     if (!EnsureOffboardMode(false, nullptr)) {
+        ClearActiveOffboardGoal();
         if (err) {
             *err = "offboard mode not active";
         }
         return false;
     }
+    StoreActiveOffboardGoal(goal);
     return true;
+}
+
+bool Px4UdpHooks::ApplyAvoidanceHoldIfNeeded(const MoveGoal &goal,
+                                             std::string *err)
+{
+    if (!m_readAvoidanceSnapshot) {
+        PublishAvoidanceIdle();
+        return false;
+    }
+    AvoidanceSnapshot snapshot{};
+    if (!m_readAvoidanceSnapshot(snapshot)) {
+        PublishAvoidanceIdle();
+        return false;
+    }
+    const AvoidanceDecision decision =
+        m_avoidancePlugin->EvaluateMoveGoal(goal, snapshot);
+    if (!decision.shouldHold) {
+        PublishAvoidanceStatus(decision, snapshot, false);
+        return false;
+    }
+    std::string holdErr;
+    HoverAlgorithmContext hoverContext{};
+    hoverContext.avoidanceSnapshot = snapshot;
+    hoverContext.avoidanceDecision = decision;
+    const bool held = m_hoverPlugin->ApplyOffboardHold(
+        m_vehicleControl, hoverContext, &holdErr);
+    PublishAvoidanceStatus(decision, snapshot, true);
+    if (err) {
+        *err = held || holdErr.empty() ? decision.reason
+                                       : decision.reason + "; " + holdErr;
+    }
+    std::cerr << "[avoid] " << decision.reason << "\n";
+    return true;
+}
+
+void Px4UdpHooks::StoreActiveOffboardGoal(const MoveGoal &goal)
+{
+    auto snapshot = std::make_shared<const MoveGoal>(goal);
+    std::atomic_store_explicit(&m_activeOffboardGoal, std::move(snapshot),
+                               std::memory_order_release);
+}
+
+std::shared_ptr<const MoveGoal> Px4UdpHooks::LoadActiveOffboardGoal() const
+{
+    return std::atomic_load_explicit(&m_activeOffboardGoal,
+                                     std::memory_order_acquire);
+}
+
+void Px4UdpHooks::ClearActiveOffboardGoal()
+{
+    ResetActiveOffboardGoal();
+    PublishAvoidanceIdle();
+}
+
+void Px4UdpHooks::ResetActiveOffboardGoal()
+{
+    std::atomic_store_explicit(&m_activeOffboardGoal,
+                               std::shared_ptr<const MoveGoal>{},
+                               std::memory_order_release);
+}
+
+void Px4UdpHooks::StepOffboardAvoidance()
+{
+    std::shared_ptr<const MoveGoal> goal = LoadActiveOffboardGoal();
+    if (!goal) {
+        return;
+    }
+    if (ApplyAvoidanceHoldIfNeeded(*goal, nullptr)) {
+        ResetActiveOffboardGoal();
+    }
+}
+
+void Px4UdpHooks::PublishAvoidanceIdle()
+{
+    if (!m_publishAvoidanceTelemetry) {
+        return;
+    }
+    AvoidanceTelemetry telemetry{};
+    telemetry.enabled = AvoidanceEnabled();
+    telemetry.holdCount = m_avoidanceHoldCount.load(std::memory_order_relaxed);
+    m_publishAvoidanceTelemetry(telemetry);
+}
+
+bool Px4UdpHooks::AvoidanceEnabled() const
+{
+    if (m_tuning) {
+        return m_tuning->avoidanceEnabled.load(std::memory_order_relaxed);
+    }
+    return ReadObstacleAvoidanceConfig().enabled;
+}
+
+void Px4UdpHooks::PublishAvoidanceStatus(
+    const AvoidanceDecision &decision,
+    const AvoidanceSnapshot &snapshot,
+    bool holding)
+{
+    if (!m_publishAvoidanceTelemetry) {
+        return;
+    }
+    AvoidanceTelemetry telemetry{};
+    telemetry.enabled = AvoidanceEnabled();
+    telemetry.activeGoal = !holding;
+    telemetry.holding = holding;
+    telemetry.holdReason = holding ? decision.holdReason
+                                   : AvoidanceHoldReason::None;
+    telemetry.nearestObstacleM = decision.nearestObstacleM;
+    telemetry.holdCount = holding
+                              ? m_avoidanceHoldCount.fetch_add(
+                                    1, std::memory_order_relaxed) + 1
+                              : m_avoidanceHoldCount.load(
+                                    std::memory_order_relaxed);
+    telemetry.pointCloudAgeMs = PointCloudAgeMs(snapshot.pointCloudUpdateUs);
+    m_publishAvoidanceTelemetry(telemetry);
 }
 
 bool Px4UdpHooks::EnsureSetpointStream()
@@ -303,6 +488,7 @@ void Px4UdpHooks::EnsureManualControlStream()
 
 void Px4UdpHooks::DisableRemoteControl(bool stopManualStream)
 {
+    ClearActiveOffboardGoal();
     m_remoteModeRequested.store(false, std::memory_order_relaxed);
     m_offboardModeRequested.store(false, std::memory_order_relaxed);
     if (stopManualStream) {
@@ -457,6 +643,7 @@ void Px4UdpHooks::StepManualControl()
         return;
     }
     if (m_offboardModeRequested.load(std::memory_order_relaxed)) {
+        StepOffboardAvoidance();
         EnsureOffboardMode(false, nullptr);
         return;
     }

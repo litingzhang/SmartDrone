@@ -48,6 +48,10 @@ std::vector<std::string> DefaultBehaviorNotes(
         "slam.feature_frontend.lk=grid_lk_pnp_vo",
         "slam.feature_frontend.lk_gftt_per_frame=klt_tracking_pnp_vo",
         "slam.lk_seed.gftt=shi_tomasi_good_features_to_track",
+        "avoidance.algorithm_plugin=occupancy_voxel_corridor",
+        "avoidance.depth_source=local_klt_inlier_occupancy_voxels",
+        "hover.algorithm_plugin=px4_position_or_manual_hold",
+        "avoidance.state_tlv_cmd=0xF6",
     };
     if (OpenVinsBackendAvailable()) {
         notes.push_back("slam.backend.openvins=in_tree_openvins_msckf_backend");

@@ -8,6 +8,7 @@
 #include "common/numeric_parse.h"
 #include "core/application/config/orb_acceleration_config.h"
 #include "core/application/config/slam_backend_availability.h"
+#include "core/application/runtime/obstacle_avoidance_config.h"
 
 namespace {
 
@@ -678,6 +679,27 @@ void ParseDiagnosticsConfig(const ArgReader &argReader,
     runtimeConfig.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");
 }
 
+void ParseAvoidanceRuntimeConfig(RuntimeConfig &runtimeConfig)
+{
+    const auto avoidanceConfig =
+        AppCore::ReadObstacleAvoidanceConfig();
+    runtimeConfig.avoidanceEnabled = avoidanceConfig.enabled;
+    runtimeConfig.avoidanceHoldOnStaleCloud =
+        avoidanceConfig.holdOnStaleCloud;
+    runtimeConfig.avoidanceRadiusM = avoidanceConfig.radiusM;
+    runtimeConfig.avoidanceLookaheadM = avoidanceConfig.lookaheadM;
+    runtimeConfig.avoidanceSpeedLookaheadS =
+        avoidanceConfig.speedLookaheadS;
+    runtimeConfig.avoidanceNearFieldRadiusM =
+        avoidanceConfig.nearFieldRadiusM;
+    runtimeConfig.avoidanceMaxPointCloudAgeMs =
+        avoidanceConfig.maxPointCloudAgeMs;
+    runtimeConfig.avoidanceMinCloudPoints =
+        avoidanceConfig.minCloudPoints;
+    runtimeConfig.avoidanceMinBlockingPoints =
+        avoidanceConfig.minBlockingPoints;
+}
+
 } // namespace
 
 AppConfig ParseAppConfig(int argc, char **argv)
@@ -696,6 +718,7 @@ AppConfig ParseAppConfig(int argc, char **argv)
     ParseVisualFeatureRuntimeConfig(argReader, argv0, config.runtime);
     ParseSlamFeatureTuningConfig(argReader, config.runtime);
     ParseDiagnosticsConfig(argReader, config.runtime);
+    ParseAvoidanceRuntimeConfig(config.runtime);
 
     return config;
 }

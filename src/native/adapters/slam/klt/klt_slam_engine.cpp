@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <utility>
 
 #include "adapters/slam/klt/klt_continuous_frontend.h"
@@ -34,6 +35,7 @@ struct ContinuousKltFrameRequest {
     KltContinuousFrontendResult *frontend{nullptr};
     uint64_t frameId{0};
     bool extractFeatures{false};
+    bool extractPointCloud{false};
     Core::Ports::SlamOutput *out{nullptr};
 };
 
@@ -41,6 +43,16 @@ struct PerFrameKltTrackingRequest {
     SlamModeSharedState *state{nullptr};
     KltPerFrameFrontendResult *frontend{nullptr};
     bool extractFeatures{false};
+    bool extractPointCloud{false};
+    Core::Ports::SlamOutput *out{nullptr};
+};
+
+struct ExportKltPointCloudRequest {
+    const SlamModeSharedState *state{nullptr};
+    const Sophus::SE3f *referenceTwc{nullptr};
+    const std::vector<cv::Point3f> *objectPoints{nullptr};
+    const std::vector<int> *inlierIndices{nullptr};
+    bool extractPointCloud{false};
     Core::Ports::SlamOutput *out{nullptr};
 };
 
@@ -53,6 +65,73 @@ void CopyKltFrontendTimings(const KltPerFrameFrontendResult &frontend,
     out.lkGfttMs = frontend.gfttMs;
     out.lkFlowMs = frontend.flowMs;
     out.lkCandidateMs = frontend.candidateMs;
+}
+
+bool CanUseKltPointCloud(const SlamModeSharedState &state)
+{
+    return state.m_lkFx > 0.0f && state.m_lkFy > 0.0f &&
+           state.m_lkBaseline > 0.0f;
+}
+
+void AppendLocalPoint(const Sophus::SE3f &twc, const cv::Point3f &point,
+                      Core::Ports::SlamOutput &out)
+{
+    const Eigen::Vector3f world =
+        twc * Eigen::Vector3f(point.x, point.y, point.z);
+    if (!std::isfinite(world.x()) || !std::isfinite(world.y()) ||
+        !std::isfinite(world.z())) {
+        return;
+    }
+    out.pointCloudXyz.push_back(world.x());
+    out.pointCloudXyz.push_back(world.y());
+    out.pointCloudXyz.push_back(world.z());
+}
+
+void AppendLocalPointCloud(const Sophus::SE3f &twc,
+                           const std::vector<cv::Point3f> &points,
+                           Core::Ports::SlamOutput &out)
+{
+    out.pointCloudXyz.reserve(points.size() * 3);
+    for (const cv::Point3f &point : points) {
+        AppendLocalPoint(twc, point, out);
+    }
+}
+
+std::vector<cv::Point3f> KeepPointsByIndices(
+    const std::vector<cv::Point3f> &points, const std::vector<int> &indices)
+{
+    std::vector<cv::Point3f> selected;
+    selected.reserve(indices.size());
+    for (int index : indices) {
+        if (index >= 0 && static_cast<size_t>(index) < points.size()) {
+            selected.push_back(points[static_cast<size_t>(index)]);
+        }
+    }
+    return selected;
+}
+
+void MaybeExportKltPointCloud(const ExportKltPointCloudRequest &request)
+{
+    if (!request.extractPointCloud || !request.state || !request.referenceTwc ||
+        !request.objectPoints || !request.out ||
+        !CanUseKltPointCloud(*request.state) || request.objectPoints->empty()) {
+        return;
+    }
+    AppendLocalPointCloud(*request.referenceTwc, *request.objectPoints,
+                          *request.out);
+}
+
+void MaybeExportKltInlierPointCloud(const ExportKltPointCloudRequest &request)
+{
+    if (!request.inlierIndices || request.inlierIndices->empty() ||
+        !request.objectPoints) {
+        return;
+    }
+    const std::vector<cv::Point3f> inlierPoints =
+        KeepPointsByIndices(*request.objectPoints, *request.inlierIndices);
+    ExportKltPointCloudRequest inlierRequest = request;
+    inlierRequest.objectPoints = &inlierPoints;
+    MaybeExportKltPointCloud(inlierRequest);
 }
 
 void InitializeContinuousKltFrame(const ContinuousKltFrameRequest &request)
@@ -87,6 +166,7 @@ void ProcessContinuousKltTrackingFrame(
         std::move(frontend.observations.pnp.imagePoints);
     std::vector<LkStereoTrack> trackedTracks =
         std::move(frontend.observations.trackedTracks);
+    const Sophus::SE3f previousTwc = state.m_lkTwc;
 
     const KltPnpCameraIntrinsics camera{state.m_lkFx, state.m_lkFy,
                                         state.m_lkCx, state.m_lkCy};
@@ -107,6 +187,9 @@ void ProcessContinuousKltTrackingFrame(
     out.matchesInliers = poseEstimate.inlierCount;
     out.trackedMapPointCount = static_cast<uint32_t>(poseEstimate.inlierCount);
     out.localMapPointCount = static_cast<uint32_t>(objectPoints.size());
+    MaybeExportKltInlierPointCloud(
+        {&state, &previousTwc, &objectPoints, &poseEstimate.inlierIndices,
+         request.extractPointCloud, &out});
     UpdateLkTracksAfterPoseEstimate(
         {state, frontend.leftRect, frontend.rightRect, request.frameId,
          std::move(trackedTracks), poseEstimate.inlierCount});
@@ -165,6 +248,9 @@ void ProcessPerFrameKltTrackingFrame(
         std::move(frontend.observations.objectPoints);
     std::vector<cv::Point2f> imagePoints =
         std::move(frontend.observations.imagePoints);
+    const Sophus::SE3f referenceTwc =
+        frontend.useKeyframeReference ? state.m_lkPerFrameReferenceTwc
+                                      : state.m_lkTwc;
 
     const auto pnpStartTp = std::chrono::steady_clock::now();
     const KltPnpPoseEstimateResult poseEstimate =
@@ -179,6 +265,9 @@ void ProcessPerFrameKltTrackingFrame(
     out.matchesInliers = poseEstimate.inlierCount;
     out.trackedMapPointCount = static_cast<uint32_t>(poseEstimate.inlierCount);
     out.localMapPointCount = static_cast<uint32_t>(objectPoints.size());
+    MaybeExportKltInlierPointCloud(
+        {&state, &referenceTwc, &objectPoints, &poseEstimate.inlierIndices,
+         request.extractPointCloud, &out});
     if (request.extractFeatures) {
         out.leftFeatures = std::move(frontend.currentLeftPoints);
     }
@@ -294,16 +383,17 @@ Core::Ports::SlamOutput
 KltSlamEngine::Process(const Core::Ports::SlamInputBatch &input,
                        bool extractFeatures, bool extractPointCloud)
 {
-    (void)extractPointCloud;
     if (m_frontend == FeatureFrontend::LK) {
-        return ProcessContinuousKlt(input, extractFeatures);
+        return ProcessContinuousKlt(input, extractFeatures,
+                                    extractPointCloud);
     }
-    return ProcessPerFrameKlt(input, extractFeatures);
+    return ProcessPerFrameKlt(input, extractFeatures, extractPointCloud);
 }
 
 Core::Ports::SlamOutput
 KltSlamEngine::ProcessContinuousKlt(const Core::Ports::SlamInputBatch &input,
-                                    bool extractFeatures)
+                                    bool extractFeatures,
+                                    bool extractPointCloud)
 {
     SlamModeSharedState &state = *m_state;
     Core::Ports::SlamOutput out = MakeOkSlamOutput(input);
@@ -318,11 +408,13 @@ KltSlamEngine::ProcessContinuousKlt(const Core::Ports::SlamInputBatch &input,
 
     if (!frontend.havePreviousFrame) {
         const ContinuousKltFrameRequest request{&state, &frontend, input.frameId,
-                                                extractFeatures, &out};
+                                                extractFeatures,
+                                                extractPointCloud, &out};
         InitializeContinuousKltFrame(request);
     } else {
         const ContinuousKltFrameRequest request{&state, &frontend, input.frameId,
-                                                extractFeatures, &out};
+                                                extractFeatures,
+                                                extractPointCloud, &out};
         ProcessContinuousKltTrackingFrame(request);
     }
 
@@ -335,7 +427,8 @@ KltSlamEngine::ProcessContinuousKlt(const Core::Ports::SlamInputBatch &input,
 
 Core::Ports::SlamOutput
 KltSlamEngine::ProcessPerFrameKlt(const Core::Ports::SlamInputBatch &input,
-                                  bool extractFeatures)
+                                  bool extractFeatures,
+                                  bool extractPointCloud)
 {
     SlamModeSharedState &state = *m_state;
     Core::Ports::SlamOutput out = MakeOkSlamOutput(input);
@@ -354,7 +447,8 @@ KltSlamEngine::ProcessPerFrameKlt(const Core::Ports::SlamInputBatch &input,
         InitializePerFrameKltFrame(state, frontend);
     } else {
         const PerFrameKltTrackingRequest request{&state, &frontend,
-                                                 extractFeatures, &out};
+                                                 extractFeatures,
+                                                 extractPointCloud, &out};
         ProcessPerFrameKltTrackingFrame(request);
     }
 

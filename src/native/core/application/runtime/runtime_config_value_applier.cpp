@@ -221,6 +221,52 @@ CommandResult ApplyAccelerationConfigValue(const std::string &key,
     return OkResult();
 }
 
+CommandResult ApplyAvoidanceConfigValue(const std::string &key,
+                                        const ConfigValue &value,
+                                        RemoteRuntimeConfig &remote,
+                                        bool &handled)
+{
+    handled = true;
+    if (key == ConfigRegistry::AVOIDANCE_ENABLED) {
+        return AssignBool(value, remote.avoidanceEnabled,
+                          "avoidance.enabled");
+    }
+    if (key == ConfigRegistry::AVOIDANCE_HOLD_ON_STALE_CLOUD) {
+        return AssignBool(value, remote.avoidanceHoldOnStaleCloud,
+                          "avoidance.hold_on_stale_cloud");
+    }
+    if (key == ConfigRegistry::AVOIDANCE_RADIUS_M) {
+        return AssignFloat(value, remote.avoidanceRadiusM,
+                           "avoidance.radius_m");
+    }
+    if (key == ConfigRegistry::AVOIDANCE_LOOKAHEAD_M) {
+        return AssignFloat(value, remote.avoidanceLookaheadM,
+                           "avoidance.lookahead_m");
+    }
+    if (key == ConfigRegistry::AVOIDANCE_SPEED_LOOKAHEAD_S) {
+        return AssignFloat(value, remote.avoidanceSpeedLookaheadS,
+                           "avoidance.speed_lookahead_s");
+    }
+    if (key == ConfigRegistry::AVOIDANCE_NEAR_FIELD_RADIUS_M) {
+        return AssignFloat(value, remote.avoidanceNearFieldRadiusM,
+                           "avoidance.near_field_radius_m");
+    }
+    if (key == ConfigRegistry::AVOIDANCE_MAX_POINT_AGE_MS) {
+        return AssignNumericInt(value, remote.avoidanceMaxPointCloudAgeMs,
+                                "avoidance.max_point_age_ms");
+    }
+    if (key == ConfigRegistry::AVOIDANCE_MIN_CLOUD_POINTS) {
+        return AssignNumericInt(value, remote.avoidanceMinCloudPoints,
+                                "avoidance.min_cloud_points");
+    }
+    if (key == ConfigRegistry::AVOIDANCE_MIN_BLOCKING_POINTS) {
+        return AssignNumericInt(value, remote.avoidanceMinBlockingPoints,
+                                "avoidance.min_blocking_points");
+    }
+    handled = false;
+    return OkResult();
+}
+
 } // namespace
 
 CommandResult ApplyConfigValue(const std::string &key,
@@ -253,6 +299,10 @@ CommandResult ApplyConfigValue(const std::string &key,
         return result;
     }
     result = ApplyAccelerationConfigValue(key, value, remote, handled);
+    if (handled || !result.ok) {
+        return result;
+    }
+    result = ApplyAvoidanceConfigValue(key, value, remote, handled);
     if (handled || !result.ok) {
         return result;
     }

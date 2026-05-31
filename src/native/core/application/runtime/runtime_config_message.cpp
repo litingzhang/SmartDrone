@@ -32,7 +32,11 @@ std::string BuildRuntimeConfigMessage(const RemoteRuntimeConfig &remote,
            std::to_string(remote.visualFeatureInputMaxWidth) + "x" +
            std::to_string(remote.visualFeatureInputMaxHeight) +
            " lk_seed=gftt lk_accel=" + remote.lkPerFrameAcceleration +
-           " orb_accel=" + remote.orbAcceleration;
+           " orb_accel=" + remote.orbAcceleration +
+           " avoid=" + (remote.avoidanceEnabled ? "on" : "off") +
+           " avoid_radius_m=" + std::to_string(remote.avoidanceRadiusM) +
+           " avoid_min_cloud_points=" +
+           std::to_string(remote.avoidanceMinCloudPoints);
 }
 
 } // namespace SmartDrone::Core::Application

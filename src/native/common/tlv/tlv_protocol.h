@@ -69,6 +69,10 @@ constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // orbAcceleration(u8) at [108] where 0=cpu, 1=opencv-cuda, 2=vpi-remap.
 // v14 additionally stores SLAM backend:
 // slamBackend(u8) at [109] where 0=orbslam3, 1=dpvo_tensorrt, 2=klt.
+// v15 additionally stores avoidance config:
+// enabled [110], holdOnStaleCloud [111], radiusM [112..115], lookaheadM [116..119],
+// speedLookaheadS [120..123], nearFieldRadiusM [124..127], maxPointAgeMs [128..131],
+// minCloudPoints [132..135], minBlockingPoints [136..139] as f32le except booleans.
 // legacy v1 (len=40) omitted pairMs and started reservedOrIp at byte 10.
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY = 40;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V2 = 42;
@@ -84,6 +88,7 @@ constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V11 = 107;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V12 = 108;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V13 = 109;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V14 = 110;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V15 = 140;
 constexpr uint16_t RUNTIME_CONFIG_PAIR_MS_OFFSET = 10;
 constexpr uint16_t RUNTIME_CONFIG_IP_OFFSET = 12;
 constexpr uint16_t RUNTIME_CONFIG_IP_LEN = 30;
@@ -111,6 +116,15 @@ constexpr uint16_t RUNTIME_CONFIG_LK_SUPERPOINT_SEEDING_OFFSET = 106;
 constexpr uint16_t RUNTIME_CONFIG_LK_PER_FRAME_ACCEL_OFFSET = 107;
 constexpr uint16_t RUNTIME_CONFIG_ORB_ACCEL_OFFSET = 108;
 constexpr uint16_t RUNTIME_CONFIG_SLAM_BACKEND_OFFSET = 109;
+constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_ENABLE_OFFSET = 110;
+constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_HOLD_ON_STALE_OFFSET = 111;
+constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_RADIUS_M_OFFSET = 112;
+constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_LOOKAHEAD_M_OFFSET = 116;
+constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_SPEED_LOOKAHEAD_S_OFFSET = 120;
+constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_NEAR_FIELD_RADIUS_M_OFFSET = 124;
+constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_MAX_POINT_AGE_MS_OFFSET = 128;
+constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_MIN_CLOUD_POINTS_OFFSET = 132;
+constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_MIN_BLOCKING_POINTS_OFFSET = 136;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;

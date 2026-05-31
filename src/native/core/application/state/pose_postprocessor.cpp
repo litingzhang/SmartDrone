@@ -193,6 +193,39 @@ void PosePostprocessor::StartupAligner::SetPublishedPose(const PoseEstimate &pos
     havePublishedPose = true;
 }
 
+Sophus::SE3f PoseFromEstimate(const PoseEstimate &pose)
+{
+    Eigen::Quaternionf q(pose.qw, pose.qx, pose.qy, pose.qz);
+    q.normalize();
+    return Sophus::SE3f(Sophus::SO3f(q),
+                        Eigen::Vector3f(pose.x, pose.y, pose.z));
+}
+
+void AppendTransformedPoint(const Sophus::SE3f &transform,
+                            const float *rawPoint,
+                            std::vector<float> &out)
+{
+    if (!std::isfinite(rawPoint[0]) || !std::isfinite(rawPoint[1]) ||
+        !std::isfinite(rawPoint[2])) {
+        return;
+    }
+    const Eigen::Vector3f point =
+        transform * Eigen::Vector3f(rawPoint[0], rawPoint[1], rawPoint[2]);
+    if (!std::isfinite(point.x()) || !std::isfinite(point.y()) ||
+        !std::isfinite(point.z())) {
+        return;
+    }
+    out.push_back(point.x());
+    out.push_back(point.y());
+    out.push_back(point.z());
+}
+
+bool HasPointCloudInput(const PosePostprocessor::ProcessRequest &request)
+{
+    return request.trackingUsable && request.rawPointCloudXyz != nullptr &&
+           request.rawPointCloudXyz->size() >= 3;
+}
+
 void PosePostprocessor::StartupAligner::RefreshRangeSensor(const ReadRangeSensorFn &readRangeSensor)
 {
     if (!readRangeSensor) {
@@ -485,7 +518,8 @@ PosePostprocessor::PreparedPose PosePostprocessor::PreparePose(const ProcessRequ
     if (!request.useImu && request.stereoExtrinsicsLoaded) {
         // Pure stereo/LK estimates the left optical camera pose. Convert it to body FRD using T_b_c1
         // before the startup reference is applied, so published local motion is +X forward, +Y right, +Z down.
-        prepared.twc = prepared.twc * request.stereoBodyExtrinsics.inverse();
+        const Sophus::SE3f rawToBody = request.stereoBodyExtrinsics.inverse();
+        prepared.twc = prepared.twc * rawToBody;
         prepared.result.debug.stereoExtrinsicsApplied = true;
     }
     prepared.result.debug.bodyX = prepared.twc.translation().x();
@@ -496,7 +530,9 @@ PosePostprocessor::PreparedPose PosePostprocessor::PreparePose(const ProcessRequ
 
 void PosePostprocessor::ApplyStereoReference(const ProcessRequest &request, PreparedPose &prepared)
 {
+    const Sophus::SE3f beforeReference = prepared.twc;
     prepared.twc = m_continuity.MapPose(request.mapId, request.trackingUsable, prepared.twc);
+    prepared.preparedToLocal = prepared.twc * beforeReference.inverse();
     prepared.result.resetCounter = m_continuity.GetResetCounter();
     prepared.result.resetMapCount = m_continuity.GetResetMapCount();
 
@@ -507,6 +543,8 @@ void PosePostprocessor::ApplyStereoReference(const ProcessRequest &request, Prep
             *request.stereoReferencePoseSet = true;
         }
         prepared.twc = request.stereoReferencePose->inverse() * prepared.twc;
+        prepared.preparedToLocal =
+            request.stereoReferencePose->inverse() * prepared.preparedToLocal;
         prepared.result.debug.referenceApplied = true;
     }
     prepared.result.debug.localX = prepared.twc.translation().x();
@@ -536,11 +574,30 @@ void PosePostprocessor::PopulateOutputPose(const ProcessRequest &request, Prepar
     prepared.result.debug.outputGuardMaxStepM = guard.maxStepM;
 }
 
+void PosePostprocessor::PopulatePointCloud(const ProcessRequest &request,
+                                           PreparedPose &prepared)
+{
+    if (!HasPointCloudInput(request) ||
+        prepared.result.quality == PoseQuality::Lost) {
+        return;
+    }
+    const Sophus::SE3f rawToLocal =
+        PoseFromEstimate(prepared.result.poseEstimate) * prepared.twc.inverse() *
+        prepared.preparedToLocal;
+    const auto &cloud = *request.rawPointCloudXyz;
+    prepared.result.localPointCloudXyz.reserve(cloud.size());
+    for (size_t index = 0; index + 2 < cloud.size(); index += 3) {
+        AppendTransformedPoint(rawToLocal, &cloud[index],
+                               prepared.result.localPointCloudXyz);
+    }
+}
+
 PosePostprocessor::Result PosePostprocessor::ProcessPose(const ProcessRequest &request)
 {
     PreparedPose prepared = PreparePose(request);
     ApplyStereoReference(request, prepared);
     PopulateOutputPose(request, prepared);
+    PopulatePointCloud(request, prepared);
     return prepared.result;
 }
 

@@ -6,6 +6,8 @@
 #include <memory>
 #include <utility>
 
+#include "core/application/runtime/runtime_config_application.h"
+#include "core/application/runtime/runtime_config_projection.h"
 #include "core/application/session/slam/slam_settings_loader.h"
 
 namespace SmartDrone::Core::Application {
@@ -96,21 +98,15 @@ UnifiedRuntimeController::UnifiedRuntimeController(UnifiedRuntimeControllerConfi
                                std::memory_order_release);
     const UnifiedConfig runtimeConfig = CurrentConfig();
 
-    m_tuning.slamInputFps.store(runtimeConfig.app.runtime.slamInputFps, std::memory_order_relaxed);
-    m_tuning.slamOperationMode.store(static_cast<uint8_t>(runtimeConfig.app.runtime.slamOperationMode),
-                                     std::memory_order_relaxed);
-    m_tuning.featureFrontend.store(static_cast<uint8_t>(runtimeConfig.app.runtime.featureFrontend),
-                                   std::memory_order_relaxed);
-    m_tuning.sendImage.store(runtimeConfig.app.udp.sendImage, std::memory_order_relaxed);
-    m_tuning.sendFeature.store(runtimeConfig.app.udp.sendFeature, std::memory_order_relaxed);
-    m_tuning.sendMap.store(runtimeConfig.app.udp.sendMap, std::memory_order_relaxed);
-    m_tuning.useCustomTbc.store(runtimeConfig.app.runtime.useCustomTbc, std::memory_order_relaxed);
-    m_tuning.tbcTx.store(runtimeConfig.app.runtime.tbcTx, std::memory_order_relaxed);
-    m_tuning.tbcTy.store(runtimeConfig.app.runtime.tbcTy, std::memory_order_relaxed);
-    m_tuning.tbcTz.store(runtimeConfig.app.runtime.tbcTz, std::memory_order_relaxed);
-    m_tuning.tbcRollDeg.store(runtimeConfig.app.runtime.tbcRollDeg, std::memory_order_relaxed);
-    m_tuning.tbcPitchDeg.store(runtimeConfig.app.runtime.tbcPitchDeg, std::memory_order_relaxed);
-    m_tuning.tbcYawDeg.store(runtimeConfig.app.runtime.tbcYawDeg, std::memory_order_relaxed);
+    const RemoteRuntimeConfig remote = BuildRemoteConfig(runtimeConfig);
+    const RuntimeTbcValues tbc{
+        runtimeConfig.app.runtime.tbcTx,
+        runtimeConfig.app.runtime.tbcTy,
+        runtimeConfig.app.runtime.tbcTz,
+        runtimeConfig.app.runtime.tbcRollDeg,
+        runtimeConfig.app.runtime.tbcPitchDeg,
+        runtimeConfig.app.runtime.tbcYawDeg};
+    SyncRuntimeTuning(m_tuning, remote, tbc);
 }
 
 void UnifiedRuntimeController::Stop()

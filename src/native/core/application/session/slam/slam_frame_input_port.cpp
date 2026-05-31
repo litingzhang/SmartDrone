@@ -7,6 +7,7 @@
 #include <iostream>
 #include <utility>
 
+#include "common/environment.h"
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/session/slam/imu_window_filter.h"
 #include "core/application/session/slam/slam_runtime_control_port.h"
@@ -360,13 +361,16 @@ void SlamFrameInputPort::PopulateFrameImageQuality(
 
 void SlamFrameInputPort::PopulateFrameProcessingFlags(FrameMetadata &metadata)
 {
+    const bool avoidancePointCloud =
+        m_ctx.tuning.avoidanceEnabled.load(std::memory_order_relaxed);
     metadata.debugRightOnlyFeatures = m_ctx.aliases.debugRightOnlyFeatures;
     metadata.extractFeatures =
         metadata.sendFeature ||
         m_sharedState.requestedSlamMode.load() ==
             SmartDrone::Core::Domain::SlamOperationMode::Auto;
     metadata.updatePointCloud =
-        !metadata.debugRightOnlyFeatures && metadata.sendMap &&
+        !metadata.debugRightOnlyFeatures &&
+        (metadata.sendMap || avoidancePointCloud) &&
         (metadata.captureTimestampNs -
          m_outputState.lastPointCloudUpdateNs.load()) >=
             POINT_CLOUD_UPDATE_INTERVAL_NS;

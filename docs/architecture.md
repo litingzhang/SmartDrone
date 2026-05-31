@@ -265,7 +265,7 @@ Key command groups:
 - movement: `CMD_MOVE`
 - runtime: mode/config/clean calib/force restart
 - query: capabilities/config
-- response: ACK/STATE/POINT_CLOUD/CAPABILITIES/CONFIG/HEARTBEAT
+- response: ACK/STATE/POINT_CLOUD/CAPABILITIES/CONFIG/HEARTBEAT/AVOIDANCE_STATE
 
 ### 4.3 Heartbeat and State Link
 
@@ -273,6 +273,7 @@ Server behavior (`UdpCommandRuntime` via EPG):
 
 - heartbeat TX: every `500ms`
 - state TX: every `100ms`
+- avoidance state TX: with each state tick as `CMD_AVOIDANCE_STATE=0xF6`
 - point cloud TX: on `sendMap=true` and cloud seq update
 
 Loss handling:
@@ -592,9 +593,11 @@ sequenceDiagram
 - control commands: `0x10`~`0x16`
 - movement command: `CMD_MOVE=0x20`
 - runtime commands: `CMD_RUNTIME_MODE=0x30`, `CMD_RUNTIME_CONFIG=0x31`
-- `CMD_RUNTIME_CONFIG` payload compatibility: `legacy/v2/v3/v4/v5/v6/v7/v8/v9/v10`
+- `CMD_RUNTIME_CONFIG` payload compatibility: `legacy/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15`
 - query commands: `CMD_GET_CAPABILITIES=0x33`, `CMD_GET_CONFIG=0x34`
-- response commands: `CMD_ACK=0xF0`, `CMD_STATE=0xF1`, `CMD_HEARTBEAT=0xF5`
+- response commands: `CMD_ACK=0xF0`, `CMD_STATE=0xF1`, `CMD_POINT_CLOUD=0xF2`,
+  `CMD_CAPABILITIES=0xF3`, `CMD_CONFIG=0xF4`, `CMD_HEARTBEAT=0xF5`,
+  `CMD_AVOIDANCE_STATE=0xF6`
 
 ### 10.2 Key Timing Parameters
 
@@ -603,8 +606,45 @@ sequenceDiagram
 - heartbeat LAND timeout: `3s`
 - command peer lock window: `5s`
 - state TX period: `100ms`
+- avoidance state TX period: `100ms`
 
-### 10.3 Core Runtime Config Keys
+### 10.3 Avoidance State Payload
+
+`CMD_AVOIDANCE_STATE=0xF6` uses a fixed 24-byte little-endian payload:
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | `u8` | avoidance enabled |
+| 1 | `u8` | active OFFBOARD goal present |
+| 2 | `u8` | currently holding due to avoidance |
+| 3 | `u8` | hold reason code |
+| 4 | `f32le` | nearest obstacle distance in meters |
+| 8 | `u32le` | cumulative avoidance hold count |
+| 12 | `u32le` | point cloud age in milliseconds |
+| 16 | `u32le` | point cloud sequence |
+| 20 | `u32le` | point cloud point count |
+
+Hold reason codes are `0=none`, `1=obstacle ahead`, `2=obstacle near`, `3=point cloud unavailable`,
+`4=point cloud stale`, and `5=point cloud sparse`.
+
+The source depth is a local occupancy voxel map built from the local-control-frame KLT inlier cloud held in
+`LivePoseState`. Avoidance decisions are provided by `IAvoidanceAlgorithmPlugin`; the default plugin scans occupied
+voxels with a near-field check and a motion corridor check. Hover responses are provided by `IHoverAlgorithmPlugin`;
+the default plugin sends a PX4 local-position hold for OFFBOARD and neutral manual control for RC/REMOTE. `CMD_GET_CONFIG`
+reports the active avoidance parameters under `avoidance.*`, and `CMD_GET_CAPABILITIES` reports the supported
+`SMART_DRONE_AVOIDANCE_*` environment keys.
+`SMART_DRONE_AVOIDANCE_MIN_CLOUD_POINTS` can require a minimum raw point-cloud size before a cloud is considered usable;
+with `SMART_DRONE_AVOIDANCE_HOLD_ON_STALE_CLOUD=1`, undersized clouds trigger the same hold behavior as stale or missing
+clouds. `SMART_DRONE_AVOIDANCE_MIN_BLOCKING_POINTS` counts occupied voxels, not duplicate raw points.
+
+Avoidance protects both OFFBOARD setpoint moves and Android REMOTE/RC joystick translation. RC forward/right input is
+projected into the local horizontal frame using the current pose yaw; RC throttle is projected onto local vertical
+motion. Both paths are evaluated with the same corridor scan.
+
+`CMD_RUNTIME_CONFIG` v15 appends hot-reloadable avoidance settings at offsets `110..139`: enabled, hold-on-stale-cloud,
+radius, lookahead, speed lookahead, near-field radius, max point age, minimum cloud points, and minimum blocking points.
+
+### 10.4 Core Runtime Config Keys
 
 - `camera.exposure_us`
 - `camera.gain`
@@ -637,13 +677,22 @@ sequenceDiagram
 - `slam.lk_superpoint_seeding`
 - `slam.lk_per_frame_accel`
 - `slam.orb_accel`
+- `avoidance.enabled`
+- `avoidance.hold_on_stale_cloud`
+- `avoidance.radius_m`
+- `avoidance.lookahead_m`
+- `avoidance.speed_lookahead_s`
+- `avoidance.near_field_radius_m`
+- `avoidance.max_point_age_ms`
+- `avoidance.min_cloud_points`
+- `avoidance.min_blocking_points`
 - `stream.udp_enabled`
 - `stream.udp_ip`
 - `stream.send_image`
 - `stream.send_feature`
 - `stream.send_map`
 
-### 10.4 `T_b_c1` Parameter (`config/*.yaml`)
+### 10.5 `T_b_c1` Parameter (`config/*.yaml`)
 
 - Definition: `T_b_c1` is the 4x4 homogeneous extrinsic (`SE3`) from `body -> c1` (left camera).
 - Loading rule: in pure stereo mode, the runtime first reads `T_b_c1`, then falls back to `IMU.T_b_c1`.
@@ -652,7 +701,7 @@ sequenceDiagram
   `T_w_b = T_w_c1 * (T_b_c1)^-1`.
 - Fallback behavior: if neither `T_b_c1` nor `IMU.T_b_c1` exists, pose remains in camera frame and a log hint is printed.
 
-### 10.5 Full Pose Processing Path (SLAM to external outputs)
+### 10.6 Full Pose Processing Path (SLAM to external outputs)
 
 1. The selected SLAM engine returns a `SlamOutput` pose in world-camera form. The ORB-SLAM3 runtime converts
    ORB-SLAM3 `T_cw` into `T_w_c`; KLT and DPVO publish their native pose estimate through the same output contract.
@@ -665,7 +714,7 @@ sequenceDiagram
    - MAVLink: `MavlinkPosePublisher -> SendOdometry` with `MAV_FRAME_LOCAL_NED / MAV_FRAME_BODY_FRD`.
    - UDP state: stored in `LivePoseState`, then packed by `UdpCommandRuntime` into `CMD_STATE`.
 
-### 10.6 ORB-SLAM3 Parameter Apply Path
+### 10.7 ORB-SLAM3 Parameter Apply Path
 
 1. Android can still send ORB parameters (`slam.orb_*`) via `CMD_RUNTIME_CONFIG` for compatibility.
 2. `RuntimeConfigService` validates and restart-gates those values only when the selected backend is `orbslam3`.

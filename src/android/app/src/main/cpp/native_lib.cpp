@@ -26,7 +26,7 @@ static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
 static constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
-static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 110;
+static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 140;
 
 struct RuntimeConfigJniArgs {
     jint exposureUs{};
@@ -59,6 +59,15 @@ struct RuntimeConfigJniArgs {
     jint lkPerFrameAcceleration{};
     jint orbAcceleration{};
     jint slamBackend{};
+    jboolean avoidanceEnabled{};
+    jboolean avoidanceHoldOnStaleCloud{};
+    jfloat avoidanceRadiusM{};
+    jfloat avoidanceLookaheadM{};
+    jfloat avoidanceSpeedLookaheadS{};
+    jfloat avoidanceNearFieldRadiusM{};
+    jint avoidanceMaxPointAgeMs{};
+    jint avoidanceMinCloudPoints{};
+    jint avoidanceMinBlockingPoints{};
 };
 
 static uint32_t NowMs32()
@@ -190,6 +199,22 @@ static void WriteRuntimeConfigFeature(std::vector<uint8_t> &payload,
     payload[109] = static_cast<uint8_t>(args.slamBackend);
 }
 
+static void WriteRuntimeConfigAvoidance(std::vector<uint8_t> &payload,
+                                        const RuntimeConfigJniArgs &args)
+{
+    payload[110] = static_cast<uint8_t>(args.avoidanceEnabled == JNI_TRUE ? 1 : 0);
+    payload[111] =
+        static_cast<uint8_t>(args.avoidanceHoldOnStaleCloud == JNI_TRUE ? 1 : 0);
+    WriteF32LeAt(payload, 112, args.avoidanceRadiusM);
+    WriteF32LeAt(payload, 116, args.avoidanceLookaheadM);
+    WriteF32LeAt(payload, 120, args.avoidanceSpeedLookaheadS);
+    WriteF32LeAt(payload, 124, args.avoidanceNearFieldRadiusM);
+    WriteF32LeAt(payload, 128, static_cast<float>(args.avoidanceMaxPointAgeMs));
+    WriteF32LeAt(payload, 132, static_cast<float>(args.avoidanceMinCloudPoints));
+    WriteF32LeAt(payload, 136,
+                 static_cast<float>(args.avoidanceMinBlockingPoints));
+}
+
 static std::vector<uint8_t> MakeRuntimeConfigPayload(
     const RuntimeConfigJniArgs &args)
 {
@@ -200,6 +225,7 @@ static std::vector<uint8_t> MakeRuntimeConfigPayload(
     WriteRuntimeConfigTbc(payload, args);
     WriteRuntimeConfigOrb(payload, args);
     WriteRuntimeConfigFeature(payload, args);
+    WriteRuntimeConfigAvoidance(payload, args);
     return payload;
 }
 
@@ -295,7 +321,12 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
     jfloat tbcTx, jfloat tbcTy, jfloat tbcTz, jfloat tbcRollDeg, jfloat tbcPitchDeg, jfloat tbcYawDeg,
     jint orbNFeatures, jfloat orbScaleFactor, jint orbNLevels, jint orbIniThFAST, jint orbMinThFAST,
     jint featureFrontend, jint superpointTopK, jint superpointMaxPoints, jint superpointInputMaxWidth, jint superpointInputMaxHeight,
-    jint lkPerFrameAcceleration, jint orbAcceleration, jint slamBackend)
+    jint lkPerFrameAcceleration, jint orbAcceleration, jint slamBackend,
+    jboolean avoidanceEnabled, jboolean avoidanceHoldOnStaleCloud,
+    jfloat avoidanceRadiusM, jfloat avoidanceLookaheadM,
+    jfloat avoidanceSpeedLookaheadS, jfloat avoidanceNearFieldRadiusM,
+    jint avoidanceMaxPointAgeMs, jint avoidanceMinCloudPoints,
+    jint avoidanceMinBlockingPoints)
 {
     const RuntimeConfigJniArgs args{
         exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
@@ -303,7 +334,11 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
         tbcRollDeg, tbcPitchDeg, tbcYawDeg, orbNFeatures, orbScaleFactor,
         orbNLevels, orbIniThFAST, orbMinThFAST, featureFrontend, superpointTopK,
         superpointMaxPoints, superpointInputMaxWidth, superpointInputMaxHeight,
-        lkPerFrameAcceleration, orbAcceleration, slamBackend};
+        lkPerFrameAcceleration, orbAcceleration, slamBackend, avoidanceEnabled,
+        avoidanceHoldOnStaleCloud, avoidanceRadiusM, avoidanceLookaheadM,
+        avoidanceSpeedLookaheadS, avoidanceNearFieldRadiusM,
+        avoidanceMaxPointAgeMs, avoidanceMinCloudPoints,
+        avoidanceMinBlockingPoints};
     const std::vector<uint8_t> payload = MakeRuntimeConfigPayload(args);
     return SendFrame(CMD_RUNTIME_CONFIG, 0, payload.data(),
                      static_cast<uint16_t>(payload.size()));

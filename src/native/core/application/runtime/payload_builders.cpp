@@ -3,6 +3,7 @@
 #include <sstream>
 
 #include "core/application/config/capability_catalog.h"
+#include "core/application/runtime/obstacle_avoidance_config.h"
 #include "core/application/runtime/runtime_provider_metadata.h"
 
 namespace SmartDrone::Core::Application {
@@ -125,6 +126,28 @@ void AppendStreamConfig(std::ostringstream &oss, const UnifiedConfig &cfg)
     oss << "stream.send_map=" << BoolText(cfg.app.udp.sendMap) << "\n";
 }
 
+void AppendAvoidanceConfig(std::ostringstream &oss, const UnifiedConfig &cfg)
+{
+    const ObstacleAvoidanceConfig config =
+        ObstacleAvoidanceConfigFromRuntime(cfg.app.runtime);
+    oss << "avoidance.enabled=" << BoolText(config.enabled) << "\n";
+    oss << "avoidance.radius_m=" << config.radiusM << "\n";
+    oss << "avoidance.lookahead_m=" << config.lookaheadM << "\n";
+    oss << "avoidance.speed_lookahead_s=" << config.speedLookaheadS << "\n";
+    oss << "avoidance.near_field_radius_m=" << config.nearFieldRadiusM
+        << "\n";
+    oss << "avoidance.max_point_age_ms=" << config.maxPointCloudAgeMs << "\n";
+    oss << "avoidance.min_cloud_points=" << config.minCloudPoints << "\n";
+    oss << "avoidance.min_blocking_points=" << config.minBlockingPoints
+        << "\n";
+    oss << "avoidance.hold_on_stale_cloud="
+        << BoolText(config.holdOnStaleCloud) << "\n";
+    oss << "avoidance.algorithm_plugin=occupancy_voxel_corridor\n";
+    oss << "avoidance.map=local_occupancy_voxels\n";
+    oss << "hover.algorithm_plugin=px4_position_or_manual_hold\n";
+    oss << "avoidance.state_cmd=0xF6\n";
+}
+
 } // namespace
 
 std::vector<uint8_t> BuildCapabilitiesPayload(
@@ -159,6 +182,15 @@ std::vector<uint8_t> BuildCapabilitiesPayload(
     oss << "behavior_notes=" << JoinStrings(capabilities.behaviorNotes, ";")
         << "\n";
     oss << "config_keys=" << JoinStrings(configKeys, ",") << "\n";
+    oss << "avoidance_env_keys=SMART_DRONE_AVOIDANCE_ENABLE,"
+           "SMART_DRONE_AVOIDANCE_RADIUS_M,"
+           "SMART_DRONE_AVOIDANCE_LOOKAHEAD_M,"
+           "SMART_DRONE_AVOIDANCE_SPEED_LOOKAHEAD_S,"
+           "SMART_DRONE_AVOIDANCE_NEAR_FIELD_RADIUS_M,"
+           "SMART_DRONE_AVOIDANCE_MAX_POINT_AGE_MS,"
+           "SMART_DRONE_AVOIDANCE_MIN_CLOUD_POINTS,"
+           "SMART_DRONE_AVOIDANCE_MIN_BLOCKING_POINTS,"
+           "SMART_DRONE_AVOIDANCE_HOLD_ON_STALE_CLOUD\n";
     return TextPayloadFromString(oss.str());
 }
 
@@ -176,6 +208,7 @@ BuildConfigPayload(const UnifiedConfig &cfg,
     AppendOrbConfig(oss, cfg);
     AppendVisualFeatureConfig(oss, cfg);
     AppendStreamConfig(oss, cfg);
+    AppendAvoidanceConfig(oss, cfg);
     return TextPayloadFromString(oss.str());
 }
 

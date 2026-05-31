@@ -69,6 +69,24 @@ class ConfigRegistry {
     static constexpr std::string_view SLAM_LK_PER_FRAME_ACCELERATION =
         "slam.lk_per_frame_accel";
     static constexpr std::string_view SLAM_ORB_ACCELERATION = "slam.orb_accel";
+    static constexpr std::string_view AVOIDANCE_ENABLED =
+        "avoidance.enabled";
+    static constexpr std::string_view AVOIDANCE_HOLD_ON_STALE_CLOUD =
+        "avoidance.hold_on_stale_cloud";
+    static constexpr std::string_view AVOIDANCE_RADIUS_M =
+        "avoidance.radius_m";
+    static constexpr std::string_view AVOIDANCE_LOOKAHEAD_M =
+        "avoidance.lookahead_m";
+    static constexpr std::string_view AVOIDANCE_SPEED_LOOKAHEAD_S =
+        "avoidance.speed_lookahead_s";
+    static constexpr std::string_view AVOIDANCE_NEAR_FIELD_RADIUS_M =
+        "avoidance.near_field_radius_m";
+    static constexpr std::string_view AVOIDANCE_MAX_POINT_AGE_MS =
+        "avoidance.max_point_age_ms";
+    static constexpr std::string_view AVOIDANCE_MIN_CLOUD_POINTS =
+        "avoidance.min_cloud_points";
+    static constexpr std::string_view AVOIDANCE_MIN_BLOCKING_POINTS =
+        "avoidance.min_blocking_points";
 
     static std::vector<Domain::ConfigDescriptor> DefaultDescriptors();
 };

@@ -1002,6 +1002,181 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
+                                android:text="Avoidance"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnAvoidanceToggle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:checked="true"
+                                android:minWidth="42dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="42dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Avoid Hold On Low Cloud"
+                                android:textColor="#183247"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <Switch
+                                android:id="@+id/btnAvoidanceHoldOnStaleToggle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:minWidth="42dp"
+                                android:showText="false"
+                                android:splitTrack="false"
+                                android:switchMinWidth="42dp"
+                                android:thumb="@drawable/switch_thumb"
+                                android:track="@drawable/switch_track" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tvCfgAvoidanceRadiusValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="Avoid radius: 0.75 m"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgAvoidanceRadius"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Avoidance radius slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgAvoidanceLookaheadValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Avoid lookahead: 2.0 m"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgAvoidanceLookahead"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Avoidance lookahead slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgAvoidanceSpeedLookaheadValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Avoid speed lookahead: 0.0 s"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgAvoidanceSpeedLookahead"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Avoidance speed lookahead slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgAvoidanceNearFieldValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Avoid near field: off"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgAvoidanceNearField"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Avoidance near field slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgAvoidanceMaxPointAgeValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Avoid cloud age: 600 ms"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgAvoidanceMaxPointAge"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Avoidance cloud age slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgAvoidanceMinCloudPointsValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Avoid min cloud points: 1"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgAvoidanceMinCloudPoints"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Avoidance min cloud points slider" />
+
+                        <TextView
+                            android:id="@+id/tvCfgAvoidanceMinBlockingPointsValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="Avoid min blocking points: 1"
+                            android:textColor="#183247"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <SeekBar
+                            android:id="@+id/sbCfgAvoidanceMinBlockingPoints"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="Avoidance min blocking points slider" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="40dp"
+                            android:layout_marginTop="8dp"
+                            android:background="#33FFFFFF"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="12dp"
+                            android:paddingRight="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
                                 android:text="Display Image"
                                 android:textColor="#183247"
                                 android:textSize="11sp"
@@ -1236,6 +1411,15 @@
             android:text="cm5udp ready"
             android:textColor="#FFFFFF"
             android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/tvAvoidance"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Avoid --"
+            android:textColor="#CFE8FF"
+            android:textSize="10sp" />
     </LinearLayout>
 
 </FrameLayout>

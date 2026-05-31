@@ -12,13 +12,16 @@
 #include "common/tlv/udp_server.h"
 #include "core/application/config/runtime_app_types.h"
 #include "core/application/runtime/runtime_command_service.h"
+#include "core/application/state/live_pose_types.h"
 #include "core/domain/runtime_mode.h"
 
 namespace SmartDrone::Core::Application {
 
 constexpr uint8_t CMD_POINT_CLOUD = 0xF2;
+constexpr uint8_t CMD_AVOIDANCE_STATE = 0xF6;
 constexpr uint8_t CMD_HEARTBEAT_RUNTIME = CMD_HEARTBEAT;
 constexpr uint16_t POINT_CLOUD_HEADER_LEN = 4;
+constexpr uint16_t AVOIDANCE_STATE_PAYLOAD_LEN = 24;
 constexpr size_t MAX_TLV_PAYLOAD_LEN = 0xFFFFu;
 constexpr size_t POINT_CLOUD_POINT_STRIDE_BYTES = 12u;
 constexpr size_t MAX_POINT_CLOUD_POINTS_PER_FRAME =
@@ -56,6 +59,8 @@ struct UdpRuntimeStateSnapshot {
     uint32_t seq{0};
     std::shared_ptr<const std::vector<float>> pointCloudXyz;
     uint32_t pointCloudSeq{0};
+    uint64_t pointCloudUpdateUs{0};
+    AvoidanceTelemetry avoidance{};
 };
 
 using ReadRuntimeStateFn = std::function<bool(UdpRuntimeStateSnapshot &)>;

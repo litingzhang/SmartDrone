@@ -4,6 +4,8 @@
 #include <memory>
 #include <utility>
 
+#include "common/time_utils.h"
+
 namespace SmartDrone::Core::Application {
 namespace {
 
@@ -32,6 +34,8 @@ struct LivePoseData {
     float qz{0.0f};
     std::shared_ptr<const std::vector<float>> pointCloudXyz;
     uint32_t pointCloudSeq{0};
+    uint64_t pointCloudUpdateUs{0};
+    AvoidanceTelemetry avoidance{};
     uint32_t txSeq{1};
     bool dirty{false};
 };
@@ -61,6 +65,8 @@ void CopyStateToSnapshot(const LivePoseData &state,
     out.seq = state.txSeq;
     out.pointCloudXyz = state.pointCloudXyz;
     out.pointCloudSeq = state.pointCloudSeq;
+    out.pointCloudUpdateUs = state.pointCloudUpdateUs;
+    out.avoidance = state.avoidance;
 }
 
 } // namespace
@@ -155,6 +161,15 @@ void LivePoseState::SetVehicleFlightState(bool armedIn, uint8_t px4MainModeIn, u
     });
 }
 
+void LivePoseState::SetAvoidanceTelemetry(
+    const AvoidanceTelemetry &telemetry)
+{
+    m_impl->PublishUpdate([&telemetry](LivePoseData &state) {
+        state.avoidance = telemetry;
+        state.dirty = true;
+    });
+}
+
 void LivePoseState::UpdatePose(const LivePoseUpdate &update)
 {
     m_impl->PublishUpdate([&update](LivePoseData &state) {
@@ -178,9 +193,11 @@ void LivePoseState::UpdatePose(const LivePoseUpdate &update)
 void LivePoseState::UpdatePointCloud(std::vector<float> xyz)
 {
     auto pointCloud = std::make_shared<const std::vector<float>>(std::move(xyz));
-    m_impl->PublishUpdate([pointCloud](LivePoseData &state) {
+    const uint64_t updateUs = MonoTimeUs();
+    m_impl->PublishUpdate([pointCloud, updateUs](LivePoseData &state) {
         state.pointCloudXyz = pointCloud;
         ++state.pointCloudSeq;
+        state.pointCloudUpdateUs = updateUs;
         state.dirty = true;
     });
 }

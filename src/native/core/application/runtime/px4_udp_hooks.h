@@ -9,6 +9,8 @@
 #include <string>
 
 #include "common/tlv/runtime_command_hooks.h"
+#include "core/application/runtime/hover_algorithm_plugin.h"
+#include "core/application/runtime/obstacle_avoidance_policy.h"
 #include "core/application/state/live_pose_types.h"
 #include "core/ports/vehicle_control_port.h"
 
@@ -27,11 +29,17 @@ struct RuntimeGateSnapshot {
 
 using ReadRuntimeGateFn = std::function<bool(RuntimeGateSnapshot &)>;
 using PublishVehicleFlightStateFn = std::function<void(bool, uint8_t, uint8_t)>;
+using PublishAvoidanceTelemetryFn = std::function<void(const AvoidanceTelemetry &)>;
 
 struct Px4UdpHooksConfig {
     SmartDrone::Core::Ports::IVehicleControlPort &vehicleControl;
+    LiveRuntimeTuning *tuning{nullptr};
     ReadRuntimeGateFn readRuntimeGate;
+    ReadAvoidanceSnapshotFn readAvoidanceSnapshot;
     PublishVehicleFlightStateFn publishVehicleFlightState;
+    PublishAvoidanceTelemetryFn publishAvoidanceTelemetry;
+    IAvoidanceAlgorithmPlugin *avoidancePlugin{nullptr};
+    IHoverAlgorithmPlugin *hoverPlugin{nullptr};
 };
 
 class Px4UdpHooks final : public RuntimeCommandHook {
@@ -65,6 +73,7 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     static float ClampSignedUnit(float value);
     static bool IsTrackingPoseUsable(int trackingState);
     static bool IsPoseQualityUsable(LivePoseQuality quality);
+    static uint32_t PointCloudAgeMs(uint64_t updateUs);
 
     bool EnsureSetpointStream();
     void EnsureManualControlStream();
@@ -73,10 +82,22 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     void SetManualControlInput(const SmartDrone::Core::Ports::VehicleManualControl &input);
     SmartDrone::Core::Ports::VehicleManualControl GetManualControlSnapshot() const;
     void SendManualControlSnapshot();
-    bool ApplyRcMoveGoal(const MoveGoal &goal);
+    bool ApplyRcMoveGoal(const MoveGoal &goal, std::string *err);
+    bool ApplyRcAvoidanceHoldIfNeeded(const MoveGoal &goal, std::string *err);
     bool ApplyOffboardMoveGoal(const MoveGoal &goal, std::string *err);
     bool EnsureOffboardMoveReady(std::string *err);
     SmartDrone::Core::Ports::VehicleSetpointLocalNed BuildMoveSetpoint(const MoveGoal &goal) const;
+    bool ApplyAvoidanceHoldIfNeeded(const MoveGoal &goal, std::string *err);
+    void StoreActiveOffboardGoal(const MoveGoal &goal);
+    std::shared_ptr<const MoveGoal> LoadActiveOffboardGoal() const;
+    void ResetActiveOffboardGoal();
+    void ClearActiveOffboardGoal();
+    void StepOffboardAvoidance();
+    bool AvoidanceEnabled() const;
+    void PublishAvoidanceIdle();
+    void PublishAvoidanceStatus(const AvoidanceDecision &decision,
+                                const AvoidanceSnapshot &snapshot,
+                                bool holding);
     void ClearRemoteModeRequest();
     bool TryMarkFlightModeRequest(uint8_t mainMode, bool force, std::chrono::steady_clock::time_point now);
     bool EnsureOffboardMode(bool force, std::string *err);
@@ -88,12 +109,21 @@ class Px4UdpHooks final : public RuntimeCommandHook {
 
     SmartDrone::Core::Ports::IVehicleControlPort &m_vehicleControl;
     ReadRuntimeGateFn m_readRuntimeGate;
+    ReadAvoidanceSnapshotFn m_readAvoidanceSnapshot;
+    LiveRuntimeTuning *m_tuning{nullptr};
     PublishVehicleFlightStateFn m_publishVehicleFlightState;
+    PublishAvoidanceTelemetryFn m_publishAvoidanceTelemetry;
+    ObstacleAvoidancePolicy m_defaultAvoidancePlugin;
+    Px4PositionHoverAlgorithmPlugin m_defaultHoverPlugin;
+    IAvoidanceAlgorithmPlugin *m_avoidancePlugin{nullptr};
+    IHoverAlgorithmPlugin *m_hoverPlugin{nullptr};
+    std::atomic<uint32_t> m_avoidanceHoldCount{0};
     std::atomic<bool> m_streamStarted{false};
     std::atomic<bool> m_manualControlStreaming{false};
     std::atomic<bool> m_remoteModeRequested{false};
     std::atomic<bool> m_offboardModeRequested{false};
     std::shared_ptr<const SmartDrone::Core::Ports::VehicleManualControl> m_manualControlInput;
+    std::shared_ptr<const MoveGoal> m_activeOffboardGoal;
     std::shared_ptr<const RemoteModeRequestState> m_remoteModeRequestState;
     std::shared_ptr<const PendingCommandAck> m_pendingCommandAck;
 };

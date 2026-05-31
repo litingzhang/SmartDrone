@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/application/runtime/obstacle_avoidance_policy.h"
 #include "core/application/runtime/px4_udp_hooks.h"
 #include "core/application/runtime/runtime_controller.h"
 #include "core/application/runtime/udp_command_runtime_config.h"
@@ -11,14 +12,21 @@ RuntimeGateSnapshot BuildRuntimeGateSnapshot(
     const LivePoseState::Snapshot &input);
 UdpRuntimeStateSnapshot BuildUdpRuntimeStateSnapshot(
     const LivePoseState::Snapshot &input);
+AvoidanceSnapshot BuildAvoidanceSnapshot(const LivePoseState::Snapshot &input);
 bool ReadRuntimeGateSnapshot(const LivePoseState &livePose,
                              RuntimeGateSnapshot &snapshot);
 bool ReadUdpRuntimeStateSnapshot(const LivePoseState &livePose,
                                  UdpRuntimeStateSnapshot &snapshot);
+bool ReadAvoidanceSnapshot(const LivePoseState &livePose,
+                           AvoidanceSnapshot &snapshot);
 ReadRuntimeGateFn MakeRuntimeGateReader(const LivePoseState &livePose);
+ReadAvoidanceSnapshotFn MakeAvoidanceSnapshotReader(
+    const LivePoseState &livePose);
 UpdateCommandPeerFn MakeCommandPeerUpdater(LivePoseState &livePose);
 PublishRuntimeModeFn MakeRuntimeModePublisher(LivePoseState &livePose);
 PublishVehicleFlightStateFn MakeVehicleFlightStatePublisher(
+    LivePoseState &livePose);
+PublishAvoidanceTelemetryFn MakeAvoidanceTelemetryPublisher(
     LivePoseState &livePose);
 ReadRuntimeStateFn MakeUdpRuntimeStateReader(const LivePoseState &livePose);
 

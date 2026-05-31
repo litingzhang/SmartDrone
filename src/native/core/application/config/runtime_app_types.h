@@ -59,6 +59,15 @@ struct RemoteRuntimeConfig {
     bool lkLoopClosure{false};
     float lkLoopScale{1.20f};
     float lkLoopRelaxation{1.40f};
+    bool avoidanceEnabled{true};
+    bool avoidanceHoldOnStaleCloud{false};
+    float avoidanceRadiusM{0.75f};
+    float avoidanceLookaheadM{2.0f};
+    float avoidanceSpeedLookaheadS{0.0f};
+    float avoidanceNearFieldRadiusM{0.0f};
+    int avoidanceMaxPointCloudAgeMs{600};
+    int avoidanceMinCloudPoints{1};
+    int avoidanceMinBlockingPoints{1};
 };
 
 struct MainRuntimeAliases {
@@ -104,6 +113,15 @@ struct LiveRuntimeTuning {
     std::atomic<float> tbcRollDeg{0.0f};
     std::atomic<float> tbcPitchDeg{0.0f};
     std::atomic<float> tbcYawDeg{0.0f};
+    std::atomic<bool> avoidanceEnabled{true};
+    std::atomic<bool> avoidanceHoldOnStaleCloud{false};
+    std::atomic<float> avoidanceRadiusM{0.75f};
+    std::atomic<float> avoidanceLookaheadM{2.0f};
+    std::atomic<float> avoidanceSpeedLookaheadS{0.0f};
+    std::atomic<float> avoidanceNearFieldRadiusM{0.0f};
+    std::atomic<int> avoidanceMaxPointCloudAgeMs{600};
+    std::atomic<int> avoidanceMinCloudPoints{1};
+    std::atomic<int> avoidanceMinBlockingPoints{1};
 };
 
 } // namespace SmartDrone::Core::Application

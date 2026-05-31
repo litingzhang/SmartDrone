@@ -57,6 +57,7 @@ class SlamFramePosePostprocessPort final {
     BuildPoseRequest(const Sophus::SE3f &twcRaw,
                      const TrackingContext &tracking,
                      int64_t captureTimestampNs,
+                     const std::vector<float> &rawPointCloudXyz,
                      const StereoExtrinsicsContext &extrinsics) const;
     void MaybeLogPoseAxis(const SlamTrackedFrameData &tracked,
                           const TrackingContext &tracking,

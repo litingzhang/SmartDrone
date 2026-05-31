@@ -37,6 +37,25 @@ UdpRuntimeStateSnapshot BuildUdpRuntimeStateSnapshot(
     output.seq = input.seq;
     output.pointCloudXyz = input.pointCloudXyz;
     output.pointCloudSeq = input.pointCloudSeq;
+    output.pointCloudUpdateUs = input.pointCloudUpdateUs;
+    output.avoidance = input.avoidance;
+    return output;
+}
+
+AvoidanceSnapshot BuildAvoidanceSnapshot(const LivePoseState::Snapshot &input)
+{
+    AvoidanceSnapshot output{};
+    output.poseValid = input.poseValid;
+    output.x = input.x;
+    output.y = input.y;
+    output.z = input.z;
+    output.qw = input.qw;
+    output.qx = input.qx;
+    output.qy = input.qy;
+    output.qz = input.qz;
+    output.pointCloudXyz = input.pointCloudXyz;
+    output.pointCloudSeq = input.pointCloudSeq;
+    output.pointCloudUpdateUs = input.pointCloudUpdateUs;
     return output;
 }
 
@@ -62,10 +81,29 @@ bool ReadUdpRuntimeStateSnapshot(const LivePoseState &livePose,
     return true;
 }
 
+bool ReadAvoidanceSnapshot(const LivePoseState &livePose,
+                           AvoidanceSnapshot &snapshot)
+{
+    LivePoseState::Snapshot liveSnapshot{};
+    if (!livePose.ReadSnapshot(liveSnapshot)) {
+        return false;
+    }
+    snapshot = BuildAvoidanceSnapshot(liveSnapshot);
+    return true;
+}
+
 ReadRuntimeGateFn MakeRuntimeGateReader(const LivePoseState &livePose)
 {
     return [&livePose](RuntimeGateSnapshot &snapshot) {
         return ReadRuntimeGateSnapshot(livePose, snapshot);
+    };
+}
+
+ReadAvoidanceSnapshotFn MakeAvoidanceSnapshotReader(
+    const LivePoseState &livePose)
+{
+    return [&livePose](AvoidanceSnapshot &snapshot) {
+        return ReadAvoidanceSnapshot(livePose, snapshot);
     };
 }
 
@@ -88,6 +126,14 @@ PublishVehicleFlightStateFn MakeVehicleFlightStatePublisher(
 {
     return [&livePose](bool armed, uint8_t mainMode, uint8_t subMode) {
         livePose.SetVehicleFlightState(armed, mainMode, subMode);
+    };
+}
+
+PublishAvoidanceTelemetryFn MakeAvoidanceTelemetryPublisher(
+    LivePoseState &livePose)
+{
+    return [&livePose](const AvoidanceTelemetry &telemetry) {
+        livePose.SetAvoidanceTelemetry(telemetry);
     };
 }
 

@@ -105,6 +105,20 @@ ParseRuntimeSlamMode(std::uint8_t value)
     }
 }
 
+void ApplyAvoidanceDefaults(RemoteRuntimeConfig &remote,
+                            const RuntimeConfig &runtime)
+{
+    remote.avoidanceEnabled = runtime.avoidanceEnabled;
+    remote.avoidanceHoldOnStaleCloud = runtime.avoidanceHoldOnStaleCloud;
+    remote.avoidanceRadiusM = runtime.avoidanceRadiusM;
+    remote.avoidanceLookaheadM = runtime.avoidanceLookaheadM;
+    remote.avoidanceSpeedLookaheadS = runtime.avoidanceSpeedLookaheadS;
+    remote.avoidanceNearFieldRadiusM = runtime.avoidanceNearFieldRadiusM;
+    remote.avoidanceMaxPointCloudAgeMs = runtime.avoidanceMaxPointCloudAgeMs;
+    remote.avoidanceMinCloudPoints = runtime.avoidanceMinCloudPoints;
+    remote.avoidanceMinBlockingPoints = runtime.avoidanceMinBlockingPoints;
+}
+
 RemoteRuntimeConfig RuntimeConfigDefaults(const UnifiedConfig &currentCfg)
 {
     RemoteRuntimeConfig remote{};
@@ -137,6 +151,7 @@ RemoteRuntimeConfig RuntimeConfigDefaults(const UnifiedConfig &currentCfg)
     remote.lkPerFrameAcceleration =
         currentCfg.app.runtime.lkPerFrameAcceleration;
     remote.orbAcceleration = currentCfg.app.runtime.orbAcceleration;
+    ApplyAvoidanceDefaults(remote, currentCfg.app.runtime);
     return remote;
 }
 
@@ -232,15 +247,33 @@ void ApplyRuntimeConfigV14(RemoteRuntimeConfig &remote,
         ParseRuntimeSlamBackend(payload[RUNTIME_CONFIG_SLAM_BACKEND_OFFSET]);
 }
 
-std::size_t ApplyVersionedRuntimeConfig(RemoteRuntimeConfig &remote,
-                                        const TlvFrame &frame)
+void ApplyRuntimeConfigV15(RemoteRuntimeConfig &remote,
+                           const std::uint8_t *payload)
 {
-    const std::uint8_t *payload = frame.payload.data();
-    std::size_t ipOffset = 10;
-    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V2) {
-        ApplyRuntimeConfigV2(remote, payload);
-        ipOffset = RUNTIME_CONFIG_IP_OFFSET;
-    }
+    remote.avoidanceEnabled =
+        payload[RUNTIME_CONFIG_AVOIDANCE_ENABLE_OFFSET] != 0;
+    remote.avoidanceHoldOnStaleCloud =
+        payload[RUNTIME_CONFIG_AVOIDANCE_HOLD_ON_STALE_OFFSET] != 0;
+    remote.avoidanceRadiusM =
+        ReadF32Le(&payload[RUNTIME_CONFIG_AVOIDANCE_RADIUS_M_OFFSET]);
+    remote.avoidanceLookaheadM =
+        ReadF32Le(&payload[RUNTIME_CONFIG_AVOIDANCE_LOOKAHEAD_M_OFFSET]);
+    remote.avoidanceSpeedLookaheadS =
+        ReadF32Le(&payload[RUNTIME_CONFIG_AVOIDANCE_SPEED_LOOKAHEAD_S_OFFSET]);
+    remote.avoidanceNearFieldRadiusM =
+        ReadF32Le(&payload[RUNTIME_CONFIG_AVOIDANCE_NEAR_FIELD_RADIUS_M_OFFSET]);
+    remote.avoidanceMaxPointCloudAgeMs = static_cast<int>(std::lround(
+        ReadF32Le(&payload[RUNTIME_CONFIG_AVOIDANCE_MAX_POINT_AGE_MS_OFFSET])));
+    remote.avoidanceMinCloudPoints = static_cast<int>(std::lround(
+        ReadF32Le(&payload[RUNTIME_CONFIG_AVOIDANCE_MIN_CLOUD_POINTS_OFFSET])));
+    remote.avoidanceMinBlockingPoints = static_cast<int>(std::lround(
+        ReadF32Le(&payload[RUNTIME_CONFIG_AVOIDANCE_MIN_BLOCKING_POINTS_OFFSET])));
+}
+
+void ApplyRuntimeConfigBaseVersions(RemoteRuntimeConfig &remote,
+                                    const TlvFrame &frame,
+                                    const std::uint8_t *payload)
+{
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN) {
         remote.autoExposureEnabled = payload[RUNTIME_CONFIG_AE_OFFSET] != 0;
     }
@@ -257,6 +290,12 @@ std::size_t ApplyVersionedRuntimeConfig(RemoteRuntimeConfig &remote,
         remote.tbcYawDeg =
             ReadF32Le(&payload[RUNTIME_CONFIG_TBC_YAW_DEG_OFFSET]);
     }
+}
+
+void ApplyRuntimeConfigFeatureVersions(RemoteRuntimeConfig &remote,
+                                       const TlvFrame &frame,
+                                       const std::uint8_t *payload)
+{
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V7) {
         ApplyRuntimeConfigV7(remote, payload);
     }
@@ -270,6 +309,12 @@ std::size_t ApplyVersionedRuntimeConfig(RemoteRuntimeConfig &remote,
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V10) {
         ApplyRuntimeConfigV10(remote, payload);
     }
+}
+
+void ApplyRuntimeConfigBackendVersions(RemoteRuntimeConfig &remote,
+                                       const TlvFrame &frame,
+                                       const std::uint8_t *payload)
+{
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V12) {
         ApplyRuntimeConfigV12(remote, payload);
     }
@@ -279,6 +324,23 @@ std::size_t ApplyVersionedRuntimeConfig(RemoteRuntimeConfig &remote,
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V14) {
         ApplyRuntimeConfigV14(remote, payload);
     }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V15) {
+        ApplyRuntimeConfigV15(remote, payload);
+    }
+}
+
+std::size_t ApplyVersionedRuntimeConfig(RemoteRuntimeConfig &remote,
+                                        const TlvFrame &frame)
+{
+    const std::uint8_t *payload = frame.payload.data();
+    std::size_t ipOffset = 10;
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V2) {
+        ApplyRuntimeConfigV2(remote, payload);
+        ipOffset = RUNTIME_CONFIG_IP_OFFSET;
+    }
+    ApplyRuntimeConfigBaseVersions(remote, frame, payload);
+    ApplyRuntimeConfigFeatureVersions(remote, frame, payload);
+    ApplyRuntimeConfigBackendVersions(remote, frame, payload);
     return ipOffset;
 }
 
@@ -299,7 +361,8 @@ void ApplyRuntimeConfigIp(RemoteRuntimeConfig &remote,
 
 bool RuntimeConfigPayloadLengthValid(std::uint16_t len)
 {
-    return len == RUNTIME_CONFIG_PAYLOAD_LEN_V14 ||
+    return len == RUNTIME_CONFIG_PAYLOAD_LEN_V15 ||
+           len == RUNTIME_CONFIG_PAYLOAD_LEN_V14 ||
            len == RUNTIME_CONFIG_PAYLOAD_LEN_V13 ||
            len == RUNTIME_CONFIG_PAYLOAD_LEN_V12 ||
            len == RUNTIME_CONFIG_PAYLOAD_LEN_V11 ||
@@ -358,7 +421,8 @@ std::string BuildRuntimeConfigAckMessage(const std::string &message,
            " tbc_override=" + (remote.useCustomTbc ? "on" : "off") +
            " lk_seed=gftt" + " lk_accel=" +
            remote.lkPerFrameAcceleration +
-           " orb_accel=" + remote.orbAcceleration;
+           " orb_accel=" + remote.orbAcceleration +
+           " avoid=" + (remote.avoidanceEnabled ? "on" : "off");
 }
 
 } // namespace SmartDrone::Core::Application

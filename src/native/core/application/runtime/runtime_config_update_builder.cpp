@@ -98,6 +98,29 @@ void AddVisualFeatureConfig(ConfigUpdate &update,
         remote.lkPerFrameAcceleration;
 }
 
+void AddAvoidanceConfig(ConfigUpdate &update,
+                        const RemoteRuntimeConfig &remote)
+{
+    update.values[std::string(ConfigRegistry::AVOIDANCE_ENABLED)] =
+        remote.avoidanceEnabled;
+    update.values[std::string(ConfigRegistry::AVOIDANCE_HOLD_ON_STALE_CLOUD)] =
+        remote.avoidanceHoldOnStaleCloud;
+    update.values[std::string(ConfigRegistry::AVOIDANCE_RADIUS_M)] =
+        static_cast<double>(remote.avoidanceRadiusM);
+    update.values[std::string(ConfigRegistry::AVOIDANCE_LOOKAHEAD_M)] =
+        static_cast<double>(remote.avoidanceLookaheadM);
+    update.values[std::string(ConfigRegistry::AVOIDANCE_SPEED_LOOKAHEAD_S)] =
+        static_cast<double>(remote.avoidanceSpeedLookaheadS);
+    update.values[std::string(ConfigRegistry::AVOIDANCE_NEAR_FIELD_RADIUS_M)] =
+        static_cast<double>(remote.avoidanceNearFieldRadiusM);
+    update.values[std::string(ConfigRegistry::AVOIDANCE_MAX_POINT_AGE_MS)] =
+        static_cast<std::int64_t>(remote.avoidanceMaxPointCloudAgeMs);
+    update.values[std::string(ConfigRegistry::AVOIDANCE_MIN_CLOUD_POINTS)] =
+        static_cast<std::int64_t>(remote.avoidanceMinCloudPoints);
+    update.values[std::string(ConfigRegistry::AVOIDANCE_MIN_BLOCKING_POINTS)] =
+        static_cast<std::int64_t>(remote.avoidanceMinBlockingPoints);
+}
+
 } // namespace
 
 ConfigUpdate BuildRuntimeConfigUpdate(const RemoteRuntimeConfig &remote)
@@ -108,6 +131,7 @@ ConfigUpdate BuildRuntimeConfigUpdate(const RemoteRuntimeConfig &remote)
     AddTbcConfig(update, remote);
     AddOrbConfig(update, remote);
     AddVisualFeatureConfig(update, remote);
+    AddAvoidanceConfig(update, remote);
     return update;
 }
 

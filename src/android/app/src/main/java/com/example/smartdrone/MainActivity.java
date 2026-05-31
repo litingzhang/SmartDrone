@@ -63,6 +63,13 @@ public class MainActivity extends Activity {
     private static final int CMD_CAPABILITIES = 0xF3;
     private static final int CMD_CONFIG = 0xF4;
     private static final int CMD_HEARTBEAT = 0xF5;
+    private static final int CMD_AVOIDANCE_STATE = 0xF6;
+    private static final int AVOIDANCE_HOLD_NONE = 0;
+    private static final int AVOIDANCE_HOLD_OBSTACLE_AHEAD = 1;
+    private static final int AVOIDANCE_HOLD_OBSTACLE_NEAR = 2;
+    private static final int AVOIDANCE_HOLD_POINT_CLOUD_UNAVAILABLE = 3;
+    private static final int AVOIDANCE_HOLD_POINT_CLOUD_STALE = 4;
+    private static final int AVOIDANCE_HOLD_POINT_CLOUD_SPARSE = 5;
 
     private static final int MODE_IDLE = 0;
     private static final int MODE_SLAM = 1;
@@ -150,12 +157,28 @@ public class MainActivity extends Activity {
     private static final int SUPERPOINT_INPUT_MAX_STEP = 16;
     private static final int SUPERPOINT_LIGHTGLUE_INPUT_MAX_WIDTH = 640;
     private static final int SUPERPOINT_LIGHTGLUE_INPUT_MAX_HEIGHT = 480;
+    private static final int AVOIDANCE_RADIUS_MIN_CM = 20;
+    private static final int AVOIDANCE_RADIUS_MAX_CM = 300;
+    private static final int AVOIDANCE_LOOKAHEAD_MIN_DM = 5;
+    private static final int AVOIDANCE_LOOKAHEAD_MAX_DM = 80;
+    private static final int AVOIDANCE_SPEED_LOOKAHEAD_MIN_DS = 0;
+    private static final int AVOIDANCE_SPEED_LOOKAHEAD_MAX_DS = 50;
+    private static final int AVOIDANCE_NEAR_FIELD_MIN_CM = 0;
+    private static final int AVOIDANCE_NEAR_FIELD_MAX_CM = 300;
+    private static final int AVOIDANCE_MAX_POINT_AGE_MIN_MS = 50;
+    private static final int AVOIDANCE_MAX_POINT_AGE_MAX_MS = 5000;
+    private static final int AVOIDANCE_MAX_POINT_AGE_STEP_MS = 50;
+    private static final int AVOIDANCE_MIN_CLOUD_POINTS_MIN = 1;
+    private static final int AVOIDANCE_MIN_CLOUD_POINTS_MAX = 5000;
+    private static final int AVOIDANCE_MIN_BLOCKING_POINTS_MIN = 1;
+    private static final int AVOIDANCE_MIN_BLOCKING_POINTS_MAX = 50;
 
     private static final int FRAME_NED = 2;
     private static final long JOYSTICK_PERIOD_MS = 50L;
     private static final long RX_POLL_PERIOD_MS = 5L;
     private static final long HEARTBEAT_PERIOD_MS = 500L;
     private static final long HEARTBEAT_TIMEOUT_MS = 3000L;
+    private static final long AVOIDANCE_STATE_TIMEOUT_MS = 1000L;
     private static final float BUTTON_AXIS_MAGNITUDE = 0.6f;
     private static final float BUTTON_MAX_SPEED_MPS = 3.0f;
     private static final int VIDEO_MAGIC = 0x5643494D;
@@ -173,11 +196,16 @@ public class MainActivity extends Activity {
     private static final int DISCOVERY_SOCKET_TIMEOUT_MS = 1000;
     private static final String DISCOVERY_MAGIC = "smartdrone_discovery";
     private static final String[] DEFAULT_VEHICLE_IPS = new String[] {"10.42.0.1", "192.168.0.105"};
+    private static final int AVOIDANCE_COLOR_OFF = Color.rgb(170, 178, 191);
+    private static final int AVOIDANCE_COLOR_READY = Color.rgb(143, 232, 190);
+    private static final int AVOIDANCE_COLOR_ACTIVE = Color.rgb(126, 203, 255);
+    private static final int AVOIDANCE_COLOR_HOLD = Color.rgb(255, 178, 117);
     private ImageView m_ivVideoLeft;
     private ImageView m_ivVideoRight;
     private Map3DView m_map3dView;
     private TextView m_tvStatus;
     private TextView m_tvPose;
+    private TextView m_tvAvoidance;
     private TextView m_tvVideoStats;
     private TextView m_tvJoystickState;
     private View m_debugPanel;
@@ -192,6 +220,8 @@ public class MainActivity extends Activity {
     private Switch m_btnToggleCalib;
     private Switch m_btnAutoExposureToggle;
     private Switch m_btnTbcOverrideToggle;
+    private Switch m_btnAvoidanceToggle;
+    private Switch m_btnAvoidanceHoldOnStaleToggle;
     private Spinner m_spinnerSensorMode;
     private Spinner m_spinnerFeatureFrontend;
     private Button m_btnQuickSlamAuto;
@@ -225,6 +255,13 @@ public class MainActivity extends Activity {
     private TextView m_tvCfgSuperPointMaxPointsValue;
     private TextView m_tvCfgSuperPointInputMaxWidthValue;
     private TextView m_tvCfgSuperPointInputMaxHeightValue;
+    private TextView m_tvCfgAvoidanceRadiusValue;
+    private TextView m_tvCfgAvoidanceLookaheadValue;
+    private TextView m_tvCfgAvoidanceSpeedLookaheadValue;
+    private TextView m_tvCfgAvoidanceNearFieldValue;
+    private TextView m_tvCfgAvoidanceMaxPointAgeValue;
+    private TextView m_tvCfgAvoidanceMinCloudPointsValue;
+    private TextView m_tvCfgAvoidanceMinBlockingPointsValue;
     private SeekBar m_sbCfgExposure;
     private SeekBar m_sbCfgGain;
     private SeekBar m_sbCfgPairMs;
@@ -244,6 +281,13 @@ public class MainActivity extends Activity {
     private SeekBar m_sbCfgSuperPointMaxPoints;
     private SeekBar m_sbCfgSuperPointInputMaxWidth;
     private SeekBar m_sbCfgSuperPointInputMaxHeight;
+    private SeekBar m_sbCfgAvoidanceRadius;
+    private SeekBar m_sbCfgAvoidanceLookahead;
+    private SeekBar m_sbCfgAvoidanceSpeedLookahead;
+    private SeekBar m_sbCfgAvoidanceNearField;
+    private SeekBar m_sbCfgAvoidanceMaxPointAge;
+    private SeekBar m_sbCfgAvoidanceMinCloudPoints;
+    private SeekBar m_sbCfgAvoidanceMinBlockingPoints;
 
     private View m_joystickLeft;
     private View m_joystickRight;
@@ -316,6 +360,15 @@ public class MainActivity extends Activity {
     private int m_cfgSuperPointMaxPoints = 320;
     private int m_cfgSuperPointInputMaxWidth = 640;
     private int m_cfgSuperPointInputMaxHeight = 400;
+    private boolean m_cfgAvoidanceEnabled = true;
+    private boolean m_cfgAvoidanceHoldOnStaleCloud = false;
+    private float m_cfgAvoidanceRadiusM = 0.75f;
+    private float m_cfgAvoidanceLookaheadM = 2.0f;
+    private float m_cfgAvoidanceSpeedLookaheadS = 0.0f;
+    private float m_cfgAvoidanceNearFieldRadiusM = 0.0f;
+    private int m_cfgAvoidanceMaxPointAgeMs = 600;
+    private int m_cfgAvoidanceMinCloudPoints = 1;
+    private int m_cfgAvoidanceMinBlockingPoints = 1;
     private int m_effectiveSlamMode = SLAM_MODE_MAPPING;
     private int m_videoPktCount = 0;
     private int m_videoFrameOk = 0;
@@ -336,6 +389,10 @@ public class MainActivity extends Activity {
     private boolean m_sendMap = false;
     private boolean m_showFeaturePoints = true;
     private long m_lastVehicleHeartbeatMs = 0L;
+    private long m_lastAvoidanceStateMs = 0L;
+    private boolean m_avoidanceStateStale = false;
+    private int m_avoidanceMinCloudPoints = 0;
+    private int m_avoidanceMaxPointAgeMs = 0;
     private boolean m_vehicleHeartbeatTimeoutHandled = false;
     private boolean m_featureDefaultEnsured = false;
     private boolean m_supportsCalib = true;
@@ -712,6 +769,59 @@ public class MainActivity extends Activity {
                         SUPERPOINT_INPUT_MAX_STEP, SUPERPOINT_INPUT_MAX_MAX);
     }
 
+    private static float quantizeAvoidanceRadiusM(float value)
+    {
+        final int cm = clampInt(Math.round(value * 100.0f),
+                                AVOIDANCE_RADIUS_MIN_CM,
+                                AVOIDANCE_RADIUS_MAX_CM);
+        return cm / 100.0f;
+    }
+
+    private static float quantizeAvoidanceLookaheadM(float value)
+    {
+        final int dm = clampInt(Math.round(value * 10.0f),
+                                AVOIDANCE_LOOKAHEAD_MIN_DM,
+                                AVOIDANCE_LOOKAHEAD_MAX_DM);
+        return dm / 10.0f;
+    }
+
+    private static float quantizeAvoidanceSpeedLookaheadS(float value)
+    {
+        final int ds = clampInt(Math.round(value * 10.0f),
+                                AVOIDANCE_SPEED_LOOKAHEAD_MIN_DS,
+                                AVOIDANCE_SPEED_LOOKAHEAD_MAX_DS);
+        return ds / 10.0f;
+    }
+
+    private static float quantizeAvoidanceNearFieldM(float value)
+    {
+        final int cm = clampInt(Math.round(value * 100.0f),
+                                AVOIDANCE_NEAR_FIELD_MIN_CM,
+                                AVOIDANCE_NEAR_FIELD_MAX_CM);
+        return cm / 100.0f;
+    }
+
+    private static int quantizeAvoidanceMaxPointAgeMs(int value)
+    {
+        final int clamped = clampInt(value, AVOIDANCE_MAX_POINT_AGE_MIN_MS,
+                                    AVOIDANCE_MAX_POINT_AGE_MAX_MS);
+        return Math.round(
+            (float)clamped / (float)AVOIDANCE_MAX_POINT_AGE_STEP_MS) *
+            AVOIDANCE_MAX_POINT_AGE_STEP_MS;
+    }
+
+    private static int quantizeAvoidanceMinCloudPoints(int value)
+    {
+        return clampInt(value, AVOIDANCE_MIN_CLOUD_POINTS_MIN,
+                        AVOIDANCE_MIN_CLOUD_POINTS_MAX);
+    }
+
+    private static int quantizeAvoidanceMinBlockingPoints(int value)
+    {
+        return clampInt(value, AVOIDANCE_MIN_BLOCKING_POINTS_MIN,
+                        AVOIDANCE_MIN_BLOCKING_POINTS_MAX);
+    }
+
     private static Float findPoseField(String text, String... keys)
     {
         if (text == null) {
@@ -860,6 +970,163 @@ public class MainActivity extends Activity {
         return true;
     }
 
+    private boolean tryHandleAvoidanceStatePacket(byte[] rx)
+    {
+        if (!isTlvPacket(rx) || rx.length < 37) {
+            return false;
+        }
+        final int cmd = rx[3] & 0xFF;
+        final int len = readU16Le(rx, 5);
+        if (cmd != CMD_AVOIDANCE_STATE ||
+            (len != 20 && len != 24) ||
+            rx.length < 15 + len + 2) {
+            return false;
+        }
+        final int payloadOffset = 15;
+        final boolean enabled = (rx[payloadOffset] & 0xFF) != 0;
+        final boolean activeGoal = (rx[payloadOffset + 1] & 0xFF) != 0;
+        final boolean holding = (rx[payloadOffset + 2] & 0xFF) != 0;
+        final int reasonCode = rx[payloadOffset + 3] & 0xFF;
+        final float nearestM = readF32Le(rx, payloadOffset + 4);
+        final long holdCount = readU32Le(rx, payloadOffset + 8);
+        final long ageMs = readU32Le(rx, payloadOffset + 12);
+        final long cloudSeq = readU32Le(rx, payloadOffset + 16);
+        final long pointCount =
+            len >= 24 ? readU32Le(rx, payloadOffset + 20) : -1L;
+        m_lastAvoidanceStateMs = System.currentTimeMillis();
+        m_avoidanceStateStale = false;
+        updateAvoidanceState(enabled, activeGoal, holding, reasonCode, nearestM,
+                             holdCount, ageMs, cloudSeq, pointCount);
+        return true;
+    }
+
+    private void updateAvoidanceState(boolean enabled, boolean activeGoal,
+                                      boolean holding, int reasonCode,
+                                      float nearestM, long holdCount, long ageMs,
+                                      long cloudSeq, long pointCount)
+    {
+        if (m_tvAvoidance == null) {
+            return;
+        }
+        final String stateText =
+            avoidanceStateText(enabled, activeGoal, holding, reasonCode);
+        final String pointsText =
+            pointCount >= 0 ? avoidancePointCountText(pointCount,
+                                                       m_avoidanceMinCloudPoints)
+                            : "";
+        final String healthText =
+            holding && reasonCode != AVOIDANCE_HOLD_NONE
+                ? ""
+                : avoidanceHealthText(ageMs, pointCount,
+                                      m_avoidanceMaxPointAgeMs,
+                                      m_avoidanceMinCloudPoints);
+        m_tvAvoidance.setText(String.format(
+            Locale.US, "Avoid %s%s  %.2fm  age=%dms%s  hold=%d  pc=%d",
+            stateText, healthText, nearestM, ageMs, pointsText, holdCount,
+            cloudSeq));
+        m_tvAvoidance.setTextColor(avoidanceStatusColor(
+            enabled, activeGoal, holding, !healthText.isEmpty()));
+    }
+
+    private static String avoidanceStateText(boolean enabled,
+                                             boolean activeGoal,
+                                             boolean holding,
+                                             int reasonCode)
+    {
+        if (!enabled) {
+            return "OFF";
+        }
+        if (!holding) {
+            return activeGoal ? "ACTIVE" : "READY";
+        }
+        final String reasonText = avoidanceHoldReasonText(reasonCode);
+        return reasonText.isEmpty() ? "HOLD" : "HOLD " + reasonText;
+    }
+
+    private static String avoidanceHoldReasonText(int reasonCode)
+    {
+        if (reasonCode == AVOIDANCE_HOLD_OBSTACLE_AHEAD) {
+            return "AHEAD";
+        }
+        if (reasonCode == AVOIDANCE_HOLD_OBSTACLE_NEAR) {
+            return "NEAR";
+        }
+        if (reasonCode == AVOIDANCE_HOLD_POINT_CLOUD_UNAVAILABLE) {
+            return "NOCLOUD";
+        }
+        if (reasonCode == AVOIDANCE_HOLD_POINT_CLOUD_STALE) {
+            return "STALE";
+        }
+        if (reasonCode == AVOIDANCE_HOLD_POINT_CLOUD_SPARSE) {
+            return "LOWPTS";
+        }
+        return "";
+    }
+
+    private static String avoidancePointCountText(long pointCount,
+                                                  int minCloudPoints)
+    {
+        if (minCloudPoints > 0) {
+            return String.format(Locale.US, " pts=%d/%d", pointCount,
+                                 minCloudPoints);
+        }
+        return String.format(Locale.US, " pts=%d", pointCount);
+    }
+
+    private static String avoidanceHealthText(long ageMs, long pointCount,
+                                              int maxAgeMs,
+                                              int minCloudPoints)
+    {
+        if (maxAgeMs > 0 && ageMs > maxAgeMs) {
+            return " STALECLOUD";
+        }
+        if (minCloudPoints > 0 && pointCount >= 0 &&
+            pointCount < minCloudPoints) {
+            return " LOWPTS";
+        }
+        return "";
+    }
+
+    private static int avoidanceStatusColor(boolean enabled,
+                                            boolean activeGoal,
+                                            boolean holding,
+                                            boolean warning)
+    {
+        if (!enabled) {
+            return AVOIDANCE_COLOR_OFF;
+        }
+        if (holding || warning) {
+            return AVOIDANCE_COLOR_HOLD;
+        }
+        return activeGoal ? AVOIDANCE_COLOR_ACTIVE : AVOIDANCE_COLOR_READY;
+    }
+
+    private void updateAvoidanceStateTimeout()
+    {
+        if (m_tvAvoidance == null || m_lastAvoidanceStateMs == 0L) {
+            return;
+        }
+        final long ageMs = System.currentTimeMillis() - m_lastAvoidanceStateMs;
+        if (m_avoidanceStateStale || ageMs <= AVOIDANCE_STATE_TIMEOUT_MS) {
+            return;
+        }
+        m_avoidanceStateStale = true;
+        m_tvAvoidance.setText(String.format(Locale.US,
+                                            "Avoid stale  age=%dms", ageMs));
+        m_tvAvoidance.setTextColor(AVOIDANCE_COLOR_OFF);
+    }
+
+    private void resetAvoidanceStateView()
+    {
+        m_lastAvoidanceStateMs = 0L;
+        m_avoidanceStateStale = false;
+        if (m_tvAvoidance == null) {
+            return;
+        }
+        m_tvAvoidance.setText("Avoid --");
+        m_tvAvoidance.setTextColor(AVOIDANCE_COLOR_OFF);
+    }
+
     private void updatePoseMapFromText()
     {
         if (m_map3dView == null || m_tvPose == null) {
@@ -976,6 +1243,42 @@ public class MainActivity extends Activity {
                 final String heightText = m_cfgSuperPointInputMaxHeight > 0 ? Integer.toString(m_cfgSuperPointInputMaxHeight) : "off";
                 m_tvCfgSuperPointInputMaxHeightValue.setText("SuperPoint input max height: " + heightText);
                 m_tvCfgSuperPointInputMaxHeightValue.setAlpha(superpointEditable ? 1.0f : 0.45f);
+            }
+            if (m_tvCfgAvoidanceRadiusValue != null) {
+                m_tvCfgAvoidanceRadiusValue.setText(String.format(Locale.US,
+                    "Avoid radius: %.2f m", m_cfgAvoidanceRadiusM));
+            }
+            if (m_tvCfgAvoidanceLookaheadValue != null) {
+                m_tvCfgAvoidanceLookaheadValue.setText(String.format(Locale.US,
+                    "Avoid lookahead: %.1f m", m_cfgAvoidanceLookaheadM));
+            }
+            if (m_tvCfgAvoidanceSpeedLookaheadValue != null) {
+                m_tvCfgAvoidanceSpeedLookaheadValue.setText(String.format(
+                    Locale.US, "Avoid speed lookahead: %.1f s",
+                    m_cfgAvoidanceSpeedLookaheadS));
+            }
+            if (m_tvCfgAvoidanceNearFieldValue != null) {
+                final String nearText = m_cfgAvoidanceNearFieldRadiusM > 0.0f
+                    ? String.format(Locale.US, "%.2f m",
+                                    m_cfgAvoidanceNearFieldRadiusM)
+                    : "off";
+                m_tvCfgAvoidanceNearFieldValue.setText(
+                    "Avoid near field: " + nearText);
+            }
+            if (m_tvCfgAvoidanceMaxPointAgeValue != null) {
+                m_tvCfgAvoidanceMaxPointAgeValue.setText(String.format(
+                    Locale.US, "Avoid cloud age: %d ms",
+                    m_cfgAvoidanceMaxPointAgeMs));
+            }
+            if (m_tvCfgAvoidanceMinCloudPointsValue != null) {
+                m_tvCfgAvoidanceMinCloudPointsValue.setText(String.format(
+                    Locale.US, "Avoid min cloud points: %d",
+                    m_cfgAvoidanceMinCloudPoints));
+            }
+            if (m_tvCfgAvoidanceMinBlockingPointsValue != null) {
+                m_tvCfgAvoidanceMinBlockingPointsValue.setText(String.format(
+                    Locale.US, "Avoid min blocking points: %d",
+                    m_cfgAvoidanceMinBlockingPoints));
             }
             if (m_sbCfgExposure != null) {
                 int progress = (m_cfgExposureUs - EXPOSURE_MIN_US) / EXPOSURE_STEP_US;
@@ -1128,6 +1431,61 @@ public class MainActivity extends Activity {
                 m_sbCfgSuperPointInputMaxHeight.setEnabled(superpointEditable);
                 m_sbCfgSuperPointInputMaxHeight.setAlpha(superpointEditable ? 1.0f : 0.35f);
             }
+            if (m_sbCfgAvoidanceRadius != null) {
+                final int progress = Math.round(m_cfgAvoidanceRadiusM * 100.0f) -
+                    AVOIDANCE_RADIUS_MIN_CM;
+                if (m_sbCfgAvoidanceRadius.getProgress() != progress) {
+                    m_sbCfgAvoidanceRadius.setProgress(progress);
+                }
+            }
+            if (m_sbCfgAvoidanceLookahead != null) {
+                final int progress =
+                    Math.round(m_cfgAvoidanceLookaheadM * 10.0f) -
+                    AVOIDANCE_LOOKAHEAD_MIN_DM;
+                if (m_sbCfgAvoidanceLookahead.getProgress() != progress) {
+                    m_sbCfgAvoidanceLookahead.setProgress(progress);
+                }
+            }
+            if (m_sbCfgAvoidanceSpeedLookahead != null) {
+                final int progress =
+                    Math.round(m_cfgAvoidanceSpeedLookaheadS * 10.0f) -
+                    AVOIDANCE_SPEED_LOOKAHEAD_MIN_DS;
+                if (m_sbCfgAvoidanceSpeedLookahead.getProgress() != progress) {
+                    m_sbCfgAvoidanceSpeedLookahead.setProgress(progress);
+                }
+            }
+            if (m_sbCfgAvoidanceNearField != null) {
+                final int progress =
+                    Math.round(m_cfgAvoidanceNearFieldRadiusM * 100.0f) -
+                    AVOIDANCE_NEAR_FIELD_MIN_CM;
+                if (m_sbCfgAvoidanceNearField.getProgress() != progress) {
+                    m_sbCfgAvoidanceNearField.setProgress(progress);
+                }
+            }
+            if (m_sbCfgAvoidanceMaxPointAge != null) {
+                final int progress =
+                    (m_cfgAvoidanceMaxPointAgeMs -
+                     AVOIDANCE_MAX_POINT_AGE_MIN_MS) /
+                    AVOIDANCE_MAX_POINT_AGE_STEP_MS;
+                if (m_sbCfgAvoidanceMaxPointAge.getProgress() != progress) {
+                    m_sbCfgAvoidanceMaxPointAge.setProgress(progress);
+                }
+            }
+            if (m_sbCfgAvoidanceMinCloudPoints != null) {
+                final int progress = m_cfgAvoidanceMinCloudPoints -
+                    AVOIDANCE_MIN_CLOUD_POINTS_MIN;
+                if (m_sbCfgAvoidanceMinCloudPoints.getProgress() != progress) {
+                    m_sbCfgAvoidanceMinCloudPoints.setProgress(progress);
+                }
+            }
+            if (m_sbCfgAvoidanceMinBlockingPoints != null) {
+                final int progress = m_cfgAvoidanceMinBlockingPoints -
+                    AVOIDANCE_MIN_BLOCKING_POINTS_MIN;
+                if (m_sbCfgAvoidanceMinBlockingPoints.getProgress() !=
+                    progress) {
+                    m_sbCfgAvoidanceMinBlockingPoints.setProgress(progress);
+                }
+            }
             if (m_btnAutoExposureToggle != null) {
                 m_btnAutoExposureToggle.setChecked(m_cfgAutoExposure);
                 m_btnAutoExposureToggle.setEnabled(!runtimeActive);
@@ -1137,6 +1495,13 @@ public class MainActivity extends Activity {
             if (m_btnTbcOverrideToggle != null) {
                 m_btnTbcOverrideToggle.setChecked(m_cfgUseCustomTbc);
                 m_btnTbcOverrideToggle.setAlpha(m_cfgUseCustomTbc ? 1.0f : 0.65f);
+            }
+            if (m_btnAvoidanceToggle != null) {
+                m_btnAvoidanceToggle.setChecked(m_cfgAvoidanceEnabled);
+            }
+            if (m_btnAvoidanceHoldOnStaleToggle != null) {
+                m_btnAvoidanceHoldOnStaleToggle.setChecked(
+                    m_cfgAvoidanceHoldOnStaleCloud);
             }
             updateQuickSlamModeButtons();
         } finally {
@@ -1449,10 +1814,18 @@ public class MainActivity extends Activity {
                                                   orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast,
                                                   featureFrontend, superpointTopK, superpointMaxPoints, superpointInputMaxWidth,
                                                   superpointInputMaxHeight, lkPerFrameAcceleration, orbAcceleration,
-                                                  slamBackend);
+                                                  slamBackend, m_cfgAvoidanceEnabled,
+                                                  m_cfgAvoidanceHoldOnStaleCloud,
+                                                  m_cfgAvoidanceRadiusM,
+                                                  m_cfgAvoidanceLookaheadM,
+                                                  m_cfgAvoidanceSpeedLookaheadS,
+                                                  m_cfgAvoidanceNearFieldRadiusM,
+                                                  m_cfgAvoidanceMaxPointAgeMs,
+                                                  m_cfgAvoidanceMinCloudPoints,
+                                                  m_cfgAvoidanceMinBlockingPoints);
             m_tvStatus.setText(String.format(
                 Locale.US,
-                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s tracking=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d orbAccel=%s sp=%d/%d/%d/%d lkAccel=%s",
+                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s tracking=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d orbAccel=%s sp=%d/%d/%d/%d lkAccel=%s avoid=%s r=%.2f look=%.1f pts=%d",
                 seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
                 runtimeTrackingModeToText(slamBackend, featureFrontend, lkPerFrameAcceleration, orbAcceleration),
                 sendImage ? "on" : "off", sendFeature ? "on" : "off",
@@ -1463,7 +1836,10 @@ public class MainActivity extends Activity {
                     : "off",
                 orbNFeatures, orbScaleFactor, orbNLevels, orbIniThFast, orbMinThFast,
                 orbAccelerationToText(orbAcceleration), superpointTopK, superpointMaxPoints,
-                superpointInputMaxWidth, superpointInputMaxHeight, lkPerFrameAccelerationToText(lkPerFrameAcceleration)));
+                superpointInputMaxWidth, superpointInputMaxHeight,
+                lkPerFrameAccelerationToText(lkPerFrameAcceleration),
+                m_cfgAvoidanceEnabled ? "on" : "off", m_cfgAvoidanceRadiusM,
+                m_cfgAvoidanceLookaheadM, m_cfgAvoidanceMinCloudPoints));
             return seq;
         } catch (Throwable t) {
             m_tvStatus.setText("CFG error: " + t.getMessage());
@@ -2485,6 +2861,39 @@ public class MainActivity extends Activity {
         final boolean remoteSendFeature = parseBooleanText(values.get("stream.send_feature"), m_sendFeature);
         m_sendFeature = remoteSendFeature;
         m_sendMap = parseBooleanText(values.get("stream.send_map"), m_sendMap);
+        m_cfgAvoidanceEnabled =
+            parseBooleanText(values.get("avoidance.enabled"),
+                             m_cfgAvoidanceEnabled);
+        m_cfgAvoidanceHoldOnStaleCloud =
+            parseBooleanText(values.get("avoidance.hold_on_stale_cloud"),
+                             m_cfgAvoidanceHoldOnStaleCloud);
+        m_cfgAvoidanceRadiusM = quantizeAvoidanceRadiusM(
+            parseFloatOrDefault(values.get("avoidance.radius_m"),
+                                m_cfgAvoidanceRadiusM));
+        m_cfgAvoidanceLookaheadM = quantizeAvoidanceLookaheadM(
+            parseFloatOrDefault(values.get("avoidance.lookahead_m"),
+                                m_cfgAvoidanceLookaheadM));
+        m_cfgAvoidanceSpeedLookaheadS = quantizeAvoidanceSpeedLookaheadS(
+            parseFloatOrDefault(values.get("avoidance.speed_lookahead_s"),
+                                m_cfgAvoidanceSpeedLookaheadS));
+        m_cfgAvoidanceNearFieldRadiusM = quantizeAvoidanceNearFieldM(
+            parseFloatOrDefault(values.get("avoidance.near_field_radius_m"),
+                                m_cfgAvoidanceNearFieldRadiusM));
+        m_cfgAvoidanceMaxPointAgeMs = quantizeAvoidanceMaxPointAgeMs(
+            parseI(values.get("avoidance.max_point_age_ms"),
+                   m_cfgAvoidanceMaxPointAgeMs));
+        m_cfgAvoidanceMinCloudPoints = quantizeAvoidanceMinCloudPoints(
+            parseI(values.get("avoidance.min_cloud_points"),
+                   m_cfgAvoidanceMinCloudPoints));
+        m_cfgAvoidanceMinBlockingPoints = quantizeAvoidanceMinBlockingPoints(
+            parseI(values.get("avoidance.min_blocking_points"),
+                   m_cfgAvoidanceMinBlockingPoints));
+        m_avoidanceMinCloudPoints =
+            parseI(values.get("avoidance.min_cloud_points"),
+                   m_avoidanceMinCloudPoints);
+        m_avoidanceMaxPointAgeMs =
+            parseI(values.get("avoidance.max_point_age_ms"),
+                   m_avoidanceMaxPointAgeMs);
 
         if (!m_featureDefaultEnsured) {
             m_featureDefaultEnsured = true;
@@ -2507,7 +2916,7 @@ public class MainActivity extends Activity {
         updateStreamToggleButtons();
         updateFeatureToggleButton();
         m_tvStatus.setText(String.format(Locale.US,
-                                         "Config synced mode=%s sensor=%s backend=%s tracking=%s slam_mode=%s slam=%dfps ae=%s tbc=%s orb=%d/%.2f/%d sp=%d/%d/%d/%d",
+                                         "Config synced mode=%s sensor=%s backend=%s tracking=%s slam_mode=%s slam=%dfps ae=%s tbc=%s orb=%d/%.2f/%d sp=%d/%d/%d/%d avoid=%s r=%.2f pts=%d",
                                          runtimeModeToText(m_runtimeMode), sensorModeToText(m_sensorMode),
                                          slamBackendToText(m_cfgSlamBackend),
                                          runtimeTrackingModeToText(m_cfgSlamBackend, m_cfgFeatureFrontend,
@@ -2516,7 +2925,10 @@ public class MainActivity extends Activity {
                                          slamModeToText(m_cfgSlamMode), m_cfgSlamFps, m_cfgAutoExposure ? "on" : "off",
                                          m_cfgUseCustomTbc ? "override" : "yaml", m_cfgOrbNFeatures,
                                          m_cfgOrbScaleFactor, m_cfgOrbNLevels, m_cfgSuperPointTopK, m_cfgSuperPointMaxPoints,
-                                         m_cfgSuperPointInputMaxWidth, m_cfgSuperPointInputMaxHeight));
+                                         m_cfgSuperPointInputMaxWidth, m_cfgSuperPointInputMaxHeight,
+                                         m_cfgAvoidanceEnabled ? "on" : "off",
+                                         m_cfgAvoidanceRadiusM,
+                                         m_cfgAvoidanceMinCloudPoints));
         return true;
     }
 
@@ -2996,6 +3408,7 @@ public class MainActivity extends Activity {
                 return;
             }
             if (rx == null) {
+                updateAvoidanceStateTimeout();
                 updateVideoStatsView();
                 return;
             }
@@ -3006,6 +3419,9 @@ public class MainActivity extends Activity {
                 continue;
             }
             if (tryHandleHeartbeatPacket(rx)) {
+                continue;
+            }
+            if (tryHandleAvoidanceStatePacket(rx)) {
                 continue;
             }
             tryHandleStatePoseForMap(rx);
@@ -3025,6 +3441,7 @@ public class MainActivity extends Activity {
                 m_tvStatus.setText(decodeTlvAck(rx));
             }
         }
+        updateAvoidanceStateTimeout();
         updateVideoStatsView();
     }
 
@@ -3198,6 +3615,7 @@ public class MainActivity extends Activity {
         m_map3dView = findViewById(R.id.map3dView);
         m_tvStatus = findViewById(R.id.tvStatus);
         m_tvPose = findViewById(R.id.tvPose);
+        m_tvAvoidance = findViewById(R.id.tvAvoidance);
         if (m_tvPose != null) {
             m_tvPose.setText("Waiting for vehicle pose...");
         }
@@ -3213,6 +3631,9 @@ public class MainActivity extends Activity {
         m_btnToggleCalib = findViewById(R.id.btnToggleCalib);
         m_btnAutoExposureToggle = findViewById(R.id.btnAutoExposureToggle);
         m_btnTbcOverrideToggle = findViewById(R.id.btnTbcOverrideToggle);
+        m_btnAvoidanceToggle = findViewById(R.id.btnAvoidanceToggle);
+        m_btnAvoidanceHoldOnStaleToggle =
+            findViewById(R.id.btnAvoidanceHoldOnStaleToggle);
         m_spinnerSensorMode = findViewById(R.id.spinnerSensorMode);
         m_spinnerFeatureFrontend = findViewById(R.id.spinnerFeatureFrontend);
         m_btnQuickSlamAuto = findViewById(R.id.btnQuickSlamAuto);
@@ -3264,6 +3685,20 @@ public class MainActivity extends Activity {
         m_tvCfgSuperPointMaxPointsValue = findViewById(R.id.tvCfgSuperPointMaxPointsValue);
         m_tvCfgSuperPointInputMaxWidthValue = findViewById(R.id.tvCfgSuperPointInputMaxWidthValue);
         m_tvCfgSuperPointInputMaxHeightValue = findViewById(R.id.tvCfgSuperPointInputMaxHeightValue);
+        m_tvCfgAvoidanceRadiusValue =
+            findViewById(R.id.tvCfgAvoidanceRadiusValue);
+        m_tvCfgAvoidanceLookaheadValue =
+            findViewById(R.id.tvCfgAvoidanceLookaheadValue);
+        m_tvCfgAvoidanceSpeedLookaheadValue =
+            findViewById(R.id.tvCfgAvoidanceSpeedLookaheadValue);
+        m_tvCfgAvoidanceNearFieldValue =
+            findViewById(R.id.tvCfgAvoidanceNearFieldValue);
+        m_tvCfgAvoidanceMaxPointAgeValue =
+            findViewById(R.id.tvCfgAvoidanceMaxPointAgeValue);
+        m_tvCfgAvoidanceMinCloudPointsValue =
+            findViewById(R.id.tvCfgAvoidanceMinCloudPointsValue);
+        m_tvCfgAvoidanceMinBlockingPointsValue =
+            findViewById(R.id.tvCfgAvoidanceMinBlockingPointsValue);
         m_sbCfgExposure = findViewById(R.id.sbCfgExposure);
         m_sbCfgGain = findViewById(R.id.sbCfgGain);
         m_sbCfgPairMs = findViewById(R.id.sbCfgPairMs);
@@ -3283,6 +3718,18 @@ public class MainActivity extends Activity {
         m_sbCfgSuperPointMaxPoints = findViewById(R.id.sbCfgSuperPointMaxPoints);
         m_sbCfgSuperPointInputMaxWidth = findViewById(R.id.sbCfgSuperPointInputMaxWidth);
         m_sbCfgSuperPointInputMaxHeight = findViewById(R.id.sbCfgSuperPointInputMaxHeight);
+        m_sbCfgAvoidanceRadius = findViewById(R.id.sbCfgAvoidanceRadius);
+        m_sbCfgAvoidanceLookahead = findViewById(R.id.sbCfgAvoidanceLookahead);
+        m_sbCfgAvoidanceSpeedLookahead =
+            findViewById(R.id.sbCfgAvoidanceSpeedLookahead);
+        m_sbCfgAvoidanceNearField =
+            findViewById(R.id.sbCfgAvoidanceNearField);
+        m_sbCfgAvoidanceMaxPointAge =
+            findViewById(R.id.sbCfgAvoidanceMaxPointAge);
+        m_sbCfgAvoidanceMinCloudPoints =
+            findViewById(R.id.sbCfgAvoidanceMinCloudPoints);
+        m_sbCfgAvoidanceMinBlockingPoints =
+            findViewById(R.id.sbCfgAvoidanceMinBlockingPoints);
 
         m_joystickLeft = findViewById(R.id.joystickLeft);
         m_joystickRight = findViewById(R.id.joystickRight);
@@ -3317,6 +3764,7 @@ public class MainActivity extends Activity {
             m_tvStatus.setText("UDP ready cmd-> " + cm5Ip + ":" + cm5CmdPort + " video<-" + phoneVideoPort);
             m_lastVehicleHeartbeatMs = 0L;
             m_vehicleHeartbeatTimeoutHandled = false;
+            resetAvoidanceStateView();
         } else {
             m_udpReady = false;
         }
@@ -3718,6 +4166,200 @@ public class MainActivity extends Activity {
                 }
             });
         }
+        if (m_sbCfgAvoidanceRadius != null) {
+            m_sbCfgAvoidanceRadius.setMax(AVOIDANCE_RADIUS_MAX_CM -
+                                          AVOIDANCE_RADIUS_MIN_CM);
+            m_sbCfgAvoidanceRadius.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar,
+                                                        int progress,
+                                                        boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgAvoidanceRadiusM = quantizeAvoidanceRadiusM(
+                        (AVOIDANCE_RADIUS_MIN_CM + progress) / 100.0f);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("Avoid radius", false,
+                                             PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgAvoidanceLookahead != null) {
+            m_sbCfgAvoidanceLookahead.setMax(AVOIDANCE_LOOKAHEAD_MAX_DM -
+                                             AVOIDANCE_LOOKAHEAD_MIN_DM);
+            m_sbCfgAvoidanceLookahead.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar,
+                                                        int progress,
+                                                        boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgAvoidanceLookaheadM = quantizeAvoidanceLookaheadM(
+                        (AVOIDANCE_LOOKAHEAD_MIN_DM + progress) / 10.0f);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("Avoid lookahead", false,
+                                             PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgAvoidanceSpeedLookahead != null) {
+            m_sbCfgAvoidanceSpeedLookahead.setMax(
+                AVOIDANCE_SPEED_LOOKAHEAD_MAX_DS -
+                AVOIDANCE_SPEED_LOOKAHEAD_MIN_DS);
+            m_sbCfgAvoidanceSpeedLookahead.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar,
+                                                        int progress,
+                                                        boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgAvoidanceSpeedLookaheadS =
+                        quantizeAvoidanceSpeedLookaheadS(
+                            (AVOIDANCE_SPEED_LOOKAHEAD_MIN_DS + progress) /
+                            10.0f);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("Avoid speed lookahead", false,
+                                             PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgAvoidanceNearField != null) {
+            m_sbCfgAvoidanceNearField.setMax(AVOIDANCE_NEAR_FIELD_MAX_CM -
+                                             AVOIDANCE_NEAR_FIELD_MIN_CM);
+            m_sbCfgAvoidanceNearField.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar,
+                                                        int progress,
+                                                        boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgAvoidanceNearFieldRadiusM =
+                        quantizeAvoidanceNearFieldM(
+                            (AVOIDANCE_NEAR_FIELD_MIN_CM + progress) / 100.0f);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("Avoid near field", false,
+                                             PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgAvoidanceMaxPointAge != null) {
+            m_sbCfgAvoidanceMaxPointAge.setMax(
+                (AVOIDANCE_MAX_POINT_AGE_MAX_MS -
+                 AVOIDANCE_MAX_POINT_AGE_MIN_MS) /
+                AVOIDANCE_MAX_POINT_AGE_STEP_MS);
+            m_sbCfgAvoidanceMaxPointAge.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar,
+                                                        int progress,
+                                                        boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgAvoidanceMaxPointAgeMs =
+                        quantizeAvoidanceMaxPointAgeMs(
+                            AVOIDANCE_MAX_POINT_AGE_MIN_MS +
+                            progress * AVOIDANCE_MAX_POINT_AGE_STEP_MS);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("Avoid cloud age", false,
+                                             PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgAvoidanceMinCloudPoints != null) {
+            m_sbCfgAvoidanceMinCloudPoints.setMax(
+                AVOIDANCE_MIN_CLOUD_POINTS_MAX -
+                AVOIDANCE_MIN_CLOUD_POINTS_MIN);
+            m_sbCfgAvoidanceMinCloudPoints.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar,
+                                                        int progress,
+                                                        boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgAvoidanceMinCloudPoints =
+                        quantizeAvoidanceMinCloudPoints(
+                            AVOIDANCE_MIN_CLOUD_POINTS_MIN + progress);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("Avoid min cloud", false,
+                                             PENDING_CONFIG, () -> {});
+                }
+            });
+        }
+        if (m_sbCfgAvoidanceMinBlockingPoints != null) {
+            m_sbCfgAvoidanceMinBlockingPoints.setMax(
+                AVOIDANCE_MIN_BLOCKING_POINTS_MAX -
+                AVOIDANCE_MIN_BLOCKING_POINTS_MIN);
+            m_sbCfgAvoidanceMinBlockingPoints.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar seekBar,
+                                                        int progress,
+                                                        boolean fromUser)
+                {
+                    if (m_updatingConfigUi || !fromUser) {
+                        return;
+                    }
+                    m_cfgAvoidanceMinBlockingPoints =
+                        quantizeAvoidanceMinBlockingPoints(
+                            AVOIDANCE_MIN_BLOCKING_POINTS_MIN + progress);
+                    updateConfigViews();
+                }
+
+                @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override public void onStopTrackingTouch(SeekBar seekBar)
+                {
+                    sendCurrentRuntimeConfig("Avoid min blocking", false,
+                                             PENDING_CONFIG, () -> {});
+                }
+            });
+        }
         m_cfgExposureUs = quantizeExposureUs(m_cfgExposureUs);
         m_cfgGain = quantizeGain(m_cfgGain);
         m_cfgPairMs = quantizePairMs(m_cfgPairMs);
@@ -3740,6 +4382,21 @@ public class MainActivity extends Activity {
         m_cfgSuperPointMaxPoints = quantizeSuperPointMaxPoints(m_cfgSuperPointMaxPoints, m_cfgSuperPointTopK);
         m_cfgSuperPointInputMaxWidth = quantizeSuperPointInputMax(m_cfgSuperPointInputMaxWidth);
         m_cfgSuperPointInputMaxHeight = quantizeSuperPointInputMax(m_cfgSuperPointInputMaxHeight);
+        m_cfgAvoidanceRadiusM =
+            quantizeAvoidanceRadiusM(m_cfgAvoidanceRadiusM);
+        m_cfgAvoidanceLookaheadM =
+            quantizeAvoidanceLookaheadM(m_cfgAvoidanceLookaheadM);
+        m_cfgAvoidanceSpeedLookaheadS =
+            quantizeAvoidanceSpeedLookaheadS(m_cfgAvoidanceSpeedLookaheadS);
+        m_cfgAvoidanceNearFieldRadiusM =
+            quantizeAvoidanceNearFieldM(m_cfgAvoidanceNearFieldRadiusM);
+        m_cfgAvoidanceMaxPointAgeMs =
+            quantizeAvoidanceMaxPointAgeMs(m_cfgAvoidanceMaxPointAgeMs);
+        m_cfgAvoidanceMinCloudPoints =
+            quantizeAvoidanceMinCloudPoints(m_cfgAvoidanceMinCloudPoints);
+        m_cfgAvoidanceMinBlockingPoints =
+            quantizeAvoidanceMinBlockingPoints(
+                m_cfgAvoidanceMinBlockingPoints);
         m_cfgSlamMode = SLAM_MODE_MAPPING;
         updateConfigViews();
         updatePoseMapFromText();
@@ -3812,6 +4469,44 @@ public class MainActivity extends Activity {
                     m_cfgUseCustomTbc = nextValue;
                     updateConfigViews();
                 });
+            });
+        }
+        if (m_btnAvoidanceToggle != null) {
+            m_btnAvoidanceToggle.setOnCheckedChangeListener((buttonView,
+                                                             isChecked) -> {
+                if (m_updatingToggleUi || m_updatingConfigUi) {
+                    return;
+                }
+                final boolean nextValue = isChecked;
+                m_cfgAvoidanceEnabled = nextValue;
+                sendRuntimeConfigAwaitAck(
+                    m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs,
+                    m_cfgSlamFps, m_cfgSlamMode, m_sensorMode,
+                    m_cfgFeatureFrontend, m_sendImage, m_sendFeature,
+                    m_sendMap, m_cfgAutoExposure,
+                    "Avoidance", PENDING_CONFIG, () -> {
+                        m_cfgAvoidanceEnabled = nextValue;
+                        updateConfigViews();
+                    });
+            });
+        }
+        if (m_btnAvoidanceHoldOnStaleToggle != null) {
+            m_btnAvoidanceHoldOnStaleToggle.setOnCheckedChangeListener(
+                (buttonView, isChecked) -> {
+                if (m_updatingToggleUi || m_updatingConfigUi) {
+                    return;
+                }
+                final boolean nextValue = isChecked;
+                m_cfgAvoidanceHoldOnStaleCloud = nextValue;
+                sendRuntimeConfigAwaitAck(
+                    m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs,
+                    m_cfgSlamFps, m_cfgSlamMode, m_sensorMode,
+                    m_cfgFeatureFrontend, m_sendImage, m_sendFeature,
+                    m_sendMap, m_cfgAutoExposure,
+                    "Avoid low cloud hold", PENDING_CONFIG, () -> {
+                        m_cfgAvoidanceHoldOnStaleCloud = nextValue;
+                        updateConfigViews();
+                    });
             });
         }
         if (m_btnMapToggle != null) {
