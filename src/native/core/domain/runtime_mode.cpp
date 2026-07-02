@@ -54,4 +54,18 @@ const char *ToString(SlamOperationMode mode)
     }
 }
 
+const char *ToString(Px4PoseOutputMode mode)
+{
+    switch (mode) {
+    case Px4PoseOutputMode::None:
+        return "none";
+    case Px4PoseOutputMode::Position:
+        return "position";
+    case Px4PoseOutputMode::PositionVelocity:
+        return "position_velocity";
+    default:
+        return "unknown";
+    }
+}
+
 } // namespace SmartDrone::Core::Domain

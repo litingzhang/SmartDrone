@@ -34,6 +34,8 @@ class ConfigRegistry {
     static constexpr std::string_view STREAM_SEND_IMAGE = "stream.send_image";
     static constexpr std::string_view STREAM_SEND_FEATURE = "stream.send_feature";
     static constexpr std::string_view STREAM_SEND_MAP = "stream.send_map";
+    static constexpr std::string_view PX4_POSE_OUTPUT_MODE =
+        "px4.pose_output_mode";
     static constexpr std::string_view SLAM_USE_CUSTOM_TBC =
         "slam.tbc_override_enabled";
     static constexpr std::string_view SLAM_TBC_TX = "slam.tbc_tx_m";

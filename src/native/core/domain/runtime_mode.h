@@ -41,6 +41,12 @@ enum class SlamOperationMode : uint8_t {
     Auto = 4,
 };
 
+enum class Px4PoseOutputMode : uint8_t {
+    None = 0,
+    Position = 1,
+    PositionVelocity = 2,
+};
+
 struct RuntimeSelection {
     RuntimeMode runtimeMode{RuntimeMode::Idle};
     PerceptionMode perceptionMode{PerceptionMode::Stereo};
@@ -50,6 +56,7 @@ struct RuntimeSelection {
 const char *ToString(RuntimeMode mode);
 const char *ToString(PerceptionMode mode);
 const char *ToString(SlamOperationMode mode);
+const char *ToString(Px4PoseOutputMode mode);
 
 } // namespace SmartDrone::Core::Domain
 

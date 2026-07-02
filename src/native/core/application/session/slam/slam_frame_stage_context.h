@@ -58,6 +58,7 @@ struct SlamFramePosePostprocessContext {
 struct SlamFrameOutputContext {
     const MainRuntimeAliases &aliases;
     bool monoMode{false};
+    LiveRuntimeTuning &tuning;
     LivePoseState &livePose;
     SmartDrone::Core::Ports::IPosePublisher &posePublisher;
     IPreviewOutputPort &previewOutput;

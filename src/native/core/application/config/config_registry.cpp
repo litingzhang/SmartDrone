@@ -183,6 +183,16 @@ DescriptorList StreamDescriptors()
     };
 }
 
+DescriptorList Px4Descriptors()
+{
+    return {
+        Make(ConfigRegistry::PX4_POSE_OUTPUT_MODE,
+             "PX4 visual odometry output mode: none, position, or "
+             "position_velocity",
+             true, false, false),
+    };
+}
+
 DescriptorList AvoidanceDescriptors()
 {
     return {
@@ -226,6 +236,7 @@ std::vector<Domain::ConfigDescriptor> ConfigRegistry::DefaultDescriptors()
     AppendDescriptors(descriptors, VisualFeatureDescriptors());
     AppendDescriptors(descriptors, AccelerationDescriptors());
     AppendDescriptors(descriptors, StreamDescriptors());
+    AppendDescriptors(descriptors, Px4Descriptors());
     AppendDescriptors(descriptors, AvoidanceDescriptors());
     return descriptors;
 }

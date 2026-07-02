@@ -26,6 +26,7 @@ void ProjectRuntimeConfig(RemoteRuntimeConfig &remote,
     remote.sensorMode = app.sensorMode;
     remote.lkPerFrameAcceleration = app.runtime.lkPerFrameAcceleration;
     remote.orbAcceleration = app.runtime.orbAcceleration;
+    remote.px4PoseOutputMode = app.runtime.px4PoseOutputMode;
 }
 
 void ProjectTbcConfig(RemoteRuntimeConfig &remote,

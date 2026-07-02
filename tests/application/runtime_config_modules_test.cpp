@@ -27,6 +27,7 @@ using SmartDrone::Core::Application::RemoteRuntimeConfig;
 using SmartDrone::Core::Application::SyncRuntimeTuning;
 using SmartDrone::Core::Application::UnifiedConfig;
 using SmartDrone::Core::Application::ValidateRemoteRuntimeConfig;
+using SmartDrone::Core::Domain::Px4PoseOutputMode;
 
 bool Contains(const std::string &text, const std::string &needle)
 {
@@ -80,6 +81,7 @@ UnifiedConfig MakeBaseConfig()
     runtime.avoidanceMaxPointCloudAgeMs = 800;
     runtime.avoidanceMinCloudPoints = 20;
     runtime.avoidanceMinBlockingPoints = 3;
+    runtime.px4PoseOutputMode = Px4PoseOutputMode::Position;
     return config;
 }
 
@@ -115,6 +117,7 @@ TEST(RuntimeConfigModulesTest, ProjectsUnifiedConfigToRemoteConfig)
     EXPECT_TRUE(remote.avoidanceHoldOnStaleCloud);
     EXPECT_FLOAT_EQ(remote.avoidanceRadiusM, 1.1f);
     EXPECT_EQ(remote.avoidanceMinCloudPoints, 20);
+    EXPECT_EQ(remote.px4PoseOutputMode, Px4PoseOutputMode::Position);
 }
 
 TEST(RuntimeConfigModulesTest, AppliesConfigValueUpdatesAndRejectsBadTypes)
@@ -146,6 +149,11 @@ TEST(RuntimeConfigModulesTest, AppliesConfigValueUpdatesAndRejectsBadTypes)
         ConfigValue{true}, remote);
     ASSERT_TRUE(result.ok);
     EXPECT_TRUE(remote.avoidanceHoldOnStaleCloud);
+
+    result = ApplyConfigValue(std::string(ConfigRegistry::PX4_POSE_OUTPUT_MODE),
+                              ConfigValue{std::string("none")}, remote);
+    ASSERT_TRUE(result.ok);
+    EXPECT_EQ(remote.px4PoseOutputMode, Px4PoseOutputMode::None);
 
     result = ApplyConfigValue(std::string(ConfigRegistry::CAMERA_GAIN),
                               ConfigValue{true}, remote);
@@ -182,6 +190,9 @@ TEST(RuntimeConfigModulesTest, BuildsRuntimeConfigUpdate)
     EXPECT_EQ(std::get<bool>(update.values.at(
                   std::string(ConfigRegistry::AVOIDANCE_ENABLED))),
               remote.avoidanceEnabled);
+    EXPECT_EQ(std::get<std::string>(update.values.at(
+                  std::string(ConfigRegistry::PX4_POSE_OUTPUT_MODE))),
+              "position");
     EXPECT_EQ(std::get<double>(update.values.at(
                   std::string(ConfigRegistry::AVOIDANCE_RADIUS_M))),
               static_cast<double>(remote.avoidanceRadiusM));
@@ -239,6 +250,7 @@ TEST(RuntimeConfigModulesTest, AppliesRemoteConfigAndSyncsRuntimeTuning)
     remote.avoidanceEnabled = true;
     remote.avoidanceRadiusM = 1.4f;
     remote.avoidanceMinCloudPoints = 24;
+    remote.px4PoseOutputMode = Px4PoseOutputMode::None;
 
     const auto applied = ApplyRemoteRuntimeConfig(config, remote);
     EXPECT_TRUE(applied.restartNeeded);
@@ -255,6 +267,9 @@ TEST(RuntimeConfigModulesTest, AppliesRemoteConfigAndSyncsRuntimeTuning)
     EXPECT_TRUE(tuning.avoidanceEnabled.load());
     EXPECT_FLOAT_EQ(tuning.avoidanceRadiusM.load(), 1.4f);
     EXPECT_EQ(tuning.avoidanceMinCloudPoints.load(), 24);
+    EXPECT_EQ(static_cast<Px4PoseOutputMode>(
+                  tuning.px4PoseOutputMode.load()),
+              Px4PoseOutputMode::None);
 }
 
 TEST(RuntimeConfigModulesTest, BuildsRuntimeConfigMessage)
@@ -271,6 +286,7 @@ TEST(RuntimeConfigModulesTest, BuildsRuntimeConfigMessage)
     EXPECT_TRUE(Contains(message, "slam_mode=relocalization"));
     EXPECT_TRUE(Contains(message, "slam_fps=60"));
     EXPECT_TRUE(Contains(message, "orb_accel=cuda"));
+    EXPECT_TRUE(Contains(message, "px4_pose=position"));
     EXPECT_TRUE(Contains(message, "avoid="));
 }
 

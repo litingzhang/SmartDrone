@@ -274,6 +274,38 @@ ParseSlamOperationModeText(const std::string &text)
     return SlamOperationMode::Mapping;
 }
 
+SmartDrone::Core::Domain::Px4PoseOutputMode
+ParsePx4PoseOutputModeText(const std::string &text)
+{
+    using SmartDrone::Core::Domain::Px4PoseOutputMode;
+
+    std::string normalized = text;
+    std::transform(
+        normalized.begin(), normalized.end(), normalized.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (normalized == "none" || normalized == "off" ||
+        normalized == "disabled") {
+        return Px4PoseOutputMode::None;
+    }
+    if (normalized == "position" || normalized == "pose") {
+        return Px4PoseOutputMode::Position;
+    }
+    if (normalized == "position_velocity" ||
+        normalized == "position-velocity" || normalized == "pose_velocity" ||
+        normalized == "pose-velocity" || normalized == "full" ||
+        normalized == "default") {
+        return Px4PoseOutputMode::PositionVelocity;
+    }
+    return Px4PoseOutputMode::PositionVelocity;
+}
+
+const char *ToPx4PoseOutputModeText(
+    SmartDrone::Core::Domain::Px4PoseOutputMode mode)
+{
+    return SmartDrone::Core::Domain::ToString(mode);
+}
+
 std::string ResolveRuntimePath(const std::string &path, const char *argv0)
 {
     if (path.empty()) {
@@ -561,6 +593,8 @@ void ParseCoreRuntimeConfig(const ArgReader &argReader, const char *argv0,
         ParseSlamOperationModeText(argReader.GetString("--slam-mode", "mapping"));
     config.runtime.slamBackend = NormalizeSlamBackendForBuild(
         ParseSlamBackendText(argReader.GetString("--slam-backend", "klt")));
+    config.runtime.px4PoseOutputMode = ParsePx4PoseOutputModeText(
+        argReader.GetString("--px4-pose-output-mode", "position_velocity"));
     const std::string vocabArg = argReader.GetString(
         "--vocab",
         config.runtime.slamBackend == SlamBackend::OrbSlam3 ? "ORBvoc.txt" : "");

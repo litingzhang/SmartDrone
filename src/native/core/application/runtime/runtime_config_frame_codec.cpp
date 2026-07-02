@@ -71,6 +71,22 @@ std::string ParseRuntimeOrbAcceleration(std::uint8_t value)
     }
 }
 
+SmartDrone::Core::Domain::Px4PoseOutputMode
+ParseRuntimePx4PoseOutputMode(std::uint8_t value)
+{
+    using SmartDrone::Core::Domain::Px4PoseOutputMode;
+
+    switch (value) {
+    case RUNTIME_PX4_POSE_OUTPUT_NONE:
+        return Px4PoseOutputMode::None;
+    case RUNTIME_PX4_POSE_OUTPUT_POSITION:
+        return Px4PoseOutputMode::Position;
+    case RUNTIME_PX4_POSE_OUTPUT_POSITION_VELOCITY:
+    default:
+        return Px4PoseOutputMode::PositionVelocity;
+    }
+}
+
 SlamBackend ParseRuntimeSlamBackend(std::uint8_t value)
 {
     switch (value) {
@@ -270,6 +286,13 @@ void ApplyRuntimeConfigV15(RemoteRuntimeConfig &remote,
         ReadF32Le(&payload[RUNTIME_CONFIG_AVOIDANCE_MIN_BLOCKING_POINTS_OFFSET])));
 }
 
+void ApplyRuntimeConfigV16(RemoteRuntimeConfig &remote,
+                           const std::uint8_t *payload)
+{
+    remote.px4PoseOutputMode = ParseRuntimePx4PoseOutputMode(
+        payload[RUNTIME_CONFIG_PX4_POSE_OUTPUT_MODE_OFFSET]);
+}
+
 void ApplyRuntimeConfigBaseVersions(RemoteRuntimeConfig &remote,
                                     const TlvFrame &frame,
                                     const std::uint8_t *payload)
@@ -327,6 +350,9 @@ void ApplyRuntimeConfigBackendVersions(RemoteRuntimeConfig &remote,
     if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V15) {
         ApplyRuntimeConfigV15(remote, payload);
     }
+    if (frame.len >= RUNTIME_CONFIG_PAYLOAD_LEN_V16) {
+        ApplyRuntimeConfigV16(remote, payload);
+    }
 }
 
 std::size_t ApplyVersionedRuntimeConfig(RemoteRuntimeConfig &remote,
@@ -361,7 +387,8 @@ void ApplyRuntimeConfigIp(RemoteRuntimeConfig &remote,
 
 bool RuntimeConfigPayloadLengthValid(std::uint16_t len)
 {
-    return len == RUNTIME_CONFIG_PAYLOAD_LEN_V15 ||
+    return len == RUNTIME_CONFIG_PAYLOAD_LEN_V16 ||
+           len == RUNTIME_CONFIG_PAYLOAD_LEN_V15 ||
            len == RUNTIME_CONFIG_PAYLOAD_LEN_V14 ||
            len == RUNTIME_CONFIG_PAYLOAD_LEN_V13 ||
            len == RUNTIME_CONFIG_PAYLOAD_LEN_V12 ||
@@ -422,6 +449,8 @@ std::string BuildRuntimeConfigAckMessage(const std::string &message,
            " lk_seed=gftt" + " lk_accel=" +
            remote.lkPerFrameAcceleration +
            " orb_accel=" + remote.orbAcceleration +
+           " px4_pose=" +
+           std::string(ToPx4PoseOutputModeText(remote.px4PoseOutputMode)) +
            " avoid=" + (remote.avoidanceEnabled ? "on" : "off");
 }
 

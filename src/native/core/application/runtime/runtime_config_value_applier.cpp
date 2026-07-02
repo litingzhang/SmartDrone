@@ -112,6 +112,23 @@ CommandResult ApplyStreamConfigValue(const std::string &key,
     return OkResult();
 }
 
+CommandResult ApplyPx4ConfigValue(const std::string &key,
+                                  const ConfigValue &value,
+                                  RemoteRuntimeConfig &remote,
+                                  bool &handled)
+{
+    handled = true;
+    if (key == ConfigRegistry::PX4_POSE_OUTPUT_MODE) {
+        if (const auto *text = std::get_if<std::string>(&value)) {
+            remote.px4PoseOutputMode = ParsePx4PoseOutputModeText(*text);
+            return OkResult();
+        }
+        return TypeMismatchResult("px4.pose_output_mode");
+    }
+    handled = false;
+    return OkResult();
+}
+
 CommandResult ApplyTbcConfigValue(const std::string &key,
                                   const ConfigValue &value,
                                   RemoteRuntimeConfig &remote,
@@ -283,6 +300,10 @@ CommandResult ApplyConfigValue(const std::string &key,
         return result;
     }
     result = ApplyStreamConfigValue(key, value, remote, handled);
+    if (handled || !result.ok) {
+        return result;
+    }
+    result = ApplyPx4ConfigValue(key, value, remote, handled);
     if (handled || !result.ok) {
         return result;
     }

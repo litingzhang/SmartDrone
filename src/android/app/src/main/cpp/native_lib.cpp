@@ -26,7 +26,7 @@ static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 static constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
 static constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
-static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 140;
+static constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN = 141;
 
 struct RuntimeConfigJniArgs {
     jint exposureUs{};
@@ -68,6 +68,7 @@ struct RuntimeConfigJniArgs {
     jint avoidanceMaxPointAgeMs{};
     jint avoidanceMinCloudPoints{};
     jint avoidanceMinBlockingPoints{};
+    jint px4PoseOutputMode{};
 };
 
 static uint32_t NowMs32()
@@ -215,6 +216,12 @@ static void WriteRuntimeConfigAvoidance(std::vector<uint8_t> &payload,
                  static_cast<float>(args.avoidanceMinBlockingPoints));
 }
 
+static void WriteRuntimeConfigPx4(std::vector<uint8_t> &payload,
+                                  const RuntimeConfigJniArgs &args)
+{
+    payload[140] = static_cast<uint8_t>(args.px4PoseOutputMode);
+}
+
 static std::vector<uint8_t> MakeRuntimeConfigPayload(
     const RuntimeConfigJniArgs &args)
 {
@@ -226,6 +233,7 @@ static std::vector<uint8_t> MakeRuntimeConfigPayload(
     WriteRuntimeConfigOrb(payload, args);
     WriteRuntimeConfigFeature(payload, args);
     WriteRuntimeConfigAvoidance(payload, args);
+    WriteRuntimeConfigPx4(payload, args);
     return payload;
 }
 
@@ -326,7 +334,7 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
     jfloat avoidanceRadiusM, jfloat avoidanceLookaheadM,
     jfloat avoidanceSpeedLookaheadS, jfloat avoidanceNearFieldRadiusM,
     jint avoidanceMaxPointAgeMs, jint avoidanceMinCloudPoints,
-    jint avoidanceMinBlockingPoints)
+    jint avoidanceMinBlockingPoints, jint px4PoseOutputMode)
 {
     const RuntimeConfigJniArgs args{
         exposureUs, gain, pairMs, slamFps, slamMode, sensorMode, sendImage,
@@ -338,7 +346,7 @@ extern "C" JNIEXPORT jint JNICALL Java_com_example_smartdrone_NativeUdp_sendRunt
         avoidanceHoldOnStaleCloud, avoidanceRadiusM, avoidanceLookaheadM,
         avoidanceSpeedLookaheadS, avoidanceNearFieldRadiusM,
         avoidanceMaxPointAgeMs, avoidanceMinCloudPoints,
-        avoidanceMinBlockingPoints};
+        avoidanceMinBlockingPoints, px4PoseOutputMode};
     const std::vector<uint8_t> payload = MakeRuntimeConfigPayload(args);
     return SendFrame(CMD_RUNTIME_CONFIG, 0, payload.data(),
                      static_cast<uint16_t>(payload.size()));

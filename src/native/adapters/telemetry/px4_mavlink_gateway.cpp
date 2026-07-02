@@ -115,6 +115,7 @@ int Px4MavlinkGateway::PollRxOnce()
 
 void Px4MavlinkGateway::StepTx()
 {
+    MaybeSendHeartbeat();
     while (m_txActive || LoadNextTxMessage()) {
         const auto &front = *m_txActive;
         const ssize_t written = m_transport.WriteSome(
@@ -647,6 +648,23 @@ bool Px4MavlinkGateway::SendMessageIntervalRequest(uint32_t messageId, float int
     request.targetSystem = targetSystem;
     request.targetComponent = targetComponent;
     return SendCommandLong(request);
+}
+
+void Px4MavlinkGateway::MaybeSendHeartbeat()
+{
+    const uint64_t nowUs = MonoTimeUs();
+    const uint64_t lastUs =
+        m_lastHeartbeatTxUs.load(std::memory_order_relaxed);
+    if (lastUs != 0 && nowUs - lastUs < 1000000ULL) {
+        return;
+    }
+    m_lastHeartbeatTxUs.store(nowUs, std::memory_order_relaxed);
+    mavlink_message_t msg{};
+    mavlink_msg_heartbeat_pack(m_sysid, m_compid, &msg,
+                               MAV_TYPE_ONBOARD_CONTROLLER,
+                               MAV_AUTOPILOT_INVALID, 0, 0,
+                               MAV_STATE_ACTIVE);
+    QueueMessage(msg);
 }
 
 bool Px4MavlinkGateway::LoadNextTxMessage()

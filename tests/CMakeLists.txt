@@ -78,12 +78,14 @@ if(ENABLE_UNIT_TESTS)
   add_executable(application_state_tests
     application/avoidance_state_payload_test.cpp
     application/calib_save_pacing_port_test.cpp
+    application/fast_planner_grid_path_planner_test.cpp
     application/frame_timing_tracker_test.cpp
     application/goal_cache_test.cpp
     application/imu_buffer_test.cpp
     application/local_occupancy_map_test.cpp
     application/live_pose_runtime_snapshots_test.cpp
     application/live_pose_state_test.cpp
+    application/mavlink_transport_test.cpp
     application/obstacle_avoidance_policy_test.cpp
     application/payload_builders_test.cpp
     application/px4_udp_hooks_test.cpp
@@ -100,6 +102,7 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/core/application/config/config_registry.cpp
     ../src/native/core/application/config/orb_acceleration_config.cpp
     ../src/native/core/application/config/slam_backend_availability.cpp
+    ../src/native/core/application/planning/fast_planner_grid_path_planner.cpp
     ../src/native/core/application/runtime/avoidance_state_payload.cpp
     ../src/native/core/application/session/calib/calib_save_pacing_port.cpp
     ../src/native/core/application/session/calib/calib_storage_helpers.cpp
@@ -125,6 +128,7 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/core/application/state/imu_buffer.cpp
     ../src/native/core/application/state/live_pose_state.cpp
     ../src/native/core/ports/slam_tracking_state.cpp
+    ../src/native/adapters/telemetry/mavlink_serial_transport.cpp
   )
 
   target_include_directories(application_state_tests PRIVATE

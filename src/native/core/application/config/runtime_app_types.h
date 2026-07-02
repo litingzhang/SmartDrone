@@ -68,6 +68,8 @@ struct RemoteRuntimeConfig {
     int avoidanceMaxPointCloudAgeMs{600};
     int avoidanceMinCloudPoints{1};
     int avoidanceMinBlockingPoints{1};
+    Domain::Px4PoseOutputMode px4PoseOutputMode{
+        Domain::Px4PoseOutputMode::PositionVelocity};
 };
 
 struct MainRuntimeAliases {
@@ -90,6 +92,8 @@ struct MainRuntimeAliases {
     std::string orbAcceleration{"cpu"};
     bool lkLoopClosure{};
     float lkLoopScale{1.20f}, lkLoopRelaxation{1.40f};
+    Domain::Px4PoseOutputMode px4PoseOutputMode{
+        Domain::Px4PoseOutputMode::PositionVelocity};
     int udpPort{}, cmdPort{}, udpJpegQ{}, udpPayload{}, udpQueue{}, imuHz{},
         accelFsG{}, gyroFsDps{};
     uint32_t spiSpeed{};
@@ -122,6 +126,8 @@ struct LiveRuntimeTuning {
     std::atomic<int> avoidanceMaxPointCloudAgeMs{600};
     std::atomic<int> avoidanceMinCloudPoints{1};
     std::atomic<int> avoidanceMinBlockingPoints{1};
+    std::atomic<uint8_t> px4PoseOutputMode{static_cast<uint8_t>(
+        Domain::Px4PoseOutputMode::PositionVelocity)};
 };
 
 } // namespace SmartDrone::Core::Application

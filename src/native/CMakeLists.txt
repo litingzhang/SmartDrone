@@ -223,6 +223,7 @@ set(SMART_DRONE_CORE_APPLICATION_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/core/application/config/capability_catalog.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/config/config_registry.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/config/orb_acceleration_config.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/core/application/planning/fast_planner_grid_path_planner.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/avoidance_state_payload.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/discovery_beacon_runtime.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/core/application/runtime/mode_manager.cpp"

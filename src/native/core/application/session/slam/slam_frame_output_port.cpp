@@ -10,6 +10,7 @@
 #include "core/application/session/slam/slam_processing_support.h"
 #include "core/application/session/stream/preview_output_port.h"
 #include "core/application/state/live_pose_state.h"
+#include "core/domain/runtime_mode.h"
 
 namespace SmartDrone::Core::Application {
 namespace {
@@ -40,6 +41,21 @@ LivePoseQuality ToLivePoseQuality(
         return LivePoseQuality::Weak;
     }
     return LivePoseQuality::Lost;
+}
+
+SmartDrone::Core::Domain::Px4PoseOutputMode ReadPx4PoseOutputMode(
+    const LiveRuntimeTuning &tuning)
+{
+    using SmartDrone::Core::Domain::Px4PoseOutputMode;
+
+    const auto raw = static_cast<Px4PoseOutputMode>(
+        tuning.px4PoseOutputMode.load(std::memory_order_relaxed));
+    if (raw == Px4PoseOutputMode::None ||
+        raw == Px4PoseOutputMode::Position ||
+        raw == Px4PoseOutputMode::PositionVelocity) {
+        return raw;
+    }
+    return Px4PoseOutputMode::PositionVelocity;
 }
 
 } // namespace
@@ -125,10 +141,19 @@ SlamFrameStepResult SlamFrameOutputPort::EmitMavlink(
     auto &slamOutput = tracked.slamOutput;
     const auto &poseResult = published.poseResult;
     const auto publishStartTp = std::chrono::steady_clock::now();
+    const auto outputMode = ReadPx4PoseOutputMode(m_ctx.tuning);
+    if (outputMode == SmartDrone::Core::Domain::Px4PoseOutputMode::None) {
+        published.publishStartTp = publishStartTp;
+        published.publishEndTp = std::chrono::steady_clock::now();
+        return SlamFrameStepResult::Continue;
+    }
     Ports::PosePublishRequest request{};
     request.frameId = slamOutput.frameId;
     request.pose = poseResult.poseEstimate;
-    request.velocity = poseResult.velocityEstimate;
+    if (outputMode ==
+        SmartDrone::Core::Domain::Px4PoseOutputMode::PositionVelocity) {
+        request.velocity = poseResult.velocityEstimate;
+    }
     request.resetCounter = published.effectiveResetCounter;
     request.resetMapCount = published.effectiveResetMapCount;
     request.trackingState = published.trackingState;

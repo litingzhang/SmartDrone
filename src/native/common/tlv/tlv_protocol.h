@@ -73,6 +73,8 @@ constexpr uint16_t RUNTIME_MODE_PAYLOAD_LEN = 1;
 // enabled [110], holdOnStaleCloud [111], radiusM [112..115], lookaheadM [116..119],
 // speedLookaheadS [120..123], nearFieldRadiusM [124..127], maxPointAgeMs [128..131],
 // minCloudPoints [132..135], minBlockingPoints [136..139] as f32le except booleans.
+// v16 additionally stores PX4 pose output mode at [140]:
+// 0=none, 1=position, 2=position_velocity.
 // legacy v1 (len=40) omitted pairMs and started reservedOrIp at byte 10.
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_LEGACY = 40;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V2 = 42;
@@ -89,6 +91,7 @@ constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V12 = 108;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V13 = 109;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V14 = 110;
 constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V15 = 140;
+constexpr uint16_t RUNTIME_CONFIG_PAYLOAD_LEN_V16 = 141;
 constexpr uint16_t RUNTIME_CONFIG_PAIR_MS_OFFSET = 10;
 constexpr uint16_t RUNTIME_CONFIG_IP_OFFSET = 12;
 constexpr uint16_t RUNTIME_CONFIG_IP_LEN = 30;
@@ -125,6 +128,7 @@ constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_NEAR_FIELD_RADIUS_M_OFFSET = 124;
 constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_MAX_POINT_AGE_MS_OFFSET = 128;
 constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_MIN_CLOUD_POINTS_OFFSET = 132;
 constexpr uint16_t RUNTIME_CONFIG_AVOIDANCE_MIN_BLOCKING_POINTS_OFFSET = 136;
+constexpr uint16_t RUNTIME_CONFIG_PX4_POSE_OUTPUT_MODE_OFFSET = 140;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_IMAGE = 0x01;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_FEATURE = 0x02;
 constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
@@ -184,6 +188,12 @@ enum RuntimeSlamBackend : uint8_t {
     RUNTIME_SLAM_BACKEND_ORBSLAM3 = 0,
     RUNTIME_SLAM_BACKEND_DPVO_TENSORRT = 1,
     RUNTIME_SLAM_BACKEND_KLT = 2,
+};
+
+enum RuntimePx4PoseOutputMode : uint8_t {
+    RUNTIME_PX4_POSE_OUTPUT_NONE = 0,
+    RUNTIME_PX4_POSE_OUTPUT_POSITION = 1,
+    RUNTIME_PX4_POSE_OUTPUT_POSITION_VELOCITY = 2,
 };
 
 enum FrameType : uint8_t {

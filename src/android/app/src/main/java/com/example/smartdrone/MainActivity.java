@@ -92,6 +92,9 @@ public class MainActivity extends Activity {
     private static final int ORB_ACCEL_CPU = 0;
     private static final int ORB_ACCEL_CUDA = 1;
     private static final int ORB_ACCEL_VPI_REMAP = 2;
+    private static final int PX4_POSE_OUTPUT_NONE = 0;
+    private static final int PX4_POSE_OUTPUT_POSITION = 1;
+    private static final int PX4_POSE_OUTPUT_POSITION_VELOCITY = 2;
     private static final int SLAM_MODE_MAPPING = 0;
     private static final int SLAM_MODE_LOCALIZATION = 1;
     private static final int SLAM_MODE_AUTO = 4;
@@ -224,6 +227,7 @@ public class MainActivity extends Activity {
     private Switch m_btnAvoidanceHoldOnStaleToggle;
     private Spinner m_spinnerSensorMode;
     private Spinner m_spinnerFeatureFrontend;
+    private Spinner m_spinnerPx4PoseOutput;
     private Button m_btnQuickSlamAuto;
     private Button m_btnQuickSlamManual;
     private Button m_btnCleanCalib;
@@ -338,6 +342,7 @@ public class MainActivity extends Activity {
     private int m_cfgFeatureFrontend = FEATURE_FRONTEND_LK_GFTT_PER_FRAME;
     private int m_cfgLkPerFrameAcceleration = LK_PER_FRAME_ACCEL_VPI_CUDA;
     private int m_cfgOrbAcceleration = ORB_ACCEL_CPU;
+    private int m_cfgPx4PoseOutputMode = PX4_POSE_OUTPUT_POSITION_VELOCITY;
     private int m_cfgExposureUs = 3000;
     private int m_cfgGain = 2;
     private boolean m_cfgAutoExposure = true;
@@ -1822,10 +1827,11 @@ public class MainActivity extends Activity {
                                                   m_cfgAvoidanceNearFieldRadiusM,
                                                   m_cfgAvoidanceMaxPointAgeMs,
                                                   m_cfgAvoidanceMinCloudPoints,
-                                                  m_cfgAvoidanceMinBlockingPoints);
+                                                  m_cfgAvoidanceMinBlockingPoints,
+                                                  m_cfgPx4PoseOutputMode);
             m_tvStatus.setText(String.format(
                 Locale.US,
-                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s tracking=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d orbAccel=%s sp=%d/%d/%d/%d lkAccel=%s avoid=%s r=%.2f look=%.1f pts=%d",
+                "CFG seq=%d exp=%d gain=%.1f pair=%dms slam=%dfps mode=%s sensor=%s tracking=%s img=%s feat=%s map=%s ae=%s tbc=%s orb=%d/%.2f/%d/%d/%d orbAccel=%s sp=%d/%d/%d/%d lkAccel=%s px4=%s avoid=%s r=%.2f look=%.1f pts=%d",
                 seq, exposureUs, gain, pairMs, slamFps, slamModeToText(slamMode), sensorModeToText(sensorMode),
                 runtimeTrackingModeToText(slamBackend, featureFrontend, lkPerFrameAcceleration, orbAcceleration),
                 sendImage ? "on" : "off", sendFeature ? "on" : "off",
@@ -1838,6 +1844,7 @@ public class MainActivity extends Activity {
                 orbAccelerationToText(orbAcceleration), superpointTopK, superpointMaxPoints,
                 superpointInputMaxWidth, superpointInputMaxHeight,
                 lkPerFrameAccelerationToText(lkPerFrameAcceleration),
+                px4PoseOutputModeToText(m_cfgPx4PoseOutputMode),
                 m_cfgAvoidanceEnabled ? "on" : "off", m_cfgAvoidanceRadiusM,
                 m_cfgAvoidanceLookaheadM, m_cfgAvoidanceMinCloudPoints));
             return seq;
@@ -2056,6 +2063,7 @@ public class MainActivity extends Activity {
         m_updatingToggleUi = true;
         updateSensorModeSpinner();
         updateFeatureFrontendSpinner();
+        updatePx4PoseOutputSpinner();
         if (m_spinnerSensorMode != null) {
             boolean enabled = !runtimeActive && !sensorPending && m_availableSensorModes.length > 0;
             m_spinnerSensorMode.setEnabled(enabled);
@@ -2065,6 +2073,11 @@ public class MainActivity extends Activity {
             boolean enabled = !runtimeActive && !sensorPending && getSupportedTrackingOptions().length > 1;
             m_spinnerFeatureFrontend.setEnabled(enabled);
             m_spinnerFeatureFrontend.setAlpha(enabled ? 1.0f : 0.35f);
+        }
+        if (m_spinnerPx4PoseOutput != null) {
+            final boolean enabled = !isPending(PENDING_CONFIG);
+            m_spinnerPx4PoseOutput.setEnabled(enabled);
+            m_spinnerPx4PoseOutput.setAlpha(enabled ? 1.0f : 0.35f);
         }
         if (m_btnToggleSlam != null) {
             m_btnToggleSlam.setChecked(m_runtimeMode == MODE_SLAM);
@@ -2082,6 +2095,28 @@ public class MainActivity extends Activity {
             setButtonState(m_btnCleanCalib, true, isPending(PENDING_CLEAN_CALIB), "#546E7A");
         }
         updateConfigViews();
+    }
+
+    private void updatePx4PoseOutputSpinner()
+    {
+        if (m_spinnerPx4PoseOutput == null) {
+            return;
+        }
+        final String[] labels = new String[] {
+            px4PoseOutputModeToText(PX4_POSE_OUTPUT_NONE),
+            px4PoseOutputModeToText(PX4_POSE_OUTPUT_POSITION),
+            px4PoseOutputModeToText(PX4_POSE_OUTPUT_POSITION_VELOCITY),
+        };
+        if (m_spinnerPx4PoseOutput.getAdapter() == null) {
+            ArrayAdapter<String> adapter =
+                new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            m_spinnerPx4PoseOutput.setAdapter(adapter);
+        }
+        final int targetIndex = Math.max(0, Math.min(2, m_cfgPx4PoseOutputMode));
+        if (m_spinnerPx4PoseOutput.getSelectedItemPosition() != targetIndex) {
+            m_spinnerPx4PoseOutput.setSelection(targetIndex, false);
+        }
     }
 
     private void updateFeatureFrontendSpinner()
@@ -2594,6 +2629,29 @@ public class MainActivity extends Activity {
         return defaultValue;
     }
 
+    private static int parsePx4PoseOutputModeText(String value, int defaultValue)
+    {
+        if (value == null) {
+            return defaultValue;
+        }
+        String normalized = value.trim().toLowerCase(Locale.US);
+        if ("none".equals(normalized) || "off".equals(normalized) ||
+            "disabled".equals(normalized)) {
+            return PX4_POSE_OUTPUT_NONE;
+        }
+        if ("position".equals(normalized) || "pose".equals(normalized)) {
+            return PX4_POSE_OUTPUT_POSITION;
+        }
+        if ("position_velocity".equals(normalized) ||
+            "position-velocity".equals(normalized) ||
+            "pose_velocity".equals(normalized) ||
+            "pose-velocity".equals(normalized) ||
+            "full".equals(normalized) || "default".equals(normalized)) {
+            return PX4_POSE_OUTPUT_POSITION_VELOCITY;
+        }
+        return defaultValue;
+    }
+
     private static int parseSlamModeText(String value, int defaultValue)
     {
         if (value == null) {
@@ -2861,6 +2919,8 @@ public class MainActivity extends Activity {
         final boolean remoteSendFeature = parseBooleanText(values.get("stream.send_feature"), m_sendFeature);
         m_sendFeature = remoteSendFeature;
         m_sendMap = parseBooleanText(values.get("stream.send_map"), m_sendMap);
+        m_cfgPx4PoseOutputMode = parsePx4PoseOutputModeText(
+            values.get("px4.pose_output_mode"), m_cfgPx4PoseOutputMode);
         m_cfgAvoidanceEnabled =
             parseBooleanText(values.get("avoidance.enabled"),
                              m_cfgAvoidanceEnabled);
@@ -2913,10 +2973,11 @@ public class MainActivity extends Activity {
 
         updateConfigViews();
         updateRuntimeButtons();
+        updatePx4PoseOutputSpinner();
         updateStreamToggleButtons();
         updateFeatureToggleButton();
         m_tvStatus.setText(String.format(Locale.US,
-                                         "Config synced mode=%s sensor=%s backend=%s tracking=%s slam_mode=%s slam=%dfps ae=%s tbc=%s orb=%d/%.2f/%d sp=%d/%d/%d/%d avoid=%s r=%.2f pts=%d",
+                                         "Config synced mode=%s sensor=%s backend=%s tracking=%s slam_mode=%s slam=%dfps ae=%s tbc=%s orb=%d/%.2f/%d sp=%d/%d/%d/%d px4=%s avoid=%s r=%.2f pts=%d",
                                          runtimeModeToText(m_runtimeMode), sensorModeToText(m_sensorMode),
                                          slamBackendToText(m_cfgSlamBackend),
                                          runtimeTrackingModeToText(m_cfgSlamBackend, m_cfgFeatureFrontend,
@@ -2926,6 +2987,7 @@ public class MainActivity extends Activity {
                                          m_cfgUseCustomTbc ? "override" : "yaml", m_cfgOrbNFeatures,
                                          m_cfgOrbScaleFactor, m_cfgOrbNLevels, m_cfgSuperPointTopK, m_cfgSuperPointMaxPoints,
                                          m_cfgSuperPointInputMaxWidth, m_cfgSuperPointInputMaxHeight,
+                                         px4PoseOutputModeToText(m_cfgPx4PoseOutputMode),
                                          m_cfgAvoidanceEnabled ? "on" : "off",
                                          m_cfgAvoidanceRadiusM,
                                          m_cfgAvoidanceMinCloudPoints));
@@ -3040,6 +3102,19 @@ public class MainActivity extends Activity {
     private String orbAccelerationToText(int acceleration)
     {
         return acceleration == ORB_ACCEL_CUDA ? "CUDA" : (acceleration == ORB_ACCEL_VPI_REMAP ? "VPI Remap" : "CPU");
+    }
+
+    private String px4PoseOutputModeToText(int mode)
+    {
+        switch (mode) {
+        case PX4_POSE_OUTPUT_NONE:
+            return "Off";
+        case PX4_POSE_OUTPUT_POSITION:
+            return "Position";
+        case PX4_POSE_OUTPUT_POSITION_VELOCITY:
+        default:
+            return "Position + Velocity";
+        }
     }
 
     private String slamModeToText(int slamMode)
@@ -3636,6 +3711,7 @@ public class MainActivity extends Activity {
             findViewById(R.id.btnAvoidanceHoldOnStaleToggle);
         m_spinnerSensorMode = findViewById(R.id.spinnerSensorMode);
         m_spinnerFeatureFrontend = findViewById(R.id.spinnerFeatureFrontend);
+        m_spinnerPx4PoseOutput = findViewById(R.id.spinnerPx4PoseOutput);
         m_btnQuickSlamAuto = findViewById(R.id.btnQuickSlamAuto);
         m_btnQuickSlamManual = findViewById(R.id.btnQuickSlamManual);
         m_btnRemoteToggle = findViewById(R.id.btnRemoteToggle);
@@ -4732,6 +4808,38 @@ public class MainActivity extends Activity {
                         m_cfgExposureUs = previousExposureUs;
                         m_cfgGain = previousGain;
                         m_cfgAutoExposure = previousAutoExposure;
+                    }
+                }
+
+                @Override public void onNothingSelected(AdapterView<?> parent) {}
+            });
+        }
+        if (m_spinnerPx4PoseOutput != null) {
+            m_spinnerPx4PoseOutput.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id)
+                {
+                    if (m_updatingToggleUi || position < 0) {
+                        return;
+                    }
+                    final int nextMode = Math.max(0, Math.min(2, position));
+                    if (nextMode == m_cfgPx4PoseOutputMode) {
+                        return;
+                    }
+                    final int previousMode = m_cfgPx4PoseOutputMode;
+                    m_cfgPx4PoseOutputMode = nextMode;
+                    sendRuntimeConfigAwaitAck(m_cfgExposureUs, (float)m_cfgGain, m_cfgPairMs,
+                                              m_cfgSlamFps, m_cfgSlamMode, m_sensorMode,
+                                              m_cfgFeatureFrontend, m_sendImage, m_sendFeature,
+                                              m_sendMap, m_cfgAutoExposure,
+                                              "PX4 pose " + px4PoseOutputModeToText(nextMode),
+                                              PENDING_CONFIG, () -> {
+                                                  m_cfgPx4PoseOutputMode = nextMode;
+                                                  updateRuntimeButtons();
+                                                  updateConfigViews();
+                                              });
+                    if (!isPending(PENDING_CONFIG)) {
+                        m_cfgPx4PoseOutputMode = previousMode;
+                        updatePx4PoseOutputSpinner();
                     }
                 }
 

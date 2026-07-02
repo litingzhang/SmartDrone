@@ -108,6 +108,7 @@ void ApplyRuntimeConfig(RuntimeConfig &runtime,
     runtime.avoidanceMinCloudPoints = remote.avoidanceMinCloudPoints;
     runtime.avoidanceMinBlockingPoints =
         remote.avoidanceMinBlockingPoints;
+    runtime.px4PoseOutputMode = remote.px4PoseOutputMode;
 }
 
 void ApplyConfiguredTbc(RuntimeConfig &runtime,
@@ -214,6 +215,8 @@ void SyncRuntimeTuning(LiveRuntimeTuning &tuning,
         remote.avoidanceMinCloudPoints, std::memory_order_relaxed);
     tuning.avoidanceMinBlockingPoints.store(
         remote.avoidanceMinBlockingPoints, std::memory_order_relaxed);
+    tuning.px4PoseOutputMode.store(static_cast<uint8_t>(
+        remote.px4PoseOutputMode), std::memory_order_relaxed);
 }
 
 } // namespace SmartDrone::Core::Application

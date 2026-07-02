@@ -47,6 +47,12 @@ void AddStreamConfig(ConfigUpdate &update,
         remote.sendMap;
 }
 
+void AddPx4Config(ConfigUpdate &update, const RemoteRuntimeConfig &remote)
+{
+    update.values[std::string(ConfigRegistry::PX4_POSE_OUTPUT_MODE)] =
+        std::string(ToPx4PoseOutputModeText(remote.px4PoseOutputMode));
+}
+
 void AddTbcConfig(ConfigUpdate &update, const RemoteRuntimeConfig &remote)
 {
     update.values[std::string(ConfigRegistry::SLAM_USE_CUSTOM_TBC)] =
@@ -128,6 +134,7 @@ ConfigUpdate BuildRuntimeConfigUpdate(const RemoteRuntimeConfig &remote)
     ConfigUpdate update{};
     AddCameraAndModeConfig(update, remote);
     AddStreamConfig(update, remote);
+    AddPx4Config(update, remote);
     AddTbcConfig(update, remote);
     AddOrbConfig(update, remote);
     AddVisualFeatureConfig(update, remote);

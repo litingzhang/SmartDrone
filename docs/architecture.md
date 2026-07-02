@@ -641,10 +641,19 @@ Avoidance protects both OFFBOARD setpoint moves and Android REMOTE/RC joystick t
 projected into the local horizontal frame using the current pose yaw; RC throttle is projected onto local vertical
 motion. Both paths are evaluated with the same corridor scan.
 
+### 10.4 Native Fast-Planner Adapter
+
+Fast-Planner is integrated as a native planning plugin boundary, not as a ROS/catkin runtime package. The first plugin is
+`FastPlannerGridPathPlannerPlugin`, exposed through `IPathPlannerPlugin`. It consumes the local occupancy voxel map, builds
+an inflated 3D grid, runs a Fast-Planner-style A* front-end search, and returns smoothed waypoints. This keeps the planner
+replaceable by a later kinodynamic/B-spline implementation while preserving the current no-ROS native runtime boundary.
+
 `CMD_RUNTIME_CONFIG` v15 appends hot-reloadable avoidance settings at offsets `110..139`: enabled, hold-on-stale-cloud,
 radius, lookahead, speed lookahead, near-field radius, max point age, minimum cloud points, and minimum blocking points.
+`CMD_RUNTIME_CONFIG` v16 appends hot-reloadable PX4 pose output mode at offset `140`: `0=none`, `1=position`,
+`2=position_velocity`. `position_velocity` is the default and preserves the historical MAVLink ODOMETRY behavior.
 
-### 10.4 Core Runtime Config Keys
+### 10.5 Core Runtime Config Keys
 
 - `camera.exposure_us`
 - `camera.gain`
@@ -677,6 +686,7 @@ radius, lookahead, speed lookahead, near-field radius, max point age, minimum cl
 - `slam.lk_superpoint_seeding`
 - `slam.lk_per_frame_accel`
 - `slam.orb_accel`
+- `px4.pose_output_mode`
 - `avoidance.enabled`
 - `avoidance.hold_on_stale_cloud`
 - `avoidance.radius_m`

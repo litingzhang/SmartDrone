@@ -126,6 +126,13 @@ void AppendStreamConfig(std::ostringstream &oss, const UnifiedConfig &cfg)
     oss << "stream.send_map=" << BoolText(cfg.app.udp.sendMap) << "\n";
 }
 
+void AppendPx4Config(std::ostringstream &oss, const UnifiedConfig &cfg)
+{
+    oss << "px4.pose_output_mode="
+        << ToPx4PoseOutputModeText(cfg.app.runtime.px4PoseOutputMode)
+        << "\n";
+}
+
 void AppendAvoidanceConfig(std::ostringstream &oss, const UnifiedConfig &cfg)
 {
     const ObstacleAvoidanceConfig config =
@@ -208,6 +215,7 @@ BuildConfigPayload(const UnifiedConfig &cfg,
     AppendOrbConfig(oss, cfg);
     AppendVisualFeatureConfig(oss, cfg);
     AppendStreamConfig(oss, cfg);
+    AppendPx4Config(oss, cfg);
     AppendAvoidanceConfig(oss, cfg);
     return TextPayloadFromString(oss.str());
 }

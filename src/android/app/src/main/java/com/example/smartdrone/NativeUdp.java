@@ -30,6 +30,7 @@ public class NativeUdp {
                                                boolean avoidanceHoldOnStaleCloud, float avoidanceRadiusM,
                                                float avoidanceLookaheadM, float avoidanceSpeedLookaheadS,
                                                float avoidanceNearFieldRadiusM, int avoidanceMaxPointAgeMs,
-                                               int avoidanceMinCloudPoints, int avoidanceMinBlockingPoints);
+                                               int avoidanceMinCloudPoints, int avoidanceMinBlockingPoints,
+                                               int px4PoseOutputMode);
     public static native byte[] pollRecv();
 }

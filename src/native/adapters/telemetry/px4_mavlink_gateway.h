@@ -184,6 +184,7 @@ class Px4MavlinkGateway {
     void ClearCommandAck(uint16_t command);
     void StoreCommandAck(const AckInfo &info);
     bool SendMessageIntervalRequest(uint32_t messageId, float intervalUs, uint8_t targetSystem, uint8_t targetComponent);
+    void MaybeSendHeartbeat();
     bool LoadNextTxMessage();
     void ReleaseActiveTxMessage();
     bool PushTxMessage(std::shared_ptr<const TxMessage> message);
@@ -204,6 +205,7 @@ class Px4MavlinkGateway {
     std::shared_ptr<const SetpointLocalNED> m_spCurrent;
     std::atomic<uint64_t> m_streamPeriodUs{50000};
     std::atomic<uint64_t> m_lastStreamTxUs{0};
+    std::atomic<uint64_t> m_lastHeartbeatTxUs{0};
     mavlink_message_t m_rxMessage{};
     mavlink_status_t m_rxStatus{};
     std::shared_ptr<const AckSnapshot> m_ackSnapshot;

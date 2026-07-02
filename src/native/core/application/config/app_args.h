@@ -24,6 +24,10 @@ SlamBackend NormalizeSlamBackendForBuild(SlamBackend backend);
 const char *ToSlamBackendText(SlamBackend backend);
 SmartDrone::Core::Domain::SlamOperationMode
 ParseSlamOperationModeText(const std::string &text);
+SmartDrone::Core::Domain::Px4PoseOutputMode
+ParsePx4PoseOutputModeText(const std::string &text);
+const char *ToPx4PoseOutputModeText(
+    SmartDrone::Core::Domain::Px4PoseOutputMode mode);
 std::string ResolveRuntimePath(const std::string &path, const char *argv0);
 std::string
 ResolveSettingsForSensorMode(SensorMode mode,
@@ -131,6 +135,8 @@ struct RuntimeConfig {
     int avoidanceMaxPointCloudAgeMs{600};
     int avoidanceMinCloudPoints{1};
     int avoidanceMinBlockingPoints{1};
+    SmartDrone::Core::Domain::Px4PoseOutputMode px4PoseOutputMode{
+        SmartDrone::Core::Domain::Px4PoseOutputMode::PositionVelocity};
 };
 
 struct AppConfig {

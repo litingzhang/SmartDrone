@@ -101,6 +101,18 @@ bool ValidateAccelerationConfig(const RemoteRuntimeConfig &remote,
     return true;
 }
 
+bool ValidatePx4Config(const RemoteRuntimeConfig &remote, std::string *err)
+{
+    using SmartDrone::Core::Domain::Px4PoseOutputMode;
+
+    if (remote.px4PoseOutputMode == Px4PoseOutputMode::None ||
+        remote.px4PoseOutputMode == Px4PoseOutputMode::Position ||
+        remote.px4PoseOutputMode == Px4PoseOutputMode::PositionVelocity) {
+        return true;
+    }
+    return SetError(err, "bad px4 pose output mode");
+}
+
 bool ValidateAvoidanceConfig(const RemoteRuntimeConfig &remote,
                              std::string *err)
 {
@@ -170,6 +182,7 @@ bool ValidateRemoteRuntimeConfig(RemoteRuntimeConfig &remote,
     }
     return ValidateVisualFeatureConfig(remote, err) &&
            ValidateAccelerationConfig(remote, err) &&
+           ValidatePx4Config(remote, err) &&
            ValidateAvoidanceConfig(remote, err);
 }
 

@@ -136,8 +136,8 @@ SlamFrameOutputContext &SlamFramePortSet::OutputContext()
     if (!m_outputContext) {
         m_outputContext = std::make_unique<SlamFrameOutputContext>(
             SlamFrameOutputContext{m_cfg.aliases, m_cfg.monoMode,
-                                   m_cfg.livePose, m_cfg.posePublisher,
-                                   m_cfg.previewOutput});
+                                   m_cfg.tuning, m_cfg.livePose,
+                                   m_cfg.posePublisher, m_cfg.previewOutput});
     }
     return *m_outputContext;
 }

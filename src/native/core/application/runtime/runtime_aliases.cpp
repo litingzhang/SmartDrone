@@ -59,6 +59,7 @@ void ApplyRuntimeAliases(MainRuntimeAliases &aliases, const AppConfig &config)
     aliases.lkLoopClosure = config.runtime.lkLoopClosure;
     aliases.lkLoopScale = config.runtime.lkLoopScale;
     aliases.lkLoopRelaxation = config.runtime.lkLoopRelaxation;
+    aliases.px4PoseOutputMode = config.runtime.px4PoseOutputMode;
     aliases.allowEmptyImu = config.runtime.allowEmptyImu;
     aliases.debugRightOnlyFeatures = config.runtime.debugRightOnlyFeatures;
     aliases.slamLowLightEnhance = config.runtime.slamLowLightEnhance;
@@ -161,6 +162,8 @@ void PrintDiagnosticsConfig(const AppConfig &app, const MainRuntimeAliases &alia
     std::cerr << "diagnostics json=" << (aliases.jsonDiagnostics ? "Y" : "N") << "\n";
     std::cerr << "imuHz=" << aliases.imuHz << " udp=" << (aliases.udpEnable ? "Y" : "N")
               << " udpPort=" << aliases.udpPort << " cmdPort=" << aliases.cmdPort << "\n";
+    std::cerr << "px4 pose_output_mode="
+              << ToPx4PoseOutputModeText(aliases.px4PoseOutputMode) << "\n";
     std::cerr << "stream img=" << (aliases.sendImage ? "Y" : "N")
               << " feat=" << (aliases.sendFeature ? "Y" : "N")
               << " map=" << (aliases.sendMap ? "Y" : "N") << "\n";
