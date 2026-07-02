@@ -21,6 +21,12 @@ cd ../PX4-Autopilot
 bash ./Tools/setup/ubuntu.sh
 ```
 
+Check the local SITL environment before launching:
+
+```bash
+./scripts/check_sitl_env.sh --bind 14540
+```
+
 ## Start PX4 SITL
 
 From this repository:
