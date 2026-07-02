@@ -4,11 +4,13 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage:
-  ./scripts/build.sh [smart_drone|android|all|test|replay] [--clean] [--reconfigure] [--jetson-orin-nx]
+  ./scripts/build.sh [smart_drone|host-smart_drone|android|all|test|replay] [--clean] [--reconfigure] [--jetson-orin-nx]
                    [--jobs N] [--camera-provider NAME] [--enable-orb-slam3] [--enable-openvins]
 
 Modes:
   smart_drone     Build the unified runtime target
+  host-smart_drone
+                  Build the unified runtime target for the Linux host
   android         Build the Android app (:app:assembleDebug)
   all             Build smart_drone and Android app
   test            Build and run host-side unit tests with GoogleTest
@@ -99,6 +101,7 @@ BUILD_SMART_DRONE=OFF
 BUILD_ANDROID=0
 BUILD_TESTS=0
 BUILD_REPLAY=0
+HOST_SMART_DRONE=0
 CLEAN_BUILD=0
 FORCE_RECONFIGURE=0
 JETSON_ORIN_NX=0
@@ -115,6 +118,10 @@ CERES_DIR_OVERRIDE="${CERES_DIR:-}"
 case "$MODE" in
     smart_drone)
         BUILD_SMART_DRONE=ON
+        ;;
+    host-smart_drone)
+        BUILD_SMART_DRONE=ON
+        HOST_SMART_DRONE=1
         ;;
     android)
         BUILD_ANDROID=1
@@ -216,6 +223,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT_ROOT="$REPO_ROOT/output"
 BUILD_DIR="$OUTPUT_ROOT/build/cm5/smart_drone"
+HOST_SMART_DRONE_BUILD_DIR="$OUTPUT_ROOT/build/host/smart_drone"
 TEST_BUILD_DIR="$OUTPUT_ROOT/build/host/unit-test"
 REPLAY_BUILD_DIR="$OUTPUT_ROOT/build/host/offline-replay"
 ANDROID_DIR="$REPO_ROOT/src/android"
@@ -230,6 +238,7 @@ TOOLCHAIN_FILE="$REPO_ROOT/toolchain/toolchain-cm5-aarch64.cmake"
 TOOLCHAIN_PREFIX=""
 CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
 NATIVE_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/$PLATFORM_NAME"
+HOST_SMART_DRONE_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host"
 HOST_TEST_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host/unit-test"
 HOST_REPLAY_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/host/offline-replay"
 REPLAY_ARTIFACTS_DIR="$HOST_REPLAY_ARTIFACTS_DIR"
@@ -247,7 +256,17 @@ if [ "$JETSON_ORIN_NX" -eq 1 ]; then
     REPLAY_BUILD_DIR="$OUTPUT_ROOT/build/jetson-orin-nx/offline-replay"
 fi
 
+if [ "$HOST_SMART_DRONE" -eq 1 ]; then
+    PLATFORM_NAME="host"
+    BUILD_DIR="$HOST_SMART_DRONE_BUILD_DIR"
+    TOOLCHAIN_FILE=""
+    SYSROOT=""
+fi
+
 NATIVE_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/$PLATFORM_NAME"
+if [ "$HOST_SMART_DRONE" -eq 1 ]; then
+    NATIVE_ARTIFACTS_DIR="$HOST_SMART_DRONE_ARTIFACTS_DIR"
+fi
 if [ "$JETSON_ORIN_NX" -eq 1 ]; then
     REPLAY_ARTIFACTS_DIR="$OUTPUT_ROOT/artifacts/$PLATFORM_NAME/offline-replay"
 fi
@@ -274,7 +293,7 @@ else
     TOOLCHAIN_PREFIX="${TOOLCHAIN_PREFIX:-}"
 fi
 
-if [ "$BUILD_SMART_DRONE" = "ON" ]; then
+if [ "$BUILD_SMART_DRONE" = "ON" ] && [ "$HOST_SMART_DRONE" -eq 0 ]; then
     if [ ! -d "$SYSROOT" ]; then
         echo "Sysroot not found: $SYSROOT" >&2
         echo "Set $SYSROOT_ENV_NAME=/path/to/sysroot and retry." >&2
@@ -301,9 +320,18 @@ if [ "$BUILD_REPLAY" -eq 1 ] && [ "$JETSON_ORIN_NX" -eq 1 ]; then
 fi
 
 configure_native_args=(
-    -DSYSROOT="$SYSROOT"
     -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE"
 )
+
+if [ "$HOST_SMART_DRONE" -eq 1 ]; then
+    configure_native_args+=(
+        -DCROSS_AARCH64=OFF
+        -DBUILD_SMART_DRONE=ON
+        -DSMART_DRONE_ENABLE_BOARD_IO=OFF
+    )
+else
+    configure_native_args+=(-DSYSROOT="$SYSROOT")
+fi
 
 if [ -n "$TOOLCHAIN_FILE" ]; then
     configure_native_args+=(-DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE")

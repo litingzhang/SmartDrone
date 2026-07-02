@@ -54,7 +54,19 @@ export SMART_DRONE_MAVLINK_DEV='udp-listen://14640'
 
 ## Run SmartDrone Against SITL
 
-Build the runtime through the project build script:
+For Linux host-only SITL development, build the runtime for the host:
+
+```bash
+./scripts/build.sh host-smart_drone --camera-provider uvc_stereo_opencv
+```
+
+Run it with the MAVLink endpoint printed by the PX4 SITL script:
+
+```bash
+./scripts/run_sitl_smart_drone.sh --bind 14540 -- --auto-mode idle
+```
+
+For deployment targets, build the runtime through the project build script:
 
 ```bash
 ./scripts/build.sh smart_drone --camera-provider uvc_stereo_opencv

@@ -46,10 +46,7 @@ endif()
 set(SMART_DRONE_ADAPTER_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/adapters/command/udp_tlv_command_channel.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/app/composition/default_application_runtime_factories.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/app/composition/imu_sample_source_provider.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688/icm42688_imu.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688_imu_provider.cpp"
-  "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688_sample_source.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_engine_factory.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/engine/slam_env.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/slam/dpvo/dpvo_tensorrt_engine_config.cpp"
@@ -96,6 +93,18 @@ set(SMART_DRONE_ADAPTER_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/px4_vehicle_control_port.cpp"
   ${SMART_DRONE_CAMERA_SOURCES}
 )
+
+if(SMART_DRONE_ENABLE_BOARD_IO)
+  list(APPEND SMART_DRONE_ADAPTER_SOURCES
+    "${SMART_DRONE_NATIVE_ROOT}/app/composition/imu_sample_source_provider.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688/icm42688_imu.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/imu/icm42688_sample_source.cpp"
+  )
+else()
+  list(APPEND SMART_DRONE_ADAPTER_SOURCES
+    "${SMART_DRONE_NATIVE_ROOT}/app/composition/imu_sample_source_provider_noop.cpp"
+  )
+endif()
 
 if(SMART_DRONE_TENSORRT_AVAILABLE)
   list(REMOVE_ITEM SMART_DRONE_ADAPTER_SOURCES
@@ -345,23 +354,26 @@ set(SMART_DRONE_CORE_APPLICATION_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/core/application/state/pose_postprocessor.cpp"
 )
 
-set(SMART_DRONE_PLATFORM_SOURCES
-  "${SMART_DRONE_NATIVE_ROOT}/platform/linux/gpio/drdy_gpio.cpp"
-)
-
-if(SMART_DRONE_GPIOD_V2)
+set(SMART_DRONE_PLATFORM_SOURCES)
+if(SMART_DRONE_ENABLE_BOARD_IO)
   list(APPEND SMART_DRONE_PLATFORM_SOURCES
-    "${SMART_DRONE_NATIVE_ROOT}/platform/linux/gpio/drdy_gpio_v2.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/platform/linux/gpio/drdy_gpio.cpp"
   )
-else()
+
+  if(SMART_DRONE_GPIOD_V2)
+    list(APPEND SMART_DRONE_PLATFORM_SOURCES
+      "${SMART_DRONE_NATIVE_ROOT}/platform/linux/gpio/drdy_gpio_v2.cpp"
+    )
+  else()
+    list(APPEND SMART_DRONE_PLATFORM_SOURCES
+      "${SMART_DRONE_NATIVE_ROOT}/platform/linux/gpio/drdy_gpio_v1.cpp"
+    )
+  endif()
+
   list(APPEND SMART_DRONE_PLATFORM_SOURCES
-    "${SMART_DRONE_NATIVE_ROOT}/platform/linux/gpio/drdy_gpio_v1.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/platform/linux/spi/spi_dev.cpp"
   )
 endif()
-
-list(APPEND SMART_DRONE_PLATFORM_SOURCES
-  "${SMART_DRONE_NATIVE_ROOT}/platform/linux/spi/spi_dev.cpp"
-)
 
 set(SMART_DRONE_ALL_SOURCES
   ${SMART_DRONE_MAIN_SOURCES}
