@@ -18,7 +18,23 @@
 namespace SmartDrone::Core::Application {
 namespace {
 
-bool ConfigValid(const SystemRuntimeGraphConfig &config)
+bool SetError(std::string *err, const char *message)
+{
+    if (err != nullptr) {
+        *err = message;
+    }
+    return false;
+}
+
+UdpCommandRuntimeConfig BuildValidatedCommandRuntimeConfig(
+    const SystemRuntimeGraphConfig &config)
+{
+    UdpCommandRuntimeConfig commandConfig = config.commandRuntime;
+    commandConfig.port = config.aliases.cmdPort;
+    return commandConfig;
+}
+
+bool ConfigValid(const SystemRuntimeGraphConfig &config, std::string *err)
 {
     const SystemRuntimeStepServices services({
         config.stepVehicleTelemetryRx,
@@ -28,13 +44,29 @@ bool ConfigValid(const SystemRuntimeGraphConfig &config)
         config.stepSessionSupervisor,
         config.stepEpgRedeploy,
     });
-    return services.Valid() &&
-           config.redeployCoordinator &&
-           UdpCommandRuntimeConfigValid(config.commandRuntime) &&
-           config.aliases.cmdPort > 0 &&
-           config.aliases.udpPort > 0 &&
-           config.discoveryPort > 0 &&
-           !config.cameraProvider.providerName.empty();
+    if (!services.Valid()) {
+        return SetError(err, "step services invalid");
+    }
+    if (!config.redeployCoordinator) {
+        return SetError(err, "redeploy coordinator missing");
+    }
+    if (!UdpCommandRuntimeConfigValid(
+            BuildValidatedCommandRuntimeConfig(config))) {
+        return SetError(err, "udp command runtime invalid");
+    }
+    if (config.aliases.cmdPort <= 0) {
+        return SetError(err, "cmd port invalid");
+    }
+    if (config.aliases.udpPort <= 0) {
+        return SetError(err, "udp port invalid");
+    }
+    if (config.discoveryPort <= 0) {
+        return SetError(err, "discovery port invalid");
+    }
+    if (config.cameraProvider.providerName.empty()) {
+        return SetError(err, "camera provider missing");
+    }
+    return true;
 }
 
 } // namespace
@@ -62,8 +94,10 @@ class SystemRuntimeGraph::Impl final {
         if (m_lifecycle.HasGraph()) {
             return true;
         }
-        if (!ConfigValid(m_config)) {
-            std::cerr << "[runtime] system EPG config invalid\n";
+        std::string err;
+        if (!ConfigValid(m_config, &err)) {
+            std::cerr << "[runtime] system EPG config invalid: " << err
+                      << "\n";
             return false;
         }
         m_lifecycle.ResetForStart();
@@ -111,8 +145,8 @@ class SystemRuntimeGraph::Impl final {
   private:
     std::shared_ptr<UdpCommandRuntime> MakeCommandRuntime()
     {
-        UdpCommandRuntimeConfig commandConfig = m_config.commandRuntime;
-        commandConfig.port = m_config.aliases.cmdPort;
+        UdpCommandRuntimeConfig commandConfig =
+            BuildValidatedCommandRuntimeConfig(m_config);
         commandConfig.buildCapabilitiesPayload =
             [cameraProvider = m_config.cameraProvider]() {
                 return BuildCapabilitiesPayload(cameraProvider);
