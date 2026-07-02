@@ -66,6 +66,12 @@ For Linux host-only SITL development, build the runtime for the host:
 ./scripts/build.sh host-smart_drone --camera-provider uvc_stereo_opencv
 ```
 
+To verify the SmartDrone side without PX4/Gazebo, run:
+
+```bash
+./scripts/smoke_sitl_smart_drone.sh --bind 14540
+```
+
 Run it with the MAVLink endpoint printed by the PX4 SITL script:
 
 ```bash
