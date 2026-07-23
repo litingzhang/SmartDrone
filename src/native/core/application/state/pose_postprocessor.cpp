@@ -164,7 +164,7 @@ PoseEstimate PosePostprocessor::StartupAligner::AlignPose(const PoseEstimate &po
 
     if (!trackingUsable) {
         PoseEstimate out = ComputeLostPose(nowUs);
-        outQuality = havePublishedPose ? PoseQuality::Weak : PoseQuality::Lost;
+        outQuality = PoseQuality::Lost;
         trackingUsablePrev = false;
         return out;
     }
@@ -568,6 +568,9 @@ void PosePostprocessor::PopulateOutputPose(const ProcessRequest &request, Prepar
     prepared.result.poseEstimate = guard.pose;
     prepared.result.poseEstimate.valid = true;
     prepared.result.velocityEstimate = velocity;
+    prepared.result.referenceFrame =
+        request.useImu ? SmartDrone::Core::Ports::PoseReferenceFrame::LocalNed
+                       : SmartDrone::Core::Ports::PoseReferenceFrame::LocalFrd;
     prepared.result.quality = guard.quality;
     prepared.result.debug.outputGuardApplied = guard.guardApplied;
     prepared.result.debug.outputGuardRawStepM = guard.rawStepM;

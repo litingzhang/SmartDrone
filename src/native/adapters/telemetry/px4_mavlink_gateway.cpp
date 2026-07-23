@@ -436,7 +436,7 @@ Px4MavlinkGateway::BuildOdometryPacketFields(const OdometryRequest &request) con
         fields.quality = 20;
     } else {
         FillCovDiag21(fields.poseCov, {1e4f, 1e4f, 1e6f, 10.0f, 10.0f, 10.0f});
-        fields.quality = 0;
+        fields.quality = -1;
     }
     if (!haveVelocity) {
         FillNanCov21(fields.velocityCov);
@@ -726,6 +726,10 @@ bool Px4MavlinkGateway::QueueMessage(const mavlink_message_t &msg)
 
 void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t &msg)
 {
+    if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
+        HandleTimesync(msg);
+        return;
+    }
     if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
         HandleHeartbeat(msg);
         return;
@@ -746,6 +750,27 @@ void Px4MavlinkGateway::HandleMavlinkMessage(const mavlink_message_t &msg)
         HandleStatusText(msg);
         return;
     }
+}
+
+void Px4MavlinkGateway::HandleTimesync(const mavlink_message_t &msg)
+{
+    mavlink_timesync_t request{};
+    mavlink_msg_timesync_decode(&msg, &request);
+    if (request.tc1 != 0) {
+        return;
+    }
+    if (request.target_system != 0 && request.target_system != m_sysid) {
+        return;
+    }
+    if (request.target_component != 0 && request.target_component != m_compid) {
+        return;
+    }
+
+    mavlink_message_t response{};
+    mavlink_msg_timesync_pack(
+        m_sysid, m_compid, &response, static_cast<int64_t>(MonoTimeUs() * 1000ULL),
+        request.ts1, msg.sysid, msg.compid);
+    QueueMessage(response);
 }
 
 void Px4MavlinkGateway::HandleHeartbeat(const mavlink_message_t &msg)

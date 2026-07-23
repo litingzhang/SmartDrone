@@ -150,6 +150,7 @@ SlamFrameStepResult SlamFrameOutputPort::EmitMavlink(
     Ports::PosePublishRequest request{};
     request.frameId = slamOutput.frameId;
     request.pose = poseResult.poseEstimate;
+    request.referenceFrame = poseResult.referenceFrame;
     if (outputMode ==
         SmartDrone::Core::Domain::Px4PoseOutputMode::PositionVelocity) {
         request.velocity = poseResult.velocityEstimate;

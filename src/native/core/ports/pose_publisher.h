@@ -19,10 +19,16 @@ enum class PoseQuality : uint8_t {
     Lost = 2,
 };
 
+enum class PoseReferenceFrame : uint8_t {
+    LocalNed = 0,
+    LocalFrd = 1,
+};
+
 struct PosePublishRequest {
     uint64_t frameId{0};
     PoseEstimate pose{};
     VelocityEstimate velocity{};
+    PoseReferenceFrame referenceFrame{PoseReferenceFrame::LocalNed};
     uint8_t resetCounter{0};
     uint16_t resetMapCount{0};
     int trackingState{0};

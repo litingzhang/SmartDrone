@@ -182,6 +182,8 @@ void ProcessContinuousKltTrackingFrame(
     }
     if (poseEstimate.poseUpdated) {
         state.m_lkTwc = state.m_lkTwc * poseEstimate.deltaTwc;
+    } else {
+        MarkSlamOutputPoseLost(out, Core::Ports::SLAM_TRACKING_LOST);
     }
 
     out.matchesInliers = poseEstimate.inlierCount;

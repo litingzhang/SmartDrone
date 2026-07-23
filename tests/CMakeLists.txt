@@ -128,12 +128,15 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/core/application/state/imu_buffer.cpp
     ../src/native/core/application/state/live_pose_state.cpp
     ../src/native/core/ports/slam_tracking_state.cpp
+    ../src/native/adapters/telemetry/mavlink_pose_publisher.cpp
+    ../src/native/adapters/telemetry/px4_mavlink_gateway.cpp
     ../src/native/adapters/telemetry/mavlink_serial_transport.cpp
   )
 
   target_include_directories(application_state_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../src/native"
     "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/Sophus"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/c_library_v2"
   )
 
   target_link_libraries(application_state_tests PRIVATE

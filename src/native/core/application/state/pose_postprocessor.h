@@ -43,6 +43,8 @@ class PosePostprocessor {
 
         SmartDrone::Core::Ports::PoseEstimate poseEstimate{};
         SmartDrone::Core::Ports::VelocityEstimate velocityEstimate{};
+        SmartDrone::Core::Ports::PoseReferenceFrame referenceFrame{
+            SmartDrone::Core::Ports::PoseReferenceFrame::LocalNed};
         PoseQuality quality{PoseQuality::Lost};
         uint8_t resetCounter{0};
         uint16_t resetMapCount{0};

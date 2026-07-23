@@ -190,6 +190,7 @@ class Px4MavlinkGateway {
     bool PushTxMessage(std::shared_ptr<const TxMessage> message);
     bool QueueMessage(const mavlink_message_t &msg);
     void HandleMavlinkMessage(const mavlink_message_t &msg);
+    void HandleTimesync(const mavlink_message_t &msg);
     void HandleHeartbeat(const mavlink_message_t &msg);
     void HandleLocalPositionNed(const mavlink_message_t &msg);
     void HandleDistanceSensor(const mavlink_message_t &msg);

@@ -1,5 +1,7 @@
 #include "adapters/telemetry/mavlink_pose_publisher.h"
 
+#include <Eigen/Geometry>
+
 namespace SmartDrone::Adapters::Telemetry {
 
 MavlinkPosePublisher::MavlinkPosePublisher(Px4MavlinkGateway &serial)
@@ -21,9 +23,15 @@ void MavlinkPosePublisher::PublishPose(
 
     Px4MavlinkGateway::LinearVelocityNed mavVelocity{};
     if (request.velocity.valid) {
-        mavVelocity.x = request.velocity.vx;
-        mavVelocity.y = request.velocity.vy;
-        mavVelocity.z = request.velocity.vz;
+        const Eigen::Quaternionf localFromBody(
+            request.pose.qw, request.pose.qx, request.pose.qy, request.pose.qz);
+        const Eigen::Vector3f localVelocity(
+            request.velocity.vx, request.velocity.vy, request.velocity.vz);
+        const Eigen::Vector3f bodyVelocity =
+            localFromBody.normalized().conjugate() * localVelocity;
+        mavVelocity.x = bodyVelocity.x();
+        mavVelocity.y = bodyVelocity.y();
+        mavVelocity.z = bodyVelocity.z();
     }
 
     OdomQualityMode odomQuality = OdomQualityMode::GOOD;
@@ -37,7 +45,10 @@ void MavlinkPosePublisher::PublishPose(
     odometry.frameId = request.frameId;
     odometry.poseNed = mavPose;
     odometry.velocityNed = mavVelocity;
-    odometry.mavFrameId = MAV_FRAME_LOCAL_FRD;
+    odometry.mavFrameId =
+        request.referenceFrame == Core::Ports::PoseReferenceFrame::LocalNed
+            ? MAV_FRAME_LOCAL_NED
+            : MAV_FRAME_LOCAL_FRD;
     odometry.childFrameId = MAV_FRAME_BODY_FRD;
     odometry.resetCounter = request.resetCounter;
     odometry.qualityMode = odomQuality;
