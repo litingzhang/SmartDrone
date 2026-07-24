@@ -1,0 +1,21 @@
+%YAML:1.0
+
+version: 1
+world_name: smartdrone_hover
+truth_pose_topic: /world/smartdrone_hover/dynamic_pose/info
+truth_model_name: smartdrone_x500
+clock_topic: /world/smartdrone_hover/clock
+left_image_topic: /smartdrone/stereo/left/image
+right_image_topic: /smartdrone/stereo/right/image
+left_camera_info_topic: /smartdrone/stereo/left/camera_info
+right_camera_info_topic: /smartdrone/stereo/right/camera_info
+calibration_path: stereo_rectified.yaml
+pair_tolerance_ns: 2000000
+queue_depth: 8
+faults:
+  blur_sigma: 0.0
+  brightness: 1.0
+  noise_stddev: 0.0
+  drop_rate: 0.0
+  delay_ms: 0
+  blackout_ms: 0

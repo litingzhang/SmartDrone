@@ -6,6 +6,7 @@
 #include <string>
 
 #include "core/application/session/epg/slam_session_task_results.h"
+#include "core/ports/camera_provider.h"
 
 namespace SmartDrone::Core::Ports {
 class IPosePublisher;
@@ -37,6 +38,8 @@ class SlamSessionRuntimeService final {
     ~SlamSessionRuntimeService();
 
     bool EnsureStarted();
+    bool SetCameraFrameReadyCallback(
+        SmartDrone::Core::Ports::CameraFrameReadyCallback callback);
     bool StartFailed() const;
     bool Stopped() const;
     std::uint64_t SessionId() const;

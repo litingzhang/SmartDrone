@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -9,6 +10,7 @@
 
 #include "common/environment.h"
 #include "common/time_utils.h"
+#include "core/ports/slam_tracking_state.h"
 #include "core/ports/vehicle_control_port.h"
 
 namespace {
@@ -20,8 +22,10 @@ using SmartDrone::Core::Application::AvoidanceTelemetry;
 using SmartDrone::Core::Application::HoverAlgorithmContext;
 using SmartDrone::Core::Application::IAvoidanceAlgorithmPlugin;
 using SmartDrone::Core::Application::IHoverAlgorithmPlugin;
+using SmartDrone::Core::Application::LivePoseQuality;
 using SmartDrone::Core::Application::Px4UdpHooks;
 using SmartDrone::Core::Application::Px4UdpHooksConfig;
+using SmartDrone::Core::Application::RuntimeGateSnapshot;
 using SmartDrone::Core::Ports::IVehicleControlPort;
 using SmartDrone::Core::Ports::VehicleCommandAckKind;
 using SmartDrone::Core::Ports::VehicleDownwardRange;
@@ -44,6 +48,7 @@ class FakeVehicleControlPort final : public IVehicleControlPort {
 
     bool BeginLand() override
     {
+        ++m_landCount;
         return true;
     }
 
@@ -54,6 +59,7 @@ class FakeVehicleControlPort final : public IVehicleControlPort {
 
     bool BeginSetModeOffboard() override
     {
+        ++m_offboardModeCount;
         return true;
     }
 
@@ -86,14 +92,25 @@ class FakeVehicleControlPort final : public IVehicleControlPort {
 
     bool GetLocalPositionNed(VehicleLocalPosition &out, uint64_t) const override
     {
+        if (!m_haveLocalPosition) {
+            return false;
+        }
         out = m_localPosition;
         return true;
     }
 
     bool GetFlightModeInfo(VehicleFlightMode &out) const override
     {
+        if (!m_haveFlightMode) {
+            return false;
+        }
         out = m_flightMode;
         return true;
+    }
+
+    bool IsLandingMode(const VehicleFlightMode &) const override
+    {
+        return m_landingModeConfirmed;
     }
 
     bool GetDownwardRange(VehicleDownwardRange &, uint64_t) const override
@@ -126,12 +143,48 @@ class FakeVehicleControlPort final : public IVehicleControlPort {
         return m_lastManual;
     }
 
+    void SetLocalPositionAvailable(bool available)
+    {
+        m_haveLocalPosition = available;
+    }
+
+    void SetFlightMode(const VehicleFlightMode &flightMode)
+    {
+        m_flightMode = flightMode;
+        m_haveFlightMode = true;
+    }
+
+    void SetFlightModeAvailable(bool available)
+    {
+        m_haveFlightMode = available;
+    }
+
+    void SetLandingModeConfirmed(bool confirmed)
+    {
+        m_landingModeConfirmed = confirmed;
+    }
+
+    int LandCount() const
+    {
+        return m_landCount;
+    }
+
+    int OffboardModeCount() const
+    {
+        return m_offboardModeCount;
+    }
+
   private:
     VehicleManualControl m_lastManual{};
     VehicleSetpointLocalNed m_lastSetpoint{};
     VehicleLocalPosition m_localPosition{};
     VehicleFlightMode m_flightMode{};
+    bool m_haveLocalPosition{true};
+    bool m_haveFlightMode{true};
+    bool m_landingModeConfirmed{false};
     int m_manualCount{0};
+    int m_landCount{0};
+    int m_offboardModeCount{0};
 };
 
 class HoldAvoidancePlugin final : public IAvoidanceAlgorithmPlugin {
@@ -353,6 +406,290 @@ TEST_F(Px4UdpHooksTest, UsesInjectedHoverPluginForOffboardHold)
     EXPECT_EQ(hoverPlugin.LastHoldReason(),
               AvoidanceHoldReason::ObstacleNear);
     EXPECT_EQ(err, "custom avoidance hold");
+}
+
+TEST_F(Px4UdpHooksTest, ControlProfileUsesFreshPx4LocalPosition)
+{
+    FakeVehicleControlPort vehicle;
+    Px4UdpHooksConfig config{vehicle};
+    config.requireVisualLocalization = false;
+    Px4UdpHooks hooks(std::move(config));
+
+    RuntimeCommandGate gate = hooks.ReadCommandGate();
+    EXPECT_TRUE(gate.localizationReady);
+    EXPECT_TRUE(gate.guidedControlReady);
+
+    vehicle.SetLocalPositionAvailable(false);
+    gate = hooks.ReadCommandGate();
+    EXPECT_FALSE(gate.localizationReady);
+    EXPECT_FALSE(gate.guidedControlReady);
+}
+
+TEST_F(Px4UdpHooksTest, WarmsSetpointsBeforeRequestingOffboard)
+{
+    FakeVehicleControlPort vehicle;
+    Px4UdpHooksConfig config{vehicle};
+    config.offboardWarmupMs = 20;
+    Px4UdpHooks hooks(std::move(config));
+
+    ASSERT_TRUE(hooks.EnterGuidedControl(nullptr));
+    hooks.StepManualControl();
+    EXPECT_EQ(vehicle.OffboardModeCount(), 0);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    hooks.StepManualControl();
+    EXPECT_EQ(vehicle.OffboardModeCount(), 1);
+}
+
+TEST_F(Px4UdpHooksTest, VisualLossTriggersControlledLand)
+{
+    FakeVehicleControlPort vehicle;
+    bool visualReady = true;
+    int invalidPublishCount = 0;
+    Px4UdpHooksConfig config{vehicle};
+    config.readRuntimeGate = [&visualReady](RuntimeGateSnapshot &snapshot) {
+        snapshot.runtimeMode = RUNTIME_MODE_SLAM;
+        snapshot.poseValid = visualReady;
+        snapshot.trackingState = visualReady
+                                     ? SmartDrone::Core::Ports::SLAM_TRACKING_OK
+                                     : SmartDrone::Core::Ports::SLAM_TRACKING_LOST;
+        snapshot.poseQuality = visualReady ? LivePoseQuality::Good
+                                           : LivePoseQuality::Lost;
+        snapshot.poseUpdateUs = MonoTimeUs();
+        return true;
+    };
+    config.publishVisualLoss = [&invalidPublishCount]() {
+        ++invalidPublishCount;
+    };
+    config.requireVisualLocalization = true;
+    config.visualLossLandTimeoutMs = 100;
+    Px4UdpHooks hooks(std::move(config));
+    ASSERT_TRUE(hooks.EnterGuidedControl(nullptr));
+    vehicle.SetFlightMode({6, 0, true});
+
+    visualReady = false;
+    hooks.StepManualControl();
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    hooks.StepManualControl();
+    hooks.StepManualControl();
+
+    EXPECT_EQ(vehicle.LandCount(), 1);
+    EXPECT_GT(invalidPublishCount, 0);
+}
+
+TEST_F(Px4UdpHooksTest, VisualFailsafeStopsRetryAfterLandingConfirmation)
+{
+    FakeVehicleControlPort vehicle;
+    Px4UdpHooksConfig config{vehicle};
+    config.readRuntimeGate = [](RuntimeGateSnapshot &snapshot) {
+        snapshot.runtimeMode = RUNTIME_MODE_SLAM;
+        snapshot.poseValid = false;
+        snapshot.trackingState = SmartDrone::Core::Ports::SLAM_TRACKING_LOST;
+        snapshot.poseQuality = LivePoseQuality::Lost;
+        snapshot.poseUpdateUs = MonoTimeUs();
+        return true;
+    };
+    config.visualLossLandTimeoutMs = 100;
+    Px4UdpHooks hooks(std::move(config));
+    ASSERT_TRUE(hooks.EnterGuidedControl(nullptr));
+    vehicle.SetFlightMode({6, 0, true});
+
+    hooks.StepManualControl();
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    hooks.StepManualControl();
+    ASSERT_EQ(vehicle.LandCount(), 1);
+
+    vehicle.SetLandingModeConfirmed(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1050));
+    hooks.StepManualControl();
+    EXPECT_EQ(vehicle.LandCount(), 1);
+
+    vehicle.SetLandingModeConfirmed(false);
+    hooks.StepManualControl();
+    EXPECT_EQ(vehicle.LandCount(), 2);
+}
+
+TEST_F(Px4UdpHooksTest, StaleVisualPoseTriggersControlledLand)
+{
+    FakeVehicleControlPort vehicle;
+    const uint64_t poseUpdateUs = MonoTimeUs();
+    Px4UdpHooksConfig config{vehicle};
+    config.readRuntimeGate = [poseUpdateUs](RuntimeGateSnapshot &snapshot) {
+        snapshot.runtimeMode = RUNTIME_MODE_SLAM;
+        snapshot.poseValid = true;
+        snapshot.trackingState = SmartDrone::Core::Ports::SLAM_TRACKING_OK;
+        snapshot.poseQuality = LivePoseQuality::Good;
+        snapshot.poseUpdateUs = poseUpdateUs;
+        return true;
+    };
+    config.visualLossLandTimeoutMs = 100;
+    Px4UdpHooks hooks(std::move(config));
+    ASSERT_TRUE(hooks.EnterGuidedControl(nullptr));
+    vehicle.SetFlightMode({6, 0, true});
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    hooks.StepManualControl();
+
+    EXPECT_EQ(vehicle.LandCount(), 1);
+}
+
+TEST_F(Px4UdpHooksTest, VisualFreshnessWindowCanScaleForSlowSimulation)
+{
+    FakeVehicleControlPort vehicle;
+    Px4UdpHooksConfig config{vehicle};
+    config.readRuntimeGate = [](RuntimeGateSnapshot &snapshot) {
+        snapshot.runtimeMode = RUNTIME_MODE_SLAM;
+        snapshot.poseValid = true;
+        snapshot.trackingState =
+            SmartDrone::Core::Ports::SLAM_TRACKING_OK;
+        snapshot.poseQuality = LivePoseQuality::Good;
+        snapshot.poseUpdateUs = MonoTimeUs() - 150000ULL;
+        return true;
+    };
+    config.visualPoseMaxAgeMs = 200;
+    Px4UdpHooks hooks(std::move(config));
+
+    const RuntimeCommandGate gate = hooks.ReadCommandGate();
+
+    EXPECT_TRUE(gate.localizationReady);
+    EXPECT_TRUE(gate.guidedControlReady);
+}
+
+TEST_F(Px4UdpHooksTest, UpdatedUsablePosePreventsContinuousLossFailsafe)
+{
+    FakeVehicleControlPort vehicle;
+    Px4UdpHooksConfig config{vehicle};
+    config.readRuntimeGate = [](RuntimeGateSnapshot &snapshot) {
+        snapshot.runtimeMode = RUNTIME_MODE_SLAM;
+        snapshot.poseValid = true;
+        snapshot.trackingState = SmartDrone::Core::Ports::SLAM_TRACKING_OK;
+        snapshot.poseQuality = LivePoseQuality::Good;
+        snapshot.poseUpdateUs = MonoTimeUs() - 120000ULL;
+        return true;
+    };
+    config.visualLossLandTimeoutMs = 300;
+    Px4UdpHooks hooks(std::move(config));
+    ASSERT_TRUE(hooks.EnterGuidedControl(nullptr));
+    vehicle.SetFlightMode({6, 0, true});
+
+    hooks.StepManualControl();
+    std::this_thread::sleep_for(std::chrono::milliseconds(160));
+    hooks.StepManualControl();
+    std::this_thread::sleep_for(std::chrono::milliseconds(160));
+    hooks.StepManualControl();
+
+    EXPECT_EQ(vehicle.LandCount(), 0);
+}
+
+TEST_F(Px4UdpHooksTest, CachedArmedOffboardModeProtectsDuringTelemetryGap)
+{
+    FakeVehicleControlPort vehicle;
+    bool visualReady = true;
+    Px4UdpHooksConfig config{vehicle};
+    config.readRuntimeGate = [&visualReady](RuntimeGateSnapshot &snapshot) {
+        snapshot.runtimeMode = RUNTIME_MODE_SLAM;
+        snapshot.poseValid = visualReady;
+        snapshot.trackingState = visualReady
+                                     ? SmartDrone::Core::Ports::SLAM_TRACKING_OK
+                                     : SmartDrone::Core::Ports::SLAM_TRACKING_LOST;
+        snapshot.poseQuality = visualReady ? LivePoseQuality::Good
+                                           : LivePoseQuality::Lost;
+        snapshot.poseUpdateUs = MonoTimeUs();
+        return true;
+    };
+    config.visualLossLandTimeoutMs = 100;
+    Px4UdpHooks hooks(std::move(config));
+    ASSERT_TRUE(hooks.EnterGuidedControl(nullptr));
+    vehicle.SetFlightMode({6, 0, true});
+    hooks.StepManualControl();
+
+    vehicle.SetFlightModeAvailable(false);
+    visualReady = false;
+    hooks.StepManualControl();
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    hooks.StepManualControl();
+
+    EXPECT_EQ(vehicle.LandCount(), 1);
+}
+
+TEST_F(Px4UdpHooksTest, ActualArmedOffboardModeProtectsAfterRuntimeRestart)
+{
+    FakeVehicleControlPort vehicle;
+    Px4UdpHooksConfig config{vehicle};
+    config.readRuntimeGate = [](RuntimeGateSnapshot &snapshot) {
+        snapshot.runtimeMode = RUNTIME_MODE_SLAM;
+        snapshot.poseValid = false;
+        snapshot.trackingState = SmartDrone::Core::Ports::SLAM_TRACKING_LOST;
+        snapshot.poseQuality = LivePoseQuality::Lost;
+        return true;
+    };
+    config.visualLossLandTimeoutMs = 100;
+    Px4UdpHooks hooks(std::move(config));
+    vehicle.SetFlightMode({6, 0, true});
+
+    hooks.StepManualControl();
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    hooks.StepManualControl();
+
+    EXPECT_EQ(vehicle.LandCount(), 1);
+}
+
+TEST_F(Px4UdpHooksTest, CachedInactiveModeDoesNotLandDuringTelemetryGap)
+{
+    FakeVehicleControlPort vehicle;
+    Px4UdpHooksConfig config{vehicle};
+    config.readRuntimeGate = [](RuntimeGateSnapshot &snapshot) {
+        snapshot.runtimeMode = RUNTIME_MODE_SLAM;
+        snapshot.poseValid = false;
+        snapshot.trackingState = SmartDrone::Core::Ports::SLAM_TRACKING_LOST;
+        snapshot.poseQuality = LivePoseQuality::Lost;
+        snapshot.poseUpdateUs = MonoTimeUs();
+        return true;
+    };
+    config.visualLossLandTimeoutMs = 100;
+    Px4UdpHooks hooks(std::move(config));
+    ASSERT_TRUE(hooks.EnterGuidedControl(nullptr));
+
+    vehicle.SetFlightMode({6, 0, false});
+    hooks.StepManualControl();
+    vehicle.SetFlightModeAvailable(false);
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    hooks.StepManualControl();
+    EXPECT_EQ(vehicle.LandCount(), 0);
+
+    vehicle.SetFlightMode({3, 0, true});
+    hooks.StepManualControl();
+    vehicle.SetFlightModeAvailable(false);
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    hooks.StepManualControl();
+    EXPECT_EQ(vehicle.LandCount(), 0);
+}
+
+TEST_F(Px4UdpHooksTest, PublishesFlightStateValidityForEveryStep)
+{
+    FakeVehicleControlPort vehicle;
+    vehicle.SetFlightMode({6, 4, true});
+    std::vector<bool> validSamples;
+    std::vector<VehicleFlightMode> samples;
+    Px4UdpHooksConfig config{vehicle};
+    config.publishVehicleFlightState =
+        [&validSamples, &samples](bool valid, bool armed, uint8_t mainMode,
+                                  uint8_t subMode) {
+            validSamples.push_back(valid);
+            samples.push_back({mainMode, subMode, armed});
+        };
+    Px4UdpHooks hooks(std::move(config));
+
+    hooks.StepManualControl();
+    vehicle.SetFlightModeAvailable(false);
+    hooks.StepManualControl();
+
+    ASSERT_EQ(validSamples.size(), 2U);
+    EXPECT_TRUE(validSamples[0]);
+    EXPECT_TRUE(samples[0].armed);
+    EXPECT_EQ(samples[0].mainMode, 6);
+    EXPECT_EQ(samples[0].subMode, 4);
+    EXPECT_FALSE(validSamples[1]);
 }
 
 } // namespace

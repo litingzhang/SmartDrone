@@ -1,5 +1,6 @@
 #include "core/application/state/frame_timing_tracker.h"
 
+#include <algorithm>
 #include <atomic>
 #include <vector>
 
@@ -18,6 +19,10 @@ struct FrameTimingSlot {
     std::atomic<std::uint64_t> sequence{0};
     std::atomic<std::uint64_t> frameId{0};
     std::atomic<std::uint64_t> tCamNs{0};
+    std::atomic<std::uint64_t> tCaptureMonotonicNs{0};
+    std::atomic<std::uint64_t> tLeftArrivalNs{0};
+    std::atomic<std::uint64_t> tRightArrivalNs{0};
+    std::atomic<std::uint64_t> tPairReadyNs{0};
     std::atomic<std::uint64_t> tCbNs{0};
     std::atomic<std::uint64_t> tSlamInFrameId{0};
     std::atomic<std::uint64_t> tSlamInNs{0};
@@ -94,15 +99,23 @@ FrameTimingTracker::FrameTimingTracker(size_t maxRecords)
 
 FrameTimingTracker::~FrameTimingTracker() = default;
 
-void FrameTimingTracker::UpsertCapture(uint64_t frameId,
-                                       uint64_t tCamNs,
-                                       uint64_t tCbNs)
+void FrameTimingTracker::UpsertCapture(
+    uint64_t frameId, const FrameCaptureTiming &timing)
 {
     FrameTimingSlot &slot = m_impl->SlotFor(frameId);
     const std::uint64_t writeSequence = NextWriteSequence(slot);
+    const std::uint64_t pairReadyNs =
+        std::max(timing.tLeftArrivalNs, timing.tRightArrivalNs);
     slot.sequence.store(writeSequence, FRAME_TIMING_WRITE_ORDER);
-    slot.tCamNs.store(tCamNs, FRAME_TIMING_RELAXED_ORDER);
-    slot.tCbNs.store(tCbNs, FRAME_TIMING_RELAXED_ORDER);
+    slot.tCamNs.store(timing.tCamNs, FRAME_TIMING_RELAXED_ORDER);
+    slot.tCaptureMonotonicNs.store(timing.tCaptureMonotonicNs,
+                                   FRAME_TIMING_RELAXED_ORDER);
+    slot.tLeftArrivalNs.store(timing.tLeftArrivalNs,
+                              FRAME_TIMING_RELAXED_ORDER);
+    slot.tRightArrivalNs.store(timing.tRightArrivalNs,
+                               FRAME_TIMING_RELAXED_ORDER);
+    slot.tPairReadyNs.store(pairReadyNs, FRAME_TIMING_RELAXED_ORDER);
+    slot.tCbNs.store(pairReadyNs, FRAME_TIMING_RELAXED_ORDER);
     slot.tSlamInFrameId.store(frameId, FRAME_TIMING_RELAXED_ORDER);
     slot.tSlamInNs.store(0, FRAME_TIMING_RELAXED_ORDER);
     slot.tSlamOutFrameId.store(frameId, FRAME_TIMING_RELAXED_ORDER);
@@ -111,6 +124,15 @@ void FrameTimingTracker::UpsertCapture(uint64_t frameId,
     slot.tMavTxNs.store(0, FRAME_TIMING_RELAXED_ORDER);
     slot.frameId.store(frameId, FRAME_TIMING_RELAXED_ORDER);
     slot.sequence.store(writeSequence + 1U, FRAME_TIMING_WRITE_ORDER);
+}
+
+void FrameTimingTracker::UpsertCapture(uint64_t frameId,
+                                       uint64_t tCamNs,
+                                       uint64_t tCaptureMonotonicNs,
+                                       uint64_t tCbNs)
+{
+    UpsertCapture(frameId, FrameCaptureTiming{
+                               tCamNs, tCaptureMonotonicNs, tCbNs, tCbNs});
 }
 
 void FrameTimingTracker::MarkSlamIn(uint64_t frameId,
@@ -150,6 +172,14 @@ bool FrameTimingTracker::Lookup(uint64_t frameId,
 
     out.frameId = frameId;
     out.tCamNs = slot.tCamNs.load(FRAME_TIMING_RELAXED_ORDER);
+    out.tCaptureMonotonicNs =
+        slot.tCaptureMonotonicNs.load(FRAME_TIMING_RELAXED_ORDER);
+    out.tLeftArrivalNs =
+        slot.tLeftArrivalNs.load(FRAME_TIMING_RELAXED_ORDER);
+    out.tRightArrivalNs =
+        slot.tRightArrivalNs.load(FRAME_TIMING_RELAXED_ORDER);
+    out.tPairReadyNs =
+        slot.tPairReadyNs.load(FRAME_TIMING_RELAXED_ORDER);
     out.tCbNs = slot.tCbNs.load(FRAME_TIMING_RELAXED_ORDER);
     out.tSlamInNs = StageTimestamp(
         slot, frameId, &FrameTimingSlot::tSlamInNs,

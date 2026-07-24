@@ -21,5 +21,6 @@ class RuntimeCommandHook {
     virtual bool HoldVehicle(std::string *errorMessage) = 0;
     virtual bool EnterPositionControl(std::string *errorMessage) = 0;
     virtual bool LandVehicle(std::string *errorMessage) = 0;
+    virtual bool IsLandingConfirmed() const = 0;
     virtual bool ApplyMoveGoal(const MoveGoal &goal, std::string *errorMessage) = 0;
 };

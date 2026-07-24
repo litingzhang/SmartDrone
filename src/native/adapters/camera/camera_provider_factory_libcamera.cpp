@@ -3,9 +3,30 @@
 
 namespace SmartDrone::Adapters::Camera {
 
-std::unique_ptr<SmartDrone::Core::Ports::ICameraProvider> CreateCameraProvider()
+std::unique_ptr<SmartDrone::Core::Ports::ICameraProvider>
+CreateCameraProvider(
+    const std::shared_ptr<SmartDrone::Core::Ports::IMeasurementClock> &)
 {
     return std::make_unique<LibcameraStereoCamera>();
+}
+
+std::shared_ptr<SmartDrone::Core::Ports::IMeasurementClock>
+CreateMeasurementClock()
+{
+    return {};
+}
+
+std::shared_ptr<SmartDrone::Core::Ports::IExternalPoseSource>
+CreateExternalPoseSource(
+    const std::shared_ptr<SmartDrone::Core::Ports::IMeasurementClock> &)
+{
+    return {};
+}
+
+SmartDrone::Core::Ports::CameraRuntimeOverrides
+LoadCameraProviderRuntimeOverrides()
+{
+    return {};
 }
 
 std::string_view CompiledCameraProviderName()

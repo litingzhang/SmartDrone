@@ -102,6 +102,9 @@ TriggerMode ParseDotTriggerMode(const std::string &value)
     if (value == "periodic_or_any_queue_ready") {
         return TriggerMode::PeriodicOrAnyQueueReady;
     }
+    if (value == "periodic_or_external") {
+        return TriggerMode::PeriodicOrExternal;
+    }
     throw std::runtime_error("unsupported DOT task trigger mode: " + value);
 }
 

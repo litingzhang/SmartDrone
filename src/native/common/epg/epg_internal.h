@@ -24,6 +24,22 @@ struct TaskRunnerSpec {
     std::shared_ptr<TaskResourceGate> resourceGate;
 };
 
+class TaskWakeSignal final {
+  public:
+    TaskWakeSignal();
+    ~TaskWakeSignal();
+
+    int Notify() const;
+    void TriggerExternal();
+    bool ConsumeExternalTrigger();
+    bool ExternalTriggerPending() const;
+    int EventFd() const;
+
+  private:
+    std::atomic<bool> m_externalTriggerPending{false};
+    int m_eventFd{-1};
+};
+
 class EventPipelineGraph::TaskRunner {
   public:
     explicit TaskRunner(TaskRunnerSpec spec);
@@ -35,6 +51,7 @@ class EventPipelineGraph::TaskRunner {
     bool JoinStopped();
     void Stop();
     void Notify();
+    std::weak_ptr<TaskWakeSignal> ExternalTriggerSignal() const;
     TaskDiagnosticsSnapshot Diagnostics() const;
 
   private:
@@ -47,6 +64,7 @@ class EventPipelineGraph::TaskRunner {
     bool WaitForDuration(std::chrono::milliseconds duration);
     bool WaitForQueueTrigger();
     bool WaitForPeriodicOrQueueTrigger();
+    bool WaitForPeriodicOrExternalTrigger();
     void PollWakeEvent(int timeoutMs);
     void DrainWakeEvents();
     bool QueuesReady() const;
@@ -65,7 +83,7 @@ class EventPipelineGraph::TaskRunner {
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_exited{true};
     std::thread m_thread;
-    int m_wakeEventFd{-1};
+    std::shared_ptr<TaskWakeSignal> m_wakeSignal;
     std::array<std::atomic<std::uint64_t>, LOOP_SAMPLE_CAPACITY> m_loopSamples{};
     std::size_t m_loopSampleCursor{};
     std::atomic<std::size_t> m_loopSampleCount{0};

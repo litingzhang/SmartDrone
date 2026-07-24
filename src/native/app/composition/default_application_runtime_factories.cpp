@@ -301,8 +301,17 @@ SlamVisualFeatureFrontendStartResult StartVisualFeatureFrontendSession(
 ApplicationRuntimeFactories CreateDefaultApplicationRuntimeFactories()
 {
     ApplicationRuntimeFactories factories{};
+    factories.measurementClock =
+        SmartDrone::Adapters::Camera::CreateMeasurementClock();
+    const auto measurementClock = factories.measurementClock;
+    factories.externalPoseSource =
+        SmartDrone::Adapters::Camera::CreateExternalPoseSource(
+            measurementClock);
     factories.createCameraProvider =
-        []() { return SmartDrone::Adapters::Camera::CreateCameraProvider(); };
+        [measurementClock]() {
+            return SmartDrone::Adapters::Camera::CreateCameraProvider(
+                measurementClock);
+        };
     factories.makeCameraOpenConfig =
         [](const MainRuntimeAliases &aliases) {
             return BuildCameraOpenConfig(aliases);
@@ -328,6 +337,8 @@ ApplicationRuntimeFactories CreateDefaultApplicationRuntimeFactories()
         std::string(SmartDrone::Adapters::Camera::CompiledCameraProviderName()),
         SmartDrone::Adapters::Camera::CompiledCameraProviderUsesPackedStereo(),
     };
+    factories.cameraOverrides =
+        SmartDrone::Adapters::Camera::LoadCameraProviderRuntimeOverrides();
     return factories;
 }
 

@@ -1,5 +1,7 @@
 #include "adapters/telemetry/px4_vehicle_control_port.h"
 
+#include <algorithm>
+
 namespace SmartDrone::Adapters::Telemetry {
 
 using SmartDrone::Core::Ports::SlamRangeSensor;
@@ -11,6 +13,9 @@ using SmartDrone::Core::Ports::VehicleManualControl;
 using SmartDrone::Core::Ports::VehicleSetpointLocalNed;
 
 namespace {
+
+constexpr uint8_t PX4_MAIN_MODE_AUTO = 4;
+constexpr uint8_t PX4_SUB_MODE_AUTO_LAND = 6;
 
 Px4MavlinkGateway::SetpointLocalNED ToPx4Setpoint(const VehicleSetpointLocalNed &input)
 {
@@ -51,8 +56,10 @@ uint16_t ToPx4CommandId(VehicleCommandAckKind command)
 
 } // namespace
 
-Px4VehicleControlPort::Px4VehicleControlPort(Px4MavlinkGateway &mavlink)
-    : m_mavlink(mavlink)
+Px4VehicleControlPort::Px4VehicleControlPort(
+    Px4MavlinkGateway &mavlink, Px4VehicleControlPortConfig config)
+    : m_mavlink(mavlink),
+      m_flightModeMaxAgeUs(std::max<uint64_t>(1, config.flightModeMaxAgeUs))
 {
 }
 
@@ -126,13 +133,19 @@ bool Px4VehicleControlPort::GetLocalPositionNed(VehicleLocalPosition &out, uint6
 bool Px4VehicleControlPort::GetFlightModeInfo(VehicleFlightMode &out) const
 {
     Px4MavlinkGateway::FlightModeInfo info{};
-    if (!m_mavlink.GetFlightModeInfo(info)) {
+    if (!m_mavlink.GetFlightModeInfo(info, m_flightModeMaxAgeUs)) {
         return false;
     }
     out.mainMode = info.mainMode;
     out.subMode = info.subMode;
     out.armed = info.armed;
     return true;
+}
+
+bool Px4VehicleControlPort::IsLandingMode(const VehicleFlightMode &flightMode) const
+{
+    return flightMode.mainMode == PX4_MAIN_MODE_AUTO &&
+           flightMode.subMode == PX4_SUB_MODE_AUTO_LAND;
 }
 
 bool Px4VehicleControlPort::GetDownwardRange(VehicleDownwardRange &out, uint64_t maxAgeUs) const

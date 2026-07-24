@@ -3,6 +3,7 @@
 #include "common/epg/epg_registry_types.h"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
@@ -17,6 +18,41 @@ namespace Epg {
 
 class EventPipelineGraph {
   public:
+    class ExternalTrigger {
+      public:
+        ExternalTrigger() = default;
+
+        bool Valid() const
+        {
+            return m_valid && m_valid();
+        }
+        const std::string &TaskName() const
+        {
+            return m_taskName;
+        }
+        void Notify() const
+        {
+            if (!m_notify) {
+                throw std::runtime_error(
+                    "EventPipelineGraph external trigger is not bound");
+            }
+            m_notify();
+        }
+
+      private:
+        friend class EventPipelineGraph;
+        ExternalTrigger(std::string taskName, std::function<bool()> valid,
+                        std::function<void()> notify)
+            : m_taskName(std::move(taskName)), m_valid(std::move(valid)),
+              m_notify(std::move(notify))
+        {
+        }
+
+        std::string m_taskName;
+        std::function<bool()> m_valid;
+        std::function<void()> m_notify;
+    };
+
     template <class T>
     class ExternalIngress {
       public:
@@ -79,6 +115,7 @@ class EventPipelineGraph {
         MarkExternalIngressQueue(queueName);
         return ExternalIngress<T>(queue);
     }
+    ExternalTrigger CreateExternalTrigger(const std::string &taskName);
 
     IQueue *Queue(const std::string &name);
     const IQueue *Queue(const std::string &name) const;
@@ -151,6 +188,7 @@ class EventPipelineGraph {
     std::unordered_map<std::string, std::unique_ptr<IQueue>> m_queues;
     std::set<std::string> m_taskProducedQueues;
     std::set<std::string> m_externalIngressQueues;
+    std::set<std::string> m_externalTriggerTasks;
     std::vector<std::unique_ptr<TaskRunner>> m_runners;
 };
 

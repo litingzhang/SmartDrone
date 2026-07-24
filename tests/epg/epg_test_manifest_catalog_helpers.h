@@ -10,7 +10,7 @@ void ExpectSystemRuntimeManifestArtifacts(
     EXPECT_EQ(system.topologyPath, "config/epg/epg_topology.dot");
     EXPECT_EQ(
         system.topologyVersion,
-        BuildEpgTaskTopologyVersion({system.topologyPath, "v9"}));
+        BuildEpgTaskTopologyVersion({system.topologyPath, "v10"}));
     EXPECT_EQ(system.artifactPaths.dfxSnapshotPath,
               "/tmp/smartdrone_epg_system.json");
     EXPECT_EQ(system.artifactPaths.profilePath,

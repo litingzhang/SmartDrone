@@ -1,6 +1,45 @@
 #include "core/application/runtime/live_pose_runtime_snapshots.h"
 
 namespace SmartDrone::Core::Application {
+namespace {
+
+LivePoseQuality ToLivePoseQuality(
+    SmartDrone::Core::Ports::PoseQuality quality)
+{
+    if (quality == SmartDrone::Core::Ports::PoseQuality::Good) {
+        return LivePoseQuality::Good;
+    }
+    if (quality == SmartDrone::Core::Ports::PoseQuality::Weak) {
+        return LivePoseQuality::Weak;
+    }
+    return LivePoseQuality::Lost;
+}
+
+SmartDrone::Core::Ports::PosePublishRequest MakeLostPoseRequest(
+    const LivePoseState::Snapshot &snapshot)
+{
+    SmartDrone::Core::Ports::PosePublishRequest request{};
+    request.pose = {true, snapshot.x, snapshot.y, snapshot.z, snapshot.qw,
+                    snapshot.qx, snapshot.qy, snapshot.qz};
+    request.referenceFrame = snapshot.referenceFrame;
+    request.resetCounter = static_cast<uint8_t>(snapshot.resetCounter);
+    request.trackingState = snapshot.trackingState;
+    request.quality = SmartDrone::Core::Ports::PoseQuality::Lost;
+    return request;
+}
+
+void PublishLastPoseAsLost(
+    LivePoseState &livePose,
+    SmartDrone::Core::Ports::IPosePublisher &publisher)
+{
+    LivePoseState::Snapshot snapshot{};
+    if (!livePose.ReadSnapshot(snapshot) || snapshot.poseUpdateUs == 0) {
+        return;
+    }
+    publisher.PublishPose(MakeLostPoseRequest(snapshot));
+}
+
+} // namespace
 
 RuntimeGateSnapshot BuildRuntimeGateSnapshot(
     const LivePoseState::Snapshot &input)
@@ -10,6 +49,7 @@ RuntimeGateSnapshot BuildRuntimeGateSnapshot(
     output.poseValid = input.poseValid;
     output.trackingState = input.trackingState;
     output.poseQuality = input.poseQuality;
+    output.poseUpdateUs = input.poseUpdateUs;
     return output;
 }
 
@@ -22,6 +62,7 @@ UdpRuntimeStateSnapshot BuildUdpRuntimeStateSnapshot(
     output.runtimeMode = input.runtimeMode;
     output.slamMode = input.slamMode;
     output.trackingState = input.trackingState;
+    output.px4FlightStateValid = input.px4FlightStateValid;
     output.armed = input.armed;
     output.px4MainMode = input.px4MainMode;
     output.px4SubMode = input.px4SubMode;
@@ -124,8 +165,9 @@ PublishRuntimeModeFn MakeRuntimeModePublisher(LivePoseState &livePose)
 PublishVehicleFlightStateFn MakeVehicleFlightStatePublisher(
     LivePoseState &livePose)
 {
-    return [&livePose](bool armed, uint8_t mainMode, uint8_t subMode) {
-        livePose.SetVehicleFlightState(armed, mainMode, subMode);
+    return [&livePose](bool valid, bool armed, uint8_t mainMode,
+                       uint8_t subMode) {
+        livePose.SetVehicleFlightState(valid, armed, mainMode, subMode);
     };
 }
 
@@ -135,6 +177,35 @@ PublishAvoidanceTelemetryFn MakeAvoidanceTelemetryPublisher(
     return [&livePose](const AvoidanceTelemetry &telemetry) {
         livePose.SetAvoidanceTelemetry(telemetry);
     };
+}
+
+PublishVisualLossFn MakeVisualLossPublisher(
+    LivePoseState &livePose, SmartDrone::Core::Ports::IPosePublisher &publisher)
+{
+    return [&livePose, &publisher]() {
+        PublishLastPoseAsLost(livePose, publisher);
+    };
+}
+
+void PublishExternalPose(
+    const SmartDrone::Core::Ports::PosePublishRequest &request,
+    SmartDrone::Core::Ports::IPosePublisher &publisher,
+    LivePoseState &livePose)
+{
+    publisher.PublishPose(request);
+    LivePoseUpdate update{};
+    update.runtimeMode = RUNTIME_MODE_IDLE;
+    update.trackingState = static_cast<uint8_t>(request.trackingState);
+    update.resetCounter = request.resetCounter;
+    update.resetMapCount = request.resetMapCount;
+    update.pose = {request.pose.x, request.pose.y, request.pose.z,
+                   request.pose.qw, request.pose.qx, request.pose.qy,
+                   request.pose.qz};
+    update.referenceFrame = request.referenceFrame;
+    update.quality = ToLivePoseQuality(request.quality);
+    update.poseValid = request.pose.valid &&
+                       request.quality != SmartDrone::Core::Ports::PoseQuality::Lost;
+    livePose.UpdatePose(update);
 }
 
 ReadRuntimeStateFn MakeUdpRuntimeStateReader(const LivePoseState &livePose)

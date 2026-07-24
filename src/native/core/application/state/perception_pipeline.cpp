@@ -25,30 +25,105 @@ StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(
 StereoAcquireStatus PerceptionPipeline::AcquireNextStereoBatch(
     const StereoAcquireRequest &request)
 {
+    if (DetectCameraClockReset(request.camera)) {
+        return StereoAcquireStatus::CameraClockReset;
+    }
     Ports::StereoFrame stereo{};
     const int clampedSlamInputFps = ClampTargetFps(request.slamInputFps);
-    const uint64_t minTimestampNs = ComputeMinCaptureTimestampNs();
+    const uint64_t minTimestampNs =
+        ComputeMinCaptureTimestampNs(clampedSlamInputFps);
 
     if (!request.camera.GrabStereo(stereo, m_cfg.preferLatestFrame,
                                    minTimestampNs)) {
+        if (DetectCameraClockReset(request.camera)) {
+            return StereoAcquireStatus::CameraClockReset;
+        }
         return HandleGrabFailure(request.camera, request.staleFrameThresholdMs,
                                  clampedSlamInputFps, minTimestampNs);
+    }
+    if (DetectCameraClockReset(request.camera)) {
+        return StereoAcquireStatus::CameraClockReset;
     }
 
     const int64_t frameStepNs = 1000000000LL / std::max(1, m_cfg.cameraFps);
     const StereoFrameTiming timing = BuildStereoFrameTiming(stereo, frameStepNs);
 
     AcceptStereoBatch(std::move(stereo), timing, request.out);
+    AdvanceCaptureSchedule(timing.captureTimestampNs, clampedSlamInputFps);
     RecordFrameTiming(request.out, request.timingTracker);
     return StereoAcquireStatus::Ok;
 }
 
-uint64_t PerceptionPipeline::ComputeMinCaptureTimestampNs() const
+bool PerceptionPipeline::DetectCameraClockReset(
+    Ports::ICameraProvider &camera)
 {
-    if (m_lastAcceptedCaptureTimestampNs != 0) {
-        return static_cast<uint64_t>(m_lastAcceptedCaptureTimestampNs + 1);
+    const uint32_t resetCounter = camera.GetDiagnostics().clockResetCounter;
+    if (!m_cameraClockInitialized) {
+        m_cameraClockResetCounter = resetCounter;
+        m_cameraClockInitialized = true;
+        return false;
     }
-    return 0;
+    if (resetCounter == m_cameraClockResetCounter) {
+        return false;
+    }
+    m_cameraClockResetCounter = resetCounter;
+    ResetTimeline();
+    return true;
+}
+
+void PerceptionPipeline::ResetTimeline()
+{
+    m_lastDeliveredLogicalFrameNs = 0;
+    m_lastAcceptedCaptureTimestampNs = 0;
+    m_nextCaptureTimestampNs = 0;
+    m_captureScheduleFps = 0;
+}
+
+uint64_t PerceptionPipeline::ComputeMinCaptureTimestampNs(
+    int clampedSlamInputFps)
+{
+    if (m_lastAcceptedCaptureTimestampNs == 0) {
+        return 0;
+    }
+    if (m_captureScheduleFps != clampedSlamInputFps ||
+        m_nextCaptureTimestampNs == 0) {
+        const uint64_t intervalNs =
+            1000000000ULL / static_cast<uint64_t>(clampedSlamInputFps);
+        m_captureScheduleFps = clampedSlamInputFps;
+        m_nextCaptureTimestampNs =
+            static_cast<uint64_t>(m_lastAcceptedCaptureTimestampNs) + intervalNs;
+    }
+    const uint64_t toleranceNs = CaptureScheduleToleranceNs();
+    return m_nextCaptureTimestampNs > toleranceNs
+               ? m_nextCaptureTimestampNs - toleranceNs
+               : 0;
+}
+
+void PerceptionPipeline::AdvanceCaptureSchedule(
+    int64_t captureTimestampNs, int clampedSlamInputFps)
+{
+    const uint64_t captureNs = static_cast<uint64_t>(captureTimestampNs);
+    const uint64_t intervalNs =
+        1000000000ULL / static_cast<uint64_t>(clampedSlamInputFps);
+    if (m_captureScheduleFps != clampedSlamInputFps ||
+        m_nextCaptureTimestampNs == 0) {
+        m_captureScheduleFps = clampedSlamInputFps;
+        m_nextCaptureTimestampNs = captureNs + intervalNs;
+        return;
+    }
+    const uint64_t adjustedCaptureNs = captureNs + CaptureScheduleToleranceNs();
+    if (adjustedCaptureNs >= m_nextCaptureTimestampNs) {
+        const uint64_t elapsedIntervals =
+            (adjustedCaptureNs - m_nextCaptureTimestampNs) / intervalNs + 1ULL;
+        m_nextCaptureTimestampNs += elapsedIntervals * intervalNs;
+    }
+}
+
+uint64_t PerceptionPipeline::CaptureScheduleToleranceNs() const
+{
+    const uint64_t cameraIntervalNs =
+        1000000000ULL / static_cast<uint64_t>(std::max(1, m_cfg.cameraFps));
+    return std::max<uint64_t>(1, cameraIntervalNs / 8ULL);
 }
 
 StereoAcquireStatus PerceptionPipeline::HandleGrabFailure(
@@ -170,12 +245,24 @@ void PerceptionPipeline::AcceptStereoBatch(Ports::StereoFrame stereo,
 void PerceptionPipeline::RecordFrameTiming(const StereoBatch &out,
                                            FrameTimingTracker *timingTracker) const
 {
-    if (timingTracker) {
-        const uint64_t tCamNs = static_cast<uint64_t>(out.captureTimestampNs);
-        const uint64_t tCbNs =
-            static_cast<uint64_t>(std::max<int64_t>(0, (out.stereo.left.arriveNs + out.stereo.right.arriveNs) / 2LL));
-        timingTracker->UpsertCapture(out.frameId, tCamNs, tCbNs);
+    if (!timingTracker) {
+        return;
     }
+    const int64_t earlierCaptureNs = std::max<int64_t>(
+        0, std::min(out.stereo.left.captureMonotonicNs,
+                    out.stereo.right.captureMonotonicNs));
+    const int64_t laterCaptureNs = std::max<int64_t>(
+        0, std::max(out.stereo.left.captureMonotonicNs,
+                    out.stereo.right.captureMonotonicNs));
+    FrameCaptureTiming timing;
+    timing.tCamNs = static_cast<uint64_t>(out.captureTimestampNs);
+    timing.tCaptureMonotonicNs = static_cast<uint64_t>(
+        earlierCaptureNs + (laterCaptureNs - earlierCaptureNs) / 2LL);
+    timing.tLeftArrivalNs = static_cast<uint64_t>(
+        std::max<int64_t>(0, out.stereo.left.arriveNs));
+    timing.tRightArrivalNs = static_cast<uint64_t>(
+        std::max<int64_t>(0, out.stereo.right.arriveNs));
+    timingTracker->UpsertCapture(out.frameId, timing);
 }
 
 int PerceptionPipeline::ClampTargetFps(int requestedFps) const

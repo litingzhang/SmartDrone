@@ -61,6 +61,7 @@ class IVehicleControlPort {
     virtual void SendManualControl(const VehicleManualControl &input) = 0;
     virtual bool GetLocalPositionNed(VehicleLocalPosition &out, uint64_t maxAgeUs) const = 0;
     virtual bool GetFlightModeInfo(VehicleFlightMode &out) const = 0;
+    virtual bool IsLandingMode(const VehicleFlightMode &flightMode) const = 0;
     virtual bool GetDownwardRange(VehicleDownwardRange &out, uint64_t maxAgeUs) const = 0;
     virtual bool TryConsumeCommandAck(VehicleCommandAckKind command, uint8_t &outResult) = 0;
     virtual uint8_t PositionModeId() const = 0;

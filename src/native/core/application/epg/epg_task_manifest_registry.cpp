@@ -14,7 +14,7 @@ constexpr const char *VEHICLE_TELEMETRY_RX_TASK_TYPE =
     "VehicleTelemetryRxTask";
 constexpr const char *LEGACY_MAVLINK_RX_TASK_TYPE = "MavlinkRxTask";
 constexpr const char *EPG_TOPOLOGY_PATH = "config/epg/epg_topology.dot";
-constexpr const char *EPG_TOPOLOGY_REVISION = "v9";
+constexpr const char *EPG_TOPOLOGY_REVISION = "v10";
 constexpr const char *EPG_SNAPSHOT_DIR = "/tmp";
 constexpr const char *EPG_OPTIMIZED_DIR = "output/epg";
 const EpgTaskTopologySpec EPG_TOPOLOGY_SPEC{

@@ -1,15 +1,23 @@
 #pragma once
 
+#include <cstdint>
+
 #include "adapters/telemetry/px4_mavlink_gateway.h"
 #include "core/ports/slam_session_telemetry.h"
 #include "core/ports/vehicle_control_port.h"
 
 namespace SmartDrone::Adapters::Telemetry {
 
+struct Px4VehicleControlPortConfig {
+    uint64_t flightModeMaxAgeUs{1500000ULL};
+};
+
 class Px4VehicleControlPort final : public SmartDrone::Core::Ports::IVehicleControlPort,
                                     public SmartDrone::Core::Ports::ISlamSessionTelemetryPort {
   public:
-    explicit Px4VehicleControlPort(Px4MavlinkGateway &mavlink);
+    explicit Px4VehicleControlPort(
+        Px4MavlinkGateway &mavlink,
+        Px4VehicleControlPortConfig config = {});
 
     void SetFrameTimingTracker(SmartDrone::Core::Ports::IFrameTimingTracker *tracker) override;
     bool BeginArm(bool arm) override;
@@ -24,6 +32,7 @@ class Px4VehicleControlPort final : public SmartDrone::Core::Ports::IVehicleCont
     void SendManualControl(const SmartDrone::Core::Ports::VehicleManualControl &input) override;
     bool GetLocalPositionNed(SmartDrone::Core::Ports::VehicleLocalPosition &out, uint64_t maxAgeUs) const override;
     bool GetFlightModeInfo(SmartDrone::Core::Ports::VehicleFlightMode &out) const override;
+    bool IsLandingMode(const SmartDrone::Core::Ports::VehicleFlightMode &flightMode) const override;
     bool GetDownwardRange(SmartDrone::Core::Ports::VehicleDownwardRange &out, uint64_t maxAgeUs) const override;
     bool GetDownwardRange(SmartDrone::Core::Ports::SlamRangeSensor &out, uint64_t maxAgeUs) const override;
     bool TryConsumeCommandAck(SmartDrone::Core::Ports::VehicleCommandAckKind command, uint8_t &outResult) override;
@@ -32,6 +41,7 @@ class Px4VehicleControlPort final : public SmartDrone::Core::Ports::IVehicleCont
 
   private:
     Px4MavlinkGateway &m_mavlink;
+    uint64_t m_flightModeMaxAgeUs{1500000ULL};
 };
 
 } // namespace SmartDrone::Adapters::Telemetry

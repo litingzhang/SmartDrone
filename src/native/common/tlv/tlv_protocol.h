@@ -135,8 +135,10 @@ constexpr uint8_t RUNTIME_CFG_FLAG_SEND_MAP = 0x04;
 // STATE payload v4:
 // runtimeMode(u8) slamMode(u8) trackingState(u8) armed(u8) resetCounter(u16le) resetMapCount(u16le)
 // x/y/z/qw/qx/qy/qz (7 * f32le) px4MainMode(u8) px4SubMode(u8)
+// frame flags bit0: armed and PX4 mode fields came from a valid flight-state sample.
 // legacy v3 omitted px4 mode fields and was 36 bytes; legacy v2 omitted armed and was 35 bytes;
 // legacy v1 omitted slamMode and was 34 bytes.
+constexpr uint8_t STATE_FLAG_PX4_FLIGHT_STATE_VALID = 0x01;
 constexpr uint16_t STATE_POSE_PAYLOAD_LEN_LEGACY = 34;
 constexpr uint16_t STATE_POSE_PAYLOAD_LEN_V2 = 35;
 constexpr uint16_t STATE_POSE_PAYLOAD_LEN_V3 = 36;

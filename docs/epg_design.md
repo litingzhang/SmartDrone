@@ -99,6 +99,7 @@ Supported trigger modes:
 - `any_queue_ready`: run when any trigger input queue has data
 - `all_queue_ready`: run when all trigger input queues have data
 - `periodic_or_any_queue_ready`: run periodically or when a trigger queue wakes it
+- `periodic_or_external`: run periodically or when its bound external trigger wakes it
 
 Periodic tasks must set `interval_ms`.
 
@@ -120,6 +121,21 @@ ingress.Emplace();
 
 Use this for signals, command-channel events, hardware callbacks, and other events
 that originate outside the graph runner.
+
+For callbacks that only need to wake an existing task without transporting a
+message, bind `periodic_or_external` with `CreateExternalTrigger`. The interval
+remains a watchdog when external events stop:
+
+```cpp
+auto trigger = graph.CreateExternalTrigger("CameraClockTask");
+trigger.Notify();
+```
+
+The trigger uses a weak wake signal: it becomes invalid when its graph runner is
+destroyed, and a concurrent late notification is ignored without dereferencing
+graph-owned state. Camera adapters notify when an input image is accepted. The
+runner coalesces adjacent notifications, while downstream acquisition remains
+responsible for stereo pairing and measurement-time FPS filtering.
 
 ## Terminal DFX Panel
 
@@ -303,7 +319,8 @@ Required fields:
 
 Optional fields:
 
-- `interval_ms`: required for `periodic` and `periodic_or_any_queue_ready`
+- `interval_ms`: required for `periodic`, `periodic_or_any_queue_ready`, and
+  `periodic_or_external`
 - `trigger_queues`: queue type names or queue names separated by `+`
 - `resource`: scheduling resource tag, default `cpu`
 - `cpu_affinity`: Linux CPU id, or `-1` to leave affinity unchanged

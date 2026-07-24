@@ -166,7 +166,7 @@ EventPipelineGraph::TaskRunner::TaskRunner(TaskRunnerSpec spec)
       m_context(std::move(spec.inputs), std::move(spec.outputs)),
       m_triggerQueues(std::move(spec.triggerQueues)),
       m_resourceGate(std::move(spec.resourceGate)),
-      m_wakeEventFd(CreateWakeEventFd())
+      m_wakeSignal(std::make_shared<TaskWakeSignal>())
 {
     m_context.AttachDiagnostics(&m_diag);
 }
@@ -174,10 +174,50 @@ EventPipelineGraph::TaskRunner::TaskRunner(TaskRunnerSpec spec)
 EventPipelineGraph::TaskRunner::~TaskRunner()
 {
     Stop();
-    if (m_wakeEventFd >= 0) {
-        (void)::close(m_wakeEventFd);
-        m_wakeEventFd = -1;
+}
+
+TaskWakeSignal::TaskWakeSignal() : m_eventFd(CreateWakeEventFd())
+{
+}
+
+TaskWakeSignal::~TaskWakeSignal()
+{
+    if (m_eventFd >= 0) {
+        (void)::close(m_eventFd);
     }
+}
+
+int TaskWakeSignal::Notify() const
+{
+    if (m_eventFd < 0) {
+        return 0;
+    }
+    const eventfd_t value = 1;
+    if (::eventfd_write(m_eventFd, value) == 0 || errno == EAGAIN) {
+        return 0;
+    }
+    return errno;
+}
+
+void TaskWakeSignal::TriggerExternal()
+{
+    m_externalTriggerPending.store(true, std::memory_order_release);
+    (void)Notify();
+}
+
+bool TaskWakeSignal::ConsumeExternalTrigger()
+{
+    return m_externalTriggerPending.exchange(false, std::memory_order_acq_rel);
+}
+
+bool TaskWakeSignal::ExternalTriggerPending() const
+{
+    return m_externalTriggerPending.load(std::memory_order_acquire);
+}
+
+int TaskWakeSignal::EventFd() const
+{
+    return m_eventFd;
 }
 
 const std::string &EventPipelineGraph::TaskRunner::Name() const
@@ -226,15 +266,17 @@ void EventPipelineGraph::TaskRunner::Stop()
 
 void EventPipelineGraph::TaskRunner::Notify()
 {
-    if (m_wakeEventFd < 0) {
-        return;
-    }
-    const eventfd_t value = 1;
-    const int result = ::eventfd_write(m_wakeEventFd, value);
-    if (result != 0 && errno != EAGAIN) {
+    const int error = m_wakeSignal->Notify();
+    if (error != 0) {
         m_diag.schedulingErrorCount.fetch_add(1, std::memory_order_relaxed);
-        m_diag.lastSchedulingError.store(errno, std::memory_order_relaxed);
+        m_diag.lastSchedulingError.store(error, std::memory_order_relaxed);
     }
+}
+
+std::weak_ptr<TaskWakeSignal>
+EventPipelineGraph::TaskRunner::ExternalTriggerSignal() const
+{
+    return m_wakeSignal;
 }
 
 TaskDiagnosticsSnapshot EventPipelineGraph::TaskRunner::Diagnostics() const
@@ -375,6 +417,9 @@ bool EventPipelineGraph::TaskRunner::WaitForTrigger()
 
     case TriggerMode::PeriodicOrAnyQueueReady:
         return WaitForPeriodicOrQueueTrigger();
+
+    case TriggerMode::PeriodicOrExternal:
+        return WaitForPeriodicOrExternalTrigger();
     }
     return false;
 }
@@ -424,14 +469,30 @@ bool EventPipelineGraph::TaskRunner::WaitForPeriodicOrQueueTrigger()
     return m_running.load(std::memory_order_acquire);
 }
 
+bool EventPipelineGraph::TaskRunner::WaitForPeriodicOrExternalTrigger()
+{
+    if (m_wakeSignal->ConsumeExternalTrigger()) {
+        return m_running.load(std::memory_order_acquire);
+    }
+    const auto deadline =
+        std::chrono::steady_clock::now() + m_config.trigger.interval;
+    while (m_running.load(std::memory_order_acquire) &&
+           !m_wakeSignal->ExternalTriggerPending() &&
+           std::chrono::steady_clock::now() < deadline) {
+        PollWakeEvent(TimeoutUntil(deadline));
+    }
+    (void)m_wakeSignal->ConsumeExternalTrigger();
+    return m_running.load(std::memory_order_acquire);
+}
+
 void EventPipelineGraph::TaskRunner::PollWakeEvent(int timeoutMs)
 {
-    if (m_wakeEventFd < 0) {
+    if (m_wakeSignal->EventFd() < 0) {
         std::this_thread::sleep_for(WakeFallbackSleep(timeoutMs));
         return;
     }
     pollfd fd{};
-    fd.fd = m_wakeEventFd;
+    fd.fd = m_wakeSignal->EventFd();
     fd.events = POLLIN;
     while (m_running.load(std::memory_order_acquire)) {
         const int result = ::poll(&fd, 1, timeoutMs);
@@ -444,11 +505,11 @@ void EventPipelineGraph::TaskRunner::PollWakeEvent(int timeoutMs)
 
 void EventPipelineGraph::TaskRunner::DrainWakeEvents()
 {
-    if (m_wakeEventFd < 0) {
+    if (m_wakeSignal->EventFd() < 0) {
         return;
     }
     eventfd_t value = 0;
-    while (::eventfd_read(m_wakeEventFd, &value) == 0) {
+    while (::eventfd_read(m_wakeSignal->EventFd(), &value) == 0) {
     }
 }
 

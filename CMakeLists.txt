@@ -12,7 +12,8 @@ option(ENABLE_UNIT_TESTS "Build unit tests" OFF)
 option(ENABLE_OFFLINE_REPLAY "Build host-side offline replay tool" OFF)
 set(SMART_DRONE_CAMERA_PROVIDER "libcamera_stereo_ov9281" CACHE STRING
     "Camera provider implementation compiled into the native runtime")
-set(_SMART_DRONE_CAMERA_PROVIDERS "libcamera_stereo_ov9281;uvc_stereo_opencv")
+set(_SMART_DRONE_CAMERA_PROVIDERS
+    "libcamera_stereo_ov9281;uvc_stereo_opencv;gz_stereo")
 if(NOT SMART_DRONE_CAMERA_PROVIDER IN_LIST _SMART_DRONE_CAMERA_PROVIDERS)
   message(FATAL_ERROR
     "Unsupported SMART_DRONE_CAMERA_PROVIDER='${SMART_DRONE_CAMERA_PROVIDER}'. "
@@ -49,6 +50,11 @@ endif()
 if(ENABLE_UNIT_TESTS AND CROSS_AARCH64)
   message(STATUS "Unit tests are host-side only, forcing CROSS_AARCH64=OFF")
   set(CROSS_AARCH64 OFF CACHE BOOL "Enable aarch64 cross compile" FORCE)
+endif()
+
+if(BUILD_SMART_DRONE AND SMART_DRONE_CAMERA_PROVIDER STREQUAL "gz_stereo"
+   AND CROSS_AARCH64)
+  message(FATAL_ERROR "gz_stereo is a host-only simulation camera provider")
 endif()
 
 if(CROSS_AARCH64)
@@ -266,6 +272,9 @@ function(configure_common_target target_name)
     if(LIBCAMERA_CFLAGS_OTHER)
       target_compile_options(${target_name} PRIVATE ${LIBCAMERA_CFLAGS_OTHER})
     endif()
+  endif()
+  if(SMART_DRONE_CAMERA_PROVIDER STREQUAL "gz_stereo")
+    target_link_libraries(${target_name} PRIVATE gz-transport13::core)
   endif()
 
   target_compile_options(${target_name} PRIVATE -O3 -w)
@@ -526,6 +535,9 @@ endif()
 if(BUILD_SMART_DRONE)
   find_package(Threads REQUIRED)
   find_package(OpenCV REQUIRED COMPONENTS core calib3d features2d imgproc video videoio)
+  if(SMART_DRONE_CAMERA_PROVIDER STREQUAL "gz_stereo")
+    find_package(gz-transport13 REQUIRED)
+  endif()
   resolve_smart_drone_openvins()
   if(SMART_DRONE_ENABLE_OPENVINS)
     set(Boost_NO_BOOST_CMAKE ON)

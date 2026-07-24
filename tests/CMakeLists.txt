@@ -76,27 +76,35 @@ if(ENABLE_UNIT_TESTS)
   add_test(NAME EventPipelineGraphTests COMMAND epg_tests)
 
   add_executable(application_state_tests
+    application/app_args_environment_test.cpp
     application/avoidance_state_payload_test.cpp
     application/calib_save_pacing_port_test.cpp
     application/fast_planner_grid_path_planner_test.cpp
     application/frame_timing_tracker_test.cpp
+    application/gazebo_stereo_frame_assembler_test.cpp
     application/goal_cache_test.cpp
     application/imu_buffer_test.cpp
+    application/klt_pose_estimator_test.cpp
     application/local_occupancy_map_test.cpp
     application/live_pose_runtime_snapshots_test.cpp
     application/live_pose_state_test.cpp
     application/mavlink_transport_test.cpp
     application/obstacle_avoidance_policy_test.cpp
     application/payload_builders_test.cpp
+    application/perception_pipeline_timing_test.cpp
     application/px4_udp_hooks_test.cpp
     application/runtime_config_modules_test.cpp
     application/runtime_session_supervisor_test.cpp
+    application/udp_command_runtime_test.cpp
     ../src/native/common/environment.cpp
     ../src/native/common/numeric_parse.cpp
     ../src/native/common/time_utils.cpp
     ../src/native/common/tlv/crc16_ccitt_false.cpp
     ../src/native/common/tlv/goal_cache.cpp
+    ../src/native/common/tlv/tlv_cmd_router.cpp
     ../src/native/common/tlv/tlv_pack.cpp
+    ../src/native/common/tlv/tlv_parser.cpp
+    ../src/native/common/tlv/udp_server.cpp
     ../src/native/core/application/config/app_args.cpp
     ../src/native/core/application/config/capability_catalog.cpp
     ../src/native/core/application/config/config_registry.cpp
@@ -116,21 +124,39 @@ if(ENABLE_UNIT_TESTS)
     ../src/native/core/application/runtime/payload_builders.cpp
     ../src/native/core/application/runtime/px4_udp_hooks.cpp
     ../src/native/core/application/runtime/runtime_config_application.cpp
+    ../src/native/core/application/runtime/runtime_config_frame_codec.cpp
     ../src/native/core/application/runtime/runtime_config_message.cpp
     ../src/native/core/application/runtime/runtime_config_projection.cpp
     ../src/native/core/application/runtime/runtime_config_validation.cpp
     ../src/native/core/application/runtime/runtime_config_update_builder.cpp
     ../src/native/core/application/runtime/runtime_config_value_applier.cpp
     ../src/native/core/application/runtime/runtime_config_value_assignments.cpp
+    ../src/native/core/application/runtime/runtime_command_service.cpp
+    ../src/native/core/application/runtime/udp_command_runtime.cpp
     ../src/native/core/application/runtime/runtime_session_supervisor.cpp
     ../src/native/core/domain/runtime_mode.cpp
     ../src/native/core/application/state/frame_timing_tracker.cpp
+    ../src/native/core/application/state/perception_pipeline.cpp
     ../src/native/core/application/state/imu_buffer.cpp
     ../src/native/core/application/state/live_pose_state.cpp
     ../src/native/core/ports/slam_tracking_state.cpp
     ../src/native/adapters/telemetry/mavlink_pose_publisher.cpp
     ../src/native/adapters/telemetry/px4_mavlink_gateway.cpp
+    ../src/native/adapters/telemetry/px4_mavlink_gateway_rx.cpp
+    ../src/native/adapters/telemetry/px4_vehicle_control_port.cpp
     ../src/native/adapters/telemetry/mavlink_serial_transport.cpp
+    ../src/native/adapters/camera/bounded_gazebo_image_queue.cpp
+    ../src/native/adapters/camera/gazebo_image_processor.cpp
+    ../src/native/adapters/camera/gazebo_stereo_config.cpp
+    ../src/native/adapters/camera/gazebo_stereo_frame_assembler.cpp
+    ../src/native/adapters/simulation/gazebo_measurement_clock.cpp
+    ../src/native/adapters/simulation/gazebo_pose_math.cpp
+    ../src/native/adapters/slam/engine/slam_env.cpp
+    ../src/native/adapters/slam/engine/slam_image_utils.cpp
+    ../src/native/adapters/slam/klt/klt_mode_utils.cpp
+    ../src/native/adapters/slam/klt/klt_pose_estimator.cpp
+    ../src/native/adapters/slam/stereo/stereo_geometry.cpp
+    ../src/native/adapters/slam/stereo/visual_pnp_pose_backend.cpp
   )
 
   target_include_directories(application_state_tests PRIVATE
@@ -153,30 +179,39 @@ if(ENABLE_UNIT_TESTS)
 
   add_test(NAME ApplicationStateTests COMMAND application_state_tests)
 
-  find_package(Python3 COMPONENTS Interpreter QUIET)
-  if(Python3_EXECUTABLE)
-    add_test(
-      NAME EventPipelineGraphSolver
-      COMMAND "${Python3_EXECUTABLE}"
-              "${CMAKE_CURRENT_SOURCE_DIR}/epg/run_epg_solver_test.py"
-              "${CMAKE_SOURCE_DIR}"
-              "${CMAKE_CURRENT_BINARY_DIR}/epg_solver"
-    )
-    add_test(
-      NAME NativeArchitectureBoundaries
-      COMMAND "${Python3_EXECUTABLE}"
-              "${CMAKE_CURRENT_SOURCE_DIR}/architecture/test_native_boundaries.py"
-              "${CMAKE_SOURCE_DIR}"
-    )
-    add_test(
-      NAME CppCodingStyle
-      COMMAND "${Python3_EXECUTABLE}"
-              "${CMAKE_CURRENT_SOURCE_DIR}/architecture/test_cpp_coding_style.py"
-              "${CMAKE_SOURCE_DIR}"
-    )
-  else()
-    message(STATUS "Python3 interpreter not available; skipping Python tests")
-  endif()
+  find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+  add_test(
+    NAME EventPipelineGraphSolver
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/epg/run_epg_solver_test.py"
+            "${CMAKE_SOURCE_DIR}"
+            "${CMAKE_CURRENT_BINARY_DIR}/epg_solver"
+  )
+  add_test(
+    NAME NativeArchitectureBoundaries
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/architecture/test_native_boundaries.py"
+            "${CMAKE_SOURCE_DIR}"
+  )
+  add_test(
+    NAME CppCodingStyle
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/architecture/test_cpp_coding_style.py"
+            "${CMAKE_SOURCE_DIR}"
+  )
+  add_test(
+    NAME SitlAcceptanceTests
+    COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+            -s "${CMAKE_CURRENT_SOURCE_DIR}/sitl"
+            -p "test_*.py"
+            -v
+  )
+  set_tests_properties(SitlAcceptanceTests PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    TIMEOUT 120
+    LABELS "unit;sitl;acceptance"
+    ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;PYTHONUNBUFFERED=1"
+  )
 endif()
 
 if(ENABLE_OFFLINE_REPLAY)

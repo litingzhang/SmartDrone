@@ -704,7 +704,8 @@ radius, lookahead, speed lookahead, near-field radius, max point age, minimum cl
 
 ### 10.5 `T_b_c1` Parameter (`config/*.yaml`)
 
-- Definition: `T_b_c1` is the 4x4 homogeneous extrinsic (`SE3`) from `body -> c1` (left camera).
+- Definition: `T_b_c1` is the 4x4 homogeneous pose (`SE3`) of `c1` in body coordinates
+  (`body <- c1`, mapping left-camera optical coordinates into body coordinates).
 - Loading rule: in pure stereo mode, the runtime first reads `T_b_c1`, then falls back to `IMU.T_b_c1`.
 - Activation scope: this transform is applied only in `SensorMode::Stereo` (without IMU fusion).
 - Usage: raw SLAM pose is `T_w_c1`, then converted to body pose before publish:

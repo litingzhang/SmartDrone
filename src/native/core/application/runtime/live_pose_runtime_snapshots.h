@@ -5,6 +5,7 @@
 #include "core/application/runtime/runtime_controller.h"
 #include "core/application/runtime/udp_command_runtime_config.h"
 #include "core/application/state/live_pose_state.h"
+#include "core/ports/pose_publisher.h"
 
 namespace SmartDrone::Core::Application {
 
@@ -27,6 +28,12 @@ PublishRuntimeModeFn MakeRuntimeModePublisher(LivePoseState &livePose);
 PublishVehicleFlightStateFn MakeVehicleFlightStatePublisher(
     LivePoseState &livePose);
 PublishAvoidanceTelemetryFn MakeAvoidanceTelemetryPublisher(
+    LivePoseState &livePose);
+PublishVisualLossFn MakeVisualLossPublisher(
+    LivePoseState &livePose, SmartDrone::Core::Ports::IPosePublisher &publisher);
+void PublishExternalPose(
+    const SmartDrone::Core::Ports::PosePublishRequest &request,
+    SmartDrone::Core::Ports::IPosePublisher &publisher,
     LivePoseState &livePose);
 ReadRuntimeStateFn MakeUdpRuntimeStateReader(const LivePoseState &livePose);
 

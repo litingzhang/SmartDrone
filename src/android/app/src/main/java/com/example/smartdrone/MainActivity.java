@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     private static final int CMD_CONFIG = 0xF4;
     private static final int CMD_HEARTBEAT = 0xF5;
     private static final int CMD_AVOIDANCE_STATE = 0xF6;
+    private static final int STATE_FLAG_PX4_FLIGHT_STATE_VALID = 0x01;
     private static final int AVOIDANCE_HOLD_NONE = 0;
     private static final int AVOIDANCE_HOLD_OBSTACLE_AHEAD = 1;
     private static final int AVOIDANCE_HOLD_OBSTACLE_NEAR = 2;
@@ -333,6 +334,7 @@ public class MainActivity extends Activity {
     private String m_lastDiscoveredVehicleIp = "";
     private int m_vehicleCmdPort = DEFAULT_CMD_PORT;
     private int m_phoneVideoPort = DEFAULT_PHONE_VIDEO_PORT;
+    private boolean m_px4FlightStateValid = false;
     private boolean m_armLatched = false;
     private String m_lastFlightCommand = "";
     private int m_px4MainMode = 0;
@@ -611,12 +613,14 @@ public class MainActivity extends Activity {
 
     private boolean isPx4AutoMode()
     {
-        return m_px4MainMode == PX4_MAIN_MODE_AUTO;
+        return m_px4FlightStateValid &&
+               m_px4MainMode == PX4_MAIN_MODE_AUTO;
     }
 
     private boolean isPx4PositionMode()
     {
-        return m_px4MainMode == PX4_MAIN_MODE_POSCTL;
+        return m_px4FlightStateValid &&
+               m_px4MainMode == PX4_MAIN_MODE_POSCTL;
     }
 
     private static int parseIntOrDefault(String text, int defaultValue)
@@ -1928,6 +1932,8 @@ public class MainActivity extends Activity {
         try {
             NativeUdp.close();
             m_udpReady = false;
+            m_px4FlightStateValid = false;
+            updateFlightButtons();
             boolean ok = NativeUdp.init(vehicleIp, cmdPort, videoPort);
             if (!ok) {
                 if (updateStatus) {
@@ -2266,8 +2272,12 @@ public class MainActivity extends Activity {
     private void updateFlightButtons()
     {
         if (m_btnArmToggle != null) {
-            m_btnArmToggle.setText(m_armLatched ? "DISARM" : "ARM");
-            setButtonState(m_btnArmToggle, true, isPending(PENDING_ARM), "#C62828");
+            m_btnArmToggle.setText(m_px4FlightStateValid
+                                       ? (m_armLatched ? "DISARM" : "ARM")
+                                       : "ARM ?");
+            setButtonState(m_btnArmToggle, true,
+                           isPending(PENDING_ARM) || !m_px4FlightStateValid,
+                           "#C62828");
         }
         if (m_btnEmergencyStop != null) {
             setButtonState(m_btnEmergencyStop, "EMERGENCY_STOP".equals(m_lastFlightCommand),
@@ -3192,6 +3202,7 @@ public class MainActivity extends Activity {
             return false;
         }
         int payloadOffset = 15;
+        int flags = rx[4] & 0xFF;
         int runtimeMode = rx[payloadOffset] & 0xFF;
         int slamMode = m_effectiveSlamMode;
         int trackingOffset = payloadOffset + 1;
@@ -3204,9 +3215,11 @@ public class MainActivity extends Activity {
             armedOffset = trackingOffset + 1;
         }
         int trackingState = rx[trackingOffset] & 0xFF;
-        if (armedOffset >= 0) {
+        m_px4FlightStateValid =
+            (flags & STATE_FLAG_PX4_FLIGHT_STATE_VALID) != 0 &&
+            armedOffset >= 0 && len >= 38;
+        if (m_px4FlightStateValid) {
             m_armLatched = (rx[armedOffset] & 0xFF) != 0;
-            updateFlightButtons();
         }
         int resetBaseOffset = (armedOffset >= 0) ? (armedOffset + 1) : (trackingOffset + 1);
         int resetCounter = len >= 34 ? readU16Le(rx, resetBaseOffset) : 0;
@@ -3219,11 +3232,11 @@ public class MainActivity extends Activity {
         float qx = readF32Le(rx, poseOffset + 16);
         float qy = readF32Le(rx, poseOffset + 20);
         float qz = readF32Le(rx, poseOffset + 24);
-        if (len >= 38) {
+        if (m_px4FlightStateValid) {
             m_px4MainMode = rx[poseOffset + 28] & 0xFF;
             m_px4SubMode = rx[poseOffset + 29] & 0xFF;
-            updateFlightButtons();
         }
+        updateFlightButtons();
         if (slamMode == SLAM_MODE_MAPPING || slamMode == SLAM_MODE_LOCALIZATION) {
             m_effectiveSlamMode = slamMode;
             updateQuickSlamModeButtons();
@@ -3540,7 +3553,7 @@ public class MainActivity extends Activity {
         if (m_lastVehicleHeartbeatMs == 0L || (nowMs - m_lastVehicleHeartbeatMs) <= HEARTBEAT_TIMEOUT_MS) {
             return;
         }
-        if (!m_armLatched) {
+        if (!m_px4FlightStateValid || !m_armLatched) {
             m_vehicleHeartbeatTimeoutHandled = false;
             return;
         }
@@ -3549,6 +3562,7 @@ public class MainActivity extends Activity {
         }
         m_vehicleHeartbeatTimeoutHandled = true;
         sendSimpleCmd("LAND(heartbeat timeout)", CMD_LAND);
+        m_px4FlightStateValid = false;
         m_armLatched = false;
         m_lastFlightCommand = "LAND";
         updateFlightButtons();

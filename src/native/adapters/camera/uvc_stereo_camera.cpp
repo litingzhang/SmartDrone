@@ -437,7 +437,9 @@ UvcStereoCamera::CaptureStatus UvcStereoCamera::CaptureOnce()
     if (decoded != CaptureStatus::Frame) {
         return decoded;
     }
-    PushFrame(BuildStereoFrame(frame.packed, frame.captureTimestampNs, frame.arriveNs), frame.captureTimestampNs);
+    PushFrame(BuildStereoFrame(frame.packed, frame.captureTimestampNs,
+                               frame.captureMonotonicNs, frame.arriveNs),
+              frame.captureTimestampNs);
     return CaptureStatus::Frame;
 }
 
@@ -517,11 +519,17 @@ UvcStereoCamera::CaptureStatus UvcStereoCamera::DecodeCaptureBuffer(int fd, v4l2
 
     frame.captureTimestampNs = TimevalToNs(buffer.timestamp);
     frame.arriveNs = MonoTimeUs() * 1000ULL;
+    frame.captureMonotonicNs =
+        (buffer.flags & V4L2_BUF_FLAG_TIMESTAMP_MASK) ==
+                V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC
+            ? frame.captureTimestampNs
+            : frame.arriveNs;
     return CaptureStatus::Frame;
 }
 
-Core::Ports::StereoFrame UvcStereoCamera::BuildStereoFrame(const cv::Mat &packed, uint64_t captureTimestampNs,
-                                                           uint64_t arriveNs)
+Core::Ports::StereoFrame UvcStereoCamera::BuildStereoFrame(
+    const cv::Mat &packed, uint64_t captureTimestampNs,
+    uint64_t captureMonotonicNs, uint64_t arriveNs)
 {
     const int halfWidth = packed.cols / 2;
     const int packedHeight = packed.rows;
@@ -530,6 +538,8 @@ Core::Ports::StereoFrame UvcStereoCamera::BuildStereoFrame(const cv::Mat &packed
     stereo.right.cameraId = 1;
     stereo.left.timestampNs = captureTimestampNs;
     stereo.right.timestampNs = captureTimestampNs;
+    stereo.left.captureMonotonicNs = static_cast<int64_t>(captureMonotonicNs);
+    stereo.right.captureMonotonicNs = static_cast<int64_t>(captureMonotonicNs);
     stereo.left.arriveNs = static_cast<int64_t>(arriveNs);
     stereo.right.arriveNs = static_cast<int64_t>(arriveNs);
     stereo.left.sequence = ++m_sequence;

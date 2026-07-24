@@ -153,6 +153,133 @@ TEST(EventPipelineGraphIngress, RejectsTypeMismatchDuplicateIngressAndTaskProduc
     }
 }
 
+TEST(EventPipelineGraphExternalTrigger, WakesPeriodicTaskBeforeWatchdogInterval)
+{
+    Registry registry;
+    registry.RegisterTaskType<TestHeartbeatTask>("TestHeartbeatTask", {}, {});
+
+    EventPipelineGraph graph(registry);
+    graph.ConfigureJson(R"({
+      "queues": [],
+      "tasks": [
+        {
+          "name": "camera_clock",
+          "type": "TestHeartbeatTask",
+          "trigger": {"mode": "periodic_or_external", "interval_ms": 1000}
+        }
+      ]
+    })");
+
+    auto trigger = graph.CreateExternalTrigger("camera_clock");
+    ASSERT_TRUE(trigger.Valid());
+    EXPECT_EQ(trigger.TaskName(), "camera_clock");
+    EXPECT_THROW(graph.CreateExternalTrigger("camera_clock"), std::runtime_error);
+
+    graph.Start();
+    trigger.Notify();
+    for (int i = 0;
+         i < 50 && graph.TaskDiagnostics().at("camera_clock").loopCount == 0;
+         ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    graph.Stop();
+
+    EXPECT_EQ(graph.TaskDiagnostics().at("camera_clock").loopCount, 1u);
+}
+
+TEST(EventPipelineGraphExternalTrigger, CoalescesNotificationsBeforeNextConsumption)
+{
+    std::atomic<int> ticks{0};
+    std::atomic<bool> firstTickEntered{false};
+    std::atomic<bool> releaseFirstTick{false};
+    Registry registry;
+    registry.RegisterTaskFactory(
+        "TestBlockedExternalTask", {}, {},
+        [&ticks, &firstTickEntered, &releaseFirstTick]() {
+            return std::unique_ptr<ITask>(new TestBlockedExternalTask(
+                ticks, firstTickEntered, releaseFirstTick));
+        });
+
+    EventPipelineGraph graph(registry);
+    graph.ConfigureJson(R"({
+      "queues": [],
+      "tasks": [{
+        "name": "camera_clock",
+        "type": "TestBlockedExternalTask",
+        "trigger": {"mode": "periodic_or_external", "interval_ms": 1000}
+      }]
+    })");
+    auto trigger = graph.CreateExternalTrigger("camera_clock");
+
+    trigger.Notify();
+    graph.Start();
+    const bool entered = WaitForTestCondition([&firstTickEntered]() {
+        return firstTickEntered.load(std::memory_order_acquire);
+    });
+    if (!entered) {
+        releaseFirstTick.store(true, std::memory_order_release);
+        graph.Stop();
+        FAIL() << "external trigger task did not enter its first loop";
+    }
+
+    for (int notification = 0; notification < 4; ++notification) {
+        trigger.Notify();
+    }
+    releaseFirstTick.store(true, std::memory_order_release);
+    const bool consumed = WaitForTestCondition([&ticks]() {
+        return ticks.load(std::memory_order_acquire) >= 2;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    const int ticksAfterEventFdDrain = ticks.load(std::memory_order_acquire);
+    graph.Stop();
+
+    ASSERT_TRUE(consumed);
+    EXPECT_EQ(ticksAfterEventFdDrain, 2);
+    EXPECT_EQ(graph.TaskDiagnostics().at("camera_clock").loopCount, 2u);
+}
+
+TEST(EventPipelineGraphExternalTrigger, RejectsTasksWithoutExternalMode)
+{
+    auto registry = MakeRegistry();
+    EventPipelineGraph graph(registry);
+    graph.ConfigureJson(R"({
+      "queues": [],
+      "tasks": [
+        {
+          "name": "heartbeat",
+          "type": "TestHeartbeatTask",
+          "trigger": {"mode": "periodic", "interval_ms": 10}
+        }
+      ]
+    })");
+
+    EXPECT_THROW(graph.CreateExternalTrigger("heartbeat"), std::runtime_error);
+    EXPECT_THROW(graph.CreateExternalTrigger("missing"), std::runtime_error);
+}
+
+TEST(EventPipelineGraphExternalTrigger, ExpiresWhenGraphIsDestroyed)
+{
+    EventPipelineGraph::ExternalTrigger trigger;
+    {
+        Registry registry;
+        registry.RegisterTaskType<TestHeartbeatTask>("TestHeartbeatTask", {}, {});
+        EventPipelineGraph graph(registry);
+        graph.ConfigureJson(R"({
+          "queues": [],
+          "tasks": [{
+            "name": "camera_clock",
+            "type": "TestHeartbeatTask",
+            "trigger": {"mode": "periodic_or_external", "interval_ms": 1000}
+          }]
+        })");
+        trigger = graph.CreateExternalTrigger("camera_clock");
+        ASSERT_TRUE(trigger.Valid());
+    }
+
+    EXPECT_FALSE(trigger.Valid());
+    EXPECT_NO_THROW(trigger.Notify());
+}
+
 TEST(EventPipelineGraph, RunsPipelineConfiguredFromJsonFile)
 {
     auto registry = MakeRegistry();

@@ -27,6 +27,10 @@ struct KltPnpPoseEstimatorOptions {
     int method{0};
     bool refineWithInliers{false};
     bool horizontalLateralFlow{false};
+    bool requireObservableGeometry{true};
+    float minRobustDepthSpanMeters{0.30f};
+    float minRobustDepthSpanRatio{0.10f};
+    float minNormalizedThickness{0.015f};
     std::string logTag;
 };
 

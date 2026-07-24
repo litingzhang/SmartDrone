@@ -43,6 +43,8 @@ void MavlinkPosePublisher::PublishPose(
 
     Px4MavlinkGateway::OdometryRequest odometry{};
     odometry.frameId = request.frameId;
+    odometry.measurementTimestampNs = request.measurementTimestampNs;
+    odometry.captureMonotonicNs = request.captureMonotonicNs;
     odometry.poseNed = mavPose;
     odometry.velocityNed = mavVelocity;
     odometry.mavFrameId =

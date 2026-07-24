@@ -280,6 +280,12 @@ SlamFrameInputPort::AcquireStereoBatch(const RuntimeFrameConfig &config)
     if (status == StereoAcquireStatus::Timeout) {
         return result;
     }
+    if (status == StereoAcquireStatus::CameraClockReset) {
+        std::cerr << "[slam] camera measurement clock reset, restarting session\n";
+        result.sessionOk = false;
+        result.stepResult = SlamFrameStepResult::SessionAbort;
+        return result;
+    }
     if (status == StereoAcquireStatus::CameraUnhealthy) {
         std::cerr << "[slam] camera pipeline unhealthy, aborting session\n";
         result.sessionOk = false;

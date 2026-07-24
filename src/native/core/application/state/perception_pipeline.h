@@ -47,6 +47,7 @@ enum class StereoAcquireStatus : uint8_t {
     Ok,
     Timeout,
     CameraUnhealthy,
+    CameraClockReset,
 };
 
 class PerceptionPipeline {
@@ -61,7 +62,10 @@ class PerceptionPipeline {
     int ClampTargetFps(int requestedFps) const;
 
   private:
-    uint64_t ComputeMinCaptureTimestampNs() const;
+    uint64_t ComputeMinCaptureTimestampNs(int clampedSlamInputFps);
+    void AdvanceCaptureSchedule(int64_t captureTimestampNs,
+                                int clampedSlamInputFps);
+    uint64_t CaptureScheduleToleranceNs() const;
     StereoAcquireStatus HandleGrabFailure(Ports::ICameraProvider &camera, int staleFrameThresholdMs,
                                           int clampedSlamInputFps, uint64_t minTimestampNs) const;
     const char *ClassifyGrabFailureCause(const StereoGrabFailureLog &failure) const;
@@ -71,11 +75,17 @@ class PerceptionPipeline {
     void AcceptStereoBatch(Ports::StereoFrame stereo, const StereoFrameTiming &timing,
                            StereoBatch &out);
     void RecordFrameTiming(const StereoBatch &out, FrameTimingTracker *timingTracker) const;
+    bool DetectCameraClockReset(Ports::ICameraProvider &camera);
+    void ResetTimeline();
 
     PerceptionPipelineConfig m_cfg;
     int64_t m_lastDeliveredLogicalFrameNs{0};
     int64_t m_lastAcceptedCaptureTimestampNs{0};
+    uint64_t m_nextCaptureTimestampNs{0};
     uint64_t m_nextFrameId{1};
+    int m_captureScheduleFps{0};
+    uint32_t m_cameraClockResetCounter{0};
+    bool m_cameraClockInitialized{false};
 };
 
 } // namespace SmartDrone::Core::Application

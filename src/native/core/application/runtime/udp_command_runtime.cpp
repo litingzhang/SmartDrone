@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -20,8 +21,19 @@
 namespace SmartDrone::Core::Application {
 namespace {
 
-constexpr auto HEARTBEAT_TIMEOUT = std::chrono::seconds(3);
 constexpr auto OPEN_RETRY_PERIOD = std::chrono::seconds(1);
+
+uint64_t TimePointUs(std::chrono::steady_clock::time_point value)
+{
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        value.time_since_epoch());
+    return static_cast<uint64_t>(elapsed.count());
+}
+
+bool IntervalElapsed(uint64_t nowUs, uint64_t startUs, uint64_t intervalUs)
+{
+    return nowUs > startUs && nowUs - startUs > intervalUs;
+}
 
 RouteResult ExecuteRuntimeAction(IRuntimeCommandTarget &commandTarget,
                                  const RuntimeAction &action)
@@ -189,8 +201,13 @@ class CommandPeerGate {
 
 bool UdpCommandRuntimeConfigValid(const UdpCommandRuntimeConfig &config)
 {
-    return config.port > 0 && ResolveCommandHook(config) != nullptr && config.commandTarget != nullptr && config.currentConfig &&
-           config.currentRuntimeMode && config.updateCommandPeer && config.readRuntimeState;
+    return config.port > 0 && config.heartbeatTimeoutMs > 0 &&
+           config.heartbeatLandRetryMs > 0 &&
+           config.heartbeatLandRetryMs <= config.heartbeatTimeoutMs &&
+           ResolveCommandHook(config) != nullptr &&
+           config.commandTarget != nullptr && config.currentConfig &&
+           config.currentRuntimeMode && config.updateCommandPeer &&
+           config.readRuntimeState;
 }
 
 class UdpCommandRuntime::Impl final {
@@ -231,6 +248,8 @@ class UdpCommandRuntime::Impl final {
 
     void Stop()
     {
+        m_lastHeartbeatRxUs.store(0, std::memory_order_release);
+        m_lastHeartbeatLandAttemptUs.store(0, std::memory_order_release);
         m_server.Close();
         m_started = false;
     }
@@ -262,9 +281,6 @@ class UdpCommandRuntime::Impl final {
 
     void StepHeartbeatTimeout()
     {
-        if (!EnsureStarted()) {
-            return;
-        }
         HandleHeartbeatTimeout(std::chrono::steady_clock::now());
     }
 
@@ -358,9 +374,8 @@ class UdpCommandRuntime::Impl final {
                      std::chrono::steady_clock::time_point now)
     {
         if (frame.cmd == CMD_HEARTBEAT) {
-            m_haveHeartbeatPeer = true;
-            m_heartbeatLandTriggered = false;
-            m_lastHeartbeatRx = now;
+            m_lastHeartbeatRxUs.store(TimePointUs(now),
+                                      std::memory_order_release);
             return;
         }
         RouteResult routeResult = RouteFrame(frame, peer);
@@ -437,25 +452,61 @@ class UdpCommandRuntime::Impl final {
         m_server.SendTo(m_activePeer, heartbeatFrame.data(), heartbeatFrame.size());
     }
 
+    bool HeartbeatTimedOut(uint64_t nowUs) const
+    {
+        const uint64_t lastHeartbeatUs =
+            m_lastHeartbeatRxUs.load(std::memory_order_acquire);
+        const uint64_t timeoutUs =
+            static_cast<uint64_t>(m_config.heartbeatTimeoutMs) * 1000ULL;
+        return lastHeartbeatUs != 0 &&
+               IntervalElapsed(nowUs, lastHeartbeatUs, timeoutUs);
+    }
+
+    bool TryReserveHeartbeatLandAttempt(uint64_t nowUs)
+    {
+        const uint64_t retryUs =
+            static_cast<uint64_t>(m_config.heartbeatLandRetryMs) * 1000ULL;
+        uint64_t previousUs =
+            m_lastHeartbeatLandAttemptUs.load(std::memory_order_acquire);
+        while (previousUs == 0 || IntervalElapsed(nowUs, previousUs, retryUs)) {
+            if (m_lastHeartbeatLandAttemptUs.compare_exchange_weak(
+                    previousUs, nowUs, std::memory_order_acq_rel,
+                    std::memory_order_acquire)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void ReleaseHeartbeatLandAttempt(uint64_t attemptUs)
+    {
+        uint64_t expectedUs = attemptUs;
+        m_lastHeartbeatLandAttemptUs.compare_exchange_strong(
+            expectedUs, 0, std::memory_order_acq_rel,
+            std::memory_order_acquire);
+    }
+
     void HandleHeartbeatTimeout(std::chrono::steady_clock::time_point now)
     {
-        UdpRuntimeStateSnapshot snapshot{};
-        const bool vehicleArmed =
-            m_config.readRuntimeState(snapshot) && snapshot.armed;
-        if (!m_haveHeartbeatPeer || !vehicleArmed || m_heartbeatLandTriggered ||
-            now - m_lastHeartbeatRx <= HEARTBEAT_TIMEOUT) {
-            if (!vehicleArmed) {
-                m_heartbeatLandTriggered = false;
-            }
+        const uint64_t nowUs = TimePointUs(now);
+        if (!HeartbeatTimedOut(nowUs)) {
             return;
         }
-        m_heartbeatLandTriggered = true;
+        UdpRuntimeStateSnapshot snapshot{};
+        RuntimeCommandHook *commandHook = ResolveCommandHook(m_config);
+        if (!m_config.readRuntimeState(snapshot) || !snapshot.armed ||
+            commandHook == nullptr || commandHook->IsLandingConfirmed() ||
+            !TryReserveHeartbeatLandAttempt(nowUs)) {
+            return;
+        }
         std::string err;
-        if (!ResolveCommandHook(m_config)->LandVehicle(&err)) {
+        if (!commandHook->LandVehicle(&err)) {
+            ReleaseHeartbeatLandAttempt(nowUs);
             std::cerr << "[udp_cmd] heartbeat timeout land failed: " << err << "\n";
             return;
         }
-        std::cerr << "[udp_cmd] heartbeat timeout >3s, LAND triggered\n";
+        std::cerr << "[udp_cmd] heartbeat timeout after "
+                  << m_config.heartbeatTimeoutMs << "ms, LAND triggered\n";
     }
 
     void SendState(const UdpRuntimeStateSnapshot &snapshot)
@@ -477,10 +528,13 @@ class UdpCommandRuntime::Impl final {
         WriteF32Le(payload, snapshot.qz);
         payload.push_back(snapshot.px4MainMode);
         payload.push_back(snapshot.px4SubMode);
+        const uint8_t stateFlags = snapshot.px4FlightStateValid
+                                       ? STATE_FLAG_PX4_FLIGHT_STATE_VALID
+                                       : 0;
         const TlvFrameBuildRequest stateRequest{
             TLV_VER,
             CMD_STATE,
-            0,
+            stateFlags,
             snapshot.seq,
             MonoTimeMs32(),
             payload.data(),
@@ -565,13 +619,12 @@ class UdpCommandRuntime::Impl final {
     CommandPeerGate m_peerGate;
     std::array<uint8_t, 2048> m_rxBuffer{};
     std::chrono::steady_clock::time_point m_lastHeartbeatTx{};
-    std::chrono::steady_clock::time_point m_lastHeartbeatRx{};
     std::chrono::steady_clock::time_point m_lastRejectedPeerLog{};
     std::chrono::steady_clock::time_point m_nextOpenAttempt{};
     uint32_t m_lastSentPointCloudSeq{0};
     UdpPeer m_activePeer{};
-    bool m_haveHeartbeatPeer{false};
-    bool m_heartbeatLandTriggered{false};
+    std::atomic<uint64_t> m_lastHeartbeatRxUs{0};
+    std::atomic<uint64_t> m_lastHeartbeatLandAttemptUs{0};
     bool m_started{false};
 };
 

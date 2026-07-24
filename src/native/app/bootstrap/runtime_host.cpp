@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -25,6 +26,7 @@
 #include "core/application/session/epg/session_graph_runtime_factory.h"
 #include "core/application/state/live_pose_state.h"
 #include "core/ports/vehicle_control_port.h"
+#include "core/ports/external_pose_source.h"
 
 namespace SmartDrone::App::Bootstrap {
 
@@ -44,6 +46,8 @@ using MavlinkPosePublisher = SmartDrone::Adapters::Telemetry::MavlinkPosePublish
 using Px4UdpHooks = SmartDrone::Core::Application::Px4UdpHooks;
 using Px4UdpHooksConfig = SmartDrone::Core::Application::Px4UdpHooksConfig;
 using Px4VehicleControlPort = SmartDrone::Adapters::Telemetry::Px4VehicleControlPort;
+using Px4VehicleControlPortConfig =
+    SmartDrone::Adapters::Telemetry::Px4VehicleControlPortConfig;
 using RuntimeSessionSupervisor = SmartDrone::Core::Application::RuntimeSessionSupervisor;
 using SessionGraphRuntimeFactoryConfig = SmartDrone::Core::Application::SessionGraphRuntimeFactoryConfig;
 using SystemRuntimeGraph = SmartDrone::Core::Application::SystemRuntimeGraph;
@@ -54,8 +58,13 @@ using UnifiedRuntimeController = SmartDrone::Core::Application::UnifiedRuntimeCo
 using UnifiedRuntimeControllerConfig = SmartDrone::Core::Application::UnifiedRuntimeControllerConfig;
 using IPosePublisher = SmartDrone::Core::Ports::IPosePublisher;
 using ISlamSessionTelemetryPort = SmartDrone::Core::Ports::ISlamSessionTelemetryPort;
+using CameraRuntimeOverrides = SmartDrone::Core::Ports::CameraRuntimeOverrides;
 constexpr int DISCOVERY_PORT = 15000;
 constexpr auto SYSTEM_REDEPLOY_POLL_INTERVAL = std::chrono::milliseconds(100);
+constexpr double MIN_SIM_WATCHDOG_SCALE = 1.0;
+constexpr double MAX_SIM_WATCHDOG_SCALE = 20.0;
+constexpr uint32_t MAX_SCALED_WATCHDOG_TIMEOUT_MS = 60000;
+constexpr uint32_t PX4_FLIGHT_MODE_MAX_AGE_MS = 1500;
 
 struct BuildSystemRuntimeGraphConfigInput {
     const MainRuntimeAliases &aliases;
@@ -65,6 +74,9 @@ struct BuildSystemRuntimeGraphConfigInput {
     const ApplicationRuntimeFactories &factories;
     std::shared_ptr<EpgRedeployCoordinator> redeploy;
     UdpCommandRuntimeConfig commandRuntime;
+    IPosePublisher &posePublisher;
+    LivePoseState &livePose;
+    bool externalPoseEnabled{false};
 };
 
 struct BuildRuntimeControllerConfigInput {
@@ -84,8 +96,10 @@ struct RuntimeHostServices {
     LiveRuntimeTuning tuning;
 
     RuntimeHostServices(const std::string &mavDev, int mavBaud,
-                        bool jsonDiagnostics)
-        : mav(mavDev, mavBaud), vehicleControl(mav), posePublisher(mav)
+                        bool jsonDiagnostics,
+                        Px4VehicleControlPortConfig vehicleConfig)
+        : mav(mavDev, mavBaud), vehicleControl(mav, vehicleConfig),
+          posePublisher(mav)
     {
         mav.SetJsonDiagnostics(jsonDiagnostics);
     }
@@ -99,6 +113,27 @@ std::string GetEnvOrDefault(const char *name, const char *fallback)
 int GetEnvIntOrDefault(const char *name, int fallback)
 {
     return SmartDrone::Common::EnvIntValue(name, fallback);
+}
+
+uint32_t ScaleSimulationWatchdogTimeout(uint32_t timeoutMs)
+{
+    const double scale = std::clamp(
+        SmartDrone::Common::EnvDoubleValue(
+            "SMART_DRONE_SIM_WATCHDOG_SCALE", 1.0),
+        MIN_SIM_WATCHDOG_SCALE, MAX_SIM_WATCHDOG_SCALE);
+    return static_cast<uint32_t>(std::min<long long>(
+        MAX_SCALED_WATCHDOG_TIMEOUT_MS,
+        std::llround(static_cast<double>(timeoutMs) * scale)));
+}
+
+Px4VehicleControlPortConfig BuildPx4VehicleControlPortConfig()
+{
+    Px4VehicleControlPortConfig config{};
+    config.flightModeMaxAgeUs =
+        static_cast<uint64_t>(ScaleSimulationWatchdogTimeout(
+            PX4_FLIGHT_MODE_MAX_AGE_MS)) *
+        1000ULL;
+    return config;
 }
 
 ControllerMode ParseAutoMode(std::string autoModeText)
@@ -131,9 +166,10 @@ RuntimeSessionSupervisor::CreateSessionFn BuildSessionRuntimeFactory(LiveRuntime
 
 Px4UdpHooksConfig BuildPx4UdpHooksConfig(IVehicleControlPort &vehicleControl,
                                          LiveRuntimeTuning &tuning,
-                                         LivePoseState &livePose)
+                                         LivePoseState &livePose,
+                                         IPosePublisher &posePublisher)
 {
-    return Px4UdpHooksConfig{
+    Px4UdpHooksConfig config{
         vehicleControl,
         &tuning,
         SmartDrone::Core::Application::MakeRuntimeGateReader(livePose),
@@ -142,6 +178,22 @@ Px4UdpHooksConfig BuildPx4UdpHooksConfig(IVehicleControlPort &vehicleControl,
             livePose),
         SmartDrone::Core::Application::MakeAvoidanceTelemetryPublisher(
             livePose)};
+    config.requireVisualLocalization = SmartDrone::Common::EnvFlagEnabled(
+        "SMART_DRONE_OFFBOARD_REQUIRES_VISION", true);
+    const uint32_t visualPoseMaxAgeMs = static_cast<uint32_t>(
+        SmartDrone::Common::EnvIntValueClamped(
+            "SMART_DRONE_VISUAL_POSE_MAX_AGE_MS", 100, 50, 10000));
+    const uint32_t visualLossLandTimeoutMs = static_cast<uint32_t>(
+        SmartDrone::Common::EnvIntValueClamped(
+            "SMART_DRONE_VISUAL_LOSS_LAND_MS", 500, 100, 10000));
+    config.visualPoseMaxAgeMs =
+        ScaleSimulationWatchdogTimeout(visualPoseMaxAgeMs);
+    config.visualLossLandTimeoutMs =
+        ScaleSimulationWatchdogTimeout(visualLossLandTimeoutMs);
+    config.publishVisualLoss =
+        SmartDrone::Core::Application::MakeVisualLossPublisher(
+            livePose, posePublisher);
+    return config;
 }
 
 UnifiedRuntimeControllerConfig BuildRuntimeControllerConfig(
@@ -177,7 +229,21 @@ SystemRuntimeGraphConfig BuildSystemRuntimeGraphConfig(BuildSystemRuntimeGraphCo
     return SystemRuntimeGraphConfig{
         input.aliases,
         DISCOVERY_PORT,
-        [&mav = input.mav]() { (void)mav.PollRxOnce(); },
+        [&mav = input.mav,
+         source = input.factories.externalPoseSource,
+         &publisher = input.posePublisher,
+         &livePose = input.livePose,
+         enabled = input.externalPoseEnabled]() {
+            (void)mav.PollRxOnce();
+            if (!enabled || !source) {
+                return;
+            }
+            SmartDrone::Core::Ports::PosePublishRequest request{};
+            if (source->TryRead(request)) {
+                SmartDrone::Core::Application::PublishExternalPose(
+                    request, publisher, livePose);
+            }
+        },
         [&mav = input.mav]() { mav.StepSetpointStream(); },
         [&hooks = input.hooks]() { hooks.StepManualControl(); },
         [&controller = input.controller]() { controller.StepForceRestart(); },
@@ -268,38 +334,76 @@ void PrintAvoidanceStartupConfig(const UnifiedConfig &cfg)
               << (config.holdOnStaleCloud ? "Y" : "N") << "\n";
 }
 
+bool ValidateRuntimeFactories(const ApplicationRuntimeFactories &factories,
+                              bool externalPoseEnabled)
+{
+    if (!factories.Valid()) {
+        std::cerr << "[runtime] application runtime factories invalid\n";
+        return false;
+    }
+    if (externalPoseEnabled &&
+        (!factories.externalPoseSource ||
+         !factories.externalPoseSource->Healthy())) {
+        std::cerr << "[runtime] truth profile requires Gazebo external pose source\n";
+        return false;
+    }
+    return true;
+}
+
+void PrintRuntimeStartup(const UnifiedConfig &cfg,
+                         const MainRuntimeAliases &aliases,
+                         const ApplicationRuntimeFactories &factories)
+{
+    SmartDrone::Core::Application::PrintStartupConfig(
+        cfg.app, aliases, factories.cameraProvider, ControllerMode::Idle);
+    PrintAvoidanceStartupConfig(cfg);
+    std::cerr << "[runtime] epg=on\n";
+}
+
+void ApplyCameraRuntimeOverrides(const CameraRuntimeOverrides &overrides,
+                                 UnifiedConfig &config)
+{
+    if (!overrides.Valid()) {
+        return;
+    }
+    config.app.camera.width = overrides.width;
+    config.app.camera.height = overrides.height;
+    config.app.camera.fps = overrides.fps;
+    config.app.settings = overrides.settingsPath;
+    std::cerr << "[runtime] camera config override=" << overrides.width << "x"
+              << overrides.height << "@" << overrides.fps
+              << " settings=" << overrides.settingsPath << "\n";
+}
+
 } // namespace
 
 int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
 {
+    UnifiedConfig effectiveConfig = cfg;
     const ControllerMode autoMode = ParseAutoMode(autoModeText);
-    const std::string mavDev = GetEnvOrDefault("SMART_DRONE_MAVLINK_DEV", "/dev/ttyAMA0");
-    const int mavBaud = GetEnvIntOrDefault("SMART_DRONE_MAVLINK_BAUD", 921600);
     const ApplicationRuntimeFactories factories =
         SmartDrone::App::Composition::CreateDefaultApplicationRuntimeFactories();
-    if (!factories.Valid()) {
-        std::cerr << "[runtime] application runtime factories invalid\n";
+    const bool externalPoseEnabled =
+        GetEnvOrDefault("SMART_DRONE_SIM_PROFILE", "") == "truth";
+    if (!ValidateRuntimeFactories(factories, externalPoseEnabled)) {
         return 1;
     }
+    ApplyCameraRuntimeOverrides(factories.cameraOverrides, effectiveConfig);
     const MainRuntimeAliases aliases =
-        SmartDrone::Core::Application::BuildRuntimeAliases(cfg.app);
-    SmartDrone::Core::Application::PrintStartupConfig(
-        cfg.app, aliases, factories.cameraProvider, ControllerMode::Idle);
-    PrintAvoidanceStartupConfig(cfg);
-
-    std::cerr << "[runtime] epg=on\n";
-    RuntimeHostServices services(mavDev, mavBaud,
-                                 cfg.app.runtime.jsonDiagnostics);
+        SmartDrone::Core::Application::BuildRuntimeAliases(effectiveConfig.app);
+    PrintRuntimeStartup(effectiveConfig, aliases, factories);
+    RuntimeHostServices services(
+        GetEnvOrDefault("SMART_DRONE_MAVLINK_DEV", "/dev/ttyAMA0"),
+        GetEnvIntOrDefault("SMART_DRONE_MAVLINK_BAUD", 921600),
+        effectiveConfig.app.runtime.jsonDiagnostics,
+        BuildPx4VehicleControlPortConfig());
+    services.mav.SetMeasurementClock(factories.measurementClock);
     Px4UdpHooks hooks(
         BuildPx4UdpHooksConfig(services.vehicleControl, services.tuning,
-                               services.livePose));
+                               services.livePose, services.posePublisher));
     UnifiedRuntimeController controller(BuildRuntimeControllerConfig({
-        cfg,
-        services.tuning,
-        services.vehicleControl,
-        services.posePublisher,
-        services.livePose,
-        factories,
+        effectiveConfig, services.tuning, services.vehicleControl,
+        services.posePublisher, services.livePose, factories,
     }));
     UdpCommandRuntimeConfig commandRuntime =
         BuildUdpCommandRuntimeConfig(hooks, controller, services.livePose);
@@ -313,6 +417,9 @@ int RuntimeHost::Run(const UnifiedConfig &cfg, const std::string &autoModeText)
             factories,
             redeploy,
             std::move(commandRuntime),
+            services.posePublisher,
+            services.livePose,
+            externalPoseEnabled,
         }));
     if (autoMode != ControllerMode::Idle) {
         controller.SetMode(autoMode, nullptr);

@@ -7,7 +7,10 @@
 #include "core/application/session/slam/slam_session_resource_factory.h"
 #include "core/application/session/stream/preview_output_port.h"
 #include "core/ports/camera_provider.h"
+#include "core/ports/camera_runtime_overrides.h"
+#include "core/ports/external_pose_source.h"
 #include "core/ports/imu_provider.h"
+#include "core/ports/measurement_clock.h"
 
 namespace SmartDrone::Core::Application {
 
@@ -36,6 +39,11 @@ struct ApplicationRuntimeFactories {
     StartVisualFeatureFrontendSessionFn startVisualFeatureFrontendSession;
     CreatePreviewOutputRuntimeFn createPreviewOutputRuntime;
     CameraRuntimeProviderMetadata cameraProvider;
+    SmartDrone::Core::Ports::CameraRuntimeOverrides cameraOverrides;
+    std::shared_ptr<SmartDrone::Core::Ports::IMeasurementClock>
+        measurementClock;
+    std::shared_ptr<SmartDrone::Core::Ports::IExternalPoseSource>
+        externalPoseSource;
 
     bool Valid() const
     {

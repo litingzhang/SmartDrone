@@ -23,6 +23,9 @@ std::unique_ptr<Epg::EventPipelineGraph> StartEpgGraph(
     auto graph = std::make_unique<Epg::EventPipelineGraph>(std::move(registry));
     graph->Configure(graphConfig);
     request.graphRef->graph = graph.get();
+    if (request.beforeStart) {
+        request.beforeStart(*graph);
+    }
     graph->Start();
     return graph;
 }

@@ -31,7 +31,7 @@ Options:
                   Build and link the optional in-tree OpenVINS backend under src/native
   --jobs N        Build parallelism; defaults to BUILD_JOBS or nproc
   --camera-provider NAME
-                  Native camera provider, e.g. libcamera_stereo_ov9281 or uvc_stereo_opencv
+                  Native camera provider: libcamera_stereo_ov9281, uvc_stereo_opencv, or gz_stereo
 EOF
 }
 
@@ -90,6 +90,10 @@ cmake_cache_needs_reconfigure() {
         return 0
     fi
     if ! cache_value_matches "$cache_file" "SMART_DRONE_ENABLE_OPENVINS" "$ENABLE_OPENVINS"; then
+        return 0
+    fi
+    if [ -n "${SMART_DRONE_CAMERA_PROVIDER:-}" ] &&
+       ! cache_value_matches "$cache_file" "SMART_DRONE_CAMERA_PROVIDER" "$SMART_DRONE_CAMERA_PROVIDER"; then
         return 0
     fi
     return 1
@@ -594,11 +598,18 @@ if [ "$BUILD_TESTS" -eq 1 ]; then
         rm -rf "$TEST_BUILD_DIR"
     fi
     mkdir -p "$TEST_BUILD_DIR"
-    if [ "$FORCE_RECONFIGURE" -eq 1 ] || [ ! -f "$TEST_BUILD_DIR/CMakeCache.txt" ]; then
-        cmake -S "$REPO_ROOT" -B "$TEST_BUILD_DIR" \
-            -DCROSS_AARCH64=OFF \
-            -DBUILD_SMART_DRONE=OFF \
+    if [ "$FORCE_RECONFIGURE" -eq 1 ] || cmake_cache_needs_reconfigure "$TEST_BUILD_DIR/CMakeCache.txt"; then
+        test_configure_args=(
+            -DCROSS_AARCH64=OFF
+            -DBUILD_SMART_DRONE=OFF
             -DENABLE_UNIT_TESTS=ON
+        )
+        if [ -n "${SMART_DRONE_CAMERA_PROVIDER:-}" ]; then
+            test_configure_args+=(
+                -DSMART_DRONE_CAMERA_PROVIDER="$SMART_DRONE_CAMERA_PROVIDER"
+            )
+        fi
+        cmake -S "$REPO_ROOT" -B "$TEST_BUILD_DIR" "${test_configure_args[@]}"
     fi
     cmake --build "$TEST_BUILD_DIR" -j"$BUILD_JOBS"
     if [ -f "$TEST_BUILD_DIR/tests/smart_drone_unit_tests" ]; then

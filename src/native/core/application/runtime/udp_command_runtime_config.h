@@ -44,6 +44,7 @@ struct UdpRuntimeStateSnapshot {
     uint8_t runtimeMode{RUNTIME_MODE_IDLE};
     uint8_t slamMode{RUNTIME_SLAM_MODE_MAPPING};
     uint8_t trackingState{0xFF};
+    bool px4FlightStateValid{false};
     bool armed{false};
     uint8_t px4MainMode{0};
     uint8_t px4SubMode{0};
@@ -67,6 +68,8 @@ using ReadRuntimeStateFn = std::function<bool(UdpRuntimeStateSnapshot &)>;
 
 struct UdpCommandRuntimeConfig {
     int port{0};
+    uint32_t heartbeatTimeoutMs{3000};
+    uint32_t heartbeatLandRetryMs{1000};
     RuntimeCommandHook *commandHook{nullptr};
     RuntimeCommandHook *hooks{nullptr};
     IRuntimeCommandTarget *commandTarget{nullptr};

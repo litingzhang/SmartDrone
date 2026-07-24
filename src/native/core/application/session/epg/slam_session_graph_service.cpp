@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 #include "common/epg/epg.h"
@@ -68,6 +69,16 @@ class SlamSessionGraphRuntime::Impl final {
             graphRef,
             [this](Epg::GraphConfig &graphConfig) {
                 ApplySlamRuntimePacing(graphConfig, m_cfg);
+            },
+            [this](Epg::EventPipelineGraph &graph) {
+                auto trigger = graph.CreateExternalTrigger("SlamClockTask");
+                const bool configured =
+                    m_runtimeService->SetCameraFrameReadyCallback(
+                        [trigger]() { trigger.Notify(); });
+                if (!configured) {
+                    throw std::runtime_error(
+                        "failed to bind SLAM camera frame-ready trigger");
+                }
             },
         });
         m_lifecycle.AttachGraph(std::move(graph));

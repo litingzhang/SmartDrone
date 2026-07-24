@@ -19,7 +19,7 @@ void ExpectSlamTimingTopology(const Epg::GraphConfig &config)
 
     const auto *clock = FindRuntimeTopologyTask(config, "SlamClockTask");
     ASSERT_NE(clock, nullptr);
-    EXPECT_EQ(clock->trigger.mode, Epg::TriggerMode::Periodic);
+    EXPECT_EQ(clock->trigger.mode, Epg::TriggerMode::PeriodicOrExternal);
     EXPECT_EQ(clock->trigger.interval, std::chrono::milliseconds(50));
 
     const auto *backendTick =

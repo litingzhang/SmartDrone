@@ -1,5 +1,6 @@
 #include "common/epg/epg_internal.h"
 
+#include <algorithm>
 #include <functional>
 #include <set>
 #include <sstream>
@@ -99,6 +100,8 @@ const char *TriggerModeName(TriggerMode mode)
         return "all_queue_ready";
     case TriggerMode::PeriodicOrAnyQueueReady:
         return "periodic_or_any_queue_ready";
+    case TriggerMode::PeriodicOrExternal:
+        return "periodic_or_external";
     }
     return "unknown";
 }
@@ -423,6 +426,49 @@ void EventPipelineGraph::MarkExternalIngressQueue(
     }
 }
 
+EventPipelineGraph::ExternalTrigger
+EventPipelineGraph::CreateExternalTrigger(const std::string &taskName)
+{
+    if (!m_configured || m_running) {
+        throw std::runtime_error(
+            "EventPipelineGraph external trigger must be bound before start");
+    }
+    const auto configIt = std::find_if(
+        m_config.tasks.begin(), m_config.tasks.end(),
+        [&taskName](const TaskConfig &task) { return task.name == taskName; });
+    if (configIt == m_config.tasks.end()) {
+        throw std::runtime_error(
+            "EventPipelineGraph external trigger task not found: " + taskName);
+    }
+    if (configIt->trigger.mode != TriggerMode::PeriodicOrExternal) {
+        throw std::runtime_error(
+            "EventPipelineGraph task is not externally triggerable: " +
+            taskName);
+    }
+    if (!m_externalTriggerTasks.insert(taskName).second) {
+        throw std::runtime_error(
+            "EventPipelineGraph external trigger already exists for task: " +
+            taskName);
+    }
+    const auto runnerIt = std::find_if(
+        m_runners.begin(), m_runners.end(),
+        [&taskName](const std::unique_ptr<TaskRunner> &runner) {
+            return runner->Name() == taskName;
+        });
+    if (runnerIt == m_runners.end()) {
+        throw std::runtime_error(
+            "EventPipelineGraph external trigger runner not found: " + taskName);
+    }
+    const auto signal = (*runnerIt)->ExternalTriggerSignal();
+    return ExternalTrigger(
+        taskName, [signal]() { return !signal.expired(); },
+        [signal]() {
+            if (const auto active = signal.lock()) {
+                active->TriggerExternal();
+            }
+        });
+}
+
 void EventPipelineGraph::Configure(const GraphConfig &config)
 {
     if (m_running) {
@@ -446,6 +492,7 @@ void EventPipelineGraph::ResetConfiguredGraph()
     m_runners.clear();
     m_taskProducedQueues.clear();
     m_externalIngressQueues.clear();
+    m_externalTriggerTasks.clear();
     m_config = {};
 }
 
@@ -559,7 +606,8 @@ void EventPipelineGraph::ValidateTaskOutputs(
 void EventPipelineGraph::ValidateTaskTrigger(const TaskConfig &taskConfig) const
 {
     if (taskConfig.trigger.mode == TriggerMode::Periodic ||
-        taskConfig.trigger.mode == TriggerMode::PeriodicOrAnyQueueReady) {
+        taskConfig.trigger.mode == TriggerMode::PeriodicOrAnyQueueReady ||
+        taskConfig.trigger.mode == TriggerMode::PeriodicOrExternal) {
         if (taskConfig.trigger.interval.count() <= 0) {
             throw std::runtime_error("periodic task interval_ms must be greater than zero: " +
                                      taskConfig.name);

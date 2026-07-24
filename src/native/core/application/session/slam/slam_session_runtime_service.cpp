@@ -40,6 +40,8 @@ class SlamSessionRuntimeService::Impl final {
     ~Impl();
 
     bool EnsureStarted();
+    bool SetCameraFrameReadyCallback(
+        SmartDrone::Core::Ports::CameraFrameReadyCallback callback);
     bool StartFailed() const;
     bool Stopped() const;
     std::uint64_t SessionId() const;
@@ -100,9 +102,12 @@ class SlamSessionRuntimeService::Impl final {
     const ApplicationRuntimeFactories &m_factories;
     std::string m_finalEurocTrajectory;
     std::unique_ptr<SlamSessionProcessingPort> m_processingPort;
+    std::shared_ptr<SmartDrone::Core::Ports::CameraFrameReadyCallback>
+        m_frameReadyCallback;
     std::shared_ptr<const RuntimeState> m_runtimeState;
     std::atomic<bool> m_starting{false};
     std::atomic<bool> m_stopped{true};
+    std::atomic<bool> m_stopRequested{false};
 };
 
 SlamSessionRuntimeService::Impl::Impl(
@@ -130,6 +135,9 @@ SlamSessionRuntimeService::Impl::~Impl()
 
 bool SlamSessionRuntimeService::Impl::EnsureStarted()
 {
+    if (m_stopRequested.load(std::memory_order_acquire)) {
+        return false;
+    }
     std::shared_ptr<const RuntimeState> current = LoadRuntimeState();
     if (current->started) {
         return true;
@@ -149,7 +157,13 @@ bool SlamSessionRuntimeService::Impl::EnsureStarted()
         return false;
     }
 
-    return StartRuntime(CreateRuntime(), current->sessionId);
+    const bool started = StartRuntime(CreateRuntime(), current->sessionId);
+    m_starting.store(false, std::memory_order_release);
+    if (m_stopRequested.load(std::memory_order_acquire)) {
+        Stop();
+        return false;
+    }
+    return started;
 }
 
 bool SlamSessionRuntimeService::Impl::TryAcquireStartSlot(
@@ -167,6 +181,8 @@ bool SlamSessionRuntimeService::Impl::TryAcquireStartSlot(
 std::shared_ptr<SlamSessionRuntime>
 SlamSessionRuntimeService::Impl::CreateRuntime() const
 {
+    const auto frameReadyCallback = std::atomic_load_explicit(
+        &m_frameReadyCallback, std::memory_order_acquire);
     return std::make_shared<SlamSessionRuntime>(SlamSessionRuntimeConfig{
         m_cfg,
         m_tuning,
@@ -176,7 +192,25 @@ SlamSessionRuntimeService::Impl::CreateRuntime() const
         m_stop,
         m_runningFlag,
         m_factories,
+        frameReadyCallback
+            ? *frameReadyCallback
+            : SmartDrone::Core::Ports::CameraFrameReadyCallback{},
     });
+}
+
+bool SlamSessionRuntimeService::Impl::SetCameraFrameReadyCallback(
+    SmartDrone::Core::Ports::CameraFrameReadyCallback callback)
+{
+    if (m_starting.load(std::memory_order_acquire) ||
+        LoadRuntimeState()->started) {
+        return false;
+    }
+    std::atomic_store_explicit(
+        &m_frameReadyCallback,
+        std::make_shared<SmartDrone::Core::Ports::CameraFrameReadyCallback>(
+            std::move(callback)),
+        std::memory_order_release);
+    return true;
 }
 
 bool SlamSessionRuntimeService::Impl::StartRuntime(
@@ -204,7 +238,8 @@ bool SlamSessionRuntimeService::Impl::StartFailed() const
 
 bool SlamSessionRuntimeService::Impl::Stopped() const
 {
-    return m_stopped.load(std::memory_order_acquire);
+    return !m_starting.load(std::memory_order_acquire) &&
+           m_stopped.load(std::memory_order_acquire);
 }
 
 std::uint64_t SlamSessionRuntimeService::Impl::SessionId() const
@@ -215,6 +250,10 @@ std::uint64_t SlamSessionRuntimeService::Impl::SessionId() const
 
 void SlamSessionRuntimeService::Impl::Stop()
 {
+    m_stopRequested.store(true, std::memory_order_release);
+    if (m_starting.load(std::memory_order_acquire)) {
+        return;
+    }
     std::shared_ptr<const RuntimeState> state = LoadRuntimeState();
     StoreRuntimeState(std::make_shared<const RuntimeState>(
         RuntimeState{nullptr, state->sessionId, false, state->startFailed}));
@@ -424,6 +463,12 @@ SlamSessionRuntimeService::~SlamSessionRuntimeService() = default;
 bool SlamSessionRuntimeService::EnsureStarted()
 {
     return m_impl->EnsureStarted();
+}
+
+bool SlamSessionRuntimeService::SetCameraFrameReadyCallback(
+    SmartDrone::Core::Ports::CameraFrameReadyCallback callback)
+{
+    return m_impl->SetCameraFrameReadyCallback(std::move(callback));
 }
 
 bool SlamSessionRuntimeService::StartFailed() const

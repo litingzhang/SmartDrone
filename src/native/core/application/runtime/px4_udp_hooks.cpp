@@ -17,18 +17,39 @@ using SmartDrone::Core::Ports::VehicleFlightMode;
 using SmartDrone::Core::Ports::VehicleManualControl;
 using SmartDrone::Core::Ports::VehicleSetpointLocalNed;
 
+namespace {
+
+bool SameFlightMode(const VehicleFlightMode &left,
+                    const VehicleFlightMode &right)
+{
+    return left.mainMode == right.mainMode && left.subMode == right.subMode &&
+           left.armed == right.armed;
+}
+
+} // namespace
+
 Px4UdpHooks::Px4UdpHooks(Px4UdpHooksConfig config)
     : m_vehicleControl(config.vehicleControl), m_readRuntimeGate(std::move(config.readRuntimeGate)),
       m_readAvoidanceSnapshot(std::move(config.readAvoidanceSnapshot)),
       m_tuning(config.tuning),
       m_publishVehicleFlightState(std::move(config.publishVehicleFlightState)),
       m_publishAvoidanceTelemetry(std::move(config.publishAvoidanceTelemetry)),
+      m_publishVisualLoss(std::move(config.publishVisualLoss)),
       m_defaultAvoidancePlugin(config.tuning),
       m_defaultHoverPlugin(),
       m_avoidancePlugin(config.avoidancePlugin ? config.avoidancePlugin
                                                : &m_defaultAvoidancePlugin),
       m_hoverPlugin(config.hoverPlugin ? config.hoverPlugin
-                                       : &m_defaultHoverPlugin)
+                                       : &m_defaultHoverPlugin),
+      m_requireVisualLocalization(config.requireVisualLocalization),
+      m_visualPoseMaxAgeUs(
+          static_cast<uint64_t>(std::max<uint32_t>(
+              50, config.visualPoseMaxAgeMs)) * 1000ULL),
+      m_visualLossLandTimeoutUs(
+          static_cast<uint64_t>(std::max<uint32_t>(
+              100, config.visualLossLandTimeoutMs)) * 1000ULL),
+      m_offboardWarmupUs(
+          static_cast<uint64_t>(config.offboardWarmupMs) * 1000ULL)
 {
 }
 
@@ -66,14 +87,36 @@ uint32_t Px4UdpHooks::PointCloudAgeMs(uint64_t updateUs)
 
 RuntimeCommandGate Px4UdpHooks::ReadCommandGate() const
 {
+    if (!m_requireVisualLocalization) {
+        Ports::VehicleLocalPosition localPosition{};
+        const bool localPositionReady =
+            m_vehicleControl.GetLocalPositionNed(localPosition, 500000);
+        return {localPositionReady, localPositionReady};
+    }
+    const bool visualReady = ReadVisualLocalizationReady();
+    return {visualReady, visualReady};
+}
+
+bool Px4UdpHooks::ReadVisualLocalizationReady() const
+{
     RuntimeGateSnapshot snapshot{};
-    const bool hasSnapshot = m_readRuntimeGate && m_readRuntimeGate(snapshot);
-    const bool vioOk = hasSnapshot && snapshot.runtimeMode == RUNTIME_MODE_SLAM && snapshot.poseValid &&
-                       IsTrackingPoseUsable(snapshot.trackingState) && IsPoseQualityUsable(snapshot.poseQuality);
-    RuntimeCommandGate gate{};
-    gate.localizationReady = vioOk;
-    gate.guidedControlReady = vioOk;
-    return gate;
+    return ReadVisualSnapshot(snapshot) &&
+           IsVisualSnapshotFresh(snapshot, MonoTimeUs());
+}
+
+bool Px4UdpHooks::ReadVisualSnapshot(RuntimeGateSnapshot &snapshot) const
+{
+    return m_readRuntimeGate && m_readRuntimeGate(snapshot) &&
+           snapshot.runtimeMode == RUNTIME_MODE_SLAM && snapshot.poseValid &&
+           IsTrackingPoseUsable(snapshot.trackingState) &&
+           IsPoseQualityUsable(snapshot.poseQuality);
+}
+
+bool Px4UdpHooks::IsVisualSnapshotFresh(
+    const RuntimeGateSnapshot &snapshot, uint64_t nowUs) const
+{
+    return snapshot.poseUpdateUs != 0 && snapshot.poseUpdateUs <= nowUs &&
+           nowUs - snapshot.poseUpdateUs <= m_visualPoseMaxAgeUs;
 }
 
 bool Px4UdpHooks::ArmVehicle(std::string *err)
@@ -92,9 +135,9 @@ bool Px4UdpHooks::ArmVehicle(std::string *err)
 
 bool Px4UdpHooks::DisarmVehicle(std::string *err)
 {
+    ResetVisualSafety();
     ClearActiveOffboardGoal();
-    m_vehicleControl.StopSetpointStream();
-    m_streamStarted.store(false, std::memory_order_relaxed);
+    StopSetpointStream();
     SetManualControlNeutral();
     SendManualControlSnapshot();
     DisableRemoteControl(true);
@@ -110,8 +153,7 @@ bool Px4UdpHooks::DisarmVehicle(std::string *err)
 bool Px4UdpHooks::StopVehicleImmediately(std::string *err)
 {
     ClearActiveOffboardGoal();
-    m_vehicleControl.StopSetpointStream();
-    m_streamStarted.store(false, std::memory_order_relaxed);
+    StopSetpointStream();
     DisableRemoteControl(true);
     if (!m_vehicleControl.BeginEmergencyStop()) {
         if (err)
@@ -124,6 +166,7 @@ bool Px4UdpHooks::StopVehicleImmediately(std::string *err)
 
 bool Px4UdpHooks::EnterGuidedControl(std::string *err)
 {
+    ResetVisualSafety();
     // OFFBOARD relies on setpoint stream; disable manual joystick streaming.
     ClearActiveOffboardGoal();
     m_manualControlStreaming.store(false, std::memory_order_relaxed);
@@ -151,8 +194,7 @@ bool Px4UdpHooks::EnterGuidedControl(std::string *err)
     m_remoteModeRequested.store(true, std::memory_order_relaxed);
     m_offboardModeRequested.store(true, std::memory_order_relaxed);
     if (!EnsureOffboardMode(true, err)) {
-        m_vehicleControl.StopSetpointStream();
-        m_streamStarted.store(false, std::memory_order_relaxed);
+        StopSetpointStream();
         m_remoteModeRequested.store(false, std::memory_order_relaxed);
         m_offboardModeRequested.store(false, std::memory_order_relaxed);
         if (err && err->empty()) {
@@ -167,8 +209,7 @@ bool Px4UdpHooks::HoldVehicle(std::string *err)
 {
     (void)err;
     ClearActiveOffboardGoal();
-    m_vehicleControl.StopSetpointStream();
-    m_streamStarted.store(false, std::memory_order_relaxed);
+    StopSetpointStream();
     m_offboardModeRequested.store(false, std::memory_order_relaxed);
     EnsureManualControlStream();
     HoverAlgorithmContext hoverContext{};
@@ -181,8 +222,7 @@ bool Px4UdpHooks::EnterPositionControl(std::string *err)
 {
     // POSITION mode should not keep OFFBOARD setpoint stream alive.
     ClearActiveOffboardGoal();
-    m_vehicleControl.StopSetpointStream();
-    m_streamStarted.store(false, std::memory_order_relaxed);
+    StopSetpointStream();
 
     EnsureManualControlStream();
     SetManualControlNeutral();
@@ -219,9 +259,9 @@ bool Px4UdpHooks::EnterPositionControl(std::string *err)
 
 bool Px4UdpHooks::LandVehicle(std::string *err)
 {
+    ResetVisualSafety();
     ClearActiveOffboardGoal();
-    m_vehicleControl.StopSetpointStream();
-    m_streamStarted.store(false, std::memory_order_relaxed);
+    StopSetpointStream();
     SetManualControlNeutral();
     SendManualControlSnapshot();
     DisableRemoteControl(true);
@@ -234,6 +274,13 @@ bool Px4UdpHooks::LandVehicle(std::string *err)
     TrackCommandAck(VehicleCommandAckKind::Land, "land");
     std::cerr << "[land] land command sent to vehicle\n";
     return true;
+}
+
+bool Px4UdpHooks::IsLandingConfirmed() const
+{
+    VehicleFlightMode flightMode{};
+    return m_vehicleControl.GetFlightModeInfo(flightMode) &&
+           m_vehicleControl.IsLandingMode(flightMode);
 }
 
 bool Px4UdpHooks::ApplyMoveGoal(const MoveGoal &goal, std::string *err)
@@ -296,8 +343,7 @@ bool Px4UdpHooks::ApplyRcAvoidanceHoldIfNeeded(const MoveGoal &goal,
 bool Px4UdpHooks::EnsureOffboardMoveReady(std::string *err)
 {
     if (!m_offboardModeRequested.load(std::memory_order_relaxed)) {
-        m_vehicleControl.StopSetpointStream();
-        m_streamStarted.store(false, std::memory_order_relaxed);
+        StopSetpointStream();
         if (err) {
             *err = "setpoint move only allowed in offboard mode";
         }
@@ -476,9 +522,26 @@ bool Px4UdpHooks::EnsureSetpointStream()
 {
     bool expected = false;
     if (m_streamStarted.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {
+        m_setpointStreamStartUs.store(MonoTimeUs(), std::memory_order_relaxed);
         m_vehicleControl.StartSetpointStreamHz(20.0);
     }
     return true;
+}
+
+void Px4UdpHooks::StopSetpointStream()
+{
+    m_vehicleControl.StopSetpointStream();
+    m_streamStarted.store(false, std::memory_order_relaxed);
+    m_setpointStreamStartUs.store(0, std::memory_order_relaxed);
+}
+
+bool Px4UdpHooks::OffboardWarmupComplete() const
+{
+    const uint64_t startUs =
+        m_setpointStreamStartUs.load(std::memory_order_relaxed);
+    const uint64_t nowUs = MonoTimeUs();
+    return startUs != 0 && nowUs >= startUs &&
+           nowUs - startUs >= m_offboardWarmupUs;
 }
 
 void Px4UdpHooks::EnsureManualControlStream()
@@ -586,6 +649,9 @@ bool Px4UdpHooks::EnsurePositionMode(bool force, std::string *err)
 
 bool Px4UdpHooks::EnsureOffboardMode(bool force, std::string *err)
 {
+    if (!OffboardWarmupComplete()) {
+        return true;
+    }
     return EnsureFlightMode(m_vehicleControl.OffboardModeId(), force, err, "OFFBOARD");
 }
 
@@ -629,12 +695,140 @@ void Px4UdpHooks::ClearCommandAckIfCurrent(const std::shared_ptr<const PendingCo
                                                  std::memory_order_acquire);
 }
 
+void Px4UdpHooks::ResetVisualSafety()
+{
+    m_visualLossStartUs.store(0, std::memory_order_relaxed);
+    m_visualLandLastRequestUs.store(0, std::memory_order_relaxed);
+    m_visualInvalidLastPublishUs.store(0, std::memory_order_relaxed);
+    m_visualFailsafeActive.store(false, std::memory_order_relaxed);
+}
+
+void Px4UdpHooks::MaybePublishVisualLoss(uint64_t nowUs)
+{
+    constexpr uint64_t INVALID_PUBLISH_INTERVAL_US = 50000ULL;
+    const uint64_t lastPublishUs =
+        m_visualInvalidLastPublishUs.load(std::memory_order_relaxed);
+    if (lastPublishUs != 0 &&
+        nowUs - lastPublishUs < INVALID_PUBLISH_INTERVAL_US) {
+        return;
+    }
+    m_visualInvalidLastPublishUs.store(nowUs, std::memory_order_relaxed);
+    if (m_publishVisualLoss) {
+        m_publishVisualLoss();
+    }
+}
+
+void Px4UdpHooks::RetryVisualFailsafeLand(uint64_t nowUs, bool armed,
+                                          bool landingConfirmed)
+{
+    if (!armed) {
+        ResetVisualSafety();
+        return;
+    }
+    if (landingConfirmed) {
+        return;
+    }
+    const uint64_t lastRequestUs =
+        m_visualLandLastRequestUs.load(std::memory_order_relaxed);
+    if (lastRequestUs != 0 && nowUs - lastRequestUs < 1000000ULL) {
+        return;
+    }
+    m_visualLandLastRequestUs.store(nowUs, std::memory_order_relaxed);
+    if (m_vehicleControl.BeginLand()) {
+        TrackCommandAck(VehicleCommandAckKind::Land, "visual failsafe land");
+        return;
+    }
+    std::cerr << "[visual_failsafe] land command send failed; retrying\n";
+}
+
+void Px4UdpHooks::TriggerVisualFailsafeLand(
+    uint64_t nowUs, const VehicleFlightMode &flightMode)
+{
+    ClearActiveOffboardGoal();
+    StopSetpointStream();
+    SetManualControlNeutral();
+    SendManualControlSnapshot();
+    DisableRemoteControl(true);
+    m_visualFailsafeActive.store(true, std::memory_order_relaxed);
+    std::cerr << "[visual_failsafe] localization lost for "
+              << (m_visualLossLandTimeoutUs / 1000ULL)
+              << "ms; controlled LAND requested\n";
+    RetryVisualFailsafeLand(
+        nowUs, flightMode.armed,
+        m_vehicleControl.IsLandingMode(flightMode));
+}
+
+void Px4UdpHooks::StepVisualSafety(const VehicleFlightMode &flightMode)
+{
+    const uint64_t nowUs = MonoTimeUs();
+    if (m_visualFailsafeActive.load(std::memory_order_relaxed)) {
+        MaybePublishVisualLoss(nowUs);
+        RetryVisualFailsafeLand(
+            nowUs, flightMode.armed,
+            m_vehicleControl.IsLandingMode(flightMode));
+        return;
+    }
+    const bool monitoring = m_requireVisualLocalization && flightMode.armed &&
+                            flightMode.mainMode ==
+                                m_vehicleControl.OffboardModeId();
+    RuntimeGateSnapshot snapshot{};
+    const bool haveUsablePose = ReadVisualSnapshot(snapshot);
+    if (!monitoring) {
+        m_visualLossStartUs.store(0, std::memory_order_relaxed);
+        return;
+    }
+    if (haveUsablePose && IsVisualSnapshotFresh(snapshot, nowUs)) {
+        m_visualLossStartUs.store(0, std::memory_order_relaxed);
+        return;
+    }
+    MaybePublishVisualLoss(nowUs);
+    uint64_t lossStartUs = m_visualLossStartUs.load(std::memory_order_relaxed);
+    if (haveUsablePose && snapshot.poseUpdateUs != 0 &&
+        snapshot.poseUpdateUs <= nowUs) {
+        lossStartUs = snapshot.poseUpdateUs;
+        m_visualLossStartUs.store(lossStartUs, std::memory_order_relaxed);
+    } else if (lossStartUs == 0) {
+        lossStartUs = nowUs;
+        m_visualLossStartUs.store(lossStartUs, std::memory_order_relaxed);
+    }
+    if (nowUs - lossStartUs >= m_visualLossLandTimeoutUs) {
+        TriggerVisualFailsafeLand(nowUs, flightMode);
+    }
+}
+
+std::shared_ptr<const VehicleFlightMode> Px4UdpHooks::ResolveSafetyFlightMode(
+    bool haveFlightMode, const VehicleFlightMode &flightMode)
+{
+    std::shared_ptr<const VehicleFlightMode> cached =
+        std::atomic_load_explicit(&m_lastSafetyFlightMode,
+                                  std::memory_order_acquire);
+    if (!haveFlightMode) {
+        return cached;
+    }
+    if (cached && SameFlightMode(*cached, flightMode)) {
+        return cached;
+    }
+    auto fresh = std::make_shared<const VehicleFlightMode>(flightMode);
+    std::atomic_store_explicit(&m_lastSafetyFlightMode, fresh,
+                               std::memory_order_release);
+    return fresh;
+}
+
 void Px4UdpHooks::StepManualControl()
 {
     StepCommandAck();
     VehicleFlightMode flightMode{};
-    if (m_vehicleControl.GetFlightModeInfo(flightMode) && m_publishVehicleFlightState) {
-        m_publishVehicleFlightState(flightMode.armed, flightMode.mainMode, flightMode.subMode);
+    const bool haveFlightMode = m_vehicleControl.GetFlightModeInfo(flightMode);
+    const std::shared_ptr<const VehicleFlightMode> safetyFlightMode =
+        ResolveSafetyFlightMode(haveFlightMode, flightMode);
+    if (safetyFlightMode) {
+        StepVisualSafety(*safetyFlightMode);
+    } else if (m_visualFailsafeActive.load(std::memory_order_relaxed)) {
+        RetryVisualFailsafeLand(MonoTimeUs(), true, false);
+    }
+    if (m_publishVehicleFlightState) {
+        m_publishVehicleFlightState(haveFlightMode, flightMode.armed,
+                                    flightMode.mainMode, flightMode.subMode);
     }
     if (m_manualControlStreaming.load(std::memory_order_relaxed)) {
         SendManualControlSnapshot();

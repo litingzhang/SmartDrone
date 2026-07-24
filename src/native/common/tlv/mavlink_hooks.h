@@ -50,6 +50,10 @@ class MavlinkHooks : public RuntimeCommandHook {
     {
         return Land(errorMessage);
     }
+    bool IsLandingConfirmed() const override
+    {
+        return false;
+    }
     bool ApplyMoveGoal(const MoveGoal &goal, std::string *errorMessage) override
     {
         return SetMoveGoal(goal, errorMessage);

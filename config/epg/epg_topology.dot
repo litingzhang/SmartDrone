@@ -126,7 +126,7 @@ digraph EpgTopology {
       label="{SlamResourceTask|type=SlamResourceTask|trigger=periodic|interval_ms=100}"
     ];
     SlamClockTask [
-      label="{SlamClockTask|type=SlamClockTask|trigger=periodic|interval_ms=50}"
+      label="{SlamClockTask|type=SlamClockTask|trigger=periodic_or_external|interval_ms=50}"
     ];
     SlamImuPollTask [
       label="{SlamImuPollTask|type=SlamImuPollTask|trigger=periodic_or_any_queue_ready|interval_ms=1|trigger_queues=SlamResourceReady|realtime=false|priority=0}"

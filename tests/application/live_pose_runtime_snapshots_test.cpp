@@ -19,6 +19,21 @@ using SmartDrone::Core::Application::MakeRuntimeGateReader;
 using SmartDrone::Core::Application::MakeRuntimeModePublisher;
 using SmartDrone::Core::Application::MakeUdpRuntimeStateReader;
 using SmartDrone::Core::Application::MakeVehicleFlightStatePublisher;
+using SmartDrone::Core::Application::MakeVisualLossPublisher;
+
+class CapturingPosePublisher final
+    : public SmartDrone::Core::Ports::IPosePublisher {
+  public:
+    void PublishPose(
+        const SmartDrone::Core::Ports::PosePublishRequest &request) override
+    {
+        lastRequest = request;
+        ++publishCount;
+    }
+
+    SmartDrone::Core::Ports::PosePublishRequest lastRequest{};
+    int publishCount{0};
+};
 
 LivePoseState::Snapshot MakeLivePoseSnapshot()
 {
@@ -29,10 +44,12 @@ LivePoseState::Snapshot MakeLivePoseSnapshot()
     snapshot.runtimeMode = RUNTIME_MODE_SLAM;
     snapshot.slamMode = RUNTIME_SLAM_MODE_RELOCALIZATION;
     snapshot.trackingState = 2;
+    snapshot.px4FlightStateValid = true;
     snapshot.armed = true;
     snapshot.px4MainMode = 3;
     snapshot.px4SubMode = 4;
     snapshot.poseQuality = LivePoseQuality::Good;
+    snapshot.poseUpdateUs = 123456;
     snapshot.resetCounter = 5;
     snapshot.resetMapCount = 6;
     snapshot.x = 1.0f;
@@ -67,6 +84,7 @@ TEST(LivePoseRuntimeSnapshotsTest, BuildsRuntimeGateSnapshot)
     EXPECT_TRUE(output.poseValid);
     EXPECT_EQ(output.trackingState, 2);
     EXPECT_EQ(output.poseQuality, LivePoseQuality::Good);
+    EXPECT_EQ(output.poseUpdateUs, 123456U);
 }
 
 TEST(LivePoseRuntimeSnapshotsTest, BuildsUdpRuntimeStateSnapshot)
@@ -79,6 +97,7 @@ TEST(LivePoseRuntimeSnapshotsTest, BuildsUdpRuntimeStateSnapshot)
     EXPECT_EQ(output.runtimeMode, RUNTIME_MODE_SLAM);
     EXPECT_EQ(output.slamMode, RUNTIME_SLAM_MODE_RELOCALIZATION);
     EXPECT_EQ(output.trackingState, 2);
+    EXPECT_TRUE(output.px4FlightStateValid);
     EXPECT_TRUE(output.armed);
     EXPECT_EQ(output.px4MainMode, 3);
     EXPECT_EQ(output.px4SubMode, 4);
@@ -133,7 +152,7 @@ TEST(LivePoseRuntimeSnapshotsTest, BuildsLivePoseCallbacks)
     auto publishRuntimeMode = MakeRuntimeModePublisher(livePose);
     publishRuntimeMode(SmartDrone::Core::Domain::RuntimeMode::Slam);
     auto publishFlightState = MakeVehicleFlightStatePublisher(livePose);
-    publishFlightState(true, 3, 4);
+    publishFlightState(true, true, 3, 4);
 
     auto readGate = MakeRuntimeGateReader(livePose);
     SmartDrone::Core::Application::RuntimeGateSnapshot gate{};
@@ -145,6 +164,7 @@ TEST(LivePoseRuntimeSnapshotsTest, BuildsLivePoseCallbacks)
     ASSERT_TRUE(readState(state));
     EXPECT_TRUE(state.hasPeer);
     EXPECT_EQ(state.runtimeMode, RUNTIME_MODE_SLAM);
+    EXPECT_TRUE(state.px4FlightStateValid);
     EXPECT_TRUE(state.armed);
     EXPECT_EQ(state.px4MainMode, 3);
     EXPECT_EQ(state.px4SubMode, 4);
@@ -153,6 +173,29 @@ TEST(LivePoseRuntimeSnapshotsTest, BuildsLivePoseCallbacks)
     SmartDrone::Core::Application::AvoidanceSnapshot avoidance{};
     ASSERT_TRUE(readAvoidance(avoidance));
     EXPECT_FALSE(avoidance.poseValid);
+}
+
+TEST(LivePoseRuntimeSnapshotsTest, VisualLossPreservesPoseReferenceFrame)
+{
+    LivePoseState livePose;
+    UdpPeer peer{};
+    peer.valid = true;
+    livePose.UpdatePeer(peer);
+    SmartDrone::Core::Application::LivePoseUpdate update{};
+    update.runtimeMode = RUNTIME_MODE_SLAM;
+    update.poseValid = true;
+    update.referenceFrame =
+        SmartDrone::Core::Ports::PoseReferenceFrame::LocalFrd;
+    livePose.UpdatePose(update);
+    CapturingPosePublisher publisher;
+
+    MakeVisualLossPublisher(livePose, publisher)();
+
+    ASSERT_EQ(publisher.publishCount, 1);
+    EXPECT_EQ(publisher.lastRequest.referenceFrame,
+              SmartDrone::Core::Ports::PoseReferenceFrame::LocalFrd);
+    EXPECT_EQ(publisher.lastRequest.quality,
+              SmartDrone::Core::Ports::PoseQuality::Lost);
 }
 
 } // namespace

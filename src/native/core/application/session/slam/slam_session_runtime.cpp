@@ -187,6 +187,9 @@ SlamSessionRuntime::Impl::Impl(SlamSessionRuntimeConfig config)
     m_slamEngine = std::move(engineResources.engine);
     m_slamRuntimeControl = std::move(engineResources.control);
     m_cameraProvider = m_factories.createCameraProvider();
+    if (m_cameraProvider && config.frameReadyCallback) {
+        m_cameraProvider->SetFrameReadyCallback(config.frameReadyCallback);
+    }
     m_imuProvider = m_factories.createImuProvider(m_imuState, m_aliases);
     m_previewOutputRuntime = m_factories.createPreviewOutputRuntime();
 }

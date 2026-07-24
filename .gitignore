@@ -6,8 +6,11 @@ temp
 .cxx
 .vscode
 *.png
+!sim/px4_gz/models/smartdrone_indoor_assets/materials/textures/*.png
 *.csv
+*.log.pos
 __pycache__
+CMakeFiles/
 *.log
 *.zip
 *.tar.gz

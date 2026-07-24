@@ -25,10 +25,13 @@ struct RuntimeGateSnapshot {
     bool poseValid{false};
     uint8_t trackingState{0xFF};
     LivePoseQuality poseQuality{LivePoseQuality::Lost};
+    uint64_t poseUpdateUs{0};
 };
 
 using ReadRuntimeGateFn = std::function<bool(RuntimeGateSnapshot &)>;
-using PublishVehicleFlightStateFn = std::function<void(bool, uint8_t, uint8_t)>;
+using PublishVisualLossFn = std::function<void()>;
+using PublishVehicleFlightStateFn =
+    std::function<void(bool, bool, uint8_t, uint8_t)>;
 using PublishAvoidanceTelemetryFn = std::function<void(const AvoidanceTelemetry &)>;
 
 struct Px4UdpHooksConfig {
@@ -40,6 +43,11 @@ struct Px4UdpHooksConfig {
     PublishAvoidanceTelemetryFn publishAvoidanceTelemetry;
     IAvoidanceAlgorithmPlugin *avoidancePlugin{nullptr};
     IHoverAlgorithmPlugin *hoverPlugin{nullptr};
+    bool requireVisualLocalization{true};
+    uint32_t visualPoseMaxAgeMs{100};
+    uint32_t visualLossLandTimeoutMs{500};
+    PublishVisualLossFn publishVisualLoss;
+    uint32_t offboardWarmupMs{1100};
 };
 
 class Px4UdpHooks final : public RuntimeCommandHook {
@@ -55,6 +63,7 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     bool HoldVehicle(std::string *err) override;
     bool EnterPositionControl(std::string *err) override;
     bool LandVehicle(std::string *err) override;
+    bool IsLandingConfirmed() const override;
     bool ApplyMoveGoal(const MoveGoal &goal, std::string *err) override;
     void StepManualControl();
 
@@ -76,6 +85,8 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     static uint32_t PointCloudAgeMs(uint64_t updateUs);
 
     bool EnsureSetpointStream();
+    void StopSetpointStream();
+    bool OffboardWarmupComplete() const;
     void EnsureManualControlStream();
     void DisableRemoteControl(bool stopManualStream);
     void SetManualControlNeutral();
@@ -106,6 +117,22 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     void TrackCommandAck(Ports::VehicleCommandAckKind command, const std::string &label);
     void StepCommandAck();
     void ClearCommandAckIfCurrent(const std::shared_ptr<const PendingCommandAck> &pending);
+    bool ReadVisualLocalizationReady() const;
+    bool ReadVisualSnapshot(RuntimeGateSnapshot &snapshot) const;
+    bool IsVisualSnapshotFresh(const RuntimeGateSnapshot &snapshot,
+                               uint64_t nowUs) const;
+    void MaybePublishVisualLoss(uint64_t nowUs);
+    void StepVisualSafety(const SmartDrone::Core::Ports::VehicleFlightMode &flightMode);
+    void TriggerVisualFailsafeLand(
+        uint64_t nowUs,
+        const SmartDrone::Core::Ports::VehicleFlightMode &flightMode);
+    void RetryVisualFailsafeLand(uint64_t nowUs, bool armed,
+                                 bool landingConfirmed);
+    void ResetVisualSafety();
+    std::shared_ptr<const SmartDrone::Core::Ports::VehicleFlightMode>
+    ResolveSafetyFlightMode(
+        bool haveFlightMode,
+        const SmartDrone::Core::Ports::VehicleFlightMode &flightMode);
 
     SmartDrone::Core::Ports::IVehicleControlPort &m_vehicleControl;
     ReadRuntimeGateFn m_readRuntimeGate;
@@ -113,12 +140,14 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     LiveRuntimeTuning *m_tuning{nullptr};
     PublishVehicleFlightStateFn m_publishVehicleFlightState;
     PublishAvoidanceTelemetryFn m_publishAvoidanceTelemetry;
+    PublishVisualLossFn m_publishVisualLoss;
     ObstacleAvoidancePolicy m_defaultAvoidancePlugin;
     Px4PositionHoverAlgorithmPlugin m_defaultHoverPlugin;
     IAvoidanceAlgorithmPlugin *m_avoidancePlugin{nullptr};
     IHoverAlgorithmPlugin *m_hoverPlugin{nullptr};
     std::atomic<uint32_t> m_avoidanceHoldCount{0};
     std::atomic<bool> m_streamStarted{false};
+    std::atomic<uint64_t> m_setpointStreamStartUs{0};
     std::atomic<bool> m_manualControlStreaming{false};
     std::atomic<bool> m_remoteModeRequested{false};
     std::atomic<bool> m_offboardModeRequested{false};
@@ -126,6 +155,16 @@ class Px4UdpHooks final : public RuntimeCommandHook {
     std::shared_ptr<const MoveGoal> m_activeOffboardGoal;
     std::shared_ptr<const RemoteModeRequestState> m_remoteModeRequestState;
     std::shared_ptr<const PendingCommandAck> m_pendingCommandAck;
+    std::shared_ptr<const SmartDrone::Core::Ports::VehicleFlightMode>
+        m_lastSafetyFlightMode;
+    bool m_requireVisualLocalization{true};
+    uint64_t m_visualPoseMaxAgeUs{100000};
+    uint64_t m_visualLossLandTimeoutUs{500000};
+    uint64_t m_offboardWarmupUs{1100000};
+    std::atomic<uint64_t> m_visualLossStartUs{0};
+    std::atomic<uint64_t> m_visualLandLastRequestUs{0};
+    std::atomic<uint64_t> m_visualInvalidLastPublishUs{0};
+    std::atomic<bool> m_visualFailsafeActive{false};
 };
 
 } // namespace SmartDrone::Core::Application

@@ -28,6 +28,18 @@ void OverrideTaskInterval(Epg::GraphConfig &config, const std::string &taskName,
     }
 }
 
+void OverrideTaskTriggerMode(Epg::GraphConfig &config,
+                             const std::string &taskName,
+                             Epg::TriggerMode mode)
+{
+    for (auto &task : config.tasks) {
+        if (task.name == taskName) {
+            task.trigger.mode = mode;
+            return;
+        }
+    }
+}
+
 void OverrideTaskScheduling(Epg::GraphConfig &config, const std::string &taskName,
                             bool realtime, int priority)
 {
@@ -57,6 +69,8 @@ void ApplySlamRuntimePacing(Epg::GraphConfig &config, const UnifiedConfig &cfg)
     OverrideTaskInterval(config, "SlamClockTask",
                          SlamInputInterval(cfg.app.runtime.slamInputFps,
                                            cfg.app.camera.fps));
+    OverrideTaskTriggerMode(config, "SlamClockTask",
+                            Epg::TriggerMode::PeriodicOrExternal);
     OverrideTaskScheduling(config, "SlamImuPollTask", cfg.app.imu.rtImu,
                            cfg.app.imu.rtPrio);
 }

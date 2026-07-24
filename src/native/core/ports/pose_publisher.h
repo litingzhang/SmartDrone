@@ -26,6 +26,8 @@ enum class PoseReferenceFrame : uint8_t {
 
 struct PosePublishRequest {
     uint64_t frameId{0};
+    uint64_t measurementTimestampNs{0};
+    uint64_t captureMonotonicNs{0};
     PoseEstimate pose{};
     VelocityEstimate velocity{};
     PoseReferenceFrame referenceFrame{PoseReferenceFrame::LocalNed};

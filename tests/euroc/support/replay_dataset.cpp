@@ -310,6 +310,8 @@ bool ReplayCameraProvider::GrabStereo(SmartDrone::Core::Ports::StereoFrame &out,
 
         out.left.timestampNs = left.timestampNs;
         out.right.timestampNs = right.timestampNs;
+        out.left.captureMonotonicNs = static_cast<int64_t>(left.timestampNs);
+        out.right.captureMonotonicNs = static_cast<int64_t>(right.timestampNs);
         out.left.arriveNs = static_cast<int64_t>(left.timestampNs);
         out.right.arriveNs = static_cast<int64_t>(right.timestampNs);
         out.left.sequence = static_cast<uint32_t>(nextIndex);

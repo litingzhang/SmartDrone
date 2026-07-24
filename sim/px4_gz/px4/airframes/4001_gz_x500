@@ -1,0 +1,9 @@
+#!/bin/sh
+
+: "${SMARTDRONE_PX4_BASE_AIRFRAME:?missing upstream x500 airframe path}"
+: "${SMARTDRONE_PX4_PROFILE_FILE:?missing SmartDrone PX4 profile path}"
+
+# shellcheck disable=SC1090
+. "$SMARTDRONE_PX4_BASE_AIRFRAME"
+# shellcheck disable=SC1090
+. "$SMARTDRONE_PX4_PROFILE_FILE"

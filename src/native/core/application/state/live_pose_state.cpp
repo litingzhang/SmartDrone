@@ -19,10 +19,14 @@ struct LivePoseData {
     uint8_t runtimeMode{RUNTIME_MODE_IDLE};
     uint8_t slamMode{RUNTIME_SLAM_MODE_MAPPING};
     uint8_t trackingState{0xFF};
+    bool px4FlightStateValid{false};
     bool armed{false};
     uint8_t px4MainMode{0};
     uint8_t px4SubMode{0};
     LivePoseQuality poseQuality{LivePoseQuality::Lost};
+    SmartDrone::Core::Ports::PoseReferenceFrame referenceFrame{
+        SmartDrone::Core::Ports::PoseReferenceFrame::LocalNed};
+    uint64_t poseUpdateUs{0};
     uint16_t resetCounter{0};
     uint16_t resetMapCount{0};
     float x{0.0f};
@@ -49,10 +53,13 @@ void CopyStateToSnapshot(const LivePoseData &state,
     out.runtimeMode = state.runtimeMode;
     out.slamMode = state.slamMode;
     out.trackingState = state.trackingState;
+    out.px4FlightStateValid = state.px4FlightStateValid;
     out.armed = state.armed;
     out.px4MainMode = state.px4MainMode;
     out.px4SubMode = state.px4SubMode;
     out.poseQuality = state.poseQuality;
+    out.referenceFrame = state.referenceFrame;
+    out.poseUpdateUs = state.poseUpdateUs;
     out.resetCounter = state.resetCounter;
     out.resetMapCount = state.resetMapCount;
     out.x = state.x;
@@ -150,10 +157,17 @@ void LivePoseState::SetSlamMode(uint8_t mode)
     });
 }
 
-void LivePoseState::SetVehicleFlightState(bool armedIn, uint8_t px4MainModeIn, uint8_t px4SubModeIn)
+void LivePoseState::SetVehicleFlightState(bool validIn, bool armedIn,
+                                          uint8_t px4MainModeIn,
+                                          uint8_t px4SubModeIn)
 {
-    m_impl->PublishUpdate([armedIn, px4MainModeIn,
+    m_impl->PublishUpdate([validIn, armedIn, px4MainModeIn,
                            px4SubModeIn](LivePoseData &state) {
+        state.px4FlightStateValid = validIn;
+        if (!validIn) {
+            state.dirty = true;
+            return;
+        }
         state.armed = armedIn;
         state.px4MainMode = px4MainModeIn;
         state.px4SubMode = px4SubModeIn;
@@ -176,6 +190,8 @@ void LivePoseState::UpdatePose(const LivePoseUpdate &update)
         state.runtimeMode = update.runtimeMode;
         state.trackingState = update.trackingState;
         state.poseQuality = update.quality;
+        state.referenceFrame = update.referenceFrame;
+        state.poseUpdateUs = MonoTimeUs();
         state.resetCounter = update.resetCounter;
         state.resetMapCount = update.resetMapCount;
         state.x = update.pose.x;

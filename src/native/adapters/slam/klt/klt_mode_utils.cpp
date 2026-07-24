@@ -304,6 +304,12 @@ int LkPerFramePnPMethod()
     if (method == "ap3p") {
         return cv::SOLVEPNP_AP3P;
     }
+    if (method == "iterative") {
+        return cv::SOLVEPNP_ITERATIVE;
+    }
+    if (method == "sqpnp") {
+        return cv::SOLVEPNP_SQPNP;
+    }
     return cv::SOLVEPNP_EPNP;
 }
 

@@ -5,6 +5,7 @@
 #include <string>
 
 #include "core/application/session/slam/slam_frame_step_result.h"
+#include "core/ports/camera_provider.h"
 
 namespace SmartDrone::Core::Ports {
 
@@ -32,6 +33,7 @@ struct SlamSessionRuntimeConfig {
     std::atomic<bool> &stop;
     std::atomic<bool> &runningFlag;
     const ApplicationRuntimeFactories &factories;
+    SmartDrone::Core::Ports::CameraFrameReadyCallback frameReadyCallback;
 };
 
 class SlamSessionRuntime {

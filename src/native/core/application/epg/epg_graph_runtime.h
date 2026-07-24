@@ -12,12 +12,15 @@ struct EpgGraphRef {
 };
 
 using EpgGraphConfigCustomizer = std::function<void(Epg::GraphConfig &)>;
+using EpgGraphBeforeStart =
+    std::function<void(Epg::EventPipelineGraph &)>;
 
 struct EpgGraphStartRequest {
     EpgDomain domain;
     EpgTaskFactoryResolver factoryResolver;
     std::shared_ptr<EpgGraphRef> graphRef;
     EpgGraphConfigCustomizer customizeConfig;
+    EpgGraphBeforeStart beforeStart;
 };
 
 std::unique_ptr<Epg::EventPipelineGraph> StartEpgGraph(

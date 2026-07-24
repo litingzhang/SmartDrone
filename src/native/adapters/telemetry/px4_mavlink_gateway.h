@@ -12,6 +12,7 @@
 #include "adapters/telemetry/mavlink_serial_transport.h"
 #include "common/mavlink.h"
 #include "core/ports/frame_timing.h"
+#include "core/ports/measurement_clock.h"
 
 enum class OdomQualityMode { GOOD,
                              WEAK,
@@ -66,6 +67,23 @@ class Px4MavlinkGateway {
         uint64_t receivedUs{0};
     };
 
+    struct ExtendedSystemState {
+        uint8_t vtolState{MAV_VTOL_STATE_UNDEFINED};
+        uint8_t landedState{MAV_LANDED_STATE_UNDEFINED};
+        uint64_t receivedUs{0};
+    };
+
+    struct EstimatorStatus {
+        float velocityRatio{NAN};
+        float horizontalPositionRatio{NAN};
+        float verticalPositionRatio{NAN};
+        float magneticRatio{NAN};
+        float heightAboveGroundRatio{NAN};
+        float trueAirspeedRatio{NAN};
+        uint16_t flags{0};
+        uint64_t receivedUs{0};
+    };
+
     struct SetpointLocalNED {
         float x = NAN, y = NAN, z = NAN;
         float vx = NAN, vy = NAN, vz = NAN;
@@ -84,6 +102,8 @@ class Px4MavlinkGateway {
 
     struct OdometryRequest {
         uint64_t frameId{0};
+        uint64_t measurementTimestampNs{0};
+        uint64_t captureMonotonicNs{0};
         Pose poseNed{};
         LinearVelocityNed velocityNed{};
         uint8_t mavFrameId{MAV_FRAME_LOCAL_NED};
@@ -102,6 +122,8 @@ class Px4MavlinkGateway {
 
     void SetJsonDiagnostics(bool enabled);
     void SetFrameTimingTracker(SmartDrone::Core::Ports::IFrameTimingTracker *tracker);
+    void SetMeasurementClock(
+        std::shared_ptr<SmartDrone::Core::Ports::IMeasurementClock> clock);
     int PollRxOnce();
     void StepTx();
     uint8_t GetTargetSystem() const;
@@ -110,6 +132,8 @@ class Px4MavlinkGateway {
     bool GetDownwardDistanceSensor(DownwardDistanceSensor &out, uint64_t maxAgeUs = 200000) const;
     bool TryConsumeCommandAck(uint16_t command, uint8_t &outResult);
     bool GetFlightModeInfo(FlightModeInfo &out, uint64_t maxAgeUs = 1500000) const;
+    bool GetExtendedSystemState(ExtendedSystemState &out, uint64_t maxAgeUs = 1500000) const;
+    bool GetEstimatorStatus(EstimatorStatus &out, uint64_t maxAgeUs = 1500000) const;
     bool SendCommandLong(const CommandLongRequest &request);
     bool BeginCommandLong(const CommandLongRequest &request);
     bool BeginSetModePx4Main(uint8_t mainMode, uint8_t targetSystem = 0, uint8_t targetComponent = 0);
@@ -126,7 +150,7 @@ class Px4MavlinkGateway {
     void UpdateStreamPosition(float xN, float yE, float zD, float yawRad = NAN);
     void SendManualControl(const ManualControlInput &input, uint16_t buttons = 0, uint16_t buttons2 = 0,
                            uint8_t targetSystem = 0);
-    bool BeginLand(uint8_t targetSystem = 1, uint8_t targetComponent = 1);
+    bool BeginLand(uint8_t targetSystem = 0, uint8_t targetComponent = 0);
     void SendOdometry(const OdometryRequest &request);
     static Pose EnuToNed(const Pose &pEnu);
     static void NormalizeQuat(float &w, float &x, float &y, float &z);
@@ -158,10 +182,25 @@ class Px4MavlinkGateway {
 
     struct OdometryTiming {
         uint64_t tCamNs{0};
-        uint64_t tCbNs{0};
+        uint64_t tCaptureMonotonicNs{0};
+        uint64_t tLeftArrivalNs{0};
+        uint64_t tRightArrivalNs{0};
+        uint64_t tPairReadyNs{0};
         uint64_t tSlamInNs{0};
         uint64_t tSlamOutNs{0};
         uint64_t tMavTxNs{0};
+        double simAgeMs{-1.0};
+        bool complete{false};
+    };
+
+    struct OdometryTimingMetrics {
+        double eyeSkewMs{-1.0};
+        double renderTransportMs{-1.0};
+        double queueMs{-1.0};
+        double processingMs{-1.0};
+        double sendMs{-1.0};
+        double pairToTxMs{-1.0};
+        double wallTotalMs{-1.0};
     };
 
     struct OdometryTimingLog {
@@ -174,13 +213,27 @@ class Px4MavlinkGateway {
 
     bool LookupFrameTiming(uint64_t frameId, SmartDrone::Core::Ports::FrameTimingRecord &out) const;
     void MarkFrameMavTx(uint64_t frameId, uint64_t tMavTxNs);
+    uint64_t MeasurementNowNs() const;
     static const char *MavResultToStr(uint8_t r);
     OdometryPacketFields BuildOdometryPacketFields(const OdometryRequest &request) const;
-    bool PrepareOdometryTiming(uint64_t frameId, OdometryTiming &out);
+    bool PrepareOdometryTiming(const OdometryRequest &request,
+                               OdometryTiming &out);
+    static bool IsOdometryTimingComplete(const OdometryTiming &timing);
+    static OdometryTimingMetrics BuildOdometryTimingMetrics(
+        const OdometryTiming &timing);
+    double MeasurementAgeMs(uint64_t measurementNs) const;
     void PackOdometryMessage(const OdometryRequest &request, const OdometryPacketFields &fields,
                              uint64_t captureTimeUs, mavlink_message_t &msg) const;
     void LogOdometryTiming(const OdometryTimingLog &log) const;
-    CommandLongRequest ResolveCommandTargets(CommandLongRequest request) const;
+    void LogOdometryTimingJson(const OdometryTimingLog &log,
+                               const OdometryTimingMetrics &metrics) const;
+    void LogOdometryTimingText(const OdometryTimingLog &log,
+                               const OdometryTimingMetrics &metrics) const;
+    bool HavePx4Target() const;
+    bool ResolveCommandTargets(const CommandLongRequest &request,
+                               CommandLongRequest &out) const;
+    bool IsMessageFromTarget(const mavlink_message_t &msg) const;
+    bool TryLockPx4Target(const mavlink_message_t &msg);
     void ClearCommandAck(uint16_t command);
     void StoreCommandAck(const AckInfo &info);
     bool SendMessageIntervalRequest(uint32_t messageId, float intervalUs, uint8_t targetSystem, uint8_t targetComponent);
@@ -194,10 +247,14 @@ class Px4MavlinkGateway {
     void HandleHeartbeat(const mavlink_message_t &msg);
     void HandleLocalPositionNed(const mavlink_message_t &msg);
     void HandleDistanceSensor(const mavlink_message_t &msg);
+    void HandleExtendedSystemState(const mavlink_message_t &msg);
+    void HandleEstimatorStatus(const mavlink_message_t &msg);
     void HandleCommandAck(const mavlink_message_t &msg);
     void HandleStatusText(const mavlink_message_t &msg);
     void MaybeRequestLocalPositionNedStream(uint8_t targetSystem, uint8_t targetComponent);
     void MaybeRequestDistanceSensorStream(uint8_t targetSystem, uint8_t targetComponent);
+    void MaybeRequestExtendedSystemStateStream(uint8_t targetSystem, uint8_t targetComponent);
+    void MaybeRequestEstimatorStatusStream(uint8_t targetSystem, uint8_t targetComponent);
 
     SmartDrone::Adapters::Telemetry::MavlinkSerialTransport m_transport;
     uint8_t m_sysid;
@@ -217,14 +274,17 @@ class Px4MavlinkGateway {
     std::atomic<uint64_t> m_txTail{0};
     std::shared_ptr<const TxMessage> m_txActive;
     std::size_t m_txOffset{0};
-    std::atomic<uint8_t> m_px4Sysid{1};
-    std::atomic<uint8_t> m_px4Compid{1};
-    std::atomic<bool> m_havePx4Heartbeat{false};
+    std::atomic<uint16_t> m_px4Target{0};
     std::atomic<bool> m_localPosStreamRequested{false};
     std::atomic<bool> m_distanceSensorStreamRequested{false};
+    std::atomic<bool> m_extendedSystemStateStreamRequested{false};
+    std::atomic<bool> m_estimatorStatusStreamRequested{false};
     std::shared_ptr<const FlightModeInfo> m_flightModeInfo;
     std::shared_ptr<const LocalPositionNed> m_localPosNed;
     std::shared_ptr<const DownwardDistanceSensor> m_downwardDistanceSensor;
+    std::shared_ptr<const ExtendedSystemState> m_extendedSystemState;
+    std::shared_ptr<const EstimatorStatus> m_estimatorStatus;
     std::atomic<SmartDrone::Core::Ports::IFrameTimingTracker *> m_frameTimingTracker{nullptr};
+    std::shared_ptr<SmartDrone::Core::Ports::IMeasurementClock> m_measurementClock;
     std::atomic<bool> m_jsonDiagnostics{false};
 };

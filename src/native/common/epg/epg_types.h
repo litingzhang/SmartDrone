@@ -33,7 +33,8 @@ enum class TriggerMode {
     Periodic,
     AnyQueueReady,
     AllQueueReady,
-    PeriodicOrAnyQueueReady
+    PeriodicOrAnyQueueReady,
+    PeriodicOrExternal
 };
 
 struct QueueDiagnostics {

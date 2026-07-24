@@ -46,6 +46,7 @@ class UvcStereoCamera final : public Core::Ports::ICameraProvider {
     struct CapturedPackedFrame {
         cv::Mat packed;
         uint64_t captureTimestampNs{0};
+        uint64_t captureMonotonicNs{0};
         uint64_t arriveNs{0};
     };
 
@@ -96,7 +97,9 @@ class UvcStereoCamera final : public Core::Ports::ICameraProvider {
                          uint32_t bufferCount);
     void CloseDevice();
     bool PopCandidate(Core::Ports::StereoFrame &out, bool preferLatest, uint64_t minTimestampNs);
-    Core::Ports::StereoFrame BuildStereoFrame(const cv::Mat &packed, uint64_t captureTimestampNs, uint64_t arriveNs);
+    Core::Ports::StereoFrame BuildStereoFrame(
+        const cv::Mat &packed, uint64_t captureTimestampNs,
+        uint64_t captureMonotonicNs, uint64_t arriveNs);
     void PushFrame(Core::Ports::StereoFrame &&frame, uint64_t captureTimestampNs);
     void MarkCaptureFault(bool acceptingFrames);
     void PublishDiagnostics();

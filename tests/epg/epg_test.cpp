@@ -163,6 +163,46 @@ class TestHeartbeatTask final : public ITask {
     }
 };
 
+class TestBlockedExternalTask final : public ITask {
+  public:
+    TestBlockedExternalTask(std::atomic<int> &ticks,
+                            std::atomic<bool> &firstTickEntered,
+                            std::atomic<bool> &releaseFirstTick)
+        : m_ticks(ticks), m_firstTickEntered(firstTickEntered),
+          m_releaseFirstTick(releaseFirstTick)
+    {
+    }
+
+    void OnTick(TaskContext &context) override
+    {
+        (void)context;
+        if (m_ticks.fetch_add(1, std::memory_order_acq_rel) != 0) {
+            return;
+        }
+        m_firstTickEntered.store(true, std::memory_order_release);
+        while (!m_releaseFirstTick.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
+  private:
+    std::atomic<int> &m_ticks;
+    std::atomic<bool> &m_firstTickEntered;
+    std::atomic<bool> &m_releaseFirstTick;
+};
+
+template <class Predicate>
+bool WaitForTestCondition(Predicate predicate)
+{
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        if (predicate()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return predicate();
+}
+
 class TestThrowingTask final : public ITask {
   public:
     void OnTick(TaskContext &context) override

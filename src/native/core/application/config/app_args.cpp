@@ -593,8 +593,11 @@ void ParseCoreRuntimeConfig(const ArgReader &argReader, const char *argv0,
         ParseSlamOperationModeText(argReader.GetString("--slam-mode", "mapping"));
     config.runtime.slamBackend = NormalizeSlamBackendForBuild(
         ParseSlamBackendText(argReader.GetString("--slam-backend", "klt")));
+    const std::string poseOutputDefault = SmartDrone::Common::EnvStringValue(
+        "SMART_DRONE_PX4_POSE_OUTPUT_MODE", "position_velocity");
     config.runtime.px4PoseOutputMode = ParsePx4PoseOutputModeText(
-        argReader.GetString("--px4-pose-output-mode", "position_velocity"));
+        argReader.GetString("--px4-pose-output-mode",
+                            poseOutputDefault.c_str()));
     const std::string vocabArg = argReader.GetString(
         "--vocab",
         config.runtime.slamBackend == SlamBackend::OrbSlam3 ? "ORBvoc.txt" : "");
@@ -710,7 +713,10 @@ void ParseDiagnosticsConfig(const ArgReader &argReader,
         argReader.HasFlag("--debug-right-only-features");
     runtimeConfig.slamLowLightEnhance =
         argReader.HasFlag("--slam-lowlight-enhance");
-    runtimeConfig.jsonDiagnostics = argReader.HasFlag("--json-diagnostics");
+    runtimeConfig.jsonDiagnostics =
+        argReader.HasFlag("--json-diagnostics") ||
+        SmartDrone::Common::EnvFlagEnabled(
+            "SMART_DRONE_JSON_DIAGNOSTICS", false);
 }
 
 void ParseAvoidanceRuntimeConfig(RuntimeConfig &runtimeConfig)

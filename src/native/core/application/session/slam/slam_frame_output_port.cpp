@@ -123,6 +123,7 @@ SlamFrameStepResult SlamFrameOutputPort::EmitLivePose(
     update.pose.qx = poseResult.poseEstimate.qx;
     update.pose.qy = poseResult.poseEstimate.qy;
     update.pose.qz = poseResult.poseEstimate.qz;
+    update.referenceFrame = poseResult.referenceFrame;
     update.quality = ToLivePoseQuality(poseResult.quality);
     update.poseValid = livePoseValid;
     m_ctx.livePose.UpdatePose(update);

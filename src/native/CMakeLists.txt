@@ -37,10 +37,23 @@ elseif(SMART_DRONE_CAMERA_PROVIDER STREQUAL "uvc_stereo_opencv")
     "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/uvc_stereo_camera.cpp"
     "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/camera_provider_factory_uvc.cpp"
   )
+elseif(SMART_DRONE_CAMERA_PROVIDER STREQUAL "gz_stereo")
+  list(APPEND SMART_DRONE_CAMERA_SOURCES
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/bounded_gazebo_image_queue.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/gazebo_image_processor.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/gazebo_stereo_config.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/gazebo_stereo_frame_assembler.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/gazebo_stereo_camera.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/camera/camera_provider_factory_gazebo.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/simulation/gazebo_measurement_clock.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/simulation/gazebo_message_time.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/simulation/gazebo_pose_math.cpp"
+    "${SMART_DRONE_NATIVE_ROOT}/adapters/simulation/gazebo_truth_pose_source.cpp"
+  )
 else()
   message(FATAL_ERROR
     "Unsupported SMART_DRONE_CAMERA_PROVIDER='${SMART_DRONE_CAMERA_PROVIDER}'. "
-    "Currently supported: libcamera_stereo_ov9281, uvc_stereo_opencv")
+    "Currently supported: libcamera_stereo_ov9281, uvc_stereo_opencv, gz_stereo")
 endif()
 
 set(SMART_DRONE_ADAPTER_SOURCES
@@ -90,6 +103,7 @@ set(SMART_DRONE_ADAPTER_SOURCES
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/mavlink_pose_publisher.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/mavlink_serial_transport.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/px4_mavlink_gateway.cpp"
+  "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/px4_mavlink_gateway_rx.cpp"
   "${SMART_DRONE_NATIVE_ROOT}/adapters/telemetry/px4_vehicle_control_port.cpp"
   ${SMART_DRONE_CAMERA_SOURCES}
 )

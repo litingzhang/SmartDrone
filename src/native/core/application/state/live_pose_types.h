@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "common/tlv/tlv_protocol.h"
+#include "core/ports/pose_publisher.h"
 
 namespace SmartDrone::Core::Application {
 
@@ -37,6 +38,8 @@ struct LivePoseUpdate {
     uint16_t resetCounter{0};
     uint16_t resetMapCount{0};
     LivePoseValue pose{};
+    SmartDrone::Core::Ports::PoseReferenceFrame referenceFrame{
+        SmartDrone::Core::Ports::PoseReferenceFrame::LocalNed};
     LivePoseQuality quality{LivePoseQuality::Lost};
     bool poseValid{false};
 };

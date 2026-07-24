@@ -34,6 +34,8 @@ LivePoseUpdate MakePoseUpdate()
     update.pose.qx = 0.1f;
     update.pose.qy = 0.2f;
     update.pose.qz = 0.3f;
+    update.referenceFrame =
+        SmartDrone::Core::Ports::PoseReferenceFrame::LocalFrd;
     update.quality = LivePoseQuality::Good;
     update.poseValid = true;
     return update;
@@ -85,17 +87,34 @@ TEST(LivePoseStateTest, ReadSnapshotDoesNotClearDirtyState)
 {
     LivePoseState state;
     state.UpdatePeer(MakePeer(14550));
-    state.SetVehicleFlightState(true, 3, 4);
+    state.SetVehicleFlightState(true, true, 3, 4);
 
     LivePoseState::Snapshot snapshot{};
     ASSERT_TRUE(state.ReadSnapshot(snapshot));
+    EXPECT_TRUE(snapshot.px4FlightStateValid);
     EXPECT_TRUE(snapshot.armed);
     EXPECT_EQ(snapshot.px4MainMode, 3);
     EXPECT_EQ(snapshot.px4SubMode, 4);
 
     ASSERT_TRUE(state.ConsumeSnapshot(snapshot));
+    EXPECT_TRUE(snapshot.px4FlightStateValid);
     EXPECT_TRUE(snapshot.armed);
     EXPECT_EQ(snapshot.seq, 2U);
+}
+
+TEST(LivePoseStateTest, InvalidFlightStatePreservesCachedValues)
+{
+    LivePoseState state;
+    state.UpdatePeer(MakePeer(14550));
+    state.SetVehicleFlightState(true, true, 3, 4);
+    state.SetVehicleFlightState(false, false, 0, 0);
+
+    LivePoseState::Snapshot snapshot{};
+    ASSERT_TRUE(state.ConsumeSnapshot(snapshot));
+    EXPECT_FALSE(snapshot.px4FlightStateValid);
+    EXPECT_TRUE(snapshot.armed);
+    EXPECT_EQ(snapshot.px4MainMode, 3);
+    EXPECT_EQ(snapshot.px4SubMode, 4);
 }
 
 TEST(LivePoseStateTest, PublishesPoseAndPointCloud)
@@ -111,6 +130,9 @@ TEST(LivePoseStateTest, PublishesPoseAndPointCloud)
     EXPECT_EQ(snapshot.runtimeMode, RUNTIME_MODE_SLAM);
     EXPECT_EQ(snapshot.trackingState, 2);
     EXPECT_EQ(snapshot.poseQuality, LivePoseQuality::Good);
+    EXPECT_EQ(snapshot.referenceFrame,
+              SmartDrone::Core::Ports::PoseReferenceFrame::LocalFrd);
+    EXPECT_GT(snapshot.poseUpdateUs, 0U);
     EXPECT_FLOAT_EQ(snapshot.x, 1.0f);
     EXPECT_FLOAT_EQ(snapshot.qz, 0.3f);
     ASSERT_TRUE(snapshot.pointCloudXyz);
